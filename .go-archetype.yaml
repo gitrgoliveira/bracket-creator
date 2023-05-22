@@ -1,0 +1,184 @@
+---
+ignore:
+  - .git/
+  - .go-archtype.yml
+  - "LICENSE"
+  - "docs/golang-cli-template"
+
+inputs:
+  - id: repo_base_url
+    text: What is the project repo path base URL? (e.g. github.com)
+    type: text
+  - id: repo_user
+    text: What is the project repo user? (e.g. thazelart)
+    type: text
+  - id: repo_name
+    text: What is the project name? (e.g. my-awesome-go-cli)
+    type: text
+  - id: short_description
+    text: What is a short project description?
+    type: text
+  - id: long_description
+    text: What is a long project description? (long texts without no newlines)
+    type: text
+  - id: maintainer
+    text: Who is the maintainer? (e.g. Thibault HAZELART <thazelart@gmail.com>)
+    type: text
+  - id: license
+    text: What is a software license? (e.g. Apache 2.0, MIT ...)
+    type: text
+  - id: includeMkdocs
+    text: Would you like to include the documentation with mkdocs?
+    type: yesno
+
+before:
+  operations:
+    - sh:
+        - rm -rf {{.destination}}
+
+transformations:
+  - name: do not include template code in the final output
+    type: include
+    region_marker: __DO_NOT_INCLUDE__
+    condition: false
+    files: ["**"]
+  - name: remove unwanted files
+    type: include
+    region_marker: # When there's no marker, the entire file(s) is included
+    condition: "yes"
+    files:
+      - ".go-archetype.yaml"
+      - "LICENSE"
+      - "docs/golang-cli-template/**"
+  #   ____            _           _
+  #  |  _ \ _ __ ___ (_) ___  ___| |_
+  #  | |_) | '__/ _ \| |/ _ \/ __| __|
+  #  |  __/| | | (_) | |  __/ (__| |_
+  #  |_|   |_|  \___// |\___|\___|\__|
+  #                |__/
+  - name: project short description
+    type: replace
+    pattern: A Golang cli template.
+    replacement: "{{ wrap 80 .short_description }}"
+    files:
+      - "cmd/root.go"
+      - ".goreleaser"
+      - "docs/*"
+  - name: project long description
+    type: replace
+    pattern: An opinionated template for new Golang cli projects.
+    replacement: "{{ wrap 80 .long_description }}"
+    files:
+      - "cmd/root.go"
+      - "README.md"
+      - "docs/*"
+  - name: project long path
+    type: replace
+    pattern: github.com/thazelart/golang-cli-template
+    replacement: "{{ .repo_base_url }}/{{ .repo_user }}/{{ .repo_name }}"
+    files:
+      - "*.go"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "Dockerfile"
+      - "README.md"
+      - ".goreleaser.yaml"
+      - ".github/workflows/*.yaml"
+      - ".github/ISSUE_TEMPLATE/*.yaml"
+      - ".github/ISSUE_TEMPLATE/config.yml"
+      - ".github/CONTRIBUTING.md"
+      - ".github/SECURITY.md"
+      - ".github/pull_request_template.md"
+      - "docs/*"
+  - name: project short path
+    type: replace
+    pattern: thazelart/golang-cli-template
+    replacement: "{{ .repo_user }}/{{ .repo_name }}"
+    files:
+      - "*.go"
+      - "**/*.go"
+      - "Makefile"
+      - "Dockerfile"
+      - "README.md"
+      - ".goreleaser.yaml"
+      - ".github/workflows/*.yaml"
+      - "docs/*"
+  - name: user
+    type: replace
+    pattern: thazelart
+    replacement: "{{ .repo_user }}"
+    files:
+      - "scripts/fury-upload.sh"
+      - "README.md"
+      - ".goreleaser.yaml"
+      - "Makefile"
+      - ".github/ISSUE_TEMPLATE/*.yaml"
+      - "docs/*"
+  - name: project name
+    type: replace
+    pattern: golang-cli-template
+    replacement: "{{ .repo_name }}"
+    files:
+      - "*.go"
+      - "**/*.go"
+      - ".gitignore"
+      - "Makefile"
+      - "Dockerfile"
+      - "README.md"
+      - ".goreleaser.yaml"
+      - ".github/workflows/*.yaml"
+      - ".github/ISSUE_TEMPLATE/*.yaml"
+      - ".github/ISSUE_TEMPLATE/config.yml"
+      - ".github/CONTRIBUTING.md"
+      - "scripts/completions.sh"
+      - "scripts/manpages.sh"
+      - "docs/*"
+  - name: project maintainer
+    type: replace
+    pattern: Thibault HAZELART <thazelart@gmail.com>
+    replacement: "{{ wrap 80 .maintainer }}"
+    files:
+      - "*.go"
+      - "**/*.go"
+      - "Dockerfile"
+      - ".goreleaser.yaml"
+      - ".github/SECURITY.md"
+      - "docs/*"
+  - name: license
+    type: replace
+    pattern: Apache 2.0
+    replacement: "{{ .license }}"
+    files:
+      - "*.go"
+      - "**/*.go"
+      - "Dockerfile"
+      - ".goreleaser.yaml"
+      - "README.md"
+  #   __  __ _       _
+  #  |  \/  | | ____| | ___   ___ ___
+  #  | |\/| | |/ / _` |/ _ \ / __/ __|
+  #  | |  | |   < (_| | (_) | (__\__ \
+  #  |_|  |_|_|\_\__,_|\___/ \___|___/
+  #
+  - name: include the mkdocs documentation
+    type: include
+    region_marker: # When there's no marker, the entire file(s) is included
+    condition: .IncludeMkdocs
+    files:
+      - docs/**
+      - .github/workflows/doc.yaml
+      - mkdocs.yaml
+  - name: include the mkdocs documentation
+    type: include
+    region_marker: __INCLUDE_MKDOCS__
+    condition: .IncludeMkdocs
+    files:
+      - "Makefile"
+
+after:
+  operations:
+    - sh:
+        - cd {{.destination}} && gofmt -s -w .
+        - cd {{.destination}} && goimports -w .

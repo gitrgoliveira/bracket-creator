@@ -1,7 +1,3 @@
-/*
-Copyright © 2022 Thibault HAZELART <thazelart@gmail.com>
-*/
-
 // Package cmd handle the cli commands
 package cmd
 
@@ -13,7 +9,7 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "golang-cli-template",
+	Use:   "bracket-creator",
 	Short: "A Golang cli template.",
 	Long:  `An opinionated template for new Golang cli projects.`,
 	// Uncomment the following line if your bare application

@@ -3,14 +3,14 @@ ignore:
   - .git/
   - .go-archtype.yml
   - "LICENSE"
-  - "docs/golang-cli-template"
+  - "docs/bracket-creator"
 
 inputs:
   - id: repo_base_url
     text: What is the project repo path base URL? (e.g. github.com)
     type: text
   - id: repo_user
-    text: What is the project repo user? (e.g. thazelart)
+    text: What is the project repo user? (e.g. gitrgoliveira)
     type: text
   - id: repo_name
     text: What is the project name? (e.g. my-awesome-go-cli)
@@ -22,7 +22,7 @@ inputs:
     text: What is a long project description? (long texts without no newlines)
     type: text
   - id: maintainer
-    text: Who is the maintainer? (e.g. Thibault HAZELART <thazelart@gmail.com>)
+    text: Who is the maintainer? (e.g. Thibault HAZELART <gitrgoliveira@gmail.com>)
     type: text
   - id: license
     text: What is a software license? (e.g. Apache 2.0, MIT ...)
@@ -49,7 +49,7 @@ transformations:
     files:
       - ".go-archetype.yaml"
       - "LICENSE"
-      - "docs/golang-cli-template/**"
+      - "docs/bracket-creator/**"
   #   ____            _           _
   #  |  _ \ _ __ ___ (_) ___  ___| |_
   #  | |_) | '__/ _ \| |/ _ \/ __| __|
@@ -74,7 +74,7 @@ transformations:
       - "docs/*"
   - name: project long path
     type: replace
-    pattern: github.com/thazelart/golang-cli-template
+    pattern: github.com/gitrgoliveira/bracket-creator
     replacement: "{{ .repo_base_url }}/{{ .repo_user }}/{{ .repo_name }}"
     files:
       - "*.go"
@@ -94,7 +94,7 @@ transformations:
       - "docs/*"
   - name: project short path
     type: replace
-    pattern: thazelart/golang-cli-template
+    pattern: gitrgoliveira/bracket-creator
     replacement: "{{ .repo_user }}/{{ .repo_name }}"
     files:
       - "*.go"
@@ -107,7 +107,7 @@ transformations:
       - "docs/*"
   - name: user
     type: replace
-    pattern: thazelart
+    pattern: gitrgoliveira
     replacement: "{{ .repo_user }}"
     files:
       - "scripts/fury-upload.sh"
@@ -118,7 +118,7 @@ transformations:
       - "docs/*"
   - name: project name
     type: replace
-    pattern: golang-cli-template
+    pattern: bracket-creator
     replacement: "{{ .repo_name }}"
     files:
       - "*.go"
@@ -137,7 +137,7 @@ transformations:
       - "docs/*"
   - name: project maintainer
     type: replace
-    pattern: Thibault HAZELART <thazelart@gmail.com>
+    pattern: Thibault HAZELART <gitrgoliveira@gmail.com>
     replacement: "{{ wrap 80 .maintainer }}"
     files:
       - "*.go"

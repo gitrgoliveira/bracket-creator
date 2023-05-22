@@ -1,11 +1,11 @@
 # Contributing
 
 By participating in this project, you agree to abide our
-[code of conduct](https://github.com/thazelart/golang-cli-template/blob/main/.github/CODE_OF_CONDUCT.md).
+[code of conduct](https://github.com/gitrgoliveira/bracket-creator/blob/main/.github/CODE_OF_CONDUCT.md).
 
 ## Set up your machine
 
-`golang-cli-template` is written in [Go](https://golang.org/).
+`bracket-creator` is written in [Go](https://golang.org/).
 
 Prerequisites:
 
@@ -15,10 +15,10 @@ Other things you might need to run the tests:
 
 - [Docker](https://www.docker.com/)
 
-Clone `golang-cli-template` anywhere:
+Clone `bracket-creator` anywhere:
 
 ```sh
-git clone git@github.com:thazelart/golang-cli-template.git
+git clone git@github.com:gitrgoliveira/bracket-creator.git
 ```
 
 `cd` into the directory and install the dependencies:
@@ -57,7 +57,7 @@ You can follow the documentation on
 
 ## Submit a pull request
 
-Push your branch to your `golang-cli-template` fork and open a pull request against the main branch.
+Push your branch to your `bracket-creator` fork and open a pull request against the main branch.
 
 ## Credit
 

@@ -9,7 +9,7 @@ ARG VERSION
 ENV GO111MODULE=auto
 ENV CGO_ENABLED=0
 
-WORKDIR $GOPATH/src/github.com/thazelart/golang-cli-template
+WORKDIR $GOPATH/src/github.com/gitrgoliveira/bracket-creator
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
@@ -20,12 +20,12 @@ RUN echo "nonroot:x:65534:65534:Non root:/:" > /etc_passwd
 # Final stage
 FROM scratch
 
-LABEL maintainer="Thibault HAZELART <thazelart@gmail.com>"
+LABEL maintainer="Thibault HAZELART <gitrgoliveira@gmail.com>"
 
-COPY --from=builder /go/bin/golang-cli-template /bin/golang-cli-template
+COPY --from=builder /go/bin/bracket-creator /bin/bracket-creator
 COPY --from=builder /etc_passwd /etc/passwd
 
 USER nonroot
 
-ENTRYPOINT [ "golang-cli-template" ]
+ENTRYPOINT [ "bracket-creator" ]
 CMD [ "version" ]

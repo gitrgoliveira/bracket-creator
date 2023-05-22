@@ -9,58 +9,58 @@ Below you can find the steps for each of them.
 === "homebrew tap"
 
     ```bash
-    brew install thazelart/tap/golang-cli-template
+    brew install gitrgoliveira/tap/bracket-creator
     ```
 
 === "apt"
 
     ```bash
-    echo 'deb [trusted=yes] https://apt.fury.io/thazelart/ /' | sudo tee /etc/apt/sources.list.d/thazelart.list
+    echo 'deb [trusted=yes] https://apt.fury.io/gitrgoliveira/ /' | sudo tee /etc/apt/sources.list.d/gitrgoliveira.list
     sudo apt update
-    sudo apt install golang-cli-template
+    sudo apt install bracket-creator
     ```
 
 === "yum"
 
     ```bash
-    echo '[thazelart]
-    name=Gemfury thazelart repository
-    baseurl=https://yum.fury.io/thazelart/
+    echo '[gitrgoliveira]
+    name=Gemfury gitrgoliveira repository
+    baseurl=https://yum.fury.io/gitrgoliveira/
     enabled=1
-    gpgcheck=0' | sudo tee /etc/yum.repos.d/thazelart.repo
+    gpgcheck=0' | sudo tee /etc/yum.repos.d/gitrgoliveira.repo
     sudo yum install goreleaser
     ```
 
 ## deb, rpm and apk packages
 
-Download the .deb, .rpm or .apk packages from the [release page](https://github.com/thazelart/golang-cli-template/releases) and install them with the appropriate tools.
+Download the .deb, .rpm or .apk packages from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and install them with the appropriate tools.
 
 ## Manually
 
 === "go install"
 
     ```bash
-    go install github.com/thazelart/golang-cli-template@latest
+    go install github.com/gitrgoliveira/bracket-creator@latest
     ```
 
 === "Released tar file"
 
-    Download the pre-compiled binaries from the [release page](https://github.com/thazelart/golang-cli-template/releases) page and copy them to the desired location.
+    Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) page and copy them to the desired location.
     ```bash
     $ VERSION=v1.0.0
     $ OS=Linux
     $ ARCH=x86_64
-    $ TAR_FILE=golang-cli-template_${OS}_${ARCH}.tar.gz
-    $ wget https://github.com/thazelart/golang-cli-template/releases/download/${VERSION}/${TAR_FILE}
-    $ sudo tar xvf ${TAR_FILE} golang-cli-template -C /usr/local/bin
+    $ TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
+    $ wget https://github.com/gitrgoliveira/bracket-creator/releases/download/${VERSION}/${TAR_FILE}
+    $ sudo tar xvf ${TAR_FILE} bracket-creator -C /usr/local/bin
     $ rm -f ${TAR_FILE}
     ```
 
 === "manually"
 
     ```bash
-    $ git clone github.com/thazelart/golang-cli-template
-    $ cd golang-cli-template
+    $ git clone github.com/gitrgoliveira/bracket-creator
+    $ cd bracket-creator
     $ go generate ./...
     $ go install
     ```

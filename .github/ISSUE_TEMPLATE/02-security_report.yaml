@@ -2,7 +2,7 @@ name: Security Report
 description: Report a security issue
 labels: [security, triage]
 assignees:
-  - thazelart
+  - gitrgoliveira
 body:
   - type: markdown
     attributes:
@@ -30,6 +30,6 @@ body:
       placeholder: |
         OS: [e.g. Ubuntu]
         OS version: [e.g. 20.04]
-        golang-cli-template version: [e.g. 1.0.0]
+        bracket-creator version: [e.g. 1.0.0]
     validations:
       required: false

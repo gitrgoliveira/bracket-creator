@@ -1,5 +1,5 @@
-BIN_NAME=golang-cli-template
-IMAGE_NAME=thazelart/${BIN_NAME}
+BIN_NAME=bc
+IMAGE_NAME=gitrgoliveira/${BIN_NAME}
 BIN_PATH=${GOPATH}/bin
 GO_VERSION=1.19
 
@@ -46,10 +46,10 @@ goreleaser/test:
 # BEGIN __DO_NOT_INCLUDE__
 ## Test go-archetype
 go-archetype/test:
-	@rm -rf /tmp/golang-cli-template
+	@rm -rf /tmp/bracket-creator
 	@go-archetype transform \
 		--transformations .go-archetype.yaml \
-		--source . --destination /tmp/golang-cli-template \
+		--source . --destination /tmp/bracket-creator \
 		-- \
 		--repo_base_url gitlab.com \
     --repo_user user \

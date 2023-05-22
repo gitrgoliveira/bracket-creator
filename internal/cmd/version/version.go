@@ -31,7 +31,7 @@ var osArch = fmt.Sprintf("%s %s", runtime.GOOS, runtime.GOARCH)
 
 // generateOutput return the output of the version command
 func generateOutput() string {
-	return fmt.Sprintf(`golang-cli-template - %s
+	return fmt.Sprintf(`bracket-creator - %s
 
 Git Commit: %s
 Build date: %s

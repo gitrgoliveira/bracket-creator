@@ -2,7 +2,7 @@ name: Bug Report
 description: File a bug report
 labels: [bug, triage]
 assignees:
-  - thazelart
+  - gitrgoliveira
 body:
   - type: markdown
     attributes:
@@ -25,8 +25,8 @@ body:
   - type: textarea
     id: version
     attributes:
-      label: golang-cli-template version
-      description: "`golang-cli-template version` output"
+      label: bracket-creator version
+      description: "`bracket-creator version` output"
       render: bash
     validations:
       required: true
@@ -41,7 +41,7 @@ body:
     id: terms
     attributes:
       label: Code of Conduct
-      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/thazelart/golang-cli-template/blob/main/.github/CODE_OF_CONDUCT.md)
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/gitrgoliveira/bracket-creator/blob/main/.github/CODE_OF_CONDUCT.md)
       options:
         - label: I agree to follow this project's Code of Conduct
           required: true

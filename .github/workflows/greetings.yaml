@@ -21,12 +21,12 @@ jobs:
           script: |
             let output = `Hello! 
 
-            Thank you for your contribution to [golang-cli-template](https://github.com/thazelart/golang-cli-template).
+            Thank you for your contribution to [bracket-creator](https://github.com/gitrgoliveira/bracket-creator).
             If you are fixing a bug, please reference the issue number in the description.
 
             We will revise your contribution as soon as possible.
 
-            The golang-cli-template team.
+            The bracket-creator team.
             `
 
             github.rest.issues.createComment({
@@ -50,7 +50,7 @@ jobs:
 
             We will work on this as soon as possible.
 
-            The golang-cli-template team.
+            The bracket-creator team.
             `
 
             github.rest.issues.createComment({

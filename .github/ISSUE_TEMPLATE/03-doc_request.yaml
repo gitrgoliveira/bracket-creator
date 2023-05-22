@@ -2,7 +2,7 @@ name: Documentation Request
 description: Request a change or addition in the documentation
 labels: [documentation, triage]
 assignees:
-  - thazelart
+  - gitrgoliveira
 body:
   - type: markdown
     attributes:

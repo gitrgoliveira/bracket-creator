@@ -11,7 +11,7 @@ $ go install github.com/rantav/go-archetype@latest
 ```bash
 $ DEST_FOLDER=/path/to/destination # Non existing folder
 $ REPO_BASE_URL=github.com
-$ REPO_USER=thazelart
+$ REPO_USER=gitrgoliveira
 $ REPO_NAME=my-awesome-cli
 ```
 

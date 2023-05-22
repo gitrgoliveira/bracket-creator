@@ -1,6 +1,3 @@
-/*
-Copyright © 2022 Thibault HAZELART <thazelart@gmail.com>
-*/
 package cmd
 
 import (
@@ -15,7 +12,7 @@ import (
 // manCmd represents the man command
 var manCmd = &cobra.Command{
 	Use:    "man",
-	Short:  "Generates golang-cli-template's command line manpages",
+	Short:  "Generates bracket-creator's command line manpages",
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -24,7 +21,7 @@ var manCmd = &cobra.Command{
 			panic(err)
 		}
 
-		manPage = manPage.WithSection("Copyright", "(C) 2022 Thibault HAZELART <thazelart@gmail.com>")
+		manPage = manPage.WithSection("Copyright", "(C) 2022 Thibault HAZELART <gitrgoliveira@gmail.com>")
 
 		fmt.Fprint(os.Stdout, manPage.Build(roff.NewDocument()))
 	},

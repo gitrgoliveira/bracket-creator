@@ -1,12 +1,8 @@
-/*
-Copyright © 2022 Thibault HAZELART <thazelart@gmail.com>
-*/
-
 package cmd
 
 import (
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/spf13/cobra"
-	"github.com/thazelart/golang-cli-template/internal/cmd/version"
 )
 
 // versionCmd represents the version command

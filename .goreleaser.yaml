@@ -68,7 +68,7 @@ brews:
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     goarm: "7"
     homepage: https://github.com/gitrgoliveira/bracket-creator
-    description: A Golang cli template.
+    description: A tournament bracket creator
     license: Apache 2.0
     test: |
       system "#{bin}/bracket-creator version"
@@ -86,7 +86,7 @@ nfpms:
   - file_name_template: "{{ .ConventionalFileName }}"
     id: packages
     homepage: https://github.com/gitrgoliveira/bracket-creator
-    description: A Golang cli template.
+    description: A tournament bracket creator
     maintainer: Thibault HAZELART <gitrgoliveira@gmail.com>
     license: Apache 2.0
     vendor: gitrgoliveira

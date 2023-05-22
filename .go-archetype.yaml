@@ -58,7 +58,7 @@ transformations:
   #                |__/
   - name: project short description
     type: replace
-    pattern: A Golang cli template.
+    pattern: A tournament bracket creator
     replacement: "{{ wrap 80 .short_description }}"
     files:
       - "cmd/root.go"

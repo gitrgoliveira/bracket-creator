@@ -28,3 +28,4 @@ bracket-creator*.tar.gz
 dist
 completions/
 manpages
+bin/

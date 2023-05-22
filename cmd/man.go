@@ -21,7 +21,7 @@ var manCmd = &cobra.Command{
 			panic(err)
 		}
 
-		manPage = manPage.WithSection("Copyright", "(C) 2022 Thibault HAZELART <gitrgoliveira@gmail.com>")
+		manPage = manPage.WithSection("Copyright", "(C) 2022 Ricardo Oliveira <oliveira.rg@gmail.com>")
 
 		fmt.Fprint(os.Stdout, manPage.Build(roff.NewDocument()))
 	},

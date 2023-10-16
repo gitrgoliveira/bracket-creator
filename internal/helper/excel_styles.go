@@ -203,7 +203,24 @@ func getNameIDStyle(f *excelize.File) int {
 			Horizontal: "center",
 			Vertical:   "center",
 		},
-		Font: &excelize.Font{Bold: false, Color: "000000", Size: 30},
+		Font: &excelize.Font{Bold: false, Color: "000000", Size: 110},
+		Border: []excelize.Border{
+			{Type: "top", Color: "000000", Style: 2},
+			{Type: "bottom", Color: "000000", Style: 2},
+			{Type: "left", Color: "000000", Style: 2},
+			{Type: "right", Color: "000000", Style: 2},
+		},
+	})
+	return style
+}
+
+func getNameIDSideStyle(f *excelize.File) int {
+	style, _ := f.NewStyle(&excelize.Style{
+		Alignment: &excelize.Alignment{
+			Horizontal: "center",
+			Vertical:   "center",
+		},
+		Font: &excelize.Font{Bold: false, Color: "000000", Size: 28},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},

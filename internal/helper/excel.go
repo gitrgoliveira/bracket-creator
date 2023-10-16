@@ -363,22 +363,22 @@ func addRoundHeader(f *excelize.File, sheetName string, startRow int, round int)
 func CreateNamesToPrint(f *excelize.File, pools []Pool) {
 	sheetName := "Names to Print"
 
+	row := 1
 	for _, pool := range pools {
-		row := 1
 
 		for i, player := range pool.Players {
 			poolCell := fmt.Sprintf("A%d", row)
-			cellB := fmt.Sprintf("B%d", row)
+			nameCell := fmt.Sprintf("B%d", row)
 			f.SetRowHeight(sheetName, row, 110)
-			f.SetCellStyle(sheetName, poolCell, fmt.Sprintf("B%d", row+1), getNameIDStyle(f))
 
 			f.SetCellValue(sheetName, poolCell, pool.PoolName)
+			f.SetCellStyle(sheetName, poolCell, fmt.Sprintf("A%d", row+1), getNameIDSideStyle(f))
 
-			f.SetCellFormula(sheetName, cellB, fmt.Sprintf("%s!%s", player.sheetName, player.cell))
-			f.MergeCell(sheetName, cellB, fmt.Sprintf("B%d", row+1))
+			f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, player.cell))
+			f.SetCellStyle(sheetName, nameCell, nameCell, getNameIDStyle(f))
+			f.MergeCell(sheetName, nameCell, fmt.Sprintf("B%d", row+1))
 
 			f.SetCellValue(sheetName, fmt.Sprintf("A%d", row+1), i+1)
-			f.SetRowHeight(sheetName, row, 110)
 			row += 2
 		}
 	}

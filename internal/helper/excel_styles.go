@@ -66,11 +66,6 @@ func getTreeHeaderStyle(f *excelize.File) int {
 	return borderStyle
 }
 
-func getEliminationRoundStyle(f *excelize.File) int {
-	cellStyle, _ := f.GetCellStyle("Elimination Matches", "A1")
-	return cellStyle
-}
-
 func getTreeTopStyle(f *excelize.File) int {
 	borderStyle, _ := f.NewStyle(&excelize.Style{
 		Border: []excelize.Border{
@@ -197,6 +192,23 @@ func getTextStyle(f *excelize.File) int {
 			{Type: "bottom", Color: "000000", Style: 1},
 			{Type: "left", Color: "000000", Style: 1},
 			{Type: "right", Color: "000000", Style: 1},
+		},
+	})
+	return style
+}
+
+func getNameIDStyle(f *excelize.File) int {
+	style, _ := f.NewStyle(&excelize.Style{
+		Alignment: &excelize.Alignment{
+			Horizontal: "center",
+			Vertical:   "center",
+		},
+		Font: &excelize.Font{Bold: false, Color: "000000", Size: 30},
+		Border: []excelize.Border{
+			{Type: "top", Color: "000000", Style: 2},
+			{Type: "bottom", Color: "000000", Style: 2},
+			{Type: "left", Color: "000000", Style: 2},
+			{Type: "right", Color: "000000", Style: 2},
 		},
 	})
 	return style

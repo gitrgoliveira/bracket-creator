@@ -106,6 +106,8 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 	poolMatchWinners := helper.PrintPoolMatches(f, pools)
 	helper.PrintEliminationMatches(f, poolMatchWinners, matchMapping, eliminationMatchRounds)
 
+	helper.CreateNamesToPrint(f, pools)
+
 	// Save the spreadsheet file
 	outputPath := "groups.xlsx" // Replace with the desired output file path
 	if err := f.SaveAs(outputPath); err != nil {

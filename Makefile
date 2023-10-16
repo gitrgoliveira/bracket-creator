@@ -1,6 +1,6 @@
 BIN_NAME=bc
 IMAGE_NAME=gitrgoliveira/${BIN_NAME}
-BIN_PATH=${GOPATH}/bin
+BIN_PATH=./bin
 GO_VERSION=1.19
 
 default: help
@@ -23,7 +23,7 @@ go/build:
 	@echo "building ${BIN_NAME}"
 	@echo "GOPATH=${GOPATH}"
 	go generate ./...
-	go build -o ${BIN_PATH}/${BIN_NAME}
+	go build -o ${BIN_PATH}/${BIN_NAME} .
 
 ## Compile optimized for alpine linux.
 docker/build:

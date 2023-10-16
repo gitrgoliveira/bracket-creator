@@ -36,38 +36,37 @@
 </p>
 <br/>
 
-An opinionated template for new Golang cli projects.
+A CLI to create kendo tournament brackets
 
 <!-- BEGIN __DO_NOT_INCLUDE__ -->
 
-## Template
+## Usage
 
-This golang CLI template includes the base of a [cobra](https://github.com/spf13/cobra) cli tested with [testify](https://github.com/stretchr/testify) and [codecov](https://codecov.io). The release process with [goreleaser](https://goreleaser.com/) and contains a basic secured Docker image.
+You will need to compile the binary from source or download a release from github, if one is available.
 
-The whole thing is documented with [MkDocs](https://www.mkdocs.org/) and templated with [go-archetype](https://github.com/rantav/go-archetype).
+To learn how to use the CLI run:
+```bash
+bc --help
+```
 
-For more information please have a look at the [features](https://gitrgoliveira.github.io/bracket-creator/bracket-creator/features/) section of the documentation.
+Example usage:
+```bash
+make go/build && ./bin/bc create -p ./teams.csv
+```
 
-### Getting started
+CSV format for individual matches should be:
+```csv
+Name, Dojo
+```
 
-Please find all the required information on the [getting stared](https://gitrgoliveira.github.io/bracket-creator/bracket-creator/getting-started/) section of the documentation.
+For teams, it shoud be one team per line.
 
-### Greetings on Pull Requests and Issues
 
-This repository includes greetings on Pull Requests and Issues. By default the comment will be added by the `github-actions bot`. If you want to customize it, add a `TAP_GITHUB_TOKEN` secret containing a [personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) of the user or organization you want the comment from.
+## Install - WIP
 
-### Logo
+*You can install the pre-compiled binary (in several ways), use Docker or compile from source (when on OSS).*
 
-The logo is based on the `create-go-app`. Please find all information [here](https://github.com/create-go-app/cli/wiki/Logo).
-
-<!-- END __DO_NOT_INCLUDE__ -->
-
-## Install
-
-You can install the pre-compiled binary (in several ways), use Docker or compile from source (when on OSS).
-
-Below you can find the steps for each of them.
-
+*Below you can find the steps for each of them.*
 <details>
   <summary><h3>homebrew tap</h3></summary>
 

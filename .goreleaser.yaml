@@ -62,7 +62,7 @@ archives:
       - manpages/*
 
 brews:
-  - tap:
+  - repository:
       owner: gitrgoliveira
       name: homebrew-tap
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
@@ -125,13 +125,13 @@ nfpms:
         - statically-linked-binary
         - changelog-file-missing-in-native-package
 
-publishers:
-  - name: fury.io
-    ids:
-      - packages
-    env:
-      - "FURY_TOKEN={{ .Env.FURY_TOKEN }}"
-    cmd: ./scripts/fury-upload.sh {{ .ArtifactName }}
+# publishers:
+#   - name: fury.io
+#     ids:
+#       - packages
+#     env:
+#       - "FURY_TOKEN={{ .Env.FURY_TOKEN }}"
+#     cmd: ./scripts/fury-upload.sh {{ .ArtifactName }}
 
 release:
   footer: |

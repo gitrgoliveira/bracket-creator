@@ -46,7 +46,6 @@ func CreatePlayers(entries []string) []Player {
 
 	for _, entry := range entries {
 		line := strings.Split(entry, ",")
-		fmt.Println(c.String(strings.TrimSpace(line[0])))
 		player := Player{
 			Name:        c.String(strings.TrimSpace(line[0])),
 			Dojo:        strings.TrimSpace(line[1]),
@@ -66,8 +65,7 @@ func sanatizeName(name string) string {
 	fullName := strings.Split(name, " ")
 
 	// capitalize first letter
-	// firstName := strings.ToUpper(fullName[0][0:1]) + fullName[0][1:]
-	firstName := strings.ToTitle(fullName[0])
+	firstName := strings.ToUpper(fullName[0])
 
 	// Last Name all caps
 	lastName := strings.ToUpper(fullName[len(fullName)-1])
@@ -76,8 +74,6 @@ func sanatizeName(name string) string {
 }
 func CreatePools(players []Player, poolSize int) []Pool {
 	totalPools := len(players) / poolSize
-	// remainingEntries := len(players) % poolSize
-
 	pools := make([]Pool, totalPools)
 
 	for _, player := range players {

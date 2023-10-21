@@ -51,7 +51,7 @@ bc --help
 
 Example usage:
 ```bash
-make go/build && ./bin/bc create -p ./teams.csv
+make go/build && ./bin/bc create -f ./teams.csv -o ./output.xlsx
 ```
 
 CSV format for individual matches should be:
@@ -60,6 +60,15 @@ Name, Dojo
 ```
 
 For teams, it shoud be one team per line.
+
+### Paramaters
+
+* `-h` - Show help
+* `-f` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
+* `-o` - Path to write the output excel file
+* `-r` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool.
+* `-p` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected.
+* `-s` - Sanatize print names into first name initial and capitalize the last name. This is useful for individual tournaments.
 
 
 ## Install - WIP

@@ -51,12 +51,12 @@ bc --help
 
 Example usage:
 ```bash
-make go/build && ./bin/bc create -f ./teams.csv -o ./output.xlsx
+make go/build && ./bin/bracket-creator create -s -f ./mock_data.csv -o ./output.xlsx
 ```
 
-CSV format for individual matches should be:
+CSV format for individual matches should be (see mock_data.csv for an example):
 ```csv
-Name, Dojo
+First_Name Last_Name, Dojo
 ```
 
 For teams, it shoud be one team per line.

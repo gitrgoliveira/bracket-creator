@@ -1,4 +1,4 @@
-BIN_NAME=bc
+BIN_NAME=bracket-creator
 IMAGE_NAME=gitrgoliveira/${BIN_NAME}
 BIN_PATH=./bin
 GO_VERSION=1.21

@@ -27,9 +27,17 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-
+    ignore:
+      - goos: darwin
+        goarch: 386
+      - goos: linux
+        goarch: arm
+        goarm: 7
+      - goarm: mips64
+      - gomips: hardfloat
+      - goamd64: v4
 universal_binaries:
-  - replace: false
+  - replace: true
 
 checksum:
   name_template: "checksums.txt"

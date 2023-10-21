@@ -3,6 +3,9 @@ package helper
 import (
 	"fmt"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 type Pool struct {
@@ -16,8 +19,9 @@ type Pool struct {
 }
 
 type Player struct {
-	Name string
-	Dojo string
+	Name        string
+	DisplayName string
+	Dojo        string
 
 	PoolPosition int
 
@@ -38,12 +42,15 @@ type Match struct {
 
 func CreatePlayers(entries []string) []Player {
 	players := make([]Player, 0)
+	c := cases.Title(language.Und, cases.NoLower)
 
 	for _, entry := range entries {
 		line := strings.Split(entry, ",")
+		fmt.Println(c.String(strings.TrimSpace(line[0])))
 		player := Player{
-			Name: strings.TrimSpace(line[0]),
-			Dojo: strings.TrimSpace(line[1]),
+			Name:        c.String(strings.TrimSpace(line[0])),
+			Dojo:        strings.TrimSpace(line[1]),
+			DisplayName: sanatizeName(line[0]),
 		}
 		players = append(players, player)
 	}
@@ -51,6 +58,22 @@ func CreatePlayers(entries []string) []Player {
 	return players
 }
 
+func sanatizeName(name string) string {
+	//removing extra spaces
+	name = strings.TrimSpace(name)
+
+	// return only first and last name
+	fullName := strings.Split(name, " ")
+
+	// capitalize first letter
+	// firstName := strings.ToUpper(fullName[0][0:1]) + fullName[0][1:]
+	firstName := strings.ToTitle(fullName[0])
+
+	// Last Name all caps
+	lastName := strings.ToUpper(fullName[len(fullName)-1])
+
+	return fmt.Sprintf("%c. %s", firstName[0], lastName)
+}
 func CreatePools(players []Player, poolSize int) []Pool {
 	totalPools := len(players) / poolSize
 	// remainingEntries := len(players) % poolSize
@@ -92,7 +115,6 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 			// try make sure that there aren't other players of the same dojo
 			if assignedPlayers.Dojo == player.Dojo ||
 				assignedPlayers.Name == player.Name {
-				// fmt.Println("Same dojo")
 				sameDojo = true
 			}
 		}
@@ -107,7 +129,6 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 
 func forcePoolSize(pools []Pool, player Player, poolSize int) int {
 
-	// TODO: still check if they are of the same Dojo
 	for i, j := 0, len(pools)-1; i <= j; i, j = i+1, j-1 {
 		if len(pools[i].Players) < poolSize+1 {
 			return i
@@ -121,55 +142,31 @@ func forcePoolSize(pools []Pool, player Player, poolSize int) int {
 	return 0
 }
 
-func alternateAdd(arr []int) []int {
-	res := make([]int, 0, len(arr))
-	for i, n := range arr {
-		if i%2 == 0 {
-			res = append([]int{n}, res...)
-		} else {
-			res = append(res, n)
-		}
-	}
-	return res
-}
-
 func CreatePoolMatches(pools []Pool) {
-	numPools := len(pools)
-
-	for i := 0; i < numPools-1; i++ {
-		// fmt.Println(pools[i].PoolName)
-		for j := 0; j < len(pools[i].Players); j++ {
-
-			p1 := pools[i].Players[0]
-			p2 := pools[i].Players[1]
-			if j%2 != 0 {
-				p1, p2 = p2, p1
+	for i := range pools {
+		pool := &pools[i]
+		players := pool.Players
+		for j := range players {
+			sideA := &players[j]
+			sideB := &players[0]
+			if j != len(players)-1 {
+				sideB = &players[j+1]
 			}
-
-			pools[i].Matches = append(pools[i].Matches, Match{
-				SideA: &pools[i].Players[0],
-				SideB: &pools[i].Players[1],
+			if j%2 != 0 {
+				sideA, sideB = sideB, sideA
+			}
+			pool.Matches = append(pool.Matches, Match{
+				SideA: sideA,
+				SideB: sideB,
 			})
-			// fmt.Printf("%d vs %d\n", p1.PoolPosition, p2.PoolPosition)
-			rotateTeams(pools[i].Players, 1)
 		}
-		rotateTeams(pools[i].Players, 1)
-	}
-}
 
-func rotateTeams(teams []Player, shift int) {
-	n := len(teams)
-	shift %= n
-	temp := make([]Player, shift)
-	copy(temp, teams[:shift])
-	copy(teams[:n-shift], teams[shift:])
-	copy(teams[n-shift:], temp)
+	}
 }
 
 func CreatePoolRoundRobinMatches(pools []Pool) {
 
 	for poolN, pool := range pools {
-		// fmt.Println(pool.PoolName)
 		size := len(pool.Players)
 
 		matchIndex := 0
@@ -195,7 +192,6 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 					SideB: sideB,
 				})
 
-				// fmt.Printf("Match %d: %d vs %d\n", matchIndex, sideA.PoolPosition, sideB.PoolPosition)
 				previousA = sideA
 				previousB = sideB
 			}

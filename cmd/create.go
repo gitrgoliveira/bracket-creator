@@ -16,7 +16,9 @@ import (
 type createOptions struct {
 	numPlayers int
 	filePath   string
+	outputPath string
 	roundRobin bool
+	sanatize   bool
 }
 
 func newCreateCmd() *cobra.Command {
@@ -31,9 +33,11 @@ func newCreateCmd() *cobra.Command {
 		RunE: o.run,
 	}
 
-	cmd.Flags().IntVarP(&o.numPlayers, "players", "", 3, "minimum number of players per pool")
-	cmd.Flags().BoolVarP(&o.roundRobin, "roundRobin", "r", true, "ensure all pools are round robin")
-	cmd.Flags().StringVarP(&o.filePath, "path", "p", "", "file with the list of players")
+	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players or teams per pool")
+	cmd.Flags().BoolVarP(&o.roundRobin, "roundRobin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone")
+	cmd.Flags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
+	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize")
+	cmd.Flags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
 
 	return cmd
 }
@@ -76,11 +80,12 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	helper.AddDataToSheet(f, pools)
+	helper.AddDataToSheet(f, pools, o.sanatize)
 	helper.AddPoolsToSheet(f, pools)
 
 	finals := helper.GenerateFinals(pools)
 	tree := helper.CreateBalancedTree(finals)
+	// helper.calc
 	depth := helper.CalculateDepth(tree)
 	fmt.Printf("Tree Depth: %d\n", depth)
 	helper.PrintLeafNodes(tree, f, "Tree", depth*2, 4, depth)
@@ -106,16 +111,15 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 	poolMatchWinners := helper.PrintPoolMatches(f, pools)
 	helper.PrintEliminationMatches(f, poolMatchWinners, matchMapping, eliminationMatchRounds)
 
-	helper.CreateNamesToPrint(f, pools)
+	helper.CreateNamesToPrint(f, pools, o.sanatize)
 
 	// Save the spreadsheet file
-	outputPath := "groups.xlsx" // Replace with the desired output file path
-	if err := f.SaveAs(outputPath); err != nil {
+	if err := f.SaveAs(o.outputPath); err != nil {
 		fmt.Println("Error saving Excel file:", err)
 		return nil
 	}
 
-	fmt.Println("Excel file created successfully:", outputPath)
+	fmt.Println("Excel file created successfully:", o.outputPath)
 	return nil
 }
 

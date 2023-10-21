@@ -9,7 +9,7 @@ By participating in this project, you agree to abide our
 
 Prerequisites:
 
-- [Go 1.19+](https://golang.org/doc/install)
+- [Go 1.21+](https://golang.org/doc/install)
 
 Other things you might need to run the tests:
 

@@ -1,7 +1,7 @@
 BIN_NAME=bc
 IMAGE_NAME=gitrgoliveira/${BIN_NAME}
 BIN_PATH=./bin
-GO_VERSION=1.19
+GO_VERSION=1.21
 
 default: help
 

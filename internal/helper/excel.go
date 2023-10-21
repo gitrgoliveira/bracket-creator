@@ -78,7 +78,7 @@ func AddDataToSheet(f *excelize.File, pools []Pool, sanatize bool) {
 
 	// Set the column widths
 	f.SetColWidth(sheetName, "A", "A", 15)
-	f.SetColWidth(sheetName, "B", "C", 30)
+	f.SetColWidth(sheetName, "B", "D", 30)
 
 }
 

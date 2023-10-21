@@ -87,7 +87,7 @@ func CreatePools(players []Player, poolSize int) []Pool {
 	}
 
 	for i := 0; i < len(pools); i++ {
-		char := string('A' + i%26)
+		char := string(rune('A' + i%26))
 		if i > 25 {
 			char = char + char
 		}

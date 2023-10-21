@@ -29,3 +29,4 @@ dist
 completions/
 manpages
 bin/
+bin/bc

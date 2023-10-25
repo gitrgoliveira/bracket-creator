@@ -107,7 +107,6 @@ func GenerateFinals(pools []Pool) []string {
 		finals = append(finals, fmt.Sprintf("%s.1", pools[len(pools)/2].PoolName))
 		finals = append(finals, fmt.Sprintf("%s.2", pools[len(pools)/2].PoolName))
 	}
-	fmt.Printf("Finals: %s\n", finals)
 
 	return finals
 }

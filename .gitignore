@@ -29,4 +29,4 @@ dist
 completions/
 manpages
 bin/
-bin/bc
+output.xlsx

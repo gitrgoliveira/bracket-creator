@@ -63,12 +63,26 @@ For teams, it shoud be one team per line.
 
 ### Paramaters
 
-* `-h` - Show help
-* `-f` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
-* `-o` - Path to write the output excel file
-* `-r` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool.
-* `-p` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected.
-* `-s` - Sanatize print names into first name initial and capitalize the last name. This is useful for individual tournaments.
+* `-h` / `-help` - Show help
+* `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
+* `-o` / `-output` - Path to write the output excel file
+* `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
+* `-p` / `-players` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected. The default is 3
+* `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
+* `-s` / `-sanatize` - Sanatize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
+
+### Examples
+**Individual player tournament**
+```bash
+bc create -s -p 4 -f mock_data.csv -o output.xlsx
+```
+
+**Team tournament**
+```bash
+bc create -t 5 -f mock_data.csv -o output.xlsx 
+```
+
+
 
 
 ## Install - WIP

@@ -358,7 +358,7 @@ func PrintPoolTeamMatches(f *excelize.File, pools []Pool, teamMatches int) map[s
 			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, poolRow), fmt.Sprintf("%d. ", result))
 			f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), getBorderStyleBottom(f))
 
-			if result < 2 {
+			if result <= 2 {
 				matchWinners[fmt.Sprintf("%s.%d", pool.PoolName, result)] = MatchWinner{
 					sheetName: sheetName,
 					cell:      fmt.Sprintf("%s%d", endColName, poolRow),

@@ -94,7 +94,7 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 func GenerateFinals(pools []Pool) []string {
 	finals := make([]string, 0)
 
-	for i, j := 0, len(pools)-1; i < j; i, j = i+1, j-1 {
+	for i, j := 0, len(pools)-1; j > i; i, j = i+1, j-1 {
 		finals = append(finals, fmt.Sprintf("%s.1", pools[i].PoolName))
 		finals = append(finals, fmt.Sprintf("%s.2", pools[j].PoolName))
 	}
@@ -102,6 +102,12 @@ func GenerateFinals(pools []Pool) []string {
 		finals = append(finals, fmt.Sprintf("%s.1", pools[j].PoolName))
 		finals = append(finals, fmt.Sprintf("%s.2", pools[i].PoolName))
 	}
+	// for an odd number of pools, add the middle pool to the finals
+	if len(pools)%2 != 0 {
+		finals = append(finals, fmt.Sprintf("%s.1", pools[len(pools)/2].PoolName))
+		finals = append(finals, fmt.Sprintf("%s.2", pools[len(pools)/2].PoolName))
+	}
+	fmt.Printf("Finals: %s\n", finals)
 
 	return finals
 }

@@ -8,25 +8,6 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-type RowStack struct {
-	data []int
-}
-
-func (s *RowStack) Push(value int) {
-	s.data = append(s.data, value)
-}
-
-func (s *RowStack) Pop() int {
-	if len(s.data) == 0 {
-		fmt.Println("Stack is empty")
-		return -1
-	}
-	index := len(s.data) - 1
-	value := s.data[index]
-	s.data = s.data[:index]
-	return value
-}
-
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int, firstRound bool, value string) string {
 
 	if firstRound {
@@ -205,9 +186,14 @@ func PrintPoolMatches(f *excelize.File, pools []Pool) map[string]MatchWinner {
 	matchWinners := make(map[string]MatchWinner)
 	sheetName := "Pool Matches"
 
+	var leftRowStack RowStack
+	var rightRowStack RowStack
 	startRow := 4
+	poolRow := startRow
 	spaceLines := 3
 	startCol := 1
+	leftRowStack.Push(startRow)
+	rightRowStack.Push(startRow)
 
 	maxNumMatches := 0
 	for i, pool := range pools {
@@ -219,9 +205,10 @@ func PrintPoolMatches(f *excelize.File, pools []Pool) map[string]MatchWinner {
 		startCol = 1
 		if i%2 != 0 {
 			startCol = 9
+			poolRow = rightRowStack.Pop()
+		} else {
+			poolRow = leftRowStack.Pop()
 		}
-		poolRow := startRow
-
 		startColName, _ := excelize.ColumnNumberToName(startCol)
 		middleColName, _ := excelize.ColumnNumberToName(startCol + 3)
 		endColName, _ := excelize.ColumnNumberToName(startCol + 6)
@@ -263,8 +250,12 @@ func PrintPoolMatches(f *excelize.File, pools []Pool) map[string]MatchWinner {
 			cell:      fmt.Sprintf("%s%d", endColName, poolRow),
 		}
 
-		if i%2 != 0 {
-			startRow += (maxNumMatches + spaceLines + len(pool.Players))
+		poolRow += spaceLines
+
+		if i%2 == 0 {
+			leftRowStack.PushHighest(poolRow, rightRowStack.Peek())
+		} else {
+			rightRowStack.PushHighest(poolRow, leftRowStack.Peek())
 		}
 	}
 
@@ -297,11 +288,9 @@ func PrintPoolTeamMatches(f *excelize.File, pools []Pool, teamMatches int) map[s
 		startCol = 1
 		if i%2 != 0 {
 			startCol = 9
-		}
-		if i%2 == 0 {
-			poolRow = leftRowStack.Pop()
-		} else {
 			poolRow = rightRowStack.Pop()
+		} else {
+			poolRow = leftRowStack.Pop()
 		}
 		startColName, _ := excelize.ColumnNumberToName(startCol)
 		leftVictoriesColName, _ := excelize.ColumnNumberToName(startCol + 1)
@@ -380,9 +369,9 @@ func PrintPoolTeamMatches(f *excelize.File, pools []Pool, teamMatches int) map[s
 		poolRow += spaceLines
 
 		if i%2 == 0 {
-			leftRowStack.Push(poolRow)
+			leftRowStack.PushHighest(poolRow, rightRowStack.Peek())
 		} else {
-			rightRowStack.Push(poolRow)
+			rightRowStack.PushHighest(poolRow, leftRowStack.Peek())
 		}
 	}
 	return matchWinners

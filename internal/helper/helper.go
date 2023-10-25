@@ -1,9 +1,43 @@
 package helper
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 )
+
+type RowStack struct {
+	data []int
+}
+
+func (s *RowStack) Push(value int) {
+	s.data = append(s.data, value)
+}
+
+func (s *RowStack) PushHighest(first int, second int) {
+	if first > second {
+		s.Push(first)
+	} else {
+		s.Push(second)
+	}
+}
+func (s *RowStack) Pop() int {
+	if len(s.data) == 0 {
+		fmt.Println("Stack is empty")
+		return -1
+	}
+	index := len(s.data) - 1
+	value := s.data[index]
+	s.data = s.data[:index]
+	return value
+}
+
+func (s *RowStack) Peek() int {
+	if len(s.data) == 0 {
+		panic("Stack is empty")
+	}
+	return s.data[len(s.data)-1]
+}
 
 func RemoveDuplicates(input []string) []string {
 	uniqueStrings := make(map[string]bool)

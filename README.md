@@ -61,7 +61,7 @@ First_Name Last_Name, Dojo
 
 For teams, it shoud be one team per line.
 
-### Paramaters
+### Parameters
 
 * `-h` / `-help` - Show help
 * `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo

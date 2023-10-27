@@ -20,6 +20,7 @@ type createOptions struct {
 	outputPath  string
 	roundRobin  bool
 	sanatize    bool
+	determined  bool
 }
 
 func newCreateCmd() *cobra.Command {
@@ -34,12 +35,13 @@ func newCreateCmd() *cobra.Command {
 		RunE: o.run,
 	}
 
-	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool")
-	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
-	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone")
+	cmd.Flags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file")
 	cmd.Flags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
-	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize")
 	cmd.Flags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
+	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool")
+	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone")
+	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize")
+	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
 	return cmd
 }
@@ -63,9 +65,11 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 	entries = helper.RemoveDuplicates(entries)
 
 	// Shuffle all entries
-	rand.Shuffle(len(entries), func(i, j int) {
-		entries[i], entries[j] = entries[j], entries[i]
-	})
+	if !o.determined {
+		rand.Shuffle(len(entries), func(i, j int) {
+			entries[i], entries[j] = entries[j], entries[i]
+		})
+	}
 
 	players := helper.CreatePlayers(entries)
 	pools := helper.CreatePools(players, o.numPlayers)

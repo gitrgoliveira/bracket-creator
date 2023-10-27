@@ -63,13 +63,14 @@ For teams, it shoud be one team per line.
 
 ### Parameters
 
-* `-h` / `-help` - Show help
+* `-d` / `-determined` - Do not shuffle the names read from the input file
 * `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
+* `-h` / `-help` - Show help
 * `-o` / `-output` - Path to write the output excel file
-* `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
 * `-p` / `-players` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected. The default is 3
-* `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
+* `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
 * `-s` / `-sanatize` - Sanatize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
+* `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 
 ### Examples
 **Individual player tournament**

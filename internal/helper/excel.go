@@ -33,7 +33,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int) map[strin
 	var poolRow int
 
 	spaceLines := 3
-	startCol := 1
+	var startCol int
 
 	maxNumMatches := 0
 	leftRowStack.Push(startRow)
@@ -174,7 +174,7 @@ func PrintEliminationMatches(f *excelize.File, poolMatchWinners map[string]Match
 
 	startRow := 1
 	spaceLines := 7
-	startCol := 1
+	var startCol int
 
 	// first round first
 	for round, eliminationMatchRound := range eliminationMatchRounds {
@@ -276,7 +276,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	startRow := 1
 	var matchRow int
 	spaceLines := 5
-	startCol := 1
+	var startCol int
 
 	leftRowStack := RowStack{}
 	rightRowStack := RowStack{}

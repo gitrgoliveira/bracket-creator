@@ -66,6 +66,7 @@ For teams, it shoud be one team per line.
 * `-d` / `-determined` - Do not shuffle the names read from the input file
 * `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
 * `-h` / `-help` - Show help
+* `--no-pools` - Do not create pools and have only straight knockouts
 * `-o` / `-output` - Path to write the output excel file
 * `-p` / `-players` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected. The default is 3
 * `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False

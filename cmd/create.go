@@ -21,6 +21,7 @@ type createOptions struct {
 	roundRobin  bool
 	sanatize    bool
 	determined  bool
+	noPools     bool
 }
 
 func newCreateCmd() *cobra.Command {
@@ -37,6 +38,7 @@ func newCreateCmd() *cobra.Command {
 
 	cmd.Flags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file")
 	cmd.Flags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
+	cmd.Flags().BoolVarP(&o.noPools, "no-pools", "", false, "Do not create pools and have only straight knockouts.")
 	cmd.Flags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
 	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool")
 	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone")
@@ -72,7 +74,11 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 	}
 
 	players := helper.CreatePlayers(entries)
-	pools := helper.CreatePools(players, o.numPlayers)
+	var pools []helper.Pool
+
+	if !o.noPools {
+		pools = helper.CreatePools(players, o.numPlayers)
+	}
 
 	// Openning the template Excel file.
 	f, err := excelize.OpenFile("template.xlsx")
@@ -86,16 +92,40 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	helper.AddDataToSheet(f, pools, o.sanatize)
-	helper.AddPoolsToSheet(f, pools)
+	if o.noPools {
+		helper.AddPlayerDataToSheet(f, players, o.sanatize)
+	} else {
+		helper.AddPoolDataToSheet(f, pools, o.sanatize)
+	}
+	var tree *helper.Node
 
-	finals := helper.GenerateFinals(pools)
-	tree := helper.CreateBalancedTree(finals)
+	if !o.noPools {
+		helper.AddPoolsToSheet(f, pools)
+		finals := helper.GenerateFinals(pools)
+		tree = helper.CreateBalancedTree(finals, false)
+	} else {
+		// gather all player names
+		var names []string
+		if o.sanatize {
+			for _, player := range players {
+				names = append(names, player.DisplayName)
+			}
+		} else {
+			for _, player := range players {
+				names = append(names, player.Name)
+			}
+		}
+		tree = helper.CreateBalancedTree(names, o.sanatize)
+	}
+
 	// helper.calc
 	depth := helper.CalculateDepth(tree)
 	fmt.Printf("Tree Depth: %d\n", depth)
 	helper.PrintLeafNodes(tree, f, "Tree", depth*2, 4, depth)
-	helper.AddPoolsToTree(f, "Tree", pools)
+
+	if !o.noPools {
+		helper.AddPoolsToTree(f, "Tree", pools)
+	}
 
 	// gathers a list of all of the matches
 	matches := helper.InOrderTraversal(tree)
@@ -108,20 +138,28 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Elimination matches for round %d: %d\n", i-1, len(eliminationMatchRounds[depth-i]))
 	}
 
-	if o.roundRobin {
-		helper.CreatePoolRoundRobinMatches(pools)
-	} else {
-		helper.CreatePoolMatches(pools)
+	if !o.noPools {
+		if o.roundRobin {
+			helper.CreatePoolRoundRobinMatches(pools)
+		} else {
+			helper.CreatePoolMatches(pools)
+		}
 	}
 
-	if o.teamMatches > 0 {
-		poolMatchWinners := helper.PrintPoolTeamMatches(f, pools, o.teamMatches)
-		helper.PrintTeamEliminationMatches(f, poolMatchWinners, matchMapping, eliminationMatchRounds, o.teamMatches)
+	var matchWinners map[string]helper.MatchWinner
+	if o.noPools {
+		f.DeleteSheet("Pool Draw")
+		f.DeleteSheet("Pool Matches")
+		// hurray! they are all winners
+		matchWinners = helper.ConvertPlayersToWinners(players, o.sanatize)
+		helper.CreateNamesToPrint(f, players, o.sanatize)
+
 	} else {
-		poolMatchWinners := helper.PrintPoolMatches(f, pools)
-		helper.PrintEliminationMatches(f, poolMatchWinners, matchMapping, eliminationMatchRounds)
+		matchWinners = helper.PrintPoolMatches(f, pools, o.teamMatches)
+		helper.CreateNamesWithPoolToPrint(f, pools, o.sanatize)
 	}
-	helper.CreateNamesToPrint(f, pools, o.sanatize)
+
+	helper.PrintTeamEliminationMatches(f, matchWinners, matchMapping, eliminationMatchRounds, o.teamMatches)
 
 	// Save the spreadsheet file
 	if err := f.SaveAs(o.outputPath); err != nil {

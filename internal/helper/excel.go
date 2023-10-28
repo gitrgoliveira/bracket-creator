@@ -2,165 +2,10 @@ package helper
 
 import (
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
 )
-
-func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int, firstRound bool, value string) string {
-
-	if firstRound {
-		colName, _ := excelize.ColumnNumberToName(col + 1)
-		cell := fmt.Sprintf("%s%d", colName, startRow)
-		f.SetCellValue(sheet, cell, value)
-		f.SetColWidth(sheet, colName, colName, 10)
-		return ""
-	}
-
-	// interval
-	colName, _ := excelize.ColumnNumberToName(col + 1)
-	f.SetColWidth(sheet, colName, colName, 5)
-
-	startCell := fmt.Sprintf("%s%d", colName, startRow)
-	endCell := fmt.Sprintf("%s%d", colName, startRow+size)
-	f.SetCellStyle(sheet, startCell, endCell, GetBorderStyleLeft(f))
-
-	// middle
-	middleCell := fmt.Sprintf("%s%d", colName, startRow+size/2)
-	f.SetCellStyle(sheet, middleCell, middleCell, GetBorderStyleBottomLeft(f))
-
-	// Top cell
-	colName, _ = excelize.ColumnNumberToName(col)
-	topCell := fmt.Sprintf("%s%d", colName, startRow)
-	f.SetCellStyle(sheet, topCell, topCell, getBorderStyleTop(f))
-	f.SetColWidth(sheet, colName, colName, 5)
-
-	// bottom
-	bottomCell := fmt.Sprintf("%s%d", colName, startRow+size)
-	f.SetCellStyle(sheet, bottomCell, bottomCell, getBorderStyleBottom(f))
-
-	return middleCell
-}
-
-func AddDataToSheet(f *excelize.File, pools []Pool, sanatize bool) {
-	sheetName := "data"
-
-	// Set the header row
-	f.SetCellValue(sheetName, "A1", "Pool")
-	f.SetCellValue(sheetName, "B1", "Player Name")
-	f.SetCellValue(sheetName, "C1", "Player Dojo")
-	if sanatize {
-		f.SetCellValue(sheetName, "D1", "Display Name")
-	}
-
-	// Populate the groups in the spreadsheet
-	row := 2
-
-	for i := 0; i < len(pools); i++ {
-		pools[i].sheetName = sheetName
-
-		for j := range pools[i].Players {
-			f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pools[i].PoolName)
-			f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), pools[i].Players[j].Name)
-			f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), pools[i].Players[j].Dojo)
-			if sanatize {
-				f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName)
-			}
-			pools[i].cell = fmt.Sprintf("A%d", row)
-			pools[i].Players[j].sheetName = sheetName
-			pools[i].Players[j].cell = fmt.Sprintf("B%d", row)
-			row++
-		}
-	}
-
-	fmt.Printf("Data added to spreadsheet\n")
-
-	// Set the column widths
-	f.SetColWidth(sheetName, "A", "A", 15)
-	f.SetColWidth(sheetName, "B", "D", 30)
-
-}
-
-func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
-	// Set the starting row and column for the bracket
-	sheetName := "Pool Draw"
-	numPoolsPerColumn := int(math.Ceil(float64(len(pools)) / 3))
-
-	startRow := 7
-	startCol := 2
-
-	col_name, _ := excelize.ColumnNumberToName(startCol)
-	cell := col_name + fmt.Sprint(startRow)
-	headerCellStyle, _ := f.GetCellStyle(sheetName, cell)
-	cell = col_name + fmt.Sprint(startRow+1)
-	contentCellStyle, _ := f.GetCellStyle(sheetName, cell)
-
-	row := startRow
-	column := startCol
-	// Write the bracket data to Excel
-	for i, pool := range pools {
-		// groupNumber := pools[i].cell
-		col_name, _ = excelize.ColumnNumberToName(column)
-		cell = col_name + fmt.Sprint(row)
-
-		f.SetCellFormula(sheetName, cell, fmt.Sprintf("%s!%s", pool.sheetName, pool.cell))
-
-		f.SetCellStyle(sheetName, cell, cell, headerCellStyle)
-		row++
-		for _, player := range pool.Players {
-			cell := col_name + fmt.Sprint(row)
-			f.SetCellFormula(sheetName, cell, fmt.Sprintf("%s!%s", player.sheetName, player.cell))
-			f.SetCellStyle(sheetName, cell, cell, contentCellStyle)
-			row++
-		}
-
-		row += 2
-
-		if (i+1)%numPoolsPerColumn == 0 {
-			column += 2
-			row = startRow
-		}
-
-		f.SetColWidth(sheetName, col_name, col_name, 30)
-	}
-
-	fmt.Printf("Pools added to spreadsheet\n")
-
-	return nil
-}
-
-func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
-
-	row := 4
-
-	for _, pool := range pools {
-		f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row),
-			fmt.Sprintf("%s!%s", pool.sheetName, pool.cell))
-
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), getTreeHeaderStyle(f))
-
-		row++
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), getTreeTopStyle(f))
-
-		for _, player := range pool.Players {
-			f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row),
-				fmt.Sprintf("%s!%s", player.sheetName, player.cell))
-			row++
-
-			f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), getTreeBodyStyle(f))
-		}
-
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row-1), fmt.Sprintf("A%d", row-1), getTreeBottomStyle(f))
-
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row),
-			getBorderStyleTop(f))
-
-		row++
-
-	}
-
-}
 
 func FillInMatches(f *excelize.File, matches []string) map[string]int {
 	// This orders all the cell values, so we start from the first cell in the first column
@@ -176,93 +21,7 @@ func FillInMatches(f *excelize.File, matches []string) map[string]int {
 	return mapping
 }
 
-// CreatePoolMatches writes the given pool matches to an Excel file.
-//
-// Parameters:
-// - f: the excelize file to write the pool matches to.
-// - poolMatches: the pool matches to write.
-func PrintPoolMatches(f *excelize.File, pools []Pool) map[string]MatchWinner {
-
-	matchWinners := make(map[string]MatchWinner)
-	sheetName := "Pool Matches"
-
-	var leftRowStack RowStack
-	var rightRowStack RowStack
-	startRow := 4
-	poolRow := startRow
-	spaceLines := 3
-	startCol := 1
-	leftRowStack.Push(startRow)
-	rightRowStack.Push(startRow)
-
-	maxNumMatches := 0
-	for i, pool := range pools {
-		numMatches := len(pool.Matches)
-		if numMatches > maxNumMatches {
-			maxNumMatches = numMatches
-		}
-
-		startCol = 1
-		if i%2 != 0 {
-			startCol = 9
-			poolRow = rightRowStack.Pop()
-		} else {
-			poolRow = leftRowStack.Pop()
-		}
-		startColName, _ := excelize.ColumnNumberToName(startCol)
-		middleColName, _ := excelize.ColumnNumberToName(startCol + 3)
-		endColName, _ := excelize.ColumnNumberToName(startCol + 6)
-		startCell := startColName + fmt.Sprint(poolRow)
-		endCell := endColName + fmt.Sprint(poolRow)
-
-		f.SetCellStyle(sheetName, startCell, endCell, getPoolHeaderStyle(f))
-		f.MergeCell(sheetName, startCell, endCell)
-		f.SetCellFormula(sheetName, startCell, fmt.Sprintf("%s!%s", pool.sheetName, pool.cell))
-
-		poolRow++
-		MatchHeader(f, sheetName, startColName, poolRow, middleColName, endColName)
-
-		poolRow++
-		for _, match := range pool.Matches {
-			startCell = startColName + fmt.Sprint(poolRow)
-			endCell = endColName + fmt.Sprint(poolRow)
-
-			f.SetCellFormula(sheetName, startCell, fmt.Sprintf("%s!%s", match.SideA.sheetName, match.SideA.cell))
-			f.SetCellFormula(sheetName, endCell, fmt.Sprintf("%s!%s", match.SideB.sheetName, match.SideB.cell))
-			f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
-
-			poolRow++
-		}
-
-		resultCol, _ := excelize.ColumnNumberToName(startCol + 5)
-		f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, poolRow), "1.")
-		f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), getBorderStyleBottom(f))
-		matchWinners[fmt.Sprintf("%s.%d", pool.PoolName, 1)] = MatchWinner{
-			sheetName: sheetName,
-			cell:      fmt.Sprintf("%s%d", endColName, poolRow),
-		}
-
-		poolRow++
-		f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, poolRow), "2.")
-		f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), getBorderStyleBottom(f))
-		matchWinners[fmt.Sprintf("%s.%d", pool.PoolName, 2)] = MatchWinner{
-			sheetName: sheetName,
-			cell:      fmt.Sprintf("%s%d", endColName, poolRow),
-		}
-
-		poolRow += spaceLines
-
-		if i%2 == 0 {
-			leftRowStack.PushHighest(poolRow, rightRowStack.Peek())
-		} else {
-			rightRowStack.PushHighest(poolRow, leftRowStack.Peek())
-		}
-	}
-
-	return matchWinners
-}
-
-func PrintPoolTeamMatches(f *excelize.File, pools []Pool, teamMatches int) map[string]MatchWinner {
+func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int) map[string]MatchWinner {
 
 	matchWinners := make(map[string]MatchWinner)
 	sheetName := "Pool Matches"
@@ -307,15 +66,21 @@ func PrintPoolTeamMatches(f *excelize.File, pools []Pool, teamMatches int) map[s
 		f.SetCellFormula(sheetName, startCell, fmt.Sprintf("%s!%s", pool.sheetName, pool.cell))
 
 		poolRow++
+		if teamMatches == 0 {
+			MatchHeader(f, sheetName, startColName, poolRow, middleColName, endColName)
+			poolRow++
+		}
 
 		for _, match := range pool.Matches {
 			startCell = startColName + fmt.Sprint(poolRow)
 			endCell = endColName + fmt.Sprint(poolRow)
 			f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
 
-			MatchHeader(f, sheetName, startColName, poolRow, middleColName, endColName)
+			if teamMatches > 0 {
+				MatchHeader(f, sheetName, startColName, poolRow, middleColName, endColName)
+				poolRow++
+			}
 
-			poolRow++
 			poolEntry(startColName, poolRow, endColName, f, sheetName,
 				fmt.Sprintf("%s!%s", match.SideA.sheetName, match.SideA.cell),
 				fmt.Sprintf("%s!%s", match.SideB.sheetName, match.SideB.cell))
@@ -328,30 +93,34 @@ func PrintPoolTeamMatches(f *excelize.File, pools []Pool, teamMatches int) map[s
 				f.SetCellInt(sheetName, startCell, i+1)
 				f.SetCellInt(sheetName, endCell, i+1)
 			}
-			// pool results summary
-			poolRow++
-			poolRow++
-			poolEntry(startColName, poolRow, endColName, f, sheetName,
-				fmt.Sprintf("%s!%s", match.SideA.sheetName, match.SideA.cell),
-				fmt.Sprintf("%s!%s", match.SideB.sheetName, match.SideB.cell))
 
-			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftVictoriesColName, poolRow), "V")
-			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftPointsColName, poolRow), "P")
-			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightVictoriesColName, poolRow), "V")
-			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightPointsColName, poolRow), "P")
-			poolRow++
+			if teamMatches > 0 {
+				// pool results summary
+				poolRow += 2
+				poolEntry(startColName, poolRow, endColName, f, sheetName,
+					fmt.Sprintf("%s!%s", match.SideA.sheetName, match.SideA.cell),
+					fmt.Sprintf("%s!%s", match.SideB.sheetName, match.SideB.cell))
 
-			startCell = startColName + fmt.Sprint(poolRow)
-			endCell = endColName + fmt.Sprint(poolRow)
-			f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
-			f.SetCellValue(sheetName, startCell, "Victories / Points")
-			f.SetCellValue(sheetName, endCell, "Victories / Points")
+				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftVictoriesColName, poolRow), "V")
+				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftPointsColName, poolRow), "P")
+				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightVictoriesColName, poolRow), "V")
+				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightPointsColName, poolRow), "P")
+				poolRow++
+
+				startCell = startColName + fmt.Sprint(poolRow)
+				endCell = endColName + fmt.Sprint(poolRow)
+				f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
+				f.SetCellValue(sheetName, startCell, "Victories / Points")
+				f.SetCellValue(sheetName, endCell, "Victories / Points")
+				poolRow += spaceLines
+			}
 
 			poolRow++
-			poolRow += spaceLines
+		}
+		if teamMatches > 0 {
+			poolRow -= spaceLines //removing previously added spaces
 		}
 
-		poolRow -= spaceLines //removing previously added spaces
 		for result := 1; result <= len(pool.Players); result++ {
 			poolRow++
 			resultCol, _ := excelize.ColumnNumberToName(startCol + 5)
@@ -441,8 +210,14 @@ func PrintEliminationMatches(f *excelize.File, poolMatchWinners map[string]Match
 			startCell = startColName + fmt.Sprint(matchRow)
 			var leftCellValue, rightCellValue string
 
-			if strings.Contains(eliminationMatch.Left, "Pool") {
-				leftCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Left, poolMatchWinners[eliminationMatch.Left].sheetName, poolMatchWinners[eliminationMatch.Left].cell)
+			_, _, err := excelize.SplitCellName(eliminationMatch.Left)
+			if err != nil {
+				if strings.Contains(eliminationMatch.Left, "Pool") {
+					leftCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Left, poolMatchWinners[eliminationMatch.Left].sheetName, poolMatchWinners[eliminationMatch.Left].cell)
+				} else {
+					leftCellValue = fmt.Sprintf("'%s'!%s", poolMatchWinners[eliminationMatch.Left].sheetName, poolMatchWinners[eliminationMatch.Left].cell)
+				}
+
 			} else {
 				winnerFromMatch := fmt.Sprintf("Match %d", matchMapping[eliminationMatch.Left])
 				leftCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", winnerFromMatch, matchWinners[winnerFromMatch].sheetName, matchWinners[winnerFromMatch].cell)
@@ -452,12 +227,18 @@ func PrintEliminationMatches(f *excelize.File, poolMatchWinners map[string]Match
 			//////////////////////////////////////
 			// eliminationMatch.Right checks if it is a pool winner
 			endCell = endColName + fmt.Sprint(matchRow)
-			if strings.Contains(eliminationMatch.Right, "Pool") {
-				rightCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Right, poolMatchWinners[eliminationMatch.Right].sheetName, poolMatchWinners[eliminationMatch.Right].cell)
+			_, _, err = excelize.SplitCellName(eliminationMatch.Right)
+			if err != nil {
+				if strings.Contains(eliminationMatch.Right, "Pool") {
+					rightCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Right, poolMatchWinners[eliminationMatch.Right].sheetName, poolMatchWinners[eliminationMatch.Right].cell)
+				} else {
+					rightCellValue = fmt.Sprintf("'%s'!%s", poolMatchWinners[eliminationMatch.Right].sheetName, poolMatchWinners[eliminationMatch.Right].cell)
+				}
 			} else {
 				winnerFromMatch := fmt.Sprintf("Match %d", matchMapping[eliminationMatch.Right])
 				rightCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", winnerFromMatch, matchWinners[winnerFromMatch].sheetName, matchWinners[winnerFromMatch].cell)
 			}
+
 			f.SetCellFormula(sheetName, endCell, rightCellValue)
 			f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
 
@@ -542,8 +323,13 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 			startCell = startColName + fmt.Sprint(matchRow)
 			var leftCellValue, rightCellValue string
 
-			if strings.Contains(eliminationMatch.Left, "Pool") {
-				leftCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Left, poolMatchWinners[eliminationMatch.Left].sheetName, poolMatchWinners[eliminationMatch.Left].cell)
+			_, _, err := excelize.SplitCellName(eliminationMatch.Left)
+			if err != nil {
+				if strings.Contains(eliminationMatch.Left, "Pool") {
+					leftCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Left, poolMatchWinners[eliminationMatch.Left].sheetName, poolMatchWinners[eliminationMatch.Left].cell)
+				} else {
+					leftCellValue = fmt.Sprintf("'%s'!%s", poolMatchWinners[eliminationMatch.Left].sheetName, poolMatchWinners[eliminationMatch.Left].cell)
+				}
 			} else {
 				winnerFromMatch := fmt.Sprintf("Match %d", matchMapping[eliminationMatch.Left])
 				leftCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", winnerFromMatch, matchWinners[winnerFromMatch].sheetName, matchWinners[winnerFromMatch].cell)
@@ -553,8 +339,13 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 			//////////////////////////////////////
 			// eliminationMatch.Right checks if it is a pool winner
 			endCell = endColName + fmt.Sprint(matchRow)
-			if strings.Contains(eliminationMatch.Right, "Pool") {
-				rightCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Right, poolMatchWinners[eliminationMatch.Right].sheetName, poolMatchWinners[eliminationMatch.Right].cell)
+			_, _, err = excelize.SplitCellName(eliminationMatch.Right)
+			if err != nil {
+				if strings.Contains(eliminationMatch.Right, "Pool") {
+					rightCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Right, poolMatchWinners[eliminationMatch.Right].sheetName, poolMatchWinners[eliminationMatch.Right].cell)
+				} else {
+					rightCellValue = fmt.Sprintf("'%s'!%s", poolMatchWinners[eliminationMatch.Right].sheetName, poolMatchWinners[eliminationMatch.Right].cell)
+				}
 			} else {
 				winnerFromMatch := fmt.Sprintf("Match %d", matchMapping[eliminationMatch.Right])
 				rightCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", winnerFromMatch, matchWinners[winnerFromMatch].sheetName, matchWinners[winnerFromMatch].cell)
@@ -571,30 +362,33 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 				f.SetCellInt(sheetName, startCell, i+1)
 				f.SetCellInt(sheetName, endCell, i+1)
 			}
-			// pool results summary
-			matchRow++
-			matchRow++
-			// eliminationMatch.Left checks if it is a pool winner
-			startCell = startColName + fmt.Sprint(matchRow)
-			f.SetCellFormula(sheetName, startCell, leftCellValue)
 
-			//////////////////////////////////////
-			// eliminationMatch.Right checks if it is a pool winner
-			endCell = endColName + fmt.Sprint(matchRow)
-			f.SetCellFormula(sheetName, endCell, rightCellValue)
-			f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
+			if numTeamMatches > 0 {
+				// pool results summary
 
-			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftVictoriesColName, matchRow), "V")
-			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftPointsColName, matchRow), "P")
-			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightVictoriesColName, matchRow), "V")
-			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightPointsColName, matchRow), "P")
-			matchRow++
+				matchRow += 2
+				// eliminationMatch.Left checks if it is a pool winner
+				startCell = startColName + fmt.Sprint(matchRow)
+				f.SetCellFormula(sheetName, startCell, leftCellValue)
 
-			startCell = startColName + fmt.Sprint(matchRow)
-			endCell = endColName + fmt.Sprint(matchRow)
-			f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
-			f.SetCellValue(sheetName, startCell, "Victories / Points")
-			f.SetCellValue(sheetName, endCell, "Victories / Points")
+				//////////////////////////////////////
+				// eliminationMatch.Right checks if it is a pool winner
+				endCell = endColName + fmt.Sprint(matchRow)
+				f.SetCellFormula(sheetName, endCell, rightCellValue)
+				f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
+
+				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftVictoriesColName, matchRow), "V")
+				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftPointsColName, matchRow), "P")
+				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightVictoriesColName, matchRow), "V")
+				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightPointsColName, matchRow), "P")
+				matchRow++
+
+				startCell = startColName + fmt.Sprint(matchRow)
+				endCell = endColName + fmt.Sprint(matchRow)
+				f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
+				f.SetCellValue(sheetName, startCell, "Victories / Points")
+				f.SetCellValue(sheetName, endCell, "Victories / Points")
+			}
 
 			matchRow += 2
 
@@ -630,7 +424,31 @@ func addRoundHeader(f *excelize.File, sheetName string, startRow int, round int)
 	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", startRow), fmt.Sprintf("O%d", startRow), getPoolHeaderStyle(f))
 }
 
-func CreateNamesToPrint(f *excelize.File, pools []Pool, sanatized bool) {
+func CreateNamesToPrint(f *excelize.File, players []Player, sanatized bool) {
+	sheetName := "Names to Print"
+
+	row := 1
+	for _, player := range players {
+		positionCell := fmt.Sprintf("A%d", row)
+		nameCell := fmt.Sprintf("B%d", row)
+		f.SetRowHeight(sheetName, row, 110)
+
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), player.PoolPosition)
+		f.SetCellStyle(sheetName, positionCell, fmt.Sprintf("A%d", row+1), getNameIDSideStyle(f))
+
+		if sanatized {
+			f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:]))
+		} else {
+			f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, player.cell))
+		}
+		f.SetCellStyle(sheetName, nameCell, fmt.Sprintf("B%d", row+1), getNameIDStyle(f))
+		f.MergeCell(sheetName, nameCell, fmt.Sprintf("B%d", row+1))
+
+		row += 2
+	}
+
+}
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanatized bool) {
 	sheetName := "Names to Print"
 
 	row := 1
@@ -651,7 +469,6 @@ func CreateNamesToPrint(f *excelize.File, pools []Pool, sanatized bool) {
 			}
 			f.SetCellStyle(sheetName, nameCell, fmt.Sprintf("B%d", row+1), getNameIDStyle(f))
 			f.MergeCell(sheetName, nameCell, fmt.Sprintf("B%d", row+1))
-			// f.SetCellValue(sheetName, fmt.Sprintf("A%d", row+1), i+1)
 
 			f.SetCellValue(sheetName, fmt.Sprintf("A%d", row+1), player.PoolPosition)
 			row += 2

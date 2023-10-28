@@ -135,7 +135,7 @@ func getTreeBottomStyle(f *excelize.File) int {
 
 func getPoolHeaderStyle(f *excelize.File) int {
 	style, _ := f.NewStyle(&excelize.Style{
-		Alignment: &excelize.Alignment{Horizontal: "center"},
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 		Font:      &excelize.Font{Bold: true, Color: "000000", Size: 12},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},

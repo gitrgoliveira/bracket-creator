@@ -29,19 +29,23 @@ type Node struct {
 	Right   *Node
 }
 
-func CreateBalancedTree(leafValues []string) *Node {
+func CreateBalancedTree(leafValues []string, sanatize bool) *Node {
 	mid := len(leafValues) / 2
 	node := &Node{}
 
 	if len(leafValues) == 1 {
-		node.LeafVal = leafValues[0]
+		if sanatize {
+			node.LeafVal = sanatizeName(leafValues[0])
+		} else {
+			node.LeafVal = leafValues[0]
+		}
 		node.LeafNode = true
 		node.Val = 1
 		return node
 	}
 
-	node.Left = CreateBalancedTree(leafValues[:mid])
-	node.Right = CreateBalancedTree(leafValues[mid:])
+	node.Left = CreateBalancedTree(leafValues[:mid], sanatize)
+	node.Right = CreateBalancedTree(leafValues[mid:], sanatize)
 	node.LeafNode = false
 	node.Val = node.Left.Val + node.Right.Val
 
@@ -81,7 +85,7 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 	}
 
 	if node.LeafNode {
-		CreateTreeBracket(f, sheetName, startCol, emptyRows/2+startRow, emptyRows, true, node.LeafVal)
+		writeTreeValue(f, sheetName, startCol, emptyRows+startRow-1, node.LeafVal)
 	} else {
 		// this collects the cell coordinates for the match number in the tree
 		node.LeafVal = CreateTreeBracket(f, sheetName, startCol, emptyRows/2+startRow, emptyRows, false, fmt.Sprintf("%d", depth))

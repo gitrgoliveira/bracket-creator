@@ -44,12 +44,13 @@ func CreatePlayers(entries []string) []Player {
 	players := make([]Player, 0)
 	c := cases.Title(language.Und, cases.NoLower)
 
-	for _, entry := range entries {
+	for i, entry := range entries {
 		line := strings.Split(entry, ",")
 		player := Player{
-			Name:        c.String(strings.TrimSpace(line[0])),
-			Dojo:        strings.TrimSpace(line[1]),
-			DisplayName: sanatizeName(line[0]),
+			Name:         c.String(strings.TrimSpace(line[0])),
+			Dojo:         strings.TrimSpace(line[1]),
+			DisplayName:  sanatizeName(line[0]),
+			PoolPosition: i,
 		}
 		players = append(players, player)
 	}
@@ -195,4 +196,27 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 
 	}
 
+}
+
+func ConvertPlayersToWinners(players []Player, sanatized bool) map[string]MatchWinner {
+	matchWinners := make(map[string]MatchWinner, len(players))
+
+	if sanatized {
+		for _, player := range players {
+			matchWinners[player.DisplayName] = MatchWinner{
+				sheetName: player.sheetName,
+				cell:      player.cell,
+			}
+		}
+
+	} else {
+		for _, player := range players {
+			matchWinners[player.Name] = MatchWinner{
+				sheetName: player.sheetName,
+				cell:      player.cell,
+			}
+		}
+	}
+
+	return matchWinners
 }

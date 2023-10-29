@@ -46,12 +46,14 @@ You will need to compile the binary from source or download a release from githu
 
 To learn how to use the CLI run:
 ```bash
-bc --help
+bracket-creator --help
+bracket-creator create-pools --help
+bracket-creator create-playoffs --help
 ```
 
-Example usage:
+Example to build the tool from source:
 ```bash
-make go/build && ./bin/bracket-creator create -s -f ./mock_data.csv -o ./output.xlsx
+make go/build
 ```
 
 CSV format for individual matches should be (see mock_data.csv for an example):
@@ -61,30 +63,62 @@ First_Name Last_Name, Dojo
 
 For teams, it shoud be one team per line.
 
-### Parameters
+### Parameters to create Pools
+Example command line to create pools with 5 players and 3 winners per pool:
+```bash
+bracket-creator create-pools -s -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-example.xlsx
+```
 
 * `-d` / `-determined` - Do not shuffle the names read from the input file
 * `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
 * `-h` / `-help` - Show help
-* `--no-pools` - Do not create pools and have only straight knockouts
 * `-o` / `-output` - Path to write the output excel file
 * `-p` / `-players` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected. The default is 3
+* `-w` / `-pool-winners` - Number of players/teams that can qualify from each pool. The default is 2
 * `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
 * `-s` / `-sanatize` - Sanatize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 
+### Parameters to create Playoffs
+Example command line to create team playoffs with 5 players per team:
+```bash
+bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-example.xlsx
+```
+
+* `-d` / `-determined` - Do not shuffle the names read from the input file
+* `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
+* `-h` / `-help` - Show help
+* `-o` / `-output` - Path to write the output excel file
+* `-s` / `-sanatize` - Sanatize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
+* `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
+
 ### Examples
-**Individual player tournament**
+**Individual pool player tournament**
+
+With 4 players and 2 winners per pool with sanatized names:
 ```bash
-bc create -s -p 4 -f mock_data.csv -o output.xlsx
+./bin/bracket-creator create-pools -s -p 4 -f mock_data.csv -o output.xlsx
 ```
 
-**Team tournament**
+**Team pool tournament**
+
+With 5 players per team:
 ```bash
-bc create -t 5 -f mock_data.csv -o output.xlsx 
+./bin/bracket-creator create-pools -t 5 -f mock_data.csv -o output.xlsx 
+```
+**Individual playoffs player tournament**
+
+Straight knockout with sanatized names:
+```bash
+./bin/bracket-creator create-playoffs -s -f mock_data.csv -o output.xlsx
 ```
 
+**Team pool tournament**
 
+Straight knockout team competition with teams of 3:
+```bash
+./bin/bracket-creator create-playoffs -t 3 -f mock_data.csv -o output.xlsx
+```
 
 
 ## Install - WIP

@@ -13,44 +13,41 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-type createOptions struct {
-	numPlayers  int
+type createPlayoffOptions struct {
 	teamMatches int
 	filePath    string
 	outputPath  string
-	roundRobin  bool
 	sanatize    bool
 	determined  bool
-	noPools     bool
 }
 
-func newCreateCmd() *cobra.Command {
+func newCreatePlayoffCmd() *cobra.Command {
 
-	o := &createOptions{}
+	o := &createPlayoffOptions{}
 
 	cmd := &cobra.Command{
-		Use:          "create",
-		Short:        "subcommand to create brackets",
+		Use:          "create-playoffs",
+		Short:        "Creates playoff brackets only",
 		SilenceUsage: true,
 		// Args:         cobra.ExactArgs(1),
 		RunE: o.run,
 	}
 
 	cmd.Flags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file")
-	cmd.Flags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
-	cmd.Flags().BoolVarP(&o.noPools, "no-pools", "", false, "Do not create pools and have only straight knockouts.")
-	cmd.Flags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
-	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool")
-	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone")
+	cmd.PersistentFlags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
+	cmd.PersistentFlags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
 	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
+
+	cmd.MarkFlagRequired("file")
+	cmd.MarkFlagRequired("output")
 
 	return cmd
 }
 
-func (o *createOptions) run(cmd *cobra.Command, args []string) error {
-	fmt.Fprintf(cmd.OutOrStdout(), "Reading file: %s\n", o.filePath)
+func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 
+	fmt.Fprintf(cmd.OutOrStdout(), "Reading file: %s\n", o.filePath)
 	file, err := os.Open(o.filePath)
 	if err != nil {
 		log.Fatal(err)
@@ -74,11 +71,6 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 	}
 
 	players := helper.CreatePlayers(entries)
-	var pools []helper.Pool
-
-	if !o.noPools {
-		pools = helper.CreatePools(players, o.numPlayers)
-	}
 
 	// Openning the template Excel file.
 	f, err := excelize.OpenFile("template.xlsx")
@@ -92,40 +84,23 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	if o.noPools {
-		helper.AddPlayerDataToSheet(f, players, o.sanatize)
-	} else {
-		helper.AddPoolDataToSheet(f, pools, o.sanatize)
-	}
-	var tree *helper.Node
-
-	if !o.noPools {
-		helper.AddPoolsToSheet(f, pools)
-		finals := helper.GenerateFinals(pools)
-		tree = helper.CreateBalancedTree(finals, false)
-	} else {
-		// gather all player names
-		var names []string
-		if o.sanatize {
-			for _, player := range players {
-				names = append(names, player.DisplayName)
-			}
-		} else {
-			for _, player := range players {
-				names = append(names, player.Name)
-			}
+	helper.AddPlayerDataToSheet(f, players, o.sanatize)
+	// gather all player names
+	var names []string
+	if o.sanatize {
+		for _, player := range players {
+			names = append(names, player.DisplayName)
 		}
-		tree = helper.CreateBalancedTree(names, o.sanatize)
+	} else {
+		for _, player := range players {
+			names = append(names, player.Name)
+		}
 	}
+	tree := helper.CreateBalancedTree(names, o.sanatize)
 
-	// helper.calc
 	depth := helper.CalculateDepth(tree)
 	fmt.Printf("Tree Depth: %d\n", depth)
-	helper.PrintLeafNodes(tree, f, "Tree", depth*2, 4, depth)
-
-	if !o.noPools {
-		helper.AddPoolsToTree(f, "Tree", pools)
-	}
+	helper.PrintLeafNodes(tree, f, "Tree", depth*2, 4, depth, false)
 
 	// gathers a list of all of the matches
 	matches := helper.InOrderTraversal(tree)
@@ -138,26 +113,12 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Elimination matches for round %d: %d\n", i-1, len(eliminationMatchRounds[depth-i]))
 	}
 
-	if !o.noPools {
-		if o.roundRobin {
-			helper.CreatePoolRoundRobinMatches(pools)
-		} else {
-			helper.CreatePoolMatches(pools)
-		}
-	}
-
 	var matchWinners map[string]helper.MatchWinner
-	if o.noPools {
-		f.DeleteSheet("Pool Draw")
-		f.DeleteSheet("Pool Matches")
-		// hurray! they are all winners
-		matchWinners = helper.ConvertPlayersToWinners(players, o.sanatize)
-		helper.CreateNamesToPrint(f, players, o.sanatize)
-
-	} else {
-		matchWinners = helper.PrintPoolMatches(f, pools, o.teamMatches)
-		helper.CreateNamesWithPoolToPrint(f, pools, o.sanatize)
-	}
+	f.DeleteSheet("Pool Draw")
+	f.DeleteSheet("Pool Matches")
+	// hurray! they are all winners
+	matchWinners = helper.ConvertPlayersToWinners(players, o.sanatize)
+	helper.CreateNamesToPrint(f, players, o.sanatize)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, matchMapping, eliminationMatchRounds, o.teamMatches)
 
@@ -172,5 +133,5 @@ func (o *createOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 func init() {
-	rootCmd.AddCommand(newCreateCmd())
+	rootCmd.AddCommand(newCreatePlayoffCmd())
 }

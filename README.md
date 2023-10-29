@@ -1,5 +1,5 @@
 <!-- BEGIN __DO_NOT_INCLUDE__ -->
-<p align="center"><img src="https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/80134d29c2dbfdf0c3718ffa029d21e1189a064e/logo/bracket-creator.v2.jpeg" alt="Logo" height="120" /></p>
+<p align="center"><img src="https://github.com/gitrgoliveira/bracket-creator/blob/main/logo/bracket-creator.v2.jpeg?raw=true" alt="Logo" height="120" /></p>
 <!-- END __DO_NOT_INCLUDE__ -->
 <h1 align="center"> bracket-creator</h1>
 

@@ -21,7 +21,7 @@ func FillInMatches(f *excelize.File, matches []string) map[string]int {
 	return mapping
 }
 
-func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int) map[string]MatchWinner {
+func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int) map[string]MatchWinner {
 
 	matchWinners := make(map[string]MatchWinner)
 	sheetName := "Pool Matches"
@@ -127,7 +127,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int) map[strin
 			f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, poolRow), fmt.Sprintf("%d. ", result))
 			f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), getBorderStyleBottom(f))
 
-			if result <= 2 {
+			if result <= numWinners {
 				matchWinners[fmt.Sprintf("%s.%d", pool.PoolName, result)] = MatchWinner{
 					sheetName: sheetName,
 					cell:      fmt.Sprintf("%s%d", endColName, poolRow),
@@ -206,7 +206,6 @@ func PrintEliminationMatches(f *excelize.File, poolMatchWinners map[string]Match
 			matchRow++
 
 			//////////////////////////////////////
-			// eliminationMatch.Left checks if it is a pool winner
 			startCell = startColName + fmt.Sprint(matchRow)
 			var leftCellValue, rightCellValue string
 

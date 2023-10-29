@@ -3,6 +3,7 @@ package helper
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -62,25 +63,37 @@ func Walk(t *Node, ch chan int) {
 	}
 }
 
-func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int, startRow int, depth int) {
+func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int, startRow int, depth int, pools bool) {
 	if node == nil {
 		return
 	}
 	emptyRows := int(math.Pow(2, float64(depth))) - 1
 
-	// Need to ensure pools winners stay on top
-	// For that we need to ensure the last charater of the left (i.e. top) node is the number 1
-	if !node.LeafNode && node.Left.LeafNode && node.Right.LeafNode {
-		if node.Left.LeafNode && strings.HasSuffix(node.Left.LeafVal, "2") {
-			node.Left, node.Right = node.Right, node.Left
-		}
-	}
+	if pools {
+		// Need to ensure pools winners stay on top
+		// For that we need to ensure the last charater of the left (i.e. top) node is the number 1
+		if !node.LeafNode && node.Left.LeafNode && node.Right.LeafNode {
+			leftPool := strings.Split(node.Left.LeafVal, ".")
+			leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
+			rightPool := strings.Split(node.Right.LeafVal, ".")
+			rightPos, _ := strconv.ParseInt(rightPool[1], 10, 64)
 
-	// Need to ensure pools winners are the ones that get a bye
-	if !node.LeafNode && node.Left.LeafNode && !node.Right.LeafNode {
-		if strings.HasSuffix(node.Left.LeafVal, "2") {
-			// find a second placed pool winner on the other branch
-			node.Left, node.Right.Left = node.Right.Left, node.Left
+			if leftPos > rightPos {
+				node.Left, node.Right = node.Right, node.Left
+			}
+		}
+
+		// Need to ensure pools winners are the ones that get a bye
+		if !node.LeafNode && node.Left.LeafNode && !node.Right.LeafNode {
+			leftPool := strings.Split(node.Left.LeafVal, ".")
+			leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
+			rightPool := strings.Split(node.Right.Left.LeafVal, ".")
+			rightPos, _ := strconv.ParseInt(rightPool[1], 10, 64)
+
+			if leftPos > rightPos {
+				// find a second placed pool winner on the other branch
+				node.Left, node.Right.Left = node.Right.Left, node.Left
+			}
 		}
 	}
 
@@ -91,28 +104,26 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 		node.LeafVal = CreateTreeBracket(f, sheetName, startCol, emptyRows/2+startRow, emptyRows, false, fmt.Sprintf("%d", depth))
 	}
 
-	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1)
-	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+emptyRows+1, depth-1)
+	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, pools)
+	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+emptyRows+1, depth-1, pools)
 }
 
-func GenerateFinals(pools []Pool) []string {
-	finals := make([]string, 0)
+func GenerateFinals(pools []Pool, poolWinners int) []string {
+	finalists := make([]string, 0)
 
-	for i, j := 0, len(pools)-1; j > i; i, j = i+1, j-1 {
-		finals = append(finals, fmt.Sprintf("%s.1", pools[i].PoolName))
-		finals = append(finals, fmt.Sprintf("%s.2", pools[j].PoolName))
-	}
-	for i, j := 0, len(pools)-1; i < j; i, j = i+1, j-1 {
-		finals = append(finals, fmt.Sprintf("%s.1", pools[j].PoolName))
-		finals = append(finals, fmt.Sprintf("%s.2", pools[i].PoolName))
-	}
-	// for an odd number of pools, add the middle pool to the finals
-	if len(pools)%2 != 0 {
-		finals = append(finals, fmt.Sprintf("%s.1", pools[len(pools)/2].PoolName))
-		finals = append(finals, fmt.Sprintf("%s.2", pools[len(pools)/2].PoolName))
+	for i := 0; i < len(pools); i++ {
+		for j := 0; j < poolWinners; j++ {
+			finalists = append(finalists, fmt.Sprintf("%s.%d", pools[i].PoolName, j+1))
+		}
 	}
 
-	return finals
+	matches := make([]string, 0)
+	for i, j := 0, len(finalists)-1; j > i; i, j = i+1, j-1 {
+		matches = append(matches, finalists[i])
+		matches = append(matches, finalists[j])
+	}
+
+	return matches
 }
 
 // Function to calculate the depth of a balanced tree for a given number of leaf nodes
@@ -194,9 +205,6 @@ func TraverseRounds(node *Node, depth int, maxDepth int, matchMapping map[string
 	}
 
 	var matches []EliminationMatch
-
-	// if depth == maxDepth &&
-	// 	(node.Left.LeafNode || node.Right.LeafNode) {
 
 	if depth == maxDepth {
 		//LeafVal

@@ -93,6 +93,14 @@ bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-exam
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 
 ### Examples
+See also the example files:
+- [playoffs-example-large.xlsx](playoffs-example-large.xlsx)
+- [playoffs-example-medium.xlsx](playoffs-example-medium.xlsx)
+- [playoffs-example-small.xlsx](playoffs-example-small.xlsx)
+- [pools-example-large.xlsx](pools-example-large.xlsx)
+- [pools-example-medium.xlsx](pools-example-medium.xlsx)
+- [pools-example-small.xlsx](pools-example-small.xlsx)
+
 **Individual pool player tournament**
 
 With 4 players and 2 winners per pool with sanatized names:

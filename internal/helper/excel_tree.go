@@ -10,7 +10,6 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 
 	// interval
 	colName, _ := excelize.ColumnNumberToName(col + 1)
-	// f.SetColWidth(sheet, colName, colName, 5)
 
 	startCell := fmt.Sprintf("%s%d", colName, startRow)
 	endCell := fmt.Sprintf("%s%d", colName, startRow+size)
@@ -72,4 +71,18 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 
 	}
 
+}
+
+func FillInMatches(f *excelize.File, eliminationMatchRounds [][]*Node) {
+	matchNum := 1
+	for _, round := range eliminationMatchRounds {
+		for _, match := range round {
+			if match == nil {
+				continue
+			}
+			match.matchNum = matchNum
+			f.SetCellInt(match.SheetName, match.LeafVal, matchNum)
+			matchNum++
+		}
+	}
 }

@@ -53,14 +53,14 @@ func RemoveDuplicates(input []string) []string {
 	return result
 }
 
-func OrderStringsAlphabetically(strings []string) []string {
+func OrderStringsAlphabetically(strings []*Node) []*Node {
 	sort.Slice(strings, func(i, j int) bool {
 		strA := strings[i]
 		strB := strings[j]
 
 		// Split the strings into prefix and suffix
-		prefixA, suffixA := extractPrefixAndSuffix(strA)
-		prefixB, suffixB := extractPrefixAndSuffix(strB)
+		prefixA, suffixA := extractPrefixAndSuffix(strA.LeafVal)
+		prefixB, suffixB := extractPrefixAndSuffix(strB.LeafVal)
 
 		// Compare the prefixes
 		if prefixA != prefixB {

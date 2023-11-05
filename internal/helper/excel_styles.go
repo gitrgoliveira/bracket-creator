@@ -10,8 +10,7 @@ func getBorderStyleTop(f *excelize.File) int {
 				Color: "000000",
 				Style: 2,
 			},
-		},
-	})
+		}})
 	return borderStyle
 }
 
@@ -23,8 +22,7 @@ func getBorderStyleBottom(f *excelize.File) int {
 				Color: "000000",
 				Style: 2,
 			},
-		},
-	})
+		}})
 	return borderStyle
 }
 
@@ -42,6 +40,8 @@ func GetBorderStyleBottomLeft(f *excelize.File) int {
 				Style: 2,
 			},
 		},
+		Font:      &excelize.Font{Bold: false, Color: "000000", Size: 12},
+		Alignment: &excelize.Alignment{Horizontal: "left"},
 	})
 	return borderStyle
 }

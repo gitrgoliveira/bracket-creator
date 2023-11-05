@@ -23,6 +23,7 @@ type poolOptions struct {
 	outputPath  string
 	roundRobin  bool
 	sanatize    bool
+	singleTree  bool
 	determined  bool
 }
 
@@ -38,13 +39,14 @@ func newCreatePoolCmd() *cobra.Command {
 		RunE: o.run,
 	}
 
-	cmd.PersistentFlags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file")
+	cmd.PersistentFlags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file (default false)")
 	cmd.PersistentFlags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
 	cmd.PersistentFlags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
-	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool")
-	cmd.Flags().IntVarP(&o.poolWinners, "pool-winners", "w", 2, "number of players/teams that can qualify from each pool")
-	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone")
-	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize")
+	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool (default 3)")
+	cmd.Flags().IntVarP(&o.poolWinners, "pool-winners", "w", 2, "number of players/teams that can qualify from each pool (default 2)")
+	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone (default false)")
+	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize (default false)")
+	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
 	cmd.MarkFlagRequired("file")
@@ -110,7 +112,7 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 
 	maxPlayersPerTree := 15
 	numPages := helper.RoundToPowerOf2(float64(len(finals)), float64(maxPlayersPerTree))
-	if numPages < 1 {
+	if numPages < 1 || o.singleTree {
 		numPages = 1
 	}
 	fmt.Printf("Spread across %d tree pages\n", numPages)

@@ -19,6 +19,7 @@ type createPlayoffOptions struct {
 	filePath    string
 	outputPath  string
 	sanatize    bool
+	singleTree  bool
 	determined  bool
 }
 
@@ -34,10 +35,11 @@ func newCreatePlayoffCmd() *cobra.Command {
 		RunE: o.run,
 	}
 
-	cmd.Flags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file")
+	cmd.Flags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file (default false)")
 	cmd.PersistentFlags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
 	cmd.PersistentFlags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
-	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize")
+	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize (default false)")
+	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
 	cmd.MarkFlagRequired("file")
@@ -101,6 +103,9 @@ func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 
 	maxPlayersPerTree := 16
 	numPages := helper.RoundToPowerOf2(float64(len(names)), float64(maxPlayersPerTree))
+	if numPages < 1 || o.singleTree {
+		numPages = 1
+	}
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree

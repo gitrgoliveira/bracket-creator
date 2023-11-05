@@ -120,6 +120,15 @@ Straight knockout team competition with teams of 3:
 ./bin/bracket-creator create-playoffs -t 3 -f mock_data.csv -o output.xlsx
 ```
 
+## How to Use the output files
+All generated output files are based on the `template.xlsx` file.
+However, I recommend you edit the final file, because there are some assumptions about the structure and contents of the template file.
+
+To be able to print the tree, you will need to reset the width and height in the Page Layout tab.
+
+### On the day of the tournament
+These files are generated to be uploaded to Google Drive (or similar), so all shiai-jo tables are in sync during the tournament, working from the same file.
+
 
 ## Install - WIP
 

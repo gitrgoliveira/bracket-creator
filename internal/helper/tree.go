@@ -9,19 +9,14 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-type EliminationMatch struct {
-	// Match Number
-	Number int
-
-	// Pool Number winner or Cell value
-	Left string
-
-	// Pool Number winner or Cell value
-	Right string
-}
-
 type Node struct {
 	LeafNode bool
+
+	// sheet for Cell Values
+	SheetName string
+
+	// match number
+	matchNum int
 
 	// Pool Number or Cell value
 	LeafVal string
@@ -53,26 +48,16 @@ func CreateBalancedTree(leafValues []string, sanatize bool) *Node {
 	return node
 }
 
-func Walk(t *Node, ch chan int) {
-	if t.Left != nil {
-		Walk(t.Left, ch)
-	}
-	ch <- t.Val
-	if t.Right != nil {
-		Walk(t.Right, ch)
-	}
-}
-
 func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int, startRow int, depth int, pools bool) {
 	if node == nil {
 		return
 	}
-	emptyRows := int(math.Pow(2, float64(depth))) - 1
+	emptyRows := int(math.Pow(2, float64(depth))) - 2
 
-	if pools {
+	if pools && !node.LeafNode {
 		// Need to ensure pools winners stay on top
 		// For that we need to ensure the last charater of the left (i.e. top) node is the number 1
-		if !node.LeafNode && node.Left.LeafNode && node.Right.LeafNode {
+		if node.Left.LeafNode && node.Right.LeafNode {
 			leftPool := strings.Split(node.Left.LeafVal, ".")
 			leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
 			rightPool := strings.Split(node.Right.LeafVal, ".")
@@ -84,7 +69,7 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 		}
 
 		// Need to ensure pools winners are the ones that get a bye
-		if !node.LeafNode && node.Left.LeafNode && !node.Right.LeafNode {
+		if node.Left.LeafNode && !node.Right.LeafNode {
 			leftPool := strings.Split(node.Left.LeafVal, ".")
 			leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
 			rightPool := strings.Split(node.Right.Left.LeafVal, ".")
@@ -98,10 +83,11 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 	}
 
 	if node.LeafNode {
-		writeTreeValue(f, sheetName, startCol, emptyRows+startRow-1, node.LeafVal)
+		writeTreeValue(f, sheetName, startCol, emptyRows+startRow, node.LeafVal)
 	} else {
 		// this collects the cell coordinates for the match number in the tree
 		node.LeafVal = CreateTreeBracket(f, sheetName, startCol, emptyRows/2+startRow, emptyRows, false, fmt.Sprintf("%d", depth))
+		node.SheetName = sheetName
 	}
 
 	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, pools)
@@ -126,13 +112,6 @@ func GenerateFinals(pools []Pool, poolWinners int) []string {
 	return matches
 }
 
-// Function to calculate the depth of a balanced tree for a given number of leaf nodes
-func CalculateDepthForLeafs(leafs int) int {
-	// Formula to calculate the depth of a balanced tree
-	depth := int(math.Ceil(math.Log2(float64(leafs + 1))))
-
-	return depth
-}
 func CalculateDepth(node *Node) int {
 	if node == nil {
 		return 0
@@ -142,12 +121,6 @@ func CalculateDepth(node *Node) int {
 	rightDepth := CalculateDepth(node.Right)
 
 	return int(math.Max(float64(leftDepth), float64(rightDepth))) + 1
-}
-
-func CalculateNodesForLeafs(leafs int) int {
-	// Formula to calculate the number of nodes in a balanced tree
-	nodes := 2*leafs - 1
-	return nodes
 }
 
 type Stack []*Node
@@ -170,58 +143,30 @@ func (s *Stack) IsEmpty() bool {
 	return len(*s) == 0
 }
 
-func InOrderTraversal(root *Node) []string {
-	if root == nil {
-		return []string{}
-	}
-
-	matches := make([]string, 0)
-
-	stack := Stack{}
-	curr := root
-
-	for curr != nil || !stack.IsEmpty() {
-		for curr != nil {
-			stack.Push(curr)
-			curr = curr.Left
-		}
-
-		curr = stack.Pop()
-		if curr.Left != nil || curr.Right != nil {
-			matches = append(matches, curr.LeafVal)
-		}
-
-		curr = curr.Right
-	}
-
-	return matches
-}
-
-/////////////################################################################
-
-func TraverseRounds(node *Node, depth int, maxDepth int, matchMapping map[string]int) []EliminationMatch {
+func TraverseRounds(node *Node, depth int, maxDepth int) []*Node {
 	if node == nil || node.Left == nil || node.Right == nil {
-		return []EliminationMatch{}
+		return []*Node{}
 	}
 
-	var matches []EliminationMatch
+	var matches []*Node
 
 	if depth == maxDepth {
 		//LeafVal
 		// fmt.Printf("%s ", node.LeafVal)
-		EliminationMatchs := EliminationMatch{
-			Number: matchMapping[node.LeafVal],
-			Left:   node.Left.LeafVal,
-			Right:  node.Right.LeafVal,
-		}
-		matches = append(matches, EliminationMatchs)
+		// EliminationMatchs := EliminationMatch{
+		// 	Sheet: node.sheetName,
+		// 	Cell:  node.LeafVal,
+		// 	Left:  node.Left.LeafVal,
+		// 	Right: node.Right.LeafVal,
+		// }
+		matches = append(matches, node)
 	}
 
 	// Then traverse the left subtree
-	leftMatches := TraverseRounds(node.Left, depth+1, maxDepth, matchMapping)
+	leftMatches := TraverseRounds(node.Left, depth+1, maxDepth)
 
 	// Traverse the right subtree first
-	rightMatches := TraverseRounds(node.Right, depth+1, maxDepth, matchMapping)
+	rightMatches := TraverseRounds(node.Right, depth+1, maxDepth)
 
 	matches = append(matches, leftMatches...)
 	matches = append(matches, rightMatches...)
@@ -230,17 +175,29 @@ func TraverseRounds(node *Node, depth int, maxDepth int, matchMapping map[string
 
 }
 
-func FindMaxDepth(node *Node) int {
-	if node == nil {
-		return 0
+// function that subdivides a tree into a specified number of subtrees
+func SubdivideTree(node *Node, numSubtrees int) []*Node {
+	if node == nil || numSubtrees <= 0 {
+		return nil
 	}
-
-	leftDepth := FindMaxDepth(node.Left)
-	rightDepth := FindMaxDepth(node.Right)
-
-	if leftDepth > rightDepth {
-		return leftDepth + 1
-	} else {
-		return rightDepth + 1
+	subtrees := []*Node{}
+	if node.Left != nil {
+		subtrees = append(subtrees, SubdivideTree(node.Left, numSubtrees/2)...)
 	}
+	if node.Right != nil {
+		subtrees = append(subtrees, SubdivideTree(node.Right, numSubtrees/2)...)
+	}
+	if len(subtrees) < numSubtrees {
+		subtrees = append(subtrees, node)
+	}
+	return subtrees
+}
+
+func RoundToPowerOf2(x, y float64) int {
+	quotient := x / y
+	absQuotient := math.Abs(quotient)
+	roundedLog2 := math.Ceil(math.Log2(absQuotient))
+	powerOf2 := math.Pow(2, roundedLog2)
+	roundedQuotient := int(powerOf2)
+	return roundedQuotient
 }

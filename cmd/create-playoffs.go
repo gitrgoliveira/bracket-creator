@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/spf13/cobra"
@@ -96,22 +97,59 @@ func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 			names = append(names, player.Name)
 		}
 	}
+	fmt.Printf("There will be %d finalists\n", len(names))
+
+	maxPlayersPerTree := 16
+	numPages := helper.RoundToPowerOf2(float64(len(names)), float64(maxPlayersPerTree))
+	fmt.Printf("Spread across %d tree pages\n", numPages)
+
+	// Create balanced tree
 	tree := helper.CreateBalancedTree(names, o.sanatize)
 
-	depth := helper.CalculateDepth(tree)
-	fmt.Printf("Tree Depth: %d\n", depth)
-	helper.PrintLeafNodes(tree, f, "Tree", depth*2, 4, depth, false)
+	// divide the tree depending on the number of pages
+	subtrees := helper.SubdivideTree(tree, numPages)
 
-	// gathers a list of all of the matches
-	matches := helper.InOrderTraversal(tree)
-	matchMapping := helper.FillInMatches(f, matches)
-	eliminationMatchRounds := make([][]helper.EliminationMatch, depth-1)
+	treeSheet, err := f.GetSheetIndex("Tree")
+	if err != nil {
+		fmt.Println("Could not find Tree sheet")
+		fmt.Println(err)
+		return nil
+	}
+
+	// adding extra sheets
+	for i := 0; i < len(subtrees); i++ {
+		subtreeSheet := "Tree " + strconv.Itoa(i+1)
+		fmt.Printf("Adding sheet %s\n", subtreeSheet)
+		index, _ := f.NewSheet(subtreeSheet)
+		err = f.CopySheet(treeSheet, index)
+		if err != nil {
+			fmt.Printf("Could not copy sheet %d\n", treeSheet)
+			fmt.Println(err)
+			return nil
+		}
+
+		depth := helper.CalculateDepth(subtrees[i])
+		fmt.Printf("With tree Depth: %d\n", depth)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 4, depth, false)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 4, depth, false)
+	}
+	f.DeleteSheet("Tree")
+	if err != nil {
+		fmt.Println("Could not find Tree sheet")
+		fmt.Println(err)
+		return nil
+	}
+
+	depth := helper.CalculateDepth(tree)
+	eliminationMatchRounds := make([][]*helper.Node, depth-1)
 	// Get all the rounds
 	for i := depth; i > 1; i-- {
-		rounds := helper.TraverseRounds(tree, 1, i-1, matchMapping)
+		rounds := helper.TraverseRounds(tree, 1, i-1)
 		eliminationMatchRounds[depth-i] = rounds
 		fmt.Printf("Elimination matches for round %d: %d\n", i-1, len(eliminationMatchRounds[depth-i]))
 	}
+
+	helper.FillInMatches(f, eliminationMatchRounds)
 
 	var matchWinners map[string]helper.MatchWinner
 	f.DeleteSheet("Pool Draw")
@@ -120,7 +158,7 @@ func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.sanatize)
 	helper.CreateNamesToPrint(f, players, o.sanatize)
 
-	helper.PrintTeamEliminationMatches(f, matchWinners, matchMapping, eliminationMatchRounds, o.teamMatches)
+	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 
 	// Save the spreadsheet file
 	if err := f.SaveAs(o.outputPath); err != nil {

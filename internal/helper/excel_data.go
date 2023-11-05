@@ -84,7 +84,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 	sheetName := "Pool Draw"
 	numPoolsPerColumn := int(math.Ceil(float64(len(pools)) / 3))
 
-	startRow := 7
+	startRow := 5
 	startCol := 2
 
 	col_name, _ := excelize.ColumnNumberToName(startCol)
@@ -122,7 +122,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 		f.SetColWidth(sheetName, col_name, col_name, 30)
 	}
 
-	fmt.Printf("Pools added to spreadsheet\n")
+	fmt.Printf("%d pools added to spreadsheet\n", len(pools))
 
 	return nil
 }

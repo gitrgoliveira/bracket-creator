@@ -25,6 +25,16 @@ go/build:
 	go generate ./...
 	go build -o ${BIN_PATH}/${BIN_NAME} .
 
+## Build locally and create the examples
+examples: go/build
+	@echo "building examples"
+	./bin/bracket-creator create-pools -t 5 -f ./mock_data_small.csv -o ./pools-example-small.xlsx
+	./bin/bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-example-small.xlsx
+	./bin/bracket-creator create-pools -s -p 3 -w 2 -f ./mock_data_medium.csv -o ./pools-example-medium.xlsx
+	./bin/bracket-creator create-playoffs -s -f ./mock_data_medium.csv -o ./playoffs-example-medium.xlsx
+	./bin/bracket-creator create-pools -s -p 3 -w 2 -t 5 -f ./mock_data_large.csv -o ./pools-example-large.xlsx
+	./bin/bracket-creator create-playoffs -s -f ./mock_data_large.csv -o ./playoffs-example-large.xlsx
+
 ## Compile optimized for alpine linux.
 docker/build:
 	@echo "building image ${IMAGE_NAME}"

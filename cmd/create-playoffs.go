@@ -164,6 +164,7 @@ func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 	helper.CreateNamesToPrint(f, players, o.sanatize)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
+	helper.FillEstimations(f, 0, 0, 0, o.teamMatches, len(names)-1)
 
 	// Save the spreadsheet file
 	if err := f.SaveAs(o.outputPath); err != nil {

@@ -333,8 +333,8 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanatized bool) {
 
 		row += 2
 	}
-
 }
+
 func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanatized bool) {
 	sheetName := "Names to Print"
 
@@ -361,4 +361,22 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanatized bool) 
 			row += 2
 		}
 	}
+}
+
+func FillEstimations(f *excelize.File, numPools int, numPoolMatches int, extraPools int, teamSize int, numEliminationMatches int) {
+	sheetName := "Time Estimator"
+
+	// Number of pools
+	f.SetCellInt(sheetName, "A2", numPools)
+	// Team size
+	f.SetCellInt(sheetName, "B2", teamSize)
+
+	// Matches per pool
+	f.SetCellInt(sheetName, "C2", numPoolMatches)
+
+	// Number of Elimination Matches
+	f.SetCellInt(sheetName, "A8", numEliminationMatches)
+	// Team size
+	f.SetCellInt(sheetName, "B8", teamSize)
+
 }

@@ -182,6 +182,7 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 	helper.CreateNamesWithPoolToPrint(f, pools, o.sanatize)
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 
+	helper.FillEstimations(f, len(pools), len(pools[2].Matches), 0, o.teamMatches, len(finals)-1)
 	// Save the spreadsheet file
 	if err := f.SaveAs(o.outputPath); err != nil {
 		fmt.Println("Error saving Excel file:", err)

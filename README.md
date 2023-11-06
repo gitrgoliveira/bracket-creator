@@ -140,6 +140,9 @@ These files are generated to be uploaded to Google Drive (or similar), so all sh
 
 ## Install - WIP
 
+Please use the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) or build from sratch with `make go/build`
+The instructions below do not work yet.
+
 *You can install the pre-compiled binary (in several ways), use Docker or compile from source (when on OSS).*
 
 *Below you can find the steps for each of them.*

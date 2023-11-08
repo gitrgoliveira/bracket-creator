@@ -70,8 +70,8 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 		node.SheetName = sheetName
 	}
 
-	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, size/2, pools)
-	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, size/2, pools)
+	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, pools)
+	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, pools)
 }
 
 func treeAdjustment(node *Node) {

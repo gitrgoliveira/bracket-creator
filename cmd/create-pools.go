@@ -144,8 +144,8 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 4, depth, true)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 4, depth, true)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 1, depth, true)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 1, depth, true)
 
 		lastPos := (i + 1) * numPools
 		if lastPos > len(pools) {

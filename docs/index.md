@@ -1,5 +1,5 @@
 <!-- BEGIN __DO_NOT_INCLUDE__ -->
-<p align="center"><img src="https://gist.githubusercontent.com/gitrgoliveira/5be06c101f53079b9914d6efd867e690/raw/1db944ea6c82dde17ad24f2288eaeafe4013dafc/bracket-creator.v2.png" alt="Logo" height="120" /></p>
+<p align="center"><img src="https://github.com/gitrgoliveira/bracket-creator/blob/main/logo/bracket-creator.v2.jpeg?raw=true" alt="Logo" height="120" width="120" /></p>
 <!-- END __DO_NOT_INCLUDE__ -->
 <h1 align="center"> bracket-creator</h1>
 
@@ -36,8 +36,22 @@
 </p>
 <br/>
 
-An opinionated template for new Golang cli projects.
+This is a CLI application created to make my life simpler when creating Kendo tournaments.
 
-### Logo
+I believe this could be useful for other clubs that want to create Kendo tournaments, without having to use complex setups, televisions as scoreboards, etc.
 
-The logo is based on the `create-go-app`. Please find all information [here](https://github.com/create-go-app/cli/wiki/Logo).
+## What will you need?
+
+### Tournament day
+
+* A3 printer to print out Team/Player names
+* A4 printer to print out the trees
+* score boards
+* whiteboard markers (for the scoreboards), scisors, tasuki, the usual.
+
+To keep all shiai-jo tables in sync, you can:
+
+1. Have an internet connection and a laptop for each shiai-jo
+1. Upload excel files to something like a google drive, so all tables are updating it in real time
+
+## Before the Tournament

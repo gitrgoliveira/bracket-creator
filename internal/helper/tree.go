@@ -52,46 +52,57 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 	if node == nil {
 		return
 	}
-	emptyRows := int(math.Pow(2, float64(depth))) - 2
 
 	if pools && !node.LeafNode {
-		// Need to ensure pools winners stay on top
-		// For that we need to ensure the last charater of the left (i.e. top) node is the number 1
-		if node.Left.LeafNode && node.Right.LeafNode {
-			leftPool := strings.Split(node.Left.LeafVal, ".")
-			leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
-			rightPool := strings.Split(node.Right.LeafVal, ".")
-			rightPos, _ := strconv.ParseInt(rightPool[1], 10, 64)
-
-			if leftPos > rightPos {
-				node.Left, node.Right = node.Right, node.Left
-			}
-		}
-
-		// Need to ensure pools winners are the ones that get a bye
-		if node.Left.LeafNode && !node.Right.LeafNode {
-			leftPool := strings.Split(node.Left.LeafVal, ".")
-			leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
-			rightPool := strings.Split(node.Right.Left.LeafVal, ".")
-			rightPos, _ := strconv.ParseInt(rightPool[1], 10, 64)
-
-			if leftPos > rightPos {
-				// find a second placed pool winner on the other branch
-				node.Left, node.Right.Left = node.Right.Left, node.Left
-			}
-		}
+		// Need to ensure pools winners stay on top and pool winners are the ones that get a bye
+		treeAdjustment(node)
 	}
+	// emptyRows := 2 * (depth + 1) //int(math.Pow(2, float64(depth))) - 3
+	// fmt.Println(emptyRows)
+
+	size := int(math.Pow(2, float64(depth-1)))
 
 	if node.LeafNode {
-		writeTreeValue(f, sheetName, startCol, emptyRows+startRow, node.LeafVal)
+		writeTreeValue(f, sheetName, startCol, startRow+size, node.LeafVal)
 	} else {
 		// this collects the cell coordinates for the match number in the tree
-		node.LeafVal = CreateTreeBracket(f, sheetName, startCol, emptyRows/2+startRow, emptyRows, false, fmt.Sprintf("%d", depth))
+		node.LeafVal = CreateTreeBracket(f, sheetName, startCol, startRow+size/2+1, size-1)
 		node.SheetName = sheetName
 	}
 
-	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, pools)
-	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+emptyRows+1, depth-1, pools)
+	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, size/2, pools)
+	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, size/2, pools)
+}
+
+func treeAdjustment(node *Node) {
+
+	if node.Left.LeafNode && node.Right.LeafNode {
+
+		// Need to ensure pools winners stay on top
+		leftPool := strings.Split(node.Left.LeafVal, ".")
+		leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
+		rightPool := strings.Split(node.Right.LeafVal, ".")
+		rightPos, _ := strconv.ParseInt(rightPool[1], 10, 64)
+
+		// For that we need to ensure the last character of the left (i.e. top) node is higher than the right
+		if leftPos > rightPos {
+			node.Left, node.Right = node.Right, node.Left
+		}
+	}
+
+	// Also need to ensure pool winners are the ones that get a bye
+	if node.Left.LeafNode && !node.Right.LeafNode {
+		// find a second placed pool winner on the other branch
+		leftPool := strings.Split(node.Left.LeafVal, ".")
+		leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
+		rightPool := strings.Split(node.Right.Left.LeafVal, ".")
+		rightPos, _ := strconv.ParseInt(rightPool[1], 10, 64)
+
+		// For that we need to ensure the last character of the left (i.e. top) node is higher than the left of the right branch
+		if leftPos > rightPos {
+			node.Left, node.Right.Left = node.Right.Left, node.Left
+		}
+	}
 }
 
 func GenerateFinals(pools []Pool, poolWinners int) []string {

@@ -138,10 +138,7 @@ func getTreeTextStyle(f *excelize.File) int {
 		Alignment: &excelize.Alignment{Horizontal: "right", Vertical: "center"},
 		Font:      &excelize.Font{Bold: true, Color: "000000", Size: 12},
 		Border: []excelize.Border{
-			// {Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},
-			// {Type: "left", Color: "000000", Style: 2},
-			// {Type: "right", Color: "000000", Style: 2},
 		},
 	})
 	return style

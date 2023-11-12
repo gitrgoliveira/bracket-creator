@@ -7,7 +7,7 @@ import (
 )
 
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {
-	fmt.Printf("CreateTreeBracket: start row: %d, size: %d\n", startRow, size)
+	// fmt.Printf("CreateTreeBracket: start row: %d, size: %d\n", startRow, size)
 
 	// interval
 	colName, _ := excelize.ColumnNumberToName(col + 1)
@@ -34,7 +34,7 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 }
 
 func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string) {
-	fmt.Printf("writeTreeValue: start row: %d\n", startRow)
+	// fmt.Printf("writeTreeValue: start row: %d\n", startRow)
 
 	colName, _ := excelize.ColumnNumberToName(col + 1)
 	cell := fmt.Sprintf("%s%d", colName, startRow)
@@ -48,7 +48,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 
 func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 
-	row := 4
+	row := 2
 
 	for _, pool := range pools {
 		f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row),

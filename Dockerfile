@@ -20,7 +20,7 @@ RUN echo "nonroot:x:65534:65534:Non root:/:" > /etc_passwd
 # Final stage
 FROM scratch
 
-LABEL maintainer="Thibault HAZELART <gitrgoliveira@gmail.com>"
+LABEL maintainer="Ricardo Oliveira @gitrgoliveira"
 
 COPY --from=builder /go/bin/bracket-creator /bin/bracket-creator
 COPY --from=builder /etc_passwd /etc/passwd

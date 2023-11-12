@@ -6,7 +6,8 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int, writeValue bool, value string) string {
+func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {
+	// fmt.Printf("CreateTreeBracket: start row: %d, size: %d\n", startRow, size)
 
 	// interval
 	colName, _ := excelize.ColumnNumberToName(col + 1)
@@ -23,6 +24,7 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 	colName, _ = excelize.ColumnNumberToName(col)
 	topCell := fmt.Sprintf("%s%d", colName, startRow)
 	f.SetCellStyle(sheet, topCell, topCell, getBorderStyleTop(f))
+	// f.SetCellStyle(sheet, topCell, topCell, getBorderStyleBottom(f))
 
 	// bottom
 	bottomCell := fmt.Sprintf("%s%d", colName, startRow+size)
@@ -32,18 +34,21 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 }
 
 func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string) {
+	// fmt.Printf("writeTreeValue: start row: %d\n", startRow)
+
 	colName, _ := excelize.ColumnNumberToName(col + 1)
 	cell := fmt.Sprintf("%s%d", colName, startRow)
 	f.SetCellValue(sheet, cell, value)
-	f.SetColWidth(sheet, colName, colName, 20)
-	f.MergeCell(sheet, cell, fmt.Sprintf("%s%d", colName, startRow+1))
-	f.SetCellStyle(sheet, cell, fmt.Sprintf("%s%d", colName, startRow+1), getPoolHeaderStyle(f))
+	// f.SetColWidth(sheet, colName, colName, 10)
+	// f.MergeCell(sheet, cell, fmt.Sprintf("%s%d", colName, startRow+1))
+	// f.SetCellStyle(sheet, cell, fmt.Sprintf("%s%d", colName, startRow+1), getPoolHeaderStyle(f))
+	f.SetCellStyle(sheet, cell, cell, getTreeTextStyle(f))
 
 }
 
 func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 
-	row := 4
+	row := 2
 
 	for _, pool := range pools {
 		f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row),

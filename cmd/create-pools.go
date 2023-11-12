@@ -110,7 +110,7 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("There will be %d finalists\n", len(finals))
 
-	maxPlayersPerTree := 15
+	maxPlayersPerTree := 16
 	numPages := helper.RoundToPowerOf2(float64(len(finals)), float64(maxPlayersPerTree))
 	if numPages < 1 || o.singleTree {
 		numPages = 1
@@ -144,8 +144,8 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 4, depth, true)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 4, depth, true)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 0, depth, true)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 0, depth, true)
 
 		lastPos := (i + 1) * numPools
 		if lastPos > len(pools) {

@@ -366,6 +366,10 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanatized bool) 
 func FillEstimations(f *excelize.File, numPools int, numPoolMatches int, extraPools int, teamSize int, numEliminationMatches int) {
 	sheetName := "Time Estimator"
 
+	if teamSize == 0 {
+		teamSize = 1
+	}
+
 	// Number of pools
 	f.SetCellInt(sheetName, "A2", numPools)
 	// Team size

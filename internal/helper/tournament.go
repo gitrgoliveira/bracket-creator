@@ -41,18 +41,24 @@ type Match struct {
 }
 
 func CreatePlayers(entries []string) []Player {
-	players := make([]Player, 0)
+	players := make([]Player, len(entries))
 	c := cases.Title(language.Und, cases.NoLower)
 
 	for i, entry := range entries {
 		line := strings.Split(entry, ",")
+
 		player := Player{
 			Name:         c.String(strings.TrimSpace(line[0])),
-			Dojo:         strings.TrimSpace(line[1]),
+			Dojo:         "NA",
 			DisplayName:  sanatizeName(line[0]),
 			PoolPosition: i,
 		}
-		players = append(players, player)
+
+		if len(line) >= 2 {
+			player.Dojo = strings.TrimSpace(line[1])
+		}
+
+		players[i] = player
 	}
 
 	return players
@@ -79,6 +85,12 @@ func CreatePools(players []Player, poolSize int) []Pool {
 
 	for _, player := range players {
 		poolN := discoverPool(pools, player, poolSize)
+		// try and force same dojo
+		if poolN < 0 {
+			poolN = forceSameDojo(pools, player, poolSize)
+		}
+
+		// try and force pool size
 		if poolN < 0 {
 			poolN = forcePoolSize(pools, player, poolSize)
 			fmt.Printf("Added extra player to pool %d\n", poolN)
@@ -100,6 +112,7 @@ func CreatePools(players []Player, poolSize int) []Pool {
 
 func discoverPool(pools []Pool, player Player, poolSize int) int {
 
+	sameDojo := false
 	for i, pool := range pools {
 
 		// making sure there's space first
@@ -107,7 +120,6 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 			continue
 		}
 
-		sameDojo := false
 		for _, assignedPlayers := range pool.Players {
 			// try make sure that there aren't other players of the same dojo
 			if assignedPlayers.Dojo == player.Dojo ||
@@ -120,6 +132,18 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 			return i
 		}
 
+	}
+
+	if sameDojo {
+		return -2
+	}
+	return -1
+}
+func forceSameDojo(pools []Pool, player Player, poolSize int) int {
+	for i, pool := range pools {
+		if len(pool.Players) < poolSize {
+			return i
+		}
 	}
 	return -1
 }

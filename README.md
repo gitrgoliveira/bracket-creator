@@ -56,12 +56,16 @@ Example to build the tool from source:
 make go/build
 ```
 
-CSV format for individual matches should be (see mock_data.csv for an example):
+### Input file format
+
+The input file can be a simple list of names or a CSV formatted file.
+For example:
 ```csv
 First_Name Last_Name, Dojo
 ```
+For teams, it should be just one team per line.
 
-For teams, it shoud be one team per line.
+When using the CSV formatted style, `Dojo` is only used to try to ensure players/teams don't meet someone of the same dojo **when doing pools.**
 
 ### Parameters to create Pools
 Example command line to create pools with 5 players and 3 winners per pool:

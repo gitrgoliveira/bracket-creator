@@ -144,8 +144,9 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 0, depth, true)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 0, depth, true)
+		startRow := 1
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true)
 
 		lastPos := (i + 1) * numPools
 		if lastPos > len(pools) {
@@ -182,7 +183,7 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 	helper.CreateNamesWithPoolToPrint(f, pools, o.sanatize)
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 
-	helper.FillEstimations(f, len(pools), len(pools[2].Matches), 0, o.teamMatches, len(finals)-1)
+	helper.FillEstimations(f, len(pools), len(pools[0].Matches), 0, o.teamMatches, len(finals)-1)
 	// Save the spreadsheet file
 	if err := f.SaveAs(o.outputPath); err != nil {
 		fmt.Println("Error saving Excel file:", err)

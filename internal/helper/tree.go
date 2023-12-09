@@ -106,20 +106,34 @@ func treeAdjustment(node *Node) {
 }
 
 func GenerateFinals(pools []Pool, poolWinners int) []string {
-	finalists := make([]string, 0)
 
+	finalists := make([][]string, len(pools))
 	for i := 0; i < len(pools); i++ {
 		for j := 0; j < poolWinners; j++ {
-			finalists = append(finalists, fmt.Sprintf("%s.%d", pools[i].PoolName, j+1))
+			finalists[i] = append(finalists[i], fmt.Sprintf("%s.%d", pools[i].PoolName, j+1))
 		}
 	}
 
+	// fmt.Println(finalists)
 	matches := make([]string, 0)
-	for i, j := 0, len(finalists)-1; j > i; i, j = i+1, j-1 {
-		matches = append(matches, finalists[i])
-		matches = append(matches, finalists[j])
+	round := -1
+	for i := 0; i < len(pools)*poolWinners; i++ {
+
+		poolPos := i % len(pools)
+
+		if poolPos == 0 && len(pools)%poolWinners == 0 {
+			// fmt.Println("new round")
+			round++
+		} else if round < 0 {
+			round = 0
+		}
+		pos := (i + round) % poolWinners
+		// fmt.Printf("pool num %d.", poolPos)
+		// fmt.Println(pos)
+		matches = append(matches, finalists[poolPos][pos])
 	}
 
+	// fmt.Println(matches)
 	return matches
 }
 
@@ -162,14 +176,6 @@ func TraverseRounds(node *Node, depth int, maxDepth int) []*Node {
 	var matches []*Node
 
 	if depth == maxDepth {
-		//LeafVal
-		// fmt.Printf("%s ", node.LeafVal)
-		// EliminationMatchs := EliminationMatch{
-		// 	Sheet: node.sheetName,
-		// 	Cell:  node.LeafVal,
-		// 	Left:  node.Left.LeafVal,
-		// 	Right: node.Right.LeafVal,
-		// }
 		matches = append(matches, node)
 	}
 

@@ -135,8 +135,9 @@ func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 0, depth, false)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, 0, depth, false)
+		startRow := 1
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false)
 	}
 	f.DeleteSheet("Tree")
 	if err != nil {

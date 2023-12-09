@@ -3,7 +3,7 @@ package helper
 import (
 	"fmt"
 
-	"github.com/xuri/excelize/v2"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {

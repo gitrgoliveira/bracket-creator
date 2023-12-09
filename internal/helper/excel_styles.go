@@ -1,6 +1,6 @@
 package helper
 
-import "github.com/xuri/excelize/v2"
+import excelize "github.com/xuri/excelize/v2"
 
 func getBorderStyleTop(f *excelize.File) int {
 	borderStyle, _ := f.NewStyle(&excelize.Style{

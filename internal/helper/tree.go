@@ -134,7 +134,6 @@ func GenerateFinals(pools []Pool, poolWinners int) []string {
 	}
 
 	// fmt.Println(matches)
-
 	return matches
 }
 
@@ -177,14 +176,6 @@ func TraverseRounds(node *Node, depth int, maxDepth int) []*Node {
 	var matches []*Node
 
 	if depth == maxDepth {
-		//LeafVal
-		// fmt.Printf("%s ", node.LeafVal)
-		// EliminationMatchs := EliminationMatch{
-		// 	Sheet: node.sheetName,
-		// 	Cell:  node.LeafVal,
-		// 	Left:  node.Left.LeafVal,
-		// 	Right: node.Right.LeafVal,
-		// }
 		matches = append(matches, node)
 	}
 

@@ -71,7 +71,11 @@ func sanatizeName(name string) string {
 	// return only first and last name
 	fullName := strings.Split(name, " ")
 
-	// capitalize first letter
+	if len(fullName) == 1 {
+		return strings.ToUpper(fullName[0])
+	}
+
+	// First Name all caps
 	firstName := strings.ToUpper(fullName[0])
 
 	// Last Name all caps

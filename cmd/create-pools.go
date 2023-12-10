@@ -3,7 +3,6 @@ package cmd
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -16,15 +15,16 @@ import (
 )
 
 type poolOptions struct {
-	numPlayers  int
-	poolWinners int
-	teamMatches int
-	filePath    string
-	outputPath  string
-	roundRobin  bool
-	sanatize    bool
-	singleTree  bool
-	determined  bool
+	numPlayers   int
+	poolWinners  int
+	teamMatches  int
+	filePath     string
+	outputPath   string
+	outputWriter *bufio.Writer
+	roundRobin   bool
+	sanatize     bool
+	singleTree   bool
+	determined   bool
 }
 
 func newCreatePoolCmd() *cobra.Command {
@@ -56,27 +56,49 @@ func newCreatePoolCmd() *cobra.Command {
 }
 
 func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
+	fmt.Printf("Reading file: %s\n", o.filePath)
+
+	entries, err := helper.ReadEntriesFromFile(o.filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read entries from file: %w", err)
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("no entries found in file")
+	}
+
+	outputFile, err := os.OpenFile(o.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open output file: %w", err)
+	}
+	defer outputFile.Close()
+
+	o.outputWriter = bufio.NewWriter(outputFile)
+	defer o.outputWriter.Flush()
+
+	err = o.createPools(entries)
+	if err != nil {
+		return fmt.Errorf("failed to create pools: %w", err)
+	}
+
+	fmt.Println("Excel file created successfully:", o.outputPath)
+	return nil
+}
+
+func (o *poolOptions) createPools(entries []string) error {
 
 	// validation
+	if len(entries) < o.poolWinners {
+		return fmt.Errorf("number of entries must be higher than number of winners per pool")
+	}
+	if len(entries) < o.numPlayers {
+		return fmt.Errorf("number of entries must be greater than requested players in pool")
+	}
+
 	if o.numPlayers < 2 {
-		return fmt.Errorf("number of players must be greater than 1")
+		return fmt.Errorf("number of players per pool must be greater than 1")
 	}
 	if o.poolWinners >= o.numPlayers {
-		return fmt.Errorf("pool winners must be less than number of players per pool")
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Reading file: %s\n", o.filePath)
-	file, err := os.Open(o.filePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	entries := make([]string, 0)
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		entry := scanner.Text()
-		entries = append(entries, entry)
+		return fmt.Errorf("number of pool winners must be less than number of players per pool")
 	}
 
 	entries = helper.RemoveDuplicates(entries)
@@ -102,6 +124,10 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 			fmt.Println(err)
 		}
 	}()
+
+	if o.sanatize {
+		fmt.Println("Sanatizing names")
+	}
 
 	helper.AddPoolDataToSheet(f, pools, o.sanatize)
 
@@ -181,16 +207,16 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 
 	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners)
 	helper.CreateNamesWithPoolToPrint(f, pools, o.sanatize)
-	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 
+	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 	helper.FillEstimations(f, len(pools), len(pools[0].Matches), 0, o.teamMatches, len(finals)-1)
+
 	// Save the spreadsheet file
-	if err := f.SaveAs(o.outputPath); err != nil {
-		fmt.Println("Error saving Excel file:", err)
-		return err
+	err = f.Write(o.outputWriter)
+	if err != nil {
+		return fmt.Errorf("error writing to buffer: %w", err)
 	}
 
-	fmt.Println("Excel file created successfully:", o.outputPath)
 	return nil
 }
 

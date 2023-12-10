@@ -3,9 +3,9 @@ package cmd
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
+
 	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -14,18 +14,19 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-type createPlayoffOptions struct {
-	teamMatches int
-	filePath    string
-	outputPath  string
-	sanatize    bool
-	singleTree  bool
-	determined  bool
+type playoffOptions struct {
+	teamMatches  int
+	filePath     string
+	outputPath   string
+	outputWriter *bufio.Writer
+	sanatize     bool
+	singleTree   bool
+	determined   bool
 }
 
 func newCreatePlayoffCmd() *cobra.Command {
 
-	o := &createPlayoffOptions{}
+	o := &playoffOptions{}
 
 	cmd := &cobra.Command{
 		Use:          "create-playoffs",
@@ -48,21 +49,36 @@ func newCreatePlayoffCmd() *cobra.Command {
 	return cmd
 }
 
-func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
+func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
+	fmt.Printf("Reading file: %s\n", o.filePath)
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Reading file: %s\n", o.filePath)
-	file, err := os.Open(o.filePath)
+	entries, err := helper.ReadEntriesFromFile(o.filePath)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to read entries from file: %w", err)
 	}
-	defer file.Close()
+	if len(entries) == 0 {
+		return fmt.Errorf("no entries found in file")
+	}
 
-	entries := make([]string, 0)
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		entry := scanner.Text()
-		entries = append(entries, entry)
+	outputFile, err := os.OpenFile(o.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open output file: %w", err)
 	}
+	defer outputFile.Close()
+
+	o.outputWriter = bufio.NewWriter(outputFile)
+	defer o.outputWriter.Flush()
+
+	err = o.createPlayoffs(entries)
+	if err != nil {
+		return fmt.Errorf("failed to create playoffs: %w", err)
+	}
+
+	fmt.Println("Excel file created successfully:", o.outputPath)
+	return nil
+}
+
+func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	entries = helper.RemoveDuplicates(entries)
 
@@ -86,6 +102,10 @@ func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 			fmt.Println(err)
 		}
 	}()
+
+	if o.sanatize {
+		fmt.Println("Sanatizing names")
+	}
 
 	helper.AddPlayerDataToSheet(f, players, o.sanatize)
 	// gather all player names
@@ -160,6 +180,7 @@ func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 	var matchWinners map[string]helper.MatchWinner
 	f.DeleteSheet("Pool Draw")
 	f.DeleteSheet("Pool Matches")
+
 	// hurray! they are all winners
 	matchWinners = helper.ConvertPlayersToWinners(players, o.sanatize)
 	helper.CreateNamesToPrint(f, players, o.sanatize)
@@ -168,12 +189,11 @@ func (o *createPlayoffOptions) run(cmd *cobra.Command, args []string) error {
 	helper.FillEstimations(f, 0, 0, 0, o.teamMatches, len(names)-1)
 
 	// Save the spreadsheet file
-	if err := f.SaveAs(o.outputPath); err != nil {
-		fmt.Println("Error saving Excel file:", err)
-		return err
+	err = f.Write(o.outputWriter)
+	if err != nil {
+		return fmt.Errorf("error writing to buffer: %w", err)
 	}
 
-	fmt.Println("Excel file created successfully:", o.outputPath)
 	return nil
 }
 

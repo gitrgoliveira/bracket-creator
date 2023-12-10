@@ -119,7 +119,10 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 		c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", inMemoryBuffer.Bytes())
 	})
 
-	r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))
+	err := r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))
+	if err != nil {
+		return fmt.Errorf("failed to start server: %w", err)
+	}
 
 	return nil
 }

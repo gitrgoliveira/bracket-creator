@@ -1,7 +1,9 @@
 package helper
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 )
@@ -39,12 +41,15 @@ func (s *RowStack) Peek() int {
 	return s.data[len(s.data)-1]
 }
 
+// RemoveDuplicates removes duplicate strings from the input slice and returns a new slice without duplicates.
+//
+// The function takes a parameter named input, which is a slice of strings. It represents the input slice from which duplicates and empty strings will be removed.
 func RemoveDuplicates(input []string) []string {
 	uniqueStrings := make(map[string]bool)
 	result := make([]string, 0)
 
 	for _, str := range input {
-		if !uniqueStrings[str] {
+		if str != "" && !uniqueStrings[str] {
 			uniqueStrings[str] = true
 			result = append(result, str)
 		}
@@ -90,4 +95,24 @@ func extractPrefixAndSuffix(str string) (string, string) {
 // Helper function to check if a character is a digit
 func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
+}
+
+func ReadEntriesFromFile(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var entries []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		entries = append(entries, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return entries, nil
 }

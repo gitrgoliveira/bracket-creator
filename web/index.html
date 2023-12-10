@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kendo Tournament Creator</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            /* height: 100vh; */
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        img {
+            display: block;
+            max-width: 25%;
+            height: auto;
+            margin-bottom: 20px;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        input[type="submit"] {
+            width: 150px;  /* Adjust as needed */
+            height: 50px;  /* Adjust as needed */
+        }
+        #poolOptions, .tournamentType {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    </style>
+</head>
+<body>
+    <img src="./logo.jpeg" alt="Logo"/>
+    <h1>Kendo Tournament Creator</h1>
+    <h2>Please enter the list of players/teams below</h2>
+    <p>
+    A simple list of names/teams - <strong>one per line</strong> - or a CSV formatted list.
+    For example:
+    </p>
+<pre>
+First_Name1 Last_Name1, Dojo1
+First_Name2 Last_Name2, Dojo2
+</pre>
+    <p>
+    When using the CSV style, 'Dojo' is only used to try to ensure players/teams,<br />
+    don't meet someone of the same dojo <strong>when doing pools.</strong>
+    </p>
+    <br />
+
+    <form method="POST" action="/" onsubmit="return validateForm()">
+        <table>
+            <tr>
+                <td align="right">Single Tree:</td>
+                <td><input type="checkbox" name="singleTree"></td>
+            </tr>
+            <tr>
+                <td align="right">Convert to "LAST_NAME, F.":</td>
+                <td><input type="checkbox" name="sanatize"></td>
+            </tr>
+            <tr>
+                <td align="right">Do not Randomize:</td>
+                <td><input type="checkbox" name="determined"></td>
+            </tr>
+            <tr>
+                <td align="right">Team Matches:</td>
+                <td><input type="number" name="teamMatches" min="0" value="0"></td>
+            </tr>
+            <tr>
+                <td align="right">Playoffs</td>
+                <td><input type="radio" id="playoffs" name="tournamentType" value="playoffs" checked></td>
+            </tr>
+            <tr>
+                <td align="right">Pools and playoffs</td>
+                <td><input type="radio" id="pools" name="tournamentType" value="pools"></td>
+            </tr>
+            <tr id="winnersPerPoolRow">
+                <td align="right">Winners per pool:</td>
+                <td><input type="number" name="winnersPerPool" min="1" value="2"></td>
+            </tr>
+            <tr id="playersPerPoolRow" >
+                <td align="right">Players per pool:</td>
+                <td><input type="number" name="playersPerPool" min="1" value="3"></td>
+            </tr>
+            <tr id="roundRobinRow">
+                <td align="right">Round Robin pools:</td>
+                <td><input type="checkbox" name="roundRobin" checked></td>
+            </tr>            <tr>
+                <td colspan="2">
+                    <textarea name="playerList" id="playerList" rows="20" cols="50"></textarea>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2" align="center">
+                    <input type="submit" value="Submit the list">
+                </td>
+            </tr>
+        </table>
+    </form>
+        <br />
+    <br />
+    <script>
+        // Validates the form by checking if the player list is empty or not.
+        // Returns true if the player list is not empty, false otherwise.
+        function validateForm() {
+            var playerList = document.getElementById('playerList').value;
+            if (playerList.trim() === '') {
+                alert('Player list cannot be empty');
+                return false;
+            }
+            return true;
+        }
+
+        // Load saved values from localStorage
+        document.querySelectorAll('input[name="tournamentType"]').forEach(function(el) {
+            if (localStorage.getItem('tournamentType') === el.value) {
+                el.checked = true;
+            }
+        });
+        document.querySelector('input[name="winnersPerPool"]').value = localStorage.getItem('winnersPerPool') || '';
+        document.querySelector('input[name="playersPerPool"]').value = localStorage.getItem('playersPerPool') || '';
+        document.querySelector('input[name="roundRobin"]').checked = localStorage.getItem('roundRobin') === 'true';
+        document.querySelector('textarea[name="playerList"]').value = localStorage.getItem('teplayerListxt') || '';
+
+        // Save values to localStorage on input change
+        document.querySelectorAll('input, textarea').forEach(function(el) {
+            el.addEventListener('input', function() {
+                if (this.name === 'tournamentType' && !this.checked) {
+                    return;
+                }
+                localStorage.setItem(this.name, this.type === 'checkbox' ? this.checked : this.value);
+            });
+        });
+
+        document.getElementById('playoffs').addEventListener('change', function() {
+            document.getElementById('winnersPerPoolRow').style.display = this.checked ? 'none' : '';
+            document.getElementById('playersPerPoolRow').style.display = this.checked ? 'none' : '';
+            document.getElementById('roundRobinRow').style.display = this.checked ? 'none' : '';
+        });
+
+        document.getElementById('pools').addEventListener('change', function() {
+            document.getElementById('winnersPerPoolRow').style.display = this.checked ? '' : 'none';
+            document.getElementById('playersPerPoolRow').style.display = this.checked ? '' : 'none';
+            document.getElementById('roundRobinRow').style.display = this.checked ? '' : 'none';
+        });
+
+    </script>
+</body>
+</html>

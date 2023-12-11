@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io/fs"
+	"log"
 	"os"
 
 	"bufio"
@@ -11,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 
 	"github.com/spf13/cobra"
 )
@@ -54,12 +57,24 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	r.LoadHTMLFiles("./web/index.html")
-	r.StaticFile("/logo.jpeg", "./web/logo.jpeg")
+	webDir, err := fs.Sub(helper.WebFs, "web")
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
 
-	r.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index.html", nil)
-	})
+	// List the files in the embedded file system
+	files, err := fs.ReadDir(webDir, ".")
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+
+	for _, file := range files {
+		fmt.Println(file.Name())
+	}
+
+	r.StaticFS("/", http.FS(webDir))
 
 	r.POST("/", func(c *gin.Context) {
 		text := c.PostForm("playerList")
@@ -68,7 +83,7 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 			return
 		}
 		singleTree := c.PostForm("singleTree") == "on"
-		sanatize := c.PostForm("sanatize") == "on"
+		sanitize := c.PostForm("sanitize") == "on"
 		determined := c.PostForm("determined") == "on"
 		teamMatches, _ := strconv.Atoi(c.PostForm("teamMatches"))
 		tournamentType := c.PostForm("tournamentType")
@@ -81,7 +96,7 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 		if tournamentType == "pools" {
 			o := &poolOptions{
 				singleTree:  singleTree,
-				sanatize:    sanatize,
+				sanitize:    sanitize,
 				determined:  determined,
 				teamMatches: teamMatches,
 				roundRobin:  roundRobin,
@@ -99,7 +114,7 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 
 			o := &playoffOptions{
 				singleTree:  singleTree,
-				sanatize:    sanatize,
+				sanitize:    sanitize,
 				determined:  determined,
 				teamMatches: teamMatches,
 			}
@@ -119,7 +134,7 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 		c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", inMemoryBuffer.Bytes())
 	})
 
-	err := r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))
+	err = r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))
 	if err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}

@@ -49,6 +49,16 @@ To use the web front end run this command and open your browser on http://localh
 bracket-creator serve
 ```
 
+You can also use docker with:
+```bash
+docker run -p 8080:8080 gitrgoliveira/bracket-creator
+```
+
+or docker-compose to run the web server:
+```bash
+docker-compose up -d
+```
+
 
 There's also a CLI. To learn how to use the CLI run:
 ```bash

@@ -51,7 +51,7 @@ bracket-creator serve
 
 You can also use docker with:
 ```bash
-docker run -p 8080:8080 gitrgoliveira/bracket-creator
+docker run -p 8080:8080 ghcr.io/gitrgoliveira/bracket-creator/bracket-creator:latest
 ```
 
 or docker-compose to run the web server:
@@ -91,8 +91,8 @@ bracket-creator serve --listen-address 0.0.0.0 --listen-port 8080
 
 You can also use the environment variables:
 ```bash
-export BRACKET_CREATOR_LISTEN_ADDRESS=0.0.0.0
-export BRACKET_CREATOR_LISTEN_PORT=8080
+export BIND_ADDRESS=0.0.0.0
+export PORT=8080
 ```
 
 

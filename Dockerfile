@@ -31,4 +31,4 @@ USER 65534
 
 EXPOSE 8080
 ENTRYPOINT [ "bracket-creator" ]
-CMD [ "serve" ]
+CMD [ "serve", "--bind=0.0.0.0", "--port=8080" ]

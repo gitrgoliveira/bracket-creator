@@ -63,17 +63,6 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// List the files in the embedded file system
-	files, err := fs.ReadDir(webDir, ".")
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-
-	for _, file := range files {
-		fmt.Println(file.Name())
-	}
-
 	r.StaticFS("/", http.FS(webDir))
 
 	r.POST("/", func(c *gin.Context) {

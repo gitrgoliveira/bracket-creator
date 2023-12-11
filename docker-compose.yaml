@@ -2,7 +2,11 @@ version: '3.8'
 
 services:
   bracket-creator:
+    # build: .
     image: ghcr.io/gitrgoliveira/bracket-creator/bracket-creator:latest
+    environment:
+      - BIND_ADDRESS=0.0.0.0
+      - PORT=8080
     ports:
       - "8080:8080"
     restart: unless-stopped

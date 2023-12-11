@@ -19,7 +19,7 @@ type playoffOptions struct {
 	filePath     string
 	outputPath   string
 	outputWriter *bufio.Writer
-	sanatize     bool
+	sanitize     bool
 	singleTree   bool
 	determined   bool
 }
@@ -39,7 +39,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file (default false)")
 	cmd.PersistentFlags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
 	cmd.PersistentFlags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
-	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize (default false)")
+	cmd.Flags().BoolVarP(&o.sanitize, "sanitize", "s", false, "sanitize names into first and last name and capitalize (default false)")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
@@ -60,7 +60,7 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	outputFile, err := os.OpenFile(o.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	outputFile, err := os.OpenFile(o.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open output file: %w", err)
 	}
@@ -92,7 +92,13 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	players := helper.CreatePlayers(entries)
 
 	// Openning the template Excel file.
-	f, err := excelize.OpenFile("template.xlsx")
+	templateFile, err := helper.TemplateFile.Open("template.xlsx")
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	f, err := excelize.OpenReader(templateFile)
 	if err != nil {
 		fmt.Println(err)
 		return nil
@@ -103,14 +109,14 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		}
 	}()
 
-	if o.sanatize {
+	if o.sanitize {
 		fmt.Println("Sanatizing names")
 	}
 
-	helper.AddPlayerDataToSheet(f, players, o.sanatize)
+	helper.AddPlayerDataToSheet(f, players, o.sanitize)
 	// gather all player names
 	var names []string
-	if o.sanatize {
+	if o.sanitize {
 		for _, player := range players {
 			names = append(names, player.DisplayName)
 		}
@@ -129,7 +135,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree
-	tree := helper.CreateBalancedTree(names, o.sanatize)
+	tree := helper.CreateBalancedTree(names, o.sanitize)
 
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
@@ -182,8 +188,8 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	f.DeleteSheet("Pool Matches")
 
 	// hurray! they are all winners
-	matchWinners = helper.ConvertPlayersToWinners(players, o.sanatize)
-	helper.CreateNamesToPrint(f, players, o.sanatize)
+	matchWinners = helper.ConvertPlayersToWinners(players, o.sanitize)
+	helper.CreateNamesToPrint(f, players, o.sanitize)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 	helper.FillEstimations(f, 0, 0, 0, o.teamMatches, len(names)-1)

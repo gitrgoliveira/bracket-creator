@@ -22,7 +22,7 @@ type poolOptions struct {
 	outputPath   string
 	outputWriter *bufio.Writer
 	roundRobin   bool
-	sanatize     bool
+	sanitize     bool
 	singleTree   bool
 	determined   bool
 }
@@ -45,7 +45,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool (default 3)")
 	cmd.Flags().IntVarP(&o.poolWinners, "pool-winners", "w", 2, "number of players/teams that can qualify from each pool (default 2)")
 	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone (default false)")
-	cmd.Flags().BoolVarP(&o.sanatize, "sanatize", "s", false, "Sanatize names into first and last name and capitalize (default false)")
+	cmd.Flags().BoolVarP(&o.sanitize, "sanitize", "s", false, "sanitize names into first and last name and capitalize (default false)")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
@@ -66,7 +66,7 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	outputFile, err := os.OpenFile(o.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	outputFile, err := os.OpenFile(o.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open output file: %w", err)
 	}
@@ -114,7 +114,13 @@ func (o *poolOptions) createPools(entries []string) error {
 	pools := helper.CreatePools(players, o.numPlayers)
 
 	// Openning the template Excel file.
-	f, err := excelize.OpenFile("template.xlsx")
+	templateFile, err := helper.TemplateFile.Open("template.xlsx")
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	f, err := excelize.OpenReader(templateFile)
 	if err != nil {
 		fmt.Println(err)
 		return nil
@@ -125,11 +131,11 @@ func (o *poolOptions) createPools(entries []string) error {
 		}
 	}()
 
-	if o.sanatize {
+	if o.sanitize {
 		fmt.Println("Sanatizing names")
 	}
 
-	helper.AddPoolDataToSheet(f, pools, o.sanatize)
+	helper.AddPoolDataToSheet(f, pools, o.sanitize)
 
 	helper.AddPoolsToSheet(f, pools)
 	finals := helper.GenerateFinals(pools, o.poolWinners)
@@ -206,7 +212,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners)
-	helper.CreateNamesWithPoolToPrint(f, pools, o.sanatize)
+	helper.CreateNamesWithPoolToPrint(f, pools, o.sanitize)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 	helper.FillEstimations(f, len(pools), len(pools[0].Matches), 0, o.teamMatches, len(finals)-1)

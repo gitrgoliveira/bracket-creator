@@ -50,7 +50,7 @@ func CreatePlayers(entries []string) []Player {
 		player := Player{
 			Name:         c.String(strings.TrimSpace(line[0])),
 			Dojo:         "NA",
-			DisplayName:  sanatizeName(line[0]),
+			DisplayName:  sanitizeName(line[0]),
 			PoolPosition: i,
 		}
 
@@ -64,7 +64,7 @@ func CreatePlayers(entries []string) []Player {
 	return players
 }
 
-func sanatizeName(name string) string {
+func sanitizeName(name string) string {
 	//removing extra spaces
 	name = strings.TrimSpace(name)
 
@@ -231,10 +231,10 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 
 }
 
-func ConvertPlayersToWinners(players []Player, sanatized bool) map[string]MatchWinner {
+func ConvertPlayersToWinners(players []Player, sanitized bool) map[string]MatchWinner {
 	matchWinners := make(map[string]MatchWinner, len(players))
 
-	if sanatized {
+	if sanitized {
 		for _, player := range players {
 			matchWinners[player.DisplayName] = MatchWinner{
 				sheetName: player.sheetName,

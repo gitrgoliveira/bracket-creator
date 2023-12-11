@@ -7,14 +7,14 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanatize bool) {
+func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 	sheetName := "data"
 
 	// Set the header row
 	f.SetCellValue(sheetName, "A1", "Pool")
 	f.SetCellValue(sheetName, "B1", "Player Name")
 	f.SetCellValue(sheetName, "C1", "Player Dojo")
-	if sanatize {
+	if sanitize {
 		f.SetCellValue(sheetName, "D1", "Display Name")
 	}
 
@@ -28,7 +28,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanatize bool) {
 			f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pools[i].PoolName)
 			f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), pools[i].Players[j].Name)
 			f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), pools[i].Players[j].Dojo)
-			if sanatize {
+			if sanitize {
 				f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName)
 			}
 			pools[i].cell = fmt.Sprintf("A%d", row)
@@ -45,14 +45,14 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanatize bool) {
 	f.SetColWidth(sheetName, "B", "D", 30)
 }
 
-func AddPlayerDataToSheet(f *excelize.File, players []Player, sanatize bool) {
+func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 	sheetName := "data"
 
 	// Set the header row
 	f.SetCellValue(sheetName, "A1", "Number")
 	f.SetCellValue(sheetName, "B1", "Player Name")
 	f.SetCellValue(sheetName, "C1", "Player Dojo")
-	if sanatize {
+	if sanitize {
 		f.SetCellValue(sheetName, "D1", "Display Name")
 	}
 	// Populate the groups in the spreadsheet
@@ -64,7 +64,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanatize bool) {
 		f.SetCellInt(sheetName, fmt.Sprintf("A%d", row), players[i].PoolPosition)
 		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), players[i].Name)
 		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), players[i].Dojo)
-		if sanatize {
+		if sanitize {
 			f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), players[i].DisplayName)
 		}
 		players[i].cell = fmt.Sprintf("B%d", row)

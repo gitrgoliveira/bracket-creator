@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  bracket-creator:
+    image: ghcr.io/gitrgoliveira/bracket-creator/bracket-creator:latest
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

@@ -42,9 +42,15 @@ A CLI to create kendo tournament brackets
 
 ## Usage
 
-You will need to compile the binary from source or download a release from github, if one is available.
+Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) page and copy them to the desired location.
 
-To learn how to use the CLI run:
+To use the web front end run this command and open your browser on http://localhost:8080
+```bash
+bracket-creator serve
+```
+
+
+There's also a CLI. To learn how to use the CLI run:
 ```bash
 bracket-creator --help
 bracket-creator create-pools --help
@@ -67,7 +73,20 @@ For teams, it should be just one team per line.
 
 When using the CSV formatted style, `Dojo` is only used to try to ensure players/teams don't meet someone of the same dojo **when doing pools.**
 
-### Parameters to create Pools
+### Customizing the web server
+To set the listen address and port run:
+```bash
+bracket-creator serve --listen-address 0.0.0.0 --listen-port 8080
+```
+
+You can also use the environment variables:
+```bash
+export BRACKET_CREATOR_LISTEN_ADDRESS=0.0.0.0
+export BRACKET_CREATOR_LISTEN_PORT=8080
+```
+
+
+### CLI Parameters to create Pools
 Example command line to create pools with 5 players and 3 winners per pool:
 ```bash
 bracket-creator create-pools -s -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-example.xlsx
@@ -83,7 +102,7 @@ bracket-creator create-pools -s -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-e
 * `-s` / `-sanitize` - sanitize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 
-### Parameters to create Playoffs
+### CLI Parameters to create Playoffs
 Example command line to create team playoffs with 5 players per team:
 ```bash
 bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-example.xlsx

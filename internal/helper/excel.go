@@ -311,7 +311,7 @@ func addRoundHeader(f *excelize.File, sheetName string, startRow int, round int)
 	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", startRow), fmt.Sprintf("O%d", startRow), getPoolHeaderStyle(f))
 }
 
-func CreateNamesToPrint(f *excelize.File, players []Player, sanatized bool) {
+func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool) {
 	sheetName := "Names to Print"
 
 	row := 1
@@ -323,7 +323,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanatized bool) {
 		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), player.PoolPosition)
 		f.SetCellStyle(sheetName, positionCell, fmt.Sprintf("A%d", row+1), getNameIDSideStyle(f))
 
-		if sanatized {
+		if sanitized {
 			f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:]))
 		} else {
 			f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, player.cell))
@@ -335,7 +335,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanatized bool) {
 	}
 }
 
-func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanatized bool) {
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) {
 	sheetName := "Names to Print"
 
 	row := 1
@@ -349,7 +349,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanatized bool) 
 			f.SetCellValue(sheetName, poolCell, pool.PoolName)
 			f.SetCellStyle(sheetName, poolCell, fmt.Sprintf("A%d", row+1), getNameIDSideStyle(f))
 
-			if sanatized {
+			if sanitized {
 				f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:]))
 			} else {
 				f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, player.cell))

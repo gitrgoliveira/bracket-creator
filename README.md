@@ -133,8 +133,7 @@ Straight knockout team competition with teams of 3:
 ```
 
 ## How to Use the output files
-All generated output files are based on the `template.xlsx` file.
-However, I recommend you edit the final file, because there are some assumptions about the structure and contents of the template file.
+All generated output files are based on the `template.xlsx` file and to customise it you will need to edit the final file.
 
 To be able to print the tree, you will need to reset the width and height in the Page Layout tab.
 

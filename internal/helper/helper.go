@@ -2,11 +2,15 @@ package helper
 
 import (
 	"bufio"
+	"embed"
 	"fmt"
 	"os"
 	"sort"
 	"strconv"
 )
+
+var WebFs embed.FS
+var TemplateFile embed.FS
 
 type RowStack struct {
 	data []int

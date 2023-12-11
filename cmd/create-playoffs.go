@@ -92,7 +92,13 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	players := helper.CreatePlayers(entries)
 
 	// Openning the template Excel file.
-	f, err := excelize.OpenFile("template.xlsx")
+	templateFile, err := helper.TemplateFile.Open("template.xlsx")
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	f, err := excelize.OpenReader(templateFile)
 	if err != nil {
 		fmt.Println(err)
 		return nil

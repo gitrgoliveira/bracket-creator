@@ -114,7 +114,13 @@ func (o *poolOptions) createPools(entries []string) error {
 	pools := helper.CreatePools(players, o.numPlayers)
 
 	// Openning the template Excel file.
-	f, err := excelize.OpenFile("template.xlsx")
+	templateFile, err := helper.TemplateFile.Open("template.xlsx")
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	f, err := excelize.OpenReader(templateFile)
 	if err != nil {
 		fmt.Println(err)
 		return nil

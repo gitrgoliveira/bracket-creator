@@ -80,7 +80,7 @@ bracket-creator create-pools -s -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-e
 * `-p` / `-players` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected. The default is 3
 * `-w` / `-pool-winners` - Number of players/teams that can qualify from each pool. The default is 2
 * `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
-* `-s` / `-sanatize` - Sanatize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
+* `-s` / `-sanitize` - sanitize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 
 ### Parameters to create Playoffs
@@ -93,7 +93,7 @@ bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-exam
 * `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
 * `-h` / `-help` - Show help
 * `-o` / `-output` - Path to write the output excel file
-* `-s` / `-sanatize` - Sanatize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
+* `-s` / `-sanitize` - sanitize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 
 ### Examples
@@ -107,7 +107,7 @@ See also the example files created by the Makefile:
 
 **Individual pool player tournament**
 
-With 4 players and 2 winners per pool with sanatized names:
+With 4 players and 2 winners per pool with sanitized names:
 ```bash
 ./bin/bracket-creator create-pools -s -p 4 -f mock_data.csv -o output.xlsx
 ```
@@ -120,7 +120,7 @@ With 5 players per team:
 ```
 **Individual playoffs player tournament**
 
-Straight knockout with sanatized names:
+Straight knockout with sanitized names:
 ```bash
 ./bin/bracket-creator create-playoffs -s -f mock_data.csv -o output.xlsx
 ```

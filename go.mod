@@ -9,7 +9,7 @@ require (
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.9.0
 	github.com/xuri/excelize/v2 v2.8.1
-	golang.org/x/text v0.14.0
+	golang.org/x/text v0.19.0
 )
 
 require (

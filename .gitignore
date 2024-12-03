@@ -30,3 +30,4 @@ completions/
 manpages
 bin/
 output.xlsx
+square_prep/*

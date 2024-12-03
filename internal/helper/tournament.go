@@ -91,12 +91,12 @@ func CreatePools(players []Player, poolSize int) []Pool {
 		poolN := discoverPool(pools, player, poolSize)
 		// try and force same dojo
 		if poolN < 0 {
-			poolN = forceSameDojo(pools, player, poolSize)
+			poolN = forceSameDojo(pools, poolSize)
 		}
 
 		// try and force pool size
 		if poolN < 0 {
-			poolN = forcePoolSize(pools, player, poolSize)
+			poolN = forcePoolSize(pools, poolSize)
 			fmt.Printf("Added extra player to pool %d\n", poolN)
 		}
 		player.PoolPosition = len(pools[poolN].Players) + 1
@@ -143,7 +143,7 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 	}
 	return -1
 }
-func forceSameDojo(pools []Pool, player Player, poolSize int) int {
+func forceSameDojo(pools []Pool, poolSize int) int {
 	for i, pool := range pools {
 		if len(pool.Players) < poolSize {
 			return i
@@ -152,7 +152,7 @@ func forceSameDojo(pools []Pool, player Player, poolSize int) int {
 	return -1
 }
 
-func forcePoolSize(pools []Pool, player Player, poolSize int) int {
+func forcePoolSize(pools []Pool, poolSize int) int {
 
 	for i, j := 0, len(pools)-1; i <= j; i, j = i+1, j-1 {
 		if len(pools[i].Players) < poolSize+1 {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/xuri/excelize/v2"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {

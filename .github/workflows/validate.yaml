@@ -51,7 +51,7 @@ jobs:
       #  |_____|_|_| |_|\__|
       #
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v6
         with:
           version: v1.50.1
           skip-pkg-cache: true
@@ -66,7 +66,7 @@ jobs:
         run: go test ./... -race -coverprofile=coverage.txt -covermode=atomic
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           file: ./coverage.txt
           fail_ci_if_error: true
@@ -80,7 +80,7 @@ jobs:
       - name: Build the Docker image
         run: make VERSION=latest docker/build
       - name: Run the Anchore scan action
-        uses: anchore/scan-action@v3
+        uses: anchore/scan-action@v5
         with:
           image: "gitrgoliveira/bracket-creator:latest"
           output-format: json

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/xuri/excelize/v2"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int) map[string]MatchWinner {
@@ -47,9 +47,15 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 		startCell := startColName + fmt.Sprint(poolRow)
 		endCell := endColName + fmt.Sprint(poolRow)
 
-		f.SetCellStyle(sheetName, startCell, endCell, getPoolHeaderStyle(f))
-		f.MergeCell(sheetName, startCell, endCell)
-		f.SetCellFormula(sheetName, startCell, fmt.Sprintf("%s!%s", pool.sheetName, pool.cell))
+		if err := f.SetCellStyle(sheetName, startCell, endCell, getPoolHeaderStyle(f)); err != nil {
+			fmt.Println("Error setting cell style:", err)
+		}
+		if err := f.MergeCell(sheetName, startCell, endCell); err != nil {
+			fmt.Println("Error merging cells:", err)
+		}
+		if err := f.SetCellFormula(sheetName, startCell, fmt.Sprintf("%s!%s", pool.sheetName, pool.cell)); err != nil {
+			fmt.Println("Error setting cell formula:", err)
+		}
 
 		poolRow++
 		if teamMatches == 0 {
@@ -60,7 +66,9 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 		for _, match := range pool.Matches {
 			startCell = startColName + fmt.Sprint(poolRow)
 			endCell = endColName + fmt.Sprint(poolRow)
-			f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
+			if err := f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f)); err != nil {
+				fmt.Println("Error setting cell style:", err)
+			}
 
 			if teamMatches > 0 {
 				MatchHeader(f, sheetName, startColName, poolRow, middleColName, endColName)
@@ -75,9 +83,16 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 				poolRow++
 				startCell = startColName + fmt.Sprint(poolRow)
 				endCell = endColName + fmt.Sprint(poolRow)
-				f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
-				f.SetCellInt(sheetName, startCell, i+1)
-				f.SetCellInt(sheetName, endCell, i+1)
+				err := f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
+				if err != nil {
+					fmt.Println("Error setting cell style:", err)
+				}
+				if err := f.SetCellInt(sheetName, startCell, i+1); err != nil {
+					fmt.Println("Error setting cell int:", err)
+				}
+				if err := f.SetCellInt(sheetName, endCell, i+1); err != nil {
+					fmt.Println("Error setting cell int:", err)
+				}
 			}
 
 			if teamMatches > 0 {
@@ -87,10 +102,18 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 					fmt.Sprintf("%s!%s", match.SideA.sheetName, match.SideA.cell),
 					fmt.Sprintf("%s!%s", match.SideB.sheetName, match.SideB.cell))
 
-				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftVictoriesColName, poolRow), "V")
-				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftPointsColName, poolRow), "P")
-				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightVictoriesColName, poolRow), "V")
-				f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightPointsColName, poolRow), "P")
+				if err := f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftVictoriesColName, poolRow), "V"); err != nil {
+					fmt.Println("Error setting cell value:", err)
+				}
+				if err := f.SetCellValue(sheetName, fmt.Sprintf("%s%d", leftPointsColName, poolRow), "P"); err != nil {
+					fmt.Println("Error setting cell value:", err)
+				}
+				if err := f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightVictoriesColName, poolRow), "V"); err != nil {
+					fmt.Println("Error setting cell value:", err)
+				}
+				if err := f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rightPointsColName, poolRow), "P"); err != nil {
+					fmt.Println("Error setting cell value:", err)
+				}
 				poolRow++
 
 				startCell = startColName + fmt.Sprint(poolRow)

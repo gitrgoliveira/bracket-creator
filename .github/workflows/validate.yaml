@@ -80,7 +80,7 @@ jobs:
       - name: Build the Docker image
         run: make VERSION=latest docker/build
       - name: Run the Anchore scan action
-        uses: anchore/scan-action@v5
+        uses: anchore/scan-action@v6
         with:
           image: "gitrgoliveira/bracket-creator:latest"
           output-format: json

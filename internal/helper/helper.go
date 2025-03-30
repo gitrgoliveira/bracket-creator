@@ -102,6 +102,11 @@ func isDigit(ch byte) bool {
 }
 
 func ReadEntriesFromFile(filePath string) ([]string, error) {
+	// Check if the file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("file does not exist: %s", filePath)
+	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err

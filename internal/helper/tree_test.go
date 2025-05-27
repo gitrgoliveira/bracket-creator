@@ -3,7 +3,7 @@ package helper
 import (
 	"testing"
 
-	"github.com/xuri/excelize/v2"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 func TestSubdivideTree(t *testing.T) {
@@ -41,7 +41,7 @@ func TestSubdivideTree(t *testing.T) {
 	}
 
 	// Assert the values of the subtrees
-	expectedValues := []int{2, 3, 4, 5, 6, 7, 8}
+	expectedValues := []int64{2, 3, 4, 5, 6, 7, 8}
 	for _, expectedValue := range expectedValues {
 		found := false
 		for _, subtree := range subtrees {

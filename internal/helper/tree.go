@@ -16,11 +16,11 @@ type Node struct {
 	SheetName string
 
 	// match number
-	matchNum int
+	matchNum int64
 
 	// Pool Number or Cell value
 	LeafVal string
-	Val     int
+	Val     int64
 	Left    *Node
 	Right   *Node
 }

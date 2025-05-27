@@ -79,7 +79,7 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 }
 
 func FillInMatches(f *excelize.File, eliminationMatchRounds [][]*Node) {
-	matchNum := 1
+	var matchNum int64 = 1
 	for _, round := range eliminationMatchRounds {
 		for _, match := range round {
 			if match == nil {

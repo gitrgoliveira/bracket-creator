@@ -23,7 +23,7 @@ type Player struct {
 	DisplayName string
 	Dojo        string
 
-	PoolPosition int
+	PoolPosition int64
 
 	// Excel coordinates
 	sheetName string
@@ -51,7 +51,7 @@ func CreatePlayers(entries []string) []Player {
 			Name:         c.String(strings.TrimSpace(line[0])),
 			Dojo:         "NA",
 			DisplayName:  sanitizeName(line[0]),
-			PoolPosition: i,
+			PoolPosition: int64(i),
 		}
 
 		if len(line) >= 2 {
@@ -99,7 +99,7 @@ func CreatePools(players []Player, poolSize int) []Pool {
 			poolN = forcePoolSize(pools, poolSize)
 			fmt.Printf("Added extra player to pool %d\n", poolN)
 		}
-		player.PoolPosition = len(pools[poolN].Players) + 1
+		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
 		pools[poolN].Players = append(pools[poolN].Players, player)
 	}
 
@@ -116,7 +116,6 @@ func CreatePools(players []Player, poolSize int) []Pool {
 
 func discoverPool(pools []Pool, player Player, poolSize int) int {
 
-	sameDojo := false
 	for i, pool := range pools {
 
 		// making sure there's space first
@@ -124,23 +123,24 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 			continue
 		}
 
+		canAddToPool := true
 		for _, assignedPlayers := range pool.Players {
 			// try make sure that there aren't other players of the same dojo
 			if assignedPlayers.Dojo == player.Dojo ||
 				assignedPlayers.Name == player.Name {
-				sameDojo = true
+				canAddToPool = false
+				break
 			}
 		}
 
-		if !sameDojo {
+		// If the player can be added, return the pool index
+		if canAddToPool {
 			return i
 		}
 
 	}
 
-	if sameDojo {
-		return -2
-	}
+	// If no suitable pool is found, return -1
 	return -1
 }
 func forceSameDojo(pools []Pool, poolSize int) int {

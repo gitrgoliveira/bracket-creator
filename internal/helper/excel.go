@@ -87,10 +87,10 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 				if err != nil {
 					fmt.Println("Error setting cell style:", err)
 				}
-				if err := f.SetCellInt(sheetName, startCell, i+1); err != nil {
+				if err := f.SetCellInt(sheetName, startCell, int64(i+1)); err != nil {
 					fmt.Println("Error setting cell int:", err)
 				}
-				if err := f.SetCellInt(sheetName, endCell, i+1); err != nil {
+				if err := f.SetCellInt(sheetName, endCell, int64(i+1)); err != nil {
 					fmt.Println("Error setting cell int:", err)
 				}
 			}
@@ -269,8 +269,8 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 				startCell = startColName + fmt.Sprint(matchRow)
 				endCell = endColName + fmt.Sprint(matchRow)
 				f.SetCellStyle(sheetName, startCell, endCell, getTextStyle(f))
-				f.SetCellInt(sheetName, startCell, i+1)
-				f.SetCellInt(sheetName, endCell, i+1)
+				f.SetCellInt(sheetName, startCell, int64(i+1))
+				f.SetCellInt(sheetName, endCell, int64(i+1))
 			}
 
 			if numTeamMatches > 0 {
@@ -386,7 +386,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) 
 	}
 }
 
-func FillEstimations(f *excelize.File, numPools int, numPoolMatches int, extraPools int, teamSize int, numEliminationMatches int) {
+func FillEstimations(f *excelize.File, numPools int64, numPoolMatches int64, extraPools int64, teamSize int64, numEliminationMatches int64) {
 	sheetName := "Time Estimator"
 
 	if teamSize == 0 {

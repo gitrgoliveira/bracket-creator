@@ -82,7 +82,8 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 
 		inMemoryBuffer := new(bytes.Buffer)
 		inMemoryWriter := bufio.NewWriter(inMemoryBuffer)
-		if tournamentType == "pools" {
+		switch tournamentType {
+		case "pools":
 			o := &poolOptions{
 				singleTree:  singleTree,
 				sanitize:    sanitize,
@@ -99,8 +100,7 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 				fmt.Printf("failed to create pools: %s", err.Error())
 			}
 
-		} else if tournamentType == "playoffs" {
-
+		case "playoffs":
 			o := &playoffOptions{
 				singleTree:  singleTree,
 				sanitize:    sanitize,

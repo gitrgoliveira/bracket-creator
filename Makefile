@@ -1,7 +1,7 @@
 BIN_NAME=bracket-creator
 IMAGE_NAME=gitrgoliveira/${BIN_NAME}
 BIN_PATH=./bin
-GO_VERSION=1.21
+GO_VERSION=1.24.1
 
 default: help
 

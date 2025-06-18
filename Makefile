@@ -1,7 +1,7 @@
 BIN_NAME=bracket-creator
-IMAGE_NAME=gitrgoliveira/${BIN_NAME}
+IMAGE_NAME=ghcr.io/${GH_REPOSITORY:-gitrgoliveira/bracket-creator}
 BIN_PATH=./bin
-GO_VERSION=1.24.1
+GO_VERSION=1.24.4
 
 default: help
 

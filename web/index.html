@@ -1,160 +1,856 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kendo Tournament Creator</title>
+    <link rel="icon" type="image/jpeg" href="/static/favicon.jpeg">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <style>
-        body {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            /* height: 100vh; */
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --primary-color: #333;
+            --accent-color: #007bff;
+            --bg-color: #f8f9fa;
+            --text-color: #333;
+            --card-bg: #fff;
+            --card-border: #dee2e6;
         }
-        img {
-            display: block;
-            max-width: 25%;
-            height: auto;
+        
+        [data-theme="dark"] {
+            --primary-color: #fff;
+            --accent-color: #0d6efd;
+            --bg-color: #212529;
+            --text-color: #f8f9fa;
+            --card-bg: #343a40;
+            --card-border: #495057;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: all 0.3s ease;
+            min-height: 100vh;
+            padding: 20px 0;
+        }
+        
+        .logo-container {
+            text-align: center;
             margin-bottom: 20px;
         }
-        form {
+        
+        .logo-img {
+            max-width: 120px;
+            height: auto;
+        }
+        
+        .main-title {
+            color: var(--primary-color);
+            text-align: center;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        
+        .app-description {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .app-card {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--card-border);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .form-label {
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--primary-color);
+        }
+        
+        .options-section {
+            margin-bottom: 25px;
+            border-bottom: 1px solid var(--card-border);
+            padding-bottom: 15px;
+        }
+        
+        .submit-btn {
+            min-width: 150px;
+            padding: 10px 20px;
+            font-weight: 600;
+        }
+        
+        .options-title {
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            font-weight: 600;
+            font-size: 1.2rem;
+        }
+        
+        .themed-switch .form-check-input:checked {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        
+        .tooltip-icon {
+            cursor: help;
+            color: var(--accent-color);
+            margin-left: 5px;
+        }
+        
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
             display: flex;
-            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            visibility: hidden;
+            opacity: 0;
+            transition: visibility 0s, opacity 0.3s;
+        }
+        
+        #loading-overlay.active {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        .loading-spinner {
+            width: 70px;
+            height: 70px;
+        }
+        
+        #error-message {
+            display: none;
+            margin-top: 15px;
+        }
+        
+        #sample-data-buttons .btn {
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+        
+        #drop-area {
+            border: 2px dashed var(--card-border);
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: var(--text-color);
+            background-color: rgba(0, 0, 0, 0.02);
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: center;
             align-items: center;
         }
-        input[type="submit"] {
-            width: 150px;  /* Adjust as needed */
-            height: 50px;  /* Adjust as needed */
+        
+        [data-theme="dark"] #drop-area {
+            background-color: rgba(255, 255, 255, 0.05);
         }
-        #poolOptions, .tournamentType {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
+        
+        #drop-area:hover, #drop-area.dragover {
+            border-color: var(--accent-color);
+            background-color: rgba(0, 123, 255, 0.05);
+        }
+        
+        #drop-area .drop-message {
+            text-align: center;
+        }
+        
+        #drop-area .drop-message i {
+            display: block;
+            margin-bottom: 10px;
+            color: var(--accent-color);
+        }
+        
+        #drop-area .drop-message p {
+            margin-bottom: 0;
+            font-size: 0.9rem;
+        }
+        
+        #app-version {
+            font-size: 0.8rem;
+        }
+        
+        /* Add responsive styling */
+        @media (max-width: 767px) {
+            .app-card {
+                padding: 15px;
+            }
+            
+            #drop-area {
+                padding: 15px 5px;
+            }
         }
     </style>
 </head>
 <body>
-    <img src="/logo.jpeg" alt="Logo"/>
-    <h1>Kendo Tournament Creator</h1>
-    <summary>
-        This is a simple tool to create a tournament bracket for kendo tournaments.<br />
-        It can be used for any other sport or game as well.<br />
-        Source: <a href="https://github.com/gitrgoliveira/bracket-creator">https://github.com/gitrgoliveira/bracket-creator </a>
-    </summary>
+    <!-- Loading overlay -->
+    <div id="loading-overlay">
+        <div class="d-flex flex-column align-items-center">
+            <div class="spinner-border text-light loading-spinner mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="text-light mb-0">Creating tournament...</p>
+        </div>
+    </div>
     
-    <h2>Please enter a list of players/teams below</h2>
-    <p>
-    The list of names/teams should be <strong>one per line</strong> or as a CSV formatted list.
-    For example:
-    </p>
-<pre>
-First_Name1 Last_Name1, Dojo1
-First_Name2 Last_Name2, Dojo2
-</pre>
-    <p>
-    When using the CSV style, 'Dojo' is only used to try to ensure players/teams,<br />
-    don't meet someone of the same dojo <strong>when doing pools.</strong>
-    </p>
-    <br />
-
-    <form method="POST" action="/" onsubmit="return validateForm()">
-        <table>
-            <tr>
-                <td align="right">Single Tree:</td>
-                <td><input type="checkbox" name="singleTree"></td>
-            </tr>
-            <tr>
-                <td align="right">Convert to "LAST_NAME, F.":</td>
-                <td><input type="checkbox" name="sanitize"></td>
-            </tr>
-            <tr>
-                <td align="right">Do not Randomize:</td>
-                <td><input type="checkbox" name="determined"></td>
-            </tr>
-            <tr>
-                <td align="right">Team Matches:</td>
-                <td><input type="number" name="teamMatches" min="0" value="0"></td>
-            </tr>
-            <tr>
-                <td align="right">Playoffs</td>
-                <td><input type="radio" id="playoffs" name="tournamentType" value="playoffs" checked></td>
-            </tr>
-            <tr>
-                <td align="right">Pools and playoffs</td>
-                <td><input type="radio" id="pools" name="tournamentType" value="pools"></td>
-            </tr>
-            <tr id="winnersPerPoolRow">
-                <td align="right">Winners per pool:</td>
-                <td><input type="number" name="winnersPerPool" min="1" value="2"></td>
-            </tr>
-            <tr id="playersPerPoolRow" >
-                <td align="right">Players per pool:</td>
-                <td><input type="number" name="playersPerPool" min="1" value="3"></td>
-            </tr>
-            <tr id="roundRobinRow">
-                <td align="right">Round Robin pools:</td>
-                <td><input type="checkbox" name="roundRobin" checked></td>
-            </tr>            <tr>
-                <td colspan="2">
-                    <textarea name="playerList" id="playerList" rows="20" cols="50"></textarea>
-                </td>
-            </tr>
-            <tr>
-                <td colspan="2" align="center">
-                    <input type="submit" value="Submit the list">
-                </td>
-            </tr>
-        </table>
-    </form>
-        <br />
-    <br />
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-10 col-lg-8">
+                <!-- Header section -->
+                <div class="logo-container">
+                    <img src="/static/logo.jpeg" alt="Kendo Tournament Logo" class="logo-img">
+                    <h1 class="main-title">Kendo Tournament Creator</h1>
+                </div>
+                
+                <div class="app-description">
+                    <p class="mb-2">A simple tool to create tournament brackets for kendo tournaments and other sports.</p>
+                    <div class="d-flex justify-content-center align-items-center gap-3 mb-2">
+                        <a href="https://github.com/gitrgoliveira/bracket-creator" target="_blank" class="text-decoration-none">
+                            <i class="bi bi-github"></i> GitHub
+                        </a>
+                        <span class="badge bg-secondary" id="app-version">Loading...</span>
+                    </div>
+                </div>
+                
+                <!-- Main form card -->
+                <div class="app-card">
+                    <form id="tournamentForm" method="POST" action="/create" onsubmit="return validateForm()">
+                        <!-- Tournament type options -->
+                        <div class="options-section">
+                            <h3 class="options-title">Tournament Type</h3>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="radio" name="tournamentType" id="playoffs" value="playoffs" checked>
+                                        <label class="form-check-label" for="playoffs">
+                                            Playoffs (Knockout Tournament)
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="radio" name="tournamentType" id="pools" value="pools">
+                                        <label class="form-check-label" for="pools">
+                                            Pools and Playoffs
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Tournament options -->
+                        <div class="options-section">
+                            <h3 class="options-title">Tournament Options</h3>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="singleTree" id="singleTree">
+                                        <label class="form-check-label" for="singleTree">
+                                            Single Tree Format
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip" title="Generates a tournament bracket in a single tree format"></i>
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="sanitize" id="sanitize">
+                                        <label class="form-check-label" for="sanitize">
+                                            Format names as "LAST_NAME, F."
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip" title="Converts names to 'LAST_NAME, F.' format"></i>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="determined" id="determined">
+                                        <label class="form-check-label" for="determined">
+                                            Do not randomize
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip" title="Uses the exact order entered for the bracket"></i>
+                                        </label>
+                                    </div>
+                                    <div class="mb-2">
+                                        <label for="teamMatches" class="form-label">Team Matches:</label>
+                                        <input type="number" class="form-control form-control-sm" name="teamMatches" id="teamMatches" min="0" value="0">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Pool options (initially hidden) -->
+                        <div id="poolOptionsSection" class="options-section" style="display: none;">
+                            <h3 class="options-title">Pool Options</h3>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="winnersPerPool" class="form-label">Winners per pool:</label>
+                                    <input type="number" class="form-control" name="winnersPerPool" id="winnersPerPool" min="1" value="2">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="playersPerPool" class="form-label">Players per pool:</label>
+                                    <input type="number" class="form-control" name="playersPerPool" id="playersPerPool" min="1" value="3">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="roundRobin" id="roundRobin" checked>
+                                        <label class="form-check-label" for="roundRobin">
+                                            Round Robin pools
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip" title="Each player plays against all others in their pool"></i>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Player list section -->
+                        <div class="mb-4">
+                            <label for="playerList" class="form-label">Player/Team List</label>
+                            
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <small class="text-muted">One per line or CSV format</small>
+                                <div id="sample-data-buttons">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="loadSmallSample">Small Sample</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="loadMediumSample">Medium Sample</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="loadLargeSample">Large Sample</button>
+                                </div>
+                            </div>
+                            
+                            <div id="drop-area" class="mb-2">
+                                <div class="drop-message">
+                                    <i class="bi bi-cloud-arrow-up fs-3"></i>
+                                    <p>Drag and drop a CSV file here <br>or click to select a file</p>
+                                    <input type="file" id="file-input" accept=".csv,.txt" class="d-none">
+                                </div>
+                            </div>
+                            
+                            <textarea class="form-control" name="playerList" id="playerList" rows="10" 
+                                      placeholder="Enter player or team names (one per line):&#10;First_Name1 Last_Name1, Dojo1&#10;First_Name2 Last_Name2, Dojo2&#10;..."></textarea>
+                            
+                            <div class="form-text mt-2">
+                                <i class="bi bi-info-circle"></i> When using the CSV format, 'Dojo' is used to ensure players/teams don't meet someone from the same dojo when doing pools.
+                            </div>
+                            
+                            <!-- Tournament stats -->
+                            <div class="d-flex justify-content-between align-items-center mt-3">
+                                <button type="button" class="btn btn-sm btn-outline-info" id="showStatistics">
+                                    <i class="bi bi-graph-up"></i> Show Statistics
+                                </button>
+                                <span id="playerCount" class="badge bg-secondary">0 players</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Error message area -->
+                        <div id="error-message" class="alert alert-danger" role="alert"></div>
+                        
+                        <!-- Stats modal -->
+                        <div class="modal fade" id="statsModal" tabindex="-1" aria-labelledby="statsModalLabel" aria-hidden="true">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="statsModalLabel">Tournament Statistics</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <div id="statsContent">
+                                            <div class="mb-3">
+                                                <strong>Total Players/Teams:</strong> <span id="modalPlayerCount">0</span>
+                                            </div>
+                                            <div class="mb-3">
+                                                <strong>Number of Dojos:</strong> <span id="dojoCount">0</span>
+                                            </div>
+                                            <div class="mb-3" id="poolStatsSection">
+                                                <strong>Pools Information:</strong>
+                                                <ul class="mt-2">
+                                                    <li>Number of Pools: <span id="poolCount">0</span></li>
+                                                    <li>Players per Pool: <span id="statsPlayersPerPool">0</span></li>
+                                                    <li>Winners per Pool: <span id="statsWinnersPerPool">0</span></li>
+                                                    <li>Total playoff participants: <span id="playoffParticipants">0</span></li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Form submission -->
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                            <button type="submit" class="btn btn-primary submit-btn">
+                                Create Tournament
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- Theme toggle card -->
+                <div class="d-flex justify-content-center mb-3">
+                    <div class="form-check form-switch themed-switch">
+                        <input class="form-check-input" type="checkbox" id="themeToggle">
+                        <label class="form-check-label" for="themeToggle">Dark Mode</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Validates the form by checking if the player list is empty or not.
-        // Returns true if the player list is not empty, false otherwise.
-        function validateForm() {
-            var playerList = document.getElementById('playerList').value;
-            if (playerList.trim() === '') {
-                alert('Player list cannot be empty');
-                return false;
+        // Fetch application version from API
+        async function fetchAppVersion() {
+            try {
+                const response = await fetch('/api/status');
+                if (response.ok) {
+                    const data = await response.json();
+                    const versionBadge = document.getElementById('app-version');
+                    versionBadge.textContent = `v${data.version}`;
+                    versionBadge.title = `Build: ${data.buildDate}\n${data.osArch}\n${data.goVersion}`;
+                    
+                    // Initialize tooltip for version badge
+                    new bootstrap.Tooltip(versionBadge, {
+                        placement: 'bottom',
+                        html: true
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to fetch version:', error);
+                document.getElementById('app-version').textContent = 'v?.?.?';
             }
-            return true;
         }
-
-        // Load saved values from localStorage
-        document.querySelectorAll('input[name="tournamentType"]').forEach(function(el) {
-            if (localStorage.getItem('tournamentType') === el.value) {
-                el.checked = true;
+        
+        // Theme toggle functionality
+        const themeToggle = document.getElementById('themeToggle');
+        
+        // Check for saved theme preference or use preferred color scheme
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.body.setAttribute('data-theme', 'dark');
+            themeToggle.checked = true;
+        }
+        
+        // Toggle theme
+        themeToggle.addEventListener('change', () => {
+            if (themeToggle.checked) {
+                document.body.setAttribute('data-theme', 'dark');
+                localStorage.setItem('theme', 'dark');
+            } else {
+                document.body.removeAttribute('data-theme');
+                localStorage.setItem('theme', 'light');
             }
         });
-        document.querySelector('input[name="winnersPerPool"]').value = localStorage.getItem('winnersPerPool') || '';
-        document.querySelector('input[name="playersPerPool"]').value = localStorage.getItem('playersPerPool') || '';
-        document.querySelector('input[name="roundRobin"]').checked = localStorage.getItem('roundRobin') === 'true';
-        document.querySelector('textarea[name="playerList"]').value = localStorage.getItem('teplayerListxt') || '';
-
+        
+        // Form validation
+        function validateForm() {
+            const playerList = document.getElementById('playerList').value.trim();
+            const errorMsg = document.getElementById('error-message');
+            let isValid = true;
+            
+            errorMsg.style.display = 'none';
+            
+            // Check if player list is empty
+            if (playerList === '') {
+                errorMsg.textContent = 'Error: Player list cannot be empty';
+                errorMsg.style.display = 'block';
+                isValid = false;
+            }
+            
+            if (document.getElementById('pools').checked) {
+                const winnersPerPool = parseInt(document.getElementById('winnersPerPool').value);
+                const playersPerPool = parseInt(document.getElementById('playersPerPool').value);
+                
+                if (winnersPerPool <= 0) {
+                    errorMsg.textContent = 'Error: Winners per pool must be at least 1';
+                    errorMsg.style.display = 'block';
+                    isValid = false;
+                }
+                
+                if (playersPerPool <= 0) {
+                    errorMsg.textContent = 'Error: Players per pool must be at least 1';
+                    errorMsg.style.display = 'block';
+                    isValid = false;
+                }
+                
+                if (winnersPerPool >= playersPerPool) {
+                    errorMsg.textContent = 'Error: Winners per pool must be less than players per pool';
+                    errorMsg.style.display = 'block';
+                    isValid = false;
+                }
+            }
+            
+            if (isValid) {
+                const lines = playerList.split('\n').filter(line => line.trim() !== '');
+                const tournamentType = document.getElementById('pools').checked ? 'Pools and Playoffs' : 'Playoffs';
+                
+                // Show confirmation dialog
+                if (confirm(`You are about to create a ${tournamentType} tournament with ${lines.length} participants.\nAre you sure you want to continue?`)) {
+                    // Show loading overlay
+                    document.getElementById('loading-overlay').classList.add('active');
+                    return true;
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        
+        // Tournament type toggle functionality
+        document.getElementById('playoffs').addEventListener('change', function() {
+            document.getElementById('poolOptionsSection').style.display = 'none';
+        });
+        
+        document.getElementById('pools').addEventListener('change', function() {
+            document.getElementById('poolOptionsSection').style.display = 'block';
+        });
+        
+        // Initialize tooltips
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        })
+        
+        // Load saved values from localStorage
+        window.addEventListener('DOMContentLoaded', () => {
+            // Tournament type
+            const savedTournamentType = localStorage.getItem('tournamentType');
+            if (savedTournamentType) {
+                document.getElementById(savedTournamentType).checked = true;
+                if (savedTournamentType === 'pools') {
+                    document.getElementById('poolOptionsSection').style.display = 'block';
+                }
+            }
+            
+            // Other form values
+            const formElements = {
+                'singleTree': 'checked',
+                'sanitize': 'checked',
+                'determined': 'checked',
+                'teamMatches': 'value',
+                'winnersPerPool': 'value',
+                'playersPerPool': 'value',
+                'roundRobin': 'checked',
+                'playerList': 'value'
+            };
+            
+            Object.entries(formElements).forEach(([id, prop]) => {
+                const savedValue = localStorage.getItem(id);
+                if (savedValue !== null) {
+                    if (prop === 'checked') {
+                        document.getElementById(id).checked = savedValue === 'true';
+                    } else {
+                        document.getElementById(id).value = savedValue;
+                    }
+                }
+            });
+            
+            // Fix for the playerList typo in the old version
+            const oldPlayerList = localStorage.getItem('teplayerListxt');
+            if (oldPlayerList) {
+                document.getElementById('playerList').value = oldPlayerList;
+                localStorage.setItem('playerList', oldPlayerList);
+                localStorage.removeItem('teplayerListxt');
+            }
+        });
+        
         // Save values to localStorage on input change
         document.querySelectorAll('input, textarea').forEach(function(el) {
             el.addEventListener('input', function() {
-                if (this.name === 'tournamentType' && !this.checked) {
+                if (this.type === 'radio' && !this.checked) {
                     return;
                 }
-                localStorage.setItem(this.name, this.type === 'checkbox' ? this.checked : this.value);
+                localStorage.setItem(this.id || this.name, this.type === 'checkbox' ? this.checked : this.value);
             });
         });
-
-        document.getElementById('playoffs').addEventListener('change', function() {
-            document.getElementById('winnersPerPoolRow').style.display = this.checked ? 'none' : '';
-            document.getElementById('playersPerPoolRow').style.display = this.checked ? 'none' : '';
-            document.getElementById('roundRobinRow').style.display = this.checked ? 'none' : '';
+        
+        // Sample data loading functions
+        const sampleData = {
+            small: `Kevin Clark, Team Alpha
+Luke Rodriguez, Team Beta
+Michael Lewis, Team Gamma
+Nathan Lee, Team Delta
+Oliver Walker, Team Epsilon
+Paul Hall, Team Alpha
+Quentin Allen, Team Beta
+Robert Young, Team Gamma
+Steven Hernandez, Team Delta
+Thomas King, Team Epsilon`,
+            medium: `Kevin Clark, Team Alpha
+Luke Rodriguez, Team Beta
+Michael Lewis, Team Gamma
+Nathan Lee, Team Delta
+Oliver Walker, Team Epsilon
+Paul Hall, Team Alpha
+Quentin Allen, Team Beta
+Robert Young, Team Gamma
+Steven Hernandez, Team Delta
+Thomas King, Team Epsilon
+Ulysses Garcia, Team Alpha
+Vincent Moore, Team Beta
+William Wright, Team Gamma
+Xavier Thompson, Team Delta
+Yusuf Robinson, Team Epsilon
+Zachary Scott, Team Alpha
+Adrian Hill, Team Beta
+Benjamin Carter, Team Gamma`,
+            large: `Kevin Clark, Team Alpha
+Luke Rodriguez, Team Beta
+Michael Lewis, Team Gamma
+Nathan Lee, Team Delta
+Oliver Walker, Team Epsilon
+Paul Hall, Team Alpha
+Quentin Allen, Team Beta
+Robert Young, Team Gamma
+Steven Hernandez, Team Delta
+Thomas King, Team Epsilon
+Ulysses Garcia, Team Alpha
+Vincent Moore, Team Beta
+William Wright, Team Gamma
+Xavier Thompson, Team Delta
+Yusuf Robinson, Team Epsilon
+Zachary Scott, Team Alpha
+Adrian Hill, Team Beta
+Benjamin Carter, Team Gamma
+Charles Phillips, Team Delta
+Daniel Evans, Team Epsilon
+Edward Collins, Team Alpha
+Frank Torres, Team Beta
+George Jenkins, Team Gamma
+Henry Turner, Team Delta
+Isaac Parker, Team Epsilon
+Jack Adams, Team Alpha`
+        };
+        
+        document.getElementById('loadSmallSample').addEventListener('click', function() {
+            document.getElementById('playerList').value = sampleData.small;
+            localStorage.setItem('playerList', sampleData.small);
         });
-
-        document.getElementById('pools').addEventListener('change', function() {
-            document.getElementById('winnersPerPoolRow').style.display = this.checked ? '' : 'none';
-            document.getElementById('playersPerPoolRow').style.display = this.checked ? '' : 'none';
-            document.getElementById('roundRobinRow').style.display = this.checked ? '' : 'none';
+        
+        document.getElementById('loadMediumSample').addEventListener('click', function() {
+            document.getElementById('playerList').value = sampleData.medium;
+            localStorage.setItem('playerList', sampleData.medium);
         });
-
+        
+        document.getElementById('loadLargeSample').addEventListener('click', function() {
+            document.getElementById('playerList').value = sampleData.large;
+            localStorage.setItem('playerList', sampleData.large);
+        });
+        
+        // File drag & drop functionality
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('file-input');
+        const playerListTextarea = document.getElementById('playerList');
+        
+        // Open file selector when clicking drop area
+        dropArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+        
+        // Handle file selection
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                readFile(file);
+            }
+        });
+        
+        // Handle drag events
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => {
+                dropArea.classList.add('dragover');
+            }, false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => {
+                dropArea.classList.remove('dragover');
+            }, false);
+        });
+        
+        dropArea.addEventListener('drop', (e) => {
+            const files = e.dataTransfer.files;
+            if (files.length) {
+                readFile(files[0]);
+            }
+        });
+        
+        // Read CSV or TXT file contents
+        function readFile(file) {
+            if (file.type !== "text/csv" && file.type !== "text/plain" && !file.name.endsWith('.csv') && !file.name.endsWith('.txt')) {
+                const errorMsg = document.getElementById('error-message');
+                errorMsg.textContent = 'Error: Please upload a CSV or text file';
+                errorMsg.style.display = 'block';
+                setTimeout(() => {
+                    errorMsg.style.display = 'none';
+                }, 3000);
+                return;
+            }
+            
+            const reader = new FileReader();
+            
+            // Add loading indicator
+            const dropArea = document.getElementById('drop-area');
+            dropArea.innerHTML = `
+                <div class="drop-message">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Reading file...</p>
+                </div>
+            `;
+            
+            reader.onload = function(e) {
+                playerListTextarea.value = e.target.result;
+                localStorage.setItem('playerList', e.target.result);
+                
+                // Success feedback
+                playerListTextarea.classList.add('border-success');
+                
+                // Restore drop area
+                dropArea.innerHTML = `
+                    <div class="drop-message">
+                        <i class="bi bi-check-circle-fill text-success fs-3"></i>
+                        <p>File loaded successfully!<br>Drag & drop another file or click to select</p>
+                        <input type="file" id="file-input" accept=".csv,.txt" class="d-none">
+                    </div>
+                `;
+                
+                // Reattach event listener to the new file input
+                document.getElementById('file-input').addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        readFile(file);
+                    }
+                });
+                
+                setTimeout(() => {
+                    playerListTextarea.classList.remove('border-success');
+                    
+                    // Restore original drop area after success message
+                    dropArea.innerHTML = `
+                        <div class="drop-message">
+                            <i class="bi bi-cloud-arrow-up fs-3"></i>
+                            <p>Drag and drop a CSV file here <br>or click to select a file</p>
+                            <input type="file" id="file-input" accept=".csv,.txt" class="d-none">
+                        </div>
+                    `;
+                    
+                    // Reattach event listener to the new file input
+                    document.getElementById('file-input').addEventListener('change', (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                            readFile(file);
+                        }
+                    });
+                }, 2000);
+            };
+            
+            reader.onerror = function() {
+                dropArea.innerHTML = `
+                    <div class="drop-message">
+                        <i class="bi bi-exclamation-triangle-fill text-danger fs-3"></i>
+                        <p>Error reading file!<br>Please try again</p>
+                        <input type="file" id="file-input" accept=".csv,.txt" class="d-none">
+                    </div>
+                `;
+                
+                // Reattach event listener to the new file input
+                document.getElementById('file-input').addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        readFile(file);
+                    }
+                });
+            };
+            
+            reader.readAsText(file);
+        }
+        
+        // Update player count badge and calculate statistics
+        function updatePlayerCount() {
+            const playerList = document.getElementById('playerList').value.trim();
+            const lines = playerList.split('\n').filter(line => line.trim() !== '');
+            const count = lines.length;
+            
+            document.getElementById('playerCount').textContent = count + (count === 1 ? ' player' : ' players');
+            
+            return lines;
+        }
+        
+        // Calculate and display statistics
+        function calculateStatistics() {
+            const lines = updatePlayerCount();
+            const totalPlayers = lines.length;
+            document.getElementById('modalPlayerCount').textContent = totalPlayers;
+            
+            // Count unique dojos
+            const dojos = new Set();
+            lines.forEach(line => {
+                const parts = line.split(',');
+                if (parts.length > 1) {
+                    const dojo = parts[1].trim();
+                    if (dojo) {
+                        dojos.add(dojo);
+                    }
+                }
+            });
+            document.getElementById('dojoCount').textContent = dojos.size;
+            
+            // Calculate pool statistics
+            const isTournamentPools = document.getElementById('pools').checked;
+            const poolStatsSection = document.getElementById('poolStatsSection');
+            
+            if (isTournamentPools) {
+                poolStatsSection.style.display = 'block';
+                
+                const playersPerPool = parseInt(document.getElementById('playersPerPool').value) || 3;
+                const winnersPerPool = parseInt(document.getElementById('winnersPerPool').value) || 2;
+                
+                // Calculate number of pools needed
+                const numPools = Math.ceil(totalPlayers / playersPerPool);
+                const playoffParticipants = numPools * winnersPerPool;
+                
+                document.getElementById('poolCount').textContent = numPools;
+                document.getElementById('statsPlayersPerPool').textContent = playersPerPool;
+                document.getElementById('statsWinnersPerPool').textContent = winnersPerPool;
+                document.getElementById('playoffParticipants').textContent = playoffParticipants;
+            } else {
+                poolStatsSection.style.display = 'none';
+            }
+            
+            // Show the modal
+            const statsModal = new bootstrap.Modal(document.getElementById('statsModal'));
+            statsModal.show();
+        }
+        
+        // Setup event listeners for statistics
+        document.getElementById('showStatistics').addEventListener('click', calculateStatistics);
+        document.getElementById('playerList').addEventListener('input', updatePlayerCount);
+        document.getElementById('playersPerPool').addEventListener('input', updatePlayerCount);
+        document.getElementById('winnersPerPool').addEventListener('input', updatePlayerCount);
+        
+        // Call version fetch and initialize player count on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchAppVersion();
+            updatePlayerCount();
+        });
     </script>
 </body>
 </html>

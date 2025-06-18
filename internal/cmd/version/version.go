@@ -44,3 +44,28 @@ OS / Arch : %s
 func Print() {
 	fmt.Println(generateOutput())
 }
+
+// GetVersion returns the current version
+func GetVersion() string {
+	return version
+}
+
+// GetGitCommit returns the git commit
+func GetGitCommit() string {
+	return gitCommit
+}
+
+// GetBuildDate returns the build date
+func GetBuildDate() string {
+	return buildDate
+}
+
+// GetGoVersion returns the go version
+func GetGoVersion() string {
+	return goVersion
+}
+
+// GetOsArch returns the OS and architecture
+func GetOsArch() string {
+	return osArch
+}

@@ -31,9 +31,9 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 			if sanitize {
 				f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName)
 			}
-			pools[i].cell = fmt.Sprintf("A%d", row)
+			pools[i].cell = fmt.Sprintf("$A$%d", row)
 			pools[i].Players[j].sheetName = sheetName
-			pools[i].Players[j].cell = fmt.Sprintf("B%d", row)
+			pools[i].Players[j].cell = fmt.Sprintf("$B$%d", row)
 			row++
 		}
 	}
@@ -67,7 +67,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 		if sanitize {
 			f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), players[i].DisplayName)
 		}
-		players[i].cell = fmt.Sprintf("B%d", row)
+		players[i].cell = fmt.Sprintf("$B$%d", row)
 		row++
 	}
 

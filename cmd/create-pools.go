@@ -11,7 +11,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/spf13/cobra"
 
-	"github.com/xuri/excelize/v2"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 type poolOptions struct {
@@ -132,7 +132,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}()
 
 	if o.sanitize {
-		fmt.Println("Sanatizing names")
+		fmt.Println("Sanitizing names")
 	}
 
 	helper.AddPoolDataToSheet(f, pools, o.sanitize)
@@ -215,7 +215,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	helper.CreateNamesWithPoolToPrint(f, pools, o.sanitize)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
-	helper.FillEstimations(f, len(pools), len(pools[0].Matches), 0, o.teamMatches, len(finals)-1)
+	helper.FillEstimations(f, int64(len(pools)), int64(len(pools[0].Matches)), 0, int64(o.teamMatches), int64(len(finals)-1))
 
 	// Save the spreadsheet file
 	err = f.Write(o.outputWriter)

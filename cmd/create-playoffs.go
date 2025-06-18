@@ -11,7 +11,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/spf13/cobra"
 
-	"github.com/xuri/excelize/v2"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 type playoffOptions struct {
@@ -95,13 +95,13 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	templateFile, err := helper.TemplateFile.Open("template.xlsx")
 	if err != nil {
 		fmt.Println(err)
-		return nil
+		return err
 	}
 
 	f, err := excelize.OpenReader(templateFile)
 	if err != nil {
 		fmt.Println(err)
-		return nil
+		return err
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -110,7 +110,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	}()
 
 	if o.sanitize {
-		fmt.Println("Sanatizing names")
+		fmt.Println("Sanitizing names")
 	}
 
 	helper.AddPlayerDataToSheet(f, players, o.sanitize)
@@ -144,7 +144,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if err != nil {
 		fmt.Println("Could not find Tree sheet")
 		fmt.Println(err)
-		return nil
+		return err
 	}
 
 	// adding extra sheets
@@ -156,7 +156,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		if err != nil {
 			fmt.Printf("Could not copy sheet %d\n", treeSheet)
 			fmt.Println(err)
-			return nil
+			return err
 		}
 
 		depth := helper.CalculateDepth(subtrees[i])
@@ -169,7 +169,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if err != nil {
 		fmt.Println("Could not find Tree sheet")
 		fmt.Println(err)
-		return nil
+		return err
 	}
 
 	depth := helper.CalculateDepth(tree)
@@ -192,7 +192,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	helper.CreateNamesToPrint(f, players, o.sanitize)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
-	helper.FillEstimations(f, 0, 0, 0, o.teamMatches, len(names)-1)
+	helper.FillEstimations(f, 0, 0, 0, int64(o.teamMatches), int64(len(names)-1))
 
 	// Save the spreadsheet file
 	err = f.Write(o.outputWriter)

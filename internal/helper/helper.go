@@ -56,6 +56,8 @@ func RemoveDuplicates(input []string) []string {
 		if str != "" && !uniqueStrings[str] {
 			uniqueStrings[str] = true
 			result = append(result, str)
+		} else {
+			fmt.Printf("Warning: Duplicate found - %s\n", str)
 		}
 	}
 

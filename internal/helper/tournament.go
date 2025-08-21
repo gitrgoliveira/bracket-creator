@@ -108,7 +108,7 @@ func CreatePools(players []Player, poolSize int) []Pool {
 		if i > 25 {
 			char = char + char
 		}
-		pools[i].PoolName = fmt.Sprintf("Pool %s", string(char))
+		pools[i].PoolName = fmt.Sprintf("Pool %s", char)
 	}
 
 	return pools

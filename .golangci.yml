@@ -1,48 +1,45 @@
+version: "2"
+
 run:
   timeout: 5m
   modules-download-mode: readonly
 
 linters:
   enable:
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
-    - goimports
     - misspell
     - revive
     - gosec
     - unconvert
   disable:
     - errcheck
-
-linters-settings:
-  revive:
-    # Disable unused parameter checks for now to avoid noise
+  settings:
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+  exclusions:
     rules:
-      - name: unused-parameter
-        disabled: true
+      - path: _test\.go
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
 
 issues:
-  # Maximum issues count per one linter.
-  # Set to 0 to disable.
   max-issues-per-linter: 0
-  # Maximum count of issues with the same text.
-  # Set to 0 to disable.
   max-same-issues: 0
-  
-  # Excluding configuration per-path and per-linter
-  exclude-rules:
-    # Exclude some linters from running on tests files.
-    - path: _test\.go
-      linters:
-        - gosec
 
 output:
   formats:
-    - format: colored-line-number
+    text:
       path: stdout
-  print-issued-lines: true
-  print-linter-name: true
+      print-issued-lines: true
+      print-linter-name: true
+      colors: true

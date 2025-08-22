@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   bracket-creator:
-    # build: .
+    build: .
     image: ghcr.io/gitrgoliveira/bracket-creator/bracket-creator:latest
     environment:
       - BIND_ADDRESS=0.0.0.0

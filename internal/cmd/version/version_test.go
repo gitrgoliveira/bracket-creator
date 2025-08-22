@@ -23,12 +23,40 @@ func TestGenerateOutput(t *testing.T) {
 }
 
 func TestPrint(t *testing.T) {
-	r, w, _ := os.Pipe()
+	// Save the original stdout
+	originalStdout := os.Stdout
+	defer func() { os.Stdout = originalStdout }()
+
+	// Create a pipe
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Error creating pipe: %v", err)
+	}
+
+	// Set stdout to the pipe writer
 	os.Stdout = w
+
+	// Call the function
 	Print()
-	w.Close()
 
-	out, _ := io.ReadAll(r)
+	// Close the writer to avoid deadlock and flush all data
+	err = w.Close()
+	if err != nil {
+		t.Fatalf("Error closing writer: %v", err)
+	}
 
+	// Read the output from the pipe
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("Error reading from pipe: %v", err)
+	}
+
+	// Close the reader
+	err = r.Close()
+	if err != nil {
+		t.Fatalf("Error closing reader: %v", err)
+	}
+
+	// Assert the output
 	assert.Regexp(t, regexp, string(out))
 }

@@ -23,7 +23,9 @@ var manCmd = &cobra.Command{
 
 		manPage = manPage.WithSection("Copyright", "(C) 2023 Ricardo Oliveira <oliveira.rg@gmail.com>")
 
-		fmt.Fprint(os.Stdout, manPage.Build(roff.NewDocument()))
+		if _, err := fmt.Fprint(os.Stdout, manPage.Build(roff.NewDocument())); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing man page: %v\n", err)
+		}
 	},
 }
 

@@ -43,8 +43,12 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
-	cmd.MarkFlagRequired("file")
-	cmd.MarkFlagRequired("output")
+	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
+	}
+	if err := cmd.MarkPersistentFlagRequired("output"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error marking output flag as required: %v\n", err)
+	}
 
 	return cmd
 }
@@ -64,10 +68,18 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open output file: %w", err)
 	}
-	defer outputFile.Close()
+	defer func() {
+		if err := outputFile.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing output file: %v\n", err)
+		}
+	}()
 
 	o.outputWriter = bufio.NewWriter(outputFile)
-	defer o.outputWriter.Flush()
+	defer func() {
+		if err := o.outputWriter.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error flushing output buffer: %v\n", err)
+		}
+	}()
 
 	err = o.createPlayoffs(entries)
 	if err != nil {
@@ -165,11 +177,9 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false)
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false)
 	}
-	f.DeleteSheet("Tree")
-	if err != nil {
-		fmt.Println("Could not find Tree sheet")
-		fmt.Println(err)
-		return err
+	if err := f.DeleteSheet("Tree"); err != nil {
+		// Ignore sheet not exist error
+		fmt.Println("Note: Tree sheet might not exist:", err)
 	}
 
 	depth := helper.CalculateDepth(tree)
@@ -184,8 +194,14 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	helper.FillInMatches(f, eliminationMatchRounds)
 
 	var matchWinners map[string]helper.MatchWinner
-	f.DeleteSheet("Pool Draw")
-	f.DeleteSheet("Pool Matches")
+	if err := f.DeleteSheet("Pool Draw"); err != nil {
+		// Ignore sheet not exist error
+		fmt.Println("Note: Pool Draw sheet might not exist:", err)
+	}
+	if err := f.DeleteSheet("Pool Matches"); err != nil {
+		// Ignore sheet not exist error
+		fmt.Println("Note: Pool Matches sheet might not exist:", err)
+	}
 
 	// hurray! they are all winners
 	matchWinners = helper.ConvertPlayersToWinners(players, o.sanitize)

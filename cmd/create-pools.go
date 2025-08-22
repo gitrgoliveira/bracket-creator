@@ -49,8 +49,12 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
-	cmd.MarkFlagRequired("file")
-	cmd.MarkFlagRequired("output")
+	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
+	}
+	if err := cmd.MarkPersistentFlagRequired("output"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error marking output flag as required: %v\n", err)
+	}
 
 	return cmd
 }
@@ -70,10 +74,18 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open output file: %w", err)
 	}
-	defer outputFile.Close()
+	defer func() {
+		if err := outputFile.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing output file: %v\n", err)
+		}
+	}()
 
 	o.outputWriter = bufio.NewWriter(outputFile)
-	defer o.outputWriter.Flush()
+	defer func() {
+		if err := o.outputWriter.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error flushing output buffer: %v\n", err)
+		}
+	}()
 
 	err = o.createPools(entries)
 	if err != nil {
@@ -137,7 +149,9 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	helper.AddPoolDataToSheet(f, pools, o.sanitize)
 
-	helper.AddPoolsToSheet(f, pools)
+	if err := helper.AddPoolsToSheet(f, pools); err != nil {
+		fmt.Fprintf(os.Stderr, "Error adding pools to sheet: %v\n", err)
+	}
 	finals := helper.GenerateFinals(pools, o.poolWinners)
 
 	fmt.Printf("There will be %d finalists\n", len(finals))
@@ -187,11 +201,8 @@ func (o *poolOptions) createPools(entries []string) error {
 
 		helper.AddPoolsToTree(f, subtreeSheet, pools[i*numPools:lastPos])
 	}
-	f.DeleteSheet("Tree")
-	if err != nil {
-		fmt.Println("Could not find Tree sheet")
-		fmt.Println(err)
-		return nil
+	if err := f.DeleteSheet("Tree"); err != nil {
+		fmt.Println("Note: Tree sheet might not exist:", err)
 	}
 
 	depth := helper.CalculateDepth(tree)

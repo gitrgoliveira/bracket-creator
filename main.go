@@ -4,7 +4,8 @@ import (
 	"embed"
 
 	"github.com/gitrgoliveira/bracket-creator/cmd"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper" // Keep for compatibility during transition
+	"github.com/gitrgoliveira/bracket-creator/internal/resources"
 )
 
 //go:embed web/*
@@ -14,7 +15,13 @@ var webFiles embed.FS
 var templateFile embed.FS
 
 func main() {
+	// Create resource handler
+	res := resources.NewResources(webFiles, templateFile)
+
+	// For compatibility during transition
 	helper.WebFs = webFiles
 	helper.TemplateFile = templateFile
-	cmd.Execute()
+
+	// Execute commands with resources
+	cmd.ExecuteWithResources(res)
 }

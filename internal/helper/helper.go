@@ -5,8 +5,10 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 var WebFs embed.FS
@@ -104,16 +106,27 @@ func isDigit(ch byte) bool {
 }
 
 func ReadEntriesFromFile(filePath string) ([]string, error) {
-	// Check if the file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("file does not exist: %s", filePath)
+	// Validate file path to prevent directory traversal attacks
+	cleanPath := filepath.Clean(filePath)
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	file, err := os.Open(filePath)
+	// Check if the file exists
+	if _, err := os.Stat(cleanPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("file does not exist: %s", cleanPath)
+	}
+
+	// #nosec G304 - file path is validated above
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing file: %v\n", err)
+		}
+	}()
 
 	var entries []string
 	scanner := bufio.NewScanner(file)

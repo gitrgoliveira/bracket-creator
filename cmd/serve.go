@@ -225,7 +225,12 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 		}
 
 		// Ensure data is written to the buffer
-		inMemoryWriter.Flush()
+		if err := inMemoryWriter.Flush(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("Failed to flush buffer: %s", err.Error()),
+			})
+			return
+		}
 
 		if inMemoryBuffer.Len() == 0 {
 			c.JSON(http.StatusInternalServerError, gin.H{

@@ -44,11 +44,11 @@ theme:
 nav:
   - Home: index.md
   - Golang CLI template:
-      - Features: bracket-creator/features.md
-      - Getting started: bracket-creator/getting-started.md
+      - Features: golang-cli-template/features.md
+      - Getting started: golang-cli-template/getting-started.md
       - Customization:
-          - Release: bracket-creator/customization/release.md
-          - Documentation: bracket-creator/customization/doc.md
+          - Release: golang-cli-template/customization/release.md
+          - Documentation: golang-cli-template/customization/doc.md
 
   - User guide:
       - Installation: user-guide/getting-started.md

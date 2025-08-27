@@ -106,8 +106,8 @@ func TestWriteTreeValue(t *testing.T) {
 	sheetName := "Sheet1"
 	f.NewSheet(sheetName)
 
-	// Call writeTreeValue
-	writeTreeValue(f, sheetName, 1, 1, "Test Value")
+	// Test 1: Call writeTreeValue with nil matchWinners (should set static value)
+	writeTreeValue(f, sheetName, 1, 1, "Test Value", nil)
 
 	// Verify the value was set (column 2, row 1 corresponds to B1)
 	cellRef, _ := excelize.CoordinatesToCellName(2, 1)
@@ -118,6 +118,41 @@ func TestWriteTreeValue(t *testing.T) {
 
 	if value != "Test Value" {
 		t.Errorf("Expected cell value to be 'Test Value', got '%s'", value)
+	}
+
+	// Test 2: Test with matchWinners map (should create formula)
+	matchWinners := map[string]MatchWinner{
+		"A.1": {
+			sheetName: "Pool Matches",
+			cell:      "G10",
+		},
+	}
+
+	writeTreeValue(f, sheetName, 1, 2, "A.1", matchWinners)
+
+	// Verify the formula was set (column 2, row 2 corresponds to B2)
+	cellRef2, _ := excelize.CoordinatesToCellName(2, 2)
+	formula, err := f.GetCellFormula(sheetName, cellRef2)
+	if err != nil {
+		t.Fatalf("Error getting cell formula: %v", err)
+	}
+
+	expectedFormula := `CONCATENATE("Pool A.1 ",'Pool Matches'!G10)`
+	if formula != expectedFormula {
+		t.Errorf("Expected formula to be '%s', got '%s'", expectedFormula, formula)
+	}
+
+	// Test 3: Test with pool reference not in matchWinners (should set static value)
+	writeTreeValue(f, sheetName, 1, 3, "B.2", matchWinners)
+
+	cellRef3, _ := excelize.CoordinatesToCellName(2, 3)
+	value3, err := f.GetCellValue(sheetName, cellRef3)
+	if err != nil {
+		t.Fatalf("Error getting cell value: %v", err)
+	}
+
+	if value3 != "B.2" {
+		t.Errorf("Expected cell value to be 'B.2', got '%s'", value3)
 	}
 }
 

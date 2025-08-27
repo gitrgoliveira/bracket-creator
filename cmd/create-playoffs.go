@@ -174,8 +174,8 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
 		startRow := 1
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
 	}
 	if err := f.DeleteSheet("Tree"); err != nil {
 		// Ignore sheet not exist error

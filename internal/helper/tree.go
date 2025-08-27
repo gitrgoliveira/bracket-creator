@@ -48,7 +48,7 @@ func CreateBalancedTree(leafValues []string, sanitize bool) *Node {
 	return node
 }
 
-func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int, startRow int, depth int, pools bool) {
+func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int, startRow int, depth int, pools bool, matchWinners map[string]MatchWinner) {
 	if node == nil {
 		return
 	}
@@ -63,15 +63,15 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 	size := int(math.Pow(2, float64(depth-1)))
 
 	if node.LeafNode {
-		writeTreeValue(f, sheetName, startCol, startRow+size, node.LeafVal)
+		writeTreeValue(f, sheetName, startCol, startRow+size, node.LeafVal, matchWinners)
 	} else {
 		// this collects the cell coordinates for the match number in the tree
 		node.LeafVal = CreateTreeBracket(f, sheetName, startCol, startRow+size/2+1, size-1)
-		node.SheetName = sheetName
+		node.SheetName = sheetName // How is this used?
 	}
 
-	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, pools)
-	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, pools)
+	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, pools, matchWinners)
+	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, pools, matchWinners)
 }
 
 func treeAdjustment(node *Node) {

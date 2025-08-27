@@ -169,6 +169,14 @@ func (o *poolOptions) createPools(entries []string) error {
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
 
+	// Create pool matches and get winners BEFORE creating tree sheets
+	if o.roundRobin {
+		helper.CreatePoolRoundRobinMatches(pools)
+	} else {
+		helper.CreatePoolMatches(pools)
+	}
+	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners)
+
 	treeSheet, err := f.GetSheetIndex("Tree")
 	if err != nil {
 		fmt.Println("Could not find Tree sheet")
@@ -191,8 +199,8 @@ func (o *poolOptions) createPools(entries []string) error {
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
 		startRow := 1
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
+		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 
 		lastPos := (i + 1) * numPools
 		if lastPos > len(pools) {
@@ -216,13 +224,6 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	helper.FillInMatches(f, eliminationMatchRounds)
 
-	if o.roundRobin {
-		helper.CreatePoolRoundRobinMatches(pools)
-	} else {
-		helper.CreatePoolMatches(pools)
-	}
-
-	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners)
 	helper.CreateNamesWithPoolToPrint(f, pools, o.sanitize)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)

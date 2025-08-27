@@ -129,7 +129,7 @@ func TestPrintLeafNodes(t *testing.T) {
 	f.NewSheet("Sheet2")
 
 	// Test with pools set to true
-	PrintLeafNodes(node, f, "Sheet1", 10, 1, 3, true)
+	PrintLeafNodes(node, f, "Sheet1", 10, 1, 3, true, nil)
 
 	// Since we're really just testing that the function doesn't panic,
 	// we'll just verify that it completed and some cells were written
@@ -140,6 +140,6 @@ func TestPrintLeafNodes(t *testing.T) {
 	t.Log("PrintLeafNodes completed without errors")
 
 	// Test with pools set to false
-	PrintLeafNodes(node, f, "Sheet2", 10, 1, 3, false)
+	PrintLeafNodes(node, f, "Sheet2", 10, 1, 3, false, nil)
 	t.Log("PrintLeafNodes with pools=false completed without errors")
 }

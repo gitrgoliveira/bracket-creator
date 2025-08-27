@@ -1,4 +1,4 @@
-package helper
+ 	package helper
 
 import (
 	"fmt"
@@ -41,11 +41,28 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 	return middleCell
 }
 
-func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string) {
+func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string, matchWinners map[string]MatchWinner) {
 	// fmt.Printf("writeTreeValue: start row: %d\n", startRow)
 
 	colName, _ := excelize.ColumnNumberToName(col + 1)
 	cell := fmt.Sprintf("%s%d", colName, startRow)
+
+	// Check if value is a pool reference and we have matchWinners
+	if matchWinners != nil {
+		if matchWinner, exists := matchWinners[value]; exists {
+			// Create CONCATENATE formula like existing elimination matches
+			formula := fmt.Sprintf(`CONCATENATE("%s ",'%s'!%s)`, value, matchWinner.sheetName, matchWinner.cell)
+			if err := f.SetCellFormula(sheet, cell, formula); err != nil {
+				fmt.Printf("Warning: failed to set cell formula: %v\n", err)
+			}
+			if err := f.SetCellStyle(sheet, cell, cell, getTreeTextStyle(f)); err != nil {
+				fmt.Printf("Warning: failed to set cell style: %v\n", err)
+			}
+			return
+		}
+	}
+
+	// Fallback to existing static value logic
 	if err := f.SetCellValue(sheet, cell, value); err != nil {
 		fmt.Printf("Warning: failed to set cell value: %v\n", err)
 	}

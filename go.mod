@@ -6,7 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/muesli/mango-cobra v1.2.0
 	github.com/muesli/roff v0.1.0
-	github.com/spf13/cobra v1.9.1
+	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.10.0
 	github.com/xuri/excelize/v2 v2.9.1
 	golang.org/x/text v0.28.0
@@ -36,7 +36,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/richardlehane/mscfb v1.0.4 // indirect
 	github.com/richardlehane/msoleps v1.0.4 // indirect
-	github.com/spf13/pflag v1.0.6 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/tiendc/go-deepcopy v1.6.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect

@@ -40,7 +40,7 @@ jobs:
           args: "-no-fail -fmt sarif -out results.sarif ./..."
 
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
 
@@ -80,7 +80,7 @@ jobs:
       - name: Build the Docker image
         run: GH_REPOSITORY="${{ github.repository }}" make VERSION=latest docker/build
       - name: Run the Anchore scan action
-        uses: anchore/scan-action@v5
+        uses: anchore/scan-action@v7
         with:
           image: "ghcr.io/${{ github.repository }}:latest"
           output-format: json

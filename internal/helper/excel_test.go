@@ -122,13 +122,13 @@ func TestWriteTreeValue(t *testing.T) {
 
 	// Test 2: Test with matchWinners map (should create formula)
 	matchWinners := map[string]MatchWinner{
-		"A.1": {
+		"Pool A.1": {
 			sheetName: "Pool Matches",
 			cell:      "G10",
 		},
 	}
 
-	writeTreeValue(f, sheetName, 1, 2, "A.1", matchWinners)
+	writeTreeValue(f, sheetName, 1, 2, "Pool A.1", matchWinners)
 
 	// Verify the formula was set (column 2, row 2 corresponds to B2)
 	cellRef2, _ := excelize.CoordinatesToCellName(2, 2)

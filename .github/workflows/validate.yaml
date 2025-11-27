@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.24.4"
+          go-version: "1.25.4"
 
       - name: Init project
         run: |
@@ -54,7 +54,6 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v1.64.8
-          skip-pkg-cache: true
 
       #   _____         _
       #  |_   _|__  ___| |_
@@ -68,7 +67,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.txt
+          files: ./coverage.txt
           fail_ci_if_error: true
 
       #   ____             _

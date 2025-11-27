@@ -3,7 +3,7 @@ BIN_NAME := bracket-creator
 GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
-GO_VERSION := 1.24.4
+GO_VERSION := 1.25.4
 
 # Build flags
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")

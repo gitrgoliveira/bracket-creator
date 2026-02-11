@@ -59,6 +59,8 @@ $(BIN_PATH)/$(BIN_NAME): $(shell find . -name "*.go" -type f)
 	go build $(LDFLAGS) -o $(BIN_PATH)/$(BIN_NAME) .
 
 examples: go/build ## Build locally and create example files
+	@echo "Cleaning previous examples..."
+	rm -f pools-example-*.xlsx playoffs-example-*.xlsx
 	@echo "Building examples..."
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./mock_data_small.csv -o ./pools-example-small.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -t 5 -f ./mock_data_small.csv -o ./playoffs-example-small.xlsx

@@ -76,7 +76,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 }
 
 func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
-
+	SetSheetLayoutPortraitA4(f, sheetName)
 	row := 2
 
 	for _, pool := range pools {
@@ -96,7 +96,7 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 
 		for _, player := range pool.Players {
 			if err := f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row),
-				fmt.Sprintf("%s!%s", player.sheetName, player.cell)); err != nil {
+				fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)); err != nil {
 				fmt.Printf("Warning: failed to set cell formula: %v\n", err)
 			}
 			row++

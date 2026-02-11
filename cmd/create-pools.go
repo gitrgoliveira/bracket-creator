@@ -226,6 +226,10 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	helper.CreateNamesWithPoolToPrint(f, pools, o.sanitize)
 
+	if err := helper.CreateTagsSheet(f, pools); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)
+	}
+
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 	helper.FillEstimations(f, int64(len(pools)), int64(len(pools[0].Matches)), 0, int64(o.teamMatches), int64(len(finals)-1))
 

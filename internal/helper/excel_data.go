@@ -82,6 +82,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 	// Set the starting row and column for the bracket
 	sheetName := "Pool Draw"
+	SetSheetLayoutPortraitA4(f, sheetName)
 	numPoolsPerColumn := int(math.Ceil(float64(len(pools)) / 3))
 
 	startRow := 5
@@ -107,7 +108,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 		row++
 		for _, player := range pool.Players {
 			cell := col_name + fmt.Sprint(row)
-			handleExcelDataError("SetCellFormula", f.SetCellFormula(sheetName, cell, fmt.Sprintf("%s!%s", player.sheetName, player.cell)))
+			handleExcelDataError("SetCellFormula", f.SetCellFormula(sheetName, cell, fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)))
 			handleExcelDataError("SetCellStyle", f.SetCellStyle(sheetName, cell, cell, contentCellStyle))
 			row++
 		}

@@ -369,8 +369,10 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool) {
 
 func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) {
 	sheetName := "Names to Print"
+	SetSheetLayoutLandscapeA3(f, sheetName)
 
 	row := 1
+	namesCount := 0
 	for _, pool := range pools {
 
 		for _, player := range pool.Players {
@@ -399,6 +401,14 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) 
 
 			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("A%d", row+1), player.PoolPosition))
 			row += 2
+			namesCount++
+
+			if namesCount > 0 && namesCount%3 == 0 {
+				breakCell := fmt.Sprintf("A%d", row)
+				if err := f.InsertPageBreak(sheetName, breakCell); err != nil {
+					fmt.Printf("Warning: failed to insert page break at %s: %v\n", breakCell, err)
+				}
+			}
 		}
 	}
 }
@@ -423,6 +433,43 @@ func FillEstimations(f *excelize.File, numPools int64, numPoolMatches int64, ext
 	// Team size
 	handleExcelError("SetCellInt", f.SetCellInt(sheetName, "B8", teamSize))
 
+}
+
+func SetSheetLayoutPortraitA4(f *excelize.File, sheetName string) {
+	// 9 = A4
+	size := 9
+	orientation := "portrait"
+	one := 1
+	zero := 0
+
+	if err := f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
+		Size:        &size,
+		Orientation: &orientation,
+		FitToWidth:  &one,
+		FitToHeight: &zero,
+	}); err != nil {
+		fmt.Printf("Warning: failed to set page layout for %s: %v\n", sheetName, err)
+	}
+
+	boolTrue := true
+	if err := f.SetSheetProps(sheetName, &excelize.SheetPropsOptions{
+		FitToPage: &boolTrue,
+	}); err != nil {
+		fmt.Printf("Warning: failed to set sheet props for %s: %v\n", sheetName, err)
+	}
+}
+
+func SetSheetLayoutLandscapeA3(f *excelize.File, sheetName string) {
+	// 8 = A3
+	size := 8
+	orientation := "landscape"
+
+	if err := f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
+		Size:        &size,
+		Orientation: &orientation,
+	}); err != nil {
+		fmt.Printf("Warning: failed to set page layout for %s: %v\n", sheetName, err)
+	}
 }
 
 // handleExcelError is a helper function to handle errors from Excel operations

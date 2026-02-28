@@ -8,7 +8,7 @@ require (
 	github.com/muesli/roff v0.1.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	github.com/xuri/excelize/v2 v2.10.0
+	github.com/xuri/excelize/v2 v2.10.1
 	golang.org/x/text v0.34.0
 )
 

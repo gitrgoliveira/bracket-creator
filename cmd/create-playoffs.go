@@ -180,7 +180,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree
-	tree := helper.CreateBalancedTree(names, o.withZekkenName)
+	tree := helper.CreateBalancedTree(names)
 
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)

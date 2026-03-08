@@ -180,7 +180,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree
-	tree := helper.CreateBalancedTree(finals, false)
+	tree := helper.CreateBalancedTree(finals)
 
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)

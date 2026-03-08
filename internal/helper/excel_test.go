@@ -160,14 +160,14 @@ func TestCreateBalancedTree(t *testing.T) {
 	// Skip empty slice test as it causes stack overflow
 
 	// Test with single leaf - should NOT sanitize
-	singleLeaf := CreateBalancedTree([]string{"John Doe"}, true)
+	singleLeaf := CreateBalancedTree([]string{"John Doe"})
 	if singleLeaf.LeafVal != "John Doe" {
 		t.Errorf("Expected verbatim name, got %s", singleLeaf.LeafVal)
 	}
 
 	// Test with multiple leaves
 	leafValues := []string{"A", "B", "C", "D"}
-	tree := CreateBalancedTree(leafValues, false)
+	tree := CreateBalancedTree(leafValues)
 
 	// Root should not be a leaf
 	if tree.LeafNode {

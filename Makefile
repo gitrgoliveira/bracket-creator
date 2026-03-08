@@ -48,7 +48,7 @@ go/lint: ## Run linters
 
 go/test: go/lint ## Run tests
 	@echo "Running tests..."
-	go test -race -cover ./...
+	go test -race -cover ./cmd/... ./internal/... ./tests/...
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 

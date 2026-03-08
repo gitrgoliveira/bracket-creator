@@ -237,18 +237,19 @@ func CreatePoolMatches(pools []Pool) {
 func CreatePoolRoundRobinMatches(pools []Pool) {
 
 	for poolN, pool := range pools {
+		currentPool := &pools[poolN]
 		size := len(pool.Players)
 
 		for i := 1; i < size; i++ {
 			for k, j := i, 0; j < size-i; j, k = j+1, k+1 {
-				sideA := &pools[poolN].Players[j]
-				sideB := &pools[poolN].Players[k]
+				sideA := &currentPool.Players[j]
+				sideB := &currentPool.Players[k]
 
 				if j%2 != 0 {
 					sideA, sideB = sideB, sideA
 				}
 
-				pools[poolN].Matches = append(pools[poolN].Matches, Match{
+				currentPool.Matches = append(currentPool.Matches, Match{
 					SideA: sideA,
 					SideB: sideB,
 				})
@@ -256,19 +257,19 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 		}
 
 		// handle the special case for pools of 4
-		if size == 4 {
+		if size == 4 && len(currentPool.Matches) >= 3 {
 			// swap the second last and third last round
-			secondLastRound := pools[poolN].Matches[len(pools[poolN].Matches)-2]
-			thirdLastRound := pools[poolN].Matches[len(pools[poolN].Matches)-3]
+			secondLastRound := currentPool.Matches[len(currentPool.Matches)-2]
+			thirdLastRound := currentPool.Matches[len(currentPool.Matches)-3]
 			// swap the sides
 			secondLastRound.SideA, secondLastRound.SideB = secondLastRound.SideB, secondLastRound.SideA
 
-			pools[poolN].Matches[len(pools[poolN].Matches)-2] = thirdLastRound
-			pools[poolN].Matches[len(pools[poolN].Matches)-3] = secondLastRound
+			currentPool.Matches[len(currentPool.Matches)-2] = thirdLastRound
+			currentPool.Matches[len(currentPool.Matches)-3] = secondLastRound
 
-		} else {
+		} else if len(currentPool.Matches) > 0 {
 			// last match always needs to swap sides
-			lastRound := &pools[poolN].Matches[len(pools[poolN].Matches)-1]
+			lastRound := &currentPool.Matches[len(currentPool.Matches)-1]
 			lastRound.SideA, lastRound.SideB = lastRound.SideB, lastRound.SideA
 		}
 

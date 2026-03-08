@@ -159,10 +159,10 @@ func TestWriteTreeValue(t *testing.T) {
 func TestCreateBalancedTree(t *testing.T) {
 	// Skip empty slice test as it causes stack overflow
 
-	// Test with single leaf
-	singleLeaf := CreateBalancedTree([]string{"A"}, false)
-	if !singleLeaf.LeafNode {
-		t.Error("Expected leaf node for single entry")
+	// Test with single leaf - should NOT sanitize
+	singleLeaf := CreateBalancedTree([]string{"John Doe"}, true)
+	if singleLeaf.LeafVal != "John Doe" {
+		t.Errorf("Expected verbatim name, got %s", singleLeaf.LeafVal)
 	}
 
 	// Test with multiple leaves
@@ -177,5 +177,40 @@ func TestCreateBalancedTree(t *testing.T) {
 	// Verify tree structure (should be balanced)
 	if tree.Left == nil || tree.Right == nil {
 		t.Error("Tree should have left and right children")
+	}
+}
+
+func TestAddPlayerDataWithMetadata(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	sheetName := "data"
+	f.NewSheet(sheetName)
+
+	players := []Player{
+		{
+			Name:         "Ricardo Oliveira",
+			DisplayName:  "クレスワェル",
+			Dojo:         "Tokyo Kendo Club",
+			Metadata:     []string{"Extra1", "Extra2"},
+			PoolPosition: 1,
+		},
+	}
+
+	AddPlayerDataToSheet(f, players, true)
+
+	// Check Display Name (Column D)
+	val, _ := f.GetCellValue(sheetName, "D2")
+	if val != "クレスワェル" {
+		t.Errorf("Expected クレスワェル, got %s", val)
+	}
+
+	// Check Metadata (Column E and F)
+	valE, _ := f.GetCellValue(sheetName, "E2")
+	if valE != "Extra1" {
+		t.Errorf("Expected Extra1, got %s", valE)
+	}
+	valF, _ := f.GetCellValue(sheetName, "F2")
+	if valF != "Extra2" {
+		t.Errorf("Expected Extra2, got %s", valF)
 	}
 }

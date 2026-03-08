@@ -111,29 +111,26 @@ func NewRouter() *gin.Engine {
 
 	r.POST("/api/parse-participants", func(c *gin.Context) {
 		var req struct {
-			PlayerList string `json:"playerList"`
+			PlayerList     string `json:"playerList"`
+			WithZekkenName bool   `json:"withZekkenName"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 			return
 		}
 
-		lines := strings.Split(req.PlayerList, "\n")
+		players, err := helper.CreatePlayers(strings.Split(req.PlayerList, "\n"), req.WithZekkenName)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		var participants []gin.H
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			parts := strings.Split(line, ",")
-			name := strings.TrimSpace(parts[0])
-			dojo := ""
-			if len(parts) > 1 {
-				dojo = strings.TrimSpace(parts[1])
-			}
+		for _, p := range players {
 			participants = append(participants, gin.H{
-				"name": name,
-				"dojo": dojo,
+				"name":        p.Name,
+				"displayName": p.DisplayName,
+				"dojo":        p.Dojo,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"participants": participants})
@@ -156,7 +153,7 @@ func NewRouter() *gin.Engine {
 
 		// Parse form values
 		singleTree := c.PostForm("singleTree") == "on"
-		sanitize := c.PostForm("sanitize") == "on"
+		withZekkenName := c.PostForm("withZekkenName") == "on"
 		determined := c.PostForm("determined") == "on"
 
 		teamMatches, err := strconv.Atoi(c.PostForm("teamMatches"))
@@ -229,7 +226,7 @@ func NewRouter() *gin.Engine {
 		case "pools":
 			o := &poolOptions{
 				singleTree:      singleTree,
-				sanitize:        sanitize,
+				withZekkenName:  withZekkenName,
 				determined:      determined,
 				teamMatches:     teamMatches,
 				roundRobin:      roundRobin,
@@ -251,7 +248,7 @@ func NewRouter() *gin.Engine {
 		case "playoffs":
 			o := &playoffOptions{
 				singleTree:      singleTree,
-				sanitize:        sanitize,
+				withZekkenName:  withZekkenName,
 				determined:      determined,
 				teamMatches:     teamMatches,
 				SeedAssignments: seedAssignments,

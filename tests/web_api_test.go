@@ -21,12 +21,12 @@ func TestAPI_ParseParticipants(t *testing.T) {
 	router := cmd.NewRouter()
 
 	w := httptest.NewRecorder()
-	body := `{"playerList": "Jane Doe, Dojo1\nJohn Smith, Dojo2"}`
+	// Test without Zekken Name
+	body := `{"playerList": "Jane Doe, Dojo1\nJohn Smith, Dojo2", "withZekkenName": false}`
 	req, _ := http.NewRequest("POST", "/api/parse-participants", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	router.ServeHTTP(w, req)
-
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string][]map[string]string
@@ -35,7 +35,25 @@ func TestAPI_ParseParticipants(t *testing.T) {
 
 	assert.Len(t, resp["participants"], 2)
 	assert.Equal(t, "Jane Doe", resp["participants"][0]["name"])
+	assert.Equal(t, "J. DOE", resp["participants"][0]["displayName"])
 	assert.Equal(t, "Dojo1", resp["participants"][0]["dojo"])
+
+	// Test with Zekken Name
+	w2 := httptest.NewRecorder()
+	body2 := `{"playerList": "Jane Doe, ジェーン, Dojo1", "withZekkenName": true}`
+	req2, _ := http.NewRequest("POST", "/api/parse-participants", strings.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+
+	var resp2 map[string][]map[string]string
+	err = json.Unmarshal(w2.Body.Bytes(), &resp2)
+	assert.NoError(t, err)
+
+	assert.Len(t, resp2["participants"], 1)
+	assert.Equal(t, "Jane Doe", resp2["participants"][0]["name"])
+	assert.Equal(t, "ジェーン", resp2["participants"][0]["displayName"])
 }
 
 func TestAPI_CreateWithSeeds(t *testing.T) {

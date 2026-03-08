@@ -30,11 +30,7 @@ func CreateBalancedTree(leafValues []string, sanitize bool) *Node {
 	node := &Node{}
 
 	if len(leafValues) == 1 {
-		if sanitize {
-			node.LeafVal = sanitizeName(leafValues[0])
-		} else {
-			node.LeafVal = leafValues[0]
-		}
+		node.LeafVal = leafValues[0]
 		node.LeafNode = true
 		node.Val = 1
 		return node

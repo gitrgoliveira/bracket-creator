@@ -31,3 +31,11 @@ manpages
 bin/
 output.xlsx
 square_prep/*
+# Universal and Go added by speckit
+vendor/
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/
+*.json

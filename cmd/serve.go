@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 
 	"github.com/spf13/cobra"
@@ -57,6 +59,11 @@ func newServeCmd() *cobra.Command {
 }
 
 func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
+	r := NewRouter()
+	return r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))
+}
+
+func NewRouter() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
@@ -76,8 +83,19 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 	// Get web directory
 	webDir, err := fs.Sub(helper.WebFs, "web")
 	if err != nil {
-		log.Fatal(err)
-		return err
+		log.Printf("Warning: web directory not found in WebFs, static files will not be served: %v", err)
+	} else {
+		// Serve static files
+		r.StaticFS("/static", http.FS(webDir))
+		// Serve index.html file directly from the root path
+		r.GET("/", func(c *gin.Context) {
+			data, err := fs.ReadFile(webDir, "index.html")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not read index.html"})
+				return
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+		})
 	}
 
 	// Setup API endpoints first
@@ -91,16 +109,31 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 		})
 	})
 
-	// Serve static files
-	r.StaticFS("/static", http.FS(webDir))
-	// Serve index.html file directly from the root path
-	r.GET("/", func(c *gin.Context) {
-		data, err := fs.ReadFile(webDir, "index.html")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not read index.html"})
+	r.POST("/api/parse-participants", func(c *gin.Context) {
+		var req struct {
+			PlayerList     string `json:"playerList"`
+			WithZekkenName bool   `json:"withZekkenName"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 			return
 		}
-		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+
+		players, err := helper.CreatePlayers(strings.Split(req.PlayerList, "\n"), req.WithZekkenName)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var participants []gin.H
+		for _, p := range players {
+			participants = append(participants, gin.H{
+				"name":        p.Name,
+				"displayName": p.DisplayName,
+				"dojo":        p.Dojo,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"participants": participants})
 	})
 
 	// Add a redirect for POST requests to the root endpoint (for backward compatibility)
@@ -120,7 +153,7 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 
 		// Parse form values
 		singleTree := c.PostForm("singleTree") == "on"
-		sanitize := c.PostForm("sanitize") == "on"
+		withZekkenName := c.PostForm("withZekkenName") == "on"
 		determined := c.PostForm("determined") == "on"
 
 		teamMatches, err := strconv.Atoi(c.PostForm("teamMatches"))
@@ -172,6 +205,18 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 
 		roundRobin := c.PostForm("roundRobin") == "on"
 
+		// Parse seeds if provided
+		var seedAssignments []domain.SeedAssignment
+		seedsJSON := c.PostForm("seeds")
+		if seedsJSON != "" {
+			err := json.Unmarshal([]byte(seedsJSON), &seedAssignments)
+			if err != nil {
+				log.Printf("failed to parse seeds JSON: %s", err.Error())
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid seed assignments format"})
+				return
+			}
+		}
+
 		// Prepare output
 		inMemoryBuffer := new(bytes.Buffer)
 		inMemoryWriter := bufio.NewWriter(inMemoryBuffer)
@@ -180,13 +225,14 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 		switch tournamentType {
 		case "pools":
 			o := &poolOptions{
-				singleTree:  singleTree,
-				sanitize:    sanitize,
-				determined:  determined,
-				teamMatches: teamMatches,
-				roundRobin:  roundRobin,
-				numPlayers:  playersPerPool,
-				poolWinners: winnersPerPool,
+				singleTree:      singleTree,
+				withZekkenName:  withZekkenName,
+				determined:      determined,
+				teamMatches:     teamMatches,
+				roundRobin:      roundRobin,
+				numPlayers:      playersPerPool,
+				poolWinners:     winnersPerPool,
+				SeedAssignments: seedAssignments,
 			}
 			o.outputWriter = inMemoryWriter
 
@@ -201,10 +247,11 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 
 		case "playoffs":
 			o := &playoffOptions{
-				singleTree:  singleTree,
-				sanitize:    sanitize,
-				determined:  determined,
-				teamMatches: teamMatches,
+				singleTree:      singleTree,
+				withZekkenName:  withZekkenName,
+				determined:      determined,
+				teamMatches:     teamMatches,
+				SeedAssignments: seedAssignments,
 			}
 
 			o.outputWriter = inMemoryWriter
@@ -248,12 +295,7 @@ func (o *serveOptions) run(cmd *cobra.Command, args []string) error {
 		c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", inMemoryBuffer.Bytes())
 	})
 
-	err = r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))
-	if err != nil {
-		return fmt.Errorf("failed to start server: %w", err)
-	}
-
-	return nil
+	return r
 }
 
 func init() {

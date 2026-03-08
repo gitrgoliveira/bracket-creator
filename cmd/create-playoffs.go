@@ -3,11 +3,13 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 
 	"strconv"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/spf13/cobra"
 
@@ -15,13 +17,15 @@ import (
 )
 
 type playoffOptions struct {
-	teamMatches  int
-	filePath     string
-	outputPath   string
-	outputWriter *bufio.Writer
-	sanitize     bool
-	singleTree   bool
-	determined   bool
+	teamMatches     int
+	filePath        string
+	outputPath      string
+	seedsPath       string
+	outputWriter    *bufio.Writer
+	withZekkenName  bool
+	singleTree      bool
+	determined      bool
+	SeedAssignments []domain.SeedAssignment
 }
 
 func newCreatePlayoffCmd() *cobra.Command {
@@ -39,7 +43,8 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file (default false)")
 	cmd.PersistentFlags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
 	cmd.PersistentFlags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
-	cmd.Flags().BoolVarP(&o.sanitize, "sanitize", "s", false, "sanitize names into first and last name and capitalize (default false)")
+	cmd.PersistentFlags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
+	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
@@ -91,7 +96,7 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 func (o *playoffOptions) createPlayoffs(entries []string) error {
-
+	var err error
 	entries = helper.RemoveDuplicates(entries)
 
 	// Shuffle all entries
@@ -101,13 +106,37 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		})
 	}
 
-	players := helper.CreatePlayers(entries)
-
-	// Openning the template Excel file.
-	templateFile, err := helper.TemplateFile.Open("template.xlsx")
+	players, err := helper.CreatePlayers(entries, o.withZekkenName)
 	if err != nil {
-		fmt.Println(err)
 		return err
+	}
+
+	if o.seedsPath != "" {
+		fmt.Printf("Parsing seeds file: %s\n", o.seedsPath)
+		assignments, err := helper.ParseSeedsFile(o.seedsPath)
+		if err != nil {
+			return fmt.Errorf("failed to parse seeds file: %w", err)
+		}
+		o.SeedAssignments = append(o.SeedAssignments, assignments...)
+	}
+
+	if len(o.SeedAssignments) > 0 {
+		err := helper.ApplySeeds(players, o.SeedAssignments)
+		if err != nil {
+			return fmt.Errorf("failed to apply seeds: %w", err)
+		}
+	}
+
+	// Opening the template Excel file.
+	var templateFile io.ReadCloser
+	templateFile, err = helper.TemplateFile.Open("template.xlsx")
+	if err != nil {
+		fmt.Println("Warning: template.xlsx not found in embedded FS, trying local disk:", err)
+		templateFile, err = os.Open("template.xlsx")
+		if err != nil {
+			fmt.Println("Error: could not find template.xlsx anywhere")
+			return err
+		}
 	}
 
 	f, err := excelize.OpenReader(templateFile)
@@ -121,14 +150,18 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		}
 	}()
 
-	if o.sanitize {
-		fmt.Println("Sanitizing names")
+	if o.withZekkenName {
+		fmt.Println("Using Zekken names")
 	}
 
-	helper.AddPlayerDataToSheet(f, players, o.sanitize)
+	helper.AddPlayerDataToSheet(f, players, o.withZekkenName)
+
+	// Reorder players based on seeds for standard bracket distribution
+	players = helper.StandardSeeding(players)
+
 	// gather all player names
 	var names []string
-	if o.sanitize {
+	if o.withZekkenName {
 		for _, player := range players {
 			names = append(names, player.DisplayName)
 		}
@@ -147,7 +180,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree
-	tree := helper.CreateBalancedTree(names, o.sanitize)
+	tree := helper.CreateBalancedTree(names)
 
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
@@ -203,9 +236,9 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		fmt.Println("Note: Pool Matches sheet might not exist:", err)
 	}
 
-	// hurray! they are all winners
-	matchWinners = helper.ConvertPlayersToWinners(players, o.sanitize)
-	helper.CreateNamesToPrint(f, players, o.sanitize)
+	// Convert all players for match-winner processing
+	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 	helper.FillEstimations(f, 0, 0, 0, int64(o.teamMatches), int64(len(names)-1))

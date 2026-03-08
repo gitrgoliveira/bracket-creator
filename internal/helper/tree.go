@@ -25,23 +25,19 @@ type Node struct {
 	Right   *Node
 }
 
-func CreateBalancedTree(leafValues []string, sanitize bool) *Node {
+func CreateBalancedTree(leafValues []string) *Node {
 	mid := len(leafValues) / 2
 	node := &Node{}
 
 	if len(leafValues) == 1 {
-		if sanitize {
-			node.LeafVal = sanitizeName(leafValues[0])
-		} else {
-			node.LeafVal = leafValues[0]
-		}
+		node.LeafVal = leafValues[0]
 		node.LeafNode = true
 		node.Val = 1
 		return node
 	}
 
-	node.Left = CreateBalancedTree(leafValues[:mid], sanitize)
-	node.Right = CreateBalancedTree(leafValues[mid:], sanitize)
+	node.Left = CreateBalancedTree(leafValues[:mid])
+	node.Right = CreateBalancedTree(leafValues[mid:])
 	node.LeafNode = false
 	node.Val = node.Left.Val + node.Right.Val
 

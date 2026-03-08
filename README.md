@@ -40,25 +40,54 @@ A CLI to create kendo tournament brackets
 
 <!-- BEGIN __DO_NOT_INCLUDE__ -->
 
-## Usage
+## Web UI
 
-Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) page and copy them to the desired location.
-
-To use the web front end run this command and open your browser on http://localhost:8080
+Start the web server and open your browser at http://localhost:8080:
 ```bash
 bracket-creator serve
 ```
 
-You can also use docker with:
+With Docker:
 ```bash
 docker run -p 8080:8080 ghcr.io/gitrgoliveira/bracket-creator/bracket-creator:latest
 ```
 
-or docker-compose to run the web server:
+or with docker-compose:
 ```bash
 docker-compose up -d
 ```
 
+### Quickstart Demo
+
+The video below shows the full workflow: entering participants, seeding past winners, and generating the bracket file.
+
+![Quickstart Demo](docs/screenshots/quickstart-demo.webp)
+
+### Using the Form
+
+| Section | Description |
+|---|---|
+| **Tournament Type** | Choose *Playoffs (Knockout Tournament)* for a straight knockout, or *Pools and Playoffs* for a round-robin pool stage followed by a knockout. |
+| **Single Tree Format** | Render all participants on one bracket sheet instead of splitting across multiple pages. |
+| **Do not randomize** | Preserve the input order instead of shuffling participants. |
+| **Column 2 is Zekken name** | Enable to use the second column of the input CSV as the participant's display name on the zekken. |
+| **Team Matches** | Number of players per team. Set to `0` for individual matches. |
+| **Player/Team List** | Enter one participant per line in plain or CSV format (`Name, Dojo`). You can also drag-and-drop a CSV file or use the **Small / Medium / Large Sample** buttons. |
+
+> **About Dojo**: In pool tournaments, the `Dojo` field is used to ensure participants from the same dojo are not placed in the same pool.
+
+### Seeding Participants (Web UI)
+
+Click the **☆ Seed Participants** button to open the seeding modal. This lets you lock past tournament winners into advantageous bracket positions before the draw.
+
+In the modal:
+- Each participant is listed with their dojo and a **Seed Rank** input field.
+- Enter a **positive integer** to seed a participant (e.g., `1` = top seed, `2` = second seed).
+- Leave a field empty to place the participant in the unseeded pool.
+- Seed ranks must be **unique** — duplicate ranks will be rejected with an error.
+- Seeded participants are **strictly validated**: every seeded name must exactly match a name in the participant list (case-sensitive). If a name does not match, the bracket generation will fail with a clear error.
+
+After saving, the button label changes to **★ N Seeds Assigned** (highlighted in amber) and the seeds are submitted with the form.
 
 There's also a CLI. To learn how to use the CLI run:
 ```bash
@@ -99,7 +128,7 @@ export PORT=8080
 ### CLI Parameters to create Pools
 Example command line to create pools with 5 players and 3 winners per pool:
 ```bash
-bracket-creator create-pools -s -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-example.xlsx
+bracket-creator create-pools -z -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-example.xlsx
 ```
 
 * `-d` / `-determined` - Do not shuffle the names read from the input file
@@ -109,7 +138,7 @@ bracket-creator create-pools -s -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-e
 * `-p` / `-players` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected. The default is 3
 * `-w` / `-pool-winners` - Number of players/teams that can qualify from each pool. The default is 2
 * `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
-* `-s` / `-sanitize` - sanitize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
+* `-z` / `-with-zekken-name` - Use the second column of the input CSV as the participant's display name on the zekken. If empty, falls back to a sanitized name.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 
 ### CLI Parameters to create Playoffs
@@ -122,8 +151,35 @@ bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-exam
 * `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
 * `-h` / `-help` - Show help
 * `-o` / `-output` - Path to write the output excel file
-* `-s` / `-sanitize` - sanitize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
+* `-z` / `-with-zekken-name` - Use the second column of the input CSV as the participant's display name on the zekken. If empty, falls back to a sanitized name.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
+* `--seeds` - Path to a CSV file mapping exact participant names to their initial seed rank (see [Seeding via CLI](#seeding-via-cli))
+
+### Seeding via CLI
+
+Seeding assigns past tournament winners to favourable positions in the bracket so they don't meet each other in the early rounds.
+
+Prepare a seeds CSV file with the following format (header required):
+
+```csv
+Rank,Name
+1,Alice Dupont
+2,Bob Martinez
+3,Charlie Chen
+```
+
+Then pass it to the command with `--seeds`:
+
+```bash
+bracket-creator create-playoffs -f ./players.csv -o ./playoffs.xlsx --seeds ./winners.csv
+```
+
+**Important rules:**
+- Names must match **exactly** (case-sensitive) to a name in the main participant list.
+- A name that cannot be matched will cause the command to fail with a descriptive error.
+- Seed ranks must be unique — duplicate ranks are rejected.
+- Seeded participants are placed first in the bracket, following standard bracket distribution (e.g., seeds 1 and 2 placed on opposite halves). Unseeded participants fill the remaining slots.
+
 
 ### Examples
 See also the example files created by the Makefile:
@@ -138,7 +194,7 @@ See also the example files created by the Makefile:
 
 With 4 players and 2 winners per pool with sanitized names:
 ```bash
-./bin/bracket-creator create-pools -s -p 4 -f mock_data.csv -o output.xlsx
+./bin/bracket-creator create-pools -z -p 4 -f mock_data.csv -o output.xlsx
 ```
 
 **Team pool tournament**
@@ -151,7 +207,7 @@ With 5 players per team:
 
 Straight knockout with sanitized names:
 ```bash
-./bin/bracket-creator create-playoffs -s -f mock_data.csv -o output.xlsx
+./bin/bracket-creator create-playoffs -z -f mock_data.csv -o output.xlsx
 ```
 
 **Team pool tournament**

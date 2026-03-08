@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/spf13/cobra"
 
@@ -15,16 +16,17 @@ import (
 )
 
 type poolOptions struct {
-	numPlayers   int
-	poolWinners  int
-	teamMatches  int
-	filePath     string
-	outputPath   string
-	outputWriter *bufio.Writer
-	roundRobin   bool
-	sanitize     bool
-	singleTree   bool
-	determined   bool
+	numPlayers      int
+	poolWinners     int
+	teamMatches     int
+	filePath        string
+	outputPath      string
+	outputWriter    *bufio.Writer
+	roundRobin      bool
+	withZekkenName  bool
+	singleTree      bool
+	determined      bool
+	SeedAssignments []domain.SeedAssignment
 }
 
 func newCreatePoolCmd() *cobra.Command {
@@ -45,7 +47,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool (default 3)")
 	cmd.Flags().IntVarP(&o.poolWinners, "pool-winners", "w", 2, "number of players/teams that can qualify from each pool (default 2)")
 	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone (default false)")
-	cmd.Flags().BoolVarP(&o.sanitize, "sanitize", "s", false, "sanitize names into first and last name and capitalize (default false)")
+	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
@@ -122,10 +124,24 @@ func (o *poolOptions) createPools(entries []string) error {
 		})
 	}
 
-	players := helper.CreatePlayers(entries)
+	players, err := helper.CreatePlayers(entries, o.withZekkenName)
+	if err != nil {
+		return err
+	}
+
+	if len(o.SeedAssignments) > 0 {
+		err := helper.ApplySeeds(players, o.SeedAssignments)
+		if err != nil {
+			return fmt.Errorf("failed to apply seeds: %w", err)
+		}
+	}
+
+	// Reorder players to ensure seeded participants are distributed effectively across pools
+	players = helper.StandardSeeding(players)
+
 	pools := helper.CreatePools(players, o.numPlayers)
 
-	// Openning the template Excel file.
+	// Opening the template Excel file.
 	templateFile, err := helper.TemplateFile.Open("template.xlsx")
 	if err != nil {
 		fmt.Println(err)
@@ -143,11 +159,11 @@ func (o *poolOptions) createPools(entries []string) error {
 		}
 	}()
 
-	if o.sanitize {
-		fmt.Println("Sanitizing names")
+	if o.withZekkenName {
+		fmt.Println("Using Zekken names")
 	}
 
-	helper.AddPoolDataToSheet(f, pools, o.sanitize)
+	helper.AddPoolDataToSheet(f, pools, o.withZekkenName)
 
 	if err := helper.AddPoolsToSheet(f, pools); err != nil {
 		fmt.Fprintf(os.Stderr, "Error adding pools to sheet: %v\n", err)
@@ -164,7 +180,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree
-	tree := helper.CreateBalancedTree(finals, false)
+	tree := helper.CreateBalancedTree(finals)
 
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
@@ -224,7 +240,7 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	helper.FillInMatches(f, eliminationMatchRounds)
 
-	helper.CreateNamesWithPoolToPrint(f, pools, o.sanitize)
+	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName)
 
 	if err := helper.CreateTagsSheet(f, pools); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)

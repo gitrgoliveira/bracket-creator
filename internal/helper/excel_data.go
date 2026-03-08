@@ -17,6 +17,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 	if sanitize {
 		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D1", "Display Name"))
 	}
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E1", "Metadata"))
 
 	// Populate the groups in the spreadsheet
 	row := 2
@@ -31,6 +32,10 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 			if sanitize {
 				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName))
 			}
+			for k, meta := range pools[i].Players[j].Metadata {
+				colName, _ := excelize.ColumnNumberToName(5 + k)
+				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
+			}
 			pools[i].cell = fmt.Sprintf("$A$%d", row)
 			pools[i].Players[j].sheetName = sheetName
 			pools[i].Players[j].cell = fmt.Sprintf("$B$%d", row)
@@ -42,7 +47,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 
 	// Set the column widths
 	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 15))
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 30))
+	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "Z", 30))
 }
 
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
@@ -55,6 +60,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 	if sanitize {
 		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D1", "Display Name"))
 	}
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E1", "Metadata"))
 	// Populate the groups in the spreadsheet
 	row := 2
 
@@ -67,6 +73,10 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 		if sanitize {
 			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), players[i].DisplayName))
 		}
+		for k, meta := range players[i].Metadata {
+			colName, _ := excelize.ColumnNumberToName(5 + k)
+			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
+		}
 		players[i].cell = fmt.Sprintf("$B$%d", row)
 		row++
 	}
@@ -75,7 +85,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 
 	// Set the column widths
 	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 15))
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 30))
+	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "Z", 30))
 
 }
 

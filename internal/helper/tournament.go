@@ -22,8 +22,10 @@ type Player struct {
 	Name        string
 	DisplayName string
 	Dojo        string
+	Metadata    []string
 
 	PoolPosition int64
+	Seed         int
 
 	// Excel coordinates
 	sheetName string
@@ -40,28 +42,71 @@ type Match struct {
 	SideB *Player
 }
 
-func CreatePlayers(entries []string) []Player {
-	players := make([]Player, len(entries))
+func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
+	players := make([]Player, 0, len(entries))
+	var errors []string
+	seenNames := make(map[string]int) // tracks composite key Name|DisplayName|Dojo -> line number
 	c := cases.Title(language.Und, cases.NoLower)
 
 	for i, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
 		line := strings.Split(entry, ",")
+		for j := range line {
+			line[j] = strings.TrimSpace(line[j])
+		}
 
 		player := Player{
-			Name:         c.String(strings.TrimSpace(line[0])),
-			Dojo:         "NA",
-			DisplayName:  sanitizeName(line[0]),
-			PoolPosition: int64(i),
+			PoolPosition: int64(len(players)),
 		}
 
-		if len(line) >= 2 {
-			player.Dojo = strings.TrimSpace(line[1])
+		if withZekkenName {
+			// expected at least 3 columns: Name, ZekkenName, Dojo
+			if len(line) < 3 {
+				errors = append(errors, fmt.Sprintf("line %d: invalid entry: expected format 'Name, ZekkenName, Dojo' (got %d column(s))", i+1, len(line)))
+				continue
+			}
+			if line[2] == "" {
+				errors = append(errors, fmt.Sprintf("line %d: missing dojo in column 3; expected format 'Name, ZekkenName, Dojo'", i+1))
+				continue
+			}
+			player.Name = c.String(line[0])
+			player.DisplayName = line[1]
+			if player.DisplayName == "" {
+				player.DisplayName = sanitizeName(line[0])
+			}
+			player.Dojo = line[2]
+			if len(line) > 3 {
+				player.Metadata = line[3:]
+			}
+		} else {
+			// backward compatibility: Name, Dojo
+			player.Name = c.String(line[0])
+			player.DisplayName = sanitizeName(line[0])
+			player.Dojo = "NA"
+			if len(line) >= 2 {
+				player.Dojo = line[1]
+			}
+			if len(line) > 2 {
+				player.Metadata = line[2:]
+			}
 		}
-
-		players[i] = player
+		key := fmt.Sprintf("%s|%s|%s", player.Name, player.DisplayName, player.Dojo)
+		if lineNo, seen := seenNames[key]; seen {
+			errors = append(errors, fmt.Sprintf("line %d: duplicate entry for participant '%s' from '%s' with zekken name '%s' (originally on line %d)", i+1, player.Name, player.Dojo, player.DisplayName, lineNo))
+			continue
+		}
+		seenNames[key] = i + 1
+		players = append(players, player)
 	}
 
-	return players
+	if len(errors) > 0 {
+		return nil, fmt.Errorf("CSV validation failed:\n%s", strings.Join(errors, "\n"))
+	}
+
+	return players, nil
 }
 
 func sanitizeName(name string) string {

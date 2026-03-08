@@ -1,13 +1,28 @@
 name: Publish Released Docker image
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.11.0)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
   release:
     types: [published]
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   push_to_registry:
     name: Push Docker image to GitHub Packages
     runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v6
@@ -24,4 +39,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
+          tags: ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}

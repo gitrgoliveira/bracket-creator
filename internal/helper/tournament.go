@@ -64,8 +64,12 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 
 		if withZekkenName {
 			// expected at least 3 columns: Name, ZekkenName, Dojo
-			if len(line) < 3 || line[2] == "" {
-				errors = append(errors, fmt.Sprintf("line %d: missing dojo in column 3", i+1))
+			if len(line) < 3 {
+				errors = append(errors, fmt.Sprintf("line %d: invalid entry: expected format 'Name, ZekkenName, Dojo' (got %d column(s))", i+1, len(line)))
+				continue
+			}
+			if line[2] == "" {
+				errors = append(errors, fmt.Sprintf("line %d: missing dojo in column 3; expected format 'Name, ZekkenName, Dojo'", i+1))
 				continue
 			}
 			player.Name = c.String(line[0])

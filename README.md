@@ -63,12 +63,14 @@ The video below shows the full workflow: entering participants, seeding past win
 
 ![Quickstart Demo](docs/screenshots/quickstart-demo.webp)
 
+![Web UI Main](docs/screenshots/webui-main.png)
+
 ### Using the Form
 
 | Section | Description |
 |---|---|
 | **Tournament Type** | Choose *Playoffs (Knockout Tournament)* for a straight knockout, or *Pools and Playoffs* for a round-robin pool stage followed by a knockout. |
-| **Single Tree Format** | Render all participants on one bracket sheet instead of splitting across multiple pages. |
+| **Single Tree Format** | Render all participants on one bracket sheet instead of splitting across multiple pages. (CLI: `--single-tree`) |
 | **Do not randomize** | Preserve the input order instead of shuffling participants. |
 | **Column 2 is Zekken name** | Enable to use the second column of the input CSV as the participant's display name on the zekken. |
 | **Team Matches** | Number of players per team. Set to `0` for individual matches. |
@@ -80,6 +82,8 @@ The video below shows the full workflow: entering participants, seeding past win
 
 Click the **☆ Seed Participants** button to open the seeding modal. This lets you lock past tournament winners into advantageous bracket positions before the draw.
 
+![Seeding Modal](docs/screenshots/webui-seeding-modal.png)
+
 In the modal:
 - Each participant is listed with their dojo and a **Seed Rank** input field.
 - Enter a **positive integer** to seed a participant (e.g., `1` = top seed, `2` = second seed).
@@ -88,6 +92,8 @@ In the modal:
 - Seeded participants are **strictly validated**: every seeded name must exactly match a name in the participant list (case-sensitive). If a name does not match, the bracket generation will fail with a clear error.
 
 After saving, the button label changes to **★ N Seeds Assigned** (highlighted in amber) and the seeds are submitted with the form.
+
+![Seeds Assigned](docs/screenshots/webui-seeds-assigned.png)
 
 There's also a CLI. To learn how to use the CLI run:
 ```bash
@@ -140,6 +146,7 @@ bracket-creator create-pools -z -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-e
 * `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
 * `-z` / `-with-zekken-name` - Use the second column of the input CSV as the participant's display name on the zekken. If empty, falls back to a sanitized name.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
+* `--single-tree` - Create a single tree instead of dividing into multiple sheets
 
 ### CLI Parameters to create Playoffs
 Example command line to create team playoffs with 5 players per team:
@@ -154,6 +161,7 @@ bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-exam
 * `-z` / `-with-zekken-name` - Use the second column of the input CSV as the participant's display name on the zekken. If empty, falls back to a sanitized name.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 * `--seeds` - Path to a CSV file mapping exact participant names to their initial seed rank (see [Seeding via CLI](#seeding-via-cli))
+* `--single-tree` - Create a single tree instead of dividing into multiple sheets
 
 ### Seeding via CLI
 

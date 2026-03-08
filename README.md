@@ -61,8 +61,6 @@ docker-compose up -d
 
 The video below shows the full workflow: entering participants, seeding past winners, and generating the bracket file.
 
-![Quickstart Demo](docs/screenshots/quickstart-demo.webp)
-
 ![Web UI Main](docs/screenshots/webui-main.png)
 
 ### Using the Form

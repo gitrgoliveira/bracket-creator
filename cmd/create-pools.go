@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/spf13/cobra"
 
@@ -15,16 +16,17 @@ import (
 )
 
 type poolOptions struct {
-	numPlayers   int
-	poolWinners  int
-	teamMatches  int
-	filePath     string
-	outputPath   string
-	outputWriter *bufio.Writer
-	roundRobin   bool
-	sanitize     bool
-	singleTree   bool
-	determined   bool
+	numPlayers      int
+	poolWinners     int
+	teamMatches     int
+	filePath        string
+	outputPath      string
+	outputWriter    *bufio.Writer
+	roundRobin      bool
+	sanitize        bool
+	singleTree      bool
+	determined      bool
+	SeedAssignments []domain.SeedAssignment
 }
 
 func newCreatePoolCmd() *cobra.Command {
@@ -123,9 +125,20 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	players := helper.CreatePlayers(entries)
+
+	if len(o.SeedAssignments) > 0 {
+		err := helper.ApplySeeds(players, o.SeedAssignments)
+		if err != nil {
+			return fmt.Errorf("failed to apply seeds: %w", err)
+		}
+	}
+
+	// Reorder players to ensure seeded participants are distributed effectively across pools
+	players = helper.StandardSeeding(players)
+
 	pools := helper.CreatePools(players, o.numPlayers)
 
-	// Openning the template Excel file.
+	// Opening the template Excel file.
 	templateFile, err := helper.TemplateFile.Open("template.xlsx")
 	if err != nil {
 		fmt.Println(err)

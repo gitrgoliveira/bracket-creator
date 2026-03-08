@@ -8,6 +8,12 @@ type Player struct {
 	DisplayName  string
 	Dojo         string
 	PoolPosition int64
+	Seed         int
+}
+
+// Matches checks if the player's name exactly matches the given name (case-sensitive)
+func (p *Player) Matches(name string) bool {
+	return p.Name == name
 }
 
 // MatchWinner represents a player who has won a match

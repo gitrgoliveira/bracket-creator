@@ -24,6 +24,7 @@ type Player struct {
 	Dojo        string
 
 	PoolPosition int64
+	Seed         int
 
 	// Excel coordinates
 	sheetName string

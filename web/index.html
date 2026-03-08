@@ -342,8 +342,13 @@
                                 <button type="button" class="btn btn-sm btn-outline-info" id="showStatistics">
                                     <i class="bi bi-graph-up"></i> Show Statistics
                                 </button>
+                                <button type="button" class="btn btn-sm btn-outline-warning" id="manageSeeds">
+                                    <i class="bi bi-star"></i> Seed Participants
+                                </button>
                                 <span id="playerCount" class="badge bg-secondary">0 players</span>
                             </div>
+                            <!-- Hidden input for JSON seeds -->
+                            <input type="hidden" name="seeds" id="seedsInput">
                         </div>
                         
                         <!-- Error message area -->
@@ -351,6 +356,7 @@
                         
                         <!-- Stats modal -->
                         <div class="modal fade" id="statsModal" tabindex="-1" aria-labelledby="statsModalLabel" aria-hidden="true">
+                            <!-- ... existing content ... -->
                             <div class="modal-dialog">
                                 <div class="modal-content">
                                     <div class="modal-header">
@@ -378,6 +384,39 @@
                                     </div>
                                     <div class="modal-footer">
                                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Seeds Modal -->
+                        <div class="modal fade" id="seedsModal" tabindex="-1" aria-labelledby="seedsModalLabel" aria-hidden="true">
+                            <div class="modal-dialog modal-lg">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="seedsModalLabel">Assign Participant Seeds</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <p class="text-muted small mb-3">Seeded participants (Seed > 0) will be placed in advantageous bracket positions before others.</p>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-hover">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Name</th>
+                                                        <th>Dojo</th>
+                                                        <th style="width: 100px;">Seed Rank</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="seedsTableBody">
+                                                    <!-- Javascript will fill this -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                        <button type="button" class="btn btn-primary" id="saveSeedsBtn">Save Seeds</button>
                                     </div>
                                 </div>
                             </div>
@@ -850,6 +889,103 @@ Jack Adams, Team Alpha`
         document.addEventListener('DOMContentLoaded', function() {
             fetchAppVersion();
             updatePlayerCount();
+        });
+
+        // Seeding Logic
+        let currentSeedAssignments = [];
+
+        document.getElementById('manageSeeds').addEventListener('click', async function() {
+            const playerList = document.getElementById('playerList').value.trim();
+            if (!playerList) {
+                alert('Please enter players first.');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/parse-participants', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playerList: playerList })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const tableBody = document.getElementById('seedsTableBody');
+                    tableBody.innerHTML = '';
+
+                    // Map existing seeds if any
+                    const seedMap = {};
+                    currentSeedAssignments.forEach(a => {
+                        seedMap[a.Name] = a.SeedRank;
+                    });
+
+                    data.participants.forEach((p, index) => {
+                        const tr = document.createElement('tr');
+                        const seedValue = seedMap[p.name] || '';
+                        tr.innerHTML = `
+                            <td>${p.name}</td>
+                            <td>${p.dojo}</td>
+                            <td>
+                                <input type="number" class="form-control form-control-sm seed-input" 
+                                       data-name="${p.name}" min="1" value="${seedValue}" placeholder="Rank">
+                            </td>
+                        `;
+                        tableBody.appendChild(tr);
+                    });
+
+                    const seedsModal = new bootstrap.Modal(document.getElementById('seedsModal'));
+                    seedsModal.show();
+                } else {
+                    alert('Failed to parse participants.');
+                }
+            } catch (error) {
+                console.error('Error fetching participants:', error);
+                alert('An error occurred.');
+            }
+        });
+
+        document.getElementById('saveSeedsBtn').addEventListener('click', function() {
+            const inputs = document.querySelectorAll('.seed-input');
+            const assignments = [];
+            const seenRanks = new Set();
+            let duplicateFound = false;
+
+            inputs.forEach(input => {
+                const rank = parseInt(input.value);
+                if (rank > 0) {
+                    if (seenRanks.has(rank)) {
+                        duplicateFound = true;
+                    }
+                    seenRanks.add(rank);
+                    assignments.push({
+                        Name: input.getAttribute('data-name'),
+                        SeedRank: rank
+                    });
+                }
+            });
+
+            if (duplicateFound) {
+                if (!confirm('Warning: Duplicate seed ranks found. This might cause unexpected behavior. Continue?')) {
+                    return;
+                }
+            }
+
+            currentSeedAssignments = assignments;
+            document.getElementById('seedsInput').value = JSON.stringify(assignments);
+            
+            bootstrap.Modal.getInstance(document.getElementById('seedsModal')).hide();
+            
+            // Highlight the seed button if seeds are assigned
+            const btn = document.getElementById('manageSeeds');
+            if (assignments.length > 0) {
+                btn.classList.add('btn-warning');
+                btn.classList.remove('btn-outline-warning');
+                btn.innerHTML = `<i class="bi bi-star-fill"></i> ${assignments.length} Seeds Assigned`;
+            } else {
+                btn.classList.remove('btn-warning');
+                btn.classList.add('btn-outline-warning');
+                btn.innerHTML = `<i class="bi bi-star"></i> Seed Participants`;
+            }
         });
     </script>
 </body>

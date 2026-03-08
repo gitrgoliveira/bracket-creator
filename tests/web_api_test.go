@@ -54,6 +54,7 @@ func TestAPI_ParseParticipants(t *testing.T) {
 	assert.Len(t, resp2["participants"], 1)
 	assert.Equal(t, "Jane Doe", resp2["participants"][0]["name"])
 	assert.Equal(t, "ジェーン", resp2["participants"][0]["displayName"])
+	assert.Equal(t, "Dojo1", resp2["participants"][0]["dojo"])
 }
 
 func TestAPI_CreateWithSeeds(t *testing.T) {

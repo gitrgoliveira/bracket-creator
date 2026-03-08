@@ -40,25 +40,54 @@ A CLI to create kendo tournament brackets
 
 <!-- BEGIN __DO_NOT_INCLUDE__ -->
 
-## Usage
+## Web UI
 
-Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) page and copy them to the desired location.
-
-To use the web front end run this command and open your browser on http://localhost:8080
+Start the web server and open your browser at http://localhost:8080:
 ```bash
 bracket-creator serve
 ```
 
-You can also use docker with:
+With Docker:
 ```bash
 docker run -p 8080:8080 ghcr.io/gitrgoliveira/bracket-creator/bracket-creator:latest
 ```
 
-or docker-compose to run the web server:
+or with docker-compose:
 ```bash
 docker-compose up -d
 ```
 
+### Quickstart Demo
+
+The video below shows the full workflow: entering participants, seeding past winners, and generating the bracket file.
+
+![Quickstart Demo](docs/screenshots/quickstart-demo.webp)
+
+### Using the Form
+
+| Section | Description |
+|---|---|
+| **Tournament Type** | Choose *Playoffs (Knockout Tournament)* for a straight knockout, or *Pools and Playoffs* for a round-robin pool stage followed by a knockout. |
+| **Single Tree Format** | Render all participants on one bracket sheet instead of splitting across multiple pages. |
+| **Do not randomize** | Preserve the input order instead of shuffling participants. |
+| **Format names** | Sanitize names to `LAST_NAME, F.` format – useful for individual player tournaments. |
+| **Team Matches** | Number of players per team. Set to `0` for individual matches. |
+| **Player/Team List** | Enter one participant per line in plain or CSV format (`Name, Dojo`). You can also drag-and-drop a CSV file or use the **Small / Medium / Large Sample** buttons. |
+
+> **About Dojo**: In pool tournaments, the `Dojo` field is used to ensure participants from the same dojo are not placed in the same pool.
+
+### Seeding Participants (Web UI)
+
+Click the **☆ Seed Participants** button to open the seeding modal. This lets you lock past tournament winners into advantageous bracket positions before the draw.
+
+In the modal:
+- Each participant is listed with their dojo and a **Seed Rank** input field.
+- Enter a **positive integer** to seed a participant (e.g., `1` = top seed, `2` = second seed).
+- Leave a field empty to place the participant in the unseeded pool.
+- Seed ranks must be **unique** — duplicate ranks will be rejected with an error.
+- Seeded participants are **strictly validated**: every seeded name must exactly match a name in the participant list (case-sensitive). If a name does not match, the bracket generation will fail with a clear error.
+
+After saving, the button label changes to **★ N Seeds Assigned** (highlighted in amber) and the seeds are submitted with the form.
 
 There's also a CLI. To learn how to use the CLI run:
 ```bash
@@ -124,6 +153,33 @@ bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-exam
 * `-o` / `-output` - Path to write the output excel file
 * `-s` / `-sanitize` - sanitize print names into first name initial and capitalize the last name. This is useful for individual player tournaments.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
+* `--seeds` - Path to a CSV file mapping exact participant names to their initial seed rank (see [Seeding via CLI](#seeding-via-cli))
+
+### Seeding via CLI
+
+Seeding assigns past tournament winners to favourable positions in the bracket so they don't meet each other in the early rounds.
+
+Prepare a seeds CSV file with the following format (header required):
+
+```csv
+Rank,Name
+1,Alice Dupont
+2,Bob Martinez
+3,Charlie Chen
+```
+
+Then pass it to the command with `--seeds`:
+
+```bash
+bracket-creator create-playoffs -f ./players.csv -o ./playoffs.xlsx --seeds ./winners.csv
+```
+
+**Important rules:**
+- Names must match **exactly** (case-sensitive) to a name in the main participant list.
+- A name that cannot be matched will cause the command to fail with a descriptive error.
+- Seed ranks must be unique — duplicate ranks are rejected.
+- Seeded participants are placed first in the bracket, following standard bracket distribution (e.g., seeds 1 and 2 placed on opposite halves). Unseeded participants fill the remaining slots.
+
 
 ### Examples
 See also the example files created by the Makefile:

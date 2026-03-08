@@ -45,7 +45,7 @@ type Match struct {
 func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 	players := make([]Player, 0, len(entries))
 	var errors []string
-	seenNames := make(map[string]int) // tracks Name -> line number
+	seenNames := make(map[string]int) // tracks composite key Name|DisplayName|Dojo -> line number
 	c := cases.Title(language.Und, cases.NoLower)
 
 	for i, entry := range entries {

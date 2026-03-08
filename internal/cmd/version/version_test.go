@@ -60,3 +60,31 @@ func TestPrint(t *testing.T) {
 	// Assert the output
 	assert.Regexp(t, regexp, string(out))
 }
+
+func TestGetVersion(t *testing.T) {
+	v := GetVersion()
+	assert.NotEmpty(t, v, "Version should not be empty")
+}
+
+func TestGetGitCommit(t *testing.T) {
+	commit := GetGitCommit()
+	assert.NotEmpty(t, commit, "Git commit should not be empty")
+}
+
+func TestGetBuildDate(t *testing.T) {
+	date := GetBuildDate()
+	assert.NotEmpty(t, date, "Build date should not be empty")
+}
+
+func TestGetGoVersion(t *testing.T) {
+	goVer := GetGoVersion()
+	assert.NotEmpty(t, goVer, "Go version should not be empty")
+	assert.Contains(t, goVer, "go", "Go version should contain 'go'")
+}
+
+func TestGetOsArch(t *testing.T) {
+	osArch := GetOsArch()
+	assert.NotEmpty(t, osArch, "OS/Arch should not be empty")
+	assert.Contains(t, osArch, runtime.GOOS, "Should contain OS")
+	assert.Contains(t, osArch, runtime.GOARCH, "Should contain architecture")
+}

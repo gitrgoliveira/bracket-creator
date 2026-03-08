@@ -22,10 +22,10 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 	seedsPath := filepath.Join("tests", "fixtures", "winners.csv")
 
 	o := &playoffOptions{
-		outputWriter: writer,
-		outputPath:   "dummy.xlsx",
-		seedsPath:    seedsPath,
-		sanitize:     false,
+		outputWriter:   writer,
+		outputPath:     "dummy.xlsx",
+		seedsPath:      seedsPath,
+		withZekkenName: false,
 	}
 
 	entries := []string{

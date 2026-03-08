@@ -22,7 +22,7 @@ type playoffOptions struct {
 	outputPath      string
 	seedsPath       string
 	outputWriter    *bufio.Writer
-	sanitize        bool
+	withZekkenName  bool
 	singleTree      bool
 	determined      bool
 	SeedAssignments []domain.SeedAssignment
@@ -44,7 +44,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
 	cmd.PersistentFlags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
 	cmd.PersistentFlags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
-	cmd.Flags().BoolVarP(&o.sanitize, "sanitize", "s", false, "sanitize names into first and last name and capitalize (default false)")
+	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 
@@ -106,7 +106,10 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		})
 	}
 
-	players := helper.CreatePlayers(entries)
+	players, err := helper.CreatePlayers(entries, o.withZekkenName)
+	if err != nil {
+		return err
+	}
 
 	if o.seedsPath != "" {
 		fmt.Printf("Parsing seeds file: %s\n", o.seedsPath)
@@ -147,18 +150,18 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		}
 	}()
 
-	if o.sanitize {
-		fmt.Println("Sanitizing names")
+	if o.withZekkenName {
+		fmt.Println("Using Zekken names")
 	}
 
-	helper.AddPlayerDataToSheet(f, players, o.sanitize)
+	helper.AddPlayerDataToSheet(f, players, o.withZekkenName)
 
 	// Reorder players based on seeds for standard bracket distribution
 	players = helper.StandardSeeding(players)
 
 	// gather all player names
 	var names []string
-	if o.sanitize {
+	if o.withZekkenName {
 		for _, player := range players {
 			names = append(names, player.DisplayName)
 		}
@@ -177,7 +180,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree
-	tree := helper.CreateBalancedTree(names, o.sanitize)
+	tree := helper.CreateBalancedTree(names)
 
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
@@ -234,8 +237,8 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	}
 
 	// Convert all players for match-winner processing
-	matchWinners = helper.ConvertPlayersToWinners(players, o.sanitize)
-	helper.CreateNamesToPrint(f, players, o.sanitize)
+	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
 	helper.FillEstimations(f, 0, 0, 0, int64(o.teamMatches), int64(len(names)-1))

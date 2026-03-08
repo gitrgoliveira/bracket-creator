@@ -6,34 +6,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
-func distributeSeeds(seeded []Player, unseeded []Player, total int) []Player {
-	result := make([]Player, total)
-
-	leftHalf := make([]Player, 0)
-	rightHalf := make([]Player, 0)
-
-	for i, s := range seeded {
-		if i%2 == 0 {
-			leftHalf = append(leftHalf, s)
-		} else {
-			rightHalf = append(rightHalf, s)
-		}
-	}
-
-	for _, u := range unseeded {
-		if len(leftHalf) <= len(rightHalf) {
-			leftHalf = append(leftHalf, u)
-		} else {
-			rightHalf = append(rightHalf, u)
-		}
-	}
-
-	copy(result[:len(leftHalf)], leftHalf)
-	copy(result[len(leftHalf):], rightHalf)
-
-	return result
-}
-
 func generateBracketOrder(n int) []int {
 	if n <= 1 {
 		return []int{1}

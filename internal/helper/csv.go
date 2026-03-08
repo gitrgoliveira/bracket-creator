@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -13,7 +14,9 @@ import (
 
 // ParseSeedsFile reads a CSV file mapping names to seed positions
 func ParseSeedsFile(filePath string) ([]domain.SeedAssignment, error) {
-	file, err := os.Open(filePath)
+	// cleanse the file path to mitigate G304
+	cleanPath := filepath.Clean(filePath)
+	file, err := os.Open(cleanPath) // #nosec G304
 	if err != nil {
 		return nil, err
 	}

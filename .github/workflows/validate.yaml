@@ -63,7 +63,7 @@ jobs:
       #    |_|\___||___/\__|
       #
       - name: Run coverage
-        run: go test ./... -race -coverprofile=coverage.txt -covermode=atomic
+        run: go test ./cmd/... ./internal/... ./tests/... -race -coverprofile=coverage.txt -covermode=atomic
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

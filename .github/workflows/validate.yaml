@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: read # for actions/checkout to fetch code
       security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+      id-token: write # for codecov/codecov-action to upload coverage without a token
     runs-on: ubuntu-latest
     env:
       GO111MODULE: on
@@ -69,6 +70,7 @@ jobs:
         with:
           files: ./coverage.txt
           fail_ci_if_error: true
+          use_oidc: true
 
       #   ____             _
       #  |  _ \  ___   ___| | _____ _ __

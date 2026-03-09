@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -94,6 +95,8 @@ func TestRouterParseParticipants(t *testing.T) {
 		payload        map[string]interface{}
 		expectedStatus int
 		expectError    bool
+		expectedError  string
+		assertions     func(t *testing.T, response map[string]interface{})
 	}{
 		{
 			name: "valid participants",
@@ -103,15 +106,47 @@ func TestRouterParseParticipants(t *testing.T) {
 			},
 			expectedStatus: http.StatusOK,
 			expectError:    false,
+			assertions: func(t *testing.T, response map[string]interface{}) {
+				participants, ok := response["participants"].([]interface{})
+				require.True(t, ok)
+				require.Len(t, participants, 2)
+
+				first, ok := participants[0].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, "John Doe", first["name"])
+				assert.Equal(t, "Dojo1", first["dojo"])
+				assert.Equal(t, "J. DOE", first["displayName"])
+			},
 		},
 		{
 			name: "with zekken names",
 			payload: map[string]interface{}{
-				"playerList":     "John Doe,Dojo1,Johnny\nJane Smith,Dojo2,Janey",
+				"playerList":     "John Doe,Johnny,Dojo1\nJane Smith,Janey,Dojo2",
 				"withZekkenName": true,
 			},
 			expectedStatus: http.StatusOK,
 			expectError:    false,
+			assertions: func(t *testing.T, response map[string]interface{}) {
+				participants, ok := response["participants"].([]interface{})
+				require.True(t, ok)
+				require.Len(t, participants, 2)
+
+				first, ok := participants[0].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, "John Doe", first["name"])
+				assert.Equal(t, "Dojo1", first["dojo"])
+				assert.Equal(t, "Johnny", first["displayName"])
+			},
+		},
+		{
+			name: "zekken format missing dojo",
+			payload: map[string]interface{}{
+				"playerList":     "John Doe,Johnny",
+				"withZekkenName": true,
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectError:    true,
+			expectedError:  "expected format 'Name, ZekkenName, Dojo'",
 		},
 		{
 			name: "empty player list",
@@ -133,12 +168,21 @@ func TestRouterParseParticipants(t *testing.T) {
 			router.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
+			var response map[string]interface{}
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			require.NoError(t, err)
 
-			if !tt.expectError {
-				var response map[string]interface{}
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				assert.NoError(t, err)
-				assert.Contains(t, response, "participants")
+			if tt.expectError {
+				assert.Contains(t, response, "error")
+				if tt.expectedError != "" {
+					assert.Contains(t, response["error"], tt.expectedError)
+				}
+				return
+			}
+
+			assert.Contains(t, response, "participants")
+			if tt.assertions != nil {
+				tt.assertions(t, response)
 			}
 		})
 	}
@@ -419,6 +463,26 @@ func TestRouterStaticFiles(t *testing.T) {
 
 	// Should serve index.html or return an error if web files not embedded
 	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+}
+
+func TestSeedModalParsePayloadContractInWebPage(t *testing.T) {
+	bodyBytes, err := os.ReadFile("../web/index.html")
+	if err != nil {
+		bodyBytes, err = os.ReadFile("web/index.html")
+	}
+	require.NoError(t, err)
+
+	body := string(bodyBytes)
+	assert.Contains(t, body, "document.getElementById('manageSeeds').addEventListener('click'")
+	assert.Contains(t, body, "/api/parse-participants")
+	assert.Contains(t, body, "withZekkenName: withZekkenName")
+
+	requestBodyIdx := strings.Index(body, "body: JSON.stringify({")
+	require.NotEqual(t, -1, requestBodyIdx)
+
+	withZekkenIdx := strings.Index(body, "withZekkenName: withZekkenName")
+	require.NotEqual(t, -1, withZekkenIdx)
+	assert.Greater(t, withZekkenIdx, requestBodyIdx, "withZekkenName should be part of the JSON request payload")
 }
 
 func TestServeOptionsRun(t *testing.T) {

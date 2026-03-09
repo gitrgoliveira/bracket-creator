@@ -354,7 +354,7 @@
                             <textarea class="form-control" name="playerList" id="playerList" rows="10"
                                 placeholder="Enter player or team names (one per line):&#10;First_Name1 Last_Name1, Dojo1&#10;First_Name2 Last_Name2, Dojo2&#10;..."></textarea>
 
-                            <div class="form-text mt-2">
+                            <div class="form-text mt-2" id="playerListHelp">
                                 <i class="bi bi-info-circle"></i> When using the CSV format, 'Dojo' is used to ensure
                                 players/teams don't meet someone from the same dojo when doing pools.
                             </div>
@@ -589,6 +589,27 @@
             return new bootstrap.Tooltip(tooltipTriggerEl)
         })
 
+        const playerListTextarea = document.getElementById('playerList');
+        const playerListHelp = document.getElementById('playerListHelp');
+        const zekkenCheckbox = document.getElementById('withZekkenName');
+        const defaultPlayerListPlaceholder = playerListTextarea.placeholder;
+        const defaultPlayerListHelpHtml = playerListHelp.innerHTML;
+
+        function updateZekkenHints() {
+            if (zekkenCheckbox.checked) {
+                playerListTextarea.placeholder =
+                    'Enter player or team names (one per line):\n' +
+                    'First_Name1 Last_Name1, ZekkenName1, Dojo1\n' +
+                    'First_Name2 Last_Name2, ZekkenName2, Dojo2\n' +
+                    '...';
+                playerListHelp.innerHTML =
+                    '<i class="bi bi-info-circle"></i> When using the CSV format, Column 2 is the Zekken name and Column 3 (Dojo) is used to ensure players/teams don\'t meet someone from the same dojo when doing pools.';
+            } else {
+                playerListTextarea.placeholder = defaultPlayerListPlaceholder;
+                playerListHelp.innerHTML = defaultPlayerListHelpHtml;
+            }
+        }
+
         // Load saved values from localStorage
         window.addEventListener('DOMContentLoaded', () => {
             // Tournament type
@@ -630,6 +651,8 @@
                 localStorage.setItem('playerList', oldPlayerList);
                 localStorage.removeItem('teplayerListxt');
             }
+
+            updateZekkenHints();
         });
 
         // Save values to localStorage on input change
@@ -718,7 +741,7 @@ Jack Adams, Team Alpha`
         // File drag & drop functionality
         const dropArea = document.getElementById('drop-area');
         const fileInput = document.getElementById('file-input');
-        const playerListTextarea = document.getElementById('playerList');
+        zekkenCheckbox.addEventListener('change', updateZekkenHints);
 
         // Open file selector when clicking drop area
         dropArea.addEventListener('click', () => {
@@ -928,6 +951,7 @@ Jack Adams, Team Alpha`
 
         document.getElementById('manageSeeds').addEventListener('click', async function () {
             const playerList = document.getElementById('playerList').value.trim();
+            const withZekkenName = document.getElementById('withZekkenName').checked;
             if (!playerList) {
                 alert('Please enter players first.');
                 return;
@@ -937,7 +961,10 @@ Jack Adams, Team Alpha`
                 const response = await fetch('/api/parse-participants', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ playerList: playerList })
+                    body: JSON.stringify({
+                        playerList: playerList,
+                        withZekkenName: withZekkenName
+                    })
                 });
 
                 if (response.ok) {
@@ -968,7 +995,16 @@ Jack Adams, Team Alpha`
                     const seedsModal = new bootstrap.Modal(document.getElementById('seedsModal'));
                     seedsModal.show();
                 } else {
-                    alert('Failed to parse participants.');
+                    let errorMessage = 'Failed to parse participants.';
+                    try {
+                        const errorData = await response.json();
+                        if (errorData && typeof errorData.error === 'string' && errorData.error.trim()) {
+                            errorMessage = errorData.error;
+                        }
+                    } catch (_) {
+                        // Keep default fallback message when response is not JSON.
+                    }
+                    alert(errorMessage);
                 }
             } catch (error) {
                 console.error('Error fetching participants:', error);

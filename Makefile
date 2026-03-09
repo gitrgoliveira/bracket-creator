@@ -24,7 +24,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps go/test go/build go/lint examples docker/build docker/run pre-commit docs/serve docs/open run goreleaser/test release version
+.PHONY: default help clean local/deps go/fmt go/test go/build go/lint examples docker/build docker/run pre-commit docs/serve docs/open run goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -42,7 +42,11 @@ local/deps: ## Install project dependencies
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 	python3 -m pip install -r docs/requirements.txt
 
-go/lint: ## Run linters
+go/fmt: ## Format Go code
+	@echo "Formatting Go code..."
+	go fmt ./...
+
+go/lint: go/fmt ## Run linters
 	@echo "Running linters..."
 	golangci-lint run ./...
 
@@ -84,7 +88,6 @@ docker/run: docker/build ## Run the application in Docker
 	docker run -p 8080:8080 $(IMAGE_NAME):latest
 
 pre-commit: go/test ## Run pre-commit checks
-	go fmt ./...
 	@echo "Code is ready to commit!"
 
 docs/serve: ## Locally serve the documentation

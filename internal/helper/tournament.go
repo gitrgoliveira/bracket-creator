@@ -218,7 +218,7 @@ func CreatePoolMatches(pools []Pool) {
 	for i := range pools {
 		pool := &pools[i]
 		players := pool.Players
-		
+
 		// Special case: pool of 2 only needs 1 match
 		if len(players) == 2 {
 			pool.Matches = append(pool.Matches, Match{
@@ -227,7 +227,7 @@ func CreatePoolMatches(pools []Pool) {
 			})
 			continue
 		}
-		
+
 		for j := range players {
 			sideA := &players[j]
 			sideB := &players[0]

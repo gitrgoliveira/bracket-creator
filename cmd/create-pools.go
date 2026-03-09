@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"os"
@@ -142,16 +143,19 @@ func (o *poolOptions) createPools(entries []string) error {
 	pools := helper.CreatePools(players, o.numPlayers)
 
 	// Opening the template Excel file.
-	templateFile, err := helper.TemplateFile.Open("template.xlsx")
+	var templateFile io.ReadCloser
+	templateFile, err = helper.TemplateFile.Open("template.xlsx")
 	if err != nil {
-		fmt.Println(err)
-		return nil
+		fmt.Println("Warning: template.xlsx not found in embedded FS, trying local disk:", err)
+		templateFile, err = os.Open("template.xlsx")
+		if err != nil {
+			return fmt.Errorf("could not find template.xlsx: %w", err)
+		}
 	}
 
 	f, err := excelize.OpenReader(templateFile)
 	if err != nil {
-		fmt.Println(err)
-		return nil
+		return fmt.Errorf("failed to open template Excel file: %w", err)
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -198,21 +202,20 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	treeSheet, err := f.GetSheetIndex("Tree")
 	if err != nil {
-		fmt.Println("Could not find Tree sheet")
-		fmt.Println(err)
-		return nil
+		return fmt.Errorf("could not find Tree sheet: %w", err)
 	}
 	numPools := int(math.Ceil(float64(len(pools)) / float64(len(subtrees))))
 	// adding extra sheets
 	for i := 0; i < len(subtrees); i++ {
 		subtreeSheet := "Tree " + strconv.Itoa(i+1)
 		fmt.Printf("Adding sheet %s\n", subtreeSheet)
-		index, _ := f.NewSheet(subtreeSheet)
+		index, err := f.NewSheet(subtreeSheet)
+		if err != nil {
+			return fmt.Errorf("failed to create sheet %s: %w", subtreeSheet, err)
+		}
 		err = f.CopySheet(treeSheet, index)
 		if err != nil {
-			fmt.Printf("Could not copy sheet %d\n", treeSheet)
-			fmt.Println(err)
-			return nil
+			return fmt.Errorf("failed to copy sheet %d to %s: %w", treeSheet, subtreeSheet, err)
 		}
 
 		depth := helper.CalculateDepth(subtrees[i])

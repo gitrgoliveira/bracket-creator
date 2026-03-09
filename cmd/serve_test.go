@@ -287,11 +287,6 @@ func TestRouterCreateEndpoint_PoolsValidation(t *testing.T) {
 }
 
 func TestRouterCreateEndpoint_PlayoffsSuccess(t *testing.T) {
-	// Change to project root for template access
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	router := NewRouter()
 
 	body := &bytes.Buffer{}
@@ -313,10 +308,6 @@ func TestRouterCreateEndpoint_PlayoffsSuccess(t *testing.T) {
 }
 
 func TestRouterCreateEndpoint_PoolsSuccess(t *testing.T) {
-	// Change to project root for template access
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
 
 	router := NewRouter()
 
@@ -345,11 +336,6 @@ func TestRouterCreateEndpoint_PoolsSuccess(t *testing.T) {
 }
 
 func TestRouterCreateEndpoint_WithSeeds(t *testing.T) {
-	// Change to project root for template access
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	router := NewRouter()
 
 	seeds := []map[string]interface{}{
@@ -399,11 +385,6 @@ func TestRouterCreateEndpoint_InvalidSeeds(t *testing.T) {
 }
 
 func TestRouterCreateEndpoint_WithOptions(t *testing.T) {
-	// Change to project root for template access
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	router := NewRouter()
 
 	body := &bytes.Buffer{}

@@ -63,10 +63,6 @@ func TestCreatePoolCmdFlags(t *testing.T) {
 }
 
 func TestCreatePools_BasicSuccess(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -88,20 +84,15 @@ func TestCreatePools_BasicSuccess(t *testing.T) {
 		"Dave,Dojo6",
 	}
 
-	err = o.createPools(entries)
-	// Function returns nil even when template is missing (prints error instead)
-	// So we just check that it doesn't panic and completes
-	assert.NoError(t, err)
+	err := o.createPools(entries)
+	// Template file should be found in embedded resources
+	require.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
 	// Buffer may be empty if template is missing, which is OK for this test
 }
 
 func TestCreatePools_WithZekkenNames(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -123,17 +114,13 @@ func TestCreatePools_WithZekkenNames(t *testing.T) {
 		"Dave,Dojo6,Davey",
 	}
 
-	err = o.createPools(entries)
+	err := o.createPools(entries)
 	assert.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
 }
 
 func TestCreatePools_RoundRobin(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -157,17 +144,13 @@ func TestCreatePools_RoundRobin(t *testing.T) {
 		"Frank,Dojo8",
 	}
 
-	err = o.createPools(entries)
+	err := o.createPools(entries)
 	assert.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
 }
 
 func TestCreatePools_SingleTree(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -189,17 +172,13 @@ func TestCreatePools_SingleTree(t *testing.T) {
 		"Dave,Dojo6",
 	}
 
-	err = o.createPools(entries)
+	err := o.createPools(entries)
 	assert.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
 }
 
 func TestCreatePools_WithTeamMatches(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -221,17 +200,13 @@ func TestCreatePools_WithTeamMatches(t *testing.T) {
 		"Dave,Dojo6",
 	}
 
-	err = o.createPools(entries)
+	err := o.createPools(entries)
 	assert.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
 }
 
 func TestCreatePools_WithSeeds(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -258,7 +233,7 @@ func TestCreatePools_WithSeeds(t *testing.T) {
 		"Dave,Dojo6",
 	}
 
-	err = o.createPools(entries)
+	err := o.createPools(entries)
 	assert.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
@@ -322,10 +297,6 @@ func TestCreatePools_ValidationErrors(t *testing.T) {
 }
 
 func TestCreatePools_RemovesDuplicates(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -349,17 +320,13 @@ func TestCreatePools_RemovesDuplicates(t *testing.T) {
 		"Dave,Dojo6",
 	}
 
-	err = o.createPools(entries)
+	err := o.createPools(entries)
 	assert.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
 }
 
 func TestCreatePools_ShuffleWhenNotDetermined(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -380,7 +347,7 @@ func TestCreatePools_ShuffleWhenNotDetermined(t *testing.T) {
 		"Dave,Dojo6",
 	}
 
-	err = o.createPools(entries)
+	err := o.createPools(entries)
 	assert.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
@@ -415,10 +382,6 @@ func TestPoolOptionsRun_EmptyFile(t *testing.T) {
 }
 
 func TestPoolOptionsRun_Success(t *testing.T) {
-	err := os.Chdir("..")
-	require.NoError(t, err)
-	defer os.Chdir("cmd")
-
 	// Create a temporary input file
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)

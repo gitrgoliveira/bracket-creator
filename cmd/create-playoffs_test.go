@@ -3,7 +3,6 @@ package cmd
 import (
 	"bufio"
 	"bytes"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,9 +10,6 @@ import (
 )
 
 func TestCreatePlayoffs_WithSeeds(t *testing.T) {
-	err := os.Chdir("..")
-	assert.NoError(t, err)
-	defer os.Chdir("cmd")
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
@@ -36,7 +32,7 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 	}
 
 	// Create playoffs
-	err = o.createPlayoffs(entries)
+	err := o.createPlayoffs(entries)
 
 	// Ensure no error because seeds path is valid and names match
 	assert.NoError(t, err)
@@ -49,9 +45,6 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 }
 
 func TestCreatePlayoffs_MissingSeed(t *testing.T) {
-	err := os.Chdir("..")
-	assert.NoError(t, err)
-	defer os.Chdir("cmd")
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
@@ -71,15 +64,12 @@ func TestCreatePlayoffs_MissingSeed(t *testing.T) {
 		"Bob,Dojo4",
 	}
 
-	err = o.createPlayoffs(entries)
+	err := o.createPlayoffs(entries)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "seeded participant not found")
 }
 
 func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
-	err := os.Chdir("..")
-	assert.NoError(t, err)
-	defer os.Chdir("cmd")
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
@@ -97,7 +87,7 @@ func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
 		"Bob,Dojo4",
 	}
 
-	err = o.createPlayoffs(entries)
+	err := o.createPlayoffs(entries)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse seeds file")
 }

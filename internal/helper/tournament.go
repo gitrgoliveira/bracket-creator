@@ -228,18 +228,47 @@ func CreatePoolMatches(pools []Pool) {
 			continue
 		}
 
-		for j := range players {
-			sideA := &players[j]
-			sideB := &players[0]
-			if j != len(players)-1 {
-				sideB = &players[j+1]
-			}
-			if j%2 != 0 {
-				sideA, sideB = sideB, sideA
-			}
+		switch len(players) {
+		case 0:
+			continue
+		case 1:
 			pool.Matches = append(pool.Matches, Match{
-				SideA: sideA,
-				SideB: sideB,
+				SideA: &players[0],
+				SideB: &players[0],
+			})
+			continue
+		case 3:
+			pool.Matches = append(pool.Matches,
+				Match{SideA: &players[0], SideB: &players[1]},
+				Match{SideA: &players[0], SideB: &players[2]},
+				Match{SideA: &players[1], SideB: &players[2]},
+			)
+			continue
+		case 4:
+			pool.Matches = append(pool.Matches,
+				Match{SideA: &players[0], SideB: &players[1]},
+				Match{SideA: &players[2], SideB: &players[1]},
+				Match{SideA: &players[2], SideB: &players[3]},
+				Match{SideA: &players[0], SideB: &players[3]},
+			)
+			continue
+		}
+
+		for i := 0; i+1 < len(players); i += 2 {
+			pool.Matches = append(pool.Matches, Match{
+				SideA: &players[i],
+				SideB: &players[i+1],
+			})
+			next := (i + 2) % len(players)
+			pool.Matches = append(pool.Matches, Match{
+				SideA: &players[next],
+				SideB: &players[i+1],
+			})
+		}
+		if len(players)%2 != 0 {
+			pool.Matches = append(pool.Matches, Match{
+				SideA: &players[len(players)-1],
+				SideB: &players[0],
 			})
 		}
 
@@ -252,13 +281,50 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 		currentPool := &pools[poolN]
 		size := len(pool.Players)
 
+		switch size {
+		case 0, 1:
+			continue
+		case 3:
+			currentPool.Matches = append(currentPool.Matches,
+				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[1]},
+				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[2]},
+				Match{SideA: &currentPool.Players[1], SideB: &currentPool.Players[2]},
+			)
+			continue
+		case 4:
+			currentPool.Matches = append(currentPool.Matches,
+				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[1]},
+				Match{SideA: &currentPool.Players[2], SideB: &currentPool.Players[1]},
+				Match{SideA: &currentPool.Players[2], SideB: &currentPool.Players[3]},
+				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[3]},
+				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[2]},
+				Match{SideA: &currentPool.Players[1], SideB: &currentPool.Players[3]},
+			)
+			continue
+		}
+
 		for i := 1; i < size; i++ {
 			for k, j := i, 0; j < size-i; j, k = j+1, k+1 {
 				sideA := &currentPool.Players[j]
 				sideB := &currentPool.Players[k]
 
-				if j%2 != 0 {
-					sideA, sideB = sideB, sideA
+				if len(currentPool.Matches) > 0 {
+					prev := currentPool.Matches[len(currentPool.Matches)-1]
+					prevSide := func(match Match, player *Player) int {
+						if match.SideA == player {
+							return 1
+						}
+						if match.SideB == player {
+							return 2
+						}
+						return 0
+					}
+
+					sideAStatus := prevSide(prev, sideA)
+					sideBStatus := prevSide(prev, sideB)
+					if sideAStatus == 2 || sideBStatus == 1 {
+						sideA, sideB = sideB, sideA
+					}
 				}
 
 				currentPool.Matches = append(currentPool.Matches, Match{
@@ -266,23 +332,6 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 					SideB: sideB,
 				})
 			}
-		}
-
-		// handle the special case for pools of 4
-		if size == 4 && len(currentPool.Matches) >= 3 {
-			// swap the second last and third last round
-			secondLastRound := currentPool.Matches[len(currentPool.Matches)-2]
-			thirdLastRound := currentPool.Matches[len(currentPool.Matches)-3]
-			// swap the sides
-			secondLastRound.SideA, secondLastRound.SideB = secondLastRound.SideB, secondLastRound.SideA
-
-			currentPool.Matches[len(currentPool.Matches)-2] = thirdLastRound
-			currentPool.Matches[len(currentPool.Matches)-3] = secondLastRound
-
-		} else if len(currentPool.Matches) > 0 {
-			// last match always needs to swap sides
-			lastRound := &currentPool.Matches[len(currentPool.Matches)-1]
-			lastRound.SideA, lastRound.SideB = lastRound.SideB, lastRound.SideA
 		}
 
 	}

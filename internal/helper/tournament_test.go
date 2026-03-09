@@ -952,6 +952,27 @@ func TestCreatePoolMatchesEdgeCases(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "pool of 4 - each player fights twice",
+			pools: []Pool{
+				{
+					PoolName: "Pool A",
+					Players:  []Player{{Name: "P1"}, {Name: "P2"}, {Name: "P3"}, {Name: "P4"}},
+				},
+			},
+			validate: func(t *testing.T, pools []Pool) {
+				playerMatches := make(map[string]int)
+				for _, match := range pools[0].Matches {
+					playerMatches[match.SideA.Name]++
+					playerMatches[match.SideB.Name]++
+				}
+				for player, count := range playerMatches {
+					if count != 2 {
+						t.Errorf("Player %s appears in %d matches, expected 2", player, count)
+					}
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -1163,8 +1184,7 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 }
 
 // TestCreatePoolMatchesOrder verifies the specific match ordering for non-round-robin pools.
-// Non-round-robin creates n matches for n players where each player faces the next player,
-// with the last player facing the first. Even-indexed matches swap sides.
+// Non-round-robin creates n matches for n players where each player fights exactly twice.
 func TestCreatePoolMatchesOrder(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1191,14 +1211,14 @@ func TestCreatePoolMatchesOrder(t *testing.T) {
 				{Name: "P3"},
 			},
 			expectedPairs: []struct{ sideA, sideB string }{
-				{"P1", "P2"}, // Match 0: j=0 (even) -> P1 vs P2
-				{"P3", "P2"}, // Match 1: j=1 (odd) -> P2 vs P3 (swapped)
-				{"P3", "P1"}, // Match 2: j=2 (even) -> P3 vs P1 (last wraps to first)
+				{"P1", "P2"}, // Match 0
+				{"P1", "P3"}, // Match 1
+				{"P2", "P3"}, // Match 2
 			},
-			description: "3 players: each faces next, last faces first",
+			description: "3 players: each fights twice in defined order",
 		},
 		{
-			name: "pool of 4 - standard case",
+			name: "pool of 4 - defined order",
 			players: []Player{
 				{Name: "P1"},
 				{Name: "P2"},
@@ -1206,12 +1226,12 @@ func TestCreatePoolMatchesOrder(t *testing.T) {
 				{Name: "P4"},
 			},
 			expectedPairs: []struct{ sideA, sideB string }{
-				{"P1", "P2"}, // Match 0: j=0 (even) -> P1 vs P2
-				{"P3", "P2"}, // Match 1: j=1 (odd) -> P2 vs P3 (swapped)
-				{"P3", "P4"}, // Match 2: j=2 (even) -> P3 vs P4
-				{"P1", "P4"}, // Match 3: j=3 (odd) -> P4 vs P1 (swapped, wraps)
+				{"P1", "P2"}, // Match 0
+				{"P3", "P2"}, // Match 1
+				{"P3", "P4"}, // Match 2
+				{"P1", "P4"}, // Match 3
 			},
-			description: "4 players: alternating side swaps with wrap-around",
+			description: "4 players: each fights twice in defined order",
 		},
 		{
 			name: "pool of 5 - larger pool",
@@ -1223,13 +1243,13 @@ func TestCreatePoolMatchesOrder(t *testing.T) {
 				{Name: "E"},
 			},
 			expectedPairs: []struct{ sideA, sideB string }{
-				{"A", "B"}, // Match 0: j=0 (even)
-				{"C", "B"}, // Match 1: j=1 (odd) swapped
-				{"C", "D"}, // Match 2: j=2 (even)
-				{"E", "D"}, // Match 3: j=3 (odd) swapped
-				{"E", "A"}, // Match 4: j=4 (even) wraps to first
+				{"A", "B"}, // Match 0
+				{"C", "B"}, // Match 1
+				{"C", "D"}, // Match 2
+				{"E", "D"}, // Match 3
+				{"E", "A"}, // Match 4
 			},
-			description: "5 players: verifies pattern holds for larger pools",
+			description: "5 players: cycle order keeps two matches per player",
 		},
 	}
 
@@ -1277,9 +1297,9 @@ func TestCreatePoolRoundRobinMatchesOrder(t *testing.T) {
 				{Name: "C"},
 			},
 			expectedPairs: []struct{ sideA, sideB string }{
-				{"A", "B"}, // i=1, j=0, k=1: even j
-				{"C", "B"}, // i=1, j=1, k=2: odd j (swapped)
-				{"C", "A"}, // i=2, j=0, k=2: last match swapped
+				{"A", "B"},
+				{"A", "C"},
+				{"B", "C"},
 			},
 			description: "3 players: 3 matches covering all pairings",
 		},
@@ -1292,14 +1312,14 @@ func TestCreatePoolRoundRobinMatchesOrder(t *testing.T) {
 				{Name: "D"},
 			},
 			expectedPairs: []struct{ sideA, sideB string }{
-				{"A", "B"}, // i=1, j=0, k=1: even j
-				{"C", "B"}, // i=1, j=1, k=2: odd j (swapped)
-				{"C", "D"}, // i=1, j=2, k=3: even j
-				{"B", "D"}, // i=2, j=0, k=2: special swap for pool of 4
-				{"A", "C"}, // i=2, j=1, k=3: special swap for pool of 4
-				{"A", "D"}, // i=3, j=0, k=3: last match swapped
+				{"A", "B"},
+				{"C", "B"},
+				{"C", "D"},
+				{"A", "D"},
+				{"A", "C"},
+				{"B", "D"},
 			},
-			description: "4 players: 6 matches with special swap logic",
+			description: "4 players: 6 matches in defined order",
 		},
 		{
 			name: "pool of 5 - standard round-robin",
@@ -1311,18 +1331,18 @@ func TestCreatePoolRoundRobinMatchesOrder(t *testing.T) {
 				{Name: "P5"},
 			},
 			expectedPairs: []struct{ sideA, sideB string }{
-				{"P1", "P2"}, // i=1, j=0, k=1
-				{"P3", "P2"}, // i=1, j=1, k=2 (swapped)
-				{"P3", "P4"}, // i=1, j=2, k=3
-				{"P5", "P4"}, // i=1, j=3, k=4 (swapped)
-				{"P1", "P3"}, // i=2, j=0, k=2
-				{"P4", "P2"}, // i=2, j=1, k=3 (swapped)
-				{"P3", "P5"}, // i=2, j=2, k=4
-				{"P1", "P4"}, // i=3, j=0, k=3
-				{"P5", "P2"}, // i=3, j=1, k=4 (swapped)
-				{"P5", "P1"}, // i=4, j=0, k=4 (last swapped)
+				{"P1", "P2"},
+				{"P3", "P2"},
+				{"P3", "P4"},
+				{"P5", "P4"},
+				{"P1", "P3"},
+				{"P2", "P4"},
+				{"P3", "P5"},
+				{"P1", "P4"},
+				{"P2", "P5"},
+				{"P1", "P5"},
 			},
-			description: "5 players: 10 matches in round-robin order",
+			description: "5 players: 10 matches with no side switching for consecutive fighters",
 		},
 	}
 

@@ -288,6 +288,13 @@ func NewRouter() *gin.Engine {
 
 		// Set response headers for file download
 		filename := fmt.Sprintf("%s-%s.xlsx", tournamentType, time.Now().Format("2006-01-02"))
+		
+		// Set download token cookie so client can detect when download starts
+		downloadToken := c.PostForm("downloadToken")
+		if downloadToken != "" {
+			c.SetCookie("downloadToken", downloadToken, 30, "/", "", false, false)
+		}
+		
 		c.Header("Content-Description", "File Transfer")
 		c.Header("Content-Transfer-Encoding", "binary")
 		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))

@@ -3,46 +3,59 @@ package excel_test
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
 )
 
 // createTestFS creates an in-memory filesystem for testing
 func createTestFS(t *testing.T) fs.FS {
-	// Create a minimal Excel file
-	excelData := []byte{
-		0x50, 0x4B, 0x03, 0x04, // PK signature for ZIP files
-		// This is not a real Excel file, just testing error handling
-	}
-
+	data := loadTemplateData(t)
 	return fstest.MapFS{
 		"template.xlsx": &fstest.MapFile{
-			Data:    excelData,
+			Data:    data,
 			Mode:    0644,
 			ModTime: time.Now(),
 		},
 	}
 }
 
+func createInvalidFS() fs.FS {
+	return fstest.MapFS{
+		"template.xlsx": &fstest.MapFile{
+			Data:    []byte{0x50, 0x4B, 0x03, 0x04},
+			Mode:    0644,
+			ModTime: time.Now(),
+		},
+	}
+}
+
+func loadTemplateData(t *testing.T) []byte {
+	t.Helper()
+	path := filepath.Join("..", "..", "template.xlsx")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return data
+}
+
 func TestNewClient(t *testing.T) {
 	testFS := createTestFS(t)
-
-	// This will likely fail since we're not providing a real Excel file
-	// but we can test the error handling
 	client, err := excel.NewClient(testFS)
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	defer client.Close()
+}
 
-	if err == nil {
-		// If by chance it doesn't fail, make sure to clean up
-		defer client.Close()
-		t.Log("Unexpected success creating Excel client with test data")
-	} else {
-		// We expect an error since our test data isn't a valid Excel file
-		t.Logf("Expected error: %v", err)
-	}
+func TestNewClient_InvalidTemplate(t *testing.T) {
+	client, err := excel.NewClient(createInvalidFS())
+	assert.Error(t, err)
+	assert.Nil(t, client)
 }
 
 func TestSaveFile(t *testing.T) {
@@ -66,28 +79,22 @@ func TestSaveFile(t *testing.T) {
 	excelFile := excelize.NewFile()
 	defer excelFile.Close()
 
-	// Create a client with the real Excel file via reflection since the file field is private
+	// Create a client with the real Excel file via test helper
 	client := &excel.Client{}
-	// We'll use a test-specific method for setting the file
 	client.SetFileForTest(excelFile)
 
 	// Test saving to a valid path
 	err = client.SaveFile(tempFileName)
-	if err != nil {
-		t.Errorf("SaveFile failed with valid path: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify the file exists
-	if _, err := os.Stat(tempFileName); os.IsNotExist(err) {
-		t.Error("Expected file to exist after SaveFile")
-	}
+	_, err = os.Stat(tempFileName)
+	require.NoError(t, err)
 
 	// Test saving to an invalid path
 	invalidPath := "/nonexistent/directory/file.xlsx"
 	err = client.SaveFile(invalidPath)
-	if err == nil {
-		t.Error("Expected SaveFile to fail with invalid path")
-	}
+	assert.Error(t, err)
 }
 
 func TestClose(t *testing.T) {
@@ -100,15 +107,9 @@ func TestClose(t *testing.T) {
 
 	// Test closing the file
 	err := client.Close()
-	if err != nil {
-		t.Errorf("Close failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Test closing again (should fail since we set file to nil in Close())
 	err = client.Close()
-	if err == nil {
-		t.Error("Expected Close to fail when called twice")
-	} else {
-		t.Logf("Got expected error when closing twice: %v", err)
-	}
+	assert.Error(t, err)
 }

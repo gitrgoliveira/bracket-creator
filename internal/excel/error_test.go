@@ -3,31 +3,24 @@ package excel
 import (
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestHandleError(t *testing.T) {
 	// Test with nil error
 	err := handleError("test", nil)
-	if err != nil {
-		t.Errorf("Expected nil error, got: %v", err)
-	}
+	assert.NoError(t, err)
 
 	// Test with non-nil error
 	originalErr := errors.New("test error")
 	err = handleError("TestOperation", originalErr)
-
-	if err == nil {
-		t.Error("Expected error to not be nil")
-	}
+	assert.Error(t, err)
 
 	// Check that the error message is as expected
 	expectedErrMsg := "excel TestOperation operation failed: test error"
-	if err.Error() != expectedErrMsg {
-		t.Errorf("Expected error message '%s', got '%s'", expectedErrMsg, err.Error())
-	}
+	assert.Equal(t, expectedErrMsg, err.Error())
 
 	// Check that the original error is wrapped
-	if !errors.Is(err, originalErr) {
-		t.Error("Expected original error to be wrapped")
-	}
+	assert.ErrorIs(t, err, originalErr)
 }

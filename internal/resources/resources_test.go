@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/resources"
+	"github.com/stretchr/testify/assert"
 )
 
 //go:embed test_data/*
@@ -14,43 +15,30 @@ var testFiles embed.FS
 var testTemplate embed.FS
 
 func TestNewResources(t *testing.T) {
-	// Create a new resources handler
 	res := resources.NewResources(testFiles, testTemplate)
-
-	// Check that the resources are not nil
-	if res == nil {
-		t.Error("Expected resources to not be nil")
-	}
+	assert.NotNil(t, res)
 }
 
 func TestGetWebFS(t *testing.T) {
-	// Create a new resources handler
 	res := resources.NewResources(testFiles, testTemplate)
-
-	// Get the web file system
 	webFS := res.GetWebFS()
+	assert.NotNil(t, webFS)
 
-	// Try to read a file from the web file system
-	_, err := webFS.Open("test_data/index.html")
-	if err != nil {
-		// This will fail because we don't have actual test data files yet,
-		// but we're testing the method wiring here, not actual file access
-		t.Logf("Note: Expected error when no test files exist: %v", err)
+	file, err := webFS.Open("test_data/index.html")
+	assert.NoError(t, err)
+	if file != nil {
+		file.Close()
 	}
 }
 
 func TestGetTemplateFS(t *testing.T) {
-	// Create a new resources handler
 	res := resources.NewResources(testFiles, testTemplate)
-
-	// Get the template file system
 	templateFS := res.GetTemplateFS()
+	assert.NotNil(t, templateFS)
 
-	// Try to read a file from the template file system
-	_, err := templateFS.Open("test_data/template.txt")
-	if err != nil {
-		// This will fail because we don't have actual test data files yet,
-		// but we're testing the method wiring here, not actual file access
-		t.Logf("Note: Expected error when no test files exist: %v", err)
+	file, err := templateFS.Open("test_data/template.txt")
+	assert.NoError(t, err)
+	if file != nil {
+		file.Close()
 	}
 }

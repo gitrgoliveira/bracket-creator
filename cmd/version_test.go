@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"bytes"
-	"io"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestVersionCmd(t *testing.T) {
@@ -17,46 +15,32 @@ func TestVersionCmd(t *testing.T) {
 }
 
 func TestVersionCmdRun(t *testing.T) {
-	// Capture stdout
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "no args",
+			args: []string{},
+		},
+		{
+			name: "with args",
+			args: []string{"arg1", "arg2"},
+		},
+	}
 
-	// Run the version command
-	versionCmd.Run(versionCmd, []string{})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := captureStdout(t, func() {
+				versionCmd.Run(versionCmd, tt.args)
+			})
 
-	// Restore stdout
-	w.Close()
-	os.Stdout = oldStdout
-
-	// Read captured output
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	output := buf.String()
-
-	// Verify output contains version information
-	// The actual version values depend on build-time variables
-	assert.NotEmpty(t, output)
-}
-
-func TestVersionCmdWithArgs(t *testing.T) {
-	// Capture stdout
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	// Run the version command with args (should be ignored)
-	versionCmd.Run(versionCmd, []string{"arg1", "arg2"})
-
-	// Restore stdout
-	w.Close()
-	os.Stdout = oldStdout
-
-	// Read captured output
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	output := buf.String()
-
-	// Should still print version info
-	assert.NotEmpty(t, output)
+			require.NotEmpty(t, output)
+			assert.Contains(t, output, "bracket-creator -")
+			assert.Contains(t, output, "Git Commit:")
+			assert.Contains(t, output, "Build date:")
+			assert.Contains(t, output, "Go version:")
+			assert.Contains(t, output, "OS / Arch")
+		})
+	}
 }

@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreatePlayersWithZekkenName(t *testing.T) {
@@ -13,33 +16,16 @@ func TestCreatePlayersWithZekkenName(t *testing.T) {
 	}
 
 	players, err := CreatePlayers(entries, true)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, players, 2)
 
-	if len(players) != 2 {
-		t.Fatalf("Expected 2 players, got %d", len(players))
-	}
+	assert.Equal(t, "John Smith", players[0].Name)
+	assert.Equal(t, "クレスワェル", players[0].DisplayName)
+	assert.Equal(t, "Tokyo Kendo Club", players[0].Dojo)
 
-	if players[0].Name != "John Smith" {
-		t.Errorf("Expected John Smith, got %s", players[0].Name)
-	}
-	if players[0].DisplayName != "クレスワェル" {
-		t.Errorf("Expected クレスワェル, got %s", players[0].DisplayName)
-	}
-	if players[0].Dojo != "Tokyo Kendo Club" {
-		t.Errorf("Expected Tokyo Kendo Club, got %s", players[0].Dojo)
-	}
-
-	if players[1].Name != "Yuki Tanaka" {
-		t.Errorf("Expected Yuki Tanaka, got %s", players[1].Name)
-	}
-	if players[1].DisplayName != "田中" {
-		t.Errorf("Expected 田中, got %s", players[1].DisplayName)
-	}
-	if players[1].Dojo != "Osaka Dojo" {
-		t.Errorf("Expected Osaka Dojo, got %s", players[1].Dojo)
-	}
+	assert.Equal(t, "Yuki Tanaka", players[1].Name)
+	assert.Equal(t, "田中", players[1].DisplayName)
+	assert.Equal(t, "Osaka Dojo", players[1].Dojo)
 }
 
 func TestCreatePlayersWithZekkenNameFallback(t *testing.T) {
@@ -48,13 +34,8 @@ func TestCreatePlayersWithZekkenNameFallback(t *testing.T) {
 	}
 
 	players, err := CreatePlayers(entries, true)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	if players[0].DisplayName != "J. SMITH" {
-		t.Errorf("Expected J. SMITH, got %s", players[0].DisplayName)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "J. SMITH", players[0].DisplayName)
 }
 
 func TestCreatePlayersWithoutZekkenName(t *testing.T) {
@@ -64,20 +45,11 @@ func TestCreatePlayersWithoutZekkenName(t *testing.T) {
 	}
 
 	players, err := CreatePlayers(entries, false)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
+	require.NoError(t, err)
 
-	if players[0].Dojo != "Tokyo Kendo Club" {
-		t.Errorf("Expected Tokyo Kendo Club, got %s", players[0].Dojo)
-	}
-	if players[0].DisplayName != "J. SMITH" {
-		t.Errorf("Expected J. SMITH, got %s", players[0].DisplayName)
-	}
-
-	if players[1].Dojo != "NA" {
-		t.Errorf("Expected NA, got %s", players[1].Dojo)
-	}
+	assert.Equal(t, "Tokyo Kendo Club", players[0].Dojo)
+	assert.Equal(t, "J. SMITH", players[0].DisplayName)
+	assert.Equal(t, "NA", players[1].Dojo)
 }
 
 func TestCreatePlayersZekkenMissingDojo(t *testing.T) {
@@ -86,9 +58,7 @@ func TestCreatePlayersZekkenMissingDojo(t *testing.T) {
 	}
 
 	_, err := CreatePlayers(entries, true)
-	if err == nil {
-		t.Fatal("Expected error for missing dojo, got nil")
-	}
+	require.Error(t, err)
 }
 
 func TestCreatePlayersWithMetadata(t *testing.T) {

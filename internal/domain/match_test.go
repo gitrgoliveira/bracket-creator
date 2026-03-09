@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMatch(t *testing.T) {
@@ -32,26 +33,13 @@ func TestMatch(t *testing.T) {
 	}
 
 	// Verify match properties
-	if match.ID != "match1" {
-		t.Errorf("Expected match ID to be 'match1', got '%s'", match.ID)
-	}
-
-	if match.SideA.ID != "player1" {
-		t.Errorf("Expected SideA player ID to be 'player1', got '%s'", match.SideA.ID)
-	}
-
-	if match.SideB.ID != "player2" {
-		t.Errorf("Expected SideB player ID to be 'player2', got '%s'", match.SideB.ID)
-	}
-
-	if match.Winner != nil {
-		t.Errorf("Expected winner to be nil, got player ID '%s'", match.Winner.ID)
-	}
+	assert.Equal(t, "match1", match.ID)
+	assert.Equal(t, "player1", match.SideA.ID)
+	assert.Equal(t, "player2", match.SideB.ID)
+	assert.Nil(t, match.Winner)
 
 	// Set a winner
 	match.Winner = &player1
 
-	if match.Winner.ID != "player1" {
-		t.Errorf("Expected winner player ID to be 'player1', got '%s'", match.Winner.ID)
-	}
+	assert.Equal(t, "player1", match.Winner.ID)
 }

@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"bytes"
-	"io"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,27 +14,16 @@ func TestManCmd(t *testing.T) {
 }
 
 func TestManCmdRun(t *testing.T) {
-	// Capture stdout
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	// Run the man command
-	manCmd.Run(manCmd, []string{})
-
-	// Restore stdout
-	w.Close()
-	os.Stdout = oldStdout
-
-	// Read captured output
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	output := buf.String()
+	output := captureStdout(t, func() {
+		manCmd.Run(manCmd, []string{})
+	})
 
 	// Verify output contains expected man page content
 	assert.Contains(t, output, "bracket-creator")
 	assert.Contains(t, output, "COPYRIGHT")
 	assert.Contains(t, output, "oliveira")
+	assert.Contains(t, output, "NAME")
+	assert.Contains(t, output, "SYNOPSIS")
 }
 
 func TestManCmdNoArgs(t *testing.T) {
@@ -53,22 +39,9 @@ func TestManCmdWithArgs(t *testing.T) {
 }
 
 func TestManCmdCopyright(t *testing.T) {
-	// Capture stdout
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	// Run the man command
-	manCmd.Run(manCmd, []string{})
-
-	// Restore stdout
-	w.Close()
-	os.Stdout = oldStdout
-
-	// Read captured output
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	output := buf.String()
+	output := captureStdout(t, func() {
+		manCmd.Run(manCmd, []string{})
+	})
 
 	// Verify copyright section is present
 	assert.Contains(t, output, "COPYRIGHT")

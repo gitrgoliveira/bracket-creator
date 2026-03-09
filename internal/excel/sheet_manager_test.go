@@ -5,6 +5,8 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -14,9 +16,7 @@ func TestNewSheetManager(t *testing.T) {
 
 	sm := excel.NewSheetManager(file)
 
-	if sm == nil {
-		t.Fatal("Expected SheetManager to not be nil")
-	}
+	require.NotNil(t, sm)
 }
 
 func TestAddPlayerDataToSheet(t *testing.T) {
@@ -53,10 +53,28 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 		},
 	}
 
-	// This is just a smoke test to ensure it doesn't panic
-	// A real test would verify the Excel contents
 	err = sm.AddPlayerDataToSheet(players, true)
-	if err != nil {
-		t.Errorf("AddPlayerDataToSheet failed: %v", err)
-	}
+	require.NoError(t, err)
+
+	assertCellValue(t, file, sheetName, "A1", "Number")
+	assertCellValue(t, file, sheetName, "B1", "Player Name")
+	assertCellValue(t, file, sheetName, "C1", "Player Dojo")
+	assertCellValue(t, file, sheetName, "D1", "Display Name")
+
+	assertCellValue(t, file, sheetName, "A2", "1")
+	assertCellValue(t, file, sheetName, "B2", "John Doe")
+	assertCellValue(t, file, sheetName, "C2", "Test Dojo")
+	assertCellValue(t, file, sheetName, "D2", "J. Doe")
+
+	assertCellValue(t, file, sheetName, "A3", "2")
+	assertCellValue(t, file, sheetName, "B3", "Jane Smith")
+	assertCellValue(t, file, sheetName, "C3", "Another Dojo")
+	assertCellValue(t, file, sheetName, "D3", "J. Smith")
+}
+
+func assertCellValue(t *testing.T, file *excelize.File, sheetName, cell, expected string) {
+	t.Helper()
+	value, err := file.GetCellValue(sheetName, cell)
+	require.NoError(t, err)
+	assert.Equal(t, expected, value)
 }

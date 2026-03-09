@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPlayer(t *testing.T) {
@@ -17,25 +18,11 @@ func TestPlayer(t *testing.T) {
 	}
 
 	// Verify player properties
-	if player.ID != "player1" {
-		t.Errorf("Expected player ID to be 'player1', got '%s'", player.ID)
-	}
-
-	if player.Name != "John Doe" {
-		t.Errorf("Expected player name to be 'John Doe', got '%s'", player.Name)
-	}
-
-	if player.DisplayName != "J. Doe" {
-		t.Errorf("Expected player display name to be 'J. Doe', got '%s'", player.DisplayName)
-	}
-
-	if player.Dojo != "Test Dojo" {
-		t.Errorf("Expected player dojo to be 'Test Dojo', got '%s'", player.Dojo)
-	}
-
-	if player.PoolPosition != 1 {
-		t.Errorf("Expected player pool position to be 1, got %d", player.PoolPosition)
-	}
+	assert.Equal(t, "player1", player.ID)
+	assert.Equal(t, "John Doe", player.Name)
+	assert.Equal(t, "J. Doe", player.DisplayName)
+	assert.Equal(t, "Test Dojo", player.Dojo)
+	assert.Equal(t, int64(1), player.PoolPosition)
 }
 
 func TestMatchWinner(t *testing.T) {
@@ -46,11 +33,6 @@ func TestMatchWinner(t *testing.T) {
 	}
 
 	// Verify match winner properties
-	if winner.PlayerID != "player1" {
-		t.Errorf("Expected winner player ID to be 'player1', got '%s'", winner.PlayerID)
-	}
-
-	if winner.MatchID != "match1" {
-		t.Errorf("Expected winner match ID to be 'match1', got '%s'", winner.MatchID)
-	}
+	assert.Equal(t, "player1", winner.PlayerID)
+	assert.Equal(t, "match1", winner.MatchID)
 }

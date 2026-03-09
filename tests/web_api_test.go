@@ -6,24 +6,26 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/cmd"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAPI_ParseParticipants(t *testing.T) {
-	err := os.Chdir("..")
-	assert.NoError(t, err)
-	defer os.Chdir("tests")
+	restoreDir := ensureRepoRoot(t)
+	defer restoreDir()
 
 	router := cmd.NewRouter()
 
 	w := httptest.NewRecorder()
 	// Test without Zekken Name
 	body := `{"playerList": "Jane Doe, Dojo1\nJohn Smith, Dojo2", "withZekkenName": false}`
-	req, _ := http.NewRequest("POST", "/api/parse-participants", strings.NewReader(body))
+	req, err := http.NewRequest("POST", "/api/parse-participants", strings.NewReader(body))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
 	router.ServeHTTP(w, req)
@@ -31,7 +33,7 @@ func TestAPI_ParseParticipants(t *testing.T) {
 
 	var resp map[string][]map[string]string
 	err = json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	assert.Len(t, resp["participants"], 2)
 	assert.Equal(t, "Jane Doe", resp["participants"][0]["name"])
@@ -41,7 +43,8 @@ func TestAPI_ParseParticipants(t *testing.T) {
 	// Test with Zekken Name
 	w2 := httptest.NewRecorder()
 	body2 := `{"playerList": "Jane Doe, ジェーン, Dojo1", "withZekkenName": true}`
-	req2, _ := http.NewRequest("POST", "/api/parse-participants", strings.NewReader(body2))
+	req2, err := http.NewRequest("POST", "/api/parse-participants", strings.NewReader(body2))
+	require.NoError(t, err)
 	req2.Header.Set("Content-Type", "application/json")
 
 	router.ServeHTTP(w2, req2)
@@ -49,7 +52,7 @@ func TestAPI_ParseParticipants(t *testing.T) {
 
 	var resp2 map[string][]map[string]string
 	err = json.Unmarshal(w2.Body.Bytes(), &resp2)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	assert.Len(t, resp2["participants"], 1)
 	assert.Equal(t, "Jane Doe", resp2["participants"][0]["name"])
@@ -58,9 +61,8 @@ func TestAPI_ParseParticipants(t *testing.T) {
 }
 
 func TestAPI_CreateWithSeeds(t *testing.T) {
-	err := os.Chdir("..")
-	assert.NoError(t, err)
-	defer os.Chdir("tests")
+	restoreDir := ensureRepoRoot(t)
+	defer restoreDir()
 
 	router := cmd.NewRouter()
 
@@ -71,7 +73,8 @@ func TestAPI_CreateWithSeeds(t *testing.T) {
 	form.Add("tournamentType", "playoffs")
 	form.Add("seeds", `[{"Name": "Jane Doe", "SeedRank": 1}]`)
 
-	req, _ := http.NewRequest("POST", "/create", strings.NewReader(form.Encode()))
+	req, err := http.NewRequest("POST", "/create", strings.NewReader(form.Encode()))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	router.ServeHTTP(w, req)
@@ -84,9 +87,8 @@ func TestAPI_CreateWithSeeds(t *testing.T) {
 }
 
 func TestAPI_CreateWithMissingSeed(t *testing.T) {
-	err := os.Chdir("..")
-	assert.NoError(t, err)
-	defer os.Chdir("tests")
+	restoreDir := ensureRepoRoot(t)
+	defer restoreDir()
 
 	router := cmd.NewRouter()
 
@@ -97,11 +99,28 @@ func TestAPI_CreateWithMissingSeed(t *testing.T) {
 	form.Add("tournamentType", "playoffs")
 	form.Add("seeds", `[{"Name": "John Smith", "SeedRank": 1}]`)
 
-	req, _ := http.NewRequest("POST", "/create", strings.NewReader(form.Encode()))
+	req, err := http.NewRequest("POST", "/create", strings.NewReader(form.Encode()))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Contains(t, w.Body.String(), "seeded participant not found")
+}
+
+func ensureRepoRoot(t *testing.T) func() {
+	t.Helper()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	if filepath.Base(wd) == "tests" {
+		root := filepath.Dir(wd)
+		require.NoError(t, os.Chdir(root))
+		return func() {
+			require.NoError(t, os.Chdir(wd))
+		}
+	}
+
+	return func() {}
 }

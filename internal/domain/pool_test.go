@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPool(t *testing.T) {
@@ -40,31 +41,11 @@ func TestPool(t *testing.T) {
 	}
 
 	// Verify pool properties
-	if pool.ID != "pool1" {
-		t.Errorf("Expected pool ID to be 'pool1', got '%s'", pool.ID)
-	}
-
-	if pool.Name != "Pool A" {
-		t.Errorf("Expected pool name to be 'Pool A', got '%s'", pool.Name)
-	}
-
-	if len(pool.Players) != 2 {
-		t.Errorf("Expected pool to have 2 players, got %d", len(pool.Players))
-	}
-
-	if pool.Players[0].ID != "player1" {
-		t.Errorf("Expected first player ID to be 'player1', got '%s'", pool.Players[0].ID)
-	}
-
-	if pool.Players[1].ID != "player2" {
-		t.Errorf("Expected second player ID to be 'player2', got '%s'", pool.Players[1].ID)
-	}
-
-	if len(pool.Matches) != 1 {
-		t.Errorf("Expected pool to have 1 match, got %d", len(pool.Matches))
-	}
-
-	if pool.Matches[0].ID != "match1" {
-		t.Errorf("Expected match ID to be 'match1', got '%s'", pool.Matches[0].ID)
-	}
+	assert.Equal(t, "pool1", pool.ID)
+	assert.Equal(t, "Pool A", pool.Name)
+	assert.Len(t, pool.Players, 2)
+	assert.Equal(t, "player1", pool.Players[0].ID)
+	assert.Equal(t, "player2", pool.Players[1].ID)
+	assert.Len(t, pool.Matches, 1)
+	assert.Equal(t, "match1", pool.Matches[0].ID)
 }

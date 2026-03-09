@@ -64,7 +64,7 @@ func TestCreatePlayoffs_MissingSeed(t *testing.T) {
 		seedsPath:    seedsPath,
 	}
 
-	// Jane Doe exists but John Smith doesn't - should warn but not fail
+	// Jane Doe exists but John Smith doesn't - should fail with seed error
 	entries := []string{
 		"Jane Doe,Dojo1",
 		"Alice,Dojo3",
@@ -74,4 +74,30 @@ func TestCreatePlayoffs_MissingSeed(t *testing.T) {
 	err = o.createPlayoffs(entries)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "seeded participant not found")
+}
+
+func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
+	err := os.Chdir("..")
+	assert.NoError(t, err)
+	defer os.Chdir("cmd")
+
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	o := &playoffOptions{
+		outputWriter: writer,
+		outputPath:   "dummy.xlsx",
+		seedsPath:    filepath.Join("tests", "fixtures", "missing.csv"),
+	}
+
+	entries := []string{
+		"Jane Doe,Dojo1",
+		"John Smith,Dojo2",
+		"Alice,Dojo3",
+		"Bob,Dojo4",
+	}
+
+	err = o.createPlayoffs(entries)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse seeds file")
 }

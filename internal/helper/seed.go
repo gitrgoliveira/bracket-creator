@@ -67,6 +67,7 @@ func StandardSeeding(players []Player) []Player {
 			result[i] = *p
 			occupied[i] = true
 			placed++
+			delete(seedMap, rank) // Remove placed seeded player to avoid duplication
 		}
 	}
 

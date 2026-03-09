@@ -128,6 +128,7 @@ func sanitizeName(name string) string {
 
 	return fmt.Sprintf("%c. %s", firstName[0], lastName)
 }
+
 func CreatePools(players []Player, poolSize int) []Pool {
 	totalPools := len(players) / poolSize
 	pools := make([]Pool, totalPools)
@@ -188,6 +189,7 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 	// If no suitable pool is found, return -1
 	return -1
 }
+
 func forceSameDojo(pools []Pool, poolSize int) int {
 	for i, pool := range pools {
 		if len(pool.Players) < poolSize {

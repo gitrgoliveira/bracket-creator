@@ -206,11 +206,23 @@ func SubdivideTree(node *Node, numSubtrees int) []*Node {
 	return subtrees
 }
 
-func RoundToPowerOf2(x, y float64) int {
+func RoundToPowerOf2(x, y float64) (int, error) {
+	if y == 0 {
+		return 0, fmt.Errorf("divisor cannot be zero")
+	}
+
 	quotient := x / y
+
+	if math.IsInf(quotient, 0) {
+		return 0, fmt.Errorf("quotient is infinite")
+	}
+	if math.IsNaN(quotient) {
+		return 0, fmt.Errorf("quotient is NaN")
+	}
+
 	absQuotient := math.Abs(quotient)
 	roundedLog2 := math.Ceil(math.Log2(absQuotient))
 	powerOf2 := math.Pow(2, roundedLog2)
 	roundedQuotient := int(powerOf2)
-	return roundedQuotient
+	return roundedQuotient, nil
 }

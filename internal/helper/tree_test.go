@@ -83,7 +83,11 @@ func TestRoundToPowerOf2_1(t *testing.T) {
 
 	// Run the test cases
 	for _, testCase := range testCases {
-		actual := RoundToPowerOf2(testCase.x, testCase.y)
+		actual, err := RoundToPowerOf2(testCase.x, testCase.y)
+		if err != nil {
+			t.Errorf("For x = %f and y = %f, unexpected error: %v", testCase.x, testCase.y, err)
+			continue
+		}
 		if actual != testCase.expected {
 			t.Errorf("For x = %f and y = %f, expected %d, but got %d", testCase.x, testCase.y, testCase.expected, actual)
 		}
@@ -709,90 +713,112 @@ func TestRoundToPowerOf2EdgeCases(t *testing.T) {
 		x        float64
 		y        float64
 		expected int
+		wantErr  bool
 	}{
 		{
 			name:     "zero dividend",
 			x:        0,
 			y:        5,
 			expected: 0,
+			wantErr:  false,
 		},
 		{
-			name:     "zero divisor causes infinity",
-			x:        10,
-			y:        0,
-			expected: 9223372036854775807, // math.Ceil(math.Log2(+Inf)) results in max int64
+			name:    "zero divisor causes infinity",
+			x:       10,
+			y:       0,
+			wantErr: true,
 		},
 		{
-			name:     "both zero",
-			x:        0,
-			y:        0,
-			expected: 0,
+			name:    "both zero",
+			x:       0,
+			y:       0,
+			wantErr: true,
 		},
 		{
 			name:     "negative dividend",
 			x:        -10,
 			y:        2,
 			expected: 8, // abs(-5) = 5, rounds to 8
+			wantErr:  false,
 		},
 		{
 			name:     "negative divisor",
 			x:        10,
 			y:        -2,
 			expected: 8, // abs(-5) = 5, rounds to 8
+			wantErr:  false,
 		},
 		{
 			name:     "both negative",
 			x:        -10,
 			y:        -2,
 			expected: 8, // abs(5) = 5, rounds to 8
+			wantErr:  false,
 		},
 		{
 			name:     "very large numbers",
 			x:        1000000,
 			y:        1000,
 			expected: 1024, // 1000, rounds to 1024
+			wantErr:  false,
 		},
 		{
 			name:     "very small quotient",
 			x:        1,
 			y:        100,
 			expected: 0, // Very small quotient rounds down to 0
+			wantErr:  false,
 		},
 		{
 			name:     "fractional x approaching power of 2",
 			x:        7.9,
 			y:        2,
 			expected: 4, // 3.95 rounds to 4
+			wantErr:  false,
 		},
 		{
 			name:     "exact power of 2 quotient",
 			x:        16,
 			y:        2,
 			expected: 8, // Exactly 8
+			wantErr:  false,
 		},
 		{
 			name:     "quotient of 1",
 			x:        5,
 			y:        5,
 			expected: 1, // Quotient 1 -> 2^0 = 1
+			wantErr:  false,
 		},
 		{
 			name:     "quotient slightly above 1",
 			x:        5.1,
 			y:        5,
 			expected: 2, // ~1.02 rounds to 2
+			wantErr:  false,
 		},
 		{
 			name:     "quotient slightly below 1",
 			x:        4.9,
 			y:        5,
 			expected: 1, // ~0.98 rounds to 1
+			wantErr:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := RoundToPowerOf2(tt.x, tt.y)
+			result, err := RoundToPowerOf2(tt.x, tt.y)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("RoundToPowerOf2(%f, %f) expected error, but got nil", tt.x, tt.y)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("RoundToPowerOf2(%f, %f) unexpected error: %v", tt.x, tt.y, err)
+				return
+			}
 			if result != tt.expected {
 				t.Errorf("RoundToPowerOf2(%f, %f) = %d, want %d", tt.x, tt.y, result, tt.expected)
 			}

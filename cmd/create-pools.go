@@ -173,7 +173,10 @@ func (o *poolOptions) createPools(entries []string) error {
 	fmt.Printf("There will be %d finalists\n", len(finals))
 
 	maxPlayersPerTree := 16
-	numPages := helper.RoundToPowerOf2(float64(len(finals)), float64(maxPlayersPerTree))
+	numPages, err := helper.RoundToPowerOf2(float64(len(finals)), float64(maxPlayersPerTree))
+	if err != nil {
+		return err
+	}
 	if numPages < 1 || o.singleTree {
 		numPages = 1
 	}

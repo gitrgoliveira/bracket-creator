@@ -60,5 +60,3 @@ func TestVersionCmdWithArgs(t *testing.T) {
 	// Should still print version info
 	assert.NotEmpty(t, output)
 }
-
-// Made with Bob

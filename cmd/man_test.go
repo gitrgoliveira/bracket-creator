@@ -75,5 +75,3 @@ func TestManCmdCopyright(t *testing.T) {
 	assert.Contains(t, output, "2023")
 	assert.Contains(t, output, "oliveira")
 }
-
-// Made with Bob

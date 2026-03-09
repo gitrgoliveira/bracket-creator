@@ -495,5 +495,3 @@ func TestServeOptionsRun(t *testing.T) {
 	assert.Equal(t, "localhost", o.bindAddress)
 	assert.Equal(t, 8080, o.port)
 }
-
-// Made with Bob

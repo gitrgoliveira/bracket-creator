@@ -69,5 +69,3 @@ func TestGetResourcesReturnsCorrectInstance(t *testing.T) {
 	assert.True(t, res2 == retrieved2, "Should return the same instance")
 	assert.True(t, res1 != retrieved2, "Should return different instance after change")
 }
-
-// Made with Bob

@@ -448,5 +448,3 @@ func TestPoolOptionsRun_Success(t *testing.T) {
 	_, err = os.Stat(tmpOutput.Name())
 	assert.NoError(t, err)
 }
-
-// Made with Bob

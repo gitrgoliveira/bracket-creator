@@ -89,10 +89,13 @@ jobs:
         packages:
           - name: cmd
             path: ./cmd/...
+            timeout: 20m
           - name: internal
             path: ./internal/...
+            timeout: 10m
           - name: integration
             path: ./tests/...
+            timeout: 10m
     steps:
       - name: Checkout Source
         uses: actions/checkout@v6
@@ -109,7 +112,7 @@ jobs:
           go generate ./...
 
       - name: Run tests (${{ matrix.packages.name }})
-        run: go test ${{ matrix.packages.path }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
+        run: go test ${{ matrix.packages.path }} -timeout=${{ matrix.packages.timeout }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
 
       - name: Upload coverage to Codecov (${{ matrix.packages.name }})
         uses: codecov/codecov-action@v5

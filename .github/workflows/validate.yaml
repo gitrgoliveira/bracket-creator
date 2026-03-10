@@ -103,6 +103,11 @@ jobs:
           go-version: "1.26.1"
           cache: true
 
+      - name: Init project
+        run: |
+          go mod tidy
+          go generate ./...
+
       - name: Run tests (${{ matrix.packages.name }})
         run: go test ${{ matrix.packages.path }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
 

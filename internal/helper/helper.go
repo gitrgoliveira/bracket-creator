@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,7 +13,7 @@ import (
 )
 
 var WebFs embed.FS
-var TemplateFile embed.FS
+var TemplateFile fs.FS
 
 type RowStack struct {
 	data []int

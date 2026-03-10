@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -111,16 +109,7 @@ func TestAPI_CreateWithMissingSeed(t *testing.T) {
 
 func ensureRepoRoot(t *testing.T) func() {
 	t.Helper()
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-
-	if filepath.Base(wd) == "tests" {
-		root := filepath.Dir(wd)
-		require.NoError(t, os.Chdir(root))
-		return func() {
-			require.NoError(t, os.Chdir(wd))
-		}
-	}
-
+	// No longer needed - template.xlsx is loaded in TestMain
+	// This function kept for backward compatibility
 	return func() {}
 }

@@ -14,8 +14,8 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
-	// Note: requires running from cmd/ or correctly resolving paths
-	seedsPath := filepath.Join("tests", "fixtures", "winners.csv")
+	// Path relative to cmd/ directory
+	seedsPath := filepath.Join("..", "tests", "fixtures", "winners.csv")
 
 	o := &playoffOptions{
 		outputWriter:   writer,
@@ -49,7 +49,7 @@ func TestCreatePlayoffs_MissingSeed(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
-	seedsPath := filepath.Join("tests", "fixtures", "winners.csv")
+	seedsPath := filepath.Join("..", "tests", "fixtures", "winners.csv")
 
 	o := &playoffOptions{
 		outputWriter: writer,
@@ -77,7 +77,7 @@ func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
 	o := &playoffOptions{
 		outputWriter: writer,
 		outputPath:   "dummy.xlsx",
-		seedsPath:    filepath.Join("tests", "fixtures", "missing.csv"),
+		seedsPath:    filepath.Join("..", "tests", "fixtures", "missing.csv"),
 	}
 
 	entries := []string{

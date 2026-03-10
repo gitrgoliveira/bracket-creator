@@ -6,29 +6,29 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
+	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/require"
 )
 
-// TestMain ensures tests run from project root for template.xlsx access
+// TestMain ensures helper.TemplateFile is populated for tests
 func TestMain(m *testing.M) {
-	// Get current working directory
-	cwd, err := os.Getwd()
+	// Load template.xlsx from project root (relative to cmd package)
+	templatePath := filepath.Join("..", "template.xlsx")
+	templateData, err := os.ReadFile(templatePath)
 	if err != nil {
-		panic(err)
+		panic("failed to read template.xlsx: " + err.Error())
 	}
 
-	// If we're in cmd directory, change to parent
-	if filepath.Base(cwd) == "cmd" {
-		if err := os.Chdir(".."); err != nil {
-			panic(err)
-		}
-		cwd, _ = os.Getwd()
-	}
-
-	// Verify template.xlsx exists
-	if _, err := os.Stat("template.xlsx"); os.IsNotExist(err) {
-		panic("template.xlsx not found in " + cwd + ". Tests must run from project root.")
+	// Populate helper.TemplateFile with in-memory FS
+	helper.TemplateFile = fstest.MapFS{
+		"template.xlsx": &fstest.MapFile{
+			Data:    templateData,
+			Mode:    0644,
+			ModTime: time.Now(),
+		},
 	}
 
 	// Run tests

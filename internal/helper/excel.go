@@ -12,6 +12,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 
 	matchWinners := make(map[string]MatchWinner)
 	sheetName := "Pool Matches"
+	configuredStartCols := make(map[int]bool)
 
 	leftRowStack := RowStack{}
 	rightRowStack := RowStack{}
@@ -37,6 +38,10 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 			poolRow = rightRowStack.Pop()
 		} else {
 			poolRow = leftRowStack.Pop()
+		}
+		if !configuredStartCols[startCol] {
+			setMatchColumnsWidthByStartCol(f, sheetName, startCol)
+			configuredStartCols[startCol] = true
 		}
 		startColName, _ := excelize.ColumnNumberToName(startCol)
 		leftVictoriesColName, _ := excelize.ColumnNumberToName(startCol + 1)
@@ -167,19 +172,17 @@ func poolEntry(startColName string, poolRow int, endColName string, f *excelize.
 func MatchHeader(f *excelize.File, sheetName string, startColName string, poolRow int, middleColName string, endColName string) {
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, poolRow), "Red"))
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, poolRow), fmt.Sprintf("%s%d", startColName, poolRow), getRedHeaderStyle(f)))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, startColName, startColName, 34))
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, poolRow), "vs"))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, middleColName, middleColName, 3))
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", middleColName, poolRow), fmt.Sprintf("%s%d", middleColName, poolRow), getTextStyle(f)))
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), "White"))
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), getWhiteHeaderStyle(f)))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, endColName, endColName, 34))
 }
 
 func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int) {
 	sheetName := "Elimination Matches"
+	configuredStartCols := make(map[int]bool)
 	matchWinners := make(map[string]MatchWinner)
 
 	startRow := 1
@@ -207,6 +210,10 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 				matchRow = rightRowStack.Pop()
 			} else {
 				matchRow = leftRowStack.Pop()
+			}
+			if !configuredStartCols[startCol] {
+				setMatchColumnsWidthByStartCol(f, sheetName, startCol)
+				configuredStartCols[startCol] = true
 			}
 
 			startColName, _ := excelize.ColumnNumberToName(startCol)
@@ -327,6 +334,19 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 
 		startRow = matchRow + spaceLines
 	}
+}
+
+func setMatchColumnsWidth(f *excelize.File, sheetName, startColName, middleColName, endColName string) {
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, startColName, startColName, 34))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, middleColName, middleColName, 3))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, endColName, endColName, 34))
+}
+
+func setMatchColumnsWidthByStartCol(f *excelize.File, sheetName string, startCol int) {
+	startColName, _ := excelize.ColumnNumberToName(startCol)
+	middleColName, _ := excelize.ColumnNumberToName(startCol + 3)
+	endColName, _ := excelize.ColumnNumberToName(startCol + 6)
+	setMatchColumnsWidth(f, sheetName, startColName, middleColName, endColName)
 }
 
 func addRoundHeader(f *excelize.File, sheetName string, startRow int, round int) {

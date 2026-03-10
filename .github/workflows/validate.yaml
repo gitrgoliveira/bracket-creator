@@ -56,22 +56,6 @@ jobs:
         with:
           version: latest
 
-      #   _____         _
-      #  |_   _|__  ___| |_
-      #    | |/ _ \/ __| __|
-      #    | |  __/\__ \ |_
-      #    |_|\___||___/\__|
-      #
-      - name: Run coverage
-        run: go test ./cmd/... ./internal/... ./tests/... -race -coverprofile=coverage.txt -covermode=atomic
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.txt
-          fail_ci_if_error: true
-          use_oidc: true
-
       #   ____             _
       #  |  _ \  ___   ___| | _____ _ __
       #  | | | |/ _ \ / __| |/ / _ \ '__|
@@ -85,3 +69,47 @@ jobs:
         with:
           image: "ghcr.io/${{ github.repository }}:latest"
           output-format: json
+
+  #   _____         _
+  #  |_   _|__  ___| |_
+  #    | |/ _ \/ __| __|
+  #    | |  __/\__ \ |_
+  #    |_|\___||___/\__|
+  #
+  test:
+    permissions:
+      contents: read
+      id-token: write # for codecov/codecov-action
+    runs-on: ubuntu-latest
+    env:
+      GO111MODULE: on
+    strategy:
+      fail-fast: false
+      matrix:
+        packages:
+          - name: cmd
+            path: ./cmd/...
+          - name: internal
+            path: ./internal/...
+          - name: integration
+            path: ./tests/...
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.1"
+          cache: true
+
+      - name: Run tests (${{ matrix.packages.name }})
+        run: go test ${{ matrix.packages.path }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
+
+      - name: Upload coverage to Codecov (${{ matrix.packages.name }})
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage-${{ matrix.packages.name }}.txt
+          flags: ${{ matrix.packages.name }}
+          fail_ci_if_error: true
+          use_oidc: true

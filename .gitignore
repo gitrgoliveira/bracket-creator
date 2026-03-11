@@ -17,6 +17,7 @@
 
 # Code coverage
 coverage.txt
+coverage-*
 
 # build files
 internal/cmd/version/commit.txt

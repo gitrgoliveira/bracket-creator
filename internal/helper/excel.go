@@ -182,8 +182,8 @@ func MatchHeader(f *excelize.File, sheetName string, startColName string, poolRo
 
 func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int) {
 	sheetName := "Elimination Matches"
-	configuredStartCols := make(map[int]bool)
 	matchWinners := make(map[string]MatchWinner)
+	configuredStartCols := make(map[int]bool)
 
 	startRow := 1
 	var matchRow int

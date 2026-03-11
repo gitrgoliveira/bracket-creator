@@ -594,15 +594,20 @@
         
         function checkDownloadComplete(downloadToken) {
             const interval = setInterval(function() {
-                if (document.cookie.indexOf('downloadToken=' + downloadToken) !== -1) {
-                    // Download has started, hide loading overlay
-                    document.getElementById('loading-overlay').classList.remove('active');
-                    
-                    // Clear the cookie
-                    document.cookie = 'downloadToken=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-                    
-                    clearInterval(interval);
-                }
+                fetch('/api/download-status?token=' + encodeURIComponent(downloadToken), {
+                    cache: 'no-store'
+                })
+                    .then(response => response.ok ? response.json() : { ready: false })
+                    .then(data => {
+                        if (data.ready) {
+                            // Download has started, hide loading overlay
+                            document.getElementById('loading-overlay').classList.remove('active');
+                            clearInterval(interval);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Failed to poll download status:', error);
+                    });
             }, 100); // Check every 100ms
             
             // Timeout after 60 seconds

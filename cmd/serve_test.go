@@ -15,6 +15,8 @@ import (
 )
 
 func TestNewServeCmd(t *testing.T) {
+	t.Parallel()
+
 	cmd := newServeCmd()
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "serve", cmd.Use)
@@ -22,6 +24,8 @@ func TestNewServeCmd(t *testing.T) {
 }
 
 func TestServeCmdFlags(t *testing.T) {
+	t.Parallel()
+
 	cmd := newServeCmd()
 
 	// Test bind flag
@@ -67,6 +71,8 @@ func TestServeCmdWithInvalidPort(t *testing.T) {
 }
 
 func TestNewRouter(t *testing.T) {
+	t.Parallel()
+
 	router := NewRouter()
 	assert.NotNil(t, router)
 }
@@ -87,7 +93,73 @@ func TestRouterStatusEndpoint(t *testing.T) {
 	assert.NotEmpty(t, response["version"])
 }
 
+func TestRouterDownloadStatusEndpoint(t *testing.T) {
+	router := NewRouter()
+	tests := []struct {
+		name           string
+		token          string
+		expectedStatus int
+		expectedReady  *bool
+		expectedError  string
+	}{
+		{
+			name:           "missing token",
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "token is required",
+		},
+		{
+			name:           "unknown token",
+			token:          "missing-token",
+			expectedStatus: http.StatusOK,
+			expectedReady:  boolPtr(false),
+		},
+		{
+			name:           "ready token is consumed",
+			token:          "ready-token",
+			expectedStatus: http.StatusOK,
+			expectedReady:  boolPtr(true),
+		},
+	}
+
+	markDownloadReady("ready-token")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := "/api/download-status"
+			if tt.token != "" {
+				url += "?token=" + tt.token
+			}
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", url, nil)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			var response map[string]interface{}
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			require.NoError(t, err)
+
+			if tt.expectedError != "" {
+				assert.Contains(t, response["error"], tt.expectedError)
+				return
+			}
+
+			require.Contains(t, response, "ready")
+			assert.Equal(t, *tt.expectedReady, response["ready"])
+		})
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/download-status?token=ready-token", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"ready":false}`, w.Body.String())
+}
+
 func TestRouterParseParticipants(t *testing.T) {
+	t.Parallel()
+
 	router := NewRouter()
 
 	tests := []struct {
@@ -160,7 +232,10 @@ func TestRouterParseParticipants(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			body, _ := json.Marshal(tt.payload)
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("POST", "/api/parse-participants", bytes.NewBuffer(body))
@@ -233,6 +308,8 @@ func TestRouterCreateEndpoint_InvalidTournamentType(t *testing.T) {
 }
 
 func TestRouterCreateEndpoint_PoolsValidation(t *testing.T) {
+	t.Parallel()
+
 	router := NewRouter()
 
 	tests := []struct {
@@ -262,7 +339,10 @@ func TestRouterCreateEndpoint_PoolsValidation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			body := &bytes.Buffer{}
 			writer := multipart.NewWriter(body)
 			writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4")
@@ -305,6 +385,41 @@ func TestRouterCreateEndpoint_PlayoffsSuccess(t *testing.T) {
 	assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
 	assert.Contains(t, w.Header().Get("Content-Disposition"), "playoffs-")
 	assert.Greater(t, w.Body.Len(), 0)
+}
+
+func TestRouterCreateEndpoint_DownloadStatusFlow(t *testing.T) {
+	router := NewRouter()
+	downloadToken := "download-token-123"
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4")
+	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("determined", "on")
+	writer.WriteField("downloadToken", downloadToken)
+	writer.Close()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/create", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Header().Values("Set-Cookie"), "downloadToken")
+
+	statusRecorder := httptest.NewRecorder()
+	statusReq, _ := http.NewRequest("GET", "/api/download-status?token="+downloadToken, nil)
+	router.ServeHTTP(statusRecorder, statusReq)
+
+	assert.Equal(t, http.StatusOK, statusRecorder.Code)
+	assert.JSONEq(t, `{"ready":true}`, statusRecorder.Body.String())
+
+	statusRecorder = httptest.NewRecorder()
+	statusReq, _ = http.NewRequest("GET", "/api/download-status?token="+downloadToken, nil)
+	router.ServeHTTP(statusRecorder, statusReq)
+
+	assert.Equal(t, http.StatusOK, statusRecorder.Code)
+	assert.JSONEq(t, `{"ready":false}`, statusRecorder.Body.String())
 }
 
 func TestRouterCreateEndpoint_PoolsSuccess(t *testing.T) {
@@ -466,7 +581,22 @@ func TestSeedModalParsePayloadContractInWebPage(t *testing.T) {
 	assert.Greater(t, withZekkenIdx, requestBodyIdx, "withZekkenName should be part of the JSON request payload")
 }
 
+func TestDownloadCompletionPollingContractInWebPage(t *testing.T) {
+	bodyBytes, err := os.ReadFile("../web/index.html")
+	if err != nil {
+		bodyBytes, err = os.ReadFile("web/index.html")
+	}
+	require.NoError(t, err)
+
+	body := string(bodyBytes)
+	assert.Contains(t, body, "fetch('/api/download-status?token=' + encodeURIComponent(downloadToken)")
+	assert.NotContains(t, body, "document.cookie.indexOf('downloadToken=' + downloadToken)")
+	assert.NotContains(t, body, "document.cookie = 'downloadToken=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'")
+}
+
 func TestServeOptionsRun(t *testing.T) {
+	t.Parallel()
+
 	// This test verifies the run method structure but doesn't actually start the server
 	o := &serveOptions{
 		bindAddress: "localhost",
@@ -475,4 +605,8 @@ func TestServeOptionsRun(t *testing.T) {
 
 	assert.Equal(t, "localhost", o.bindAddress)
 	assert.Equal(t, 8080, o.port)
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

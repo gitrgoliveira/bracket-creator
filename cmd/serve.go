@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"bufio"
@@ -26,6 +27,8 @@ type serveOptions struct {
 	bindAddress string
 	port        int
 }
+
+var downloadStatus sync.Map
 
 func newServeCmd() *cobra.Command {
 	o := &serveOptions{}
@@ -107,6 +110,16 @@ func NewRouter() *gin.Engine {
 			"goVersion": version.GetGoVersion(),
 			"osArch":    version.GetOsArch(),
 		})
+	})
+
+	r.GET("/api/download-status", func(c *gin.Context) {
+		downloadToken := c.Query("token")
+		if downloadToken == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"ready": consumeDownloadReady(downloadToken)})
 	})
 
 	r.POST("/api/parse-participants", func(c *gin.Context) {
@@ -289,10 +302,10 @@ func NewRouter() *gin.Engine {
 		// Set response headers for file download
 		filename := fmt.Sprintf("%s-%s.xlsx", tournamentType, time.Now().Format("2006-01-02"))
 
-		// Set download token cookie so client can detect when download starts
+		// Mark the download as ready so the client can detect when download starts
 		downloadToken := c.PostForm("downloadToken")
 		if downloadToken != "" {
-			c.SetCookie("downloadToken", downloadToken, 30, "/", "", true, false)
+			markDownloadReady(downloadToken)
 		}
 
 		c.Header("Content-Description", "File Transfer")
@@ -307,4 +320,16 @@ func NewRouter() *gin.Engine {
 
 func init() {
 	rootCmd.AddCommand(newServeCmd())
+}
+
+func markDownloadReady(token string) {
+	downloadStatus.Store(token, true)
+}
+
+func consumeDownloadReady(token string) bool {
+	if _, ok := downloadStatus.LoadAndDelete(token); ok {
+		return true
+	}
+
+	return false
 }

@@ -8,6 +8,8 @@ import (
 )
 
 func TestVersionCmd(t *testing.T) {
+	t.Parallel()
+
 	assert.NotNil(t, versionCmd)
 	assert.Equal(t, "version", versionCmd.Use)
 	assert.Equal(t, "Print the application version.", versionCmd.Short)

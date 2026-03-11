@@ -12,6 +12,8 @@ import (
 )
 
 func TestNewCreatePoolCmd(t *testing.T) {
+	t.Parallel()
+
 	cmd := newCreatePoolCmd()
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "create-pools", cmd.Use)
@@ -19,6 +21,8 @@ func TestNewCreatePoolCmd(t *testing.T) {
 }
 
 func TestCreatePoolCmdFlags(t *testing.T) {
+	t.Parallel()
+
 	cmd := newCreatePoolCmd()
 
 	// Test required flags
@@ -240,6 +244,8 @@ func TestCreatePools_WithSeeds(t *testing.T) {
 }
 
 func TestCreatePools_ValidationErrors(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name          string
 		entries       []string
@@ -278,7 +284,10 @@ func TestCreatePools_ValidationErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			var b bytes.Buffer
 			writer := bufio.NewWriter(&b)
 

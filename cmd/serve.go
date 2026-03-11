@@ -292,7 +292,7 @@ func NewRouter() *gin.Engine {
 		// Set download token cookie so client can detect when download starts
 		downloadToken := c.PostForm("downloadToken")
 		if downloadToken != "" {
-			c.SetCookie("downloadToken", downloadToken, 30, "/", "", false, false)
+			c.SetCookie("downloadToken", downloadToken, 30, "/", "", true, false)
 		}
 
 		c.Header("Content-Description", "File Transfer")

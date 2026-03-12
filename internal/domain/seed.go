@@ -21,9 +21,11 @@ func (s *SeedAssignment) Validate() error {
 	return nil
 }
 
-// ValidateAssignments checks a list for duplicate seed ranks and valid properties.
+// ValidateAssignments checks a list for duplicate seed ranks, valid properties, and gapless sequences.
 func ValidateAssignments(assignments []SeedAssignment) error {
 	seen := make(map[int]bool)
+	maxRank := 0
+
 	for _, a := range assignments {
 		if err := a.Validate(); err != nil {
 			return err
@@ -32,7 +34,15 @@ func ValidateAssignments(assignments []SeedAssignment) error {
 			return errors.New("duplicate seed rank detected")
 		}
 		seen[a.SeedRank] = true
+		if a.SeedRank > maxRank {
+			maxRank = a.SeedRank
+		}
 	}
+
+	if len(seen) > 0 && len(seen) != maxRank {
+		return errors.New("seed ranks must be sequential without gaps")
+	}
+
 	return nil
 }
 

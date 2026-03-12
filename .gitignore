@@ -43,3 +43,4 @@ Thumbs.db
 specs/
 .specify
 .agent*
+.playwright-mcp

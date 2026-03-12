@@ -4,6 +4,8 @@ GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
 GO_VERSION := 1.26.1
+GO_SOURCES := $(shell find . -name "*.go" -type f)
+EMBEDDED_ASSETS := $(shell find ./web -type f) ./template.xlsx
 
 # Build flags
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -56,7 +58,7 @@ go/test: go/lint ## Run tests
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 
-$(BIN_PATH)/$(BIN_NAME): $(shell find . -name "*.go" -type f)
+$(BIN_PATH)/$(BIN_NAME): $(GO_SOURCES) $(EMBEDDED_ASSETS)
 	@echo "Building $(BIN_NAME) version $(VERSION)..."
 	@mkdir -p $(BIN_PATH)
 	go generate ./...

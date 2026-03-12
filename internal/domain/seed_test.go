@@ -7,20 +7,75 @@ import (
 )
 
 func TestValidateAssignments(t *testing.T) {
-	assignments := []SeedAssignment{
-		{Name: "Jane Doe", SeedRank: 1},
-		{Name: "John Smith", SeedRank: 2},
+	tests := []struct {
+		name        string
+		assignments []SeedAssignment
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid assignments",
+			assignments: []SeedAssignment{
+				{Name: "Jane Doe", SeedRank: 1},
+				{Name: "John Smith", SeedRank: 2},
+			},
+			wantErr: false,
+		}, {
+			name: "valid assignments",
+			assignments: []SeedAssignment{
+				{Name: "Jane Doe", SeedRank: 2},
+				{Name: "John Smith", SeedRank: 1},
+			},
+			wantErr: false,
+		},
+		{
+			name: "duplicate seed rank",
+			assignments: []SeedAssignment{
+				{Name: "Jane Doe", SeedRank: 1},
+				{Name: "John Smith", SeedRank: 1},
+			},
+			wantErr:     true,
+			errContains: "duplicate seed rank detected",
+		},
+		{
+			name: "gap in sequence",
+			assignments: []SeedAssignment{
+				{Name: "Jane Doe", SeedRank: 1},
+				{Name: "John Smith", SeedRank: 2},
+				{Name: "Alice", SeedRank: 4},
+			},
+			wantErr:     true,
+			errContains: "seed ranks must be sequential without gaps",
+		},
+		{
+			name: "invalid seed rank",
+			assignments: []SeedAssignment{
+				{Name: "Jane Doe", SeedRank: 0},
+			},
+			wantErr:     true,
+			errContains: "seed rank must be greater than 0",
+		},
+		{
+			name: "empty name",
+			assignments: []SeedAssignment{
+				{Name: "", SeedRank: 1},
+			},
+			wantErr:     true,
+			errContains: "name cannot be empty",
+		},
 	}
-	err := ValidateAssignments(assignments)
-	assert.NoError(t, err)
 
-	assignments = []SeedAssignment{
-		{Name: "Jane Doe", SeedRank: 1},
-		{Name: "John Smith", SeedRank: 1},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAssignments(tt.assignments)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
-	err = ValidateAssignments(assignments)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate seed rank detected")
 }
 
 func TestAssignSeeds(t *testing.T) {

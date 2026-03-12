@@ -139,6 +139,150 @@
             margin-bottom: 8px;
         }
 
+        .format-guide {
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+            background-color: rgba(13, 110, 253, 0.05);
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        [data-theme="dark"] .format-guide {
+            background-color: rgba(13, 110, 253, 0.12);
+        }
+
+        .format-guide-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--primary-color);
+        }
+
+        .format-guide-columns {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .format-guide .badge {
+            font-size: 0.8rem;
+            padding: 0.45em 0.65em;
+        }
+
+        .format-guide-example {
+            font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 0.85rem;
+            margin-bottom: 0;
+            word-break: break-word;
+        }
+
+        .validation-panel {
+            display: none;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+
+        .validation-panel.validation-success {
+            display: block;
+            background-color: rgba(25, 135, 84, 0.1);
+            border: 1px solid rgba(25, 135, 84, 0.3);
+        }
+
+        .validation-panel.validation-warning {
+            display: block;
+            background-color: rgba(255, 193, 7, 0.12);
+            border: 1px solid rgba(255, 193, 7, 0.35);
+        }
+
+        .validation-panel.validation-info {
+            display: block;
+            background-color: rgba(13, 110, 253, 0.1);
+            border: 1px solid rgba(13, 110, 253, 0.3);
+        }
+
+        .validation-panel.validation-error {
+            display: block;
+            background-color: rgba(220, 53, 69, 0.08);
+            border: 1px solid rgba(220, 53, 69, 0.28);
+        }
+
+        .validation-panel-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .validation-panel ul {
+            padding-left: 1.2rem;
+            margin-bottom: 0;
+        }
+
+        .validation-panel li + li {
+            margin-top: 4px;
+        }
+
+        .validation-line-jump {
+            border: 0;
+            background: none;
+            color: var(--accent-color);
+            padding: 0;
+            margin: 0;
+            text-decoration: underline;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .validation-line-jump:hover {
+            opacity: 0.85;
+        }
+
+        .validation-line-jump:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
+
+        .player-list-input-wrap {
+            position: relative;
+            width: 100%;
+        }
+
+        .player-list-line-numbers {
+            position: absolute;
+            top: 1px;
+            left: 1px;
+            bottom: 1px;
+            width: 3.5rem;
+            border-right: 1px solid var(--card-border);
+            border-radius: 0.375rem 0 0 0.375rem;
+            background-color: rgba(0, 0, 0, 0.04);
+            color: #6c757d;
+            text-align: right;
+            padding: 0.375rem 0.5rem;
+            overflow: hidden;
+            white-space: pre;
+            line-height: 1.5;
+            font-size: 1rem;
+            font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            pointer-events: none;
+        }
+
+        [data-theme="dark"] .player-list-line-numbers {
+            background-color: rgba(255, 255, 255, 0.08);
+        }
+
+        .player-list-input-wrap #playerList {
+            padding-left: 4.2rem;
+            line-height: 1.5;
+            font-size: 1rem;
+            font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            field-sizing: fixed;
+            height: 16rem;
+            overflow-y: auto;
+            resize: vertical;
+        }
+
         #drop-area {
             border: 2px dashed var(--card-border);
             border-radius: 6px;
@@ -265,7 +409,7 @@
                                         <input class="form-check-input" type="checkbox" name="singleTree"
                                             id="singleTree">
                                         <label class="form-check-label" for="singleTree">
-                                            Single Tree Format
+                                            Do not split the tree into multiple sheets
                                             <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip"
                                                 title="Generates a tournament bracket in a single tree format"></i>
                                         </label>
@@ -274,7 +418,7 @@
                                         <input class="form-check-input" type="checkbox" name="withZekkenName"
                                             id="withZekkenName">
                                         <label class="form-check-label" for="withZekkenName">
-                                            Column 2 is Zekken name
+                                            Use Zekken display name (column 2)
                                             <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip"
                                                 title="Enable to use the second column as the participant's display name on the zekken. Requires CSV format: Name, ZekkenName, Dojo (falls back to sanitized name if ZekkenName is empty)."></i>
                                         </label>
@@ -291,7 +435,7 @@
                                         </label>
                                     </div>
                                     <div class="mb-2">
-                                        <label for="teamMatches" class="form-label">Team Matches:</label>
+                                        <label for="teamMatches" class="form-label">Team size:</label>
                                         <input type="number" class="form-control form-control-sm" name="teamMatches"
                                             id="teamMatches" min="0" value="0">
                                     </div>
@@ -309,7 +453,7 @@
                                         min="1" value="2">
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label for="playersPerPool" class="form-label">Players per pool:</label>
+                                    <label for="playersPerPool" class="form-label">Players/Teams per pool:</label>
                                     <input type="number" class="form-control" name="playersPerPool" id="playersPerPool"
                                         min="1" value="3">
                                 </div>
@@ -318,9 +462,9 @@
                                         <input class="form-check-input" type="checkbox" name="roundRobin"
                                             id="roundRobin" checked>
                                         <label class="form-check-label" for="roundRobin">
-                                            Round Robin pools
+                                            Use round robin in pools
                                             <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip"
-                                                title="Each player plays against all others in their pool"></i>
+                                                title="Each player plays against all others in their pool. Without this setting, each player will only have 2 fights."></i>
                                         </label>
                                     </div>
                                 </div>
@@ -332,7 +476,7 @@
                             <label for="playerList" class="form-label">Player/Team List</label>
 
                             <div class="d-flex justify-content-between align-items-center mb-2">
-                                <small class="text-muted">One per line or CSV format</small>
+                                <small class="text-muted">One participant per line in headerless CSV format</small>
                                 <div id="sample-data-buttons">
                                     <button type="button" class="btn btn-sm btn-outline-secondary"
                                         id="loadSmallSample">Small Sample</button>
@@ -351,13 +495,26 @@
                                 </div>
                             </div>
 
-                            <textarea class="form-control" name="playerList" id="playerList" rows="10"
-                                placeholder="Enter player or team names (one per line):&#10;First_Name1 Last_Name1, Dojo1&#10;First_Name2 Last_Name2, Dojo2&#10;..."></textarea>
+                            <div id="csvFormatGuide" class="format-guide" aria-live="polite">
+                                <div class="format-guide-title">Expected format</div>
+                                <div id="csvFormatColumns" class="format-guide-columns"></div>
+                                <p id="csvFormatDescription" class="small mb-1 text-muted"></p>
+                                <p id="csvFormatExample" class="format-guide-example"></p>
+                            </div>
+
+                            <div class="player-list-input-wrap">
+                                <div id="playerListLineNumbers" class="player-list-line-numbers" aria-hidden="true">1</div>
+                                <textarea class="form-control" name="playerList" id="playerList" rows="10"
+                                    placeholder="Enter one participant per line (no header row):&#10;First_Name1 Last_Name1, Dojo1&#10;First_Name2 Last_Name2, Dojo2&#10;..."></textarea>
+                            </div>
 
                             <div class="form-text mt-2" id="playerListHelp">
-                                <i class="bi bi-info-circle"></i> When using the CSV format, 'Dojo' is used to ensure
-                                players/teams don't meet someone from the same dojo when doing pools.
+                                <i class="bi bi-info-circle"></i> Use one participant per line with no header row.
+                                In standard mode, enter <strong>Name, Dojo</strong>. When Zekken mode is enabled, enter
+                                <strong>Name, ZekkenName, Dojo</strong>. The dojo is used to help avoid same-dojo matchups in pools.
                             </div>
+
+                            <div id="playerListValidation" class="validation-panel" aria-live="polite"></div>
 
                             <!-- Tournament stats -->
                             <div class="d-flex justify-content-between align-items-center mt-3">
@@ -434,6 +591,7 @@
                                                 <thead>
                                                     <tr>
                                                         <th>Name</th>
+                                                        <th id="seedsDisplayNameHeader" style="display: none;">Display Name</th>
                                                         <th>Dojo</th>
                                                         <th style="width: 100px;">Seed Rank</th>
                                                     </tr>
@@ -483,7 +641,7 @@
                 if (response.ok) {
                     const data = await response.json();
                     const versionBadge = document.getElementById('app-version');
-                    versionBadge.textContent = `v${data.version}`;
+                    versionBadge.textContent = `${data.version}`;
                     versionBadge.title = `Build: ${data.buildDate}\n${data.osArch}\n${data.goVersion}`;
 
                     // Initialize tooltip for version badge
@@ -531,6 +689,14 @@
             if (playerList === '') {
                 errorMsg.textContent = 'Error: Player list cannot be empty';
                 errorMsg.style.display = 'block';
+                isValid = false;
+            }
+
+            const participantValidation = validateParticipantListInput();
+            if (participantValidation.errors.length > 0) {
+                errorMsg.textContent = `Error: Fix the participant list before creating the tournament. ${participantValidation.errors[0]}`;
+                errorMsg.style.display = 'block';
+                playerListValidation.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 isValid = false;
             }
 
@@ -635,21 +801,295 @@
         const playerListTextarea = document.getElementById('playerList');
         const playerListHelp = document.getElementById('playerListHelp');
         const zekkenCheckbox = document.getElementById('withZekkenName');
+        const csvFormatColumns = document.getElementById('csvFormatColumns');
+        const csvFormatDescription = document.getElementById('csvFormatDescription');
+        const csvFormatExample = document.getElementById('csvFormatExample');
+        const playerListLineNumbers = document.getElementById('playerListLineNumbers');
+        const playerListValidation = document.getElementById('playerListValidation');
+        const seedsDisplayNameHeader = document.getElementById('seedsDisplayNameHeader');
         const defaultPlayerListPlaceholder = playerListTextarea.placeholder;
         const defaultPlayerListHelpHtml = playerListHelp.innerHTML;
+        let validationDebounceTimer = null;
+
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function getIssueLineNumber(message) {
+            const match = message.match(/^Line (\d+):/);
+            if (!match) {
+                return null;
+            }
+            return parseInt(match[1], 10);
+        }
+
+        function renderIssueListItem(issue) {
+            const lineNumber = getIssueLineNumber(issue.message);
+            const escapedSeverity = escapeHtml(issue.severity);
+            const escapedMessage = escapeHtml(issue.message);
+
+            if (lineNumber === null) {
+                return `<li><strong>${escapedSeverity}:</strong> ${escapedMessage}</li>`;
+            }
+
+            const lineLabel = `Line ${lineNumber}`;
+            const escapedLineLabel = escapeHtml(lineLabel);
+            const lineButton = `<button type="button" class="validation-line-jump" data-line-number="${lineNumber}" aria-label="Jump to participant list ${escapedLineLabel}">${escapedLineLabel}</button>`;
+            const messageWithJump = escapedMessage.replace(escapedLineLabel, lineButton);
+            return `<li><strong>${escapedSeverity}:</strong> ${messageWithJump}</li>`;
+        }
+
+        function getLineStartIndex(lineNumber) {
+            const lines = playerListTextarea.value.split('\n');
+            const boundedLineNumber = Math.min(Math.max(lineNumber, 1), Math.max(lines.length, 1));
+            let index = 0;
+            for (let i = 0; i < boundedLineNumber - 1; i += 1) {
+                index += (lines[i] || '').length + 1;
+            }
+            return { index, boundedLineNumber };
+        }
+
+        function jumpToParticipantLine(lineNumber) {
+            const { index, boundedLineNumber } = getLineStartIndex(lineNumber);
+            playerListTextarea.focus();
+            playerListTextarea.setSelectionRange(index, index);
+
+            const lineHeight = parseFloat(window.getComputedStyle(playerListTextarea).lineHeight) || 24;
+            playerListTextarea.scrollTop = Math.max(0, ((boundedLineNumber - 1) * lineHeight) - (2 * lineHeight));
+            playerListLineNumbers.scrollTop = playerListTextarea.scrollTop;
+        }
+
+        function updateLineNumbers() {
+            const lineCount = Math.max(playerListTextarea.value.split('\n').length, 1);
+            const lineLabels = Array.from({ length: lineCount }, (_, index) => index + 1).join('\n');
+            playerListLineNumbers.textContent = lineLabels;
+            playerListLineNumbers.scrollTop = playerListTextarea.scrollTop;
+        }
+
+        function renderFormatGuide(columns, description, example) {
+            csvFormatColumns.innerHTML = columns
+                .map((column, index) => `<span class="badge text-bg-light border">Column ${index + 1}: ${column}</span>`)
+                .join('');
+            csvFormatDescription.innerHTML = description;
+            csvFormatExample.textContent = `Example: ${example}`;
+        }
+
+        function sanitizeNameForValidation(name) {
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+                return '';
+            }
+
+            const fullName = trimmedName.split(/\s+/);
+            if (fullName.length === 1) {
+                return fullName[0].toUpperCase();
+            }
+
+            const firstName = fullName[0].toUpperCase();
+            const lastName = fullName[fullName.length - 1].toUpperCase();
+            return `${firstName[0]}. ${lastName}`;
+        }
+
+        function normalizeNameForValidation(name) {
+            return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+        }
+
+        function renderPlayerListValidation(state) {
+            playerListValidation.className = 'validation-panel';
+
+            if (state.isEmpty) {
+                playerListValidation.innerHTML = '';
+                return;
+            }
+
+            const issues = [];
+            const maxIssuesToShow = 5;
+            const combinedIssues = [
+                ...state.errors.map(message => ({ severity: 'Error', message })),
+                ...state.warnings.map(message => ({ severity: 'Warning', message })),
+                ...state.infos.map(message => ({ severity: 'Info', message }))
+            ];
+
+            combinedIssues.slice(0, maxIssuesToShow).forEach(issue => {
+                issues.push(renderIssueListItem(issue));
+            });
+
+            if (combinedIssues.length > maxIssuesToShow) {
+                issues.push(`<li>And ${combinedIssues.length - maxIssuesToShow} more issue(s)…</li>`);
+            }
+
+            if (state.errors.length > 0) {
+                playerListValidation.classList.add('validation-error');
+                playerListValidation.innerHTML = `
+                    <div class="validation-panel-title">Participant list needs attention</div>
+                    <div class="small mb-2">Fix these issues before creating the tournament or assigning seeds.</div>
+                    <ul>${issues.join('')}</ul>
+                `;
+                return;
+            }
+
+            if (state.warnings.length > 0) {
+                playerListValidation.classList.add('validation-warning');
+                playerListValidation.innerHTML = `
+                    <div class="validation-panel-title">Participant list looks usable, with a few caveats</div>
+                    <div class="small mb-2">${state.participantCount} participant(s) parsed for the current mode.</div>
+                    <ul>${issues.join('')}</ul>
+                `;
+                return;
+            }
+
+            if (state.infos.length > 0) {
+                playerListValidation.classList.add('validation-info');
+                playerListValidation.innerHTML = `
+                    <div class="validation-panel-title">Participant list format looks good</div>
+                    <div class="small mb-2">${state.participantCount} participant(s) match the current ${state.withZekkenName ? 'Zekken' : 'standard'} CSV format.</div>
+                    <ul>${issues.join('')}</ul>
+                `;
+                return;
+            }
+
+            playerListValidation.classList.add('validation-success');
+            playerListValidation.innerHTML = `
+                <div class="validation-panel-title">Participant list format looks good</div>
+                <div class="small">${state.participantCount} participant(s) match the current ${state.withZekkenName ? 'Zekken' : 'standard'} CSV format.</div>
+            `;
+        }
+
+        function getParticipantValidationState() {
+            const playerList = playerListTextarea.value;
+            const lines = playerList.split('\n');
+            const withZekkenName = zekkenCheckbox.checked;
+            const errors = [];
+            const warnings = [];
+            const infos = [];
+            const seenEntries = new Map();
+            let participantCount = 0;
+            let metadataLineCount = 0;
+
+            lines.forEach((rawLine, index) => {
+                const lineNumber = index + 1;
+                const trimmedLine = rawLine.trim();
+                if (!trimmedLine) {
+                    return;
+                }
+
+                participantCount += 1;
+                const columns = rawLine.split(',').map(part => part.trim());
+                const name = columns[0] || '';
+
+                if (!name) {
+                    errors.push(`Line ${lineNumber}: missing participant name in column 1.`);
+                    return;
+                }
+
+                if (withZekkenName) {
+                    if (columns.length < 3) {
+                        errors.push(`Line ${lineNumber}: expected format 'Name, ZekkenName, Dojo'.`);
+                        return;
+                    }
+
+                    if (!columns[2]) {
+                        errors.push(`Line ${lineNumber}: missing dojo in column 3.`);
+                        return;
+                    }
+
+                    if (columns.length > 3) {
+                        metadataLineCount += 1;
+                    }
+
+                    const displayName = columns[1] || sanitizeNameForValidation(name);
+                    const duplicateKey = `${normalizeNameForValidation(name)}|${displayName}|${columns[2].toLocaleLowerCase()}`;
+                    if (seenEntries.has(duplicateKey)) {
+                        errors.push(`Line ${lineNumber}: duplicate participant entry also appears on line ${seenEntries.get(duplicateKey)}.`);
+                        return;
+                    }
+
+                    seenEntries.set(duplicateKey, lineNumber);
+                    return;
+                }
+
+                const dojo = columns.length >= 2 ? columns[1] : '';
+                if (!dojo) {
+                    warnings.push(`Line ${lineNumber}: dojo is missing in column 2; it will fall back to 'NA'.`);
+                }
+
+                if (columns.length > 2) {
+                    metadataLineCount += 1;
+                }
+
+                const duplicateKey = `${normalizeNameForValidation(name)}|${sanitizeNameForValidation(name)}|${(dojo || 'NA').toLocaleLowerCase()}`;
+                if (seenEntries.has(duplicateKey)) {
+                    errors.push(`Line ${lineNumber}: duplicate participant entry also appears on line ${seenEntries.get(duplicateKey)}.`);
+                    return;
+                }
+
+                seenEntries.set(duplicateKey, lineNumber);
+            });
+
+            if (metadataLineCount > 0) {
+                const limitColumn = withZekkenName ? 3 : 2;
+                infos.push(`Extra columns were detected on ${metadataLineCount} line(s). Columns after column ${limitColumn} are treated as metadata.`);
+            }
+
+            return {
+                isEmpty: playerList.trim() === '',
+                participantCount,
+                withZekkenName,
+                errors,
+                warnings,
+                infos
+            };
+        }
+
+        function validateParticipantListInput(options = {}) {
+            const settings = {
+                render: true,
+                ...options
+            };
+            const state = getParticipantValidationState();
+            if (settings.render) {
+                renderPlayerListValidation(state);
+            }
+            return state;
+        }
+
+        function scheduleParticipantValidation() {
+            if (validationDebounceTimer) {
+                clearTimeout(validationDebounceTimer);
+            }
+
+            validationDebounceTimer = setTimeout(() => {
+                validateParticipantListInput();
+            }, 200);
+        }
 
         function updateZekkenHints() {
             if (zekkenCheckbox.checked) {
                 playerListTextarea.placeholder =
-                    'Enter player or team names (one per line):\n' +
+                    'Enter one participant per line (no header row):\n' +
                     'First_Name1 Last_Name1, ZekkenName1, Dojo1\n' +
                     'First_Name2 Last_Name2, ZekkenName2, Dojo2\n' +
                     '...';
                 playerListHelp.innerHTML =
-                    '<i class="bi bi-info-circle"></i> When using the CSV format, Column 2 is the Zekken name and Column 3 (Dojo) is used to ensure players/teams don\'t meet someone from the same dojo when doing pools.';
+                    '<i class="bi bi-info-circle"></i> Use one participant per line with no header row. In Zekken mode, enter <strong>Name, ZekkenName, Dojo</strong>. Leave the Zekken name blank only if you want it to fall back to a shortened display name.';
+                renderFormatGuide(
+                    ['Name', 'ZekkenName', 'Dojo'],
+                    'Headerless CSV with three columns. Column 2 becomes the display name shown on the zekken.',
+                    'Jane Doe, ジェーン, Mushin Dojo'
+                );
             } else {
                 playerListTextarea.placeholder = defaultPlayerListPlaceholder;
                 playerListHelp.innerHTML = defaultPlayerListHelpHtml;
+                renderFormatGuide(
+                    ['Name', 'Dojo'],
+                    'Headerless CSV with two columns. Column 2 is used to help separate same-dojo participants in pools.',
+                    'Jane Doe, Mushin Dojo'
+                );
             }
         }
 
@@ -696,6 +1136,8 @@
             }
 
             updateZekkenHints();
+            updateLineNumbers();
+            validateParticipantListInput();
         });
 
         // Save values to localStorage on input change
@@ -766,25 +1208,98 @@ Isaac Parker, Team Epsilon
 Jack Adams, Team Alpha`
         };
 
+        function toZekkenDisplayName(name) {
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+                return '';
+            }
+
+            const firstName = trimmedName.split(/\s+/)[0] || trimmedName;
+            return firstName.toUpperCase();
+        }
+
+        function toZekkenSample(sampleText) {
+            return sampleText
+                .split('\n')
+                .map(line => line.trim())
+                .filter(line => line !== '')
+                .map(line => {
+                    const parts = line.split(',').map(part => part.trim());
+                    const name = parts[0] || '';
+                    const dojo = parts[1] || '';
+                    const zekkenName = toZekkenDisplayName(name);
+                    return `${name}, ${zekkenName}, ${dojo}`;
+                })
+                .join('\n');
+        }
+
+        const sampleDataWithZekken = {
+            small: toZekkenSample(sampleData.small),
+            medium: toZekkenSample(sampleData.medium),
+            large: toZekkenSample(sampleData.large)
+        };
+
+        function getSampleData(size) {
+            return zekkenCheckbox.checked ? sampleDataWithZekken[size] : sampleData[size];
+        }
+
+        function detectLoadedSampleSize(currentText) {
+            const normalizedText = currentText.trim();
+            if (!normalizedText) {
+                return null;
+            }
+
+            const sampleSizes = ['small', 'medium', 'large'];
+            for (const size of sampleSizes) {
+                if (
+                    normalizedText === sampleData[size].trim() ||
+                    normalizedText === sampleDataWithZekken[size].trim()
+                ) {
+                    return size;
+                }
+            }
+
+            return null;
+        }
+
+        function syncLoadedSampleToCurrentMode() {
+            const currentText = playerListTextarea.value;
+            const sampleSize = detectLoadedSampleSize(currentText);
+            if (!sampleSize) {
+                return;
+            }
+
+            setPlayerList(getSampleData(sampleSize));
+        }
+
+        function setPlayerList(text) {
+            document.getElementById('playerList').value = text;
+            localStorage.setItem('playerList', text);
+            updateLineNumbers();
+            updatePlayerCount();
+            validateParticipantListInput();
+        }
+
         document.getElementById('loadSmallSample').addEventListener('click', function () {
-            document.getElementById('playerList').value = sampleData.small;
-            localStorage.setItem('playerList', sampleData.small);
+            setPlayerList(getSampleData('small'));
         });
 
         document.getElementById('loadMediumSample').addEventListener('click', function () {
-            document.getElementById('playerList').value = sampleData.medium;
-            localStorage.setItem('playerList', sampleData.medium);
+            setPlayerList(getSampleData('medium'));
         });
 
         document.getElementById('loadLargeSample').addEventListener('click', function () {
-            document.getElementById('playerList').value = sampleData.large;
-            localStorage.setItem('playerList', sampleData.large);
+            setPlayerList(getSampleData('large'));
         });
 
         // File drag & drop functionality
         const dropArea = document.getElementById('drop-area');
         const fileInput = document.getElementById('file-input');
-        zekkenCheckbox.addEventListener('change', updateZekkenHints);
+        zekkenCheckbox.addEventListener('change', function () {
+            updateZekkenHints();
+            syncLoadedSampleToCurrentMode();
+            validateParticipantListInput();
+        });
 
         // Open file selector when clicking drop area
         dropArea.addEventListener('click', () => {
@@ -854,8 +1369,7 @@ Jack Adams, Team Alpha`
             `;
 
             reader.onload = function (e) {
-                playerListTextarea.value = e.target.result;
-                localStorage.setItem('playerList', e.target.result);
+                setPlayerList(e.target.result);
 
                 // Success feedback
                 playerListTextarea.classList.add('border-success');
@@ -936,13 +1450,15 @@ Jack Adams, Team Alpha`
             const lines = updatePlayerCount();
             const totalPlayers = lines.length;
             document.getElementById('modalPlayerCount').textContent = totalPlayers;
+            const withZekkenName = document.getElementById('withZekkenName').checked;
 
             // Count unique dojos
             const dojos = new Set();
             lines.forEach(line => {
-                const parts = line.split(',');
-                if (parts.length > 1) {
-                    const dojo = parts[1].trim();
+                const parts = line.split(',').map(part => part.trim());
+                const dojoIndex = withZekkenName ? 2 : 1;
+                if (parts.length > dojoIndex) {
+                    const dojo = parts[dojoIndex].trim();
                     if (dojo) {
                         dojos.add(dojo);
                     }
@@ -979,14 +1495,34 @@ Jack Adams, Team Alpha`
 
         // Setup event listeners for statistics
         document.getElementById('showStatistics').addEventListener('click', calculateStatistics);
-        document.getElementById('playerList').addEventListener('input', updatePlayerCount);
+        document.getElementById('playerList').addEventListener('input', function () {
+            updateLineNumbers();
+            updatePlayerCount();
+            scheduleParticipantValidation();
+        });
+        document.getElementById('playerList').addEventListener('scroll', function () {
+            playerListLineNumbers.scrollTop = playerListTextarea.scrollTop;
+        });
+        playerListValidation.addEventListener('click', function (event) {
+            const jumpButton = event.target.closest('.validation-line-jump');
+            if (!jumpButton) {
+                return;
+            }
+
+            const lineNumber = parseInt(jumpButton.getAttribute('data-line-number'), 10);
+            if (!Number.isNaN(lineNumber) && lineNumber > 0) {
+                jumpToParticipantLine(lineNumber);
+            }
+        });
         document.getElementById('playersPerPool').addEventListener('input', updatePlayerCount);
         document.getElementById('winnersPerPool').addEventListener('input', updatePlayerCount);
 
         // Call version fetch and initialize player count on page load
         document.addEventListener('DOMContentLoaded', function () {
             fetchAppVersion();
+            updateLineNumbers();
             updatePlayerCount();
+            validateParticipantListInput();
         });
 
         // Seeding Logic
@@ -997,6 +1533,12 @@ Jack Adams, Team Alpha`
             const withZekkenName = document.getElementById('withZekkenName').checked;
             if (!playerList) {
                 alert('Please enter players first.');
+                return;
+            }
+
+            const participantValidation = validateParticipantListInput();
+            if (participantValidation.errors.length > 0) {
+                alert(`Please fix the participant list before assigning seeds.\n\n${participantValidation.errors[0]}`);
                 return;
             }
 
@@ -1014,6 +1556,7 @@ Jack Adams, Team Alpha`
                     const data = await response.json();
                     const tableBody = document.getElementById('seedsTableBody');
                     tableBody.innerHTML = '';
+                    seedsDisplayNameHeader.style.display = withZekkenName ? '' : 'none';
 
                     // Map existing seeds if any
                     const seedMap = {};
@@ -1024,8 +1567,12 @@ Jack Adams, Team Alpha`
                     data.participants.forEach((p, index) => {
                         const tr = document.createElement('tr');
                         const seedValue = seedMap[p.name] || '';
+                        const displayNameCell = withZekkenName
+                            ? `<td>${p.displayName || ''}</td>`
+                            : '';
                         tr.innerHTML = `
                             <td>${p.name}</td>
+                            ${displayNameCell}
                             <td>${p.dojo}</td>
                             <td>
                                 <input type="number" class="form-control form-control-sm seed-input" 
@@ -1058,27 +1605,53 @@ Jack Adams, Team Alpha`
         document.getElementById('saveSeedsBtn').addEventListener('click', function () {
             const inputs = document.querySelectorAll('.seed-input');
             const assignments = [];
+            
+            const duplicates = new Set();
             const seenRanks = new Set();
-            let duplicateFound = false;
+            let maxRank = 0;
 
             inputs.forEach(input => {
                 const rank = parseInt(input.value);
                 if (rank > 0) {
                     if (seenRanks.has(rank)) {
-                        duplicateFound = true;
+                        duplicates.add(rank);
                     }
                     seenRanks.add(rank);
+                    if (rank > maxRank) {
+                        maxRank = rank;
+                    }
                     assignments.push({
                         Name: input.getAttribute('data-name'),
                         SeedRank: rank
                     });
+                } else if (input.value !== '') {
+                    // Clear out invalid non-positive integers
+                    input.value = '';
                 }
             });
 
-            if (duplicateFound) {
-                if (!confirm('Warning: Duplicate seed ranks found. This might cause unexpected behavior. Continue?')) {
-                    return;
+            const errors = [];
+            
+            if (duplicates.size > 0) {
+                const dupList = Array.from(duplicates).sort((a, b) => a - b).join(', ');
+                errors.push(`Duplicate seed ranks found: ${dupList}. All ranks must be unique.`);
+            }
+
+            const missingRanks = [];
+            for (let i = 1; i <= maxRank; i++) {
+                if (!seenRanks.has(i)) {
+                    missingRanks.push(i);
                 }
+            }
+
+            if (missingRanks.length > 0) {
+                const missingList = missingRanks.join(', ');
+                errors.push(`Missing seed ranks in the sequence: ${missingList}. Ranks must be continuous from 1 to ${maxRank}.`);
+            }
+
+            if (errors.length > 0) {
+                alert(`Cannot save seeds due to the following errors:\n\n- ${errors.join('\n- ')}`);
+                return;
             }
 
             currentSeedAssignments = assignments;

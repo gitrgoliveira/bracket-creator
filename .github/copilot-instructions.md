@@ -45,12 +45,20 @@ make go/build
 make run
 # or manually: bin/bracket-creator serve
 
+# If 8080 is occupied
+PORT=8081 make run
+
 # Generate example files
 make examples
 
 # Docker
 make docker/run
 ```
+
+### Web UI Validation Workflow
+- For changes in `web/index.html`, validate behavior in the running app, not only by reading file diffs.
+- Use `make run` (or `PORT=<port> make run` when 8080 is busy), then exercise the changed flow with Playwright click interactions.
+- Prefer concise, aggregated informational messages over repetitive per-line warnings in client-side validation feedback.
 
 ### Test Execution
 - `make go/test` runs: `go test -race -cover ./cmd/... ./internal/... ./tests/...`
@@ -105,6 +113,7 @@ make docker/run
 - Seeding modal enforces strict validation before submission
 - CSV drag-and-drop supported in player/team list textarea
 - Environment variables: `BIND_ADDRESS`, `PORT` for server configuration
+- Additional Web UI-specific rules live in `.github/instructions/web-ui.instructions.md` (applies to `web/index.html`)
 
 ## Common Pitfalls
 

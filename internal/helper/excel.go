@@ -360,28 +360,33 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool) {
 
 	row := 1
 	for _, player := range players {
-		positionCell := fmt.Sprintf("A%d", row)
-		nameCell := fmt.Sprintf("B%d", row)
+		rowStr := strconv.Itoa(row)
+		nextRowStr := strconv.Itoa(row + 1)
+
+		positionCell := "A" + rowStr
+		nameCell := "B" + rowStr
+		positionNextCell := "A" + nextRowStr
+		nameNextCell := "B" + nextRowStr
+
 		handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 110))
 
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), player.PoolPosition))
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, fmt.Sprintf("A%d", row+1), getNameIDSideStyle(f)))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, positionCell, player.PoolPosition))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionNextCell, getNameIDSideStyle(f)))
 
 		if sanitized {
-			_, row, err := excelize.SplitCellName(player.cell)
+			_, rowNum, err := excelize.SplitCellName(player.cell)
 			if err != nil {
 				handleExcelError("SplitCellName", err)
 				// Fallback to original approach if SplitCellName fails
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:])))
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, player.sheetName+"!D"+player.cell[1:]))
 			} else {
-				rowStr := strconv.Itoa(row)
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+rowStr)))
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, player.sheetName+"!D"+strconv.Itoa(rowNum)))
 			}
 		} else {
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, player.cell)))
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, player.sheetName+"!"+player.cell))
 		}
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, fmt.Sprintf("B%d", row+1), getNameIDStyle(f)))
-		handleExcelError("MergeCell", f.MergeCell(sheetName, nameCell, fmt.Sprintf("B%d", row+1)))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameNextCell, getNameIDStyle(f)))
+		handleExcelError("MergeCell", f.MergeCell(sheetName, nameCell, nameNextCell))
 
 		row += 2
 	}
@@ -396,35 +401,40 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) 
 	for _, pool := range pools {
 
 		for _, player := range pool.Players {
-			poolCell := fmt.Sprintf("A%d", row)
-			nameCell := fmt.Sprintf("B%d", row)
+			rowStr := strconv.Itoa(row)
+			nextRowStr := strconv.Itoa(row + 1)
+
+			poolCell := "A" + rowStr
+			nameCell := "B" + rowStr
+			poolNextCell := "A" + nextRowStr
+			nameNextCell := "B" + nextRowStr
+
 			handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 110))
 
 			handleExcelError("SetCellValue", f.SetCellValue(sheetName, poolCell, pool.PoolName))
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, poolCell, fmt.Sprintf("A%d", row+1), getNameIDSideStyle(f)))
+			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, poolCell, poolNextCell, getNameIDSideStyle(f)))
 
 			if sanitized {
 				_, rowNum, err := excelize.SplitCellName(player.cell)
 				if err != nil {
 					handleExcelError("SplitCellName", err)
 					// Fallback to original approach if SplitCellName fails
-					handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:])))
+					handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, player.sheetName+"!D"+player.cell[1:]))
 				} else {
-					rowStr := strconv.Itoa(rowNum)
-					handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+rowStr)))
+					handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, player.sheetName+"!D"+strconv.Itoa(rowNum)))
 				}
 			} else {
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, player.cell)))
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, player.sheetName+"!"+player.cell))
 			}
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, fmt.Sprintf("B%d", row+1), getNameIDStyle(f)))
-			handleExcelError("MergeCell", f.MergeCell(sheetName, nameCell, fmt.Sprintf("B%d", row+1)))
+			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameNextCell, getNameIDStyle(f)))
+			handleExcelError("MergeCell", f.MergeCell(sheetName, nameCell, nameNextCell))
 
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("A%d", row+1), player.PoolPosition))
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, poolNextCell, player.PoolPosition))
 			row += 2
 			namesCount++
 
 			if namesCount > 0 && namesCount%3 == 0 {
-				breakCell := fmt.Sprintf("A%d", row)
+				breakCell := "A" + strconv.Itoa(row)
 				if err := f.InsertPageBreak(sheetName, breakCell); err != nil {
 					fmt.Printf("Warning: failed to insert page break at %s: %v\n", breakCell, err)
 				}

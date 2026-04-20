@@ -412,32 +412,22 @@ func TestStack(t *testing.T) {
 		stack.Push(node1)
 		stack.Push(node2)
 
-		if stack.IsEmpty() {
-			t.Error("Stack should not be empty after pushing")
-		}
+		assert.False(t, stack.IsEmpty(), "Stack should not be empty after pushing")
 
 		popped := stack.Pop()
-		if popped.Val != 2 {
-			t.Errorf("Expected to pop node with Val=2, got Val=%d", popped.Val)
-		}
+		assert.NotNil(t, popped)
+		assert.Equal(t, int64(2), popped.Val, "Expected to pop node with Val=2")
 
 		popped = stack.Pop()
-		if popped.Val != 1 {
-			t.Errorf("Expected to pop node with Val=1, got Val=%d", popped.Val)
-		}
+		assert.NotNil(t, popped)
+		assert.Equal(t, int64(1), popped.Val, "Expected to pop node with Val=1")
 
-		if !stack.IsEmpty() {
-			t.Error("Stack should be empty after popping all elements")
-		}
+		assert.True(t, stack.IsEmpty(), "Stack should be empty after popping all elements")
 	})
 
 	t.Run("pop from empty stack", func(t *testing.T) {
 		stack := Stack{}
-
-		popped := stack.Pop()
-		if popped != nil {
-			t.Error("Expected nil when popping from empty stack")
-		}
+		assert.Nil(t, stack.Pop(), "Expected nil when popping from empty stack")
 	})
 
 	t.Run("multiple push and pop operations", func(t *testing.T) {
@@ -448,18 +438,34 @@ func TestStack(t *testing.T) {
 		}
 
 		for i := 10; i >= 1; i-- {
-			if stack.IsEmpty() {
-				t.Errorf("Stack should not be empty at iteration %d", i)
-			}
+			assert.False(t, stack.IsEmpty(), "Stack should not be empty at iteration %d", i)
 			popped := stack.Pop()
-			if popped.Val != int64(i) {
-				t.Errorf("Expected Val=%d, got Val=%d", i, popped.Val)
-			}
+			assert.NotNil(t, popped)
+			assert.Equal(t, int64(i), popped.Val)
 		}
 
-		if !stack.IsEmpty() {
-			t.Error("Stack should be empty after all pops")
-		}
+		assert.True(t, stack.IsEmpty(), "Stack should be empty after all pops")
+	})
+
+	t.Run("mixed push and pop", func(t *testing.T) {
+		stack := Stack{}
+
+		stack.Push(&Node{Val: 1})
+		stack.Push(&Node{Val: 2})
+		popped := stack.Pop()
+		assert.NotNil(t, popped)
+		assert.Equal(t, int64(2), popped.Val)
+
+		stack.Push(&Node{Val: 3})
+		popped = stack.Pop()
+		assert.NotNil(t, popped)
+		assert.Equal(t, int64(3), popped.Val)
+
+		popped = stack.Pop()
+		assert.NotNil(t, popped)
+		assert.Equal(t, int64(1), popped.Val)
+
+		assert.True(t, stack.IsEmpty())
 	})
 }
 

@@ -360,3 +360,29 @@ func ConvertPlayersToWinners(players []Player, sanitized bool) map[string]MatchW
 
 	return matchWinners
 }
+
+// ExtractNamesAndWinners returns a list of player names and a map of match winners by performing a single iteration over players.
+func ExtractNamesAndWinners(players []Player, withZekkenName bool) ([]string, map[string]MatchWinner) {
+	names := make([]string, len(players))
+	matchWinners := make(map[string]MatchWinner, len(players))
+
+	if withZekkenName {
+		for i, player := range players {
+			names[i] = player.DisplayName
+			matchWinners[player.DisplayName] = MatchWinner{
+				sheetName: player.sheetName,
+				cell:      player.cell,
+			}
+		}
+	} else {
+		for i, player := range players {
+			names[i] = player.Name
+			matchWinners[player.Name] = MatchWinner{
+				sheetName: player.sheetName,
+				cell:      player.cell,
+			}
+		}
+	}
+
+	return names, matchWinners
+}

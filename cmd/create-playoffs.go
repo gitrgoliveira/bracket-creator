@@ -160,16 +160,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	players = helper.StandardSeeding(players)
 
 	// gather all player names
-	var names []string
-	if o.withZekkenName {
-		for _, player := range players {
-			names = append(names, player.DisplayName)
-		}
-	} else {
-		for _, player := range players {
-			names = append(names, player.Name)
-		}
-	}
+	names, matchWinners := helper.ExtractNamesAndWinners(players, o.withZekkenName)
 	fmt.Printf("There will be %d finalists\n", len(names))
 
 	maxPlayersPerTree := 16
@@ -229,7 +220,6 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	helper.FillInMatches(f, eliminationMatchRounds)
 
-	var matchWinners map[string]helper.MatchWinner
 	if err := f.DeleteSheet("Pool Draw"); err != nil {
 		// Ignore sheet not exist error
 		fmt.Println("Note: Pool Draw sheet might not exist:", err)
@@ -239,8 +229,6 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		fmt.Println("Note: Pool Matches sheet might not exist:", err)
 	}
 
-	// Convert all players for match-winner processing
-	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)

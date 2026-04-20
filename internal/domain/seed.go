@@ -49,30 +49,49 @@ func ValidateAssignments(assignments []SeedAssignment) error {
 // AssignSeeds applies valid seed assignments to a list of players
 // It swaps seeds if a collision occurs. Returns error if a seeded participant is not found.
 func AssignSeeds(players []Player, assignments []SeedAssignment) error {
-	// Build map for quick lookup by name
-	playerMap := make(map[string]*Player)
+	// Build maps for quick lookup by name and seed
+	playerMap := make(map[string]*Player, len(players))
+	seedMap := make(map[int]*Player, len(players))
+
 	for i := range players {
-		playerMap[players[i].Name] = &players[i]
+		p := &players[i]
+		playerMap[p.Name] = p
+		if p.Seed > 0 {
+			seedMap[p.Seed] = p
+		}
 	}
 
 	for _, a := range assignments {
 		if p, ok := playerMap[a.Name]; ok {
 			// Check if seed rank is already taken by another player
-			var existingPlayer *Player
-			for i := range players {
-				if players[i].Seed == a.SeedRank && players[i].Name != p.Name {
-					existingPlayer = &players[i]
-					break
-				}
+			existingPlayer, exists := seedMap[a.SeedRank]
+			if exists && existingPlayer.Name == p.Name {
+				// It's the same player, no swap needed, but we should make sure we keep the map updated
+				// This shouldn't really happen since it would be assigning to the same spot, but let's handle it
+				continue
 			}
 
 			// If taken, swap their seeds
-			if existingPlayer != nil {
+			if exists && existingPlayer != nil {
 				existingPlayer.Seed = p.Seed
+				if existingPlayer.Seed > 0 {
+					seedMap[existingPlayer.Seed] = existingPlayer
+				} else {
+					// Seed is now 0 (unseeded), remove from map
+					// Though the old code didn't actually have this specific edge case check,
+					// if someone swaps from 0 to N, existingPlayer gets 0.
+					// Removing 0 from seedMap is safe since 0 usually means unseeded.
+				}
+			} else {
+				// The old seed for p is now free, remove it from seedMap
+				if p.Seed > 0 {
+					delete(seedMap, p.Seed)
+				}
 			}
 
 			// Assign new seed rank
 			p.Seed = a.SeedRank
+			seedMap[a.SeedRank] = p
 		} else {
 			return errors.New("seeded participant not found in main list: " + a.Name)
 		}

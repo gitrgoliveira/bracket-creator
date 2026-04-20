@@ -95,24 +95,61 @@ func StandardSeeding(players []Player) []Player {
 // Returns an error if an assigned name could not be matched
 func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 	playerMap := make(map[string]*Player)
+	seedMap := make(map[int][]*Player)
+
 	for i := range players {
 		playerMap[players[i].Name] = &players[i]
+		if players[i].Seed > 0 {
+			seedMap[players[i].Seed] = append(seedMap[players[i].Seed], &players[i])
+		}
 	}
 
 	for _, a := range assignments {
 		if p, ok := playerMap[a.Name]; ok {
 			var existingPlayer *Player
-			for i := range players {
-				if players[i].Seed == a.SeedRank && players[i].Name != p.Name {
-					existingPlayer = &players[i]
-					break
+
+			// Get the first player with this seed who is not the current player
+			if existingPlayers, ok := seedMap[a.SeedRank]; ok {
+				for _, ep := range existingPlayers {
+					if ep.Name != p.Name {
+						existingPlayer = ep
+						break
+					}
 				}
 			}
 
 			if existingPlayer != nil {
+				// Remove existingPlayer from seedMap[a.SeedRank]
+				var newSeedList []*Player
+				for _, ep := range seedMap[a.SeedRank] {
+					if ep.Name != existingPlayer.Name {
+						newSeedList = append(newSeedList, ep)
+					}
+				}
+				seedMap[a.SeedRank] = newSeedList
+
 				existingPlayer.Seed = p.Seed
+				// Add existingPlayer to seedMap[p.Seed]
+				if p.Seed > 0 {
+					seedMap[p.Seed] = append(seedMap[p.Seed], existingPlayer)
+				}
 			}
+
+			// Remove p from seedMap[p.Seed]
+			if p.Seed > 0 {
+				var newSeedList []*Player
+				for _, ep := range seedMap[p.Seed] {
+					if ep.Name != p.Name {
+						newSeedList = append(newSeedList, ep)
+					}
+				}
+				seedMap[p.Seed] = newSeedList
+			}
+
 			p.Seed = a.SeedRank
+			// Add p to seedMap[a.SeedRank]
+			seedMap[a.SeedRank] = append(seedMap[a.SeedRank], p)
+
 		} else {
 			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}

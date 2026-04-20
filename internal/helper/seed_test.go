@@ -1092,3 +1092,32 @@ func TestApplySeeds_CornerCases(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkApplySeeds(b *testing.B) {
+	for n := 10; n <= 10000; n *= 10 {
+		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
+			players := make([]Player, n)
+			assignments := make([]domain.SeedAssignment, n/2)
+			for i := 0; i < n; i++ {
+				players[i] = Player{
+					Name: fmt.Sprintf("Player%d", i),
+					Seed: i + 1, // initialize with some seeds
+				}
+			}
+			for i := 0; i < n/2; i++ {
+				assignments[i] = domain.SeedAssignment{
+					Name:     fmt.Sprintf("Player%d", i),
+					SeedRank: (n / 2) - i, // swap seeds around
+				}
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				// We need to copy players so we don't skew the benchmark, but copying is O(N)
+				pCopy := make([]Player, n)
+				copy(pCopy, players)
+				_ = ApplySeeds(pCopy, assignments)
+			}
+		})
+	}
+}

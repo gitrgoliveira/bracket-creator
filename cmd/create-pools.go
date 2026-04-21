@@ -46,13 +46,15 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file (default false)")
 	cmd.PersistentFlags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
 	cmd.PersistentFlags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
-	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 0, "minimum number of players/teams per pool")
+	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool")
 	cmd.Flags().IntVarP(&o.maxPlayers, "max-players", "m", 0, "maximum number of players/teams per pool")
-	cmd.Flags().IntVarP(&o.poolWinners, "pool-winners", "w", 2, "number of players/teams that can qualify from each pool (default 2)")
+	cmd.Flags().IntVarP(&o.poolWinners, "pool-winners", "w", 2, "number of players/teams that can qualify from each pool")
 	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone (default false)")
 	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
+
+	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
@@ -65,12 +67,6 @@ func newCreatePoolCmd() *cobra.Command {
 }
 
 func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
-	if o.numPlayers == 0 && o.maxPlayers == 0 {
-		o.numPlayers = 3
-	} else if o.numPlayers > 0 && o.maxPlayers > 0 {
-		return fmt.Errorf("cannot use both --players and --max-players")
-	}
-
 	fmt.Printf("Reading file: %s\n", o.filePath)
 
 	entries, err := helper.ReadEntriesFromFile(o.filePath)
@@ -116,9 +112,6 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		isMax = false
 		activePoolSize = o.numPlayers
-		if activePoolSize == 0 {
-			activePoolSize = 3
-		}
 	}
 
 	// validation

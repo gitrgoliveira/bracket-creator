@@ -38,7 +38,7 @@ func TestCreatePoolCmdFlags(t *testing.T) {
 	playersFlag := cmd.Flags().Lookup("players")
 	assert.NotNil(t, playersFlag)
 	assert.Equal(t, "p", playersFlag.Shorthand)
-	assert.Equal(t, "0", playersFlag.DefValue)
+	assert.Equal(t, "3", playersFlag.DefValue)
 
 	maxPlayersFlag := cmd.Flags().Lookup("max-players")
 	assert.NotNil(t, maxPlayersFlag)

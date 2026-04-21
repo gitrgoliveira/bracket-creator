@@ -125,7 +125,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	if len(entries) < o.poolWinners {
 		return fmt.Errorf("number of entries must be higher than number of winners per pool")
 	}
-	if len(entries) < activePoolSize {
+	if !isMax && len(entries) < activePoolSize {
 		return fmt.Errorf("number of entries must be greater than requested players in pool")
 	}
 

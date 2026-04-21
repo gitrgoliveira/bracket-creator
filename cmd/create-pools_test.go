@@ -248,6 +248,30 @@ func TestCreatePools_WithSeeds(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestCreatePools_MaxPlayersValidation(t *testing.T) {
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	o := &poolOptions{
+		outputWriter: writer,
+		outputPath:   "dummy.xlsx",
+		maxPlayers:   3,
+		poolWinners:  2,
+		determined:   true,
+	}
+
+	// 2 entries with max-players 3 should be valid
+	entries := []string{
+		"John Doe,Dojo1",
+		"Jane Smith,Dojo2",
+	}
+
+	err := o.createPools(entries)
+	assert.NoError(t, err)
+	err = writer.Flush()
+	assert.NoError(t, err)
+}
+
 func TestCreatePools_ValidationErrors(t *testing.T) {
 	t.Parallel()
 

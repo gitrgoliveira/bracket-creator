@@ -720,6 +720,8 @@
             if (document.getElementById('pools').checked) {
                 const winnersPerPool = parseInt(document.getElementById('winnersPerPool').value);
                 const playersPerPool = parseInt(document.getElementById('playersPerPool').value);
+                const isMaxMode = document.getElementById('poolSizeMax').checked;
+                const poolSizeModeLabel = isMaxMode ? 'Maximum players' : 'Minimum players';
 
                 if (winnersPerPool <= 0) {
                     errorMsg.textContent = 'Error: Winners per pool must be at least 1';
@@ -728,16 +730,17 @@
                 }
 
                 if (playersPerPool <= 0) {
-                    errorMsg.textContent = 'Error: Players per pool must be at least 1';
+                    errorMsg.textContent = `Error: ${poolSizeModeLabel} per pool must be at least 1`;
                     errorMsg.style.display = 'block';
                     isValid = false;
                 }
 
                 if (winnersPerPool >= playersPerPool) {
-                    errorMsg.textContent = 'Error: Winners per pool must be less than players per pool';
+                    errorMsg.textContent = `Error: Winners per pool must be less than ${poolSizeModeLabel.toLowerCase()} per pool`;
                     errorMsg.style.display = 'block';
                     isValid = false;
                 }
+            }
             }
 
             if (isValid) {
@@ -1110,14 +1113,38 @@
             }
         }
 
+        function updatePoolSizeHints() {
+            const playersPerPoolLabel = document.querySelector('label[for="playersPerPool"]');
+            const isMaxMode = document.getElementById('poolSizeMax').checked;
+
+            if (isMaxMode) {
+                playersPerPoolLabel.textContent = 'Maximum players/teams per pool:';
+            } else {
+                playersPerPoolLabel.textContent = 'Minimum players/teams per pool:';
+            }
+        }
+
         // Load saved values from localStorage
         window.addEventListener('DOMContentLoaded', () => {
             // Tournament type
             const savedTournamentType = localStorage.getItem('tournamentType');
             if (savedTournamentType) {
-                document.getElementById(savedTournamentType).checked = true;
-                if (savedTournamentType === 'pools') {
-                    document.getElementById('poolOptionsSection').style.display = 'block';
+                const el = document.getElementById(savedTournamentType);
+                if (el) {
+                    el.checked = true;
+                    if (savedTournamentType === 'pools') {
+                        document.getElementById('poolOptionsSection').style.display = 'block';
+                    }
+                }
+            }
+
+            // Pool size mode
+            const savedPoolSizeMode = localStorage.getItem('poolSizeMode');
+            if (savedPoolSizeMode) {
+                if (savedPoolSizeMode === 'max') {
+                    document.getElementById('poolSizeMax').checked = true;
+                } else {
+                    document.getElementById('poolSizeMin').checked = true;
                 }
             }
 
@@ -1136,10 +1163,13 @@
             Object.entries(formElements).forEach(([id, prop]) => {
                 const savedValue = localStorage.getItem(id);
                 if (savedValue !== null) {
-                    if (prop === 'checked') {
-                        document.getElementById(id).checked = savedValue === 'true';
-                    } else {
-                        document.getElementById(id).value = savedValue;
+                    const el = document.getElementById(id);
+                    if (el) {
+                        if (prop === 'checked') {
+                            el.checked = savedValue === 'true';
+                        } else {
+                            el.value = savedValue;
+                        }
                     }
                 }
             });
@@ -1153,6 +1183,7 @@
             }
 
             updateZekkenHints();
+            updatePoolSizeHints();
             updateLineNumbers();
             validateParticipantListInput();
         });
@@ -1163,9 +1194,13 @@
                 if (this.type === 'radio' && !this.checked) {
                     return;
                 }
-                localStorage.setItem(this.id || this.name, this.type === 'checkbox' ? this.checked : this.value);
+                const key = (this.type === 'radio' && this.name) ? this.name : (this.id || this.name);
+                localStorage.setItem(key, this.type === 'checkbox' ? this.checked : this.value);
             });
         });
+
+        document.getElementById('poolSizeMin').addEventListener('change', updatePoolSizeHints);
+        document.getElementById('poolSizeMax').addEventListener('change', updatePoolSizeHints);
 
         // Sample data loading functions
         const sampleData = {
@@ -1492,13 +1527,14 @@ Jack Adams, Team Alpha`
 
                 const playersPerPool = parseInt(document.getElementById('playersPerPool').value) || 3;
                 const winnersPerPool = parseInt(document.getElementById('winnersPerPool').value) || 2;
+                const isMaxMode = document.getElementById('poolSizeMax').checked;
 
                 // Calculate number of pools needed
-                const numPools = Math.ceil(totalPlayers / playersPerPool);
+                const numPools = isMaxMode ? Math.ceil(totalPlayers / playersPerPool) : Math.floor(totalPlayers / playersPerPool);
                 const playoffParticipants = numPools * winnersPerPool;
 
                 document.getElementById('poolCount').textContent = numPools;
-                document.getElementById('statsPlayersPerPool').textContent = playersPerPool;
+                document.getElementById('statsPlayersPerPool').textContent = playersPerPool + (isMaxMode ? ' (Max)' : ' (Min)');
                 document.getElementById('statsWinnersPerPool').textContent = winnersPerPool;
                 document.getElementById('playoffParticipants').textContent = playoffParticipants;
             } else {

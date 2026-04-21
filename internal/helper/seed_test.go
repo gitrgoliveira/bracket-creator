@@ -6,6 +6,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGenerateBracketOrder(t *testing.T) {
@@ -553,8 +554,8 @@ func TestStandardSeeding_24PlayersWithSeeds_NoMissingPlayers(t *testing.T) {
 	assert.Len(t, seedsPresent, 3, "Should have exactly 3 seeded players")
 }
 
-func TestStandardSeeding_WithPools_Integration(t *testing.T) {
-	// Integration test: Apply seeds, run StandardSeeding, create pools
+func TestPoolSeeding_WithPools_Integration(t *testing.T) {
+	// Integration test: Apply seeds, run PoolSeeding, create pools
 	// Verify no duplicates end up in pools
 
 	// Create 24 players
@@ -578,8 +579,8 @@ func TestStandardSeeding_WithPools_Integration(t *testing.T) {
 	err := ApplySeeds(players, assignments)
 	assert.NoError(t, err)
 
-	// Run standard seeding
-	seededPlayers := StandardSeeding(players)
+	// Run pool seeding
+	seededPlayers := PoolSeeding(players, 8)
 
 	// Verify no duplicates
 	nameCount := make(map[string]int)
@@ -592,7 +593,8 @@ func TestStandardSeeding_WithPools_Integration(t *testing.T) {
 	}
 
 	// Create pools (3 players per pool = 8 pools)
-	pools := CreatePools(seededPlayers, 3, false)
+	pools, err := CreatePools(seededPlayers, 3, false)
+	assert.NoError(t, err)
 
 	// Verify no duplicates across pools
 	allPlayersInPools := make(map[string]int)
@@ -610,7 +612,7 @@ func TestStandardSeeding_WithPools_Integration(t *testing.T) {
 	assert.Len(t, allPlayersInPools, 24, "All 24 players should be in pools")
 }
 
-func TestStandardSeeding_WithBalancedPools_Integration(t *testing.T) {
+func TestPoolSeeding_WithBalancedPools_Integration(t *testing.T) {
 	// 10 players, 4 seeds
 	players := make([]Player, 10)
 	for i := 0; i < 10; i++ {
@@ -624,11 +626,12 @@ func TestStandardSeeding_WithBalancedPools_Integration(t *testing.T) {
 	players[2].Seed = 3
 	players[3].Seed = 4
 
-	// Standard seeding reorders them
-	seededPlayers := StandardSeeding(players)
+	// Use PoolSeeding for pool distribution
+	seededPlayers := PoolSeeding(players, 4)
 
 	// Create pools with max size 3 -> should create 4 pools (3, 3, 2, 2)
-	pools := CreatePools(seededPlayers, 3, true)
+	pools, err := CreatePools(seededPlayers, 3, true)
+	assert.NoError(t, err)
 
 	assert.Len(t, pools, 4, "Should have 4 pools")
 
@@ -986,6 +989,99 @@ func TestStandardSeeding_LargeTournaments(t *testing.T) {
 	}
 }
 
+func TestStandardSeeding_DisplacedSeeds(t *testing.T) {
+	t.Run("basic displaced seed - 3 players", func(t *testing.T) {
+		players := []Player{
+			{Name: "Seed1", Seed: 1},
+			{Name: "Displaced100", Seed: 100},
+			{Name: "Unseeded1", Seed: 0},
+		}
+
+		result := StandardSeeding(players)
+
+		assert.Len(t, result, 3)
+
+		// Seed 1 should be at index 0
+		assert.Equal(t, "Seed1", result[0].Name)
+		// Displaced100 should be at index 2 (furthest from index 0)
+		assert.Equal(t, "Displaced100", result[2].Name)
+		// Unseeded1 should be at index 1
+		assert.Equal(t, "Unseeded1", result[1].Name)
+
+		// Verification of completeness
+		names := make(map[string]bool)
+		for _, p := range result {
+			assert.NotEmpty(t, p.Name, "Result should not contain players with empty names")
+			names[p.Name] = true
+		}
+		assert.Len(t, names, 3)
+	})
+
+	t.Run("extreme seed rank - 10 players", func(t *testing.T) {
+		players := make([]Player, 10)
+		for i := 0; i < 10; i++ {
+			players[i] = Player{Name: fmt.Sprintf("Player%d", i+1)}
+		}
+		players[0] = Player{Name: "Seed1", Seed: 1}
+		players[1] = Player{Name: "Seed2", Seed: 2}
+		players[2] = Player{Name: "Extreme5000", Seed: 5000}
+
+		result := StandardSeeding(players)
+
+		assert.Len(t, result, 10)
+
+		// Seed 1 should be at index 0 (standard position)
+		assert.Equal(t, "Seed1", result[0].Name)
+		// Seed 2 should be at index 8 (standard position for 16-player bracket)
+		assert.Equal(t, "Seed2", result[8].Name)
+		// Extreme5000 should be at index 4 (furthest from 0 and 8 in [1..7, 9])
+		assert.Equal(t, "Extreme5000", result[4].Name)
+
+		// Check for blanks and duplicates
+		names := make(map[string]int)
+		for _, p := range result {
+			assert.NotEmpty(t, p.Name, "Result should not contain players with empty names")
+			names[p.Name]++
+		}
+		assert.Len(t, names, 10)
+		for name, count := range names {
+			assert.Equal(t, 1, count, "Player %s should appear exactly once", name)
+		}
+	})
+
+	t.Run("multiple displaced seeds - 8 players", func(t *testing.T) {
+		players := make([]Player, 8)
+		for i := 0; i < 8; i++ {
+			players[i] = Player{Name: fmt.Sprintf("Player%d", i+1)}
+		}
+		players[0] = Player{Name: "Seed1", Seed: 1}
+		players[1] = Player{Name: "Seed2", Seed: 2}
+		players[2] = Player{Name: "Disp100", Seed: 100}
+		players[3] = Player{Name: "Disp200", Seed: 200}
+
+		result := StandardSeeding(players)
+
+		// 8 players, power of 2 is 8. Order: [1, 8, 4, 5, 2, 7, 3, 6]
+		// Seed 1 (rank 1) at index 0.
+		// Seed 2 (rank 2) at index 4.
+		// Disp100: furthest from {0, 4}. Distances: 1:1, 2:2, 3:1, 5:1, 6:2, 7:3.
+		// Furthest is index 7 (dist 3).
+		// Disp200: furthest from {0, 4, 7}. Distances: 1:1, 2:2, 3:1, 5:1, 6:1.
+		// Max distance 2 at index 2.
+
+		assert.Equal(t, "Seed1", result[0].Name)
+		assert.Equal(t, "Seed2", result[4].Name)
+		assert.Equal(t, "Disp100", result[7].Name)
+		assert.Equal(t, "Disp200", result[2].Name)
+
+		names := make(map[string]bool)
+		for _, p := range result {
+			names[p.Name] = true
+		}
+		assert.Len(t, names, 8)
+	})
+}
+
 func TestApplySeeds_CornerCases(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1140,4 +1236,276 @@ func TestApplySeeds_CornerCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGeneratePoolPriority(t *testing.T) {
+	tests := []struct {
+		n        int
+		expected []int
+	}{
+		{n: 1, expected: []int{0}},
+		{n: 2, expected: []int{0, 1}},
+		{n: 4, expected: []int{0, 3, 1, 2}},
+		{n: 8, expected: []int{0, 7, 3, 4, 1, 5, 2, 6}},
+		{n: 12, expected: []int{0, 11, 5, 6, 2, 8, 3, 9, 1, 4, 7, 10}},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("n=%d", tt.n), func(t *testing.T) {
+			result := generatePoolPriority(tt.n)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestPoolSeeding(t *testing.T) {
+	t.Run("12 pools 4 seeds", func(t *testing.T) {
+		players := make([]Player, 36) // 3 players per pool
+		for i := 0; i < 36; i++ {
+			players[i] = Player{Name: fmt.Sprintf("P%d", i+1), Dojo: fmt.Sprintf("Dojo%d", i+1)}
+		}
+		players[0].Seed = 1
+		players[1].Seed = 2
+		players[2].Seed = 3
+		players[3].Seed = 4
+
+		numPools := 12
+		result := PoolSeeding(players, numPools)
+
+		// Create pools to verify final placement
+		pools, err := CreatePools(result, 3, false)
+		assert.NoError(t, err)
+		assert.Len(t, pools, 12)
+
+		// Seed 1 in Pool 1 (index 0)
+		assert.Equal(t, 1, pools[0].Players[0].Seed)
+		// Seed 2 in Pool 12 (index 11)
+		assert.Equal(t, 2, pools[11].Players[0].Seed)
+		// Seed 3 in Pool 6 (index 5)
+		assert.Equal(t, 3, pools[5].Players[0].Seed)
+		// Seed 4 in Pool 7 (index 6)
+		assert.Equal(t, 4, pools[6].Players[0].Seed)
+	})
+
+	t.Run("more seeds than pools", func(t *testing.T) {
+		numPools := 4
+		players := make([]Player, 12)
+		for i := 0; i < 12; i++ {
+			players[i] = Player{Name: fmt.Sprintf("P%d", i+1), Seed: i + 1, Dojo: fmt.Sprintf("Dojo%d", i+1)}
+		}
+
+		result := PoolSeeding(players, numPools)
+		pools, err := CreatePools(result, 3, false)
+		assert.NoError(t, err)
+
+		// Priority for 4 pools: [0, 3, 1, 2]
+		// Cyclic Priority Assignment:
+		// Pool Index:  0  3  1  2 |  0  3  1  2 |  0  3  1  2
+		// Seed Rank:   1  2  3  4 |  5  6  7  8 |  9 10 11 12
+		// Result Idx:  0  3  1  2 |  4  7  5  6 |  8 11  9 10
+		// (Assuming numPools=4 and linear filling)
+
+		assert.Equal(t, 1, pools[0].Players[0].Seed)
+		assert.Equal(t, 5, pools[0].Players[1].Seed)
+		assert.Equal(t, 9, pools[0].Players[2].Seed)
+
+		assert.Equal(t, 2, pools[3].Players[0].Seed)
+		assert.Equal(t, 6, pools[3].Players[1].Seed)
+		assert.Equal(t, 10, pools[3].Players[2].Seed)
+	})
+}
+
+func TestPoolSeeding_CornerCases(t *testing.T) {
+	t.Run("zero pools returns input unchanged", func(t *testing.T) {
+		players := []Player{{Name: "A", Seed: 1}, {Name: "B"}}
+		result := PoolSeeding(players, 0)
+		assert.Equal(t, players, result)
+	})
+
+	t.Run("negative pools returns input unchanged", func(t *testing.T) {
+		players := []Player{{Name: "A", Seed: 1}, {Name: "B"}}
+		result := PoolSeeding(players, -1)
+		assert.Equal(t, players, result)
+	})
+
+	t.Run("no seeded players keeps unseeded order", func(t *testing.T) {
+		players := []Player{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}}
+		result := PoolSeeding(players, 2)
+		// Unseeded should fill linearly in order.
+		assert.Equal(t, "A", result[0].Name)
+		assert.Equal(t, "B", result[1].Name)
+		assert.Equal(t, "C", result[2].Name)
+		assert.Equal(t, "D", result[3].Name)
+	})
+
+	t.Run("single pool places all seeds", func(t *testing.T) {
+		players := []Player{
+			{Name: "S1", Seed: 1},
+			{Name: "S2", Seed: 2},
+			{Name: "U1"},
+		}
+		result := PoolSeeding(players, 1)
+		// All players present, seeds preserved.
+		seen := map[string]bool{}
+		for _, p := range result {
+			seen[p.Name] = true
+		}
+		assert.Len(t, seen, 3)
+	})
+
+	t.Run("preserves total count", func(t *testing.T) {
+		players := make([]Player, 17)
+		for i := range players {
+			players[i] = Player{Name: fmt.Sprintf("P%d", i+1)}
+		}
+		players[0].Seed = 1
+		players[1].Seed = 2
+		players[2].Seed = 3
+		result := PoolSeeding(players, 6)
+		assert.Len(t, result, 17)
+
+		nonEmpty := 0
+		for _, p := range result {
+			if p.Name != "" {
+				nonEmpty++
+			}
+		}
+		assert.Equal(t, 17, nonEmpty)
+	})
+}
+
+func TestPoolSeeding_DistributesSeedsAcrossPools(t *testing.T) {
+	// When seeds <= numPools, every seed should land in a distinct pool.
+	tests := []struct {
+		name     string
+		seeds    int
+		numPools int
+		poolSize int
+	}{
+		{name: "2 seeds, 4 pools", seeds: 2, numPools: 4, poolSize: 3},
+		{name: "3 seeds, 5 pools", seeds: 3, numPools: 5, poolSize: 3},
+		{name: "4 seeds, 4 pools", seeds: 4, numPools: 4, poolSize: 3},
+		{name: "5 seeds, 8 pools", seeds: 5, numPools: 8, poolSize: 3},
+		{name: "8 seeds, 8 pools", seeds: 8, numPools: 8, poolSize: 3},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			total := tt.numPools * tt.poolSize
+			players := make([]Player, total)
+			for i := range players {
+				players[i] = Player{Name: fmt.Sprintf("P%d", i+1), Dojo: fmt.Sprintf("D%d", i+1)}
+			}
+			for i := 0; i < tt.seeds; i++ {
+				players[i].Seed = i + 1
+			}
+
+			result := PoolSeeding(players, tt.numPools)
+			pools, err := CreatePools(result, tt.poolSize, false)
+			assert.NoError(t, err)
+			assert.Len(t, pools, tt.numPools)
+
+			seedPools := map[int]bool{}
+			for i, pool := range pools {
+				for _, p := range pool.Players {
+					if p.Seed > 0 {
+						assert.False(t, seedPools[i], "pool %d already has a seed", i)
+						seedPools[i] = true
+					}
+				}
+			}
+			assert.Len(t, seedPools, tt.seeds, "each seed should land in a distinct pool")
+		})
+	}
+}
+
+func TestGeneratePoolPriority_Properties(t *testing.T) {
+	t.Run("zero returns empty", func(t *testing.T) {
+		assert.Empty(t, generatePoolPriority(0))
+	})
+
+	t.Run("negative returns empty", func(t *testing.T) {
+		assert.Empty(t, generatePoolPriority(-3))
+	})
+
+	for n := 1; n <= 64; n++ {
+		n := n
+		t.Run(fmt.Sprintf("permutation_n=%d", n), func(t *testing.T) {
+			p := generatePoolPriority(n)
+			assert.Len(t, p, n, "priority length must equal n")
+
+			seen := make(map[int]bool, n)
+			for _, v := range p {
+				assert.GreaterOrEqual(t, v, 0)
+				assert.Less(t, v, n)
+				assert.False(t, seen[v], "duplicate value %d", v)
+				seen[v] = true
+			}
+			assert.Len(t, seen, n)
+
+			if n >= 2 {
+				assert.Equal(t, 0, p[0], "first priority must be 0 (low extreme)")
+				assert.Equal(t, n-1, p[1], "second priority must be n-1 (high extreme)")
+			}
+		})
+	}
+}
+
+func TestStandardSeeding_DisplacedSeeds_NoMissingPlayers(t *testing.T) {
+	// Stress test: many displaced seeds should never lose players.
+	players := make([]Player, 16)
+	for i := range players {
+		players[i] = Player{Name: fmt.Sprintf("P%d", i+1)}
+	}
+	// Mix of valid and displaced seed ranks.
+	players[0].Seed = 1
+	players[1].Seed = 16
+	players[2].Seed = 99   // displaced
+	players[3].Seed = 200  // displaced
+	players[4].Seed = 1000 // displaced
+
+	result := StandardSeeding(players)
+	assert.Len(t, result, 16)
+
+	names := map[string]int{}
+	for _, p := range result {
+		assert.NotEmpty(t, p.Name)
+		names[p.Name]++
+	}
+	assert.Len(t, names, 16)
+	for n, c := range names {
+		assert.Equal(t, 1, c, "player %s appears %d times", n, c)
+	}
+}
+
+func TestApplySeeds_DuplicateSeedRanks(t *testing.T) {
+	t.Run("rejects two assignments with the same rank", func(t *testing.T) {
+		players := []Player{
+			{Name: "Alice"},
+			{Name: "Bob"},
+		}
+		assignments := []domain.SeedAssignment{
+			{Name: "Alice", SeedRank: 1},
+			{Name: "Bob", SeedRank: 1},
+		}
+		err := ApplySeeds(players, assignments)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate seed rank 1")
+	})
+
+	t.Run("allows multiple unseeded entries (rank 0)", func(t *testing.T) {
+		players := []Player{
+			{Name: "Alice"},
+			{Name: "Bob"},
+			{Name: "Carol"},
+		}
+		assignments := []domain.SeedAssignment{
+			{Name: "Alice", SeedRank: 0},
+			{Name: "Bob", SeedRank: 0},
+			{Name: "Carol", SeedRank: 1},
+		}
+		err := ApplySeeds(players, assignments)
+		require.NoError(t, err)
+	})
 }

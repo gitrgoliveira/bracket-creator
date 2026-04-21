@@ -157,6 +157,7 @@ func TestCreatePools(t *testing.T) {
 		poolSize  int
 		isMax     bool
 		wantPanic bool
+		wantErr   bool
 		validate  func(t *testing.T, pools []Pool)
 	}{
 		{
@@ -330,10 +331,11 @@ func TestCreatePools(t *testing.T) {
 			wantPanic: true,
 		},
 		{
-			name:      "panics when pool size larger than player count",
-			players:   createPlayers(3, 3),
-			poolSize:  4,
-			wantPanic: true,
+			name:     "errors when pool size larger than player count",
+			players:  createPlayers(3, 3),
+			poolSize: 4,
+			isMax:    false,
+			wantErr:  true,
 		},
 		{
 			name:     "max pool size mode creates exact number of pools",
@@ -386,7 +388,16 @@ func TestCreatePools(t *testing.T) {
 				}()
 			}
 
-			pools := CreatePools(tt.players, tt.poolSize, tt.isMax)
+			pools, err := CreatePools(tt.players, tt.poolSize, tt.isMax)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+			if err != nil && !tt.wantPanic {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if tt.validate != nil {
 				tt.validate(t, pools)
 			}
@@ -534,7 +545,7 @@ func TestDiscoverPool(t *testing.T) {
 
 	t.Run("finds empty pool", func(t *testing.T) {
 		player := Player{Name: "P2", Dojo: "Dojo B"}
-		poolIdx := discoverPool(pools, player, []int{2, 2})
+		poolIdx := discoverPool(pools, player, []int{2, 2}, 0)
 
 		if poolIdx != 0 {
 			t.Errorf("Expected pool 0, got %d", poolIdx)
@@ -543,7 +554,7 @@ func TestDiscoverPool(t *testing.T) {
 
 	t.Run("avoids same dojo", func(t *testing.T) {
 		player := Player{Name: "P3", Dojo: "Dojo A"}
-		poolIdx := discoverPool(pools, player, []int{2, 2})
+		poolIdx := discoverPool(pools, player, []int{2, 2}, 0)
 
 		// Should find pool 1 since pool 0 has same dojo
 		if poolIdx != 1 {
@@ -562,7 +573,7 @@ func TestDiscoverPool(t *testing.T) {
 			},
 		}
 		player := Player{Name: "P3", Dojo: "D3"}
-		poolIdx := discoverPool(fullPools, player, []int{2})
+		poolIdx := discoverPool(fullPools, player, []int{2}, 0)
 
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
@@ -1462,4 +1473,70 @@ func TestPoolMatchOrderingComparison(t *testing.T) {
 			t.Errorf("Non-round-robin should have fewer than 6 unique pairings, got %d", len(pairings))
 		}
 	})
+}
+
+func TestCreatePools_MaxMode_LargeBalancing(t *testing.T) {
+	// 17 players, max 4 per pool -> 5 pools sized (4,4,3,3,3).
+	players := make([]Player, 17)
+	for i := range players {
+		players[i] = Player{Name: fmt.Sprintf("P%d", i+1), Dojo: fmt.Sprintf("D%d", i+1)}
+	}
+
+	pools, err := CreatePools(players, 4, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pools) != 5 {
+		t.Fatalf("expected 5 pools, got %d", len(pools))
+	}
+
+	sizes := make(map[int]int)
+	total := 0
+	for _, p := range pools {
+		sizes[len(p.Players)]++
+		total += len(p.Players)
+		if len(p.Players) > 4 {
+			t.Errorf("pool exceeds max size 4: got %d", len(p.Players))
+		}
+	}
+	if total != 17 {
+		t.Errorf("expected 17 players placed, got %d", total)
+	}
+	if sizes[4] != 2 || sizes[3] != 3 {
+		t.Errorf("expected sizes (4x2, 3x3), got %v", sizes)
+	}
+}
+
+func TestDiscoverPool_StartIndexRoundRobin(t *testing.T) {
+	// Three empty pools. Starting at index 1 should return 1 first.
+	pools := []Pool{{}, {}, {}}
+	player := Player{Name: "P", Dojo: "D"}
+
+	if got := discoverPool(pools, player, []int{2, 2, 2}, 1); got != 1 {
+		t.Errorf("expected start-index 1, got %d", got)
+	}
+	if got := discoverPool(pools, player, []int{2, 2, 2}, 2); got != 2 {
+		t.Errorf("expected start-index 2, got %d", got)
+	}
+	if got := discoverPool(pools, player, []int{2, 2, 2}, 0); got != 0 {
+		t.Errorf("expected start-index 0, got %d", got)
+	}
+}
+
+func TestCreatePools_MaxMode_AllSamePool(t *testing.T) {
+	// Edge: with isMax true and only 2 players, expect a single pool of size 2.
+	players := []Player{
+		{Name: "A", Dojo: "DA"},
+		{Name: "B", Dojo: "DB"},
+	}
+	pools, err := CreatePools(players, 3, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pools) != 1 {
+		t.Fatalf("expected 1 pool, got %d", len(pools))
+	}
+	if len(pools[0].Players) != 2 {
+		t.Errorf("expected pool size 2, got %d", len(pools[0].Players))
+	}
 }

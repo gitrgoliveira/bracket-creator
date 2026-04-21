@@ -129,13 +129,18 @@ func sanitizeName(name string) string {
 	return fmt.Sprintf("%c. %s", firstName[0], lastName)
 }
 
-func CreatePools(players []Player, poolSize int, isMax bool) []Pool {
+func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	var totalPools int
 	if isMax {
 		totalPools = (len(players) + poolSize - 1) / poolSize
 	} else {
 		totalPools = len(players) / poolSize
 	}
+
+	if totalPools == 0 && len(players) > 0 {
+		return nil, fmt.Errorf("cannot create pools: player count (%d) is less than pool size (%d)", len(players), poolSize)
+	}
+
 	pools := make([]Pool, totalPools)
 
 	targetSizes := make([]int, totalPools)
@@ -155,8 +160,8 @@ func CreatePools(players []Player, poolSize int, isMax bool) []Pool {
 		}
 	}
 
-	for _, player := range players {
-		poolN := discoverPool(pools, player, targetSizes)
+	for i, player := range players {
+		poolN := discoverPool(pools, player, targetSizes, i%totalPools)
 		// try and force same dojo
 		if poolN < 0 {
 			poolN = forceSameDojo(pools, targetSizes)
@@ -165,7 +170,6 @@ func CreatePools(players []Player, poolSize int, isMax bool) []Pool {
 		// try and force pool size
 		if poolN < 0 {
 			poolN = forcePoolSize(pools, targetSizes)
-			fmt.Printf("Added extra player to pool %d\n", poolN)
 		}
 		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
 		pools[poolN].Players = append(pools[poolN].Players, player)
@@ -179,15 +183,21 @@ func CreatePools(players []Player, poolSize int, isMax bool) []Pool {
 		pools[i].PoolName = fmt.Sprintf("Pool %s", char)
 	}
 
-	return pools
+	return pools, nil
 }
 
-func discoverPool(pools []Pool, player Player, targetSizes []int) int {
+func discoverPool(pools []Pool, player Player, targetSizes []int, startIndex int) int {
+	totalPools := len(pools)
+	if totalPools == 0 {
+		return -1
+	}
 
-	for i, pool := range pools {
+	for i := 0; i < totalPools; i++ {
+		curr := (startIndex + i) % totalPools
+		pool := pools[curr]
 
 		// making sure there's space first
-		if len(pool.Players) >= targetSizes[i] {
+		if len(pool.Players) >= targetSizes[curr] {
 			continue
 		}
 
@@ -203,7 +213,7 @@ func discoverPool(pools []Pool, player Player, targetSizes []int) int {
 
 		// If the player can be added, return the pool index
 		if canAddToPool {
-			return i
+			return curr
 		}
 
 	}

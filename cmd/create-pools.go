@@ -104,14 +104,10 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 func (o *poolOptions) createPools(entries []string) error {
-	var isMax bool
-	var activePoolSize int
-	if o.maxPlayers > 0 {
-		isMax = true
+	isMax := o.maxPlayers > 0
+	activePoolSize := o.numPlayers
+	if isMax {
 		activePoolSize = o.maxPlayers
-	} else {
-		isMax = false
-		activePoolSize = o.numPlayers
 	}
 
 	// validation
@@ -120,6 +116,14 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	if !isMax && len(entries) < activePoolSize {
 		return fmt.Errorf("number of entries must be greater than requested players in pool")
+	}
+	if isMax && len(entries) < 2 {
+		return fmt.Errorf("number of entries must be at least 2")
+	}
+	// In max-mode the equality case (entries == poolWinners) would otherwise
+	// produce a "tournament" where every player auto-qualifies. Reject it.
+	if isMax && len(entries) <= o.poolWinners {
+		return fmt.Errorf("number of entries must be higher than number of winners per pool")
 	}
 
 	if activePoolSize < 2 {
@@ -150,10 +154,24 @@ func (o *poolOptions) createPools(entries []string) error {
 		}
 	}
 
-	// Reorder players to ensure seeded participants are distributed effectively across pools
-	players = helper.StandardSeeding(players)
+	// Calculate number of pools to ensure seeding distribution matches pool count
+	var numPools int
+	if isMax {
+		numPools = (len(players) + activePoolSize - 1) / activePoolSize
+	} else {
+		numPools = len(players) / activePoolSize
+	}
+	if numPools == 0 {
+		return fmt.Errorf("not enough valid participants (%d) to form a pool of size %d", len(players), activePoolSize)
+	}
 
-	pools := helper.CreatePools(players, activePoolSize, isMax)
+	// Reorder players to ensure seeded participants are distributed effectively across pools
+	players = helper.PoolSeeding(players, numPools)
+
+	pools, err := helper.CreatePools(players, activePoolSize, isMax)
+	if err != nil {
+		return err
+	}
 
 	// Opening the template Excel file.
 	var templateFile io.ReadCloser
@@ -217,7 +235,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	if err != nil {
 		return fmt.Errorf("could not find Tree sheet: %w", err)
 	}
-	numPools := int(math.Ceil(float64(len(pools)) / float64(len(subtrees))))
+	poolsPerSubtree := int(math.Ceil(float64(len(pools)) / float64(len(subtrees))))
 	// adding extra sheets
 	for i := 0; i < len(subtrees); i++ {
 		subtreeSheet := "Tree " + strconv.Itoa(i+1)
@@ -237,12 +255,12 @@ func (o *poolOptions) createPools(entries []string) error {
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 
-		lastPos := (i + 1) * numPools
+		lastPos := (i + 1) * poolsPerSubtree
 		if lastPos > len(pools) {
 			lastPos = len(pools)
 		}
 
-		helper.AddPoolsToTree(f, subtreeSheet, pools[i*numPools:lastPos])
+		helper.AddPoolsToTree(f, subtreeSheet, pools[i*poolsPerSubtree:lastPos])
 	}
 	if err := f.DeleteSheet("Tree"); err != nil {
 		fmt.Println("Note: Tree sheet might not exist:", err)

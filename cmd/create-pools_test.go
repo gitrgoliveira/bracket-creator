@@ -260,10 +260,11 @@ func TestCreatePools_MaxPlayersValidation(t *testing.T) {
 		determined:   true,
 	}
 
-	// 2 entries with max-players 3 should be valid
+	// 3 entries with max-players 3 and 2 winners is the smallest valid config.
 	entries := []string{
 		"John Doe,Dojo1",
 		"Jane Smith,Dojo2",
+		"Alice,Dojo3",
 	}
 
 	err := o.createPools(entries)
@@ -448,4 +449,150 @@ func TestPoolOptionsRun_Success(t *testing.T) {
 	// Output file is created even if template is missing
 	_, err = os.Stat(tmpOutput.Name())
 	assert.NoError(t, err)
+}
+
+func TestCreatePoolCmdMutuallyExclusiveFlags(t *testing.T) {
+	t.Parallel()
+
+	cmd := newCreatePoolCmd()
+	// Provide both --players and --max-players to trigger the mutual-exclusion check.
+	cmd.SetArgs([]string{"--file", "/tmp/does-not-exist.csv", "--output", "/tmp/out.xlsx", "--players", "3", "--max-players", "4"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "none of the others can be")
+}
+
+func TestCreatePools_MaxMode_ValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		entries       []string
+		maxPlayers    int
+		poolWinners   int
+		expectedError string
+	}{
+		{
+			name:          "max mode requires at least 2 entries",
+			entries:       []string{"John Doe,Dojo1"},
+			maxPlayers:    3,
+			poolWinners:   0,
+			expectedError: "number of entries must be at least 2",
+		},
+		{
+			name:          "max mode rejects pool size below 2",
+			entries:       []string{"A,D1", "B,D2", "C,D3"},
+			maxPlayers:    1,
+			poolWinners:   0,
+			expectedError: "number of players per pool must be greater than 1",
+		},
+		{
+			name:          "max mode rejects winners >= max",
+			entries:       []string{"A,D1", "B,D2", "C,D3", "D,D4"},
+			maxPlayers:    3,
+			poolWinners:   3,
+			expectedError: "number of pool winners must be less than number of players per pool",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var b bytes.Buffer
+			writer := bufio.NewWriter(&b)
+
+			o := &poolOptions{
+				outputWriter: writer,
+				outputPath:   "dummy.xlsx",
+				maxPlayers:   tt.maxPlayers,
+				poolWinners:  tt.poolWinners,
+				determined:   true,
+			}
+
+			err := o.createPools(tt.entries)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedError)
+		})
+	}
+}
+
+func TestCreatePools_MaxMode_BalancedDistribution(t *testing.T) {
+	t.Parallel()
+
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	o := &poolOptions{
+		outputWriter: writer,
+		outputPath:   "dummy.xlsx",
+		maxPlayers:   3,
+		poolWinners:  2,
+		determined:   true,
+	}
+
+	// 10 entries with max 3 players per pool -> 4 pools (3, 3, 2, 2).
+	entries := []string{
+		"P1,D1", "P2,D2", "P3,D3", "P4,D4", "P5,D5",
+		"P6,D6", "P7,D7", "P8,D8", "P9,D9", "P10,D10",
+	}
+
+	err := o.createPools(entries)
+	require.NoError(t, err)
+	require.NoError(t, writer.Flush())
+}
+
+func TestCreatePools_ServeMutuallyExclusiveModes(t *testing.T) {
+	t.Parallel()
+
+	// Sanity check: the option struct allows only one of numPlayers/maxPlayers
+	// to be effective. Cmd-level enforcement is via cobra.MarkFlagsMutuallyExclusive,
+	// while serve.go selects between the two based on poolSizeMode.
+	o := &poolOptions{
+		outputPath:  "dummy.xlsx",
+		maxPlayers:  3,
+		numPlayers:  10, // numPlayers should be ignored when maxPlayers > 0
+		poolWinners: 2,
+		determined:  true,
+	}
+
+	var b bytes.Buffer
+	o.outputWriter = bufio.NewWriter(&b)
+
+	// 4 entries with max 3 should produce 2 pools (2, 2). Without isMax this
+	// would be 0 pools (4/10) and would have errored.
+	err := o.createPools([]string{"A,D1", "B,D2", "C,D3", "D,D4"})
+	require.NoError(t, err)
+}
+
+func TestCreatePools_WithMaxPlayersAndSeeds(t *testing.T) {
+	t.Parallel()
+
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	o := &poolOptions{
+		outputWriter: writer,
+		outputPath:   "dummy.xlsx",
+		maxPlayers:   3,
+		poolWinners:  2,
+		determined:   true,
+		SeedAssignments: []domain.SeedAssignment{
+			{Name: "P1", SeedRank: 1},
+			{Name: "P2", SeedRank: 2},
+		},
+	}
+
+	entries := []string{
+		"P1,D1", "P2,D2", "P3,D3", "P4,D4", "P5,D5",
+		"P6,D6", "P7,D7", "P8,D8",
+	}
+
+	err := o.createPools(entries)
+	require.NoError(t, err)
+	require.NoError(t, writer.Flush())
 }

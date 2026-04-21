@@ -2,7 +2,7 @@
 ARG GO_VERSION=1.26.1
 
 # Build stage
-FROM golang:${GO_VERSION} AS builder
+FROM golang:${GO_VERSION}-alpine AS builder
 
 
 ARG GIT_COMMIT

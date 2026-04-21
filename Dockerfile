@@ -12,7 +12,6 @@ ENV CGO_ENABLED=0
 
 WORKDIR /bracket-creator
 COPY go.mod go.sum ./
-ENV GOTOOLCHAIN=local
 RUN go mod download
 COPY . .
 RUN echo "nonroot:x:65534:65534:Non root:/:" > /etc_passwd

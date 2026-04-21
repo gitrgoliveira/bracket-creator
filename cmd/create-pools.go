@@ -18,6 +18,7 @@ import (
 
 type poolOptions struct {
 	numPlayers      int
+	maxPlayers      int
 	poolWinners     int
 	teamMatches     int
 	filePath        string
@@ -45,7 +46,8 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVarP(&o.determined, "determined", "d", false, "Do not shuffle the names read from the input file (default false)")
 	cmd.PersistentFlags().StringVarP(&o.filePath, "file", "f", "", "file with the list of players/teams")
 	cmd.PersistentFlags().StringVarP(&o.outputPath, "output", "o", "", "output path for the excel file")
-	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 3, "minimum number of players/teams per pool (default 3)")
+	cmd.Flags().IntVarP(&o.numPlayers, "players", "p", 0, "minimum number of players/teams per pool")
+	cmd.Flags().IntVarP(&o.maxPlayers, "max-players", "m", 0, "maximum number of players/teams per pool")
 	cmd.Flags().IntVarP(&o.poolWinners, "pool-winners", "w", 2, "number of players/teams that can qualify from each pool (default 2)")
 	cmd.Flags().BoolVarP(&o.roundRobin, "round-robin", "r", false, "ensure all pools are round robin. Example, in a pool of 4, everyone would fight everyone (default false)")
 	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
@@ -63,6 +65,12 @@ func newCreatePoolCmd() *cobra.Command {
 }
 
 func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
+	if o.numPlayers == 0 && o.maxPlayers == 0 {
+		o.numPlayers = 3
+	} else if o.numPlayers > 0 && o.maxPlayers > 0 {
+		return fmt.Errorf("cannot use both --players and --max-players")
+	}
+
 	fmt.Printf("Reading file: %s\n", o.filePath)
 
 	entries, err := helper.ReadEntriesFromFile(o.filePath)
@@ -100,19 +108,31 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 func (o *poolOptions) createPools(entries []string) error {
+	var isMax bool
+	var activePoolSize int
+	if o.maxPlayers > 0 {
+		isMax = true
+		activePoolSize = o.maxPlayers
+	} else {
+		isMax = false
+		activePoolSize = o.numPlayers
+		if activePoolSize == 0 {
+			activePoolSize = 3
+		}
+	}
 
 	// validation
 	if len(entries) < o.poolWinners {
 		return fmt.Errorf("number of entries must be higher than number of winners per pool")
 	}
-	if len(entries) < o.numPlayers {
+	if len(entries) < activePoolSize {
 		return fmt.Errorf("number of entries must be greater than requested players in pool")
 	}
 
-	if o.numPlayers < 2 {
+	if activePoolSize < 2 {
 		return fmt.Errorf("number of players per pool must be greater than 1")
 	}
-	if o.poolWinners >= o.numPlayers {
+	if o.poolWinners >= activePoolSize {
 		return fmt.Errorf("number of pool winners must be less than number of players per pool")
 	}
 
@@ -140,7 +160,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	// Reorder players to ensure seeded participants are distributed effectively across pools
 	players = helper.StandardSeeding(players)
 
-	pools := helper.CreatePools(players, o.numPlayers)
+	pools := helper.CreatePools(players, activePoolSize, isMax)
 
 	// Opening the template Excel file.
 	var templateFile io.ReadCloser

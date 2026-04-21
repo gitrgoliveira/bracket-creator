@@ -155,6 +155,7 @@ func TestCreatePools(t *testing.T) {
 		name      string
 		players   []Player
 		poolSize  int
+		isMax     bool
 		wantPanic bool
 		validate  func(t *testing.T, pools []Pool)
 	}{
@@ -334,6 +335,45 @@ func TestCreatePools(t *testing.T) {
 			poolSize:  4,
 			wantPanic: true,
 		},
+		{
+			name:     "max pool size mode creates exact number of pools",
+			players:  createPlayers(11, 11),
+			poolSize: 3,
+			isMax:    true,
+			validate: func(t *testing.T, pools []Pool) {
+				if len(pools) != 4 {
+					t.Errorf("Expected 4 pools, got %d", len(pools))
+				}
+				for i, pool := range pools {
+					if len(pool.Players) > 3 {
+						t.Errorf("Expected pool %d to have at most 3 players, got %d", i, len(pool.Players))
+					}
+				}
+			},
+		},
+		{
+			name:     "10 players with max 3 players creates 4 pools (3, 3, 2, 2)",
+			players:  createPlayers(10, 10),
+			poolSize: 3,
+			isMax:    true,
+			validate: func(t *testing.T, pools []Pool) {
+				if len(pools) != 4 {
+					t.Errorf("Expected 4 pools, got %d", len(pools))
+				}
+
+				poolSizes := make(map[int]int)
+				for _, pool := range pools {
+					poolSizes[len(pool.Players)]++
+				}
+
+				if poolSizes[3] != 2 {
+					t.Errorf("Expected 2 pools of size 3, got %d", poolSizes[3])
+				}
+				if poolSizes[2] != 2 {
+					t.Errorf("Expected 2 pools of size 2, got %d", poolSizes[2])
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -346,7 +386,7 @@ func TestCreatePools(t *testing.T) {
 				}()
 			}
 
-			pools := CreatePools(tt.players, tt.poolSize)
+			pools := CreatePools(tt.players, tt.poolSize, tt.isMax)
 			if tt.validate != nil {
 				tt.validate(t, pools)
 			}
@@ -494,7 +534,7 @@ func TestDiscoverPool(t *testing.T) {
 
 	t.Run("finds empty pool", func(t *testing.T) {
 		player := Player{Name: "P2", Dojo: "Dojo B"}
-		poolIdx := discoverPool(pools, player, 2)
+		poolIdx := discoverPool(pools, player, []int{2, 2})
 
 		if poolIdx != 0 {
 			t.Errorf("Expected pool 0, got %d", poolIdx)
@@ -503,7 +543,7 @@ func TestDiscoverPool(t *testing.T) {
 
 	t.Run("avoids same dojo", func(t *testing.T) {
 		player := Player{Name: "P3", Dojo: "Dojo A"}
-		poolIdx := discoverPool(pools, player, 2)
+		poolIdx := discoverPool(pools, player, []int{2, 2})
 
 		// Should find pool 1 since pool 0 has same dojo
 		if poolIdx != 1 {
@@ -522,7 +562,7 @@ func TestDiscoverPool(t *testing.T) {
 			},
 		}
 		player := Player{Name: "P3", Dojo: "D3"}
-		poolIdx := discoverPool(fullPools, player, 2)
+		poolIdx := discoverPool(fullPools, player, []int{2})
 
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
@@ -537,7 +577,7 @@ func TestForceSameDojo(t *testing.T) {
 			{Players: []Player{{Name: "P3"}}},
 		}
 
-		poolIdx := forceSameDojo(pools, 2)
+		poolIdx := forceSameDojo(pools, []int{2, 2})
 		if poolIdx != 1 {
 			t.Errorf("Expected pool 1, got %d", poolIdx)
 		}
@@ -549,7 +589,7 @@ func TestForceSameDojo(t *testing.T) {
 			{Players: []Player{{Name: "P3"}, {Name: "P4"}}},
 		}
 
-		poolIdx := forceSameDojo(pools, 2)
+		poolIdx := forceSameDojo(pools, []int{2, 2})
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
 		}
@@ -563,7 +603,7 @@ func TestForcePoolSize(t *testing.T) {
 			{Players: []Player{{Name: "P3"}, {Name: "P4"}}},
 		}
 
-		poolIdx := forcePoolSize(pools, 2)
+		poolIdx := forcePoolSize(pools, []int{2, 2})
 		// Should return 0 or 1 (first pool with space for poolSize+1)
 		if poolIdx < 0 || poolIdx > 1 {
 			t.Errorf("Expected 0 or 1, got %d", poolIdx)
@@ -575,7 +615,7 @@ func TestForcePoolSize(t *testing.T) {
 			{Players: []Player{}},
 		}
 
-		poolIdx := forcePoolSize(pools, 3)
+		poolIdx := forcePoolSize(pools, []int{3, 3})
 		if poolIdx != 0 {
 			t.Errorf("Expected 0, got %d", poolIdx)
 		}
@@ -587,7 +627,7 @@ func TestForcePoolSize(t *testing.T) {
 			{Players: []Player{{Name: "P4"}, {Name: "P5"}, {Name: "P6"}}},
 		}
 
-		poolIdx := forcePoolSize(pools, 2)
+		poolIdx := forcePoolSize(pools, []int{2, 2})
 		// Returns 0 when all pools are at capacity
 		if poolIdx != 0 {
 			t.Errorf("Expected 0, got %d", poolIdx)

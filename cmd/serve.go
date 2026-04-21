@@ -217,6 +217,7 @@ func NewRouter() *gin.Engine {
 		}
 
 		roundRobin := c.PostForm("roundRobin") == "on"
+		poolSizeMode := c.PostForm("poolSizeMode")
 
 		// Parse seeds if provided
 		var seedAssignments []domain.SeedAssignment
@@ -237,13 +238,21 @@ func NewRouter() *gin.Engine {
 		// Create tournament
 		switch tournamentType {
 		case "pools":
+			var numPlayers, maxPlayers int
+			if poolSizeMode == "max" {
+				maxPlayers = playersPerPool
+			} else {
+				numPlayers = playersPerPool
+			}
+
 			o := &poolOptions{
 				singleTree:      singleTree,
 				withZekkenName:  withZekkenName,
 				determined:      determined,
 				teamMatches:     teamMatches,
 				roundRobin:      roundRobin,
-				numPlayers:      playersPerPool,
+				numPlayers:      numPlayers,
+				maxPlayers:      maxPlayers,
 				poolWinners:     winnersPerPool,
 				SeedAssignments: seedAssignments,
 			}

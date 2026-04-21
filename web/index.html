@@ -447,6 +447,23 @@
                         <div id="poolOptionsSection" class="options-section" style="display: none;">
                             <h3 class="options-title">Pool Options</h3>
                             <div class="row">
+                                <div class="col-md-12 mb-3">
+                                    <label class="form-label">Pool Size Mode:</label>
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="radio" name="poolSizeMode" id="poolSizeMin" value="min" checked>
+                                        <label class="form-check-label" for="poolSizeMin">
+                                            Minimum players per pool
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip" title="Extra players are added to the end of the pools if there are more than expected."></i>
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="radio" name="poolSizeMode" id="poolSizeMax" value="max">
+                                        <label class="form-check-label" for="poolSizeMax">
+                                            Maximum players per pool
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip" title="Players are distributed to not exceed the maximum, creating extra pools if necessary."></i>
+                                        </label>
+                                    </div>
+                                </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="winnersPerPool" class="form-label">Winners per pool:</label>
                                     <input type="number" class="form-control" name="winnersPerPool" id="winnersPerPool"
@@ -457,7 +474,7 @@
                                     <input type="number" class="form-control" name="playersPerPool" id="playersPerPool"
                                         min="1" value="3">
                                 </div>
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-12 mb-3">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" name="roundRobin"
                                             id="roundRobin" checked>

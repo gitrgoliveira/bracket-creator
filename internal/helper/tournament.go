@@ -129,20 +129,42 @@ func sanitizeName(name string) string {
 	return fmt.Sprintf("%c. %s", firstName[0], lastName)
 }
 
-func CreatePools(players []Player, poolSize int) []Pool {
-	totalPools := len(players) / poolSize
+func CreatePools(players []Player, poolSize int, isMax bool) []Pool {
+	var totalPools int
+	if isMax {
+		totalPools = (len(players) + poolSize - 1) / poolSize
+	} else {
+		totalPools = len(players) / poolSize
+	}
 	pools := make([]Pool, totalPools)
 
+	targetSizes := make([]int, totalPools)
+	if isMax && totalPools > 0 {
+		base := len(players) / totalPools
+		rem := len(players) % totalPools
+		for i := 0; i < totalPools; i++ {
+			if i < rem {
+				targetSizes[i] = base + 1
+			} else {
+				targetSizes[i] = base
+			}
+		}
+	} else {
+		for i := 0; i < totalPools; i++ {
+			targetSizes[i] = poolSize
+		}
+	}
+
 	for _, player := range players {
-		poolN := discoverPool(pools, player, poolSize)
+		poolN := discoverPool(pools, player, targetSizes)
 		// try and force same dojo
 		if poolN < 0 {
-			poolN = forceSameDojo(pools, poolSize)
+			poolN = forceSameDojo(pools, targetSizes)
 		}
 
 		// try and force pool size
 		if poolN < 0 {
-			poolN = forcePoolSize(pools, poolSize)
+			poolN = forcePoolSize(pools, targetSizes)
 			fmt.Printf("Added extra player to pool %d\n", poolN)
 		}
 		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
@@ -160,12 +182,12 @@ func CreatePools(players []Player, poolSize int) []Pool {
 	return pools
 }
 
-func discoverPool(pools []Pool, player Player, poolSize int) int {
+func discoverPool(pools []Pool, player Player, targetSizes []int) int {
 
 	for i, pool := range pools {
 
 		// making sure there's space first
-		if len(pool.Players) >= poolSize {
+		if len(pool.Players) >= targetSizes[i] {
 			continue
 		}
 
@@ -190,23 +212,23 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 	return -1
 }
 
-func forceSameDojo(pools []Pool, poolSize int) int {
+func forceSameDojo(pools []Pool, targetSizes []int) int {
 	for i, pool := range pools {
-		if len(pool.Players) < poolSize {
+		if len(pool.Players) < targetSizes[i] {
 			return i
 		}
 	}
 	return -1
 }
 
-func forcePoolSize(pools []Pool, poolSize int) int {
+func forcePoolSize(pools []Pool, targetSizes []int) int {
 
 	for i, j := 0, len(pools)-1; i <= j; i, j = i+1, j-1 {
-		if len(pools[i].Players) < poolSize+1 {
+		if len(pools[i].Players) < targetSizes[i]+1 {
 			return i
 		}
 		if i != j {
-			if len(pools[j].Players) < poolSize+1 {
+			if len(pools[j].Players) < targetSizes[j]+1 {
 				return j
 			}
 		}

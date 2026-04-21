@@ -71,20 +71,59 @@ func StandardSeeding(players []Player) []Player {
 		}
 	}
 
+	// Handle displaced seeds (those whose rank position was out of range)
+	// Place them in unoccupied slots furthest from already placed seeds to ensure distribution.
+	if len(seedMap) > 0 {
+		// Get remaining seeds in order
+		remainingSeeds := make([]Player, 0)
+		for _, p := range seeded {
+			if _, ok := seedMap[p.Seed]; ok {
+				remainingSeeds = append(remainingSeeds, p)
+			}
+		}
+
+		for _, p := range remainingSeeds {
+			bestSlot := -1
+			maxDist := -1
+
+			for i := 0; i < len(players); i++ {
+				if !occupied[i] {
+					// Calculate distance to nearest occupied slot
+					minD := len(players)
+					for j := 0; j < len(players); j++ {
+						if occupied[j] {
+							d := i - j
+							if d < 0 {
+								d = -d
+							}
+							if d < minD {
+								minD = d
+							}
+						}
+					}
+					if minD > maxDist {
+						maxDist = minD
+						bestSlot = i
+					} else if minD == maxDist {
+						bestSlot = i
+					}
+				}
+			}
+
+			if bestSlot != -1 {
+				result[bestSlot] = p
+				occupied[bestSlot] = true
+				delete(seedMap, p.Seed)
+			}
+		}
+	}
+
 	unIdx := 0
 	for i := 0; i < len(players); i++ {
 		if !occupied[i] {
 			if unIdx < len(unseeded) {
 				result[i] = unseeded[unIdx]
 				unIdx++
-			} else {
-				for _, p := range seeded {
-					if _, ok := seedMap[p.Seed]; ok {
-						result[i] = p
-						delete(seedMap, p.Seed)
-						break
-					}
-				}
 			}
 		}
 	}

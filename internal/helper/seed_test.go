@@ -592,7 +592,7 @@ func TestStandardSeeding_WithPools_Integration(t *testing.T) {
 	}
 
 	// Create pools (3 players per pool = 8 pools)
-	pools := CreatePools(seededPlayers, 3)
+	pools := CreatePools(seededPlayers, 3, false)
 
 	// Verify no duplicates across pools
 	allPlayersInPools := make(map[string]int)
@@ -608,6 +608,55 @@ func TestStandardSeeding_WithPools_Integration(t *testing.T) {
 
 	// Verify all 24 players ended up in pools
 	assert.Len(t, allPlayersInPools, 24, "All 24 players should be in pools")
+}
+
+func TestStandardSeeding_WithBalancedPools_Integration(t *testing.T) {
+	// 10 players, 4 seeds
+	players := make([]Player, 10)
+	for i := 0; i < 10; i++ {
+		players[i] = Player{
+			Name: fmt.Sprintf("Player%d", i+1),
+			Dojo: fmt.Sprintf("Dojo%d", i+1),
+		}
+	}
+	players[0].Seed = 1
+	players[1].Seed = 2
+	players[2].Seed = 3
+	players[3].Seed = 4
+
+	// Standard seeding reorders them
+	seededPlayers := StandardSeeding(players)
+
+	// Create pools with max size 3 -> should create 4 pools (3, 3, 2, 2)
+	pools := CreatePools(seededPlayers, 3, true)
+
+	assert.Len(t, pools, 4, "Should have 4 pools")
+
+	poolSizes := make(map[int]int)
+	for _, pool := range pools {
+		poolSizes[len(pool.Players)]++
+	}
+	assert.Equal(t, 2, poolSizes[3], "Should have 2 pools of size 3")
+	assert.Equal(t, 2, poolSizes[2], "Should have 2 pools of size 2")
+
+	// Verify seeds are in different pools
+	seedInPool := make(map[int]int)
+	for i, pool := range pools {
+		for _, p := range pool.Players {
+			if p.Seed > 0 {
+				seedInPool[p.Seed] = i
+			}
+		}
+	}
+
+	assert.Len(t, seedInPool, 4, "All 4 seeds should be assigned to pools")
+
+	// Check pool uniqueness for seeds
+	poolsWithSeeds := make(map[int]bool)
+	for _, poolIdx := range seedInPool {
+		poolsWithSeeds[poolIdx] = true
+	}
+	assert.Len(t, poolsWithSeeds, 4, "Each of the 4 seeds should be in a unique pool")
 }
 
 func TestStandardSeeding_CornerCases(t *testing.T) {

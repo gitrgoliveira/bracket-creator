@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 GO_VERSION="${GO_VERSION:-1.26.2}"
 GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short HEAD)}"
 VERSION="${VERSION:-$(git describe --tags --exact-match 2>/dev/null || printf '%s' "$GIT_COMMIT")}"

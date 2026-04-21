@@ -2,7 +2,7 @@
 ARG GO_VERSION=1.26.1
 
 # Build stage
-FROM golang:${GO_VERSION}-alpine AS builder
+FROM golang:${GO_VERSION} AS builder
 
 
 ARG GIT_COMMIT
@@ -12,6 +12,7 @@ ENV CGO_ENABLED=0
 
 WORKDIR /bracket-creator
 COPY go.mod go.sum ./
+RUN go build -mod=readonly
 ENV GOTOOLCHAIN=local
 RUN go mod download
 COPY . .

@@ -76,11 +76,6 @@ func AssignSeeds(players []Player, assignments []SeedAssignment) error {
 				existingPlayer.Seed = p.Seed
 				if existingPlayer.Seed > 0 {
 					seedMap[existingPlayer.Seed] = existingPlayer
-				} else {
-					// Seed is now 0 (unseeded), remove from map
-					// Though the old code didn't actually have this specific edge case check,
-					// if someone swaps from 0 to N, existingPlayer gets 0.
-					// Removing 0 from seedMap is safe since 0 usually means unseeded.
 				}
 			} else {
 				// The old seed for p is now free, remove it from seedMap

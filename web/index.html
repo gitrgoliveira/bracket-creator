@@ -447,6 +447,23 @@
                         <div id="poolOptionsSection" class="options-section" style="display: none;">
                             <h3 class="options-title">Pool Options</h3>
                             <div class="row">
+                                <div class="col-md-12 mb-3">
+                                    <label class="form-label">Pool Size Mode:</label>
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="radio" name="poolSizeMode" id="poolSizeMin" value="min" checked>
+                                        <label class="form-check-label" for="poolSizeMin">
+                                            Minimum players per pool
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip" title="Extra players may be added to some pools beyond the minimum if there are more players than expected."></i>
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="radio" name="poolSizeMode" id="poolSizeMax" value="max">
+                                        <label class="form-check-label" for="poolSizeMax">
+                                            Maximum players per pool
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip" title="Players are distributed to not exceed the maximum, creating extra pools if necessary."></i>
+                                        </label>
+                                    </div>
+                                </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="winnersPerPool" class="form-label">Winners per pool:</label>
                                     <input type="number" class="form-control" name="winnersPerPool" id="winnersPerPool"
@@ -457,7 +474,7 @@
                                     <input type="number" class="form-control" name="playersPerPool" id="playersPerPool"
                                         min="1" value="3">
                                 </div>
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-12 mb-3">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" name="roundRobin"
                                             id="roundRobin" checked>
@@ -703,6 +720,8 @@
             if (document.getElementById('pools').checked) {
                 const winnersPerPool = parseInt(document.getElementById('winnersPerPool').value);
                 const playersPerPool = parseInt(document.getElementById('playersPerPool').value);
+                const isMaxMode = document.getElementById('poolSizeMax').checked;
+                const poolSizeModeLabel = isMaxMode ? 'Maximum players' : 'Minimum players';
 
                 if (winnersPerPool <= 0) {
                     errorMsg.textContent = 'Error: Winners per pool must be at least 1';
@@ -711,13 +730,13 @@
                 }
 
                 if (playersPerPool <= 0) {
-                    errorMsg.textContent = 'Error: Players per pool must be at least 1';
+                    errorMsg.textContent = `Error: ${poolSizeModeLabel} per pool must be at least 1`;
                     errorMsg.style.display = 'block';
                     isValid = false;
                 }
 
                 if (winnersPerPool >= playersPerPool) {
-                    errorMsg.textContent = 'Error: Winners per pool must be less than players per pool';
+                    errorMsg.textContent = `Error: Winners per pool must be less than ${poolSizeModeLabel.toLowerCase()} per pool`;
                     errorMsg.style.display = 'block';
                     isValid = false;
                 }
@@ -1093,14 +1112,38 @@
             }
         }
 
+        function updatePoolSizeHints() {
+            const playersPerPoolLabel = document.querySelector('label[for="playersPerPool"]');
+            const isMaxMode = document.getElementById('poolSizeMax').checked;
+
+            if (isMaxMode) {
+                playersPerPoolLabel.textContent = 'Maximum players/teams per pool:';
+            } else {
+                playersPerPoolLabel.textContent = 'Minimum players/teams per pool:';
+            }
+        }
+
         // Load saved values from localStorage
         window.addEventListener('DOMContentLoaded', () => {
             // Tournament type
             const savedTournamentType = localStorage.getItem('tournamentType');
             if (savedTournamentType) {
-                document.getElementById(savedTournamentType).checked = true;
-                if (savedTournamentType === 'pools') {
-                    document.getElementById('poolOptionsSection').style.display = 'block';
+                const el = document.getElementById(savedTournamentType);
+                if (el) {
+                    el.checked = true;
+                    if (savedTournamentType === 'pools') {
+                        document.getElementById('poolOptionsSection').style.display = 'block';
+                    }
+                }
+            }
+
+            // Pool size mode
+            const savedPoolSizeMode = localStorage.getItem('poolSizeMode');
+            if (savedPoolSizeMode) {
+                if (savedPoolSizeMode === 'max') {
+                    document.getElementById('poolSizeMax').checked = true;
+                } else {
+                    document.getElementById('poolSizeMin').checked = true;
                 }
             }
 
@@ -1119,10 +1162,13 @@
             Object.entries(formElements).forEach(([id, prop]) => {
                 const savedValue = localStorage.getItem(id);
                 if (savedValue !== null) {
-                    if (prop === 'checked') {
-                        document.getElementById(id).checked = savedValue === 'true';
-                    } else {
-                        document.getElementById(id).value = savedValue;
+                    const el = document.getElementById(id);
+                    if (el) {
+                        if (prop === 'checked') {
+                            el.checked = savedValue === 'true';
+                        } else {
+                            el.value = savedValue;
+                        }
                     }
                 }
             });
@@ -1136,6 +1182,7 @@
             }
 
             updateZekkenHints();
+            updatePoolSizeHints();
             updateLineNumbers();
             validateParticipantListInput();
         });
@@ -1146,9 +1193,13 @@
                 if (this.type === 'radio' && !this.checked) {
                     return;
                 }
-                localStorage.setItem(this.id || this.name, this.type === 'checkbox' ? this.checked : this.value);
+                const key = (this.type === 'radio' && this.name) ? this.name : (this.id || this.name);
+                localStorage.setItem(key, this.type === 'checkbox' ? this.checked : this.value);
             });
         });
+
+        document.getElementById('poolSizeMin').addEventListener('change', updatePoolSizeHints);
+        document.getElementById('poolSizeMax').addEventListener('change', updatePoolSizeHints);
 
         // Sample data loading functions
         const sampleData = {
@@ -1475,13 +1526,14 @@ Jack Adams, Team Alpha`
 
                 const playersPerPool = parseInt(document.getElementById('playersPerPool').value) || 3;
                 const winnersPerPool = parseInt(document.getElementById('winnersPerPool').value) || 2;
+                const isMaxMode = document.getElementById('poolSizeMax').checked;
 
                 // Calculate number of pools needed
-                const numPools = Math.ceil(totalPlayers / playersPerPool);
+                const numPools = isMaxMode ? Math.ceil(totalPlayers / playersPerPool) : Math.floor(totalPlayers / playersPerPool);
                 const playoffParticipants = numPools * winnersPerPool;
 
                 document.getElementById('poolCount').textContent = numPools;
-                document.getElementById('statsPlayersPerPool').textContent = playersPerPool;
+                document.getElementById('statsPlayersPerPool').textContent = playersPerPool + (isMaxMode ? ' (Max)' : ' (Min)');
                 document.getElementById('statsWinnersPerPool').textContent = winnersPerPool;
                 document.getElementById('playoffParticipants').textContent = playoffParticipants;
             } else {

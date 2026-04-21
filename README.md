@@ -69,6 +69,7 @@ The images below show the full workflow: entering participants, seeding past win
 | Section | Description |
 |---|---|
 | **Tournament Type** | Choose *Playoffs (Knockout Tournament)* for a straight knockout, or *Pools and Playoffs* for a round-robin pool stage followed by a knockout. |
+| **Pool Size Mode** | When generating pools, choose whether the number you enter is the **minimum** players per pool (extra players are added to existing pools when totals don't divide evenly) or the **maximum** (extra pools are created so no pool exceeds the limit). |
 | **Single Tree Format** | Render all participants on one bracket sheet instead of splitting across multiple pages. (CLI: `--single-tree`) |
 | **Do not randomize** | Preserve the input order instead of shuffling participants. |
 | **Column 2 is Zekken name** | Enable to use the second column of the input CSV as the participant's display name on the zekken. |
@@ -140,7 +141,8 @@ bracket-creator create-pools -z -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-e
 * `-f` / `-file` - Path to the CSV file containing the players/teams in `Name, Dojo` format. `Dojo` is a field to ensure players/teams don't endup fighting someone of the same dojo
 * `-h` / `-help` - Show help
 * `-o` / `-output` - Path to write the output excel file
-* `-p` / `-players` - Minimum number of players/teams per pool. Extra players are added to the end of the pool if there are more than expected. The default is 3
+* `-p` / `-players` - **Minimum** number of players/teams per pool. Extra players are added to existing pools if there are more than expected. The default is 3. Mutually exclusive with `--max-players`.
+* `-m` / `-max-players` - **Maximum** number of players/teams per pool. Extra pools are created so no pool exceeds this size. Mutually exclusive with `--players`.
 * `-w` / `-pool-winners` - Number of players/teams that can qualify from each pool. The default is 2
 * `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
 * `-z` / `-with-zekken-name` - Use the second column of the input CSV as the participant's display name on the zekken. If empty, falls back to a sanitized name.

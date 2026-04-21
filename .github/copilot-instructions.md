@@ -35,8 +35,11 @@ A Go CLI tool for generating kendo tournament brackets with pool stages and play
 # Install dependencies
 make local/deps
 
-# Run tests (includes linting + race detection)
+# Run tests (lint + coverage, no race)
 make go/test
+
+# Run tests with race detection (slower)
+make go/test-race
 
 # Build locally
 make go/build
@@ -61,7 +64,8 @@ make docker/run
 - Prefer concise, aggregated informational messages over repetitive per-line warnings in client-side validation feedback.
 
 ### Test Execution
-- `make go/test` runs: `go test -race -cover ./cmd/... ./internal/... ./tests/...`
+- `make go/test` runs: `go test -cover ./cmd/... ./internal/... ./tests/...`
+- `make go/test-race` runs: `go test -race -cover ./cmd/... ./internal/... ./tests/...` and is very slow
 - Linting is a pre-check (golangci-lint)
 - Coverage reported to Codecov in CI
 

@@ -54,6 +54,10 @@ go/lint: go/fmt ## Run linters
 
 go/test: go/lint ## Run tests
 	@echo "Running tests..."
+	go test -cover ./cmd/... ./internal/... ./tests/...
+
+go/test-race: go/lint ## Run tests with race detection
+	@echo "Running tests with race detection..."
 	go test -race -cover ./cmd/... ./internal/... ./tests/...
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally

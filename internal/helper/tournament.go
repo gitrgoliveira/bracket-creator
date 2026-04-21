@@ -129,21 +129,47 @@ func sanitizeName(name string) string {
 	return fmt.Sprintf("%c. %s", firstName[0], lastName)
 }
 
-func CreatePools(players []Player, poolSize int) []Pool {
-	totalPools := len(players) / poolSize
+func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
+	var totalPools int
+	if isMax {
+		totalPools = (len(players) + poolSize - 1) / poolSize
+	} else {
+		totalPools = len(players) / poolSize
+	}
+
+	if totalPools == 0 && len(players) > 0 {
+		return nil, fmt.Errorf("cannot create pools: player count (%d) is less than pool size (%d)", len(players), poolSize)
+	}
+
 	pools := make([]Pool, totalPools)
 
-	for _, player := range players {
-		poolN := discoverPool(pools, player, poolSize)
+	targetSizes := make([]int, totalPools)
+	if isMax && totalPools > 0 {
+		base := len(players) / totalPools
+		rem := len(players) % totalPools
+		for i := 0; i < totalPools; i++ {
+			if i < rem {
+				targetSizes[i] = base + 1
+			} else {
+				targetSizes[i] = base
+			}
+		}
+	} else {
+		for i := 0; i < totalPools; i++ {
+			targetSizes[i] = poolSize
+		}
+	}
+
+	for i, player := range players {
+		poolN := discoverPool(pools, player, targetSizes, i%totalPools)
 		// try and force same dojo
 		if poolN < 0 {
-			poolN = forceSameDojo(pools, poolSize)
+			poolN = forceSameDojo(pools, targetSizes)
 		}
 
 		// try and force pool size
 		if poolN < 0 {
-			poolN = forcePoolSize(pools, poolSize)
-			fmt.Printf("Added extra player to pool %d\n", poolN)
+			poolN = forcePoolSize(pools, targetSizes)
 		}
 		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
 		pools[poolN].Players = append(pools[poolN].Players, player)
@@ -157,15 +183,21 @@ func CreatePools(players []Player, poolSize int) []Pool {
 		pools[i].PoolName = fmt.Sprintf("Pool %s", char)
 	}
 
-	return pools
+	return pools, nil
 }
 
-func discoverPool(pools []Pool, player Player, poolSize int) int {
+func discoverPool(pools []Pool, player Player, targetSizes []int, startIndex int) int {
+	totalPools := len(pools)
+	if totalPools == 0 {
+		return -1
+	}
 
-	for i, pool := range pools {
+	for i := 0; i < totalPools; i++ {
+		curr := (startIndex + i) % totalPools
+		pool := pools[curr]
 
 		// making sure there's space first
-		if len(pool.Players) >= poolSize {
+		if len(pool.Players) >= targetSizes[curr] {
 			continue
 		}
 
@@ -181,7 +213,7 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 
 		// If the player can be added, return the pool index
 		if canAddToPool {
-			return i
+			return curr
 		}
 
 	}
@@ -190,23 +222,23 @@ func discoverPool(pools []Pool, player Player, poolSize int) int {
 	return -1
 }
 
-func forceSameDojo(pools []Pool, poolSize int) int {
+func forceSameDojo(pools []Pool, targetSizes []int) int {
 	for i, pool := range pools {
-		if len(pool.Players) < poolSize {
+		if len(pool.Players) < targetSizes[i] {
 			return i
 		}
 	}
 	return -1
 }
 
-func forcePoolSize(pools []Pool, poolSize int) int {
+func forcePoolSize(pools []Pool, targetSizes []int) int {
 
 	for i, j := 0, len(pools)-1; i <= j; i, j = i+1, j-1 {
-		if len(pools[i].Players) < poolSize+1 {
+		if len(pools[i].Players) < targetSizes[i]+1 {
 			return i
 		}
 		if i != j {
-			if len(pools[j].Players) < poolSize+1 {
+			if len(pools[j].Players) < targetSizes[j]+1 {
 				return j
 			}
 		}

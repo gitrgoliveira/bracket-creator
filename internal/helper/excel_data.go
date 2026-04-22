@@ -10,17 +10,20 @@ import (
 func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 	sheetName := "data"
 
-	// Set the header row
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Pool"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B1", "Player Name"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "C1", "Player Dojo"))
+	// Row 1: title prefix label (B1 is left empty for user to fill in)
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
+
+	// Row 2: column headers
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A2", "Pool"))
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B2", "Player Name"))
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "C2", "Player Dojo"))
 	if sanitize {
-		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D1", "Display Name"))
+		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
 	}
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E1", "Metadata"))
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E2", "Metadata"))
 
 	// Populate the groups in the spreadsheet
-	row := 2
+	row := 3
 	metaCols := make([]string, 0, 8)
 
 	for i := 0; i < len(pools); i++ {
@@ -58,16 +61,19 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 	sheetName := "data"
 
-	// Set the header row
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Number"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B1", "Player Name"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "C1", "Player Dojo"))
+	// Row 1: title prefix label (B1 is left empty for user to fill in)
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
+
+	// Row 2: column headers
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A2", "Number"))
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B2", "Player Name"))
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "C2", "Player Dojo"))
 	if sanitize {
-		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D1", "Display Name"))
+		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
 	}
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E1", "Metadata"))
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E2", "Metadata"))
 	// Populate the groups in the spreadsheet
-	row := 2
+	row := 3
 	metaCols := make([]string, 0, 8)
 
 	for i := 0; i < len(players); i++ {
@@ -103,6 +109,12 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 	// Set the starting row and column for the bracket
 	sheetName := "Pool Draw"
 	SetSheetLayoutPortraitA4(f, sheetName)
+
+	// Write a formula that prepends the title prefix (data!$B$1) to the sheet title.
+	// B2:F2 is merged in the template and holds "Tournament Pools" as a static value;
+	// this formula replaces it so editing data!B1 updates the title automatically.
+	handleExcelDataError("SetCellFormula", f.SetCellFormula(sheetName, "B2",
+		`IF(data!$B$1="","Tournament Pools",data!$B$1&" - Tournament Pools")`))
 	numPoolsPerColumn := int(math.Ceil(float64(len(pools)) / 3))
 
 	startRow := 5

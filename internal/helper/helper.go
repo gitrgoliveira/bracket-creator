@@ -141,3 +141,68 @@ func ReadEntriesFromFile(filePath string) ([]string, error) {
 
 	return entries, nil
 }
+
+// AssignPoolsToCourts distributes numPools pools across numCourts courts using
+// contiguous blocks that match the tree sheet grouping. The first court gets
+// ceil(numPools/numCourts) pools, subsequent courts get the remainder.
+// Returns an error when numCourts exceeds numPools.
+func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
+	if numCourts < 1 {
+		return nil, fmt.Errorf("number of courts must be at least 1")
+	}
+	if numPools == 0 {
+		return []int{}, nil
+	}
+	if numCourts > numPools {
+		return nil, fmt.Errorf("number of courts (%d) cannot exceed number of pools (%d)", numCourts, numPools)
+	}
+	base := numPools / numCourts
+	extra := numPools % numCourts
+	result := make([]int, numPools)
+	pool := 0
+	for court := 0; court < numCourts; court++ {
+		count := base
+		if court < extra {
+			count++
+		}
+		for j := 0; j < count; j++ {
+			result[pool] = court
+			pool++
+		}
+	}
+	return result, nil
+}
+
+// ReorderPoolsForCourts deinterleaves pools so that when divided into
+// contiguous court blocks, each block has balanced pool sizes and seeds are
+// spread across courts. Original pool i goes to court block (i % numCourts).
+// Pool names are re-assigned alphabetically after reordering.
+func ReorderPoolsForCourts(pools []Pool, numCourts int) []Pool {
+	if numCourts <= 1 || len(pools) <= numCourts {
+		return pools
+	}
+
+	// Group pools by their round-robin court: pool i → group (i % numCourts)
+	groups := make([][]Pool, numCourts)
+	for i, p := range pools {
+		court := i % numCourts
+		groups[court] = append(groups[court], p)
+	}
+
+	// Concatenate groups: all court-0 pools first, then court-1, etc.
+	result := make([]Pool, 0, len(pools))
+	for _, group := range groups {
+		result = append(result, group...)
+	}
+
+	// Re-assign pool names in the new order
+	for i := range result {
+		char := string(rune('A' + i%26))
+		if i > 25 {
+			char = char + char
+		}
+		result[i].PoolName = fmt.Sprintf("Pool %s", char)
+	}
+
+	return result
+}

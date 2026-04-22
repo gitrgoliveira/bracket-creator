@@ -219,6 +219,12 @@ func NewRouter() *gin.Engine {
 		roundRobin := c.PostForm("roundRobin") == "on"
 		poolSizeMode := c.PostForm("poolSizeMode")
 
+		// Parse courts (number of Shiaijo)
+		courts, err := strconv.Atoi(c.PostForm("courts"))
+		if err != nil || courts < 1 {
+			courts = 2
+		}
+
 		// Parse seeds if provided
 		var seedAssignments []domain.SeedAssignment
 		seedsJSON := c.PostForm("seeds")
@@ -254,6 +260,7 @@ func NewRouter() *gin.Engine {
 				numPlayers:      numPlayers,
 				maxPlayers:      maxPlayers,
 				poolWinners:     winnersPerPool,
+				courts:          courts,
 				SeedAssignments: seedAssignments,
 			}
 			o.outputWriter = inMemoryWriter
@@ -273,6 +280,7 @@ func NewRouter() *gin.Engine {
 				withZekkenName:  withZekkenName,
 				determined:      determined,
 				teamMatches:     teamMatches,
+				courts:          courts,
 				SeedAssignments: seedAssignments,
 			}
 

@@ -21,6 +21,7 @@ type poolOptions struct {
 	maxPlayers      int
 	poolWinners     int
 	teamMatches     int
+	courts          int
 	filePath        string
 	outputPath      string
 	outputWriter    *bufio.Writer
@@ -53,6 +54,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
+	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute pools across (default 2)")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 
@@ -108,6 +110,11 @@ func (o *poolOptions) createPools(entries []string) error {
 	activePoolSize := o.numPlayers
 	if isMax {
 		activePoolSize = o.maxPlayers
+	}
+
+	// Apply default for courts (0 means unset, e.g. when struct is built directly in tests)
+	if o.courts < 1 {
+		o.courts = 2
 	}
 
 	// validation
@@ -173,6 +180,10 @@ func (o *poolOptions) createPools(entries []string) error {
 		return err
 	}
 
+	// Reorder pools so contiguous court blocks have balanced sizes and
+	// seeds are spread across courts (deinterleave by numCourts).
+	pools = helper.ReorderPoolsForCourts(pools, o.courts)
+
 	// Opening the template Excel file.
 	var templateFile io.ReadCloser
 	templateFile, err = helper.TemplateFile.Open("template.xlsx")
@@ -215,6 +226,14 @@ func (o *poolOptions) createPools(entries []string) error {
 	if numPages < 1 || o.singleTree {
 		numPages = 1
 	}
+	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool exists)
+	if o.courts > numPools {
+		o.courts = numPools
+	}
+	// Ensure enough tree pages for the number of courts
+	if courtPages := helper.NextPow2(o.courts); courtPages > numPages {
+		numPages = courtPages
+	}
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree
@@ -229,7 +248,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners)
+	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts)
 
 	treeSheet, err := f.GetSheetIndex("Tree")
 	if err != nil {
@@ -252,6 +271,16 @@ func (o *poolOptions) createPools(entries []string) error {
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
 		startRow := helper.TreeTitleRows + 1
+		// Group consecutive tree sheets under the same Shiaijo label
+		pagesPerCourt := len(subtrees) / o.courts
+		if pagesPerCourt > 0 {
+			courtIndex := i / pagesPerCourt
+			if courtIndex >= o.courts {
+				courtIndex = o.courts - 1
+			}
+			courtLabel := string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIndex])
+			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
+		}
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 

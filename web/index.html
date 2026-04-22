@@ -439,6 +439,14 @@
                                         <input type="number" class="form-control form-control-sm" name="teamMatches"
                                             id="teamMatches" min="0" value="0">
                                     </div>
+                                    <div class="mb-2">
+                                        <label for="courts" class="form-label">Number of Shiaijo (courts):
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip"
+                                                title="Number of courts (Shiaijo A, B, …). For pool tournaments, pools are split evenly across courts. For both types, each tree sheet is labelled with the matching Shiaijo name."></i>
+                                        </label>
+                                        <input type="number" class="form-control form-control-sm" name="courts" id="courts"
+                                            min="1" value="2">
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1155,6 +1163,7 @@
                 'teamMatches': 'value',
                 'winnersPerPool': 'value',
                 'playersPerPool': 'value',
+                'courts': 'value',
                 'roundRobin': 'checked',
                 'playerList': 'value'
             };

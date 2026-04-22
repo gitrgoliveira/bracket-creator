@@ -38,21 +38,18 @@ func buildMatchColumnNames(startCol int) matchColumnNames {
 	}
 }
 
-func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int) map[string]MatchWinner {
+func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, numCourts int) map[string]MatchWinner {
 
 	matchWinners := make(map[string]MatchWinner)
 	sheetName := "Pool Matches"
 	configuredStartCols := make(map[int]bool)
-
-	leftRowStack := RowStack{}
-	rightRowStack := RowStack{}
 
 	startRow := 4
 	var poolRow int
 
 	spaceLines := 3
 	var startCol int
-	colNamesByStartCol := make(map[int]matchColumnNames, 2)
+	colNamesByStartCol := make(map[int]matchColumnNames, numCourts)
 
 	poolHeaderStyle := getPoolHeaderStyle(f)
 	textStyle := getTextStyle(f)
@@ -60,22 +57,32 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 	redHeaderStyle := getRedHeaderStyle(f)
 	whiteHeaderStyle := getWhiteHeaderStyle(f)
 
-	maxNumMatches := 0
-	leftRowStack.Push(startRow)
-	rightRowStack.Push(startRow)
-	for i, pool := range pools {
-		numMatches := len(pool.Matches)
-		if numMatches > maxNumMatches {
-			maxNumMatches = numMatches
-		}
+	// Initialize per-court row stacks
+	rowStacks := make([]RowStack, numCourts)
+	for c := range rowStacks {
+		rowStacks[c].Push(startRow)
+	}
 
-		startCol = 1
-		if i%2 != 0 {
-			startCol = 9
-			poolRow = rightRowStack.Pop()
-		} else {
-			poolRow = leftRowStack.Pop()
-		}
+	// Write Shiaijo court headers at row 1 for each court block
+	for c := 0; c < numCourts; c++ {
+		courtStartCol := 1 + c*8
+		courtEndCol := courtStartCol + 6
+		cStartColName, _ := excelize.ColumnNumberToName(courtStartCol)
+		cEndColName, _ := excelize.ColumnNumberToName(courtEndCol)
+		courtLabel := fmt.Sprintf("Shiaijo %c", rune('A'+c))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s1", cStartColName), courtLabel))
+		handleExcelError("MergeCell", f.MergeCell(sheetName, fmt.Sprintf("%s1", cStartColName), fmt.Sprintf("%s1", cEndColName)))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s1", cStartColName), fmt.Sprintf("%s1", cEndColName), poolHeaderStyle))
+	}
+
+	// Compute pool-to-court assignment (contiguous split, first courts get extra)
+	courtAssignments, _ := AssignPoolsToCourts(len(pools), numCourts)
+
+	for i, pool := range pools {
+		court := courtAssignments[i]
+		startCol = 1 + court*8
+		poolRow = rowStacks[court].Pop()
+
 		if !configuredStartCols[startCol] {
 			setMatchColumnsWidthByStartCol(f, sheetName, startCol)
 			configuredStartCols[startCol] = true
@@ -198,11 +205,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 
 		poolRow += spaceLines
 
-		if i%2 == 0 {
-			leftRowStack.PushHighest(poolRow, rightRowStack.Peek())
-		} else {
-			rightRowStack.PushHighest(poolRow, leftRowStack.Peek())
-		}
+		rowStacks[court].Push(poolRow)
 	}
 	return matchWinners
 }

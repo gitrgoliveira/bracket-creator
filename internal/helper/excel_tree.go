@@ -148,3 +148,17 @@ func FillInMatches(f *excelize.File, eliminationMatchRounds [][]*Node) {
 		}
 	}
 }
+
+// SetTreeSheetTitle writes a title formula into the first row of a tree sheet,
+// spanning a wide range of columns to cover the bracket layout.
+// The formula prepends the value of data!$B$1 (the user-supplied title prefix)
+// to the given title string, so editing that single cell updates all tree sheets.
+func SetTreeSheetTitle(f *excelize.File, sheetName string, title string) {
+	titleStyle := getPoolHeaderStyle(f)
+	startCell := "A1"
+	endCell := "P1"
+	formula := fmt.Sprintf(`IF(data!$B$1="","%s",data!$B$1&" - %s")`, title, title)
+	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, formula))
+	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, titleStyle))
+}

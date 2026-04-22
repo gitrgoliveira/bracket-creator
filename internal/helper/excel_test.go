@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
@@ -146,17 +147,17 @@ func TestAddPlayerDataWithMetadata(t *testing.T) {
 	AddPlayerDataToSheet(f, players, true)
 
 	// Check Display Name (Column D)
-	val, _ := f.GetCellValue(sheetName, "D2")
+	val, _ := f.GetCellValue(sheetName, "D3")
 	if val != "クレスワェル" {
 		t.Errorf("Expected クレスワェル, got %s", val)
 	}
 
 	// Check Metadata (Column E and F)
-	valE, _ := f.GetCellValue(sheetName, "E2")
+	valE, _ := f.GetCellValue(sheetName, "E3")
 	if valE != "Extra1" {
 		t.Errorf("Expected Extra1, got %s", valE)
 	}
-	valF, _ := f.GetCellValue(sheetName, "F2")
+	valF, _ := f.GetCellValue(sheetName, "F3")
 	if valF != "Extra2" {
 		t.Errorf("Expected Extra2, got %s", valF)
 	}
@@ -546,4 +547,93 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// makeTestPool builds a minimal Pool with two players and one match,
+// suitable for PrintPoolMatches tests.
+func makeTestPool(name string) Pool {
+	playerA := &Player{Name: "Alice", sheetName: "Pool Draw", cell: "A1"}
+	playerB := &Player{Name: "Bob", sheetName: "Pool Draw", cell: "A2"}
+	return Pool{
+		PoolName:  name,
+		sheetName: "Pool Draw",
+		cell:      "B1",
+		Players:   []Player{*playerA, *playerB},
+		Matches:   []Match{{SideA: playerA, SideB: playerB}},
+	}
+}
+
+func TestPrintPoolMatchesCourts(t *testing.T) {
+	tests := []struct {
+		name          string
+		numPools      int
+		numCourts     int
+		checkHeaders  []string // Shiaijo labels that must appear in row 1
+		checkColStart []int    // expected startCol for each court block
+	}{
+		{
+			name:          "single court",
+			numPools:      4,
+			numCourts:     1,
+			checkHeaders:  []string{"Shiaijo A"},
+			checkColStart: []int{1},
+		},
+		{
+			name:          "two courts",
+			numPools:      4,
+			numCourts:     2,
+			checkHeaders:  []string{"Shiaijo A", "Shiaijo B"},
+			checkColStart: []int{1, 9},
+		},
+		{
+			name:          "three courts",
+			numPools:      6,
+			numCourts:     3,
+			checkHeaders:  []string{"Shiaijo A", "Shiaijo B", "Shiaijo C"},
+			checkColStart: []int{1, 9, 17},
+		},
+		{
+			name:          "two courts uneven split (7 pools)",
+			numPools:      7,
+			numCourts:     2,
+			checkHeaders:  []string{"Shiaijo A", "Shiaijo B"},
+			checkColStart: []int{1, 9},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := excelize.NewFile()
+			defer f.Close()
+			f.NewSheet("Pool Matches")
+			f.NewSheet("Pool Draw")
+
+			pools := make([]Pool, tt.numPools)
+			for i := range pools {
+				pools[i] = makeTestPool(fmt.Sprintf("Pool %c", rune('A'+i)))
+			}
+
+			matchWinners := PrintPoolMatches(f, pools, 0, 1, tt.numCourts)
+
+			// Must have one matchWinner per pool (position 1)
+			if len(matchWinners) != tt.numPools {
+				t.Errorf("expected %d matchWinners, got %d", tt.numPools, len(matchWinners))
+			}
+
+			// Check court header labels at row 1
+			for ci, label := range tt.checkHeaders {
+				courtStartCol := tt.checkColStart[ci]
+				colName, _ := excelize.ColumnNumberToName(courtStartCol)
+				cell := fmt.Sprintf("%s1", colName)
+				val, err := f.GetCellValue("Pool Matches", cell)
+				if err != nil {
+					t.Errorf("error reading court header cell %s: %v", cell, err)
+					continue
+				}
+				if val != label {
+					t.Errorf("court header at %s: got %q, want %q", cell, val, label)
+				}
+			}
+		})
+	}
 }

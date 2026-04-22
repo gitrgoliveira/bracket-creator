@@ -831,6 +831,33 @@ func TestRoundToPowerOf2EdgeCases(t *testing.T) {
 	}
 }
 
+func TestNextPow2(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    int
+		expected int
+	}{
+		{"zero returns 1", 0, 1},
+		{"one returns 1", 1, 1},
+		{"two returns 2", 2, 2},
+		{"three rounds up to 4", 3, 4},
+		{"exact power 4", 4, 4},
+		{"five rounds up to 8", 5, 8},
+		{"exact power 8", 8, 8},
+		{"nine rounds up to 16", 9, 16},
+		{"exact power 16", 16, 16},
+		{"courts=3 rounds up to 4", 3, 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NextPow2(tt.input)
+			if got != tt.expected {
+				t.Errorf("NextPow2(%d) = %d, want %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestGenerateFinalsEdgeCases(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -109,31 +109,36 @@ func TestAddPoolDataToSheet(t *testing.T) {
 
 			AddPoolDataToSheet(f, tt.pools, tt.sanitize)
 
-			// Verify headers
-			poolHeader, err := f.GetCellValue("data", "A1")
+			// Verify prefix label row
+			prefixLabel, err := f.GetCellValue("data", "A1")
+			require.NoError(t, err)
+			assert.Equal(t, "Title prefix:", prefixLabel)
+
+			// Verify headers (row 2)
+			poolHeader, err := f.GetCellValue("data", "A2")
 			require.NoError(t, err)
 			assert.Equal(t, "Pool", poolHeader)
 
-			playerNameHeader, err := f.GetCellValue("data", "B1")
+			playerNameHeader, err := f.GetCellValue("data", "B2")
 			require.NoError(t, err)
 			assert.Equal(t, "Player Name", playerNameHeader)
 
-			dojoHeader, err := f.GetCellValue("data", "C1")
+			dojoHeader, err := f.GetCellValue("data", "C2")
 			require.NoError(t, err)
 			assert.Equal(t, "Player Dojo", dojoHeader)
 
 			if tt.sanitize {
-				displayNameHeader, err := f.GetCellValue("data", "D1")
+				displayNameHeader, err := f.GetCellValue("data", "D2")
 				require.NoError(t, err)
 				assert.Equal(t, "Display Name", displayNameHeader)
 			}
 
-			metaHeader, err := f.GetCellValue("data", "E1")
+			metaHeader, err := f.GetCellValue("data", "E2")
 			require.NoError(t, err)
 			assert.Equal(t, "Metadata", metaHeader)
 
-			// Verify data rows
-			row := 2
+			// Verify data rows (start at row 3)
+			row := 3
 			for _, pool := range tt.pools {
 				for _, player := range pool.Players {
 					poolName, err := f.GetCellValue("data", fmt.Sprintf("A%d", row))
@@ -170,7 +175,7 @@ func TestAddPoolDataToSheet(t *testing.T) {
 			// Verify that pool and player cells are set correctly
 			// Note: The AddPoolDataToSheet function sets pool.cell for each player iteration,
 			// so the final value is the cell of the last player in the pool
-			row = 2
+			row = 3
 			for i, pool := range tt.pools {
 				assert.Equal(t, "data", tt.pools[i].sheetName)
 
@@ -259,32 +264,37 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 
 			AddPlayerDataToSheet(f, tt.players, tt.sanitize)
 
-			// Verify headers
-			numberHeader, err := f.GetCellValue("data", "A1")
+			// Verify prefix label row
+			prefixLabel, err := f.GetCellValue("data", "A1")
+			require.NoError(t, err)
+			assert.Equal(t, "Title prefix:", prefixLabel)
+
+			// Verify headers (row 2)
+			numberHeader, err := f.GetCellValue("data", "A2")
 			require.NoError(t, err)
 			assert.Equal(t, "Number", numberHeader)
 
-			playerNameHeader, err := f.GetCellValue("data", "B1")
+			playerNameHeader, err := f.GetCellValue("data", "B2")
 			require.NoError(t, err)
 			assert.Equal(t, "Player Name", playerNameHeader)
 
-			dojoHeader, err := f.GetCellValue("data", "C1")
+			dojoHeader, err := f.GetCellValue("data", "C2")
 			require.NoError(t, err)
 			assert.Equal(t, "Player Dojo", dojoHeader)
 
 			if tt.sanitize {
-				displayNameHeader, err := f.GetCellValue("data", "D1")
+				displayNameHeader, err := f.GetCellValue("data", "D2")
 				require.NoError(t, err)
 				assert.Equal(t, "Display Name", displayNameHeader)
 			}
 
-			metaHeader, err := f.GetCellValue("data", "E1")
+			metaHeader, err := f.GetCellValue("data", "E2")
 			require.NoError(t, err)
 			assert.Equal(t, "Metadata", metaHeader)
 
-			// Verify data rows
+			// Verify data rows (start at row 3)
 			for i, player := range tt.players {
-				row := i + 2
+				row := i + 3
 
 				// Verify position number
 				position, err := f.GetCellValue("data", fmt.Sprintf("A%d", row))
@@ -419,6 +429,11 @@ func TestAddPoolsToSheet(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+
+			// Verify Pool Draw title formula
+			titleFormula, err := f.GetCellFormula("Pool Draw", "B2")
+			require.NoError(t, err)
+			assert.Equal(t, `IF(data!$B$1="","Tournament Pools",data!$B$1&" - Tournament Pools")`, titleFormula)
 
 			// Verify formulas exist (spot check first pool if pools exist)
 			if len(tt.pools) > 0 {

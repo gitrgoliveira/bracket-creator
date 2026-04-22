@@ -18,6 +18,7 @@ import (
 
 type playoffOptions struct {
 	teamMatches     int
+	courts          int
 	filePath        string
 	outputPath      string
 	seedsPath       string
@@ -47,6 +48,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
+	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across (default 2)")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
@@ -180,6 +182,18 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if numPages < 1 || o.singleTree {
 		numPages = 1
 	}
+	// Apply default for courts if unset
+	if o.courts < 1 {
+		o.courts = 2
+	}
+	// Clamp courts to actual number of tree pages
+	if o.courts > numPages {
+		o.courts = numPages
+	}
+	// Ensure enough tree pages for the number of courts
+	if courtPages := helper.NextPow2(o.courts); courtPages > numPages {
+		numPages = courtPages
+	}
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
 	// Create balanced tree
@@ -210,6 +224,16 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
 		startRow := helper.TreeTitleRows + 1
+		// Group consecutive tree sheets under the same Shiaijo label
+		pagesPerCourt := len(subtrees) / o.courts
+		if pagesPerCourt > 0 {
+			courtIndex := i / pagesPerCourt
+			if courtIndex >= o.courts {
+				courtIndex = o.courts - 1
+			}
+			courtLabel := string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIndex])
+			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
+		}
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
 	}

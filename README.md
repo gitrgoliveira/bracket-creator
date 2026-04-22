@@ -74,6 +74,7 @@ The images below show the full workflow: entering participants, seeding past win
 | **Do not randomize** | Preserve the input order instead of shuffling participants. |
 | **Column 2 is Zekken name** | Enable to use the second column of the input CSV as the participant's display name on the zekken. |
 | **Team Matches** | Number of players per team. Set to `0` for individual matches. |
+| **Number of Shiaijo (courts)** | Number of courts to use. For pool tournaments, pools are split evenly across courts and each column in the Pool Matches sheet is labelled "Shiaijo A", "Shiaijo B", etc. For both tournament types, each tree sheet is labelled with the matching Shiaijo name. (CLI: `--courts`, default `2`) |
 | **Player/Team List** | Enter one participant per line in plain or CSV format (`Name, Dojo`). You can also drag-and-drop a CSV file or use the **Small / Medium / Large Sample** buttons. |
 
 > **About Dojo**: In pool tournaments, the `Dojo` field is used to ensure participants from the same dojo are not placed in the same pool.
@@ -147,6 +148,7 @@ bracket-creator create-pools -z -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-e
 * `-r` / `-round-robin` - Round robin, to ensure that in a pool of 4 or more, everyone would fight everyone. Otherwise, everyone fights only twice in their pool. The default is False
 * `-z` / `-with-zekken-name` - Use the second column of the input CSV as the participant's display name on the zekken. If empty, falls back to a sanitized name.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
+* `-c` / `--courts` - Number of Shiaijo (courts) to distribute pools across. Pools are split evenly and the Pool Matches sheet gains one labelled column per court ("Shiaijo A", "Shiaijo B", …). Each tree sheet is labelled with the matching Shiaijo name. Default is 2.
 * `--single-tree` - Create a single tree instead of dividing into multiple sheets
 
 ### CLI Parameters to create Playoffs
@@ -161,6 +163,7 @@ bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-exam
 * `-o` / `-output` - Path to write the output excel file
 * `-z` / `-with-zekken-name` - Use the second column of the input CSV as the participant's display name on the zekken. If empty, falls back to a sanitized name.
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
+* `-c` / `--courts` - Number of Shiaijo (courts). Each tree sheet is labelled with the matching Shiaijo name ("Shiaijo A", "Shiaijo B", …). Default is 2.
 * `--seeds` - Path to a CSV file mapping exact participant names to their initial seed rank (see [Seeding via CLI](#seeding-via-cli))
 * `--single-tree` - Create a single tree instead of dividing into multiple sheets
 

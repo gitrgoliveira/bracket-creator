@@ -364,3 +364,154 @@ func TestRowStack_Operations(t *testing.T) {
 		assert.Equal(t, 1, stack.Pop())
 	})
 }
+
+func TestAssignPoolsToCourts(t *testing.T) {
+	tests := []struct {
+		name      string
+		numPools  int
+		numCourts int
+		expected  []int
+		wantErr   bool
+	}{
+		{
+			name:      "even split 4 pools 2 courts",
+			numPools:  4,
+			numCourts: 2,
+			expected:  []int{0, 0, 1, 1},
+		},
+		{
+			name:      "uneven split 7 pools 2 courts",
+			numPools:  7,
+			numCourts: 2,
+			expected:  []int{0, 0, 0, 0, 1, 1, 1},
+		},
+		{
+			name:      "uneven split 7 pools 3 courts",
+			numPools:  7,
+			numCourts: 3,
+			expected:  []int{0, 0, 0, 1, 1, 2, 2},
+		},
+		{
+			name:      "single court",
+			numPools:  5,
+			numCourts: 1,
+			expected:  []int{0, 0, 0, 0, 0},
+		},
+		{
+			name:      "one pool per court",
+			numPools:  3,
+			numCourts: 3,
+			expected:  []int{0, 1, 2},
+		},
+		{
+			name:      "zero pools returns empty",
+			numPools:  0,
+			numCourts: 1,
+			expected:  []int{},
+		},
+		{
+			name:      "courts exceed pools returns error",
+			numPools:  2,
+			numCourts: 3,
+			wantErr:   true,
+		},
+		{
+			name:      "zero courts returns error",
+			numPools:  4,
+			numCourts: 0,
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := AssignPoolsToCourts(tt.numPools, tt.numCourts)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestReorderPoolsForCourts(t *testing.T) {
+	makePools := func(sizes ...int) []Pool {
+		pools := make([]Pool, len(sizes))
+		for i, s := range sizes {
+			char := string(rune('A' + i%26))
+			if i > 25 {
+				char = char + char
+			}
+			pools[i].PoolName = "Pool " + char
+			pools[i].Players = make([]Player, s)
+		}
+		return pools
+	}
+
+	tests := []struct {
+		name          string
+		pools         []Pool
+		numCourts     int
+		expectedSizes []int
+		expectedNames []string
+	}{
+		{
+			name:          "single court no reorder",
+			pools:         makePools(3, 3, 2),
+			numCourts:     1,
+			expectedSizes: []int{3, 3, 2},
+			expectedNames: []string{"Pool A", "Pool B", "Pool C"},
+		},
+		{
+			name:          "2 courts 4 equal pools",
+			pools:         makePools(3, 3, 3, 3),
+			numCourts:     2,
+			expectedSizes: []int{3, 3, 3, 3},
+			expectedNames: []string{"Pool A", "Pool B", "Pool C", "Pool D"},
+		},
+		{
+			name:          "2 courts small pools at end spread across blocks",
+			pools:         makePools(3, 3, 3, 3, 2, 2),
+			numCourts:     2,
+			expectedSizes: []int{3, 3, 2, 3, 3, 2}, // even→block0, odd→block1
+			expectedNames: []string{"Pool A", "Pool B", "Pool C", "Pool D", "Pool E", "Pool F"},
+		},
+		{
+			name:          "2 courts 5 pools uneven blocks",
+			pools:         makePools(3, 3, 3, 3, 2),
+			numCourts:     2,
+			expectedSizes: []int{3, 3, 2, 3, 3}, // group0: p0,p2,p4; group1: p1,p3
+			expectedNames: []string{"Pool A", "Pool B", "Pool C", "Pool D", "Pool E"},
+		},
+		{
+			name:          "3 courts 7 pools",
+			pools:         makePools(3, 3, 3, 3, 3, 2, 2),
+			numCourts:     3,
+			expectedSizes: []int{3, 3, 2, 3, 3, 3, 2}, // g0:[p0,p3,p6] g1:[p1,p4] g2:[p2,p5]
+			expectedNames: []string{"Pool A", "Pool B", "Pool C", "Pool D", "Pool E", "Pool F", "Pool G"},
+		},
+		{
+			name:          "fewer pools than courts returns unchanged",
+			pools:         makePools(3, 2),
+			numCourts:     3,
+			expectedSizes: []int{3, 2},
+			expectedNames: []string{"Pool A", "Pool B"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ReorderPoolsForCourts(tt.pools, tt.numCourts)
+			sizes := make([]int, len(result))
+			names := make([]string, len(result))
+			for i, p := range result {
+				sizes[i] = len(p.Players)
+				names[i] = p.PoolName
+			}
+			assert.Equal(t, tt.expectedSizes, sizes, "pool sizes after reorder")
+			assert.Equal(t, tt.expectedNames, names, "pool names after reorder")
+		})
+	}
+}

@@ -74,10 +74,11 @@ examples: go/build ## Build locally and create example files
 	@echo "Building examples..."
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./mock_data_small.csv -o ./pools-example-small.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -t 5 -f ./mock_data_small.csv -o ./playoffs-example-small.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -f ./mock_data_medium_zekken.csv -o ./pools-example-medium.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -f ./mock_data_medium_zekken.csv -o ./playoffs-example-medium.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -f ./mock_data_large_zekken.csv -o ./pools-example-large.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -f ./mock_data_large_zekken.csv -o ./playoffs-example-large.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./mock_data_medium_zekken.csv -o ./pools-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./mock_data_medium_zekken.csv -o ./playoffs-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-teams.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-max-size.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./mock_data_large_zekken.csv -o ./playoffs-example-large.xlsx
 	@echo "Examples successfully created!"
 
 docker/build: ## Build Docker image

@@ -226,3 +226,15 @@ func RoundToPowerOf2(x, y float64) (int, error) {
 	roundedQuotient := int(powerOf2)
 	return roundedQuotient, nil
 }
+
+// NextPow2 returns the smallest power of 2 that is >= n. Returns 1 for n <= 1.
+func NextPow2(n int) int {
+	if n <= 1 {
+		return 1
+	}
+	p := 1
+	for p < n {
+		p <<= 1
+	}
+	return p
+}

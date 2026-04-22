@@ -26,7 +26,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps go/fmt go/test go/build go/lint examples docker/build docker/run pre-commit docs/serve docs/open run goreleaser/test release version
+.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security examples docker/build docker/run pre-commit docs/serve docs/open run goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -42,6 +42,8 @@ local/deps: ## Install project dependencies
 	go install github.com/spf13/cobra-cli@v1.3.0
 	go install github.com/goreleaser/goreleaser@latest
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
+	go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
 
 go/fmt: ## Format Go code
@@ -51,6 +53,16 @@ go/fmt: ## Format Go code
 go/lint: go/fmt ## Run linters
 	@echo "Running linters..."
 	golangci-lint run ./...
+
+go/sec: ## Run security scans (gosec)
+	@echo "Running security scans..."
+	gosec ./...
+
+go/vuln: ## Run vulnerability check (govulncheck)
+	@echo "Running vulnerability check..."
+	govulncheck ./...
+
+go/security: go/sec go/vuln ## Run all security checks
 
 go/test: go/lint ## Run tests
 	@echo "Running tests..."
@@ -94,7 +106,7 @@ docker/build: ## Build Docker image
 docker/run: docker/build ## Run the application in Docker
 	docker run -p 8080:8080 $(IMAGE_NAME):latest
 
-pre-commit: go/test ## Run pre-commit checks
+pre-commit: go/test go/security ## Run pre-commit checks
 	@echo "Code is ready to commit!"
 
 docs/serve: ## Locally serve the documentation

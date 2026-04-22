@@ -21,6 +21,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 
 	// Populate the groups in the spreadsheet
 	row := 2
+	metaCols := make([]string, 0, 8)
 
 	for i := 0; i < len(pools); i++ {
 		pools[i].sheetName = sheetName
@@ -33,7 +34,11 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool) {
 				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName))
 			}
 			for k, meta := range pools[i].Players[j].Metadata {
-				colName, _ := excelize.ColumnNumberToName(5 + k)
+				if k >= len(metaCols) {
+					colName, _ := excelize.ColumnNumberToName(5 + k)
+					metaCols = append(metaCols, colName)
+				}
+				colName := metaCols[k]
 				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
 			}
 			pools[i].cell = fmt.Sprintf("$A$%d", row)
@@ -63,6 +68,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E1", "Metadata"))
 	// Populate the groups in the spreadsheet
 	row := 2
+	metaCols := make([]string, 0, 8)
 
 	for i := 0; i < len(players); i++ {
 		players[i].sheetName = sheetName
@@ -74,7 +80,11 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), players[i].DisplayName))
 		}
 		for k, meta := range players[i].Metadata {
-			colName, _ := excelize.ColumnNumberToName(5 + k)
+			if k >= len(metaCols) {
+				colName, _ := excelize.ColumnNumberToName(5 + k)
+				metaCols = append(metaCols, colName)
+			}
+			colName := metaCols[k]
 			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
 		}
 		players[i].cell = fmt.Sprintf("$B$%d", row)

@@ -160,8 +160,16 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 		}
 	}
 
+	// Per-pool sets for O(1) dojo-conflict and duplicate-name detection.
+	dojoSets := make([]map[string]bool, totalPools)
+	nameSets := make([]map[string]bool, totalPools)
+	for i := range dojoSets {
+		dojoSets[i] = make(map[string]bool)
+		nameSets[i] = make(map[string]bool)
+	}
+
 	for i, player := range players {
-		poolN := discoverPool(pools, player, targetSizes, i%totalPools)
+		poolN := discoverPool(pools, dojoSets, nameSets, player, targetSizes, i%totalPools)
 		// try and force same dojo
 		if poolN < 0 {
 			poolN = forceSameDojo(pools, targetSizes)
@@ -173,6 +181,8 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 		}
 		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
 		pools[poolN].Players = append(pools[poolN].Players, player)
+		dojoSets[poolN][player.Dojo] = true
+		nameSets[poolN][player.Name] = true
 	}
 
 	for i := 0; i < len(pools); i++ {
@@ -186,7 +196,7 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	return pools, nil
 }
 
-func discoverPool(pools []Pool, player Player, targetSizes []int, startIndex int) int {
+func discoverPool(pools []Pool, dojoSets, nameSets []map[string]bool, player Player, targetSizes []int, startIndex int) int {
 	totalPools := len(pools)
 	if totalPools == 0 {
 		return -1
@@ -194,28 +204,18 @@ func discoverPool(pools []Pool, player Player, targetSizes []int, startIndex int
 
 	for i := 0; i < totalPools; i++ {
 		curr := (startIndex + i) % totalPools
-		pool := pools[curr]
 
 		// making sure there's space first
-		if len(pool.Players) >= targetSizes[curr] {
+		if len(pools[curr].Players) >= targetSizes[curr] {
 			continue
 		}
 
-		canAddToPool := true
-		for _, assignedPlayers := range pool.Players {
-			// try make sure that there aren't other players of the same dojo
-			if assignedPlayers.Dojo == player.Dojo ||
-				assignedPlayers.Name == player.Name {
-				canAddToPool = false
-				break
-			}
+		// O(1): reject if dojo or name already present in this pool
+		if dojoSets[curr][player.Dojo] || nameSets[curr][player.Name] {
+			continue
 		}
 
-		// If the player can be added, return the pool index
-		if canAddToPool {
-			return curr
-		}
-
+		return curr
 	}
 
 	// If no suitable pool is found, return -1

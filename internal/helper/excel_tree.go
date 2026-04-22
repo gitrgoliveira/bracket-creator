@@ -6,35 +6,43 @@ import (
 	excelize "github.com/xuri/excelize/v2"
 )
 
+// TreeTitleRows is the number of rows reserved at the top of every tree sheet
+// for the user to add a title. Content starts below this offset.
+const TreeTitleRows = 3
+
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {
 	// fmt.Printf("CreateTreeBracket: start row: %d, size: %d\n", startRow, size)
+	borderLeftStyle := GetBorderStyleLeft(f)
+	borderBottomLeftStyle := GetBorderStyleBottomLeft(f)
+	borderTopStyle := getBorderStyleTop(f)
+	borderBottomStyle := getBorderStyleBottom(f)
 
 	// interval
 	colName, _ := excelize.ColumnNumberToName(col + 1)
 
 	startCell := fmt.Sprintf("%s%d", colName, startRow)
 	endCell := fmt.Sprintf("%s%d", colName, startRow+size)
-	if err := f.SetCellStyle(sheet, startCell, endCell, GetBorderStyleLeft(f)); err != nil {
+	if err := f.SetCellStyle(sheet, startCell, endCell, borderLeftStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}
 
 	// middle
 	middleCell := fmt.Sprintf("%s%d", colName, startRow+size/2)
-	if err := f.SetCellStyle(sheet, middleCell, middleCell, GetBorderStyleBottomLeft(f)); err != nil {
+	if err := f.SetCellStyle(sheet, middleCell, middleCell, borderBottomLeftStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}
 
 	// Top cell
 	colName, _ = excelize.ColumnNumberToName(col)
 	topCell := fmt.Sprintf("%s%d", colName, startRow)
-	if err := f.SetCellStyle(sheet, topCell, topCell, getBorderStyleTop(f)); err != nil {
+	if err := f.SetCellStyle(sheet, topCell, topCell, borderTopStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}
 	// f.SetCellStyle(sheet, topCell, topCell, getBorderStyleBottom(f))
 
 	// bottom
 	bottomCell := fmt.Sprintf("%s%d", colName, startRow+size)
-	if err := f.SetCellStyle(sheet, bottomCell, bottomCell, getBorderStyleBottom(f)); err != nil {
+	if err := f.SetCellStyle(sheet, bottomCell, bottomCell, borderBottomStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}
 
@@ -43,6 +51,7 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 
 func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string, matchWinners map[string]MatchWinner) {
 	// fmt.Printf("writeTreeValue: start row: %d\n", startRow)
+	treeTextStyle := getTreeTextStyle(f)
 
 	colName, _ := excelize.ColumnNumberToName(col + 1)
 	cell := fmt.Sprintf("%s%d", colName, startRow)
@@ -55,7 +64,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 			if err := f.SetCellFormula(sheet, cell, formula); err != nil {
 				fmt.Printf("Warning: failed to set cell formula: %v\n", err)
 			}
-			if err := f.SetCellStyle(sheet, cell, cell, getTreeTextStyle(f)); err != nil {
+			if err := f.SetCellStyle(sheet, cell, cell, treeTextStyle); err != nil {
 				fmt.Printf("Warning: failed to set cell style: %v\n", err)
 			}
 			return
@@ -69,15 +78,20 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 	// f.SetColWidth(sheet, colName, colName, 10)
 	// f.MergeCell(sheet, cell, fmt.Sprintf("%s%d", colName, startRow+1))
 	// f.SetCellStyle(sheet, cell, fmt.Sprintf("%s%d", colName, startRow+1), getPoolHeaderStyle(f))
-	if err := f.SetCellStyle(sheet, cell, cell, getTreeTextStyle(f)); err != nil {
+	if err := f.SetCellStyle(sheet, cell, cell, treeTextStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}
 
 }
 
 func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
-	SetSheetLayoutPortraitA4(f, sheetName)
-	row := 2
+	SetSheetLayoutPortraitA4Centered(f, sheetName)
+	treeHeaderStyle := getTreeHeaderStyle(f)
+	treeTopStyle := getTreeTopStyle(f)
+	treeBodyStyle := getTreeBodyStyle(f)
+	treeBottomStyle := getTreeBottomStyle(f)
+	borderTopStyle := getBorderStyleTop(f)
+	row := TreeTitleRows + 1
 
 	for _, pool := range pools {
 		if err := f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row),
@@ -85,12 +99,12 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 			fmt.Printf("Warning: failed to set cell formula: %v\n", err)
 		}
 
-		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), getTreeHeaderStyle(f)); err != nil {
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), treeHeaderStyle); err != nil {
 			fmt.Printf("Warning: failed to set cell style: %v\n", err)
 		}
 
 		row++
-		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), getTreeTopStyle(f)); err != nil {
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), treeTopStyle); err != nil {
 			fmt.Printf("Warning: failed to set cell style: %v\n", err)
 		}
 
@@ -101,17 +115,17 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 			}
 			row++
 
-			if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), getTreeBodyStyle(f)); err != nil {
+			if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), treeBodyStyle); err != nil {
 				fmt.Printf("Warning: failed to set cell style: %v\n", err)
 			}
 		}
 
-		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row-1), fmt.Sprintf("A%d", row-1), getTreeBottomStyle(f)); err != nil {
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row-1), fmt.Sprintf("A%d", row-1), treeBottomStyle); err != nil {
 			fmt.Printf("Warning: failed to set cell style: %v\n", err)
 		}
 
 		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row),
-			getBorderStyleTop(f)); err != nil {
+			borderTopStyle); err != nil {
 			fmt.Printf("Warning: failed to set cell style: %v\n", err)
 		}
 

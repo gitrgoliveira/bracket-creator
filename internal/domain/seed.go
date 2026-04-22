@@ -50,31 +50,53 @@ func ValidateAssignments(assignments []SeedAssignment) error {
 // It swaps seeds if a collision occurs. Returns error if a seeded participant is not found.
 func AssignSeeds(players []Player, assignments []SeedAssignment) error {
 	// Build map for quick lookup by name
-	playerMap := make(map[string]*Player)
+	playerMap := make(map[string]*Player, len(players))
 	for i := range players {
 		playerMap[players[i].Name] = &players[i]
 	}
 
+	// Build a seed→player reverse index for O(1) collision detection.
+	// Only non-zero seeds are tracked.
+	seedToPlayer := make(map[int]*Player, len(players))
+	for i := range players {
+		if players[i].Seed > 0 {
+			seedToPlayer[players[i].Seed] = &players[i]
+		}
+	}
+
 	for _, a := range assignments {
-		if p, ok := playerMap[a.Name]; ok {
-			// Check if seed rank is already taken by another player
-			var existingPlayer *Player
-			for i := range players {
-				if players[i].Seed == a.SeedRank && players[i].Name != p.Name {
-					existingPlayer = &players[i]
-					break
-				}
-			}
-
-			// If taken, swap their seeds
-			if existingPlayer != nil {
-				existingPlayer.Seed = p.Seed
-			}
-
-			// Assign new seed rank
-			p.Seed = a.SeedRank
-		} else {
+		p, ok := playerMap[a.Name]
+		if !ok {
 			return errors.New("seeded participant not found in main list: " + a.Name)
+		}
+
+		oldRank := p.Seed
+
+		// O(1): find whoever currently holds the target rank (excluding p itself)
+		var existingPlayer *Player
+		if a.SeedRank > 0 {
+			if ep := seedToPlayer[a.SeedRank]; ep != nil && ep != p {
+				existingPlayer = ep
+			}
+		}
+
+		// Perform swap and keep the reverse index consistent
+		if existingPlayer != nil {
+			// existingPlayer surrenders a.SeedRank and takes p's old rank
+			delete(seedToPlayer, a.SeedRank)
+			existingPlayer.Seed = oldRank
+			if oldRank > 0 {
+				seedToPlayer[oldRank] = existingPlayer
+			}
+		} else if oldRank > 0 {
+			// No collision: vacate p's current slot
+			delete(seedToPlayer, oldRank)
+		}
+
+		// Assign the new rank to p
+		p.Seed = a.SeedRank
+		if a.SeedRank > 0 {
+			seedToPlayer[a.SeedRank] = p
 		}
 	}
 	return nil

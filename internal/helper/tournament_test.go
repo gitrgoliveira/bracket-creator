@@ -9,6 +9,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// buildSetsFromPools reconstructs the per-pool dojo/name conflict sets from
+// pools that already have players assigned, so that direct calls to discoverPool
+// in tests start from the correct initial state.
+func buildSetsFromPools(pools []Pool) (dojoSets, nameSets []map[string]bool) {
+	dojoSets = make([]map[string]bool, len(pools))
+	nameSets = make([]map[string]bool, len(pools))
+	for i, pool := range pools {
+		dojoSets[i] = make(map[string]bool, len(pool.Players))
+		nameSets[i] = make(map[string]bool, len(pool.Players))
+		for _, p := range pool.Players {
+			dojoSets[i][p.Dojo] = true
+			nameSets[i][p.Name] = true
+		}
+	}
+	return
+}
+
 func TestCreatePlayersWithZekkenName(t *testing.T) {
 	entries := []string{
 		"John Smith, クレスワェル, Tokyo Kendo Club",
@@ -544,8 +561,9 @@ func TestDiscoverPool(t *testing.T) {
 	}
 
 	t.Run("finds empty pool", func(t *testing.T) {
+		dojoSets, nameSets := buildSetsFromPools(pools)
 		player := Player{Name: "P2", Dojo: "Dojo B"}
-		poolIdx := discoverPool(pools, player, []int{2, 2}, 0)
+		poolIdx := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2}, 0)
 
 		if poolIdx != 0 {
 			t.Errorf("Expected pool 0, got %d", poolIdx)
@@ -553,8 +571,9 @@ func TestDiscoverPool(t *testing.T) {
 	})
 
 	t.Run("avoids same dojo", func(t *testing.T) {
+		dojoSets, nameSets := buildSetsFromPools(pools)
 		player := Player{Name: "P3", Dojo: "Dojo A"}
-		poolIdx := discoverPool(pools, player, []int{2, 2}, 0)
+		poolIdx := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2}, 0)
 
 		// Should find pool 1 since pool 0 has same dojo
 		if poolIdx != 1 {
@@ -572,8 +591,9 @@ func TestDiscoverPool(t *testing.T) {
 				},
 			},
 		}
+		dojoSets, nameSets := buildSetsFromPools(fullPools)
 		player := Player{Name: "P3", Dojo: "D3"}
-		poolIdx := discoverPool(fullPools, player, []int{2}, 0)
+		poolIdx := discoverPool(fullPools, dojoSets, nameSets, player, []int{2}, 0)
 
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
@@ -1510,15 +1530,16 @@ func TestCreatePools_MaxMode_LargeBalancing(t *testing.T) {
 func TestDiscoverPool_StartIndexRoundRobin(t *testing.T) {
 	// Three empty pools. Starting at index 1 should return 1 first.
 	pools := []Pool{{}, {}, {}}
+	dojoSets, nameSets := buildSetsFromPools(pools)
 	player := Player{Name: "P", Dojo: "D"}
 
-	if got := discoverPool(pools, player, []int{2, 2, 2}, 1); got != 1 {
+	if got := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2, 2}, 1); got != 1 {
 		t.Errorf("expected start-index 1, got %d", got)
 	}
-	if got := discoverPool(pools, player, []int{2, 2, 2}, 2); got != 2 {
+	if got := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2, 2}, 2); got != 2 {
 		t.Errorf("expected start-index 2, got %d", got)
 	}
-	if got := discoverPool(pools, player, []int{2, 2, 2}, 0); got != 0 {
+	if got := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2, 2}, 0); got != 0 {
 		t.Errorf("expected start-index 0, got %d", got)
 	}
 }

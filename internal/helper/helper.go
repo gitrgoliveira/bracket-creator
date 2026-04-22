@@ -148,13 +148,10 @@ func ReadEntriesFromFile(filePath string) ([]string, error) {
 // Returns an error when numCourts exceeds numPools.
 func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
 	if numCourts < 1 {
-		return nil, fmt.Errorf("number of courts must be at least 1")
+		numCourts = 1
 	}
 	if numPools == 0 {
 		return []int{}, nil
-	}
-	if numCourts > numPools {
-		return nil, fmt.Errorf("number of courts (%d) cannot exceed number of pools (%d)", numCourts, numPools)
 	}
 	base := numPools / numCourts
 	extra := numPools % numCourts

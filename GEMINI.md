@@ -16,11 +16,15 @@
 - `cmd/`: CLI command definitions (serve, create-playoffs, create-pools, version).
 - `internal/`: Core logic and domain models.
     - `domain/`: Domain entities (Tournament, Pool, Match, Player).
-    - `helper/`: Implementation of bracket generation, Excel file creation, and business logic.
+    - `helper/`: Implementation of bracket generation, pool creation, Excel file creation, and business logic.
     - `excel/`: Lower-level Excel client and styling logic.
     - `resources/`: Management of embedded assets.
 - `web/`: Frontend assets (HTML, CSS, JS) embedded into the binary using `go:embed`.
 - `tests/`: Integration tests for the Web API and CLI.
+
+### Seeding Logic
+- **Playoffs (`StandardSeeding`)**: Uses a power-of-2 bracket distribution (e.g., seeds 1 and 2 on opposite halves). Includes displaced seed placement using a furthest-distance heuristic for out-of-range seeds.
+- **Pools (`PoolSeeding`)**: Distributes seeds across pools using an "extremes and middle" balanced priority distribution (e.g., for 12 pools: Pool 1, Pool 12, Pool 6, Pool 7), with cyclic priority for additional seeds.
 
 ## Building and Running
 
@@ -54,7 +58,7 @@
 - **Testing:**
     - New features should include unit tests in the same directory as the implementation.
     - Integration tests should be added to the `tests/` directory.
-    - Ensure tests pass with the `-race` flag: `go test -race ./...`.
+    - Ensure tests pass with: `make go/test`.
 - **Embedded Assets:** Static files in `web/` and the Excel `template.xlsx` are embedded. After modifying these, run `go generate ./...` if needed (though `go build` usually handles `embed`).
 - **CI/CD:** GitHub Actions are used for validation (`.github/workflows/validate.yaml`), including security scans (`gosec`), linting, and coverage reporting via Codecov.
 - **Git:** Never commit changes directly to `main` without a PR. Ensure the build and tests pass before requesting a review.

@@ -63,6 +63,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool) {
 
 	// Row 1: title prefix label (B1 is left empty for user to fill in)
 	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B1", ""))
 
 	// Row 2: column headers
 	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A2", "Number"))
@@ -128,6 +129,8 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 
 	row := startRow
 	column := startCol
+	maxRow := startRow
+
 	// Write the bracket data to Excel
 	for i, pool := range pools {
 		// groupNumber := pools[i].cell
@@ -145,6 +148,10 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 			row++
 		}
 
+		if row > maxRow {
+			maxRow = row
+		}
+
 		row += 2
 
 		if (i+1)%numPoolsPerColumn == 0 {
@@ -153,6 +160,16 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 		}
 
 		handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, col_name, col_name, 30))
+	}
+
+	// Define print area for the "Pool Draw" sheet
+	// It starts at B2 (title) and goes to column F (3rd pool column)
+	if maxRow > 2 {
+		handleExcelDataError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
+			Name:     "_xlnm.Print_Area",
+			RefersTo: fmt.Sprintf("'%s'!$B$2:$F$%d", sheetName, maxRow),
+			Scope:    sheetName,
+		}))
 	}
 
 	fmt.Printf("%d pools added to spreadsheet\n", len(pools))

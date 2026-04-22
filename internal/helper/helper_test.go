@@ -410,16 +410,18 @@ func TestAssignPoolsToCourts(t *testing.T) {
 			expected:  []int{},
 		},
 		{
-			name:      "courts exceed pools returns error",
+			name:      "courts exceed pools returns valid distribution",
 			numPools:  2,
 			numCourts: 3,
-			wantErr:   true,
+			expected:  []int{0, 1},
+			wantErr:   false,
 		},
 		{
-			name:      "zero courts returns error",
+			name:      "zero courts defaults to one",
 			numPools:  4,
 			numCourts: 0,
-			wantErr:   true,
+			expected:  []int{0, 0, 0, 0},
+			wantErr:   false,
 		},
 	}
 

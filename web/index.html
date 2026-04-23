@@ -434,6 +434,15 @@
                                                 title="Uses the exact order entered for the bracket"></i>
                                         </label>
                                     </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="mirror"
+                                            id="mirror" checked>
+                                        <label class="form-check-label" for="mirror">
+                                            Mirror match sides (White on left)
+                                            <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip"
+                                                title="When enabled, White is on the left and Red is on the right. When disabled, Red is on the left and White is on the right."></i>
+                                        </label>
+                                    </div>
                                     <div class="mb-2">
                                         <label for="teamMatches" class="form-label">Team size:</label>
                                         <input type="number" class="form-control form-control-sm" name="teamMatches"
@@ -643,6 +652,7 @@
                                 Create Tournament
                             </button>
                         </div>
+                        <input type="hidden" name="form_submitted" value="on">
                     </form>
                 </div>
 

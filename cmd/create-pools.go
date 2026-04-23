@@ -29,6 +29,7 @@ type poolOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
+	mirror          bool
 	SeedAssignments []domain.SeedAssignment
 }
 
@@ -55,6 +56,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute pools across (default 2)")
+	cmd.Flags().BoolVarP(&o.mirror, "mirror", "", true, "Mirror match sides (White on left, Red on right) (default true)")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 
@@ -248,7 +250,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts)
+	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, o.mirror)
 
 	treeSheet, err := f.GetSheetIndex("Tree")
 	if err != nil {
@@ -312,7 +314,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)
 	}
 
-	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
+	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.mirror)
 	helper.FillEstimations(f, int64(len(pools)), int64(len(pools[0].Matches)), 0, int64(o.teamMatches), int64(len(finals)-1))
 
 	// Save the spreadsheet file

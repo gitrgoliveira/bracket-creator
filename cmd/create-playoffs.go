@@ -26,6 +26,7 @@ type playoffOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
+	mirror          bool
 	SeedAssignments []domain.SeedAssignment
 }
 
@@ -49,6 +50,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across (default 2)")
+	cmd.Flags().BoolVarP(&o.mirror, "mirror", "", true, "Mirror match sides (White on left, Red on right) (default true)")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
@@ -267,7 +269,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName)
 
-	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches)
+	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.mirror)
 	helper.FillEstimations(f, 0, 0, 0, int64(o.teamMatches), int64(len(names)-1))
 
 	// Save the spreadsheet file

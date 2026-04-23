@@ -610,3 +610,54 @@ func TestServeOptionsRun(t *testing.T) {
 func boolPtr(v bool) *bool {
 	return &v
 }
+
+func TestRouterCreateEndpoint_Mirroring(t *testing.T) {
+	router := NewRouter()
+
+	tests := []struct {
+		name          string
+		formSubmitted string
+		mirrorValue   string
+	}{
+		{
+			name:          "default mirror (no form_submitted)",
+			formSubmitted: "",
+			mirrorValue:   "",
+		},
+		{
+			name:          "explicit mirror on",
+			formSubmitted: "on",
+			mirrorValue:   "on",
+		},
+		{
+			name:          "explicit mirror off (sentinel present)",
+			formSubmitted: "on",
+			mirrorValue:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := &bytes.Buffer{}
+			writer := multipart.NewWriter(body)
+			writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2")
+			writer.WriteField("tournamentType", "playoffs")
+			if tt.formSubmitted != "" {
+				writer.WriteField("form_submitted", tt.formSubmitted)
+			}
+			if tt.mirrorValue != "" {
+				writer.WriteField("mirror", tt.mirrorValue)
+			}
+			writer.Close()
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/create", body)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
+		})
+	}
+}
+

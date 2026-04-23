@@ -613,7 +613,7 @@ func TestPrintPoolMatchesCourts(t *testing.T) {
 				pools[i] = makeTestPool(fmt.Sprintf("Pool %c", rune('A'+i)))
 			}
 
-			matchWinners := PrintPoolMatches(f, pools, 0, 1, tt.numCourts)
+			matchWinners := PrintPoolMatches(f, pools, 0, 1, tt.numCourts, false)
 
 			// Must have one matchWinner per pool (position 1)
 			if len(matchWinners) != tt.numPools {

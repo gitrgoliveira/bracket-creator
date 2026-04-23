@@ -24,6 +24,7 @@ const (
 	styleText             styleKey = "text"
 	styleNameID           styleKey = "name_id"
 	styleNameIDSide       styleKey = "name_id_side"
+	styleTime             styleKey = "time"
 )
 
 var (
@@ -346,6 +347,25 @@ func buildNameIDSideStyle(f *excelize.File) int {
 			{Type: "bottom", Color: "000000", Style: 2},
 			{Type: "left", Color: "000000", Style: 2},
 			{Type: "right", Color: "000000", Style: 2},
+		},
+	})
+	return style
+}
+
+func getTimeStyle(f *excelize.File) int {
+	return getCachedStyle(f, styleTime, buildTimeStyle)
+}
+
+func buildTimeStyle(f *excelize.File) int {
+	style, _ := f.NewStyle(&excelize.Style{
+		Alignment: &excelize.Alignment{Horizontal: "center"},
+		Font:      &excelize.Font{Bold: false, Color: "000000", Size: 12},
+		NumFmt:    20, // h:mm
+		Border: []excelize.Border{
+			{Type: "top", Color: "000000", Style: 1},
+			{Type: "bottom", Color: "000000", Style: 1},
+			{Type: "left", Color: "000000", Style: 1},
+			{Type: "right", Color: "000000", Style: 1},
 		},
 	})
 	return style

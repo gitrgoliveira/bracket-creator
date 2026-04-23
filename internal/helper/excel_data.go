@@ -2,7 +2,6 @@ package helper
 
 import (
 	"fmt"
-	"math"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -116,10 +115,9 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 	// this formula replaces it so editing data!B1 updates the title automatically.
 	handleExcelDataError("SetCellFormula", f.SetCellFormula(sheetName, "B2",
 		`IF(data!$B$1="","Tournament Pools",data!$B$1&" - Tournament Pools")`))
-	numPoolsPerColumn := int(math.Ceil(float64(len(pools)) / 3))
-
 	startRow := 5
 	startCol := 2
+	rowsPerPageLimit := 42
 
 	col_name, _ := excelize.ColumnNumberToName(startCol)
 	cell := col_name + fmt.Sprint(startRow)
@@ -130,15 +128,37 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 	row := startRow
 	column := startCol
 	maxRow := startRow
+	pageStartRow := startRow
 
 	// Write the bracket data to Excel
-	for i, pool := range pools {
-		// groupNumber := pools[i].cell
+	for _, pool := range pools {
+		poolHeight := 1 + len(pool.Players) + 2
+
+		// Check if pool fits in the current column of the current page
+		if row+poolHeight > rowsPerPageLimit {
+			// Move to next column
+			column += 2
+			row = pageStartRow
+
+			// If we've filled all 3 columns (B, D, F -> 2, 4, 6)
+			if column > 6 {
+				// Insert page break at the start of the next page
+				// We use rowsPerPageLimit + 1 as the break point
+				breakRow := rowsPerPageLimit + 1
+				handleExcelDataError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", breakRow)))
+
+				// Update page boundaries for the next page
+				pageStartRow = breakRow + 1
+				row = pageStartRow
+				column = startCol
+				rowsPerPageLimit = pageStartRow + (42 - 5) // Maintain same page height
+			}
+		}
+
 		col_name, _ = excelize.ColumnNumberToName(column)
 		cell = col_name + fmt.Sprint(row)
 
 		handleExcelDataError("SetCellFormula", f.SetCellFormula(sheetName, cell, fmt.Sprintf("%s!%s", pool.sheetName, pool.cell)))
-
 		handleExcelDataError("SetCellStyle", f.SetCellStyle(sheetName, cell, cell, headerCellStyle))
 		row++
 		for _, player := range pool.Players {
@@ -153,12 +173,6 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 		}
 
 		row += 2
-
-		if (i+1)%numPoolsPerColumn == 0 {
-			column += 2
-			row = startRow
-		}
-
 		handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, col_name, col_name, 30))
 	}
 

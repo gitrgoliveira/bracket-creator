@@ -64,7 +64,7 @@ go/vuln: ## Run vulnerability check (govulncheck)
 
 go/security: go/sec go/vuln ## Run all security checks
 
-go/test: go/lint ## Run tests
+go/test: go/lint go/security ## Run tests
 	@echo "Running tests..."
 	go test -cover ./cmd/... ./internal/... ./tests/...
 
@@ -89,6 +89,7 @@ examples: go/build ## Build locally and create example files
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./mock_data_medium_zekken.csv -o ./pools-example-medium.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./mock_data_medium_zekken.csv -o ./playoffs-example-medium.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-teams.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-teams-max-size.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-max-size.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./mock_data_large_zekken.csv -o ./playoffs-example-large.xlsx
 	@echo "Examples successfully created!"

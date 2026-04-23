@@ -314,8 +314,13 @@ func (o *poolOptions) createPools(entries []string) error {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)
 	}
 
-	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.mirror)
-	helper.FillEstimations(f, int64(len(pools)), int64(len(pools[0].Matches)), 0, int64(o.teamMatches), int64(len(finals)-1))
+	var totalPoolMatches int
+	for _, p := range pools {
+		totalPoolMatches += len(p.Matches)
+	}
+
+	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.mirror)
+	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(finals)-1), o.courts)
 
 	// Save the spreadsheet file
 	err = f.Write(o.outputWriter)

@@ -60,9 +60,9 @@ func checkBreaks(filename string) {
 	}
 	target := relMap[rId]
 	sheetPath := "xl/" + target
-	
+
 	fmt.Printf("Sheet: %s (%s)\n", sheetName, sheetPath)
-	
+
 	for _, f := range r.File {
 		if f.Name == sheetPath {
 			content := readFile(f)

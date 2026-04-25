@@ -26,7 +26,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security examples docker/build docker/run pre-commit docs/serve docs/open run goreleaser/test release version
+.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security examples docker/build docker/run pre-commit docs/serve docs/open docs/build run goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -121,6 +121,10 @@ docs/serve: ## Locally serve the documentation
 docs/open: docs/serve & ## Open documentation in browser
 	@echo "Opening documentation in browser..."
 	$(OPEN_CMD) http://localhost:8000
+
+docs/build: ## Build static documentation site (output: site/)
+	@echo "Building documentation..."
+	mkdocs build --strict
 
 run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."

@@ -6,9 +6,7 @@ on:
       - main
       - test-deploy-documentation/*
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 jobs:
   docs:
     runs-on: ubuntu-latest

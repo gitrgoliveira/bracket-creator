@@ -327,6 +327,33 @@
             font-size: 0.8rem;
         }
 
+        .time-estimator-results {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+            padding: 16px 12px;
+        }
+
+        .time-estimator-results .est-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent-color);
+        }
+
+        .time-estimator-results .est-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+        }
+
         /* Add responsive styling */
         @media (max-width: 767px) {
             .app-card {
@@ -350,6 +377,9 @@
             <p class="text-light mb-0">Creating tournament...</p>
         </div>
     </div>
+
+    <!-- Toast notifications -->
+    <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
 
     <div class="container">
         <div class="row justify-content-center">
@@ -569,6 +599,64 @@
                             <input type="hidden" name="seeds" id="seedsInput">
                         </div>
 
+                        <!-- Time Estimator -->
+                        <div class="options-section" id="timeEstimatorSection">
+                            <h3 class="options-title">
+                                <i class="bi bi-clock"></i> Time Estimator
+                            </h3>
+                            <div id="timeEstimatorBody">
+                                <div class="row mb-3">
+                                    <div class="col-md-6" id="estPoolMatchTimeGroup">
+                                        <label for="estPoolMatchTime" class="form-label">Time per pool match (minutes):</label>
+                                        <input type="number" class="form-control form-control-sm" id="estPoolMatchTime"
+                                            min="0.5" value="3" step="0.5">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="estElimMatchTime" class="form-label">Time per elimination match (minutes):</label>
+                                        <input type="number" class="form-control form-control-sm" id="estElimMatchTime"
+                                            min="0.5" value="4" step="0.5">
+                                    </div>
+                                </div>
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label for="estRotationPadding" class="form-label">Rotation padding (seconds):</label>
+                                        <input type="number" class="form-control form-control-sm" id="estRotationPadding"
+                                            min="0" value="30" step="5">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="estBreakTime" class="form-label">Break between phases (minutes):</label>
+                                        <input type="number" class="form-control form-control-sm" id="estBreakTime"
+                                            min="0" value="30" step="5">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="estStartTime" class="form-label">Start time:</label>
+                                        <input type="time" class="form-control form-control-sm" id="estStartTime"
+                                            value="09:00">
+                                    </div>
+                                </div>
+                                <div class="time-estimator-results">
+                                    <div class="row text-center" id="estimatorResults">
+                                        <div class="col" id="estPoolTimeCol">
+                                            <span class="est-label">Pool Phase</span>
+                                            <span class="est-value" id="estPoolTimeResult">--</span>
+                                        </div>
+                                        <div class="col">
+                                            <span class="est-label">Elimination Phase</span>
+                                            <span class="est-value" id="estElimTimeResult">--</span>
+                                        </div>
+                                        <div class="col">
+                                            <span class="est-label">Total (<span id="estCourtsLabel">2</span> courts)</span>
+                                            <span class="est-value" id="estTotalTimeResult">--</span>
+                                        </div>
+                                        <div class="col">
+                                            <span class="est-label">Estimated Finish</span>
+                                            <span class="est-value" id="estFinishTimeResult">--</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Error message area -->
                         <div id="error-message" class="alert alert-danger" role="alert"></div>
 
@@ -693,6 +781,7 @@
             } catch (error) {
                 console.error('Failed to fetch version:', error);
                 document.getElementById('app-version').textContent = 'v?.?.?';
+                showToast('Could not connect to the server to fetch version info.', 'warning');
             }
         }
 
@@ -827,27 +916,42 @@
         }
         
         function checkDownloadComplete(downloadToken) {
+            let consecutiveErrors = 0;
             const interval = setInterval(function() {
                 fetch('/api/download-status?token=' + encodeURIComponent(downloadToken), {
                     cache: 'no-store'
                 })
-                    .then(response => response.ok ? response.json() : { ready: false })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`Server returned ${response.status}`);
+                        }
+                        return response.json();
+                    })
                     .then(data => {
+                        consecutiveErrors = 0;
                         if (data.ready) {
-                            // Download has started, hide loading overlay
                             document.getElementById('loading-overlay').classList.remove('active');
                             clearInterval(interval);
                         }
                     })
                     .catch(error => {
+                        consecutiveErrors++;
                         console.error('Failed to poll download status:', error);
+                        if (consecutiveErrors >= 5) {
+                            clearInterval(interval);
+                            document.getElementById('loading-overlay').classList.remove('active');
+                            showToast('Lost connection while waiting for the tournament file. Please try again.', 'danger');
+                        }
                     });
-            }, 100); // Check every 100ms
-            
+            }, 100);
+
             // Timeout after 60 seconds
             setTimeout(function() {
-                clearInterval(interval);
-                document.getElementById('loading-overlay').classList.remove('active');
+                if (document.getElementById('loading-overlay').classList.contains('active')) {
+                    clearInterval(interval);
+                    document.getElementById('loading-overlay').classList.remove('active');
+                    showToast('Tournament generation timed out. The file may be too large or the server may be busy.', 'warning');
+                }
             }, 60000);
         }
 
@@ -1379,6 +1483,7 @@ Jack Adams, Team Alpha`
             updateLineNumbers();
             updatePlayerCount();
             validateParticipantListInput();
+            calculateTimeEstimate();
         }
 
         document.getElementById('loadSmallSample').addEventListener('click', function () {
@@ -1696,11 +1801,11 @@ Jack Adams, Team Alpha`
                     } catch (_) {
                         // Keep default fallback message when response is not JSON.
                     }
-                    alert(errorMessage);
+                    showToast(errorMessage, 'danger');
                 }
             } catch (error) {
                 console.error('Error fetching participants:', error);
-                alert('An error occurred.');
+                showToast('Could not reach the server. Check your connection and try again.', 'danger');
             }
         });
 
@@ -1772,6 +1877,156 @@ Jack Adams, Team Alpha`
                 btn.classList.add('btn-outline-warning');
                 btn.innerHTML = `<i class="bi bi-star"></i> Seed Participants`;
             }
+        });
+        // --- Toast notification system ---
+        function showToast(message, type = 'danger') {
+            const container = document.getElementById('toastContainer');
+            const icons = {
+                danger: 'bi-exclamation-triangle-fill',
+                warning: 'bi-exclamation-circle-fill',
+                success: 'bi-check-circle-fill',
+                info: 'bi-info-circle-fill'
+            };
+            const icon = icons[type] || icons.info;
+            const toastEl = document.createElement('div');
+            toastEl.className = `toast align-items-center text-bg-${type} border-0`;
+            toastEl.setAttribute('role', 'alert');
+            toastEl.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body"><i class="bi ${icon} me-2"></i>${escapeHtml(message)}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>`;
+            container.appendChild(toastEl);
+            const toast = new bootstrap.Toast(toastEl, { delay: 6000 });
+            toast.show();
+            toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+        }
+
+        // --- Time Estimator ---
+        function matchesPerPool(n, isRoundRobin) {
+            if (n <= 1) return 0;
+            if (n <= 3 || isRoundRobin) return n * (n - 1) / 2;
+            return n;
+        }
+
+        function formatDuration(totalMinutes) {
+            if (totalMinutes <= 0) return '0m';
+            const h = Math.floor(totalMinutes / 60);
+            const m = Math.round(totalMinutes % 60);
+            if (h > 0 && m > 0) return `${h}h ${m}m`;
+            if (h > 0) return `${h}h`;
+            return `${m}m`;
+        }
+
+        function formatTime(totalMinutes) {
+            const h = Math.floor(totalMinutes / 60) % 24;
+            const m = Math.round(totalMinutes % 60);
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        }
+
+        function calculateTimeEstimate() {
+            const playerList = document.getElementById('playerList').value.trim();
+            const lines = playerList.split('\n').filter(line => line.trim() !== '');
+            const totalPlayers = lines.length;
+
+            const emptyResult = () => {
+                document.getElementById('estPoolTimeResult').textContent = '--';
+                document.getElementById('estElimTimeResult').textContent = '--';
+                document.getElementById('estTotalTimeResult').textContent = '--';
+                document.getElementById('estFinishTimeResult').textContent = '--';
+            };
+
+            if (totalPlayers < 2) { emptyResult(); return; }
+
+            const isPools = document.getElementById('pools').checked;
+            const courts = Math.max(parseInt(document.getElementById('courts').value) || 1, 1);
+            const teamSize = Math.max(parseInt(document.getElementById('teamMatches').value) || 0, 1);
+
+            const poolMatchMins = parseFloat(document.getElementById('estPoolMatchTime').value) || 3;
+            const elimMatchMins = parseFloat(document.getElementById('estElimMatchTime').value) || 4;
+            const rotationSecs = parseFloat(document.getElementById('estRotationPadding').value) || 0;
+            const breakMins = parseFloat(document.getElementById('estBreakTime').value) || 0;
+            const startTimeStr = document.getElementById('estStartTime').value || '09:00';
+
+            let totalPoolMinutes = 0;
+            let playoffParticipants = totalPlayers;
+
+            if (isPools) {
+                const playersPerPool = parseInt(document.getElementById('playersPerPool').value) || 3;
+                const winnersPerPool = parseInt(document.getElementById('winnersPerPool').value) || 2;
+                const isMaxMode = document.getElementById('poolSizeMax').checked;
+                const isRoundRobin = document.getElementById('roundRobin').checked;
+
+                const numPools = isMaxMode
+                    ? Math.ceil(totalPlayers / playersPerPool)
+                    : Math.floor(totalPlayers / playersPerPool);
+
+                if (numPools <= 0) { emptyResult(); return; }
+
+                const mpp = matchesPerPool(playersPerPool, isRoundRobin);
+                const totalPoolMatches = numPools * mpp;
+
+                totalPoolMinutes = (totalPoolMatches * teamSize * poolMatchMins)
+                    + (totalPoolMatches * rotationSecs / 60)
+                    + breakMins;
+
+                playoffParticipants = numPools * winnersPerPool;
+            }
+
+            const numElimMatches = Math.max(playoffParticipants - 1, 0);
+            const totalElimMinutes = (numElimMatches * teamSize * elimMatchMins)
+                + (numElimMatches * rotationSecs / 60)
+                + breakMins;
+
+            const totalSequentialMinutes = totalPoolMinutes + totalElimMinutes;
+            const totalParallelMinutes = totalSequentialMinutes / courts;
+
+            document.getElementById('estPoolTimeResult').textContent = isPools ? formatDuration(totalPoolMinutes) : '--';
+            document.getElementById('estElimTimeResult').textContent = formatDuration(totalElimMinutes);
+            document.getElementById('estTotalTimeResult').textContent = formatDuration(totalParallelMinutes);
+            document.getElementById('estCourtsLabel').textContent = courts;
+
+            const [startH, startM] = startTimeStr.split(':').map(Number);
+            const finishTotalMins = (startH * 60 + startM) + totalParallelMinutes;
+            document.getElementById('estFinishTimeResult').textContent = formatTime(finishTotalMins);
+
+            document.getElementById('estPoolTimeCol').style.display = isPools ? '' : 'none';
+            document.getElementById('estPoolMatchTimeGroup').style.display = isPools ? '' : 'none';
+        }
+
+        // Wire up estimator to all relevant inputs
+        const estimatorInputIds = [
+            'estPoolMatchTime', 'estElimMatchTime', 'estRotationPadding',
+            'estBreakTime', 'estStartTime', 'courts', 'teamMatches',
+            'playersPerPool', 'winnersPerPool'
+        ];
+        estimatorInputIds.forEach(id => {
+            document.getElementById(id).addEventListener('input', calculateTimeEstimate);
+        });
+        ['playoffs', 'pools', 'roundRobin', 'poolSizeMin', 'poolSizeMax'].forEach(id => {
+            document.getElementById(id).addEventListener('change', calculateTimeEstimate);
+        });
+        document.getElementById('playerList').addEventListener('input', calculateTimeEstimate);
+
+        // Persist estimator values to localStorage
+        const estimatorPersistIds = [
+            'estPoolMatchTime', 'estElimMatchTime', 'estRotationPadding',
+            'estBreakTime', 'estStartTime'
+        ];
+        estimatorPersistIds.forEach(id => {
+            const el = document.getElementById(id);
+            el.addEventListener('input', () => localStorage.setItem(id, el.value));
+        });
+
+        // Restore estimator values from localStorage on load
+        window.addEventListener('DOMContentLoaded', () => {
+            estimatorPersistIds.forEach(id => {
+                const saved = localStorage.getItem(id);
+                if (saved !== null) {
+                    document.getElementById(id).value = saved;
+                }
+            });
+            calculateTimeEstimate();
         });
     </script>
 </body>

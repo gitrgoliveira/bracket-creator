@@ -43,18 +43,15 @@ theme:
 
 nav:
   - Home: index.md
-  - Golang CLI template:
-      - Features: golang-cli-template/features.md
-      - Getting started: golang-cli-template/getting-started.md
-      - Customization:
-          - Release: golang-cli-template/customization/release.md
-          - Documentation: golang-cli-template/customization/doc.md
-
   - User guide:
       - Installation: user-guide/getting-started.md
+      - Input format: user-guide/input-format.md
+      - Web UI: user-guide/web-ui.md
       - Commands:
-          - Version: user-guide/commands/version.md
-
+          - create-pools: user-guide/commands/create-pools.md
+          - create-playoffs: user-guide/commands/create-playoffs.md
+          - serve: user-guide/commands/serve.md
+          - version: user-guide/commands/version.md
   - Developer guide:
       - Code of conduct: dev-guide/code_of_conduct.md
       - Contributing: dev-guide/contributing.md

@@ -1,57 +1,60 @@
-<!-- BEGIN __DO_NOT_INCLUDE__ -->
-<p align="center"><img src="https://github.com/gitrgoliveira/bracket-creator/blob/main/logo/bracket-creator.v2.jpeg?raw=true" alt="Logo" height="120" width="120" /></p>
-<!-- END __DO_NOT_INCLUDE__ -->
-<h1 align="center"> bracket-creator</h1>
+# bracket-creator
 
 <p align="center">
-  <a href="https://github.com/gitrgoliveira/bracket-creator/releases" rel="nofollow">
-    <img alt="GitHub release (latest SemVer including pre-releases)" src="https://img.shields.io/github/v/release/gitrgoliveira/bracket-creator?include_prereleases">
+  <a href="https://github.com/gitrgoliveira/bracket-creator/releases">
+    <img alt="GitHub release" src="https://img.shields.io/github/v/release/gitrgoliveira/bracket-creator?include_prereleases">
   </a>
-
-  <a href="https://github.com/gitrgoliveira/bracket-creator/actions/workflows/release.yaml" rel="nofollow">
-    <img src="https://github.com/gitrgoliveira/bracket-creator/actions/workflows/release.yaml/badge.svg" alt="goreleaser" style="max-width:100%;">
+  <a href="https://github.com/gitrgoliveira/bracket-creator/actions/workflows/validate.yaml">
+    <img src="https://github.com/gitrgoliveira/bracket-creator/actions/workflows/validate.yaml/badge.svg" alt="CI">
   </a>
-
-  <a href="https://pkg.go.dev/github.com/gitrgoliveira/bracket-creator" rel="nofollow">
-    <img src="https://pkg.go.dev/badge/github.com/gitrgoliveira/bracket-creator.svg" alt="Go reference" style="max-width:100%;">
+  <a href="https://codecov.io/gh/gitrgoliveira/bracket-creator">
+    <img src="https://codecov.io/gh/gitrgoliveira/bracket-creator/branch/main/graph/badge.svg?token=CLP6KW4QLK" alt="Coverage">
   </a>
-
-  <a href="https://github.com/gojp/goreportcard/blob/master/LICENSE" rel="nofollow">
-    <img src="https://img.shields.io/badge/license-Apache 2.0-blue.svg" alt="License Apache 2.0" style="max-width:100%;">
+  <a href="https://pkg.go.dev/github.com/gitrgoliveira/bracket-creator">
+    <img src="https://pkg.go.dev/badge/github.com/gitrgoliveira/bracket-creator.svg" alt="Go reference">
   </a>
-
-  <br/>
-
-  <a href="https://codecov.io/gh/gitrgoliveira/bracket-creator" >
-    <img src="https://codecov.io/gh/gitrgoliveira/bracket-creator/branch/main/graph/badge.svg?token=CLP6KW4QLK"/>
-  </a>
-
-  <a href="https://github.com/gitrgoliveira/bracket-creator/actions/workflows/codeql.yaml" rel="nofollow">
-    <img src="https://github.com/gitrgoliveira/bracket-creator/actions/workflows/codeql.yaml/badge.svg" alt="codeql" style="max-width:100%;">
-  </a>
-
-  <a href="https://goreportcard.com/report/github.com/gitrgoliveira/bracket-creator" rel="nofollow">
-    <img src="https://goreportcard.com/badge/github.com/gitrgoliveira/bracket-creator" alt="Go report card" style="max-width:100%;">
+  <a href="https://goreportcard.com/report/github.com/gitrgoliveira/bracket-creator">
+    <img src="https://goreportcard.com/badge/github.com/gitrgoliveira/bracket-creator" alt="Go report card">
   </a>
 </p>
-<br/>
 
-This is a CLI application created to make my life simpler when creating Kendo tournaments.
+**bracket-creator** is a CLI and web application for generating kendo tournament brackets as Excel spreadsheets. Give it a CSV of participants and it produces a fully formatted, print-ready `.xlsx` file with pool draws, match schedules, and elimination trees.
 
-I believe this could be useful for other clubs that want to create Kendo tournaments, without having to use complex setups, televisions as scoreboards, etc.
+## Formats
 
-## What will you need?
+| Format | Command | Use when |
+|--------|---------|----------|
+| **Pools & Playoffs** | `create-pools` | Round-robin pools followed by a knockout bracket |
+| **Playoffs Only** | `create-playoffs` | Direct single-elimination bracket |
 
-### Tournament day
+## Quick start
 
-* A3 printer to print out Team/Player names
-* A4 printer to print out the trees
-* score boards
-* whiteboard markers (for the scoreboards), scisors, tasuki, the usual.
+```bash
+# Install
+brew install gitrgoliveira/tap/bracket-creator
 
-To keep all shiai-jo tables in sync, you can:
+# Create a pools + playoffs bracket
+bracket-creator create-pools -f participants.csv -o tournament.xlsx
 
-1. Have an internet connection and a laptop for each shiai-jo
-1. Upload excel files to something like a google drive, so all tables are updating it in real time
+# Or run the web UI
+bracket-creator serve
+```
 
-## Before the Tournament
+Open `tournament.xlsx` in Excel or LibreOffice and print.
+
+## What you need on tournament day
+
+- **A3 printer** — for team/player name sheets
+- **A4 printer** — for the bracket trees
+- Scoreboards, whiteboard markers, scissors, tasuki
+
+### Keeping courts in sync
+
+If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar) so all tables share one live document.
+
+## Before the tournament
+
+1. **Collect participants** — one name per line in a CSV file ([input format](user-guide/input-format.md))
+2. **Generate the bracket** — run `create-pools` or `create-playoffs` ([commands](user-guide/commands/create-pools.md))
+3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](user-guide/commands/create-pools.md#seeding))
+4. **Print** — the Excel file is laid out to print cleanly on A4/A3

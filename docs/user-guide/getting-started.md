@@ -28,7 +28,7 @@ Below you can find the steps for each of them.
     baseurl=https://yum.fury.io/gitrgoliveira/
     enabled=1
     gpgcheck=0' | sudo tee /etc/yum.repos.d/gitrgoliveira.repo
-    sudo yum install goreleaser
+    sudo yum install bracket-creator
     ```
 
 ## deb, rpm and apk packages

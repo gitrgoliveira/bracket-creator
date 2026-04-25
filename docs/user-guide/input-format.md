@@ -15,7 +15,7 @@ The first column is the participant name. The second column is the dojo/team aff
 
 ## Zekken display name
 
-When using `--with-zekken-name` (`-z`), a third column provides the name printed on the zekken (name tag). If the third column is empty the participant name is used instead.
+When using `--with-zekken-name` (`-z`), the second column provides the name printed on the zekken (name tag), and the third column provides the dojo/team affiliation. If the second column is empty the participant name is used instead.
 
 ```
 Cersei Lannister, LANNISTER, Team Gamma

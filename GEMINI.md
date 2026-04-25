@@ -59,6 +59,6 @@
     - New features should include unit tests in the same directory as the implementation.
     - Integration tests should be added to the `tests/` directory.
     - Ensure tests pass with: `make go/test`.
-- **Embedded Assets:** Static files in `web/` and the Excel `template.xlsx` are embedded. After modifying these, run `go generate ./...` if needed (though `go build` usually handles `embed`).
+- **Embedded Assets:** Static files in `web/` are embedded via `//go:embed`. The Excel workbook is built entirely from code in `internal/excel/template.go`. After modifying embedded web assets, rebuild with `go build` (or `make go/build`).
 - **CI/CD:** GitHub Actions are used for validation (`.github/workflows/validate.yaml`), including security scans (`gosec`), linting, and coverage reporting via Codecov.
 - **Git:** Never commit changes directly to `main` without a PR. Ensure the build and tests pass before requesting a review.

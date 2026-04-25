@@ -1,41 +1,10 @@
 # Install
 
-You can install the pre-compiled binary (in several ways), use Docker or compile from source (when on OSS).
+You can install the pre-compiled binary, use Go, build from source, or use Docker.
 
 Below you can find the steps for each of them.
 
-## Install the pre-compiled binary
-
-=== "homebrew tap"
-
-    ```bash
-    brew install gitrgoliveira/tap/bracket-creator
-    ```
-
-=== "apt"
-
-    ```bash
-    echo 'deb [trusted=yes] https://apt.fury.io/gitrgoliveira/ /' | sudo tee /etc/apt/sources.list.d/gitrgoliveira.list
-    sudo apt update
-    sudo apt install bracket-creator
-    ```
-
-=== "yum"
-
-    ```bash
-    echo '[gitrgoliveira]
-    name=Gemfury gitrgoliveira repository
-    baseurl=https://yum.fury.io/gitrgoliveira/
-    enabled=1
-    gpgcheck=0' | sudo tee /etc/yum.repos.d/gitrgoliveira.repo
-    sudo yum install bracket-creator
-    ```
-
-## deb, rpm and apk packages
-
-Download the .deb, .rpm or .apk packages from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and install them with the appropriate tools.
-
-## Manually
+## Pre-compiled binaries
 
 === "go install"
 
@@ -45,7 +14,8 @@ Download the .deb, .rpm or .apk packages from the [release page](https://github.
 
 === "Released tar file"
 
-    Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) page and copy them to the desired location.
+    Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and extract them to your desired location.
+
     ```bash
     $ VERSION=v1.0.0
     $ OS=Linux
@@ -56,11 +26,44 @@ Download the .deb, .rpm or .apk packages from the [release page](https://github.
     $ rm -f ${TAR_FILE}
     ```
 
-=== "manually"
+## Build from source
+
+If you prefer to compile from source, `bracket-creator` is written in [Go](https://golang.org/).
+
+Prerequisites:
+- [Go 1.26.2+](https://golang.org/doc/install)
+
+```bash
+git clone https://github.com/gitrgoliveira/bracket-creator.git
+cd bracket-creator
+make go/build
+```
+
+The binary will be available at `./bin/bracket-creator`.
+
+## Docker
+
+You can also run the application using Docker.
+
+=== "Docker Compose"
+
+    The easiest way to get the web UI running is using Docker Compose:
 
     ```bash
-    $ git clone github.com/gitrgoliveira/bracket-creator
-    $ cd bracket-creator
-    $ go generate ./...
-    $ go install
+    git clone https://github.com/gitrgoliveira/bracket-creator.git
+    cd bracket-creator
+    docker compose up -d
+    ```
+
+    The application will be available at `http://localhost:8080`.
+
+=== "Make"
+
+    Alternatively, you can build and run it using the provided Makefile targets:
+
+    ```bash
+    git clone https://github.com/gitrgoliveira/bracket-creator.git
+    cd bracket-creator
+    make docker/build
+    make docker/run
     ```

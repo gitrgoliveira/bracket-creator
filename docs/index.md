@@ -31,7 +31,7 @@
 
 ```bash
 # Install
-brew install gitrgoliveira/tap/bracket-creator
+go install github.com/gitrgoliveira/bracket-creator@latest
 
 # Create a pools + playoffs bracket
 bracket-creator create-pools -f participants.csv -o tournament.xlsx

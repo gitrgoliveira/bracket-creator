@@ -3,6 +3,7 @@ package helper
 import (
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -20,7 +21,11 @@ func ParseSeedsFile(filePath string) ([]domain.SeedAssignment, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "error closing seeds file: %v\n", err)
+		}
+	}()
 
 	reader := csv.NewReader(file)
 	header, err := reader.Read()

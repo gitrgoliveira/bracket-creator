@@ -107,7 +107,7 @@ func TestAddPoolDataToSheet(t *testing.T) {
 			_, err := f.NewSheet("data")
 			require.NoError(t, err)
 
-			AddPoolDataToSheet(f, tt.pools, tt.sanitize)
+			AddPoolDataToSheet(f, tt.pools, tt.sanitize, "")
 
 			// Verify prefix label row
 			prefixLabel, err := f.GetCellValue("data", "A1")
@@ -262,7 +262,7 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 			_, err := f.NewSheet("data")
 			require.NoError(t, err)
 
-			AddPlayerDataToSheet(f, tt.players, tt.sanitize)
+			AddPlayerDataToSheet(f, tt.players, tt.sanitize, "")
 
 			// Verify prefix label row
 			prefixLabel, err := f.GetCellValue("data", "A1")

@@ -5,7 +5,7 @@ IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
 GO_VERSION := 1.26.2
 GO_SOURCES := $(shell find . -name "*.go" -type f)
-EMBEDDED_ASSETS := $(shell find ./web -type f) ./template.xlsx
+EMBEDDED_ASSETS := $(shell find ./web -type f)
 
 # Build flags
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -92,6 +92,10 @@ examples: go/build ## Build locally and create example files
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-teams-max-size.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-max-size.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./mock_data_large_zekken.csv -o ./playoffs-example-large.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./seeds_medium.csv -f ./mock_data_medium_zekken.csv -o ./pools-example-medium-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./seeds_medium.csv -f ./mock_data_medium_zekken.csv -o ./playoffs-example-medium-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./seeds_large.csv -f ./mock_data_large_zekken.csv -o ./pools-example-large-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./seeds_large.csv -f ./mock_data_large_zekken.csv -o ./playoffs-example-large-seeded.xlsx
 	@echo "Examples successfully created!"
 
 docker/build: ## Build Docker image

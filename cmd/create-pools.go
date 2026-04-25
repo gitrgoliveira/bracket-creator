@@ -3,17 +3,13 @@ package cmd
 import (
 	"bufio"
 	"fmt"
-	"io"
-	"math"
-	"math/rand"
 	"os"
 	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/spf13/cobra"
-
-	excelize "github.com/xuri/excelize/v2"
 )
 
 type poolOptions struct {
@@ -24,12 +20,14 @@ type poolOptions struct {
 	courts          int
 	filePath        string
 	outputPath      string
+	seedsPath       string
 	outputWriter    *bufio.Writer
 	roundRobin      bool
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
 	mirror          bool
+	titlePrefix     string
 	SeedAssignments []domain.SeedAssignment
 }
 
@@ -57,6 +55,8 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute pools across (default 2)")
 	cmd.Flags().BoolVarP(&o.mirror, "mirror", "", true, "Mirror match sides (White on left, Red on right) (default true)")
+	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
+	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 
@@ -81,22 +81,34 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	outputFile, err := os.OpenFile(o.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err := helper.ValidateCourts(o.courts); err != nil {
+		return err
+	}
+
+	outputFile, outputWriter, err := openOutputFile(o.outputPath)
 	if err != nil {
-		return fmt.Errorf("failed to open output file: %w", err)
+		return err
 	}
 	defer func() {
 		if err := outputFile.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error closing output file: %v\n", err)
 		}
 	}()
-
-	o.outputWriter = bufio.NewWriter(outputFile)
+	o.outputWriter = outputWriter
 	defer func() {
 		if err := o.outputWriter.Flush(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error flushing output buffer: %v\n", err)
 		}
 	}()
+
+	if o.seedsPath != "" {
+		fmt.Printf("Parsing seeds file: %s\n", o.seedsPath)
+		assignments, err := helper.ParseSeedsFile(o.seedsPath)
+		if err != nil {
+			return fmt.Errorf("failed to parse seeds file: %w", err)
+		}
+		o.SeedAssignments = append(o.SeedAssignments, assignments...)
+	}
 
 	err = o.createPools(entries)
 	if err != nil {
@@ -142,16 +154,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		return fmt.Errorf("number of pool winners must be less than number of players per pool")
 	}
 
-	entries = helper.RemoveDuplicates(entries)
-
-	// Shuffle all entries
-	if !o.determined {
-		rand.Shuffle(len(entries), func(i, j int) {
-			entries[i], entries[j] = entries[j], entries[i]
-		})
-	}
-
-	players, err := helper.CreatePlayers(entries, o.withZekkenName)
+	players, err := processEntries(entries, o.determined, o.withZekkenName)
 	if err != nil {
 		return err
 	}
@@ -175,7 +178,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	// Reorder players to ensure seeded participants are distributed effectively across pools
-	players = helper.PoolSeeding(players, numPools)
+	players = helper.PoolSeeding(players, numPools, o.courts)
 
 	pools, err := helper.CreatePools(players, activePoolSize, isMax)
 	if err != nil {
@@ -186,20 +189,9 @@ func (o *poolOptions) createPools(entries []string) error {
 	// seeds are spread across courts (deinterleave by numCourts).
 	pools = helper.ReorderPoolsForCourts(pools, o.courts)
 
-	// Opening the template Excel file.
-	var templateFile io.ReadCloser
-	templateFile, err = helper.TemplateFile.Open("template.xlsx")
+	f, err := excel.NewFileFromScratch()
 	if err != nil {
-		fmt.Println("Warning: template.xlsx not found in embedded FS, trying local disk:", err)
-		templateFile, err = os.Open("template.xlsx")
-		if err != nil {
-			return fmt.Errorf("could not find template.xlsx: %w", err)
-		}
-	}
-
-	f, err := excelize.OpenReader(templateFile)
-	if err != nil {
-		return fmt.Errorf("failed to open template Excel file: %w", err)
+		return err
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -211,7 +203,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		fmt.Println("Using Zekken names")
 	}
 
-	helper.AddPoolDataToSheet(f, pools, o.withZekkenName)
+	helper.AddPoolDataToSheet(f, pools, o.withZekkenName, o.titlePrefix)
 
 	if err := helper.AddPoolsToSheet(f, pools); err != nil {
 		fmt.Fprintf(os.Stderr, "Error adding pools to sheet: %v\n", err)
@@ -220,7 +212,7 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	fmt.Printf("There will be %d finalists\n", len(finals))
 
-	maxPlayersPerTree := 16
+	maxPlayersPerTree := helper.MaxPlayersPerTree
 	numPages, err := helper.RoundToPowerOf2(float64(len(finals)), float64(maxPlayersPerTree))
 	if err != nil {
 		return err
@@ -256,7 +248,6 @@ func (o *poolOptions) createPools(entries []string) error {
 	if err != nil {
 		return fmt.Errorf("could not find Tree sheet: %w", err)
 	}
-	poolsPerSubtree := int(math.Ceil(float64(len(pools)) / float64(len(subtrees))))
 	// adding extra sheets
 	for i := 0; i < len(subtrees); i++ {
 		subtreeSheet := "Tree " + strconv.Itoa(i+1)
@@ -273,25 +264,25 @@ func (o *poolOptions) createPools(entries []string) error {
 		depth := helper.CalculateDepth(subtrees[i])
 		fmt.Printf("With tree Depth: %d\n", depth)
 		startRow := helper.TreeTitleRows + 1
-		// Group consecutive tree sheets under the same Shiaijo label
+
+		// pagesPerCourt should be >= 1 because numPages >= NextPow2(courts) >= courts,
+		// but SubdivideTree may return fewer subtrees than requested for small
+		// brackets. Guard against the divide-by-zero in that degenerate case
+		// rather than relying on the invariant alone.
 		pagesPerCourt := len(subtrees) / o.courts
-		if pagesPerCourt > 0 {
-			courtIndex := i / pagesPerCourt
-			if courtIndex >= o.courts {
-				courtIndex = o.courts - 1
-			}
-			courtLabel := string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIndex])
-			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
+		if pagesPerCourt < 1 {
+			pagesPerCourt = 1
 		}
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
+		courtIndex := i / pagesPerCourt
+		if courtIndex >= o.courts {
+			courtIndex = o.courts - 1
+		}
+		courtLabel := string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIndex])
+		helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 
-		lastPos := (i + 1) * poolsPerSubtree
-		if lastPos > len(pools) {
-			lastPos = len(pools)
-		}
-
-		helper.AddPoolsToTree(f, subtreeSheet, pools[i*poolsPerSubtree:lastPos])
+		poolStart, poolEnd := poolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
+		helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd])
 	}
 	if err := f.DeleteSheet("Tree"); err != nil {
 		fmt.Println("Note: Tree sheet might not exist:", err)
@@ -329,6 +320,48 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	return nil
+}
+
+// poolBoundsForSubtree returns the [start, end) slice into the pool list for
+// the given subtree. After ReorderPoolsForCourts the pool list is laid out in
+// contiguous per-court blocks; this function respects those boundaries so that
+// no subtree page ever references pools from more than one court.
+// Uses the same AssignPoolsToCourts logic as PrintPoolMatches so both views
+// are always consistent.
+func poolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (start, end int) {
+	if numCourts < 1 || numSubtrees < 1 {
+		return 0, 0
+	}
+	pagesPerCourt := numSubtrees / numCourts
+	if pagesPerCourt < 1 {
+		pagesPerCourt = 1
+	}
+	courtIdx := subtreeIdx / pagesPerCourt
+	if courtIdx >= numCourts {
+		courtIdx = numCourts - 1
+	}
+	pageWithinCourt := subtreeIdx % pagesPerCourt
+
+	// Derive court block boundaries from the same assignment used by Pool Matches.
+	assignments, _ := helper.AssignPoolsToCourts(numPools, numCourts)
+	courtStart, courtEnd := -1, 0
+	for i, c := range assignments {
+		if c == courtIdx {
+			if courtStart < 0 {
+				courtStart = i
+			}
+			courtEnd = i + 1
+		}
+	}
+	if courtStart < 0 {
+		return 0, 0
+	}
+
+	courtSize := courtEnd - courtStart
+	poolsPerPage := (courtSize + pagesPerCourt - 1) / pagesPerCourt
+	start = courtStart + pageWithinCourt*poolsPerPage
+	end = min(start+poolsPerPage, courtEnd)
+	return
 }
 
 func init() {

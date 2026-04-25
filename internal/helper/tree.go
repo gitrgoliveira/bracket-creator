@@ -70,15 +70,27 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, pools, matchWinners)
 }
 
+// treeAdjustment repositions leaf nodes within a two-level subtree so that
+// the lower-position pool finalist (e.g. "-1st" beats "-2nd") appears at the top
+// of a match pair.  In the Excel layout a smaller row number is the preferred
+// / seeded side that receives a bye when there is an odd number of players,
+// so putting the first-place finisher on top is necessary for correct seeding.
+//
+// Two cases are handled:
+//  1. Both children are leaf nodes → swap them so the lower-position value
+//     is on the left (top) child.
+//  2. Left child is a leaf and right child is an internal node → swap the leaf
+//     with the right node's top-left leaf if the incoming leaf has a lower
+//     position, ensuring the first-place finisher gets the bye at this level.
 func treeAdjustment(node *Node) {
 
 	if node.Left.LeafNode && node.Right.LeafNode {
 
 		// Need to ensure pools winners stay on top
-		leftPool := strings.Split(node.Left.LeafVal, ".")
-		leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
-		rightPool := strings.Split(node.Right.LeafVal, ".")
-		rightPos, _ := strconv.ParseInt(rightPool[1], 10, 64)
+		_, leftRankStr := splitPoolNameAndRank(node.Left.LeafVal)
+		leftPos := parsePoolRank(leftRankStr)
+		_, rightRankStr := splitPoolNameAndRank(node.Right.LeafVal)
+		rightPos := parsePoolRank(rightRankStr)
 
 		// For that we need to ensure the last character of the left (i.e. top) node is higher than the right
 		if leftPos > rightPos {
@@ -89,10 +101,10 @@ func treeAdjustment(node *Node) {
 	// Also need to ensure pool winners are the ones that get a bye
 	if node.Left.LeafNode && !node.Right.LeafNode {
 		// find a second placed pool winner on the other branch
-		leftPool := strings.Split(node.Left.LeafVal, ".")
-		leftPos, _ := strconv.ParseInt(leftPool[1], 10, 64)
-		rightPool := strings.Split(node.Right.Left.LeafVal, ".")
-		rightPos, _ := strconv.ParseInt(rightPool[1], 10, 64)
+		_, leftRankStr := splitPoolNameAndRank(node.Left.LeafVal)
+		leftPos := parsePoolRank(leftRankStr)
+		_, rightRankStr := splitPoolNameAndRank(node.Right.Left.LeafVal)
+		rightPos := parsePoolRank(rightRankStr)
 
 		// For that we need to ensure the last character of the left (i.e. top) node is higher than the left of the right branch
 		if leftPos > rightPos {
@@ -101,35 +113,68 @@ func treeAdjustment(node *Node) {
 	}
 }
 
+func splitPoolNameAndRank(val string) (string, string) {
+	idx := strings.LastIndex(val, "-")
+	if idx == -1 {
+		return val, ""
+	}
+	return val[:idx], val[idx+1:]
+}
+
+func parsePoolRank(rankStr string) int64 {
+	if rankStr == "" {
+		return 0
+	}
+	// Remove ordinal suffix (st, nd, rd, th)
+	s := rankStr
+	if len(s) > 2 {
+		s = s[:len(s)-2]
+	}
+	pos, _ := strconv.ParseInt(s, 10, 64)
+	return pos
+}
+
+// GenerateFinals interleaves pool finalists so that when CreateBalancedTree
+// distributes them into bracket slots, the first-place finisher of one pool
+// is paired against the second-place finisher of another pool.
+//
+// The algorithm cycles through all pools, advancing a round counter every
+// time a full set of pools has been placed.  The position rank for each slot
+// is computed as (i + round) % poolWinners, which shifts the rank picked for
+// successive pools so that adjacent bracket slots always contain different
+// finishing positions.
+//
+// Example with 4 pools and 2 winners per pool:
+//
+//	result = [Pool_A-1st, Pool_B-2nd, Pool_C-1st, Pool_D-2nd,
+//	          Pool_A-2nd, Pool_B-1st, Pool_C-2nd, Pool_D-1st]
 func GenerateFinals(pools []Pool, poolWinners int) []string {
+	if poolWinners <= 0 || len(pools) == 0 {
+		return nil
+	}
 
 	finalists := make([][]string, len(pools))
 	for i := 0; i < len(pools); i++ {
 		for j := 0; j < poolWinners; j++ {
-			finalists[i] = append(finalists[i], fmt.Sprintf("%s.%d", pools[i].PoolName, j+1))
+			finalists[i] = append(finalists[i], fmt.Sprintf("%s-%s", pools[i].PoolName, getOrdinal(j+1)))
 		}
 	}
 
-	// fmt.Println(finalists)
-	matches := make([]string, 0)
+	matches := make([]string, 0, len(pools)*poolWinners)
 	round := -1
 	for i := 0; i < len(pools)*poolWinners; i++ {
 
 		poolPos := i % len(pools)
 
 		if poolPos == 0 && len(pools)%poolWinners == 0 {
-			// fmt.Println("new round")
 			round++
 		} else if round < 0 {
 			round = 0
 		}
 		pos := (i + round) % poolWinners
-		// fmt.Printf("pool num %d.", poolPos)
-		// fmt.Println(pos)
 		matches = append(matches, finalists[poolPos][pos])
 	}
 
-	// fmt.Println(matches)
 	return matches
 }
 
@@ -237,4 +282,24 @@ func NextPow2(n int) int {
 		p <<= 1
 	}
 	return p
+}
+
+func getOrdinal(n int) string {
+	if n <= 0 {
+		return strconv.Itoa(n)
+	}
+	switch n % 100 {
+	case 11, 12, 13:
+		return strconv.Itoa(n) + "th"
+	}
+	switch n % 10 {
+	case 1:
+		return strconv.Itoa(n) + "st"
+	case 2:
+		return strconv.Itoa(n) + "nd"
+	case 3:
+		return strconv.Itoa(n) + "rd"
+	default:
+		return strconv.Itoa(n) + "th"
+	}
 }

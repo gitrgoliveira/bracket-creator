@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"embed"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,7 +12,6 @@ import (
 )
 
 var WebFs embed.FS
-var TemplateFile fs.FS
 
 type RowStack struct {
 	data []int
@@ -30,22 +28,21 @@ func (s *RowStack) PushHighest(first int, second int) {
 		s.Push(second)
 	}
 }
-func (s *RowStack) Pop() int {
+func (s *RowStack) Pop() (int, error) {
 	if len(s.data) == 0 {
-		fmt.Println("Stack is empty")
-		return -1
+		return 0, fmt.Errorf("pop on empty stack")
 	}
 	index := len(s.data) - 1
 	value := s.data[index]
 	s.data = s.data[:index]
-	return value
+	return value, nil
 }
 
-func (s *RowStack) Peek() int {
+func (s *RowStack) Peek() (int, error) {
 	if len(s.data) == 0 {
-		panic("Stack is empty")
+		return 0, fmt.Errorf("peek on empty stack")
 	}
-	return s.data[len(s.data)-1]
+	return s.data[len(s.data)-1], nil
 }
 
 // RemoveDuplicates removes duplicate strings from the input slice and returns a new slice without duplicates.
@@ -65,6 +62,39 @@ func RemoveDuplicates(input []string) []string {
 	}
 
 	return result
+}
+
+// CheckDuplicateEntries scans the raw entry list (one CSV row per element)
+// for duplicates and returns a list of entries that appear more than once.
+// Empty strings are ignored. The returned slice preserves first-seen order
+// of the offending entries; an empty result means the list is unique.
+func CheckDuplicateEntries(input []string) []string {
+	seen := make(map[string]int, len(input))
+	order := make([]string, 0)
+	for _, s := range input {
+		if s == "" {
+			continue
+		}
+		seen[s]++
+		if seen[s] == 2 {
+			order = append(order, s)
+		}
+	}
+	return order
+}
+
+// ValidateCourts returns an error when n is outside the supported court
+// range. Courts are labelled A–Z, so MaxCourts (26) is the hard upper
+// bound. n < 1 is also rejected so the caller does not have to guess what
+// "0 courts" should mean.
+func ValidateCourts(n int) error {
+	if n < 1 {
+		return fmt.Errorf("courts must be >= 1, got %d", n)
+	}
+	if n > MaxCourts {
+		return fmt.Errorf("courts must be <= %d (Shiaijo are labelled A–Z), got %d", MaxCourts, n)
+	}
+	return nil
 }
 
 func OrderStringsAlphabetically(strings []*Node) []*Node {

@@ -444,6 +444,11 @@
                                         </label>
                                     </div>
                                     <div class="mb-2">
+                                        <label for="titlePrefix" class="form-label">Title prefix:</label>
+                                        <input type="text" class="form-control form-control-sm" name="titlePrefix"
+                                            id="titlePrefix" placeholder="e.g. London Cup 2026">
+                                    </div>
+                                    <div class="mb-2">
                                         <label for="teamMatches" class="form-label">Team size:</label>
                                         <input type="number" class="form-control form-control-sm" name="teamMatches"
                                             id="teamMatches" min="0" value="0">
@@ -454,7 +459,7 @@
                                                 title="Number of courts (Shiaijo A, B, …). For pool tournaments, pools are split evenly across courts. For both types, each tree sheet is labelled with the matching Shiaijo name."></i>
                                         </label>
                                         <input type="number" class="form-control form-control-sm" name="courts" id="courts"
-                                            min="1" value="2">
+                                            min="1" max="26" value="2">
                                     </div>
                                 </div>
                             </div>
@@ -755,6 +760,32 @@
 
                 if (winnersPerPool >= playersPerPool) {
                     errorMsg.textContent = `Error: Winners per pool must be less than ${poolSizeModeLabel.toLowerCase()} per pool`;
+                    errorMsg.style.display = 'block';
+                    isValid = false;
+                }
+            }
+
+            // Courts: A–Z labels, hard-cap at 26.
+            const courts = parseInt(document.getElementById('courts').value);
+            if (isNaN(courts) || courts < 1 || courts > 26) {
+                errorMsg.textContent = 'Error: Number of Shiaijo (courts) must be between 1 and 26';
+                errorMsg.style.display = 'block';
+                isValid = false;
+            }
+
+            // Reject duplicate participant entries before submission.
+            if (playerList !== '') {
+                const seen = new Map();
+                const dups = [];
+                for (const raw of playerList.split('\n')) {
+                    const line = raw.trim();
+                    if (line === '') continue;
+                    const count = (seen.get(line) || 0) + 1;
+                    seen.set(line, count);
+                    if (count === 2) dups.push(line);
+                }
+                if (dups.length > 0) {
+                    errorMsg.textContent = `Error: Duplicate participant entries: ${dups.join(', ')}`;
                     errorMsg.style.display = 'block';
                     isValid = false;
                 }

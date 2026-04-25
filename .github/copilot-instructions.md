@@ -77,7 +77,7 @@ make docker/run
 
 ### Test Patterns
 - **Table-driven tests**: Use `t.Run()` with subtests for multiple cases — see [internal/helper/seed_test.go](internal/helper/seed_test.go), [cmd/serve_test.go](cmd/serve_test.go)
-- **Test helpers**: Leverage `internal/test/helpers.go` factories (`CreateTestPlayers`, `CreateTestPools`, `CreateTestTournament`, `CreateTestFS`)
+- **Test helpers**: Leverage `internal/test/helpers.go` factories (`CreateTestPlayers`, `CreateTestPools`, `CreateTestTournament`)
 - **Assertions**: `github.com/stretchr/testify/assert` for non-fatal checks, `require` for fatal errors
 - **Mocking**: Manual mocks with `testify/mock` (no code generation tools)
 

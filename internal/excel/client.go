@@ -2,10 +2,7 @@
 package excel
 
 import (
-	"bytes"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -17,32 +14,12 @@ type Client struct {
 	file *excelize.File
 }
 
-// NewClient creates a new Excel client from a template
-func NewClient(templateFS fs.FS) (*Client, error) {
-	// Extract and open the template file
-	templateFile, err := templateFS.Open("template.xlsx")
+// NewClient creates a new Excel client with a fresh file built from scratch.
+func NewClient() (*Client, error) {
+	f, err := NewFileFromScratch()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open template file: %w", err)
+		return nil, fmt.Errorf("failed to create Excel file: %w", err)
 	}
-	defer func() {
-		if closeErr := templateFile.Close(); closeErr != nil {
-			fmt.Printf("Warning: failed to close template file: %v\n", closeErr)
-		}
-	}()
-
-	// Read the template data
-	templateData, err := io.ReadAll(templateFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read template data: %w", err)
-	}
-
-	// Create Excel file from template data
-	reader := bytes.NewReader(templateData)
-	f, err := excelize.OpenReader(reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open Excel template: %w", err)
-	}
-
 	return &Client{file: f}, nil
 }
 
@@ -59,7 +36,6 @@ func (c *Client) SaveFile(path string) error {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	// Save the file
 	if err := c.file.SaveAs(path); err != nil {
 		return fmt.Errorf("failed to save Excel file: %w", err)
 	}

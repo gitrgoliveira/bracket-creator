@@ -580,7 +580,7 @@ func TestPoolSeeding_WithPools_Integration(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Run pool seeding
-	seededPlayers := PoolSeeding(players, 8)
+	seededPlayers := PoolSeeding(players, 8, 1)
 
 	// Verify no duplicates
 	nameCount := make(map[string]int)
@@ -627,7 +627,7 @@ func TestPoolSeeding_WithBalancedPools_Integration(t *testing.T) {
 	players[3].Seed = 4
 
 	// Use PoolSeeding for pool distribution
-	seededPlayers := PoolSeeding(players, 4)
+	seededPlayers := PoolSeeding(players, 4, 1)
 
 	// Create pools with max size 3 -> should create 4 pools (3, 3, 2, 2)
 	pools, err := CreatePools(seededPlayers, 3, true)
@@ -1270,7 +1270,7 @@ func TestPoolSeeding(t *testing.T) {
 		players[3].Seed = 4
 
 		numPools := 12
-		result := PoolSeeding(players, numPools)
+		result := PoolSeeding(players, numPools, 1)
 
 		// Create pools to verify final placement
 		pools, err := CreatePools(result, 3, false)
@@ -1294,7 +1294,7 @@ func TestPoolSeeding(t *testing.T) {
 			players[i] = Player{Name: fmt.Sprintf("P%d", i+1), Seed: i + 1, Dojo: fmt.Sprintf("Dojo%d", i+1)}
 		}
 
-		result := PoolSeeding(players, numPools)
+		result := PoolSeeding(players, numPools, 1)
 		pools, err := CreatePools(result, 3, false)
 		assert.NoError(t, err)
 
@@ -1318,19 +1318,19 @@ func TestPoolSeeding(t *testing.T) {
 func TestPoolSeeding_CornerCases(t *testing.T) {
 	t.Run("zero pools returns input unchanged", func(t *testing.T) {
 		players := []Player{{Name: "A", Seed: 1}, {Name: "B"}}
-		result := PoolSeeding(players, 0)
+		result := PoolSeeding(players, 0, 1)
 		assert.Equal(t, players, result)
 	})
 
 	t.Run("negative pools returns input unchanged", func(t *testing.T) {
 		players := []Player{{Name: "A", Seed: 1}, {Name: "B"}}
-		result := PoolSeeding(players, -1)
+		result := PoolSeeding(players, -1, 1)
 		assert.Equal(t, players, result)
 	})
 
 	t.Run("no seeded players keeps unseeded order", func(t *testing.T) {
 		players := []Player{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}}
-		result := PoolSeeding(players, 2)
+		result := PoolSeeding(players, 2, 1)
 		// Unseeded should fill linearly in order.
 		assert.Equal(t, "A", result[0].Name)
 		assert.Equal(t, "B", result[1].Name)
@@ -1344,7 +1344,7 @@ func TestPoolSeeding_CornerCases(t *testing.T) {
 			{Name: "S2", Seed: 2},
 			{Name: "U1"},
 		}
-		result := PoolSeeding(players, 1)
+		result := PoolSeeding(players, 1, 1)
 		// All players present, seeds preserved.
 		seen := map[string]bool{}
 		for _, p := range result {
@@ -1361,7 +1361,7 @@ func TestPoolSeeding_CornerCases(t *testing.T) {
 		players[0].Seed = 1
 		players[1].Seed = 2
 		players[2].Seed = 3
-		result := PoolSeeding(players, 6)
+		result := PoolSeeding(players, 6, 1)
 		assert.Len(t, result, 17)
 
 		nonEmpty := 0
@@ -1401,7 +1401,7 @@ func TestPoolSeeding_DistributesSeedsAcrossPools(t *testing.T) {
 				players[i].Seed = i + 1
 			}
 
-			result := PoolSeeding(players, tt.numPools)
+			result := PoolSeeding(players, tt.numPools, 1)
 			pools, err := CreatePools(result, tt.poolSize, false)
 			assert.NoError(t, err)
 			assert.Len(t, pools, tt.numPools)
@@ -1479,6 +1479,372 @@ func TestStandardSeeding_DisplacedSeeds_NoMissingPlayers(t *testing.T) {
 	}
 }
 
+func TestPoolSeeding_DojoConflict(t *testing.T) {
+	// Regression test: LC2026 6+ mixed category had 5 players from Tora Dojo
+	// London and 1 seeded player. The seeded player shifted unseeded filling
+	// by one slot, causing the 5th Tora player to find no conflict-free pool
+	// and fall back to forceSameDojo — placing two Tora players in the same pool.
+	players := []Player{
+		{Name: "Walter McCahon", Dojo: "Tora Dojo London"},
+		{Name: "Ricardo Oliveira", Dojo: "Tora Dojo London"},
+		{Name: "Chris Bowden", Dojo: "Ichi Byoshi"},
+		{Name: "Ruairidh Pooler", Dojo: "Scotland"},
+		{Name: "Royth von Hahn", Dojo: "Kendo Dojo Koln"},
+		{Name: "Mykolas Maciulevicius", Dojo: "Iron Wolf Kendo Club"},
+		{Name: "Jonathan Fitzgerald", Dojo: "Peristeri Kenyukai"},
+		{Name: "Dominik Christ", Dojo: "Tora Dojo London"},
+		{Name: "Denis Arsenin", Dojo: "Latvian Kendo Federation"},
+		{Name: "Masatoshi Kurokawa", Dojo: "PSV MG"}, // "6" in column 4 is a dan grade, not a seed
+		{Name: "Barry Straughan", Dojo: "Kadode"},
+		{Name: "Andrew Lam", Dojo: "Tora Dojo London"},
+		{Name: "Alex Ansell", Dojo: "Shin Sei dojo"},
+		{Name: "Zenjiro Hamada", Dojo: "Oxford"},
+		{Name: "KAORU FUJITA", Dojo: "Tora Dojo London"},
+	}
+
+	result := PoolSeeding(players, 5, 2)
+	require.Len(t, result, 15)
+
+	pools, err := CreatePools(result, 3, false)
+	require.NoError(t, err)
+	require.Len(t, pools, 5)
+
+	for _, pool := range pools {
+		dojoCount := make(map[string]int)
+		for _, p := range pool.Players {
+			dojoCount[p.Dojo]++
+		}
+		for dojo, count := range dojoCount {
+			assert.Equal(t, 1, count,
+				"dojo %q has %d players in %s — expected at most 1", dojo, count, pool.PoolName)
+		}
+	}
+}
+
+func TestPoolSeeding_LargeSameDojo(t *testing.T) {
+	// Regression test: same-dojo players spread throughout the CSV (not grouped
+	// at the front) trigger the forceSameDojo fallback and land in the same pool.
+	// Each case uses dojoSize == numPools (worst case: every pool must absorb
+	// exactly one same-dojo player). Players are placed at evenly-spaced
+	// positions pos[i] = i*(total-1)/(D-1), which reproduces the adversarial
+	// ordering from the LC2026 bug. Grouping same-dojo at the front does NOT
+	// trigger the bug; this spread does.
+	tests := []struct {
+		name      string
+		dojoSize  int
+		numPools  int
+		poolSize  int
+		numCourts int
+	}{
+		{"4 same-dojo, 4 pools", 4, 4, 3, 2},
+		{"5 same-dojo, 5 pools", 5, 5, 3, 2},
+		{"6 same-dojo, 6 pools", 6, 6, 3, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			total := tt.numPools * tt.poolSize
+			players := make([]Player, total)
+
+			// Spread same-dojo players evenly: pos[i] = i*(total-1)/(dojoSize-1).
+			dojoPositions := make(map[int]bool, tt.dojoSize)
+			for i := range tt.dojoSize {
+				dojoPositions[i*(total-1)/(tt.dojoSize-1)] = true
+			}
+
+			dojoIdx, otherIdx := 0, 0
+			for i := range total {
+				if dojoPositions[i] {
+					players[i] = Player{Name: fmt.Sprintf("BigDojo%d", dojoIdx+1), Dojo: "BigDojo"}
+					dojoIdx++
+				} else {
+					otherIdx++
+					players[i] = Player{Name: fmt.Sprintf("Other%d", otherIdx), Dojo: fmt.Sprintf("Dojo%d", otherIdx)}
+				}
+			}
+
+			result := PoolSeeding(players, tt.numPools, tt.numCourts)
+			pools, err := CreatePools(result, tt.poolSize, false)
+			require.NoError(t, err)
+			require.Len(t, pools, tt.numPools)
+
+			for _, pool := range pools {
+				dojoCount := make(map[string]int)
+				for _, p := range pool.Players {
+					dojoCount[p.Dojo]++
+				}
+				assert.LessOrEqual(t, dojoCount["BigDojo"], 1,
+					"BigDojo has %d players in %s", dojoCount["BigDojo"], pool.PoolName)
+			}
+		})
+	}
+}
+
+func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
+	// Helper: build a pool of N players from one dojo plus filler from unique dojos.
+	makePlayers := func(dojoGroups map[string]int, fillerCount int) []Player {
+		players := []Player{}
+		for dojo, n := range dojoGroups {
+			for i := range n {
+				players = append(players, Player{Name: fmt.Sprintf("%s_%d", dojo, i+1), Dojo: dojo})
+			}
+		}
+		for i := range fillerCount {
+			players = append(players, Player{Name: fmt.Sprintf("Solo%d", i+1), Dojo: fmt.Sprintf("SoloDojo%d", i+1)})
+		}
+		return players
+	}
+
+	// Interleave dojoGroups players with filler at evenly-spaced positions per group.
+	makePlayersInterleaved := func(dojoGroups []struct {
+		Name string
+		Size int
+	}, fillerCount int) []Player {
+		total := fillerCount
+		for _, g := range dojoGroups {
+			total += g.Size
+		}
+		players := make([]Player, total)
+		used := make(map[int]bool)
+		for _, g := range dojoGroups {
+			if g.Size == 1 {
+				// place at midpoint
+				pos := total / 2
+				for used[pos] {
+					pos = (pos + 1) % total
+				}
+				used[pos] = true
+				players[pos] = Player{Name: fmt.Sprintf("%s_1", g.Name), Dojo: g.Name}
+				continue
+			}
+			for i := range g.Size {
+				pos := i * (total - 1) / (g.Size - 1)
+				for used[pos] {
+					pos = (pos + 1) % total
+				}
+				used[pos] = true
+				players[pos] = Player{Name: fmt.Sprintf("%s_%d", g.Name, i+1), Dojo: g.Name}
+			}
+		}
+		soloIdx := 0
+		for i := range total {
+			if !used[i] {
+				soloIdx++
+				players[i] = Player{Name: fmt.Sprintf("Solo%d", soloIdx), Dojo: fmt.Sprintf("SoloDojo%d", soloIdx)}
+			}
+		}
+		return players
+	}
+
+	t.Run("two competing large dojos 5+5 in 5 pools", func(t *testing.T) {
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"Alpha", 5}, {"Beta", 5}}, 5)
+		result := PoolSeeding(players, 5, 2)
+		pools, err := CreatePools(result, 3, false)
+		require.NoError(t, err)
+		for _, pool := range pools {
+			counts := map[string]int{}
+			for _, p := range pool.Players {
+				counts[p.Dojo]++
+			}
+			assert.LessOrEqual(t, counts["Alpha"], 1, "Alpha doubled in %s", pool.PoolName)
+			assert.LessOrEqual(t, counts["Beta"], 1, "Beta doubled in %s", pool.PoolName)
+		}
+	})
+
+	t.Run("dojo larger than pool count - doubling unavoidable but bounded", func(t *testing.T) {
+		// 6 from one dojo into 5 pools: at least one pool MUST have 2; expect <= 2.
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"Mega", 6}}, 9)
+		result := PoolSeeding(players, 5, 2)
+		pools, err := CreatePools(result, 3, false)
+		require.NoError(t, err)
+		doublings := 0
+		for _, pool := range pools {
+			c := 0
+			for _, p := range pool.Players {
+				if p.Dojo == "Mega" {
+					c++
+				}
+			}
+			assert.LessOrEqual(t, c, 2, "Mega tripled in %s", pool.PoolName)
+			if c == 2 {
+				doublings++
+			}
+		}
+		assert.LessOrEqual(t, doublings, 1, "expected at most 1 pool with 2 Mega players, got %d", doublings)
+	})
+
+	t.Run("three medium dojos 3+3+3 in 3 pools", func(t *testing.T) {
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"Red", 3}, {"Blue", 3}, {"Green", 3}}, 0)
+		result := PoolSeeding(players, 3, 2)
+		pools, err := CreatePools(result, 3, false)
+		require.NoError(t, err)
+		for _, pool := range pools {
+			counts := map[string]int{}
+			for _, p := range pool.Players {
+				counts[p.Dojo]++
+			}
+			for d, c := range counts {
+				assert.Equal(t, 1, c, "dojo %s has %d in %s", d, c, pool.PoolName)
+			}
+		}
+	})
+
+	t.Run("equal-size dojos resolve via stable tiebreak", func(t *testing.T) {
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"AAA", 4}, {"BBB", 4}}, 4)
+		result := PoolSeeding(players, 4, 2)
+		pools, err := CreatePools(result, 3, false)
+		require.NoError(t, err)
+		for _, pool := range pools {
+			counts := map[string]int{}
+			for _, p := range pool.Players {
+				counts[p.Dojo]++
+			}
+			assert.LessOrEqual(t, counts["AAA"], 1)
+			assert.LessOrEqual(t, counts["BBB"], 1)
+		}
+	})
+
+	t.Run("seeded player from a large dojo", func(t *testing.T) {
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"Big", 5}}, 10)
+		// Mark one Big player as seeded.
+		for i := range players {
+			if players[i].Dojo == "Big" {
+				players[i].Seed = 1
+				break
+			}
+		}
+		result := PoolSeeding(players, 5, 2)
+		pools, err := CreatePools(result, 3, false)
+		require.NoError(t, err)
+		for _, pool := range pools {
+			c := 0
+			for _, p := range pool.Players {
+				if p.Dojo == "Big" {
+					c++
+				}
+			}
+			assert.LessOrEqual(t, c, 1, "Big doubled in %s", pool.PoolName)
+		}
+	})
+
+	t.Run("pool size 4 with large dojo", func(t *testing.T) {
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"Big", 5}}, 15)
+		result := PoolSeeding(players, 5, 2)
+		pools, err := CreatePools(result, 4, false)
+		require.NoError(t, err)
+		for _, pool := range pools {
+			c := 0
+			for _, p := range pool.Players {
+				if p.Dojo == "Big" {
+					c++
+				}
+			}
+			assert.LessOrEqual(t, c, 1, "Big doubled in %s", pool.PoolName)
+		}
+	})
+
+	t.Run("isMax with imbalanced sizes", func(t *testing.T) {
+		// 13 players, poolSize=3, isMax=true → 5 pools (3,3,3,2,2).
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"Big", 5}}, 8)
+		result := PoolSeeding(players, 5, 2)
+		pools, err := CreatePools(result, 3, true)
+		require.NoError(t, err)
+		for _, pool := range pools {
+			c := 0
+			for _, p := range pool.Players {
+				if p.Dojo == "Big" {
+					c++
+				}
+			}
+			assert.LessOrEqual(t, c, 1, "Big doubled in %s", pool.PoolName)
+		}
+	})
+
+	t.Run("single pool degenerate", func(t *testing.T) {
+		players := makePlayers(map[string]int{"X": 2}, 1)
+		result := PoolSeeding(players, 1, 1)
+		pools, err := CreatePools(result, 3, false)
+		require.NoError(t, err)
+		require.Len(t, pools, 1)
+		assert.Len(t, pools[0].Players, 3)
+	})
+
+	t.Run("all players from one dojo", func(t *testing.T) {
+		// Degenerate: doubling unavoidable; just ensure no crash and all placed.
+		players := []Player{}
+		for i := range 9 {
+			players = append(players, Player{Name: fmt.Sprintf("OnlyOne_%d", i+1), Dojo: "Only"})
+		}
+		result := PoolSeeding(players, 3, 2)
+		pools, err := CreatePools(result, 3, false)
+		require.NoError(t, err)
+		total := 0
+		for _, p := range pools {
+			total += len(p.Players)
+		}
+		assert.Equal(t, 9, total)
+	})
+
+	t.Run("two large dojos plus one small dojo", func(t *testing.T) {
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"Alpha", 4}, {"Beta", 4}, {"Gamma", 2}}, 5)
+		result := PoolSeeding(players, 5, 2)
+		pools, err := CreatePools(result, 3, false)
+		require.NoError(t, err)
+		for _, pool := range pools {
+			counts := map[string]int{}
+			for _, p := range pool.Players {
+				counts[p.Dojo]++
+			}
+			assert.LessOrEqual(t, counts["Alpha"], 1)
+			assert.LessOrEqual(t, counts["Beta"], 1)
+			assert.LessOrEqual(t, counts["Gamma"], 1)
+		}
+	})
+
+	t.Run("4 courts distribute correctly with large dojo", func(t *testing.T) {
+		players := makePlayersInterleaved([]struct {
+			Name string
+			Size int
+		}{{"Big", 4}}, 12)
+		result := PoolSeeding(players, 4, 4)
+		pools, err := CreatePools(result, 4, false)
+		require.NoError(t, err)
+		for _, pool := range pools {
+			c := 0
+			for _, p := range pool.Players {
+				if p.Dojo == "Big" {
+					c++
+				}
+			}
+			assert.LessOrEqual(t, c, 1, "Big doubled in %s", pool.PoolName)
+		}
+	})
+}
+
 func TestApplySeeds_DuplicateSeedRanks(t *testing.T) {
 	t.Run("rejects two assignments with the same rank", func(t *testing.T) {
 		players := []Player{
@@ -1508,4 +1874,44 @@ func TestApplySeeds_DuplicateSeedRanks(t *testing.T) {
 		err := ApplySeeds(players, assignments)
 		require.NoError(t, err)
 	})
+}
+
+// TestPoolSeeding_SingleCourt_DojoSpread covers the numCourts == 1 path where
+// the court-aware priority logic collapses to a single bracket. Two large
+// dojos must still be spread across pools instead of being placed together by
+// PoolSeeding's dojo-clustering step.
+func TestPoolSeeding_SingleCourt_DojoSpread(t *testing.T) {
+	t.Parallel()
+
+	const numPools = 4
+	const poolSize = 3
+	total := numPools * poolSize
+
+	players := make([]Player, 0, total)
+	// Two large dojo groups (4 each) plus 4 unique-dojo fillers.
+	for i := 0; i < 4; i++ {
+		players = append(players, Player{Name: fmt.Sprintf("Alpha%d", i+1), Dojo: "AlphaDojo"})
+	}
+	for i := 0; i < 4; i++ {
+		players = append(players, Player{Name: fmt.Sprintf("Beta%d", i+1), Dojo: "BetaDojo"})
+	}
+	for i := 0; i < 4; i++ {
+		players = append(players, Player{Name: fmt.Sprintf("Solo%d", i+1), Dojo: fmt.Sprintf("SoloDojo%d", i+1)})
+	}
+
+	result := PoolSeeding(players, numPools, 1)
+	pools, err := CreatePools(result, poolSize, false)
+	require.NoError(t, err)
+	require.Len(t, pools, numPools)
+
+	for _, pool := range pools {
+		dojoCount := make(map[string]int)
+		for _, p := range pool.Players {
+			dojoCount[p.Dojo]++
+		}
+		assert.LessOrEqual(t, dojoCount["AlphaDojo"], 1,
+			"AlphaDojo overpopulated %s: %v", pool.PoolName, dojoCount)
+		assert.LessOrEqual(t, dojoCount["BetaDojo"], 1,
+			"BetaDojo overpopulated %s: %v", pool.PoolName, dojoCount)
+	}
 }

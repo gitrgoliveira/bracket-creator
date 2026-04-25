@@ -1,30 +1,8 @@
 package test
 
 import (
-	"io/fs"
-	"testing"
-	"testing/fstest"
-	"time"
-
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
-
-// CreateTestFS creates an in-memory filesystem for testing
-func CreateTestFS(t *testing.T) fs.FS {
-	// Create a minimal Excel file
-	excelData := []byte{
-		0x50, 0x4B, 0x03, 0x04, // PK signature for ZIP files
-		// This is not a real Excel file, just testing error handling
-	}
-
-	return fstest.MapFS{
-		"template.xlsx": &fstest.MapFile{
-			Data:    excelData,
-			Mode:    0644,
-			ModTime: time.Now(),
-		},
-	}
-}
 
 // CreateTestPlayers returns a slice of players for testing
 func CreateTestPlayers() []domain.Player {

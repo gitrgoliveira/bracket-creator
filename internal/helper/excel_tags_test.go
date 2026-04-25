@@ -53,29 +53,23 @@ func TestCreateTagsSheet(t *testing.T) {
 		t.Errorf("Expected row height 390, got %f", height)
 	}
 
-	// 5. Verification - Content: tags use pool letter + position
-	val, err := f.GetCellValue(sheetName, "A1")
-	if err != nil {
-		t.Errorf("Failed to get cell value: %v", err)
+	// 5. Verification - each tag appears twice consecutively (same A4 page)
+	// Player 1 (A1): rows 1 and 2
+	// Player 2 (A2): rows 3 and 4
+	// Player 3 (A3): rows 5 and 6
+	expected := map[string]string{
+		"A1": "A1", "A2": "A1",
+		"A3": "A2", "A4": "A2",
+		"A5": "A3", "A6": "A3",
 	}
-	if val != "A1" {
-		t.Errorf("Expected cell A1 to contain 'A1', got '%s'", val)
-	}
-
-	val, err = f.GetCellValue(sheetName, "A2")
-	if err != nil {
-		t.Errorf("Failed to get cell value: %v", err)
-	}
-	if val != "A2" {
-		t.Errorf("Expected cell A2 to contain 'A2', got '%s'", val)
-	}
-
-	// 6. Verification - 3 players → 3 rows written, last row is on second page
-	val3, err := f.GetCellValue(sheetName, "A3")
-	if err != nil {
-		t.Errorf("Failed to get cell A3 value: %v", err)
-	}
-	if val3 != "A3" {
-		t.Errorf("Expected cell A3 to contain 'A3', got '%s'", val3)
+	for cell, want := range expected {
+		got, err := f.GetCellValue(sheetName, cell)
+		if err != nil {
+			t.Errorf("Failed to get cell %s: %v", cell, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("Expected cell %s to contain %q, got %q", cell, want, got)
+		}
 	}
 }

@@ -1,28 +1,23 @@
 // Package resources manages embedded resources for the application
 package resources
 
-import "embed"
+import "io/fs"
 
-// Resources holds embedded application resources
+// Resources holds embedded application resources.
+// Fields use the fs.FS interface so that both embed.FS (production) and
+// fstest.MapFS (tests) can be used.
 type Resources struct {
-	WebFiles     embed.FS
-	TemplateFile embed.FS
+	WebFiles fs.FS
 }
 
 // NewResources creates a new resources handler
-func NewResources(webFiles, templateFile embed.FS) *Resources {
+func NewResources(webFiles fs.FS) *Resources {
 	return &Resources{
-		WebFiles:     webFiles,
-		TemplateFile: templateFile,
+		WebFiles: webFiles,
 	}
 }
 
 // GetWebFS returns the embedded web file system
-func (r *Resources) GetWebFS() embed.FS {
+func (r *Resources) GetWebFS() fs.FS {
 	return r.WebFiles
-}
-
-// GetTemplateFS returns the embedded template file system
-func (r *Resources) GetTemplateFS() embed.FS {
-	return r.TemplateFile
 }

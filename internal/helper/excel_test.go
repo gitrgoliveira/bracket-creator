@@ -70,13 +70,13 @@ func TestWriteTreeValue(t *testing.T) {
 
 	// Test 2: Test with matchWinners map (should create formula)
 	matchWinners := map[string]MatchWinner{
-		"Pool A.1": {
+		"Pool A-1st": {
 			sheetName: "Pool Matches",
 			cell:      "G10",
 		},
 	}
 
-	writeTreeValue(f, sheetName, 1, 2, "Pool A.1", matchWinners)
+	writeTreeValue(f, sheetName, 1, 2, "Pool A-1st", matchWinners)
 
 	// Verify the formula was set (column 2, row 2 corresponds to B2)
 	cellRef2, _ := excelize.CoordinatesToCellName(2, 2)
@@ -85,13 +85,13 @@ func TestWriteTreeValue(t *testing.T) {
 		t.Fatalf("Error getting cell formula: %v", err)
 	}
 
-	expectedFormula := `CONCATENATE("Pool A.1 ",'Pool Matches'!G10)`
+	expectedFormula := `CONCATENATE("Pool A-1st ",'Pool Matches'!G10)`
 	if formula != expectedFormula {
 		t.Errorf("Expected formula to be '%s', got '%s'", expectedFormula, formula)
 	}
 
 	// Test 3: Test with pool reference not in matchWinners (should set static value)
-	writeTreeValue(f, sheetName, 1, 3, "B.2", matchWinners)
+	writeTreeValue(f, sheetName, 1, 3, "B-2nd", matchWinners)
 
 	cellRef3, _ := excelize.CoordinatesToCellName(2, 3)
 	value3, err := f.GetCellValue(sheetName, cellRef3)
@@ -99,8 +99,8 @@ func TestWriteTreeValue(t *testing.T) {
 		t.Fatalf("Error getting cell value: %v", err)
 	}
 
-	if value3 != "B.2" {
-		t.Errorf("Expected cell value to be 'B.2', got '%s'", value3)
+	if value3 != "B-2nd" {
+		t.Errorf("Expected cell value to be 'B-2nd', got '%s'", value3)
 	}
 }
 
@@ -144,7 +144,7 @@ func TestAddPlayerDataWithMetadata(t *testing.T) {
 		},
 	}
 
-	AddPlayerDataToSheet(f, players, true)
+	AddPlayerDataToSheet(f, players, true, "")
 
 	// Check Display Name (Column D)
 	val, _ := f.GetCellValue(sheetName, "D3")
@@ -472,14 +472,14 @@ func TestWriteTreeValueExtended(t *testing.T) {
 			name:         "static pool reference",
 			col:          2,
 			startRow:     5,
-			value:        "Pool A.1",
+			value:        "Pool A-1st",
 			matchWinners: nil,
 			validateFunc: func(t *testing.T, f *excelize.File, sheet string, col int, startRow int) {
 				colLetter, _ := excelize.ColumnNumberToName(col + 1)
 				cellRef := colLetter + "5"
 				val, _ := f.GetCellValue(sheet, cellRef)
-				if val != "Pool A.1" {
-					t.Errorf("Expected 'Pool A.1', got '%s'", val)
+				if val != "Pool A-1st" {
+					t.Errorf("Expected 'Pool A-1st', got '%s'", val)
 				}
 			},
 		},
@@ -487,9 +487,9 @@ func TestWriteTreeValueExtended(t *testing.T) {
 			name:     "formula with match winner",
 			col:      3,
 			startRow: 10,
-			value:    "Pool B.2",
+			value:    "Pool B-2nd",
 			matchWinners: map[string]MatchWinner{
-				"Pool B.2": {
+				"Pool B-2nd": {
 					sheetName: "MatchSheet",
 					cell:      "E5",
 				},
@@ -635,5 +635,130 @@ func TestPrintPoolMatchesCourts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMatchHeader(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	sheet := "MatchHeaderSheet"
+	f.NewSheet(sheet)
+
+	// test no mirror
+	MatchHeader(f, sheet, "A", 1, "D", "G", false)
+	val1, _ := f.GetCellValue(sheet, "A1")
+	if val1 != "Red" {
+		t.Errorf("Expected 'Red', got '%s'", val1)
+	}
+	val2, _ := f.GetCellValue(sheet, "G1")
+	if val2 != "White" {
+		t.Errorf("Expected 'White', got '%s'", val2)
+	}
+
+	// test mirror
+	MatchHeader(f, sheet, "A", 2, "D", "G", true)
+	val3, _ := f.GetCellValue(sheet, "A2")
+	if val3 != "White" {
+		t.Errorf("Expected 'White', got '%s'", val3)
+	}
+	val4, _ := f.GetCellValue(sheet, "G2")
+	if val4 != "Red" {
+		t.Errorf("Expected 'Red', got '%s'", val4)
+	}
+}
+
+func TestSetupNamesToPrintLayout(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	sheetName := "LayoutSheet"
+	f.NewSheet(sheetName)
+
+	setupNamesToPrintLayout(f, sheetName)
+
+	width, _ := f.GetColWidth(sheetName, "A")
+	if width != 30 {
+		t.Errorf("Expected column A width 30, got %f", width)
+	}
+	widthB, _ := f.GetColWidth(sheetName, "B")
+	if widthB != 160 {
+		t.Errorf("Expected column B width 160, got %f", widthB)
+	}
+}
+
+func TestCreateNamesToPrint(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool1")
+	f.NewSheet("Names to Print")
+
+	players := []Player{
+		{Name: "Player1", PoolPosition: 1, sheetName: "Pool1", cell: "B2"},
+		{Name: "Player2", PoolPosition: 2, sheetName: "Pool1", cell: "B3"},
+	}
+
+	CreateNamesToPrint(f, players, false)
+	CreateNamesToPrint(f, players, true)
+
+	valA1, _ := f.GetCellValue("Names to Print", "A1")
+	if valA1 != "1" {
+		t.Errorf("Expected '1', got '%s'", valA1)
+	}
+	valA2, _ := f.GetCellValue("Names to Print", "A2")
+	if valA2 != "2" {
+		t.Errorf("Expected '2', got '%s'", valA2)
+	}
+}
+
+func TestCreateNamesWithPoolToPrint(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool1")
+	f.NewSheet("Names to Print")
+
+	pools := []Pool{
+		{
+			PoolName: "Pool A",
+			Players: []Player{
+				{Name: "Player1", PoolPosition: 1, sheetName: "Pool1", cell: "B2"},
+				{Name: "Player2", PoolPosition: 2, sheetName: "Pool1", cell: "B3"},
+			},
+		},
+	}
+
+	CreateNamesWithPoolToPrint(f, pools, false)
+	CreateNamesWithPoolToPrint(f, pools, true)
+
+	valA1, _ := f.GetCellValue("Names to Print", "A1")
+	if valA1 != "A1" {
+		t.Errorf("Expected 'A1', got '%s'", valA1)
+	}
+	valA2, _ := f.GetCellValue("Names to Print", "A2")
+	if valA2 != "A2" {
+		t.Errorf("Expected 'A2', got '%s'", valA2)
+	}
+}
+
+func TestFillEstimations(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Time Estimator")
+
+	FillEstimations(f, 5, 20, 1, 10, 2)
+
+	valA2, _ := f.GetCellValue("Time Estimator", "A2")
+	if valA2 != "5" {
+		t.Errorf("Expected 5, got %s", valA2)
+	}
+	valB2, _ := f.GetCellValue("Time Estimator", "B2")
+	if valB2 != "1" {
+		t.Errorf("Expected 1, got %s", valB2)
+	}
+	valC2, _ := f.GetCellValue("Time Estimator", "C2")
+	if valC2 != "20" {
+		t.Errorf("Expected 20, got %s", valC2)
+	}
+	valA14, _ := f.GetCellValue("Time Estimator", "A14")
+	if valA14 != "2" {
+		t.Errorf("Expected 2, got %s", valA14)
 	}
 }

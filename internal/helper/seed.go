@@ -5,8 +5,20 @@ import (
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
+// generateBracketOrder returns the slot indices for a standard tournament
+// bracket of size n (must be a power of 2).  The recursion ensures that:
+//   - seeds 1 and n are placed in opposite halves of the draw, so they can
+//     only meet in the final;
+//   - seeds 2 and (n-1) are placed in opposite halves within their halves,
+//     so they can only meet in the semis;
+//   - and so on recursively.
+//
+// Example (n=4): returns [1, 4, 2, 3], meaning slot 0 gets seed 1,
+// slot 1 gets seed 4, slot 2 gets seed 2, slot 3 gets seed 3.
 func generateBracketOrder(n int) []int {
 	if n <= 1 {
 		return []int{1}
@@ -66,9 +78,14 @@ func StandardSeeding(players []Player) []Player {
 		}
 	}
 
-	// Handle displaced seeds (those whose rank position was out of range)
-	// Place them in unoccupied slots furthest from already placed seeds to ensure distribution.
-	// Tie-break: when multiple slots share the maximum minimum-distance, the highest index wins.
+	// Handle displaced seeds — seeds whose natural bracket position (determined
+	// by generateBracketOrder) exceeds len(players) because the bracket size
+	// is rounded up to the nearest power of 2 but there are fewer actual
+	// participants.  Each displaced seed is placed in the unoccupied slot that
+	// maximises the nearest-neighbour distance to all already-placed seeds.
+	// Tie-break: when multiple empty slots share the same maximum distance,
+	// the highest-index slot wins, which keeps the bracket visually consistent
+	// when several seeds are displaced.
 	if len(seedMap) > 0 {
 		// Collect remaining seeds in rank order (seeded is already sorted by Seed).
 		remainingSeeds := make([]Player, 0, len(seedMap))
@@ -146,19 +163,17 @@ func StandardSeeding(players []Player) []Player {
 }
 
 // PoolSeeding reorders players for pool distribution so that top seeds land
-// in pools that are as far apart as possible.
+// in pools that are appropriately spread across the given number of courts.
 //
-// Distribution priority (see generatePoolPriority): both extremes first, then
-// the inner midpoints, then a recursive midpoint of the remaining gaps. For
-// example, with 4 pools the priority is [0, 3, 1, 2] and seeds 1..4 are
-// assigned to pools 0, 3, 1, 2 in that order. Seeds beyond numPools wrap to
-// the next "row" using the same priority.
-//
-// The returned slice is laid out so that calling CreatePools (which fills
-// pools linearly) places each seed in the intended pool.
-func PoolSeeding(players []Player, numPools int) []Player {
+// It assigns seeds to courts in a round-robin fashion and uses a per-court
+// priority to ensure correct bracket placement (e.g., top and bottom of the
+// court's bracket) after the pools are deinterleaved by ReorderPoolsForCourts.
+func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 	if numPools <= 0 {
 		return players
+	}
+	if numCourts < 1 {
+		numCourts = 1
 	}
 
 	seeded := make([]Player, 0)
@@ -177,26 +192,65 @@ func PoolSeeding(players []Player, numPools int) []Player {
 		return seeded[i].Seed < seeded[j].Seed
 	})
 
-	priority := generatePoolPriority(numPools)
+	// Cluster unseeded players by dojo (largest groups first) so that players
+	// from the same dojo occupy consecutive result slots. Consecutive slots map
+	// to distinct start-pool indices mod numPools, preventing forceSameDojo
+	// fallback from landing same-dojo players in the same pool.
+	dojoCount := make(map[string]int)
+	for _, p := range unseeded {
+		dojoCount[p.Dojo]++
+	}
+	sort.SliceStable(unseeded, func(i, j int) bool {
+		ci, cj := dojoCount[unseeded[i].Dojo], dojoCount[unseeded[j].Dojo]
+		if ci != cj {
+			return ci > cj
+		}
+		if unseeded[i].Dojo != unseeded[j].Dojo {
+			return unseeded[i].Dojo < unseeded[j].Dojo
+		}
+		return false
+	})
+
+	// Determine how many pools are assigned to each court
+	courtPoolCounts := make([]int, numCourts)
+	for i := 0; i < numPools; i++ {
+		courtPoolCounts[i%numCourts]++
+	}
+
+	// Generate priority for each court
+	courtPriorities := make([][]int, numCourts)
+	for c := 0; c < numCourts; c++ {
+		courtPriorities[c] = generatePoolPriority(courtPoolCounts[c])
+	}
 
 	// We want to interleave players such that CreatePools (which fills linearly)
 	// puts them in the correct pools.
-	// Order: [Pool_0_Pos0, Pool_1_Pos0, ..., Pool_N-1_Pos0, Pool_0_Pos1, ...]
 	result := make([]Player, len(players))
 	occupied := make(map[int]bool)
 
-	// Assign seeded players based on priority order. If the preferred slot is
-	// taken (or out of range), step through the priority ring at the same
-	// position-in-pool to keep pool distribution balanced before falling back
-	// to a linear scan.
+	// Assign seeded players based on court-aware priority order.
 	for i, p := range seeded {
+		// global pool rank (0 to numPools-1)
 		poolRank := i % numPools
-		posInPool := i / numPools
+		posInPool := i / numPools // which slot within the pool
 
 		placed := false
 		for offset := 0; offset < numPools && !placed; offset++ {
-			poolIdx := priority[(poolRank+offset)%numPools]
-			targetIdx := posInPool*numPools + poolIdx
+			// calculate the court and local pool index for (poolRank+offset)
+			currentRank := (poolRank + offset) % numPools
+			courtIdx := currentRank % numCourts
+			posInCourt := currentRank / numCourts
+
+			var globalPoolIdx int
+			if courtPoolCounts[courtIdx] > 0 {
+				localPoolIdx := courtPriorities[courtIdx][posInCourt%courtPoolCounts[courtIdx]]
+				globalPoolIdx = localPoolIdx*numCourts + courtIdx
+			} else {
+				// Fallback if a court has 0 pools (shouldn't happen if numCourts <= numPools)
+				globalPoolIdx = currentRank
+			}
+
+			targetIdx := posInPool*numPools + globalPoolIdx
 			if targetIdx < len(players) && !occupied[targetIdx] {
 				result[targetIdx] = p
 				occupied[targetIdx] = true
@@ -228,6 +282,20 @@ func PoolSeeding(players []Player, numPools int) []Player {
 	return result
 }
 
+// generatePoolPriority returns an ordering of pool indices (0..n-1) designed
+// to spread top seeds across courts as evenly as possible.  The algorithm
+// is a recursive bisection:
+//
+//  1. Start with the two extremes: index 0 and index n-1, so seeds 1 and 2
+//     land at opposite ends of the draw.
+//  2. Add the two midpoints (⌊(n-1)/2⌋ and ⌈(n-1)/2⌉), placing seeds 3 and 4
+//     in the centre of each half.
+//  3. Repeatedly find the largest gap between already-placed indices and insert
+//     the midpoint of that gap until all n pool indices are assigned.
+//  4. When no gap larger than 1 remains, fill any unassigned indices linearly.
+//
+// Example (n=4): [0, 3, 1, 2]
+// Example (n=6): [0, 5, 2, 3, 1, 4]
 func generatePoolPriority(n int) []int {
 	if n <= 0 {
 		return []int{}
@@ -307,6 +375,7 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 	}
 
 	seenSeeds := make(map[int]string)
+	c := cases.Title(language.Und, cases.NoLower)
 	for _, a := range assignments {
 		if a.SeedRank > 0 {
 			if name, seen := seenSeeds[a.SeedRank]; seen {
@@ -315,7 +384,7 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 			seenSeeds[a.SeedRank] = a.Name
 		}
 
-		p, ok := playerMap[a.Name]
+		p, ok := playerMap[c.String(a.Name)]
 		if !ok {
 			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}

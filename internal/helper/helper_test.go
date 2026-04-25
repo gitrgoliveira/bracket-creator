@@ -9,6 +9,68 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCheckDuplicateEntries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{name: "no duplicates", input: []string{"a", "b", "c"}, expected: []string{}},
+		{name: "single duplicate", input: []string{"a", "b", "a"}, expected: []string{"a"}},
+		{name: "multiple duplicates", input: []string{"a", "b", "a", "c", "b"}, expected: []string{"a", "b"}},
+		{name: "triple of one entry reported once", input: []string{"a", "a", "a"}, expected: []string{"a"}},
+		{name: "ignores empty strings", input: []string{"", "a", "", "b", ""}, expected: []string{}},
+		{name: "case sensitive", input: []string{"Alice", "alice"}, expected: []string{}},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := CheckDuplicateEntries(tt.input)
+			if len(tt.expected) == 0 {
+				assert.Empty(t, got)
+			} else {
+				assert.Equal(t, tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestValidateCourts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		n       int
+		wantErr string
+	}{
+		{name: "zero rejected", n: 0, wantErr: "courts must be >= 1"},
+		{name: "negative rejected", n: -1, wantErr: "courts must be >= 1"},
+		{name: "min accepted", n: 1},
+		{name: "two accepted", n: 2},
+		{name: "max accepted", n: MaxCourts},
+		{name: "above max rejected", n: MaxCourts + 1, wantErr: "courts must be <= 26"},
+		{name: "way above max rejected", n: 100, wantErr: "courts must be <= 26"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateCourts(tt.n)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestRemoveDuplicates(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -193,20 +255,27 @@ func TestRowStack_Push(t *testing.T) {
 	stack := &RowStack{}
 
 	stack.Push(1)
-	assert.Equal(t, 1, stack.Peek())
+	v, err := stack.Peek()
+	require.NoError(t, err)
+	assert.Equal(t, 1, v)
 
 	stack.Push(2)
-	assert.Equal(t, 2, stack.Peek())
+	v, err = stack.Peek()
+	require.NoError(t, err)
+	assert.Equal(t, 2, v)
 
 	stack.Push(3)
-	assert.Equal(t, 3, stack.Peek())
+	v, err = stack.Peek()
+	require.NoError(t, err)
+	assert.Equal(t, 3, v)
 }
 
 func TestRowStack_Pop(t *testing.T) {
 	tests := []struct {
-		name     string
-		initial  []int
-		expected int
+		name        string
+		initial     []int
+		expected    int
+		expectError bool
 	}{
 		{
 			name:     "pop from stack with one element",
@@ -219,17 +288,22 @@ func TestRowStack_Pop(t *testing.T) {
 			expected: 3,
 		},
 		{
-			name:     "pop from empty stack",
-			initial:  []int{},
-			expected: -1,
+			name:        "pop from empty stack returns error",
+			initial:     []int{},
+			expectError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stack := &RowStack{data: tt.initial}
-			result := stack.Pop()
-			assert.Equal(t, tt.expected, result)
+			result, err := stack.Pop()
+			if tt.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
 		})
 	}
 }
@@ -239,7 +313,7 @@ func TestRowStack_Peek(t *testing.T) {
 		name        string
 		initial     []int
 		expected    int
-		shouldPanic bool
+		expectError bool
 	}{
 		{
 			name:     "peek at stack with one element",
@@ -252,25 +326,22 @@ func TestRowStack_Peek(t *testing.T) {
 			expected: 3,
 		},
 		{
-			name:        "peek at empty stack",
+			name:        "peek at empty stack returns error",
 			initial:     []int{},
-			shouldPanic: true,
+			expectError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stack := &RowStack{data: tt.initial}
-
-			if tt.shouldPanic {
-				assert.Panics(t, func() {
-					stack.Peek()
-				})
-				return
+			result, err := stack.Peek()
+			if tt.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
 			}
-
-			result := stack.Peek()
-			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -318,38 +389,53 @@ func TestRowStack_PushHighest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			stack := &RowStack{}
 			stack.PushHighest(tt.first, tt.second)
-			assert.Equal(t, tt.expected, stack.Peek())
+			v, err := stack.Peek()
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, v)
 		})
 	}
 }
 
 func TestRowStack_Operations(t *testing.T) {
+	mustPop := func(t *testing.T, s *RowStack) int {
+		t.Helper()
+		v, err := s.Pop()
+		require.NoError(t, err)
+		return v
+	}
+	mustPeek := func(t *testing.T, s *RowStack) int {
+		t.Helper()
+		v, err := s.Peek()
+		require.NoError(t, err)
+		return v
+	}
+
 	t.Run("push pop sequence", func(t *testing.T) {
 		stack := &RowStack{}
 
-		// Push multiple values
 		stack.Push(1)
 		stack.Push(2)
 		stack.Push(3)
 
 		// Pop in reverse order
-		assert.Equal(t, 3, stack.Pop())
-		assert.Equal(t, 2, stack.Pop())
-		assert.Equal(t, 1, stack.Pop())
-		assert.Equal(t, -1, stack.Pop()) // Empty stack
+		assert.Equal(t, 3, mustPop(t, stack))
+		assert.Equal(t, 2, mustPop(t, stack))
+		assert.Equal(t, 1, mustPop(t, stack))
+		_, err := stack.Pop() // Empty stack returns error
+		require.Error(t, err)
 	})
 
 	t.Run("push highest sequence", func(t *testing.T) {
 		stack := &RowStack{}
 
 		stack.PushHighest(10, 5)
-		assert.Equal(t, 10, stack.Peek())
+		assert.Equal(t, 10, mustPeek(t, stack))
 
 		stack.PushHighest(3, 7)
-		assert.Equal(t, 7, stack.Peek())
+		assert.Equal(t, 7, mustPeek(t, stack))
 
-		assert.Equal(t, 7, stack.Pop())
-		assert.Equal(t, 10, stack.Pop())
+		assert.Equal(t, 7, mustPop(t, stack))
+		assert.Equal(t, 10, mustPop(t, stack))
 	})
 
 	t.Run("mixed operations", func(t *testing.T) {
@@ -359,9 +445,9 @@ func TestRowStack_Operations(t *testing.T) {
 		stack.PushHighest(5, 3)
 		stack.Push(2)
 
-		assert.Equal(t, 2, stack.Pop())
-		assert.Equal(t, 5, stack.Pop())
-		assert.Equal(t, 1, stack.Pop())
+		assert.Equal(t, 2, mustPop(t, stack))
+		assert.Equal(t, 5, mustPop(t, stack))
+		assert.Equal(t, 1, mustPop(t, stack))
 	})
 }
 
@@ -514,6 +600,107 @@ func TestReorderPoolsForCourts(t *testing.T) {
 			}
 			assert.Equal(t, tt.expectedSizes, sizes, "pool sizes after reorder")
 			assert.Equal(t, tt.expectedNames, names, "pool names after reorder")
+		})
+	}
+}
+
+func TestIsDigit(t *testing.T) {
+	tests := []struct {
+		name     string
+		ch       byte
+		expected bool
+	}{
+		{"digit 0", '0', true},
+		{"digit 5", '5', true},
+		{"digit 9", '9', true},
+		{"letter a", 'a', false},
+		{"letter Z", 'Z', false},
+		{"special char", '-', false},
+		{"space", ' ', false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isDigit(tt.ch))
+		})
+	}
+}
+
+func TestExtractPrefixAndSuffix(t *testing.T) {
+	tests := []struct {
+		name           string
+		str            string
+		expectedPrefix string
+		expectedSuffix string
+	}{
+		{"only letters", "abc", "abc", ""},
+		{"only digits", "123", "", "123"},
+		{"letters and digits", "pool12", "pool", "12"},
+		{"mixed digits inside", "p1ool12", "p1ool", "12"},
+		{"empty string", "", "", ""},
+		{"letters then digits then letters", "abc12xyz", "abc12xyz", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prefix, suffix := extractPrefixAndSuffix(tt.str)
+			assert.Equal(t, tt.expectedPrefix, prefix)
+			assert.Equal(t, tt.expectedSuffix, suffix)
+		})
+	}
+}
+
+func TestOrderStringsAlphabetically(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []*Node
+		expected []*Node
+	}{
+		{
+			name: "numerical suffix ordering",
+			input: []*Node{
+				{LeafVal: "Pool 10"},
+				{LeafVal: "Pool 2"},
+				{LeafVal: "Pool 1"},
+			},
+			expected: []*Node{
+				{LeafVal: "Pool 1"},
+				{LeafVal: "Pool 2"},
+				{LeafVal: "Pool 10"},
+			},
+		},
+		{
+			name: "alphabetical prefix ordering",
+			input: []*Node{
+				{LeafVal: "Z Pool 1"},
+				{LeafVal: "A Pool 2"},
+				{LeafVal: "B Pool 1"},
+			},
+			expected: []*Node{
+				{LeafVal: "A Pool 2"},
+				{LeafVal: "B Pool 1"},
+				{LeafVal: "Z Pool 1"},
+			},
+		},
+		{
+			name: "no numerical suffix",
+			input: []*Node{
+				{LeafVal: "Charlie"},
+				{LeafVal: "Alpha"},
+				{LeafVal: "Bravo"},
+			},
+			expected: []*Node{
+				{LeafVal: "Alpha"},
+				{LeafVal: "Bravo"},
+				{LeafVal: "Charlie"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := OrderStringsAlphabetically(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

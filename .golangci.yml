@@ -14,8 +14,6 @@ linters:
     - revive
     - gosec
     - unconvert
-  disable:
-    - errcheck
   settings:
     revive:
       rules:
@@ -26,6 +24,7 @@ linters:
       - path: _test\.go
         linters:
           - gosec
+          - errcheck
 
 formatters:
   enable:

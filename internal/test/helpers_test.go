@@ -7,18 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreateTestFS(t *testing.T) {
-	fs := CreateTestFS(t)
-
-	// Check that we can read the template.xlsx file
-	file, err := fs.Open("template.xlsx")
-	require.NoError(t, err)
-	defer file.Close()
-
-	// The fact that we can open the file is enough for this test
-	t.Log("Successfully created and accessed test filesystem")
-}
-
 func TestCreateTestPlayers(t *testing.T) {
 	players := CreateTestPlayers()
 

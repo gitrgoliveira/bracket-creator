@@ -1,9 +1,11 @@
 package helper
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -260,4 +262,147 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		val, _ = f.GetCellValue("Elimination Matches", "I1")
 		assert.Equal(t, "Shiaijo B", val)
 	})
+}
+
+// TestEliminationMatchSameSheetFormulas verifies that when later-round elimination
+// matches reference earlier-round results on the same sheet, the formula uses a
+// plain cell reference (e.g. G6) rather than a qualified one ('Elimination Matches'!G6).
+// The qualified form causes Excel to flag the formula as invalid and repair/remove it.
+func TestEliminationMatchSameSheetFormulas(t *testing.T) {
+	// 4 pools × 2 finalists = 8 finalists → 3 rounds; rounds 2+ reference same sheet.
+	makePool := func(name string, players ...*Player) Pool {
+		ps := make([]Player, len(players))
+		for i, p := range players {
+			ps[i] = *p
+		}
+		matches := []Match{}
+		for i := 0; i < len(players); i++ {
+			for j := i + 1; j < len(players); j++ {
+				matches = append(matches, Match{SideA: players[i], SideB: players[j]})
+			}
+		}
+		return Pool{PoolName: name, Players: ps, Matches: matches}
+	}
+	pools := []Pool{
+		makePool("Pool A",
+			&Player{Name: "P1", sheetName: "Pool Draw", cell: "A1"},
+			&Player{Name: "P2", sheetName: "Pool Draw", cell: "A2"},
+			&Player{Name: "P3", sheetName: "Pool Draw", cell: "A3"},
+		),
+		makePool("Pool B",
+			&Player{Name: "P4", sheetName: "Pool Draw", cell: "B1"},
+			&Player{Name: "P5", sheetName: "Pool Draw", cell: "B2"},
+			&Player{Name: "P6", sheetName: "Pool Draw", cell: "B3"},
+		),
+		makePool("Pool C",
+			&Player{Name: "P7", sheetName: "Pool Draw", cell: "C1"},
+			&Player{Name: "P8", sheetName: "Pool Draw", cell: "C2"},
+			&Player{Name: "P9", sheetName: "Pool Draw", cell: "C3"},
+		),
+		makePool("Pool D",
+			&Player{Name: "P10", sheetName: "Pool Draw", cell: "D1"},
+			&Player{Name: "P11", sheetName: "Pool Draw", cell: "D2"},
+			&Player{Name: "P12", sheetName: "Pool Draw", cell: "D3"},
+		),
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool Matches")
+	f.NewSheet("Elimination Matches")
+
+	poolWinners := 2
+	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false)
+
+	finalists := GenerateFinals(pools, poolWinners)
+	tree := CreateBalancedTree(finalists)
+	depth := CalculateDepth(tree)
+	rounds := make([][]*Node, depth-1)
+	for i := depth; i > 1; i-- {
+		rounds[depth-i] = TraverseRounds(tree, 1, i-1)
+	}
+
+	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, 1, false)
+
+	// Collect all formula cells in the Elimination Matches sheet.
+	rows, err := f.GetRows("Elimination Matches")
+	require.NoError(t, err)
+	for rowIdx, row := range rows {
+		for colIdx := range row {
+			cellName, _ := excelize.CoordinatesToCellName(colIdx+1, rowIdx+1)
+			formula, err := f.GetCellFormula("Elimination Matches", cellName)
+			if err != nil || formula == "" {
+				continue
+			}
+			assert.NotContains(t, formula, "'Elimination Matches'!",
+				"same-sheet self-reference in cell %s: %s", cellName, formula)
+		}
+	}
+}
+
+// TestPoolWinnerFormulaReferences verifies that elimination match cells contain
+// valid CONCATENATE formulas referencing actual pool result cells, not empty
+// sheet references (”!) caused by a key format mismatch between PrintPoolMatches
+// and the tree's LeafVal strings.
+func TestPoolWinnerFormulaReferences(t *testing.T) {
+	playerA1 := &Player{Name: "Alice", sheetName: "Pool Draw", cell: "A1"}
+	playerA2 := &Player{Name: "Bob", sheetName: "Pool Draw", cell: "A2"}
+	playerA3 := &Player{Name: "Carol", sheetName: "Pool Draw", cell: "A3"}
+	playerB1 := &Player{Name: "Dave", sheetName: "Pool Draw", cell: "B1"}
+	playerB2 := &Player{Name: "Eve", sheetName: "Pool Draw", cell: "B2"}
+	playerB3 := &Player{Name: "Frank", sheetName: "Pool Draw", cell: "B3"}
+
+	pools := []Pool{
+		{
+			PoolName: "Pool A",
+			Players:  []Player{*playerA1, *playerA2, *playerA3},
+			Matches: []Match{
+				{SideA: playerA1, SideB: playerA2},
+				{SideA: playerA1, SideB: playerA3},
+				{SideA: playerA2, SideB: playerA3},
+			},
+		},
+		{
+			PoolName: "Pool B",
+			Players:  []Player{*playerB1, *playerB2, *playerB3},
+			Matches: []Match{
+				{SideA: playerB1, SideB: playerB2},
+				{SideA: playerB1, SideB: playerB3},
+				{SideA: playerB2, SideB: playerB3},
+			},
+		},
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool Matches")
+	f.NewSheet("Elimination Matches")
+
+	poolWinners := 2
+	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false)
+
+	// Build elimination tree using the same LeafVal format as in production.
+	finalists := GenerateFinals(pools, poolWinners)
+	tree := CreateBalancedTree(finalists)
+	depth := CalculateDepth(tree)
+	eliminationMatchRounds := make([][]*Node, depth-1)
+	for i := depth; i > 1; i-- {
+		eliminationMatchRounds[depth-i] = TraverseRounds(tree, 1, i-1)
+	}
+
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false)
+
+	// The first round has 2 matches; each match's player row is at startRow+2=4.
+	// Left player is in column A (col 1), right player in column G (col 7).
+	// Every CONCATENATE formula must reference a real cell, not an empty sheet
+	// reference (''!) which indicates the pool winner key lookup failed.
+	playerCells := []string{"A4", "G4", "A12", "G12"}
+	for _, cell := range playerCells {
+		formula, err := f.GetCellFormula("Elimination Matches", cell)
+		assert.NoError(t, err)
+		assert.True(t, strings.Contains(formula, "CONCATENATE"),
+			"expected CONCATENATE formula in %s, got: %q", cell, formula)
+		assert.NotContains(t, formula, "''!",
+			"formula in Elimination Matches %s has empty sheet reference: %s", cell, formula)
+	}
 }

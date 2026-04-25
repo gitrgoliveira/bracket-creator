@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"os"
 	"testing"
 
@@ -335,7 +336,7 @@ func TestCreatePools_ValidationErrors(t *testing.T) {
 	}
 }
 
-func TestCreatePools_RemovesDuplicates(t *testing.T) {
+func TestCreatePools_RejectsDuplicates(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -347,7 +348,6 @@ func TestCreatePools_RemovesDuplicates(t *testing.T) {
 		determined:   true,
 	}
 
-	// Include duplicates
 	entries := []string{
 		"John Doe,Dojo1",
 		"Jane Smith,Dojo2",
@@ -360,9 +360,10 @@ func TestCreatePools_RemovesDuplicates(t *testing.T) {
 	}
 
 	err := o.createPools(entries)
-	assert.NoError(t, err)
-	err = writer.Flush()
-	assert.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate participant entries")
+	assert.Contains(t, err.Error(), "John Doe,Dojo1")
+	assert.Contains(t, err.Error(), "Jane Smith,Dojo2")
 }
 
 func TestCreatePools_ShuffleWhenNotDetermined(t *testing.T) {
@@ -441,6 +442,7 @@ func TestPoolOptionsRun_Success(t *testing.T) {
 		outputPath:  tmpOutput.Name(),
 		numPlayers:  3,
 		poolWinners: 2,
+		courts:      2,
 		determined:  true,
 	}
 
@@ -595,4 +597,167 @@ func TestCreatePools_WithMaxPlayersAndSeeds(t *testing.T) {
 	err := o.createPools(entries)
 	require.NoError(t, err)
 	require.NoError(t, writer.Flush())
+}
+
+// TestPoolBoundsForSubtree verifies that the court-aware pool slicing never
+// assigns pools from one court to a subtree page that belongs to another court.
+// The critical regression is the "17 pools, 2 courts, 4 subtrees" case: the old
+// naive i*poolsPerSubtree slicing let subtree 1 span pools from both court A
+// (indices 0-8) and court B (index 9+).
+func TestPoolBoundsForSubtree(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		numPools    int
+		numCourts   int
+		numSubtrees int
+		subtreeIdx  int
+		wantStart   int
+		wantEnd     int
+	}{
+		// Regression case: 17 pools unevenly split across 2 courts (9 + 8),
+		// each court has 2 subtree pages.
+		// Court A occupies pools[0:9], Court B occupies pools[9:17].
+		{name: "17p_2c_4s_tree0", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 5},
+		{name: "17p_2c_4s_tree1", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 5, wantEnd: 9},
+		{name: "17p_2c_4s_tree2", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 9, wantEnd: 13},
+		{name: "17p_2c_4s_tree3", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 13, wantEnd: 17},
+
+		// Even split: 16 pools, 2 courts (8 each), 4 subtrees (2 per court).
+		{name: "16p_2c_4s_tree0", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 4},
+		{name: "16p_2c_4s_tree1", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 4, wantEnd: 8},
+		{name: "16p_2c_4s_tree2", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 8, wantEnd: 12},
+		{name: "16p_2c_4s_tree3", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 12, wantEnd: 16},
+
+		// Single court: all pools belong to the same block.
+		{name: "6p_1c_2s_tree0", numPools: 6, numCourts: 1, numSubtrees: 2, subtreeIdx: 0, wantStart: 0, wantEnd: 3},
+		{name: "6p_1c_2s_tree1", numPools: 6, numCourts: 1, numSubtrees: 2, subtreeIdx: 1, wantStart: 3, wantEnd: 6},
+
+		// One page per court (no multi-page case, but must still be correct).
+		{name: "6p_2c_2s_tree0", numPools: 6, numCourts: 2, numSubtrees: 2, subtreeIdx: 0, wantStart: 0, wantEnd: 3},
+		{name: "6p_2c_2s_tree1", numPools: 6, numCourts: 2, numSubtrees: 2, subtreeIdx: 1, wantStart: 3, wantEnd: 6},
+
+		// 5 pools, 2 courts: court A gets 3 pools (0-2), court B gets 2 (3-4).
+		{name: "5p_2c_4s_tree0", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 2},
+		{name: "5p_2c_4s_tree1", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 2, wantEnd: 3},
+		{name: "5p_2c_4s_tree2", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 3, wantEnd: 4},
+		{name: "5p_2c_4s_tree3", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 4, wantEnd: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotStart, gotEnd := poolBoundsForSubtree(tt.numPools, tt.numCourts, tt.numSubtrees, tt.subtreeIdx)
+			assert.Equal(t, tt.wantStart, gotStart, "start")
+			assert.Equal(t, tt.wantEnd, gotEnd, "end")
+
+			// Verify the slice lies strictly within the owning court's block.
+			pagesPerCourt := tt.numSubtrees / tt.numCourts
+			courtIdx := tt.subtreeIdx / pagesPerCourt
+			if courtIdx >= tt.numCourts {
+				courtIdx = tt.numCourts - 1
+			}
+			floor := tt.numPools / tt.numCourts
+			extra := tt.numPools % tt.numCourts
+			courtStart := courtIdx*floor + min(courtIdx, extra)
+			courtSize := floor
+			if courtIdx < extra {
+				courtSize++
+			}
+			assert.GreaterOrEqual(t, gotStart, courtStart, "start must be within court block")
+			assert.LessOrEqual(t, gotEnd, courtStart+courtSize, "end must be within court block")
+		})
+	}
+}
+
+// TestPoolBoundsForSubtree_DegenerateInputs guards against divide-by-zero
+// when SubdivideTree returns fewer subtrees than expected for very small
+// brackets (e.g. courts > numSubtrees).
+func TestPoolBoundsForSubtree_DegenerateInputs(t *testing.T) {
+	t.Parallel()
+
+	// numSubtrees < numCourts: pagesPerCourt would be 0 — must not panic.
+	start, end := poolBoundsForSubtree(2, 4, 1, 0)
+	assert.GreaterOrEqual(t, start, 0)
+	assert.GreaterOrEqual(t, end, start)
+
+	// Zero courts/subtrees: should return (0, 0) without panicking.
+	s, e := poolBoundsForSubtree(0, 0, 0, 0)
+	assert.Equal(t, 0, s)
+	assert.Equal(t, 0, e)
+}
+
+// TestCreatePools_CourtsExceedNumPages exercises the path where the user
+// asks for more courts than would otherwise be filled by the bracket size,
+// which forces numPages to be bumped to NextPow2(courts). The page-per-court
+// invariant must hold (no divide-by-zero, no out-of-range court labels).
+func TestCreatePools_CourtsExceedNumPages(t *testing.T) {
+	t.Parallel()
+
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	// 8 finalists fit on a single tree, but with 4 courts we need >=4 pages.
+	o := &poolOptions{
+		outputWriter: writer,
+		outputPath:   "dummy.xlsx",
+		numPlayers:   3,
+		poolWinners:  2,
+		courts:       4,
+		determined:   true,
+	}
+
+	entries := make([]string, 0, 12)
+	for i := 0; i < 12; i++ {
+		entries = append(entries, fmt.Sprintf("P%02d,D%d", i, i))
+	}
+
+	err := o.createPools(entries)
+	require.NoError(t, err)
+	require.NoError(t, writer.Flush())
+}
+
+// TestCreatePools_RejectsTooManyCourts ensures the CLI rejects a court
+// count above MaxCourts (26) instead of silently truncating.
+func TestCreatePools_RejectsTooManyCourts(t *testing.T) {
+	t.Parallel()
+
+	tmpInput, err := os.CreateTemp("", "input-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpInput.Name())
+	_, err = tmpInput.WriteString("A,D1\nB,D2\nC,D3\nD,D4\nE,D5\nF,D6\n")
+	require.NoError(t, err)
+	require.NoError(t, tmpInput.Close())
+
+	tmpOutput, err := os.CreateTemp("", "out-*.xlsx")
+	require.NoError(t, err)
+	defer os.Remove(tmpOutput.Name())
+	require.NoError(t, tmpOutput.Close())
+
+	o := &poolOptions{
+		filePath:    tmpInput.Name(),
+		outputPath:  tmpOutput.Name(),
+		numPlayers:  3,
+		poolWinners: 2,
+		courts:      30,
+		determined:  true,
+	}
+
+	err = o.run(nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "courts must be <= 26")
+}
+
+// TestCreatePoolCmd_SeedsFlagOnLocalFlags confirms --seeds is registered on
+// Flags() (not PersistentFlags()), matching the rest of the create-pools
+// flag set.
+func TestCreatePoolCmd_SeedsFlagOnLocalFlags(t *testing.T) {
+	t.Parallel()
+
+	cmd := newCreatePoolCmd()
+	assert.NotNil(t, cmd.Flags().Lookup("seeds"))
+	assert.Nil(t, cmd.PersistentFlags().Lookup("seeds"),
+		"--seeds must live on Flags() so it is local to create-pools")
 }

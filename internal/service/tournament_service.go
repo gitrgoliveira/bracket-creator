@@ -3,7 +3,6 @@ package service
 
 import (
 	"fmt"
-	"io/fs"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 )
@@ -14,8 +13,8 @@ type TournamentService struct {
 }
 
 // NewTournamentService creates a new tournament service
-func NewTournamentService(templateFS fs.FS) (*TournamentService, error) {
-	client, err := excel.NewClient(templateFS)
+func NewTournamentService() (*TournamentService, error) {
+	client, err := excel.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Excel client: %w", err)
 	}

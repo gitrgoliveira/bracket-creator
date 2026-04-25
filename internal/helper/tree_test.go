@@ -99,12 +99,12 @@ func TestPrintLeafNodes(t *testing.T) {
 			Left: &Node{
 				Val:      2,
 				LeafNode: true,
-				LeafVal:  "A.1", // Pool A, 1st place
+				LeafVal:  "A-1st", // Pool A, 1st place
 			},
 			Right: &Node{
 				Val:      4,
 				LeafNode: true,
-				LeafVal:  "B.1", // Pool B, 1st place
+				LeafVal:  "B-1st", // Pool B, 1st place
 			},
 		},
 		Right: &Node{
@@ -112,12 +112,12 @@ func TestPrintLeafNodes(t *testing.T) {
 			Left: &Node{
 				Val:      6,
 				LeafNode: true,
-				LeafVal:  "C.1", // Pool C, 1st place
+				LeafVal:  "C-1st", // Pool C, 1st place
 			},
 			Right: &Node{
 				Val:      8,
 				LeafNode: true,
-				LeafVal:  "D.1", // Pool D, 1st place
+				LeafVal:  "D-1st", // Pool D, 1st place
 			},
 		},
 	}
@@ -135,10 +135,10 @@ func TestPrintLeafNodes(t *testing.T) {
 
 	// Verify leaf values were written to expected cells
 	cellChecks := map[string]string{
-		"G2": "A.1",
-		"G4": "B.1",
-		"G6": "C.1",
-		"G8": "D.1",
+		"G2": "A-1st",
+		"G4": "B-1st",
+		"G6": "C-1st",
+		"G8": "D-1st",
 	}
 	for cell, expected := range cellChecks {
 		value, err := f.GetCellValue("Sheet1", cell)
@@ -174,7 +174,7 @@ func TestGenerateFinals(t *testing.T) {
 					t.Errorf("Expected 4 finalists, got %d", len(finalists))
 				}
 				// Check that we have the expected format
-				expectedFormats := []string{"Pool A.1", "Pool A.2", "Pool B.1", "Pool B.2"}
+				expectedFormats := []string{"Pool A-1st", "Pool A-2nd", "Pool B-1st", "Pool B-2nd"}
 				formatMap := make(map[string]bool)
 				for _, f := range finalists {
 					formatMap[f] = true
@@ -213,6 +213,26 @@ func TestGenerateFinals(t *testing.T) {
 				if len(finalists) != 12 {
 					t.Errorf("Expected 12 finalists, got %d", len(finalists))
 				}
+			},
+		},
+		{
+			name: "4 pools 2 winners - cross-pool matchup ordering",
+			pools: []Pool{
+				{PoolName: "Pool A"},
+				{PoolName: "Pool B"},
+				{PoolName: "Pool C"},
+				{PoolName: "Pool D"},
+			},
+			poolWinners: 2,
+			validate: func(t *testing.T, finalists []string) {
+				// The interleaving must pair 1st-place finishers against
+				// 2nd-place finishers from other pools. Adjacent pairs in
+				// the result become bracket matchups via CreateBalancedTree.
+				expected := []string{
+					"Pool A-1st", "Pool B-2nd", "Pool C-1st", "Pool D-2nd",
+					"Pool A-2nd", "Pool B-1st", "Pool C-2nd", "Pool D-1st",
+				}
+				assert.Equal(t, expected, finalists)
 			},
 		},
 	}
@@ -831,6 +851,27 @@ func TestRoundToPowerOf2EdgeCases(t *testing.T) {
 	}
 }
 
+func TestSplitPoolNameAndRank(t *testing.T) {
+	tests := []struct {
+		input        string
+		expectedPool string
+		expectedRank string
+	}{
+		{"Pool A-1st", "Pool A", "1st"},
+		{"Pool-A-1st", "Pool-A", "1st"},
+		{"My-Complex-Pool-Name-2nd", "My-Complex-Pool-Name", "2nd"},
+		{"NoRank", "NoRank", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			pool, rank := splitPoolNameAndRank(tt.input)
+			assert.Equal(t, tt.expectedPool, pool)
+			assert.Equal(t, tt.expectedRank, rank)
+		})
+	}
+}
+
 func TestNextPow2(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -885,8 +926,8 @@ func TestGenerateFinalsEdgeCases(t *testing.T) {
 				if len(finalists) != 1 {
 					t.Errorf("Expected 1 finalist, got %d", len(finalists))
 				}
-				if finalists[0] != "Pool A.1" {
-					t.Errorf("Expected 'Pool A.1', got %s", finalists[0])
+				if finalists[0] != "Pool A-1st" {
+					t.Errorf("Expected 'Pool A-1st', got %s", finalists[0])
 				}
 			},
 		},
@@ -920,7 +961,7 @@ func TestGenerateFinalsEdgeCases(t *testing.T) {
 				}
 				// Verify format of entries
 				for i, finalist := range finalists {
-					if !strings.Contains(finalist, "Pool") || !strings.Contains(finalist, ".") {
+					if !strings.Contains(finalist, "Pool") || !strings.Contains(finalist, "-") {
 						t.Errorf("Finalist %d has invalid format: %s", i, finalist)
 					}
 				}
@@ -940,9 +981,9 @@ func TestGenerateFinalsEdgeCases(t *testing.T) {
 				}
 				// Verify all expected finalists are present
 				expectedSet := map[string]bool{
-					"Pool A.1": true, "Pool A.2": true,
-					"Pool B.1": true, "Pool B.2": true,
-					"Pool C.1": true, "Pool C.2": true,
+					"Pool A-1st": true, "Pool A-2nd": true,
+					"Pool B-1st": true, "Pool B-2nd": true,
+					"Pool C-1st": true, "Pool C-2nd": true,
 				}
 				for _, f := range finalists {
 					if !expectedSet[f] {
@@ -962,7 +1003,7 @@ func TestGenerateFinalsEdgeCases(t *testing.T) {
 					t.Errorf("Expected 5 finalists, got %d", len(finalists))
 				}
 				for i := 0; i < 5; i++ {
-					expected := fmt.Sprintf("Pool X.%d", i+1)
+					expected := fmt.Sprintf("Pool X-%s", getOrdinal(i+1))
 					if finalists[i] != expected {
 						t.Errorf("Position %d: expected %s, got %s", i, expected, finalists[i])
 					}
@@ -1077,7 +1118,7 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 		{
 			name: "single leaf with pools enabled",
 			setupTree: func() *Node {
-				return &Node{Val: 1, LeafNode: true, LeafVal: "A.1"}
+				return &Node{Val: 1, LeafNode: true, LeafVal: "A-1st"}
 			},
 			pools:        true,
 			matchWinners: nil,

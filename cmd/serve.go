@@ -83,8 +83,13 @@ func NewRouter() *gin.Engine {
 		c.Next()
 	})
 
-	// Get web directory
-	webDir, err := fs.Sub(helper.WebFs, "web")
+	// Get web directory — fall back to the global helper.WebFs if appResources
+	// has not been set (e.g. during integration tests that call NewRouter directly).
+	var webFS fs.FS = helper.WebFs
+	if res := GetResources(); res != nil {
+		webFS = res.GetWebFS()
+	}
+	webDir, err := fs.Sub(webFS, "web")
 	if err != nil {
 		log.Printf("Warning: web directory not found in WebFs, static files will not be served: %v", err)
 	} else {
@@ -132,7 +137,15 @@ func NewRouter() *gin.Engine {
 			return
 		}
 
-		players, err := helper.CreatePlayers(strings.Split(req.PlayerList, "\n"), req.WithZekkenName)
+		rawEntries := strings.Split(req.PlayerList, "\n")
+		if dups := helper.CheckDuplicateEntries(rawEntries); len(dups) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":      fmt.Sprintf("Duplicate participant entries: %s", strings.Join(dups, ", ")),
+				"duplicates": dups,
+			})
+			return
+		}
+		players, err := helper.CreatePlayers(rawEntries, req.WithZekkenName)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -172,6 +185,7 @@ func NewRouter() *gin.Engine {
 		// 'form_submitted' hidden field to distinguish between an unchecked box (mirror=false)
 		// and an API call/initial load where the parameter is missing (mirror=true).
 		mirror := c.PostForm("form_submitted") == "" || c.PostForm("mirror") == "on"
+		titlePrefix := c.PostForm("titlePrefix")
 
 		teamMatches, err := strconv.Atoi(c.PostForm("teamMatches"))
 		if err != nil {
@@ -228,6 +242,19 @@ func NewRouter() *gin.Engine {
 		if err != nil || courts < 1 {
 			courts = 2
 		}
+		if err := helper.ValidateCourts(courts); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Reject duplicate participant entries up front so the user sees a
+		// clear error instead of silently dropped rows in the spreadsheet.
+		if dups := helper.CheckDuplicateEntries(strings.Split(text, "\n")); len(dups) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("Duplicate participant entries: %s", strings.Join(dups, ", ")),
+			})
+			return
+		}
 
 		// Parse seeds if provided
 		var seedAssignments []domain.SeedAssignment
@@ -266,6 +293,7 @@ func NewRouter() *gin.Engine {
 				poolWinners:     winnersPerPool,
 				courts:          courts,
 				mirror:          mirror,
+				titlePrefix:     titlePrefix,
 				SeedAssignments: seedAssignments,
 			}
 			o.outputWriter = inMemoryWriter
@@ -287,6 +315,7 @@ func NewRouter() *gin.Engine {
 				teamMatches:     teamMatches,
 				courts:          courts,
 				mirror:          mirror,
+				titlePrefix:     titlePrefix,
 				SeedAssignments: seedAssignments,
 			}
 

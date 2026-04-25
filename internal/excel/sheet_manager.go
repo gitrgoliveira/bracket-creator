@@ -44,8 +44,6 @@ func (m *SheetManager) AddPlayerDataToSheet(players []domain.Player, sanitize bo
 	// Populate players in the spreadsheet
 	row := 2
 	for _, player := range players {
-		// TODO: This would update domain players with Excel coordinates in final implementation
-
 		if err := m.file.SetCellInt(sheetName, fmt.Sprintf("A%d", row), player.PoolPosition); err != nil {
 			return handleError("SetCellInt", err)
 		}

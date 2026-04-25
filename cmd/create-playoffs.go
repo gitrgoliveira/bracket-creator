@@ -3,17 +3,13 @@ package cmd
 import (
 	"bufio"
 	"fmt"
-	"io"
-	"math/rand"
 	"os"
-
 	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/spf13/cobra"
-
-	excelize "github.com/xuri/excelize/v2"
 )
 
 type playoffOptions struct {
@@ -27,6 +23,7 @@ type playoffOptions struct {
 	singleTree      bool
 	determined      bool
 	mirror          bool
+	titlePrefix     string
 	SeedAssignments []domain.SeedAssignment
 }
 
@@ -51,6 +48,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across (default 2)")
 	cmd.Flags().BoolVarP(&o.mirror, "mirror", "", true, "Mirror match sides (White on left, Red on right) (default true)")
+	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
@@ -73,17 +71,20 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	outputFile, err := os.OpenFile(o.outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err := helper.ValidateCourts(o.courts); err != nil {
+		return err
+	}
+
+	outputFile, outputWriter, err := openOutputFile(o.outputPath)
 	if err != nil {
-		return fmt.Errorf("failed to open output file: %w", err)
+		return err
 	}
 	defer func() {
 		if err := outputFile.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error closing output file: %v\n", err)
 		}
 	}()
-
-	o.outputWriter = bufio.NewWriter(outputFile)
+	o.outputWriter = outputWriter
 	defer func() {
 		if err := o.outputWriter.Flush(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error flushing output buffer: %v\n", err)
@@ -100,17 +101,7 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 func (o *playoffOptions) createPlayoffs(entries []string) error {
-	var err error
-	entries = helper.RemoveDuplicates(entries)
-
-	// Shuffle all entries
-	if !o.determined {
-		rand.Shuffle(len(entries), func(i, j int) {
-			entries[i], entries[j] = entries[j], entries[i]
-		})
-	}
-
-	players, err := helper.CreatePlayers(entries, o.withZekkenName)
+	players, err := processEntries(entries, o.determined, o.withZekkenName)
 	if err != nil {
 		return err
 	}
@@ -131,21 +122,8 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		}
 	}
 
-	// Opening the template Excel file.
-	var templateFile io.ReadCloser
-	templateFile, err = helper.TemplateFile.Open("template.xlsx")
+	f, err := excel.NewFileFromScratch()
 	if err != nil {
-		fmt.Println("Warning: template.xlsx not found in embedded FS, trying local disk:", err)
-		templateFile, err = os.Open("template.xlsx")
-		if err != nil {
-			fmt.Println("Error: could not find template.xlsx anywhere")
-			return err
-		}
-	}
-
-	f, err := excelize.OpenReader(templateFile)
-	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 	defer func() {
@@ -158,7 +136,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		fmt.Println("Using Zekken names")
 	}
 
-	helper.AddPlayerDataToSheet(f, players, o.withZekkenName)
+	helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
 
 	// Reorder players based on seeds for standard bracket distribution
 	players = helper.StandardSeeding(players)
@@ -176,7 +154,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	}
 	fmt.Printf("There will be %d finalists\n", len(names))
 
-	maxPlayersPerTree := 16
+	maxPlayersPerTree := helper.MaxPlayersPerTree
 	numPages, err := helper.RoundToPowerOf2(float64(len(names)), float64(maxPlayersPerTree))
 	if err != nil {
 		return err
@@ -206,21 +184,20 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	treeSheet, err := f.GetSheetIndex("Tree")
 	if err != nil {
-		fmt.Println("Could not find Tree sheet")
-		fmt.Println(err)
-		return err
+		return fmt.Errorf("could not find Tree sheet: %w", err)
 	}
 
 	// adding extra sheets
 	for i := 0; i < len(subtrees); i++ {
 		subtreeSheet := "Tree " + strconv.Itoa(i+1)
 		fmt.Printf("Adding sheet %s\n", subtreeSheet)
-		index, _ := f.NewSheet(subtreeSheet)
+		index, err := f.NewSheet(subtreeSheet)
+		if err != nil {
+			return fmt.Errorf("failed to create sheet %s: %w", subtreeSheet, err)
+		}
 		err = f.CopySheet(treeSheet, index)
 		if err != nil {
-			fmt.Printf("Could not copy sheet %d\n", treeSheet)
-			fmt.Println(err)
-			return err
+			return fmt.Errorf("failed to copy sheet %d to %s: %w", treeSheet, subtreeSheet, err)
 		}
 
 		depth := helper.CalculateDepth(subtrees[i])

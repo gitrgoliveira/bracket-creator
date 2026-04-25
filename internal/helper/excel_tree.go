@@ -18,7 +18,7 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 	borderBottomStyle := getBorderStyleBottom(f)
 
 	// interval
-	colName, _ := excelize.ColumnNumberToName(col + 1)
+	colName := mustColumnName(col + 1)
 
 	startCell := fmt.Sprintf("%s%d", colName, startRow)
 	endCell := fmt.Sprintf("%s%d", colName, startRow+size)
@@ -33,7 +33,7 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 	}
 
 	// Top cell
-	colName, _ = excelize.ColumnNumberToName(col)
+	colName = mustColumnName(col)
 	topCell := fmt.Sprintf("%s%d", colName, startRow)
 	if err := f.SetCellStyle(sheet, topCell, topCell, borderTopStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
@@ -53,7 +53,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 	// fmt.Printf("writeTreeValue: start row: %d\n", startRow)
 	treeTextStyle := getTreeTextStyle(f)
 
-	colName, _ := excelize.ColumnNumberToName(col + 1)
+	colName := mustColumnName(col + 1)
 	cell := fmt.Sprintf("%s%d", colName, startRow)
 
 	// Check if value is a pool reference and we have matchWinners

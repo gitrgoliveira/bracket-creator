@@ -17,9 +17,9 @@ func NewStyleManager(file *excelize.File) *StyleManager {
 }
 
 // GetTextStyle returns a style for text cells
-func (s *StyleManager) GetTextStyle() int {
+func (s *StyleManager) GetTextStyle() (int, error) {
 	style, err := s.file.NewStyle(&excelize.Style{
-		Font: &excelize.Font{
+		Font: &excelize.Font{Family: "Calibri",
 			Bold: true,
 			Size: 10,
 		},
@@ -29,15 +29,15 @@ func (s *StyleManager) GetTextStyle() int {
 		},
 	})
 	if err != nil {
-		fmt.Printf("Error creating text style: %v\n", err)
+		return 0, fmt.Errorf("creating text style: %w", err)
 	}
-	return style
+	return style, nil
 }
 
 // GetPoolHeaderStyle returns a style for pool headers
-func (s *StyleManager) GetPoolHeaderStyle() int {
+func (s *StyleManager) GetPoolHeaderStyle() (int, error) {
 	style, err := s.file.NewStyle(&excelize.Style{
-		Font: &excelize.Font{
+		Font: &excelize.Font{Family: "Calibri",
 			Bold: true,
 			Size: 14,
 		},
@@ -58,35 +58,35 @@ func (s *StyleManager) GetPoolHeaderStyle() int {
 		},
 	})
 	if err != nil {
-		fmt.Printf("Error creating pool header style: %v\n", err)
+		return 0, fmt.Errorf("creating pool header style: %w", err)
 	}
-	return style
+	return style, nil
 }
 
 // GetBorderStyleLeft returns a style for left borders
-func (s *StyleManager) GetBorderStyleLeft() int {
+func (s *StyleManager) GetBorderStyleLeft() (int, error) {
 	style, err := s.file.NewStyle(&excelize.Style{
 		Border: []excelize.Border{
 			{Type: "left", Color: "000000", Style: 1},
 		},
 	})
 	if err != nil {
-		fmt.Printf("Error creating left border style: %v\n", err)
+		return 0, fmt.Errorf("creating left border style: %w", err)
 	}
-	return style
+	return style, nil
 }
 
 // GetBorderStyleBottom returns a style for bottom borders
-func (s *StyleManager) GetBorderStyleBottom() int {
+func (s *StyleManager) GetBorderStyleBottom() (int, error) {
 	style, err := s.file.NewStyle(&excelize.Style{
 		Border: []excelize.Border{
 			{Type: "bottom", Color: "000000", Style: 1},
 		},
 	})
 	if err != nil {
-		fmt.Printf("Error creating bottom border style: %v\n", err)
+		return 0, fmt.Errorf("creating bottom border style: %w", err)
 	}
-	return style
+	return style, nil
 }
 
 // Additional style methods can be added as needed

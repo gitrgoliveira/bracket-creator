@@ -77,9 +77,6 @@ func TestAPI_CreateWithSeeds(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	// Since we are in test and helper.TemplateFile is empty, it should try fallback to disk
-	// If it fails fallback too, it might error. But from root it should find template.xlsx.
-	// Oh wait, tests/ subpackage - Chdir might be needed or it finds it in root if we run go test ./...
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
 }
@@ -109,7 +106,5 @@ func TestAPI_CreateWithMissingSeed(t *testing.T) {
 
 func ensureRepoRoot(t *testing.T) func() {
 	t.Helper()
-	// No longer needed - template.xlsx is loaded in TestMain
-	// This function kept for backward compatibility
 	return func() {}
 }

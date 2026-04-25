@@ -4,37 +4,18 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path/filepath"
 	"testing"
-	"testing/fstest"
-	"time"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/resources"
 	"github.com/stretchr/testify/require"
 )
 
-// TestMain ensures helper.TemplateFile is populated for tests
+// TestMain sets up appResources for tests.
 func TestMain(m *testing.M) {
-	// Load template.xlsx from project root (relative to cmd package)
-	templatePath := filepath.Join("..", "template.xlsx")
-	templateData, err := os.ReadFile(templatePath)
-	if err != nil {
-		panic("failed to read template.xlsx: " + err.Error())
-	}
+	// Wire a minimal Resources (web-files only) into appResources.
+	appResources = resources.NewResources(nil)
 
-	// Populate helper.TemplateFile with in-memory FS
-	helper.TemplateFile = fstest.MapFS{
-		"template.xlsx": &fstest.MapFile{
-			Data:    templateData,
-			Mode:    0644,
-			ModTime: time.Now(),
-		},
-	}
-
-	// Run tests
 	code := m.Run()
-
-	// Exit with test result code
 	os.Exit(code)
 }
 

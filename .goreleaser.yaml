@@ -73,7 +73,6 @@ archives:
     files:
       - README.md
       - LICENSE
-      - template.xlsx
       - completions/*
       - manpages/*
 

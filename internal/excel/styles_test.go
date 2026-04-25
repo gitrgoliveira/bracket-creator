@@ -21,7 +21,8 @@ func TestGetTextStyle(t *testing.T) {
 	defer file.Close()
 	sm := NewStyleManager(file)
 
-	styleID := sm.GetTextStyle()
+	styleID, err := sm.GetTextStyle()
+	require.NoError(t, err)
 	assert.Positive(t, styleID)
 	assertStyleApplied(t, file, "Sheet1", "A1", styleID)
 }
@@ -31,7 +32,8 @@ func TestGetPoolHeaderStyle(t *testing.T) {
 	defer file.Close()
 	sm := NewStyleManager(file)
 
-	styleID := sm.GetPoolHeaderStyle()
+	styleID, err := sm.GetPoolHeaderStyle()
+	require.NoError(t, err)
 	assert.Positive(t, styleID)
 	assertStyleApplied(t, file, "Sheet1", "A2", styleID)
 }
@@ -41,7 +43,8 @@ func TestGetBorderStyleLeft(t *testing.T) {
 	defer file.Close()
 	sm := NewStyleManager(file)
 
-	styleID := sm.GetBorderStyleLeft()
+	styleID, err := sm.GetBorderStyleLeft()
+	require.NoError(t, err)
 	assert.Positive(t, styleID)
 	assertStyleApplied(t, file, "Sheet1", "A3", styleID)
 }
@@ -51,7 +54,8 @@ func TestGetBorderStyleBottom(t *testing.T) {
 	defer file.Close()
 	sm := NewStyleManager(file)
 
-	styleID := sm.GetBorderStyleBottom()
+	styleID, err := sm.GetBorderStyleBottom()
+	require.NoError(t, err)
 	assert.Positive(t, styleID)
 	assertStyleApplied(t, file, "Sheet1", "A4", styleID)
 }

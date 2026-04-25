@@ -73,7 +73,6 @@ Available factories in [internal/test/helpers.go](../../internal/test/helpers.go
 
 | Helper | Returns | Use For |
 |--------|---------|---------|
-| `CreateTestFS(t)` | `fs.FS` | Minimal in-memory filesystem with template.xlsx |
 | `CreateTestPlayers()` | `[]domain.Player` | Two test players with different dojos |
 | `CreateTestPools()` | `[]domain.Pool` | One pool with two players and a match |
 | `CreateTestTournament()` | `domain.Tournament` | Full tournament with pools and elimination |

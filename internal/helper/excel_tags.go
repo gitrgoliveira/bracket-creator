@@ -62,6 +62,9 @@ func CreateTagsSheet(f *excelize.File, pools []Pool) error {
 
 		for _, player := range pool.Players {
 			tag := fmt.Sprintf("%s%d", poolLetter, player.PoolPosition)
+			if player.Number != "" {
+				tag = player.Number
+			}
 
 			// Write the same tag twice (top half and bottom half of A4)
 			for range 2 {

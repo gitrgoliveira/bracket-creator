@@ -62,6 +62,13 @@ func buildMatchColumnNames(startCol int) matchColumnNames {
 // getMatchSides returns the left and right participants for a match.
 // sideA is Red (left by default), sideB is White (right by default).
 // If mirror is true, sideB (White) is returned on the left and sideA (Red) on the right.
+func playerRef(p *Player) string {
+	if p.numberCell != "" {
+		return fmt.Sprintf("%s!%s&\" \"&%s!%s", p.sheetName, p.numberCell, p.sheetName, p.cell)
+	}
+	return fmt.Sprintf("%s!%s", p.sheetName, p.cell)
+}
+
 func getMatchSides(sideA, sideB string, mirror bool) (left, right string) {
 	if mirror {
 		return sideB, sideA
@@ -138,7 +145,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 				poolRow++
 			}
 
-			leftSide, rightSide := getMatchSides(fmt.Sprintf("%s!%s", match.SideA.sheetName, match.SideA.cell), fmt.Sprintf("%s!%s", match.SideB.sheetName, match.SideB.cell), mirror)
+			leftSide, rightSide := getMatchSides(playerRef(match.SideA), playerRef(match.SideB), mirror)
 
 			poolEntryWithStyle(startColName, poolRow, endColName, f, sheetName,
 				leftSide,
@@ -679,22 +686,27 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool) {
 		// ~270pt = 1/3 of A3 landscape printable height with 0.1" margins.
 		handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 270))
 
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, positionCell, player.PoolPosition))
+		if player.numberCell != "" {
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, fmt.Sprintf("%s!%s", player.sheetName, player.numberCell)))
+		} else {
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, positionCell, player.PoolPosition))
+		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 
+		var nameFormula string
 		if sanitized {
-			_, row, err := excelize.SplitCellName(player.cell)
+			_, rowNum, err := excelize.SplitCellName(player.cell)
 			if err != nil {
 				handleExcelError("SplitCellName", err)
-				// Fallback to original approach if SplitCellName fails
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:])))
+				nameFormula = fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:])
 			} else {
-				rowStr := strconv.Itoa(row)
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+rowStr)))
+				rowStr := strconv.Itoa(rowNum)
+				nameFormula = fmt.Sprintf("%s!%s", player.sheetName, "D"+rowStr)
 			}
 		} else {
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, player.cell)))
+			nameFormula = fmt.Sprintf("%s!%s", player.sheetName, player.cell)
 		}
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, nameFormula))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
 
 		if row%3 == 0 {
@@ -729,22 +741,28 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) 
 			// ~270pt = 1/3 of A3 landscape printable height with 0.1" margins.
 			handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 270))
 
-			tag := fmt.Sprintf("%s%d", poolLetter, player.PoolPosition)
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, tagCell, tag))
+			if player.numberCell != "" {
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, tagCell, fmt.Sprintf("%s!%s", player.sheetName, player.numberCell)))
+			} else {
+				tag := fmt.Sprintf("%s%d", poolLetter, player.PoolPosition)
+				handleExcelError("SetCellValue", f.SetCellValue(sheetName, tagCell, tag))
+			}
 			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, tagCell, tagCell, nameIDPositionStyle))
 
+			var nameFormula string
 			if sanitized {
 				_, rowNum, err := excelize.SplitCellName(player.cell)
 				if err != nil {
 					handleExcelError("SplitCellName", err)
-					handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:])))
+					nameFormula = fmt.Sprintf("%s!%s", player.sheetName, "D"+player.cell[1:])
 				} else {
 					rowStr := strconv.Itoa(rowNum)
-					handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, "D"+rowStr)))
+					nameFormula = fmt.Sprintf("%s!%s", player.sheetName, "D"+rowStr)
 				}
 			} else {
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, fmt.Sprintf("%s!%s", player.sheetName, player.cell)))
+				nameFormula = fmt.Sprintf("%s!%s", player.sheetName, player.cell)
 			}
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, nameFormula))
 			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
 
 			row++

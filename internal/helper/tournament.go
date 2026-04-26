@@ -26,10 +26,12 @@ type Player struct {
 
 	PoolPosition int64
 	Seed         int
+	Number       string // e.g. "K1" — assigned when --number-prefix is set
 
 	// Excel coordinates
-	sheetName string
-	cell      string
+	sheetName  string
+	cell       string
+	numberCell string // e.g. "$D$3" — set when Number is populated
 }
 type MatchWinner struct {
 	// Excel coordinates

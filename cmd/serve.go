@@ -186,6 +186,7 @@ func NewRouter() *gin.Engine {
 		// and an API call/initial load where the parameter is missing (mirror=true).
 		mirror := c.PostForm("form_submitted") == "" || c.PostForm("mirror") == "on"
 		titlePrefix := c.PostForm("titlePrefix")
+		numberPrefix := c.PostForm("numberPrefix")
 
 		teamMatches, err := strconv.Atoi(c.PostForm("teamMatches"))
 		if err != nil {
@@ -294,6 +295,7 @@ func NewRouter() *gin.Engine {
 				courts:          courts,
 				mirror:          mirror,
 				titlePrefix:     titlePrefix,
+				numberPrefix:    numberPrefix,
 				SeedAssignments: seedAssignments,
 			}
 			o.outputWriter = inMemoryWriter
@@ -316,6 +318,7 @@ func NewRouter() *gin.Engine {
 				courts:          courts,
 				mirror:          mirror,
 				titlePrefix:     titlePrefix,
+				numberPrefix:    numberPrefix,
 				SeedAssignments: seedAssignments,
 			}
 

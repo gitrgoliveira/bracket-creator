@@ -70,15 +70,8 @@ func intPtr(i int) *int       { return &i }
 // data
 // ---------------------------------------------------------------------------
 
-func setupDataSheet(f *excelize.File) {
-	const s = "data"
-	// Column widths are also set by AddPoolDataToSheet / AddPlayerDataToSheet;
-	// these are the starting values from the original template.
-	logSetupErr("SetColWidth A", f.SetColWidth(s, "A", "A", 15))
-	logSetupErr("SetColWidth B-Z", f.SetColWidth(s, "B", "Z", 30))
-	logSetupErr("SetPageLayout", f.SetPageLayout(s, &excelize.PageLayoutOptions{
-		Orientation: strPtr("landscape"),
-	}))
+func setupDataSheet(_ *excelize.File) {
+	// Column widths and page layout are set by AddPoolDataToSheet / AddPlayerDataToSheet.
 }
 
 // ---------------------------------------------------------------------------
@@ -359,7 +352,7 @@ func setupTreeSheet(f *excelize.File) {
 	// Column widths: A is the wide label column, B is a medium header column,
 	// and C onward are the narrow bracket-line columns.
 	// These widths are inherited by every "Tree N" sheet created via CopySheet.
-	logSetupErr("col A", f.SetColWidth(s, "A", "A", 20.83))
+	logSetupErr("col A", f.SetColWidth(s, "A", "A", 25))
 	logSetupErr("col B", f.SetColWidth(s, "B", "B", 10))
 	logSetupErr("col C-Z", f.SetColWidth(s, "C", "Z", 3.5))
 

@@ -28,6 +28,7 @@ type poolOptions struct {
 	determined      bool
 	mirror          bool
 	titlePrefix     string
+	numberPrefix    string
 	SeedAssignments []domain.SeedAssignment
 }
 
@@ -57,6 +58,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.mirror, "mirror", "", true, "Mirror match sides (White on left, Red on right) (default true)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
+	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 
@@ -188,6 +190,16 @@ func (o *poolOptions) createPools(entries []string) error {
 	// Reorder pools so contiguous court blocks have balanced sizes and
 	// seeds are spread across courts (deinterleave by numCourts).
 	pools = helper.ReorderPoolsForCourts(pools, o.courts)
+
+	if o.numberPrefix != "" {
+		counter := 1
+		for i := range pools {
+			for j := range pools[i].Players {
+				pools[i].Players[j].Number = fmt.Sprintf("%s%d", o.numberPrefix, counter)
+				counter++
+			}
+		}
+	}
 
 	f, err := excel.NewFileFromScratch()
 	if err != nil {

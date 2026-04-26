@@ -9,6 +9,7 @@ import (
 
 func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) {
 	sheetName := "data"
+	SetSheetLayoutPortraitA4(f, sheetName)
 
 	// Row 1: title prefix label (B1 is filled with the user-supplied prefix)
 	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
@@ -21,7 +22,31 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	if sanitize {
 		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
 	}
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E2", "Metadata"))
+
+	// Determine number and metadata column positions.
+	// Without sanitize: D is free for number, metadata at E (col 5).
+	// With sanitize: D=DisplayName, number goes in E, metadata shifts to F (col 6).
+	hasNumber := false
+	for i := range pools {
+		if len(pools[i].Players) > 0 && pools[i].Players[0].Number != "" {
+			hasNumber = true
+			break
+		}
+	}
+	numberColNum := 4 // D (1-based)
+	metaStartCol := 5 // E (1-based)
+	if sanitize {
+		numberColNum = 5 // E
+		metaStartCol = 5 // E (same as number col when no number)
+	}
+	if hasNumber {
+		numberColName := mustColumnName(numberColNum)
+		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
+		if sanitize {
+			metaStartCol = 6 // shift metadata to F
+		}
+	}
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
 
 	// Populate the groups in the spreadsheet
 	row := 3
@@ -37,9 +62,14 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 			if sanitize {
 				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName))
 			}
+			if hasNumber {
+				numberColName := mustColumnName(numberColNum)
+				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), pools[i].Players[j].Number))
+				pools[i].Players[j].numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
+			}
 			for k, meta := range pools[i].Players[j].Metadata {
 				if k >= len(metaCols) {
-					metaCols = append(metaCols, mustColumnName(5+k))
+					metaCols = append(metaCols, mustColumnName(metaStartCol+k))
 				}
 				colName := metaCols[k]
 				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
@@ -54,12 +84,14 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	fmt.Printf("Data added to spreadsheet\n")
 
 	// Set the column widths
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 15))
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "Z", 30))
+	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
+	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 20))
+	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
 }
 
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) {
 	sheetName := "data"
+	SetSheetLayoutPortraitA4(f, sheetName)
 
 	// Row 1: title prefix label (B1 is filled with the user-supplied prefix)
 	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
@@ -72,7 +104,23 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 	if sanitize {
 		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
 	}
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "E2", "Metadata"))
+
+	hasNumber := len(players) > 0 && players[0].Number != ""
+	numberColNum := 4 // D
+	metaStartCol := 5 // E
+	if sanitize {
+		numberColNum = 5 // E
+		metaStartCol = 5 // E (same default as without sanitize)
+	}
+	if hasNumber {
+		numberColName := mustColumnName(numberColNum)
+		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
+		if sanitize {
+			metaStartCol = 6 // shift metadata to F
+		}
+	}
+	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
+
 	// Populate the groups in the spreadsheet
 	row := 3
 	metaCols := make([]string, 0, 8)
@@ -86,9 +134,14 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 		if sanitize {
 			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), players[i].DisplayName))
 		}
+		if hasNumber {
+			numberColName := mustColumnName(numberColNum)
+			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), players[i].Number))
+			players[i].numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
+		}
 		for k, meta := range players[i].Metadata {
 			if k >= len(metaCols) {
-				metaCols = append(metaCols, mustColumnName(5+k))
+				metaCols = append(metaCols, mustColumnName(metaStartCol+k))
 			}
 			colName := metaCols[k]
 			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
@@ -100,9 +153,9 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 	fmt.Printf("Data added to spreadsheet\n")
 
 	// Set the column widths
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 15))
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "Z", 30))
-
+	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
+	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 20))
+	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
 }
 
 // poolDrawColumnCount is the fixed number of columns on the Pool Draw sheet.
@@ -240,9 +293,14 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 		// Write player rows.
 		for _, player := range pool.Players {
 			cell := colName + fmt.Sprint(row)
+			var formula string
+			if player.numberCell != "" {
+				formula = fmt.Sprintf("%s!%s&\" \"&%s!%s", player.sheetName, player.numberCell, player.sheetName, player.cell)
+			} else {
+				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)
+			}
 			handleExcelDataError("SetCellFormula",
-				f.SetCellFormula(sheetName, cell,
-					fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)))
+				f.SetCellFormula(sheetName, cell, formula))
 			handleExcelDataError("SetCellStyle",
 				f.SetCellStyle(sheetName, cell, cell, contentCellStyle))
 			row++

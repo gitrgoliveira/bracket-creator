@@ -24,6 +24,7 @@ type playoffOptions struct {
 	determined      bool
 	mirror          bool
 	titlePrefix     string
+	numberPrefix    string
 	SeedAssignments []domain.SeedAssignment
 }
 
@@ -49,6 +50,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across (default 2)")
 	cmd.Flags().BoolVarP(&o.mirror, "mirror", "", true, "Mirror match sides (White on left, Red on right) (default true)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
+	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
@@ -134,6 +136,12 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	if o.withZekkenName {
 		fmt.Println("Using Zekken names")
+	}
+
+	if o.numberPrefix != "" {
+		for i := range players {
+			players[i].Number = fmt.Sprintf("%s%d", o.numberPrefix, i+1)
+		}
 	}
 
 	helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)

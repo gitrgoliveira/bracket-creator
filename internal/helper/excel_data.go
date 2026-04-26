@@ -12,15 +12,15 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	SetSheetLayoutPortraitA4(f, sheetName)
 
 	// Row 1: title prefix label (B1 is filled with the user-supplied prefix)
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B1", titlePrefix))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "B1", titlePrefix))
 
 	// Row 2: column headers
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A2", "Pool"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B2", "Player Name"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "C2", "Player Dojo"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A2", "Pool"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "B2", "Player Name"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "C2", "Player Dojo"))
 	if sanitize {
-		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
 	}
 
 	// Determine number and metadata column positions.
@@ -41,12 +41,12 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	}
 	if hasNumber {
 		numberColName := mustColumnName(numberColNum)
-		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
 		if sanitize {
 			metaStartCol = 6 // shift metadata to F
 		}
 	}
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
 
 	// Populate the groups in the spreadsheet
 	row := 3
@@ -56,15 +56,15 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 		pools[i].sheetName = sheetName
 
 		for j := range pools[i].Players {
-			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pools[i].PoolName))
-			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), pools[i].Players[j].Name))
-			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), pools[i].Players[j].Dojo))
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pools[i].PoolName))
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), pools[i].Players[j].Name))
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), pools[i].Players[j].Dojo))
 			if sanitize {
-				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName))
+				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName))
 			}
 			if hasNumber {
 				numberColName := mustColumnName(numberColNum)
-				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), pools[i].Players[j].Number))
+				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), pools[i].Players[j].Number))
 				pools[i].Players[j].numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
 			}
 			for k, meta := range pools[i].Players[j].Metadata {
@@ -72,7 +72,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 					metaCols = append(metaCols, mustColumnName(metaStartCol+k))
 				}
 				colName := metaCols[k]
-				handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
+				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
 			}
 			pools[i].cell = fmt.Sprintf("$A$%d", row)
 			pools[i].Players[j].sheetName = sheetName
@@ -84,9 +84,9 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	fmt.Printf("Data added to spreadsheet\n")
 
 	// Set the column widths
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 20))
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 20))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
 }
 
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) {
@@ -94,15 +94,15 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 	SetSheetLayoutPortraitA4(f, sheetName)
 
 	// Row 1: title prefix label (B1 is filled with the user-supplied prefix)
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B1", titlePrefix))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "B1", titlePrefix))
 
 	// Row 2: column headers
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "A2", "Number"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "B2", "Player Name"))
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "C2", "Player Dojo"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A2", "Number"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "B2", "Player Name"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "C2", "Player Dojo"))
 	if sanitize {
-		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
 	}
 
 	hasNumber := len(players) > 0 && players[0].Number != ""
@@ -114,12 +114,12 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 	}
 	if hasNumber {
 		numberColName := mustColumnName(numberColNum)
-		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
 		if sanitize {
 			metaStartCol = 6 // shift metadata to F
 		}
 	}
-	handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
 
 	// Populate the groups in the spreadsheet
 	row := 3
@@ -128,15 +128,15 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 	for i := 0; i < len(players); i++ {
 		players[i].sheetName = sheetName
 
-		handleExcelDataError("SetCellInt", f.SetCellInt(sheetName, fmt.Sprintf("A%d", row), players[i].PoolPosition))
-		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), players[i].Name))
-		handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), players[i].Dojo))
+		handleExcelError("SetCellInt", f.SetCellInt(sheetName, fmt.Sprintf("A%d", row), players[i].PoolPosition))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), players[i].Name))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), players[i].Dojo))
 		if sanitize {
-			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), players[i].DisplayName))
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), players[i].DisplayName))
 		}
 		if hasNumber {
 			numberColName := mustColumnName(numberColNum)
-			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), players[i].Number))
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), players[i].Number))
 			players[i].numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
 		}
 		for k, meta := range players[i].Metadata {
@@ -144,7 +144,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 				metaCols = append(metaCols, mustColumnName(metaStartCol+k))
 			}
 			colName := metaCols[k]
-			handleExcelDataError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
 		}
 		players[i].cell = fmt.Sprintf("$B$%d", row)
 		row++
@@ -153,9 +153,9 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 	fmt.Printf("Data added to spreadsheet\n")
 
 	// Set the column widths
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 20))
-	handleExcelDataError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 20))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
 }
 
 // poolDrawColumnCount is the fixed number of columns on the Pool Draw sheet.
@@ -169,7 +169,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 	// Write a formula that prepends the title prefix (data!$B$1) to the sheet title.
 	// B2:F2 is merged in the template and holds "Tournament Pools" as a static value;
 	// this formula replaces it so editing data!B1 updates the title automatically.
-	handleExcelDataError("SetCellFormula", f.SetCellFormula(sheetName, "B2",
+	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, "B2",
 		`IF(data!$B$1="","Tournament Pools",data!$B$1&" - Tournament Pools")`))
 
 	// Pool header style: bold italic, 12 pt, silver fill, thick borders, right-aligned.
@@ -272,7 +272,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 		// Insert a page break before page p (if not already inserted).
 		if p.page > 0 && !insertedBreaks[p.page] {
 			breakRow := pageStartRows[p.page]
-			handleExcelDataError("InsertPageBreak",
+			handleExcelError("InsertPageBreak",
 				f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", breakRow)))
 			insertedBreaks[p.page] = true
 		}
@@ -283,10 +283,10 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 
 		// Write pool header.
 		headerCell := colName + fmt.Sprint(row)
-		handleExcelDataError("SetCellFormula",
+		handleExcelError("SetCellFormula",
 			f.SetCellFormula(sheetName, headerCell,
-				fmt.Sprintf("%s!%s", pool.sheetName, pool.cell)))
-		handleExcelDataError("SetCellStyle",
+				sheetRef(pool.sheetName, pool.cell)))
+		handleExcelError("SetCellStyle",
 			f.SetCellStyle(sheetName, headerCell, headerCell, headerCellStyle))
 		row++
 
@@ -295,13 +295,13 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 			cell := colName + fmt.Sprint(row)
 			var formula string
 			if player.numberCell != "" {
-				formula = fmt.Sprintf("%s!%s&\" \"&%s!%s", player.sheetName, player.numberCell, player.sheetName, player.cell)
+				formula = playerRef(&player)
 			} else {
 				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)
 			}
-			handleExcelDataError("SetCellFormula",
+			handleExcelError("SetCellFormula",
 				f.SetCellFormula(sheetName, cell, formula))
-			handleExcelDataError("SetCellStyle",
+			handleExcelError("SetCellStyle",
 				f.SetCellStyle(sheetName, cell, cell, contentCellStyle))
 			row++
 		}
@@ -316,13 +316,13 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 		}
 
 		// Ensure the column has its display width set.
-		handleExcelDataError("SetColWidth",
+		handleExcelError("SetColWidth",
 			f.SetColWidth(sheetName, colName, colName, 30))
 	}
 
 	// Define print area: B2 to F<maxRow>.
 	if maxRow > 2 {
-		handleExcelDataError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
+		handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
 			Name:     "_xlnm.Print_Area",
 			RefersTo: fmt.Sprintf("'%s'!$B$2:$F$%d", sheetName, maxRow),
 			Scope:    sheetName,
@@ -331,11 +331,4 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 
 	fmt.Printf("%d pools added to spreadsheet\n", len(pools))
 	return nil
-}
-
-// handleExcelDataError is a helper function to handle errors from Excel operations
-func handleExcelDataError(operation string, err error) {
-	if err != nil {
-		fmt.Printf("Error in Excel operation %s: %v\n", operation, err)
-	}
 }

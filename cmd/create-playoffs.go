@@ -221,7 +221,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 			courtLabel := string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIndex])
 			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
 		}
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
+
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
 	}
 	if err := f.DeleteSheet("Tree"); err != nil {

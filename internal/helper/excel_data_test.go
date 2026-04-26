@@ -483,7 +483,7 @@ func TestHandleExcelDataError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// This function only prints errors, so we just verify it doesn't panic
 			assert.NotPanics(t, func() {
-				handleExcelDataError(tt.operation, tt.err)
+				handleExcelError(tt.operation, tt.err)
 			})
 		})
 	}

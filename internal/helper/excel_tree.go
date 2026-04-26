@@ -95,7 +95,7 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 
 	for _, pool := range pools {
 		if err := f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row),
-			fmt.Sprintf("%s!%s", pool.sheetName, pool.cell)); err != nil {
+			sheetRef(pool.sheetName, pool.cell)); err != nil {
 			fmt.Printf("Warning: failed to set cell formula: %v\n", err)
 		}
 
@@ -111,7 +111,7 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 		for _, player := range pool.Players {
 			var formula string
 			if player.numberCell != "" {
-				formula = fmt.Sprintf("%s!%s&\" \"&%s!%s", player.sheetName, player.numberCell, player.sheetName, player.cell)
+				formula = playerRef(&player)
 			} else {
 				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)
 			}

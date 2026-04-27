@@ -194,10 +194,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	if o.numberPrefix != "" {
 		counter := 1
 		for i := range pools {
-			for j := range pools[i].Players {
-				pools[i].Players[j].Number = fmt.Sprintf("%s%d", o.numberPrefix, counter)
-				counter++
-			}
+			counter = assignPlayerNumbers(pools[i].Players, o.numberPrefix, counter)
 		}
 	}
 
@@ -256,7 +253,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, o.mirror)
 
-	treeSheet, err := f.GetSheetIndex("Tree")
+	treeSheet, err := f.GetSheetIndex(helper.SheetTree)
 	if err != nil {
 		return fmt.Errorf("could not find Tree sheet: %w", err)
 	}
@@ -296,7 +293,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		poolStart, poolEnd := poolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
 		helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd])
 	}
-	if err := f.DeleteSheet("Tree"); err != nil {
+	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		fmt.Println("Note: Tree sheet might not exist:", err)
 	}
 

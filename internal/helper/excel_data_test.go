@@ -104,36 +104,36 @@ func TestAddPoolDataToSheet(t *testing.T) {
 			defer f.Close()
 
 			// Create the data sheet
-			_, err := f.NewSheet("data")
+			_, err := f.NewSheet(SheetData)
 			require.NoError(t, err)
 
 			AddPoolDataToSheet(f, tt.pools, tt.sanitize, "")
 
 			// Verify prefix label row
-			prefixLabel, err := f.GetCellValue("data", "A1")
+			prefixLabel, err := f.GetCellValue(SheetData, "A1")
 			require.NoError(t, err)
 			assert.Equal(t, "Title prefix:", prefixLabel)
 
 			// Verify headers (row 2)
-			poolHeader, err := f.GetCellValue("data", "A2")
+			poolHeader, err := f.GetCellValue(SheetData, "A2")
 			require.NoError(t, err)
 			assert.Equal(t, "Pool", poolHeader)
 
-			playerNameHeader, err := f.GetCellValue("data", "B2")
+			playerNameHeader, err := f.GetCellValue(SheetData, "B2")
 			require.NoError(t, err)
 			assert.Equal(t, "Player Name", playerNameHeader)
 
-			dojoHeader, err := f.GetCellValue("data", "C2")
+			dojoHeader, err := f.GetCellValue(SheetData, "C2")
 			require.NoError(t, err)
 			assert.Equal(t, "Player Dojo", dojoHeader)
 
 			if tt.sanitize {
-				displayNameHeader, err := f.GetCellValue("data", "D2")
+				displayNameHeader, err := f.GetCellValue(SheetData, "D2")
 				require.NoError(t, err)
 				assert.Equal(t, "Display Name", displayNameHeader)
 			}
 
-			metaHeader, err := f.GetCellValue("data", "E2")
+			metaHeader, err := f.GetCellValue(SheetData, "E2")
 			require.NoError(t, err)
 			assert.Equal(t, "Metadata", metaHeader)
 
@@ -141,20 +141,20 @@ func TestAddPoolDataToSheet(t *testing.T) {
 			row := 3
 			for _, pool := range tt.pools {
 				for _, player := range pool.Players {
-					poolName, err := f.GetCellValue("data", fmt.Sprintf("A%d", row))
+					poolName, err := f.GetCellValue(SheetData, fmt.Sprintf("A%d", row))
 					require.NoError(t, err)
 					assert.Equal(t, pool.PoolName, poolName)
 
-					playerName, err := f.GetCellValue("data", fmt.Sprintf("B%d", row))
+					playerName, err := f.GetCellValue(SheetData, fmt.Sprintf("B%d", row))
 					require.NoError(t, err)
 					assert.Equal(t, player.Name, playerName)
 
-					dojo, err := f.GetCellValue("data", fmt.Sprintf("C%d", row))
+					dojo, err := f.GetCellValue(SheetData, fmt.Sprintf("C%d", row))
 					require.NoError(t, err)
 					assert.Equal(t, player.Dojo, dojo)
 
 					if tt.sanitize {
-						displayName, err := f.GetCellValue("data", fmt.Sprintf("D%d", row))
+						displayName, err := f.GetCellValue(SheetData, fmt.Sprintf("D%d", row))
 						require.NoError(t, err)
 						assert.Equal(t, player.DisplayName, displayName)
 					}
@@ -163,7 +163,7 @@ func TestAddPoolDataToSheet(t *testing.T) {
 					for k, meta := range player.Metadata {
 						colName, err := excelize.ColumnNumberToName(5 + k)
 						require.NoError(t, err)
-						metaValue, err := f.GetCellValue("data", fmt.Sprintf("%s%d", colName, row))
+						metaValue, err := f.GetCellValue(SheetData, fmt.Sprintf("%s%d", colName, row))
 						require.NoError(t, err)
 						assert.Equal(t, meta, metaValue)
 					}
@@ -177,7 +177,7 @@ func TestAddPoolDataToSheet(t *testing.T) {
 			// so the final value is the cell of the last player in the pool
 			row = 3
 			for i, pool := range tt.pools {
-				assert.Equal(t, "data", tt.pools[i].sheetName)
+				assert.Equal(t, SheetData, tt.pools[i].sheetName)
 
 				lastPlayerRow := row + len(pool.Players) - 1
 				if len(pool.Players) > 0 {
@@ -189,7 +189,7 @@ func TestAddPoolDataToSheet(t *testing.T) {
 				}
 
 				for j := range pool.Players {
-					assert.Equal(t, "data", tt.pools[i].Players[j].sheetName)
+					assert.Equal(t, SheetData, tt.pools[i].Players[j].sheetName)
 					expectedPlayerCell := fmt.Sprintf("$B$%d", row)
 					assert.Equal(t, expectedPlayerCell, tt.pools[i].Players[j].cell)
 					row++
@@ -259,36 +259,36 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 			defer f.Close()
 
 			// Create the data sheet
-			_, err := f.NewSheet("data")
+			_, err := f.NewSheet(SheetData)
 			require.NoError(t, err)
 
 			AddPlayerDataToSheet(f, tt.players, tt.sanitize, "")
 
 			// Verify prefix label row
-			prefixLabel, err := f.GetCellValue("data", "A1")
+			prefixLabel, err := f.GetCellValue(SheetData, "A1")
 			require.NoError(t, err)
 			assert.Equal(t, "Title prefix:", prefixLabel)
 
 			// Verify headers (row 2)
-			numberHeader, err := f.GetCellValue("data", "A2")
+			numberHeader, err := f.GetCellValue(SheetData, "A2")
 			require.NoError(t, err)
 			assert.Equal(t, "Number", numberHeader)
 
-			playerNameHeader, err := f.GetCellValue("data", "B2")
+			playerNameHeader, err := f.GetCellValue(SheetData, "B2")
 			require.NoError(t, err)
 			assert.Equal(t, "Player Name", playerNameHeader)
 
-			dojoHeader, err := f.GetCellValue("data", "C2")
+			dojoHeader, err := f.GetCellValue(SheetData, "C2")
 			require.NoError(t, err)
 			assert.Equal(t, "Player Dojo", dojoHeader)
 
 			if tt.sanitize {
-				displayNameHeader, err := f.GetCellValue("data", "D2")
+				displayNameHeader, err := f.GetCellValue(SheetData, "D2")
 				require.NoError(t, err)
 				assert.Equal(t, "Display Name", displayNameHeader)
 			}
 
-			metaHeader, err := f.GetCellValue("data", "E2")
+			metaHeader, err := f.GetCellValue(SheetData, "E2")
 			require.NoError(t, err)
 			assert.Equal(t, "Metadata", metaHeader)
 
@@ -297,22 +297,22 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 				row := i + 3
 
 				// Verify position number
-				position, err := f.GetCellValue("data", fmt.Sprintf("A%d", row))
+				position, err := f.GetCellValue(SheetData, fmt.Sprintf("A%d", row))
 				require.NoError(t, err)
 				assert.Equal(t, fmt.Sprint(player.PoolPosition), position)
 
 				// Verify name
-				name, err := f.GetCellValue("data", fmt.Sprintf("B%d", row))
+				name, err := f.GetCellValue(SheetData, fmt.Sprintf("B%d", row))
 				require.NoError(t, err)
 				assert.Equal(t, player.Name, name)
 
 				// Verify dojo
-				dojo, err := f.GetCellValue("data", fmt.Sprintf("C%d", row))
+				dojo, err := f.GetCellValue(SheetData, fmt.Sprintf("C%d", row))
 				require.NoError(t, err)
 				assert.Equal(t, player.Dojo, dojo)
 
 				if tt.sanitize {
-					displayName, err := f.GetCellValue("data", fmt.Sprintf("D%d", row))
+					displayName, err := f.GetCellValue(SheetData, fmt.Sprintf("D%d", row))
 					require.NoError(t, err)
 					assert.Equal(t, player.DisplayName, displayName)
 				}
@@ -321,7 +321,7 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 				for k, meta := range player.Metadata {
 					colName, err := excelize.ColumnNumberToName(5 + k)
 					require.NoError(t, err)
-					metaValue, err := f.GetCellValue("data", fmt.Sprintf("%s%d", colName, row))
+					metaValue, err := f.GetCellValue(SheetData, fmt.Sprintf("%s%d", colName, row))
 					require.NoError(t, err)
 					assert.Equal(t, meta, metaValue)
 				}
@@ -329,7 +329,7 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 				// Verify player cell is set
 				expectedCell := fmt.Sprintf("$B$%d", row)
 				assert.Equal(t, expectedCell, tt.players[i].cell)
-				assert.Equal(t, "data", tt.players[i].sheetName)
+				assert.Equal(t, SheetData, tt.players[i].sheetName)
 			}
 		})
 	}
@@ -346,20 +346,20 @@ func TestAddPoolsToSheet(t *testing.T) {
 			pools: []Pool{
 				{
 					PoolName:  "Pool A",
-					sheetName: "data",
+					sheetName: SheetData,
 					cell:      "$A$2",
 					Players: []Player{
-						{Name: "Player 1", sheetName: "data", cell: "$B$2", PoolPosition: 1},
-						{Name: "Player 2", sheetName: "data", cell: "$B$3", PoolPosition: 2},
+						{Name: "Player 1", sheetName: SheetData, cell: "$B$2", PoolPosition: 1},
+						{Name: "Player 2", sheetName: SheetData, cell: "$B$3", PoolPosition: 2},
 					},
 				},
 				{
 					PoolName:  "Pool B",
-					sheetName: "data",
+					sheetName: SheetData,
 					cell:      "$A$4",
 					Players: []Player{
-						{Name: "Player 3", sheetName: "data", cell: "$B$4", PoolPosition: 1},
-						{Name: "Player 4", sheetName: "data", cell: "$B$5", PoolPosition: 2},
+						{Name: "Player 3", sheetName: SheetData, cell: "$B$4", PoolPosition: 1},
+						{Name: "Player 4", sheetName: SheetData, cell: "$B$5", PoolPosition: 2},
 					},
 				},
 			},
@@ -370,10 +370,10 @@ func TestAddPoolsToSheet(t *testing.T) {
 			pools: []Pool{
 				{
 					PoolName:  "Only Pool",
-					sheetName: "data",
+					sheetName: SheetData,
 					cell:      "$A$2",
 					Players: []Player{
-						{Name: "Player 1", sheetName: "data", cell: "$B$2", PoolPosition: 1},
+						{Name: "Player 1", sheetName: SheetData, cell: "$B$2", PoolPosition: 1},
 					},
 				},
 			},
@@ -391,10 +391,10 @@ func TestAddPoolsToSheet(t *testing.T) {
 				for i := 0; i < 9; i++ {
 					pools[i] = Pool{
 						PoolName:  fmt.Sprintf("Pool %d", i+1),
-						sheetName: "data",
+						sheetName: SheetData,
 						cell:      fmt.Sprintf("$A$%d", i+2),
 						Players: []Player{
-							{Name: fmt.Sprintf("Player %d", i+1), sheetName: "data", cell: fmt.Sprintf("$B$%d", i+2), PoolPosition: 1},
+							{Name: fmt.Sprintf("Player %d", i+1), sheetName: SheetData, cell: fmt.Sprintf("$B$%d", i+2), PoolPosition: 1},
 						},
 					}
 				}
@@ -410,15 +410,15 @@ func TestAddPoolsToSheet(t *testing.T) {
 			defer f.Close()
 
 			// Create necessary sheets
-			_, err := f.NewSheet("Pool Draw")
+			_, err := f.NewSheet(SheetPoolDraw)
 			require.NoError(t, err)
-			_, err = f.NewSheet("data")
+			_, err = f.NewSheet(SheetData)
 			require.NoError(t, err)
 
 			// Add some basic data to the Pool Draw sheet for style references
-			err = f.SetCellValue("Pool Draw", "B5", "Pool Header")
+			err = f.SetCellValue(SheetPoolDraw, "B5", "Pool Header")
 			require.NoError(t, err)
-			err = f.SetCellValue("Pool Draw", "B6", "Player 1")
+			err = f.SetCellValue(SheetPoolDraw, "B6", "Player 1")
 			require.NoError(t, err)
 
 			err = AddPoolsToSheet(f, tt.pools)
@@ -431,21 +431,21 @@ func TestAddPoolsToSheet(t *testing.T) {
 			require.NoError(t, err)
 
 			// Verify Pool Draw title formula
-			titleFormula, err := f.GetCellFormula("Pool Draw", "B2")
+			titleFormula, err := f.GetCellFormula(SheetPoolDraw, "B2")
 			require.NoError(t, err)
 			assert.Equal(t, `IF(data!$B$1="","Tournament Pools",data!$B$1&" - Tournament Pools")`, titleFormula)
 
 			// Verify formulas exist (spot check first pool if pools exist)
 			if len(tt.pools) > 0 {
 				// Pool name formula at B5
-				formula, err := f.GetCellFormula("Pool Draw", "B5")
+				formula, err := f.GetCellFormula(SheetPoolDraw, "B5")
 				require.NoError(t, err)
 				expectedFormula := fmt.Sprintf("%s!%s", tt.pools[0].sheetName, tt.pools[0].cell)
 				assert.Equal(t, expectedFormula, formula)
 
 				// First player formula at B6
 				if len(tt.pools[0].Players) > 0 {
-					formula, err = f.GetCellFormula("Pool Draw", "B6")
+					formula, err = f.GetCellFormula(SheetPoolDraw, "B6")
 					require.NoError(t, err)
 					player := tt.pools[0].Players[0]
 					expectedFormula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)

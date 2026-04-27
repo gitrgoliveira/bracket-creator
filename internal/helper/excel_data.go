@@ -8,7 +8,7 @@ import (
 )
 
 func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) {
-	sheetName := "data"
+	sheetName := SheetData
 	SetSheetLayoutPortraitA4(f, sheetName)
 
 	// Row 1: title prefix label (B1 is filled with the user-supplied prefix)
@@ -90,7 +90,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 }
 
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) {
-	sheetName := "data"
+	sheetName := SheetData
 	SetSheetLayoutPortraitA4(f, sheetName)
 
 	// Row 1: title prefix label (B1 is filled with the user-supplied prefix)
@@ -163,7 +163,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 const poolDrawColumnCount = 3
 
 func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
-	sheetName := "Pool Draw"
+	sheetName := SheetPoolDraw
 	SetSheetLayoutPortraitA4(f, sheetName)
 
 	// Write a formula that prepends the title prefix (data!$B$1) to the sheet title.

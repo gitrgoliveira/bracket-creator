@@ -6,6 +6,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,4 +88,40 @@ func TestProcessEntries_Empty(t *testing.T) {
 	players, err := processEntries([]string{}, true, false)
 	require.NoError(t, err)
 	assert.Empty(t, players)
+}
+
+func TestAssignPlayerNumbers_FlatSlice(t *testing.T) {
+	t.Parallel()
+
+	players := []helper.Player{{Name: "A"}, {Name: "B"}, {Name: "C"}}
+	next := assignPlayerNumbers(players, "K", 1)
+
+	assert.Equal(t, "K1", players[0].Number)
+	assert.Equal(t, "K2", players[1].Number)
+	assert.Equal(t, "K3", players[2].Number)
+	assert.Equal(t, 4, next)
+}
+
+func TestAssignPlayerNumbers_ChainsAcrossPools(t *testing.T) {
+	t.Parallel()
+
+	pool1 := []helper.Player{{Name: "A"}, {Name: "B"}}
+	pool2 := []helper.Player{{Name: "C"}, {Name: "D"}}
+
+	counter := 1
+	counter = assignPlayerNumbers(pool1, "P", counter)
+	counter = assignPlayerNumbers(pool2, "P", counter)
+
+	assert.Equal(t, "P1", pool1[0].Number)
+	assert.Equal(t, "P2", pool1[1].Number)
+	assert.Equal(t, "P3", pool2[0].Number)
+	assert.Equal(t, "P4", pool2[1].Number)
+	assert.Equal(t, 5, counter)
+}
+
+func TestAssignPlayerNumbers_Empty(t *testing.T) {
+	t.Parallel()
+
+	next := assignPlayerNumbers(nil, "X", 7)
+	assert.Equal(t, 7, next)
 }

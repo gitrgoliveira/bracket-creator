@@ -26,7 +26,7 @@ func TestCreateTagsSheet(t *testing.T) {
 		t.Fatalf("CreateTagsSheet failed: %v", err)
 	}
 
-	sheetName := "Tags"
+	sheetName := SheetTags
 
 	// 3. Verification - Page Layout (A4 portrait)
 	opts, err := f.GetPageLayout(sheetName)

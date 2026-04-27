@@ -227,7 +227,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 	numCourts = clampCourts(numCourts)
 
 	matchWinners := make(map[string]MatchWinner)
-	sheetName := "Pool Matches"
+	sheetName := SheetPoolMatches
 	configuredStartCols := make(map[int]bool)
 
 	startRow := 2
@@ -435,7 +435,7 @@ func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName stri
 func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, numCourts int, mirror bool) {
 	numCourts = clampCourts(numCourts)
 
-	sheetName := "Elimination Matches"
+	sheetName := SheetEliminationMatches
 	matchWinners := make(map[string]MatchWinner)
 	configuredStartCols := make(map[int]bool)
 
@@ -690,7 +690,7 @@ func setupNamesToPrintLayout(f *excelize.File, sheetName string) {
 }
 
 func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool) {
-	sheetName := "Names to Print"
+	sheetName := SheetNamesToPrint
 	setupNamesToPrintLayout(f, sheetName)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)
@@ -728,7 +728,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool) {
 }
 
 func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) {
-	sheetName := "Names to Print"
+	sheetName := SheetNamesToPrint
 	setupNamesToPrintLayout(f, sheetName)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)
@@ -776,7 +776,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) 
 }
 
 func FillEstimations(f *excelize.File, numPools int64, totalPoolMatches int64, teamSize int64, numEliminationMatches int64, numCourts int) {
-	sheetName := "Time Estimator"
+	sheetName := SheetTimeEstimator
 
 	if teamSize == 0 {
 		teamSize = 1

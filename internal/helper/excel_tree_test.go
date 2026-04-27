@@ -33,7 +33,7 @@ func TestSetTreeSheetTitle(t *testing.T) {
 
 			_, err := f.NewSheet("Tree 1")
 			require.NoError(t, err)
-			_, err = f.NewSheet("data")
+			_, err = f.NewSheet(SheetData)
 			require.NoError(t, err)
 
 			SetTreeSheetTitle(f, "Tree 1", tt.title)

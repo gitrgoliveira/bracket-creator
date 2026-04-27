@@ -139,9 +139,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	}
 
 	if o.numberPrefix != "" {
-		for i := range players {
-			players[i].Number = fmt.Sprintf("%s%d", o.numberPrefix, i+1)
-		}
+		assignPlayerNumbers(players, o.numberPrefix, 1)
 	}
 
 	helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
@@ -190,7 +188,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
 
-	treeSheet, err := f.GetSheetIndex("Tree")
+	treeSheet, err := f.GetSheetIndex(helper.SheetTree)
 	if err != nil {
 		return fmt.Errorf("could not find Tree sheet: %w", err)
 	}
@@ -224,7 +222,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
 	}
-	if err := f.DeleteSheet("Tree"); err != nil {
+	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		// Ignore sheet not exist error
 		fmt.Println("Note: Tree sheet might not exist:", err)
 	}
@@ -241,11 +239,11 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	helper.FillInMatches(f, eliminationMatchRounds)
 
 	var matchWinners map[string]helper.MatchWinner
-	if err := f.DeleteSheet("Pool Draw"); err != nil {
+	if err := f.DeleteSheet(helper.SheetPoolDraw); err != nil {
 		// Ignore sheet not exist error
 		fmt.Println("Note: Pool Draw sheet might not exist:", err)
 	}
-	if err := f.DeleteSheet("Pool Matches"); err != nil {
+	if err := f.DeleteSheet(helper.SheetPoolMatches); err != nil {
 		// Ignore sheet not exist error
 		fmt.Println("Note: Pool Matches sheet might not exist:", err)
 	}

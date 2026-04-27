@@ -11,7 +11,6 @@ import (
 const TreeTitleRows = 3
 
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {
-	// fmt.Printf("CreateTreeBracket: start row: %d, size: %d\n", startRow, size)
 	borderLeftStyle := GetBorderStyleLeft(f)
 	borderBottomLeftStyle := GetBorderStyleBottomLeft(f)
 	borderTopStyle := getBorderStyleTop(f)
@@ -38,7 +37,6 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 	if err := f.SetCellStyle(sheet, topCell, topCell, borderTopStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}
-	// f.SetCellStyle(sheet, topCell, topCell, getBorderStyleBottom(f))
 
 	// bottom
 	bottomCell := fmt.Sprintf("%s%d", colName, startRow+size)
@@ -50,7 +48,6 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 }
 
 func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string, matchWinners map[string]MatchWinner) {
-	// fmt.Printf("writeTreeValue: start row: %d\n", startRow)
 	treeTextStyle := getTreeTextStyle(f)
 
 	colName := mustColumnName(col + 1)
@@ -75,9 +72,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 	if err := f.SetCellValue(sheet, cell, value); err != nil {
 		fmt.Printf("Warning: failed to set cell value: %v\n", err)
 	}
-	// f.SetColWidth(sheet, colName, colName, 10)
-	// f.MergeCell(sheet, cell, fmt.Sprintf("%s%d", colName, startRow+1))
-	// f.SetCellStyle(sheet, cell, fmt.Sprintf("%s%d", colName, startRow+1), getPoolHeaderStyle(f))
+
 	if err := f.SetCellStyle(sheet, cell, cell, treeTextStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}

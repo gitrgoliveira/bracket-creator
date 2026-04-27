@@ -8,7 +8,7 @@ import (
 )
 
 func CreateTagsSheet(f *excelize.File, pools []Pool) error {
-	sheetName := "Tags"
+	sheetName := SheetTags
 	index, err := f.NewSheet(sheetName)
 	if err != nil {
 		return fmt.Errorf("failed to create sheet %s: %w", sheetName, err)
@@ -17,30 +17,24 @@ func CreateTagsSheet(f *excelize.File, pools []Pool) error {
 	// A4 portrait, 2 labels per page (each label = half the page height)
 	pageSize := 9 // A4
 	orientation := "portrait"
-	if err := f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
+	handleExcelError("SetPageLayout", f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
 		Size:        &pageSize,
 		Orientation: &orientation,
-	}); err != nil {
-		fmt.Printf("Warning: failed to set page layout: %v\n", err)
-	}
+	}))
 
 	// Narrow margins
 	margin := 0.1
-	if err := f.SetPageMargins(sheetName, &excelize.PageLayoutMarginsOptions{
+	handleExcelError("SetPageMargins", f.SetPageMargins(sheetName, &excelize.PageLayoutMarginsOptions{
 		Bottom: &margin,
 		Footer: &margin,
 		Header: &margin,
 		Left:   &margin,
 		Right:  &margin,
 		Top:    &margin,
-	}); err != nil {
-		fmt.Printf("Warning: failed to set page margins: %v\n", err)
-	}
+	}))
 
 	// Column width to fill A4 portrait width
-	if err := f.SetColWidth(sheetName, "A", "A", 90); err != nil {
-		fmt.Printf("Warning: failed to set column width: %v\n", err)
-	}
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 90))
 
 	style, err := f.NewStyle(&excelize.Style{
 		Alignment: &excelize.Alignment{
@@ -76,16 +70,12 @@ func CreateTagsSheet(f *excelize.File, pools []Pool) error {
 					return fmt.Errorf("failed to set cell style: %w", err)
 				}
 				// Half of A4 portrait printable height (~146mm = ~390 points)
-				if err := f.SetRowHeight(sheetName, row, 390); err != nil {
-					fmt.Printf("Warning: failed to set row height: %v\n", err)
-				}
+				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 390))
 				row++
 			}
 
 			// Page break after each pair of identical labels
-			if err := f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", row)); err != nil {
-				fmt.Printf("Warning: failed to insert page break: %v\n", err)
-			}
+			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", row)))
 		}
 	}
 

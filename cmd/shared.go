@@ -9,6 +9,16 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
+// assignPlayerNumbers sets Number on each player to prefix+counter, where counter
+// starts at start and increments by one. Returns the next counter value so callers
+// can chain across multiple slices (e.g. pools).
+func assignPlayerNumbers(players []helper.Player, prefix string, start int) int {
+	for i := range players {
+		players[i].Number = fmt.Sprintf("%s%d", prefix, start+i)
+	}
+	return start + len(players)
+}
+
 // openOutputFile opens (or creates) the file at outputPath for appending and
 // returns the file and a buffered writer over it.  The caller must defer
 // both Close and Flush.

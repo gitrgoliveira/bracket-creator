@@ -51,3 +51,16 @@ const (
 // throughout the workbook; values above this are rejected up front by
 // ValidateCourts so we never silently truncate a user-requested layout.
 const MaxCourts = 26
+
+// Sheet names for every tab in the workbook. Use these constants wherever a
+// sheet name is needed so that a rename only requires one edit here.
+const (
+	SheetData               = "data"
+	SheetTimeEstimator      = "Time Estimator"
+	SheetPoolDraw           = "Pool Draw"
+	SheetPoolMatches        = "Pool Matches"
+	SheetEliminationMatches = "Elimination Matches"
+	SheetNamesToPrint       = "Names to Print"
+	SheetTags               = "Tags"
+	SheetTree               = "Tree"
+)

@@ -71,7 +71,7 @@ func TestWriteTreeValue(t *testing.T) {
 	// Test 2: Test with matchWinners map (should create formula)
 	matchWinners := map[string]MatchWinner{
 		"Pool A-1st": {
-			sheetName: "Pool Matches",
+			sheetName: SheetPoolMatches,
 			cell:      "G10",
 		},
 	}
@@ -131,7 +131,7 @@ func TestCreateBalancedTree(t *testing.T) {
 func TestAddPlayerDataWithMetadata(t *testing.T) {
 	f := excelize.NewFile()
 	defer f.Close()
-	sheetName := "data"
+	sheetName := SheetData
 	f.NewSheet(sheetName)
 
 	players := []Player{
@@ -552,11 +552,11 @@ func contains(s, substr string) bool {
 // makeTestPool builds a minimal Pool with two players and one match,
 // suitable for PrintPoolMatches tests.
 func makeTestPool(name string) Pool {
-	playerA := &Player{Name: "Alice", sheetName: "Pool Draw", cell: "A1"}
-	playerB := &Player{Name: "Bob", sheetName: "Pool Draw", cell: "A2"}
+	playerA := &Player{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"}
+	playerB := &Player{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"}
 	return Pool{
 		PoolName:  name,
-		sheetName: "Pool Draw",
+		sheetName: SheetPoolDraw,
 		cell:      "B1",
 		Players:   []Player{*playerA, *playerB},
 		Matches:   []Match{{SideA: playerA, SideB: playerB}},
@@ -605,8 +605,8 @@ func TestPrintPoolMatchesCourts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := excelize.NewFile()
 			defer f.Close()
-			f.NewSheet("Pool Matches")
-			f.NewSheet("Pool Draw")
+			f.NewSheet(SheetPoolMatches)
+			f.NewSheet(SheetPoolDraw)
 
 			pools := make([]Pool, tt.numPools)
 			for i := range pools {
@@ -625,7 +625,7 @@ func TestPrintPoolMatchesCourts(t *testing.T) {
 				courtStartCol := tt.checkColStart[ci]
 				colName, _ := excelize.ColumnNumberToName(courtStartCol)
 				cell := fmt.Sprintf("%s1", colName)
-				val, err := f.GetCellValue("Pool Matches", cell)
+				val, err := f.GetCellValue(SheetPoolMatches, cell)
 				if err != nil {
 					t.Errorf("error reading court header cell %s: %v", cell, err)
 					continue
@@ -689,7 +689,7 @@ func TestCreateNamesToPrint(t *testing.T) {
 	f := excelize.NewFile()
 	defer f.Close()
 	f.NewSheet("Pool1")
-	f.NewSheet("Names to Print")
+	f.NewSheet(SheetNamesToPrint)
 
 	players := []Player{
 		{Name: "Player1", PoolPosition: 1, sheetName: "Pool1", cell: "B2"},
@@ -699,11 +699,11 @@ func TestCreateNamesToPrint(t *testing.T) {
 	CreateNamesToPrint(f, players, false)
 	CreateNamesToPrint(f, players, true)
 
-	valA1, _ := f.GetCellValue("Names to Print", "A1")
+	valA1, _ := f.GetCellValue(SheetNamesToPrint, "A1")
 	if valA1 != "1" {
 		t.Errorf("Expected '1', got '%s'", valA1)
 	}
-	valA2, _ := f.GetCellValue("Names to Print", "A2")
+	valA2, _ := f.GetCellValue(SheetNamesToPrint, "A2")
 	if valA2 != "2" {
 		t.Errorf("Expected '2', got '%s'", valA2)
 	}
@@ -713,7 +713,7 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 	f := excelize.NewFile()
 	defer f.Close()
 	f.NewSheet("Pool1")
-	f.NewSheet("Names to Print")
+	f.NewSheet(SheetNamesToPrint)
 
 	pools := []Pool{
 		{
@@ -728,11 +728,11 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 	CreateNamesWithPoolToPrint(f, pools, false)
 	CreateNamesWithPoolToPrint(f, pools, true)
 
-	valA1, _ := f.GetCellValue("Names to Print", "A1")
+	valA1, _ := f.GetCellValue(SheetNamesToPrint, "A1")
 	if valA1 != "A1" {
 		t.Errorf("Expected 'A1', got '%s'", valA1)
 	}
-	valA2, _ := f.GetCellValue("Names to Print", "A2")
+	valA2, _ := f.GetCellValue(SheetNamesToPrint, "A2")
 	if valA2 != "A2" {
 		t.Errorf("Expected 'A2', got '%s'", valA2)
 	}
@@ -741,23 +741,23 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 func TestFillEstimations(t *testing.T) {
 	f := excelize.NewFile()
 	defer f.Close()
-	f.NewSheet("Time Estimator")
+	f.NewSheet(SheetTimeEstimator)
 
 	FillEstimations(f, 5, 20, 1, 10, 2)
 
-	valA2, _ := f.GetCellValue("Time Estimator", "A2")
+	valA2, _ := f.GetCellValue(SheetTimeEstimator, "A2")
 	if valA2 != "5" {
 		t.Errorf("Expected 5, got %s", valA2)
 	}
-	valB2, _ := f.GetCellValue("Time Estimator", "B2")
+	valB2, _ := f.GetCellValue(SheetTimeEstimator, "B2")
 	if valB2 != "1" {
 		t.Errorf("Expected 1, got %s", valB2)
 	}
-	valC2, _ := f.GetCellValue("Time Estimator", "C2")
+	valC2, _ := f.GetCellValue(SheetTimeEstimator, "C2")
 	if valC2 != "20" {
 		t.Errorf("Expected 20, got %s", valC2)
 	}
-	valA14, _ := f.GetCellValue("Time Estimator", "A14")
+	valA14, _ := f.GetCellValue(SheetTimeEstimator, "A14")
 	if valA14 != "2" {
 		t.Errorf("Expected 2, got %s", valA14)
 	}

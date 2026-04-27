@@ -30,7 +30,6 @@ func NewFileFromScratch() (*excelize.File, error) {
 		}
 	}
 
-	setupDataSheet(f)
 	setupTimeEstimatorSheet(f)
 	setupPoolDrawSheet(f)
 	setupPoolMatchesSheet(f)
@@ -65,14 +64,6 @@ func logSetupErr(op string, err error) {
 
 func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
-
-// ---------------------------------------------------------------------------
-// data
-// ---------------------------------------------------------------------------
-
-func setupDataSheet(_ *excelize.File) {
-	// Column widths and page layout are set by AddPoolDataToSheet / AddPlayerDataToSheet.
-}
 
 // ---------------------------------------------------------------------------
 // Time Estimator
@@ -142,7 +133,6 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 	logSetupErr("E2", f.SetCellFormula(s, "E2", "(A2*B2*C2*D2)"))
 	logSetupErr("F2", f.SetCellValue(s, "F2", secs(30)))
 	logSetupErr("G2", f.SetCellValue(s, "G2", mins(30)))
-	logSetupErr("H2", f.SetCellFormula(s, "H2", "E2+(A2*C2*F2)+G2"))
 	logSetupErr("sty A2-C2", f.SetCellStyle(s, "A2", "C2", inp))
 	logSetupErr("sty D2-H2", f.SetCellStyle(s, "D2", "H2", tim))
 
@@ -202,13 +192,9 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 func setupPoolDrawSheet(f *excelize.File) {
 	const s = "Pool Draw"
 
-	// Spacer columns A/C/E/G = 8.83; pool-name columns B/D/F = 32.66.
-	// AddPoolsToSheet later overrides B/D/F to 30 for each populated column.
+	// Spacer columns A/C/E/G = 8.83.
 	for _, col := range []string{"A", "C", "E", "G"} {
 		logSetupErr("spacer col", f.SetColWidth(s, col, col, 8.83))
-	}
-	for _, col := range []string{"B", "D", "F"} {
-		logSetupErr("pool col", f.SetColWidth(s, col, col, 32.66))
 	}
 
 	// Row heights
@@ -248,12 +234,6 @@ func setupPoolDrawSheet(f *excelize.File) {
 		Font: &excelize.Font{Family: "Calibri", Size: 12},
 	})
 	logSetupErr("row4 style", f.SetCellStyle(s, "A4", "H4", row4Style))
-
-	// Page layout: A4 portrait (also applied by SetSheetLayoutPortraitA4).
-	logSetupErr("SetPageLayout", f.SetPageLayout(s, &excelize.PageLayoutOptions{
-		Size:        intPtr(9),
-		Orientation: strPtr("portrait"),
-	}))
 }
 
 // ---------------------------------------------------------------------------
@@ -276,12 +256,6 @@ func setupPoolMatchesSheet(f *excelize.File) {
 	} {
 		logSetupErr("col", f.SetColWidth(s, cw.from, cw.to, cw.w))
 	}
-
-	// Page layout: A4 landscape (also set programmatically in excel.go).
-	logSetupErr("SetPageLayout", f.SetPageLayout(s, &excelize.PageLayoutOptions{
-		Size:        intPtr(9),
-		Orientation: strPtr("landscape"),
-	}))
 }
 
 // ---------------------------------------------------------------------------
@@ -302,12 +276,6 @@ func setupEliminationMatchesSheet(f *excelize.File) {
 	} {
 		logSetupErr("col", f.SetColWidth(s, cw.from, cw.to, cw.w))
 	}
-
-	// Page layout: A4 landscape.
-	logSetupErr("SetPageLayout", f.SetPageLayout(s, &excelize.PageLayoutOptions{
-		Size:        intPtr(9),
-		Orientation: strPtr("landscape"),
-	}))
 }
 
 // ---------------------------------------------------------------------------
@@ -316,11 +284,6 @@ func setupEliminationMatchesSheet(f *excelize.File) {
 
 func setupNamesToPrintSheet(f *excelize.File) {
 	const s = "Names to Print"
-
-	// Column A = side/pool label (28 pt bold), B = player name (72 pt bold).
-	// The code overrides these widths to 20 and 170 respectively.
-	logSetupErr("col A", f.SetColWidth(s, "A", "A", 21.66))
-	logSetupErr("col B", f.SetColWidth(s, "B", "B", 170.66))
 
 	// Apply column-level default styles so any cell the code doesn't
 	// explicitly restyle still renders at the correct font size.
@@ -334,12 +297,6 @@ func setupNamesToPrintSheet(f *excelize.File) {
 	})
 	logSetupErr("col A style", f.SetColStyle(s, "A", sideStyle))
 	logSetupErr("col B style", f.SetColStyle(s, "B", nameStyle))
-
-	// Page layout: A3 landscape (paperSize 8).
-	logSetupErr("SetPageLayout", f.SetPageLayout(s, &excelize.PageLayoutOptions{
-		Size:        intPtr(8),
-		Orientation: strPtr("landscape"),
-	}))
 }
 
 // ---------------------------------------------------------------------------

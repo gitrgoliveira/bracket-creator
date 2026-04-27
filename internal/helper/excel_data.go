@@ -7,25 +7,81 @@ import (
 	excelize "github.com/xuri/excelize/v2"
 )
 
-func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) {
+type dataColumnLayout struct {
+	hasNumber    bool
+	numberColNum int
+	metaStartCol int
+	metaCols     []string
+}
+
+func setupDataSheet(f *excelize.File, sanitize bool, hasNumber bool, titlePrefix string, colAHeader string) dataColumnLayout {
 	sheetName := SheetData
 	SetSheetLayoutPortraitA4(f, sheetName)
 
-	// Row 1: title prefix label (B1 is filled with the user-supplied prefix)
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "B1", titlePrefix))
 
-	// Row 2: column headers
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A2", "Pool"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A2", colAHeader))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "B2", "Player Name"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "C2", "Player Dojo"))
 	if sanitize {
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
 	}
 
-	// Determine number and metadata column positions.
-	// Without sanitize: D is free for number, metadata at E (col 5).
-	// With sanitize: D=DisplayName, number goes in E, metadata shifts to F (col 6).
+	numberColNum := 4
+	metaStartCol := 5
+	if sanitize {
+		numberColNum = 5
+		metaStartCol = 5
+	}
+	if hasNumber {
+		numberColName := mustColumnName(numberColNum)
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
+		if sanitize {
+			metaStartCol = 6
+		}
+	}
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
+
+	return dataColumnLayout{
+		hasNumber:    hasNumber,
+		numberColNum: numberColNum,
+		metaStartCol: metaStartCol,
+		metaCols:     make([]string, 0, 8),
+	}
+}
+
+func (layout *dataColumnLayout) writePlayer(f *excelize.File, row int, player *Player, sanitize bool) {
+	sheetName := SheetData
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), player.Name))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), player.Dojo))
+	if sanitize {
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), player.DisplayName))
+	}
+	if layout.hasNumber {
+		numberColName := mustColumnName(layout.numberColNum)
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), player.Number))
+		player.numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
+	}
+	for k, meta := range player.Metadata {
+		if k >= len(layout.metaCols) {
+			layout.metaCols = append(layout.metaCols, mustColumnName(layout.metaStartCol+k))
+		}
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", layout.metaCols[k], row), meta))
+	}
+	player.sheetName = sheetName
+	player.cell = fmt.Sprintf("$B$%d", row)
+}
+
+func finishDataSheet(f *excelize.File) {
+	sheetName := SheetData
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "C", 20))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
+	fmt.Printf("Data added to spreadsheet\n")
+}
+
+func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) {
 	hasNumber := false
 	for i := range pools {
 		if len(pools[i].Players) > 0 && pools[i].Players[0].Number != "" {
@@ -33,129 +89,34 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 			break
 		}
 	}
-	numberColNum := 4 // D (1-based)
-	metaStartCol := 5 // E (1-based)
-	if sanitize {
-		numberColNum = 5 // E
-		metaStartCol = 5 // E (same as number col when no number)
-	}
-	if hasNumber {
-		numberColName := mustColumnName(numberColNum)
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
-		if sanitize {
-			metaStartCol = 6 // shift metadata to F
-		}
-	}
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
+	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Pool")
 
-	// Populate the groups in the spreadsheet
 	row := 3
-	metaCols := make([]string, 0, 8)
-
-	for i := 0; i < len(pools); i++ {
-		pools[i].sheetName = sheetName
-
+	for i := range pools {
+		pools[i].sheetName = SheetData
 		for j := range pools[i].Players {
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pools[i].PoolName))
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), pools[i].Players[j].Name))
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), pools[i].Players[j].Dojo))
-			if sanitize {
-				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pools[i].Players[j].DisplayName))
-			}
-			if hasNumber {
-				numberColName := mustColumnName(numberColNum)
-				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), pools[i].Players[j].Number))
-				pools[i].Players[j].numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
-			}
-			for k, meta := range pools[i].Players[j].Metadata {
-				if k >= len(metaCols) {
-					metaCols = append(metaCols, mustColumnName(metaStartCol+k))
-				}
-				colName := metaCols[k]
-				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
-			}
+			handleExcelError("SetCellValue", f.SetCellValue(SheetData, fmt.Sprintf("A%d", row), pools[i].PoolName))
+			layout.writePlayer(f, row, &pools[i].Players[j], sanitize)
 			pools[i].cell = fmt.Sprintf("$A$%d", row)
-			pools[i].Players[j].sheetName = sheetName
-			pools[i].Players[j].cell = fmt.Sprintf("$B$%d", row)
 			row++
 		}
 	}
 
-	fmt.Printf("Data added to spreadsheet\n")
-
-	// Set the column widths
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 20))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
+	finishDataSheet(f)
 }
 
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) {
-	sheetName := SheetData
-	SetSheetLayoutPortraitA4(f, sheetName)
-
-	// Row 1: title prefix label (B1 is filled with the user-supplied prefix)
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A1", "Title prefix:"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "B1", titlePrefix))
-
-	// Row 2: column headers
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "A2", "Number"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "B2", "Player Name"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, "C2", "Player Dojo"))
-	if sanitize {
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, "D2", "Display Name"))
-	}
-
 	hasNumber := len(players) > 0 && players[0].Number != ""
-	numberColNum := 4 // D
-	metaStartCol := 5 // E
-	if sanitize {
-		numberColNum = 5 // E
-		metaStartCol = 5 // E (same default as without sanitize)
-	}
-	if hasNumber {
-		numberColName := mustColumnName(numberColNum)
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", numberColName), "Player Number"))
-		if sanitize {
-			metaStartCol = 6 // shift metadata to F
-		}
-	}
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s2", mustColumnName(metaStartCol)), "Metadata"))
+	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Number")
 
-	// Populate the groups in the spreadsheet
 	row := 3
-	metaCols := make([]string, 0, 8)
-
-	for i := 0; i < len(players); i++ {
-		players[i].sheetName = sheetName
-
-		handleExcelError("SetCellInt", f.SetCellInt(sheetName, fmt.Sprintf("A%d", row), players[i].PoolPosition))
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), players[i].Name))
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), players[i].Dojo))
-		if sanitize {
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), players[i].DisplayName))
-		}
-		if hasNumber {
-			numberColName := mustColumnName(numberColNum)
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), players[i].Number))
-			players[i].numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
-		}
-		for k, meta := range players[i].Metadata {
-			if k >= len(metaCols) {
-				metaCols = append(metaCols, mustColumnName(metaStartCol+k))
-			}
-			colName := metaCols[k]
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", colName, row), meta))
-		}
-		players[i].cell = fmt.Sprintf("$B$%d", row)
+	for i := range players {
+		handleExcelError("SetCellInt", f.SetCellInt(SheetData, fmt.Sprintf("A%d", row), players[i].PoolPosition))
+		layout.writePlayer(f, row, &players[i], sanitize)
 		row++
 	}
 
-	fmt.Printf("Data added to spreadsheet\n")
-
-	// Set the column widths
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "D", 20))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
+	finishDataSheet(f)
 }
 
 // poolDrawColumnCount is the fixed number of columns on the Pool Draw sheet.

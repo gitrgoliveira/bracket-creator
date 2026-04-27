@@ -2,5 +2,5 @@
 1. Make brew install work.
 2. Add PDF generator from spreadsheet (with Web UI, etc)
 3. add square_prep examples
-4. Add an API cabapility and documentation.
+4. Add an API cabapility (OpenAPI compatible) and documentation.
 5. Should have an Agent skill on how to use the CLI/API

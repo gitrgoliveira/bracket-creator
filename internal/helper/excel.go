@@ -126,7 +126,15 @@ func getMatchWinnerColumns(colNames matchColumnNames) (lV, lP, rV, rP string) {
 	return colNames.leftVictoriesColName, colNames.leftPointsColName, colNames.rightVictoriesColName, colNames.rightPointsColName
 }
 
-func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, poolHeaderStyle, textStyle, borderBottomStyle, redHeaderStyle, whiteHeaderStyle int, matchWinners map[string]MatchWinner, mirror bool) {
+type matchStyles struct {
+	poolHeader   int
+	text         int
+	borderBottom int
+	redHeader    int
+	whiteHeader  int
+}
+
+func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, mirror bool) {
 	spaceLines := PoolSpaceLines
 	poolRow := startRow
 
@@ -137,13 +145,13 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 	startCell := startColName + fmt.Sprint(poolRow)
 	endCell := endColName + fmt.Sprint(poolRow)
 
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, poolHeaderStyle))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.poolHeader))
 	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))
 	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, sheetRef(pool.sheetName, pool.cell)))
 
 	poolRow++
 	if teamMatches == 0 {
-		matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, redHeaderStyle, textStyle, whiteHeaderStyle, mirror)
+		matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror)
 		poolRow++
 	}
 
@@ -154,10 +162,10 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 			match := pool.Matches[m]
 			startCell = startColName + fmt.Sprint(poolRow)
 			endCell = endColName + fmt.Sprint(poolRow)
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, textStyle))
+			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 
 			if teamMatches > 0 {
-				matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, redHeaderStyle, textStyle, whiteHeaderStyle, mirror)
+				matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror)
 				poolRow++
 			}
 
@@ -166,13 +174,13 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 			poolEntryWithStyle(startColName, poolRow, endColName, f, sheetName,
 				leftSide,
 				rightSide,
-				textStyle)
+				styles.text)
 
 			for i := 0; i < teamMatches; i++ {
 				poolRow++
 				startCell = startColName + fmt.Sprint(poolRow)
 				endCell = endColName + fmt.Sprint(poolRow)
-				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, textStyle))
+				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 				handleExcelError("SetCellInt", f.SetCellInt(sheetName, startCell, int64(i+1)))
 				handleExcelError("SetCellInt", f.SetCellInt(sheetName, endCell, int64(i+1)))
 			}
@@ -183,7 +191,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 				poolEntryWithStyle(startColName, poolRow, endColName, f, sheetName,
 					leftSide,
 					rightSide,
-					textStyle)
+					styles.text)
 
 				lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
 
@@ -195,7 +203,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 
 				startCell = startColName + fmt.Sprint(poolRow)
 				endCell = endColName + fmt.Sprint(poolRow)
-				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, textStyle))
+				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 				handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, "Victories / Points"))
 				handleExcelError("SetCellValue", f.SetCellValue(sheetName, endCell, "Victories / Points"))
 			}
@@ -212,7 +220,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 		poolRow++
 		resultCol := rightVictoriesColName
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, poolRow), fmt.Sprintf("%d. ", result)))
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), borderBottomStyle))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), styles.borderBottom))
 
 		if result <= numWinners {
 			matchWinners[fmt.Sprintf("%s-%s", pool.PoolName, getOrdinal(result))] = MatchWinner{
@@ -234,13 +242,15 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 	spaceLines := 2
 	colNamesByStartCol := make(map[int]matchColumnNames, numCourts)
 
-	poolHeaderStyle := getPoolHeaderStyle(f)
-	textStyle := getTextStyle(f)
-	borderBottomStyle := getBorderStyleBottom(f)
-	redHeaderStyle := getRedHeaderStyle(f)
-	whiteHeaderStyle := getWhiteHeaderStyle(f)
+	styles := matchStyles{
+		poolHeader:   getPoolHeaderStyle(f),
+		text:         getTextStyle(f),
+		borderBottom: getBorderStyleBottom(f),
+		redHeader:    getRedHeaderStyle(f),
+		whiteHeader:  getWhiteHeaderStyle(f),
+	}
 
-	writeCourtHeaders(f, sheetName, numCourts, poolHeaderStyle)
+	writeCourtHeaders(f, sheetName, numCourts, styles.poolHeader)
 
 	courtAssignments, _ := AssignPoolsToCourts(len(pools), numCourts)
 	poolsByCourt := make([][]int, numCourts)
@@ -371,7 +381,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 					colNamesByStartCol[startCol] = colNames
 				}
 
-				printSinglePool(f, sheetName, pools[poolIdx], startCol, poolRow, teamMatches, numWinners, maxBlocks, colNames, poolHeaderStyle, textStyle, borderBottomStyle, redHeaderStyle, whiteHeaderStyle, matchWinners, mirror)
+				printSinglePool(f, sheetName, pools[poolIdx], startCol, poolRow, teamMatches, numWinners, maxBlocks, colNames, styles, matchWinners, mirror)
 			}
 		}
 
@@ -443,13 +453,15 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	spaceLines := EliminationSpaceLines
 	colNamesByStartCol := make(map[int]matchColumnNames, numCourts)
 
-	poolHeaderStyle := getPoolHeaderStyle(f)
-	textStyle := getTextStyle(f)
-	borderBottomStyle := getBorderStyleBottom(f)
-	redHeaderStyle := getRedHeaderStyle(f)
-	whiteHeaderStyle := getWhiteHeaderStyle(f)
+	styles := matchStyles{
+		poolHeader:   getPoolHeaderStyle(f),
+		text:         getTextStyle(f),
+		borderBottom: getBorderStyleBottom(f),
+		redHeader:    getRedHeaderStyle(f),
+		whiteHeader:  getWhiteHeaderStyle(f),
+	}
 
-	writeCourtHeaders(f, sheetName, numCourts, poolHeaderStyle)
+	writeCourtHeaders(f, sheetName, numCourts, styles.poolHeader)
 
 	for c := 0; c < numCourts; c++ {
 		courtStartCol := 1 + c*8
@@ -511,7 +523,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 					colNamesByStartCol[startCol] = colNames
 				}
 
-				printSingleEliminationMatch(f, sheetName, eliminationMatch, poolMatchWinners, matchWinners, colNames, startRow, round, numTeamMatches, poolHeaderStyle, redHeaderStyle, textStyle, whiteHeaderStyle, borderBottomStyle, mirror)
+				printSingleEliminationMatch(f, sheetName, eliminationMatch, poolMatchWinners, matchWinners, colNames, startRow, round, numTeamMatches, styles, mirror)
 			}
 			startRow += matchHeight
 			rowsSinceLastPageBreak += matchHeight
@@ -541,7 +553,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	SetSheetLayoutPortraitA4DownThenOver(f, sheetName, numCourts)
 }
 
-func printSingleEliminationMatch(f *excelize.File, sheetName string, eliminationMatch *Node, poolMatchWinners map[string]MatchWinner, matchWinners map[string]MatchWinner, colNames matchColumnNames, matchRow int, round int, numTeamMatches int, poolHeaderStyle, redHeaderStyle, textStyle, whiteHeaderStyle, borderBottomStyle int, mirror bool) {
+func printSingleEliminationMatch(f *excelize.File, sheetName string, eliminationMatch *Node, poolMatchWinners map[string]MatchWinner, matchWinners map[string]MatchWinner, colNames matchColumnNames, matchRow int, round int, numTeamMatches int, styles matchStyles, mirror bool) {
 	startColName := colNames.startColName
 	middleColName := colNames.middleColName
 	rightVictoriesColName := colNames.rightVictoriesColName
@@ -549,12 +561,12 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	startCell := startColName + fmt.Sprint(matchRow)
 	endCell := endColName + fmt.Sprint(matchRow)
 
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, poolHeaderStyle))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.poolHeader))
 	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, fmt.Sprintf("Round %d - Match %d", round, eliminationMatch.matchNum)))
 
 	matchRow++
-	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName, redHeaderStyle, textStyle, whiteHeaderStyle, mirror)
+	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror)
 	matchRow++
 
 	//////////////////////////////////////
@@ -603,14 +615,14 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 
 	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, leftCellValue))
 	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, endCell, rightCellValue))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, textStyle))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 
 	// adding the individual matches
 	for i := 0; i < numTeamMatches; i++ {
 		matchRow++
 		startCell = startColName + fmt.Sprint(matchRow)
 		endCell = endColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, textStyle))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 		handleExcelError("SetCellInt", f.SetCellInt(sheetName, startCell, int64(i+1)))
 		handleExcelError("SetCellInt", f.SetCellInt(sheetName, endCell, int64(i+1)))
 	}
@@ -622,7 +634,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, leftCellValue))
 		endCell = endColName + fmt.Sprint(matchRow)
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, endCell, rightCellValue))
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, textStyle))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 
 		lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow), "V"))
@@ -633,7 +645,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 
 		startCell = startColName + fmt.Sprint(matchRow)
 		endCell = endColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, textStyle))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, "Victories / Points"))
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, endCell, "Victories / Points"))
 	}
@@ -641,7 +653,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	matchRow += 2
 	resultCol := rightVictoriesColName
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, matchRow), "1."))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, matchRow), fmt.Sprintf("%s%d", endColName, matchRow), borderBottomStyle))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, matchRow), fmt.Sprintf("%s%d", endColName, matchRow), styles.borderBottom))
 
 	// Gathering the match winners for the following rounds
 	matchWinners[fmt.Sprintf("M %d", eliminationMatch.matchNum)] = MatchWinner{
@@ -651,7 +663,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 
 	matchRow++
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, matchRow), "2."))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, matchRow), fmt.Sprintf("%s%d", endColName, matchRow), borderBottomStyle))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, matchRow), fmt.Sprintf("%s%d", endColName, matchRow), styles.borderBottom))
 }
 
 func setMatchColumnsWidthByStartCol(f *excelize.File, sheetName string, startCol int) {
@@ -689,87 +701,64 @@ func setupNamesToPrintLayout(f *excelize.File, sheetName string) {
 	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "B", 160))
 }
 
+type nameEntry struct {
+	player      Player
+	fallbackTag interface{}
+}
+
 func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool) {
+	entries := make([]nameEntry, len(players))
+	for i, p := range players {
+		entries[i] = nameEntry{player: p, fallbackTag: p.PoolPosition}
+	}
+	printNameEntries(f, entries, sanitized)
+}
+
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) {
+	var entries []nameEntry
+	for _, pool := range pools {
+		poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
+		for _, player := range pool.Players {
+			entries = append(entries, nameEntry{
+				player:      player,
+				fallbackTag: fmt.Sprintf("%s%d", poolLetter, player.PoolPosition),
+			})
+		}
+	}
+	printNameEntries(f, entries, sanitized)
+}
+
+func printNameEntries(f *excelize.File, entries []nameEntry, sanitized bool) {
 	sheetName := SheetNamesToPrint
 	setupNamesToPrintLayout(f, sheetName)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)
 
-	row := 1
-	for _, player := range players {
+	for i, entry := range entries {
+		row := i + 1
 		positionCell := fmt.Sprintf("A%d", row)
 		nameCell := fmt.Sprintf("B%d", row)
-		// ~270pt = 1/3 of A3 landscape printable height with 0.1" margins.
 		handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 270))
 
-		if player.numberCell != "" {
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, sheetRef(player.sheetName, player.numberCell)))
+		if entry.player.numberCell != "" {
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, sheetRef(entry.player.sheetName, entry.player.numberCell)))
 		} else {
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, positionCell, player.PoolPosition))
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, positionCell, entry.fallbackTag))
 		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(player, sanitized)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(entry.player, sanitized)))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
 
 		if row%3 == 0 {
 			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", row+1)))
 		}
-		row++
 	}
 
-	if row > 1 {
+	if len(entries) > 0 {
 		handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
 			Name:     "_xlnm.Print_Area",
-			RefersTo: fmt.Sprintf("'%s'!$A$1:$B$%d", sheetName, row-1),
-			Scope:    sheetName,
-		}))
-	}
-}
-
-func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) {
-	sheetName := SheetNamesToPrint
-	setupNamesToPrintLayout(f, sheetName)
-	nameIDPositionStyle := getNameIDPositionStyle(f)
-	nameIDStyle := getNameIDStyle(f)
-
-	row := 1
-	namesCount := 0
-	for _, pool := range pools {
-		poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
-
-		for _, player := range pool.Players {
-			tagCell := fmt.Sprintf("A%d", row)
-			nameCell := fmt.Sprintf("B%d", row)
-			// ~270pt = 1/3 of A3 landscape printable height with 0.1" margins.
-			handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 270))
-
-			if player.numberCell != "" {
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, tagCell, sheetRef(player.sheetName, player.numberCell)))
-			} else {
-				tag := fmt.Sprintf("%s%d", poolLetter, player.PoolPosition)
-				handleExcelError("SetCellValue", f.SetCellValue(sheetName, tagCell, tag))
-			}
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, tagCell, tagCell, nameIDPositionStyle))
-
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(player, sanitized)))
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
-
-			row++
-			namesCount++
-
-			// 3 players per A3 landscape page.
-			if namesCount%3 == 0 {
-				breakCell := fmt.Sprintf("A%d", row)
-				handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, breakCell))
-			}
-		}
-	}
-
-	if row > 1 {
-		handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
-			Name:     "_xlnm.Print_Area",
-			RefersTo: fmt.Sprintf("'%s'!$A$1:$B$%d", sheetName, row-1),
+			RefersTo: fmt.Sprintf("'%s'!$A$1:$B$%d", sheetName, len(entries)),
 			Scope:    sheetName,
 		}))
 	}

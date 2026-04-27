@@ -304,33 +304,32 @@ func generatePoolPriority(n int) []int {
 		return []int{0}
 	}
 
-	priority := []int{0, n - 1}
-	if n > 2 {
-		priority = append(priority, (n-1)/2, n/2)
-	}
+	priority := make([]int, 0, n)
+	seen := make(map[int]bool, n)
+	sorted := make([]int, 0, n)
 
-	// Deduplicate if n is small (e.g. n=3, (3-1)/2=1, 3/2=1)
-	seen := make(map[int]bool)
-	unique := make([]int, 0)
-	for _, p := range priority {
-		if !seen[p] {
-			unique = append(unique, p)
-			seen[p] = true
+	addPoint := func(v int) {
+		if seen[v] {
+			return
 		}
+		seen[v] = true
+		priority = append(priority, v)
+		pos := sort.SearchInts(sorted, v)
+		sorted = append(sorted, 0)
+		copy(sorted[pos+1:], sorted[pos:])
+		sorted[pos] = v
 	}
-	priority = unique
 
-	// Recursive splitting for remaining gaps
+	addPoint(0)
+	addPoint(n - 1)
+	if n > 2 {
+		addPoint((n - 1) / 2)
+		addPoint(n / 2)
+	}
+
 	for len(priority) < n {
 		bestGap := -1
 		bestStart := -1
-
-		// Find largest gap between existing priority points
-		sorted := make([]int, len(priority))
-		copy(sorted, priority)
-		sort.Ints(sorted)
-
-		// Check gap between sorted points
 		for i := 0; i < len(sorted)-1; i++ {
 			gap := sorted[i+1] - sorted[i]
 			if gap > bestGap {
@@ -340,16 +339,10 @@ func generatePoolPriority(n int) []int {
 		}
 
 		if bestGap > 1 {
-			mid := bestStart + bestGap/2
-			priority = append(priority, mid)
-			seen[mid] = true
+			addPoint(bestStart + bestGap/2)
 		} else {
-			// No more gaps > 1, just fill remaining linearly
 			for i := 0; i < n; i++ {
-				if !seen[i] {
-					priority = append(priority, i)
-					seen[i] = true
-				}
+				addPoint(i)
 			}
 		}
 	}

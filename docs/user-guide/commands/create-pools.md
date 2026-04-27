@@ -23,6 +23,7 @@ bracket-creator create-pools [flags]
 | `--determined` | `-d` | `false` | Do not shuffle input order |
 | `--single-tree` | — | `false` | Produce one tree sheet instead of one per court |
 | `--mirror` | — | `true` | White on left, Red on right |
+| `--number-prefix` | `-n` | `""` | Assign consecutive numbers with this letter prefix (e.g. `K` produces K1, K2, …) |
 | `--title-prefix` | — | `""` | Prefix added to sheet titles |
 
 ## Examples

@@ -34,7 +34,7 @@ go test -cover ./internal/helper/...
 
 ### Package Responsibilities
 
-- **`cmd/`** — Cobra CLI commands. Each uses an options struct with a `run()` method. `create-pools` and `create-playoffs` share significant logic.
+- **`cmd/`** — Cobra CLI commands. Each uses an options struct with a `run()` method. `create-pools` and `create-playoffs` share significant logic. Shared helpers (`processEntries`, `openOutputFile`, `assignPlayerNumbers`) live in `cmd/shared.go`.
 - **`internal/helper/`** — Core business logic: CSV parsing, pool/match generation, tree building, seeding algorithms, and all Excel rendering. This is the largest package.
 - **`internal/excel/`** — Excel file lifecycle (`Client`), sheet operations (`SheetManager`), style definitions.
 - **`internal/service/`** — Service layer abstraction over helper logic.
@@ -50,7 +50,7 @@ go test -cover ./internal/helper/...
 
 ### Excel workbook construction
 
-The workbook is built entirely from code in `internal/excel/template.go` (`NewFileFromScratch`). Each sheet (data, Time Estimator, Pool Draw, Pool Matches, Elimination Matches, Names to Print, Tree) is created and styled programmatically. Layout constants (rows-per-page, spacing, max bracket size) live in `internal/helper/constants.go`.
+The workbook is built entirely from code in `internal/excel/template.go` (`NewFileFromScratch`). Each sheet (data, Time Estimator, Pool Draw, Pool Matches, Elimination Matches, Names to Print, Tree) is created and styled programmatically. Layout constants (rows-per-page, spacing, max bracket size) and sheet name constants (`SheetData`, `SheetPoolDraw`, etc.) live in `internal/helper/constants.go` — use these constants everywhere rather than string literals.
 
 ### Resource Embedding
 
@@ -59,7 +59,7 @@ The workbook is built entirely from code in `internal/excel/template.go` (`NewFi
 ## Testing Conventions
 
 - **Table-driven tests** with `t.Run()` subtests throughout (see `seed_test.go`, `tree_test.go`)
-- **Package naming**: `_test` suffix for external tests of domain/internal; same package for cmd tests
+- **Package naming**: `_test` suffix for external tests of `domain`; same package (`package helper`, `package cmd`) for `helper` and `cmd` tests
 - **Test helpers**: `internal/test/helpers.go` has factories (`CreateTestPlayers`, `CreateTestPools`, `CreateTestTournament`)
 - **Assertions**: `testify/assert` for non-fatal, `require` for fatal
 - **Cleanup**: Always use `defer` for temp files, servers, and env vars

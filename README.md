@@ -152,6 +152,7 @@ bracket-creator create-pools -z -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-e
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 * `-c` / `--courts` - Number of Shiaijo (courts) to distribute pools across. Must be between 1 and 26. Pools are split evenly and the Pool Matches sheet gains one labelled column per court ("Shiaijo A", "Shiaijo B", …). Each tree sheet is labelled with the matching Shiaijo name. Default is 2.
 * `--mirror` - Mirror match sides (White on left, Red on right). Default is true. To disable, use `--mirror=false`.
+* `-n` / `--number-prefix` - Assign consecutive numbers with this letter prefix (e.g. `K` produces K1, K2, …)
 * `--title-prefix` - Title prefix for the tournament (default "")
 * `--single-tree` - Create a single tree instead of dividing into multiple sheets
 
@@ -169,6 +170,7 @@ bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-exam
 * `-t` / `-team-matches` - Create team matches with x players per team. Default is 0, which means these are not team matches
 * `-c` / `--courts` - Number of Shiaijo (courts). Must be between 1 and 26. Each tree sheet is labelled with the matching Shiaijo name ("Shiaijo A", "Shiaijo B", …). Default is 2.
 * `--mirror` - Mirror match sides (White on left, Red on right). Default is true. To disable, use `--mirror=false`.
+* `-n` / `--number-prefix` - Assign consecutive numbers with this letter prefix (e.g. `K` produces K1, K2, …)
 * `--seeds` - Path to a CSV file mapping exact participant names to their initial seed rank (see [Seeding via CLI](#seeding-via-cli))
 * `--title-prefix` - Title prefix for the tournament (default "")
 * `--single-tree` - Create a single tree instead of dividing into multiple sheets
@@ -201,12 +203,18 @@ bracket-creator create-playoffs -f ./players.csv -o ./playoffs.xlsx --seeds ./wi
 
 ### Examples
 See also the example files created by the Makefile:
-- [playoffs-example-large.xlsx](playoffs-example-large.xlsx)
-- [playoffs-example-medium.xlsx](playoffs-example-medium.xlsx)
 - [playoffs-example-small.xlsx](playoffs-example-small.xlsx)
-- [pools-example-large.xlsx](pools-example-large.xlsx)
-- [pools-example-medium.xlsx](pools-example-medium.xlsx)
+- [playoffs-example-medium.xlsx](playoffs-example-medium.xlsx)
+- [playoffs-example-medium-seeded.xlsx](playoffs-example-medium-seeded.xlsx)
+- [playoffs-example-large.xlsx](playoffs-example-large.xlsx)
+- [playoffs-example-large-seeded.xlsx](playoffs-example-large-seeded.xlsx)
 - [pools-example-small.xlsx](pools-example-small.xlsx)
+- [pools-example-medium.xlsx](pools-example-medium.xlsx)
+- [pools-example-medium-seeded.xlsx](pools-example-medium-seeded.xlsx)
+- [pools-example-large-teams.xlsx](pools-example-large-teams.xlsx)
+- [pools-example-large-teams-max-size.xlsx](pools-example-large-teams-max-size.xlsx)
+- [pools-example-large-max-size.xlsx](pools-example-large-max-size.xlsx)
+- [pools-example-large-seeded.xlsx](pools-example-large-seeded.xlsx)
 
 **Individual pool player tournament**
 

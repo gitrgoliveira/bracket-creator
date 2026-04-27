@@ -19,6 +19,7 @@ bracket-creator create-playoffs [flags]
 | `--determined` | `-d` | `false` | Do not shuffle input order |
 | `--single-tree` | — | `false` | Produce one tree sheet instead of one per court |
 | `--mirror` | — | `true` | White on left, Red on right |
+| `--number-prefix` | `-n` | `""` | Assign consecutive numbers with this letter prefix (e.g. `K` produces K1, K2, …) |
 | `--title-prefix` | — | `""` | Prefix added to sheet titles |
 
 ## Examples
@@ -54,6 +55,7 @@ Works the same as `create-pools` — top seeds are placed on opposite sides of t
 | Sheet | Contents |
 |-------|----------|
 | Data | Raw participant list |
+| Time Estimator | Expected duration per phase |
 | Elimination Matches | Match schedule |
 | Names to Print | A3-ready name labels |
 | Tree (one per court) | Visual bracket tree |

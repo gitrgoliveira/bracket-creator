@@ -30,7 +30,6 @@ dist
 completions/
 manpages
 bin/
-output.xlsx
 site/
 square_prep/*
 # Universal and Go added by speckit
@@ -41,7 +40,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.json
-specs/
+specs/*
+!specs/openapi.yaml
 .specify
 .agent*
 .playwright-mcp

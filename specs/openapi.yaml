@@ -1,0 +1,221 @@
+openapi: 3.1.0
+info:
+  title: bracket-creator API
+  description: Web API for generating Kendo tournament brackets
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+paths:
+  /api/parse-participants:
+    post:
+      summary: Parse and validate participants
+      description: Parses a CSV list of participants and returns a structured list. Can detect duplicates.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                playerList:
+                  type: string
+                  description: The CSV formatted list of players.
+                withZekkenName:
+                  type: boolean
+                  description: Whether the CSV includes Zekken names (Name, Zekken, Dojo).
+              required:
+                - playerList
+      responses:
+        '200':
+          description: Successfully parsed participants.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participants:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Participant'
+        '400':
+          description: Parsing error or duplicates found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  duplicates:
+                    type: array
+                    items:
+                      type: string
+
+  /create:
+    post:
+      summary: Create tournament bracket
+      description: Generates an Excel spreadsheet containing the tournament bracket based on the provided configuration.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                playerList:
+                  type: string
+                  description: The CSV formatted list of players.
+                tournamentType:
+                  type: string
+                  enum: [pools, playoffs]
+                  description: The type of tournament to create.
+                singleTree:
+                  type: string
+                  enum: ["on", "off"]
+                  description: Whether to put all matches on a single tree.
+                withZekkenName:
+                  type: string
+                  enum: ["on", "off"]
+                  description: Whether the CSV includes Zekken names.
+                determined:
+                  type: string
+                  enum: ["on", "off"]
+                  description: Create determined tree format.
+                mirror:
+                  type: string
+                  enum: ["on", "off"]
+                  description: Create mirrored tree format.
+                titlePrefix:
+                  type: string
+                  description: Prefix for match titles.
+                numberPrefix:
+                  type: string
+                  description: Prefix for match numbers.
+                teamMatches:
+                  type: integer
+                  description: Number of matches in a team (e.g. 5 for 5-person team).
+                winnersPerPool:
+                  type: integer
+                  default: 2
+                  description: Number of players advancing from each pool (pools mode only).
+                playersPerPool:
+                  type: integer
+                  default: 3
+                  description: Desired number of players per pool (pools mode only).
+                roundRobin:
+                  type: string
+                  enum: ["on", "off"]
+                  description: Generate round-robin match sheets for pools.
+                poolSizeMode:
+                  type: string
+                  enum: [max, exact]
+                  description: Whether playersPerPool is a maximum or an exact target.
+                courts:
+                  type: integer
+                  default: 2
+                  description: Number of courts to distribute pools/matches across.
+                seeds:
+                  type: string
+                  description: JSON string representation of an array of SeedAssignment objects.
+                downloadToken:
+                  type: string
+                  description: Unique token for polling download status.
+              required:
+                - playerList
+                - tournamentType
+      responses:
+        '200':
+          description: Excel file containing the generated bracket.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid input parameters.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '500':
+          description: Server error during bracket generation.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+  /api/download-status:
+    get:
+      summary: Check download status
+      description: Poll this endpoint to check if a previously requested file generation is complete.
+      parameters:
+        - in: query
+          name: token
+          schema:
+            type: string
+          required: true
+          description: The downloadToken passed to the /create endpoint.
+      responses:
+        '200':
+          description: Status of the download.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready:
+                    type: boolean
+
+  /api/status:
+    get:
+      summary: Application status
+      description: Returns information about the running application, including version and build details.
+      responses:
+        '200':
+          description: Status information.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  version:
+                    type: string
+                  buildDate:
+                    type: string
+                  goVersion:
+                    type: string
+                  osArch:
+                    type: string
+
+components:
+  schemas:
+    Participant:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The name of the participant.
+        displayName:
+          type: string
+          description: The display name (potentially including Zekken name).
+        dojo:
+          type: string
+          description: The dojo or team affiliation.
+    SeedAssignment:
+      type: object
+      properties:
+        Name:
+          type: string
+          description: The name of the participant to be seeded.
+        SeedRank:
+          type: integer
+          description: The rank of the seed (e.g., 1 for top seed).

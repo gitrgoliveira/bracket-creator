@@ -1002,7 +1002,7 @@ func TestGenerateFinalsEdgeCases(t *testing.T) {
 				if len(finalists) != 5 {
 					t.Errorf("Expected 5 finalists, got %d", len(finalists))
 				}
-				for i := 0; i < 5; i++ {
+				for i := range 5 {
 					expected := fmt.Sprintf("Pool X-%s", getOrdinal(i+1))
 					if finalists[i] != expected {
 						t.Errorf("Position %d: expected %s, got %s", i, expected, finalists[i])
@@ -1164,4 +1164,255 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+// applyTreeAdjustments replicates the pre-order traversal that PrintLeafNodes
+// performs when pools=true, calling treeAdjustment at each non-leaf node.
+func applyTreeAdjustments(node *Node) {
+	if node == nil || node.LeafNode {
+		return
+	}
+	treeAdjustment(node)
+	applyTreeAdjustments(node.Left)
+	applyTreeAdjustments(node.Right)
+}
+
+func leafPool(val string) string {
+	name, _ := splitPoolNameAndRank(val)
+	return name
+}
+
+func leafRank(val string) int64 {
+	_, rankStr := splitPoolNameAndRank(val)
+	return parsePoolRank(rankStr)
+}
+
+// collectOrderedLeaves returns leaf values in left-to-right (top-to-bottom) order.
+func collectOrderedLeaves(node *Node) []string {
+	if node == nil {
+		return nil
+	}
+	if node.LeafNode {
+		return []string{node.LeafVal}
+	}
+	return append(collectOrderedLeaves(node.Left), collectOrderedLeaves(node.Right)...)
+}
+
+type bracketMatch struct {
+	top, bottom string
+}
+
+// findLeafMatches returns nodes where both children are leaves (actual first-round matches).
+func findLeafMatches(node *Node) []bracketMatch {
+	if node == nil || node.LeafNode {
+		return nil
+	}
+	var matches []bracketMatch
+	if node.Left.LeafNode && node.Right.LeafNode {
+		matches = append(matches, bracketMatch{node.Left.LeafVal, node.Right.LeafVal})
+	}
+	matches = append(matches, findLeafMatches(node.Left)...)
+	matches = append(matches, findLeafMatches(node.Right)...)
+	return matches
+}
+
+// findByes returns leaf values at nodes where one child is a leaf and the other
+// is an internal node (the leaf gets a bye).
+func findByeLeaves(node *Node) []string {
+	if node == nil || node.LeafNode {
+		return nil
+	}
+	var byes []string
+	if node.Left.LeafNode && !node.Right.LeafNode {
+		byes = append(byes, node.Left.LeafVal)
+	}
+	if !node.Left.LeafNode && node.Right.LeafNode {
+		byes = append(byes, node.Right.LeafVal)
+	}
+	byes = append(byes, findByeLeaves(node.Left)...)
+	byes = append(byes, findByeLeaves(node.Right)...)
+	return byes
+}
+
+func buildAdjustedTree(pools []Pool, poolWinners int) *Node {
+	finals := GenerateFinals(pools, poolWinners)
+	tree := CreateBalancedTree(finals)
+	applyTreeAdjustments(tree)
+	return tree
+}
+
+func makePools(n int) ([]Pool, []string) {
+	pools := make([]Pool, n)
+	names := make([]string, n)
+	for i := range n {
+		name := fmt.Sprintf("Pool %c", 'A'+i)
+		pools[i] = Pool{PoolName: name}
+		names[i] = name
+	}
+	return pools, names
+}
+
+func TestBracketSamePoolSeparation(t *testing.T) {
+	poolCounts := []int{2, 3, 4, 5, 6, 8}
+
+	for _, nPools := range poolCounts {
+		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
+			pools, poolNames := makePools(nPools)
+			tree := buildAdjustedTree(pools, 2)
+
+			leaves := collectOrderedLeaves(tree)
+			mid := len(leaves) / 2
+			topHalf := leaves[:mid]
+			bottomHalf := leaves[mid:]
+
+			for _, pool := range poolNames {
+				topCount := 0
+				bottomCount := 0
+				for _, l := range topHalf {
+					if leafPool(l) == pool {
+						topCount++
+					}
+				}
+				for _, l := range bottomHalf {
+					if leafPool(l) == pool {
+						bottomCount++
+					}
+				}
+				assert.Equal(t, 1, topCount, "%s should have exactly 1 player in top half", pool)
+				assert.Equal(t, 1, bottomCount, "%s should have exactly 1 player in bottom half", pool)
+			}
+		})
+	}
+}
+
+func TestBracketNoSamePoolFirstRoundMatch(t *testing.T) {
+	poolCounts := []int{2, 3, 4, 5, 6, 8}
+
+	for _, nPools := range poolCounts {
+		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
+			pools, _ := makePools(nPools)
+			tree := buildAdjustedTree(pools, 2)
+
+			for _, m := range findLeafMatches(tree) {
+				topPool := leafPool(m.top)
+				bottomPool := leafPool(m.bottom)
+				assert.NotEqual(t, topPool, bottomPool,
+					"same-pool first-round match: %s vs %s", m.top, m.bottom)
+			}
+		})
+	}
+}
+
+func TestBracketCrossPoolMatching(t *testing.T) {
+	// For power-of-2 pool counts, every first-round match should be 1st vs 2nd.
+	poolCounts := []int{2, 4, 8}
+
+	for _, nPools := range poolCounts {
+		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
+			pools, _ := makePools(nPools)
+			tree := buildAdjustedTree(pools, 2)
+
+			matches := findLeafMatches(tree)
+			require.NotEmpty(t, matches)
+
+			for _, m := range matches {
+				topRank := leafRank(m.top)
+				bottomRank := leafRank(m.bottom)
+				assert.NotEqual(t, topRank, bottomRank,
+					"expected 1st-vs-2nd cross-pool match, got %s vs %s", m.top, m.bottom)
+			}
+		})
+	}
+}
+
+func TestTreeAdjustmentRankOrdering(t *testing.T) {
+	// In every first-round match, the top (left) player should have rank <= bottom (right).
+	poolCounts := []int{2, 3, 4, 5, 6, 8}
+
+	for _, nPools := range poolCounts {
+		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
+			pools, _ := makePools(nPools)
+			tree := buildAdjustedTree(pools, 2)
+
+			for _, m := range findLeafMatches(tree) {
+				topRank := leafRank(m.top)
+				bottomRank := leafRank(m.bottom)
+				assert.LessOrEqual(t, topRank, bottomRank,
+					"1st-place finisher should be on top: got %s (rank %d) above %s (rank %d)",
+					m.top, topRank, m.bottom, bottomRank)
+			}
+		})
+	}
+}
+
+func TestTreeAdjustmentByeAllocation(t *testing.T) {
+	// For non-power-of-2 finalist counts, byes should go to 1st-place finishers.
+	poolCounts := []int{3, 5, 6}
+
+	for _, nPools := range poolCounts {
+		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
+			pools, _ := makePools(nPools)
+			tree := buildAdjustedTree(pools, 2)
+
+			byes := findByeLeaves(tree)
+			require.NotEmpty(t, byes, "expected byes for %d pools (non-power-of-2 finalists)", nPools)
+
+			for _, b := range byes {
+				rank := leafRank(b)
+				assert.Equal(t, int64(1), rank,
+					"bye should go to a 1st-place finisher, got %s (rank %d)", b, rank)
+			}
+		})
+	}
+}
+
+func TestTreeAdjustmentSwapsBothLeaves(t *testing.T) {
+	// Direct test: when both children are leaves with 2nd on left and 1st on right,
+	// treeAdjustment should swap them.
+	node := &Node{
+		Left:  &Node{LeafNode: true, LeafVal: "Pool A-2nd"},
+		Right: &Node{LeafNode: true, LeafVal: "Pool B-1st"},
+	}
+	treeAdjustment(node)
+	assert.Equal(t, "Pool B-1st", node.Left.LeafVal, "1st-place should be swapped to top")
+	assert.Equal(t, "Pool A-2nd", node.Right.LeafVal, "2nd-place should be swapped to bottom")
+}
+
+func TestTreeAdjustmentNoSwapWhenCorrect(t *testing.T) {
+	node := &Node{
+		Left:  &Node{LeafNode: true, LeafVal: "Pool A-1st"},
+		Right: &Node{LeafNode: true, LeafVal: "Pool B-2nd"},
+	}
+	treeAdjustment(node)
+	assert.Equal(t, "Pool A-1st", node.Left.LeafVal)
+	assert.Equal(t, "Pool B-2nd", node.Right.LeafVal)
+}
+
+func TestTreeAdjustmentByeSwap(t *testing.T) {
+	// When left child is a leaf (bye position) with rank 2, and right child is an
+	// internal node whose top-left leaf has rank 1, treeAdjustment should swap
+	// so the 1st-place finisher gets the bye.
+	node := &Node{
+		Left: &Node{LeafNode: true, LeafVal: "Pool A-2nd"},
+		Right: &Node{
+			Left:  &Node{LeafNode: true, LeafVal: "Pool B-1st"},
+			Right: &Node{LeafNode: true, LeafVal: "Pool C-2nd"},
+		},
+	}
+	treeAdjustment(node)
+	assert.Equal(t, "Pool B-1st", node.Left.LeafVal, "1st-place should get the bye (left/top position)")
+	assert.Equal(t, "Pool A-2nd", node.Right.Left.LeafVal, "2nd-place should be pushed into the match")
+}
+
+func TestTreeAdjustmentByeNoSwapWhenCorrect(t *testing.T) {
+	node := &Node{
+		Left: &Node{LeafNode: true, LeafVal: "Pool A-1st"},
+		Right: &Node{
+			Left:  &Node{LeafNode: true, LeafVal: "Pool B-2nd"},
+			Right: &Node{LeafNode: true, LeafVal: "Pool C-2nd"},
+		},
+	}
+	treeAdjustment(node)
+	assert.Equal(t, "Pool A-1st", node.Left.LeafVal, "1st-place already in bye position, no swap")
+	assert.Equal(t, "Pool B-2nd", node.Right.Left.LeafVal)
 }

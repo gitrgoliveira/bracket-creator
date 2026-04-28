@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Go CLI and web application for generating kendo tournament brackets as Excel spreadsheets. Supports two formats: **Pools & Playoffs** (round-robin pools then knockout) and **Playoffs Only** (direct elimination). Input is CSV, output is Excel with formula-linked cells for bracket visualization.
+A Go CLI and web application for generating kendo tournament brackets as Excel spreadsheets. Supports two formats: **Pools & Playoffs** (round-robin pools then knockout) and **Playoffs Only** (direct elimination). Input is CSV, output is Excel with formula-linked cells for bracket visualization. The web API is documented via an OpenAPI specification in `specs/openapi.yaml`.
 
 ## Build & Test Commands
 

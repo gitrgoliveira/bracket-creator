@@ -9,6 +9,7 @@ High-signal instructions for AI agents working in this repository.
 - **Paging:** `helper.MaxPlayersPerTree = 16`. Brackets larger than 16 are subdivided into multiple sheets (pages) unless `--single-tree` is used.
 - **Embedding:** Only `web/*` is embedded via `//go:embed` in `main.go`. Rebuild with `make go/build` after modifying web assets.
 - **Court limit:** A–Z labels mean `--courts` is rejected if greater than 26.
+- **API Documentation:** The OpenAPI specification for the web API is located in `specs/openapi.yaml`.
 
 ## Developer Workflow
 - **Standard Verification:** `make go/test` (runs lint + security + tests).

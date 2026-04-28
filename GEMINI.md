@@ -21,6 +21,7 @@
     - `resources/`: Management of embedded assets.
 - `web/`: Frontend assets (HTML, CSS, JS) embedded into the binary using `go:embed`.
 - `tests/`: Integration tests for the Web API and CLI.
+- `specs/`: Contains the OpenAPI specification (`openapi.yaml`) for the web API.
 
 ### Seeding Logic
 - **Playoffs (`StandardSeeding`)**: Uses a power-of-2 bracket distribution (e.g., seeds 1 and 2 on opposite halves). Includes displaced seed placement using a furthest-distance heuristic for out-of-range seeds.

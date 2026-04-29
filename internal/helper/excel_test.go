@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -458,6 +459,49 @@ func TestFillInMatchesTable(t *testing.T) {
 	}
 }
 
+func TestFillInMatchesMultiPageBracket(t *testing.T) {
+	// Simulates a multi-page bracket where SubdivideTree splits the tree into
+	// subtrees. Subtree nodes get SheetName set by PrintLeafNodes, but the
+	// connecting nodes (final, semi-finals) between subtrees have SheetName="".
+	// All nodes must still receive sequential matchNum values so the
+	// Elimination Matches sheet never shows "Match 0".
+	qf1 := &Node{SheetName: "Tree 1", LeafVal: "H5", Val: 1}
+	qf2 := &Node{SheetName: "Tree 1", LeafVal: "H13", Val: 2}
+	qf3 := &Node{SheetName: "Tree 2", LeafVal: "H5", Val: 3}
+	qf4 := &Node{SheetName: "Tree 2", LeafVal: "H13", Val: 4}
+	sf1 := &Node{SheetName: "Tree 1", LeafVal: "J9", Val: 5}
+	sf2 := &Node{SheetName: "Tree 2", LeafVal: "J9", Val: 6}
+	final := &Node{SheetName: "", LeafVal: "", Val: 7}
+
+	rounds := [][]*Node{
+		{qf1, qf2, qf3, qf4},
+		{sf1, sf2},
+		{final},
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+	_, _ = f.NewSheet("Tree 1")
+	_, _ = f.NewSheet("Tree 2")
+
+	FillInMatches(f, rounds)
+
+	for _, round := range rounds {
+		for _, node := range round {
+			assert.NotZero(t, node.matchNum,
+				"node with SheetName=%q should have non-zero matchNum", node.SheetName)
+		}
+	}
+
+	assert.Equal(t, int64(1), qf1.matchNum)
+	assert.Equal(t, int64(2), qf2.matchNum)
+	assert.Equal(t, int64(3), qf3.matchNum)
+	assert.Equal(t, int64(4), qf4.matchNum)
+	assert.Equal(t, int64(5), sf1.matchNum)
+	assert.Equal(t, int64(6), sf2.matchNum)
+	assert.Equal(t, int64(7), final.matchNum)
+}
+
 // TestWriteTreeValueExtended provides comprehensive value/formula writing tests
 func TestWriteTreeValueExtended(t *testing.T) {
 	tests := []struct {
@@ -696,17 +740,50 @@ func TestCreateNamesToPrint(t *testing.T) {
 		{Name: "Player2", PoolPosition: 2, sheetName: "Pool1", cell: "B3"},
 	}
 
-	CreateNamesToPrint(f, players, false)
-	CreateNamesToPrint(f, players, true)
+	CreateNamesToPrint(f, players, false, 1)
 
-	valA1, _ := f.GetCellValue(SheetNamesToPrint, "A1")
+	sheet := "Names to Print A"
+	valA1, _ := f.GetCellValue(sheet, "A1")
 	if valA1 != "1" {
 		t.Errorf("Expected '1', got '%s'", valA1)
 	}
-	valA2, _ := f.GetCellValue(SheetNamesToPrint, "A2")
+	valA2, _ := f.GetCellValue(sheet, "A2")
 	if valA2 != "2" {
 		t.Errorf("Expected '2', got '%s'", valA2)
 	}
+
+	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
+	assert.Equal(t, -1, idx, "template sheet should be deleted")
+}
+
+func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("data")
+	f.NewSheet(SheetNamesToPrint)
+
+	players := make([]Player, 8)
+	for i := range 8 {
+		players[i] = Player{
+			Name:         fmt.Sprintf("Player%d", i+1),
+			PoolPosition: int64(i + 1),
+			sheetName:    "data",
+			cell:         fmt.Sprintf("B%d", i+2),
+		}
+	}
+
+	CreateNamesToPrint(f, players, false, 2)
+
+	rowsA, err := f.GetRows("Names to Print A")
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(rowsA), "court A should have 4 players")
+
+	rowsB, err := f.GetRows("Names to Print B")
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(rowsB), "court B should have 4 players")
+
+	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
+	assert.Equal(t, -1, idx, "template sheet should be deleted")
 }
 
 func TestCreateNamesWithPoolToPrint(t *testing.T) {
@@ -725,17 +802,59 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 		},
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false)
-	CreateNamesWithPoolToPrint(f, pools, true)
+	CreateNamesWithPoolToPrint(f, pools, false, 1)
 
-	valA1, _ := f.GetCellValue(SheetNamesToPrint, "A1")
+	sheet := "Names to Print A"
+	valA1, _ := f.GetCellValue(sheet, "A1")
 	if valA1 != "A1" {
 		t.Errorf("Expected 'A1', got '%s'", valA1)
 	}
-	valA2, _ := f.GetCellValue(SheetNamesToPrint, "A2")
+	valA2, _ := f.GetCellValue(sheet, "A2")
 	if valA2 != "A2" {
 		t.Errorf("Expected 'A2', got '%s'", valA2)
 	}
+
+	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
+	assert.Equal(t, -1, idx, "template sheet should be deleted")
+}
+
+func TestCreateNamesWithPoolToPrint_MultiCourt(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("data")
+	f.NewSheet(SheetNamesToPrint)
+
+	pools := []Pool{
+		{PoolName: "Pool A", Players: []Player{
+			{Name: "P1", PoolPosition: 1, sheetName: "data", cell: "B2"},
+			{Name: "P2", PoolPosition: 2, sheetName: "data", cell: "B3"},
+		}},
+		{PoolName: "Pool B", Players: []Player{
+			{Name: "P3", PoolPosition: 1, sheetName: "data", cell: "B4"},
+			{Name: "P4", PoolPosition: 2, sheetName: "data", cell: "B5"},
+		}},
+		{PoolName: "Pool C", Players: []Player{
+			{Name: "P5", PoolPosition: 1, sheetName: "data", cell: "B6"},
+			{Name: "P6", PoolPosition: 2, sheetName: "data", cell: "B7"},
+		}},
+		{PoolName: "Pool D", Players: []Player{
+			{Name: "P7", PoolPosition: 1, sheetName: "data", cell: "B8"},
+			{Name: "P8", PoolPosition: 2, sheetName: "data", cell: "B9"},
+		}},
+	}
+
+	CreateNamesWithPoolToPrint(f, pools, false, 2)
+
+	rowsA, err := f.GetRows("Names to Print A")
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(rowsA), "court A should have players from pools A,B")
+
+	rowsB, err := f.GetRows("Names to Print B")
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(rowsB), "court B should have players from pools C,D")
+
+	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
+	assert.Equal(t, -1, idx, "template sheet should be deleted")
 }
 
 func TestFillEstimations(t *testing.T) {

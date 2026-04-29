@@ -139,11 +139,13 @@ func FillInMatches(f *excelize.File, eliminationMatchRounds [][]*Node) {
 	var matchNum = 1
 	for _, round := range eliminationMatchRounds {
 		for _, match := range round {
-			if match == nil || match.SheetName == "" {
+			if match == nil {
 				continue
 			}
 			match.matchNum = int64(matchNum)
-			handleExcelError("SetCellInt", f.SetCellInt(match.SheetName, match.LeafVal, int64(matchNum)))
+			if match.SheetName != "" {
+				handleExcelError("SetCellInt", f.SetCellInt(match.SheetName, match.LeafVal, int64(matchNum)))
+			}
 			matchNum++
 		}
 	}

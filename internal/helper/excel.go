@@ -706,30 +706,79 @@ type nameEntry struct {
 	fallbackTag interface{}
 }
 
-func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool) {
-	entries := make([]nameEntry, len(players))
-	for i, p := range players {
-		entries[i] = nameEntry{player: p, fallbackTag: p.PoolPosition}
-	}
-	printNameEntries(f, entries, sanitized)
+func courtSheetName(courtIdx int) string {
+	return fmt.Sprintf("%s %s", SheetNamesToPrint, string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIdx]))
 }
 
-func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool) {
-	var entries []nameEntry
-	for _, pool := range pools {
+func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, numCourts int) {
+	numCourts = clampCourts(numCourts)
+
+	base := len(players) / numCourts
+	extra := len(players) % numCourts
+	offset := 0
+
+	for c := range numCourts {
+		count := base
+		if c < extra {
+			count++
+		}
+		courtPlayers := players[offset : offset+count]
+		offset += count
+
+		if len(courtPlayers) == 0 {
+			continue
+		}
+
+		entries := make([]nameEntry, len(courtPlayers))
+		for i, p := range courtPlayers {
+			entries[i] = nameEntry{player: p, fallbackTag: p.PoolPosition}
+		}
+
+		sheetName := courtSheetName(c)
+		if _, err := f.NewSheet(sheetName); err != nil {
+			handleExcelError("NewSheet", err)
+		}
+		printNameEntries(f, sheetName, entries, sanitized)
+	}
+
+	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
+		fmt.Fprintf(os.Stderr, "Note: %s sheet might not exist: %v\n", SheetNamesToPrint, err)
+	}
+}
+
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, numCourts int) {
+	numCourts = clampCourts(numCourts)
+	courtAssignments, _ := AssignPoolsToCourts(len(pools), numCourts)
+
+	entriesByCourt := make([][]nameEntry, numCourts)
+	for poolIdx, pool := range pools {
+		court := courtAssignments[poolIdx]
 		poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
 		for _, player := range pool.Players {
-			entries = append(entries, nameEntry{
+			entriesByCourt[court] = append(entriesByCourt[court], nameEntry{
 				player:      player,
 				fallbackTag: fmt.Sprintf("%s%d", poolLetter, player.PoolPosition),
 			})
 		}
 	}
-	printNameEntries(f, entries, sanitized)
+
+	for c := range numCourts {
+		if len(entriesByCourt[c]) == 0 {
+			continue
+		}
+		sheetName := courtSheetName(c)
+		if _, err := f.NewSheet(sheetName); err != nil {
+			handleExcelError("NewSheet", err)
+		}
+		printNameEntries(f, sheetName, entriesByCourt[c], sanitized)
+	}
+
+	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
+		fmt.Fprintf(os.Stderr, "Note: %s sheet might not exist: %v\n", SheetNamesToPrint, err)
+	}
 }
 
-func printNameEntries(f *excelize.File, entries []nameEntry, sanitized bool) {
-	sheetName := SheetNamesToPrint
+func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, sanitized bool) {
 	setupNamesToPrintLayout(f, sheetName)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)

@@ -12,6 +12,7 @@ import (
 )
 
 var WebFs embed.FS
+var MobileWebFs embed.FS
 
 type RowStack struct {
 	data []int

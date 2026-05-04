@@ -74,14 +74,12 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
-		// Results should still be printed at row 5
-		// Header(2) + Results(1+3) = 6.
-		// Actually, Header is 2 rows (2,3). poolRow=4. Result 1 is poolRow++=5.
-		val, _ := f.GetCellValue(SheetPoolMatches, "F5")
+		// Results should still be printed at row 8
+		val, _ := f.GetCellValue(SheetPoolMatches, "F8")
 		if val != "1. " {
-			v4, _ := f.GetCellValue(SheetPoolMatches, "F4")
-			v6, _ := f.GetCellValue(SheetPoolMatches, "F6")
-			t.Errorf("expected result 1. at F5 for single player pool, got '%s' (F4='%s', v6='%s')", val, v4, v6)
+			v7, _ := f.GetCellValue(SheetPoolMatches, "F7")
+			v9, _ := f.GetCellValue(SheetPoolMatches, "F9")
+			t.Errorf("expected result 1. at F8 for single player pool, got '%s' (F7='%s', F9='%s')", val, v7, v9)
 		}
 	})
 
@@ -100,48 +98,44 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 }
 
 func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
-	playerA1 := &Player{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"}
-	playerA2 := &Player{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"}
-	poolA := Pool{
-		PoolName:  "Pool A",
-		sheetName: SheetPoolDraw,
-		cell:      "B1",
-		Players:   []Player{*playerA1, *playerA2},
-		Matches:   []Match{{SideA: playerA1, SideB: playerA2}},
-	}
-	pools := []Pool{poolA}
-
 	t.Run("teamMatches = 1", func(t *testing.T) {
+		playerA1 := &Player{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"}
+		playerA2 := &Player{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"}
+		pools := []Pool{{
+			PoolName: "Pool A",
+			Players:  []Player{*playerA1, *playerA2},
+			Matches:  []Match{{SideA: playerA1, SideB: playerA2}},
+		}}
+
 		f := excelize.NewFile()
 		defer f.Close()
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
 		PrintPoolMatches(f, pools, 1, 1, 1, false)
-		// Result 1 should be at row 9
-		val, _ := f.GetCellValue(SheetPoolMatches, "F9")
-		if val != "1. " {
-			v8, _ := f.GetCellValue(SheetPoolMatches, "F8")
-			v10, _ := f.GetCellValue(SheetPoolMatches, "F10")
-			t.Errorf("expected result 1. at F9 for teamMatches=1, got '%s' (F8='%s', F10='%s')", val, v8, v10)
-		}
+		// Result 1 should be at row 18
+		val, _ := f.GetCellValue(SheetPoolMatches, "F18")
+		assert.Equal(t, "1. ", val, "expected result 1. at F18 for teamMatches=1, got '%s'", val)
 	})
 
 	t.Run("teamMatches = 10", func(t *testing.T) {
+		playerA1 := &Player{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"}
+		playerA2 := &Player{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"}
+		pools := []Pool{{
+			PoolName: "Pool A",
+			Players:  []Player{*playerA1, *playerA2},
+			Matches:  []Match{{SideA: playerA1, SideB: playerA2}},
+		}}
+
 		f := excelize.NewFile()
 		defer f.Close()
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
 		PrintPoolMatches(f, pools, 10, 1, 1, false)
-		// Header(1) + Match(1+2+10+2+1+2=18) = 19. Result 1 at 18.
-		val, _ := f.GetCellValue(SheetPoolMatches, "F18")
-		if val != "1. " {
-			v17, _ := f.GetCellValue(SheetPoolMatches, "F17")
-			v19, _ := f.GetCellValue(SheetPoolMatches, "F19")
-			v22, _ := f.GetCellValue(SheetPoolMatches, "F22")
-			t.Errorf("expected result 1. at F18 for teamMatches=10, got '%s' (F17='%s', v19='%s', v22='%s')", val, v17, v19, v22)
-		}
+		// Result 1 at row 27
+		val, _ := f.GetCellValue(SheetPoolMatches, "F27")
+		assert.Equal(t, "1. ", val, "expected result 1. at F27 for teamMatches=10, got '%s'", val)
 	})
 }
 

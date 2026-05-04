@@ -50,3 +50,6 @@ specs/*
 .dolt/
 *.db
 .beads-credential-key
+tournament-data*
+browser-test*
+bracket-creator-webapp*

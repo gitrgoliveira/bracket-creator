@@ -5,7 +5,7 @@ IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
 GO_VERSION := 1.26.2
 GO_SOURCES := $(shell find . -name "*.go" -type f)
-EMBEDDED_ASSETS := $(shell find ./web -type f)
+EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
 # Build flags
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -26,7 +26,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security examples docker/build docker/run pre-commit docs/serve docs/open docs/build run goreleaser/test release version
+.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -74,7 +74,21 @@ go/test-race: go/lint ## Run tests with race detection
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 
-$(BIN_PATH)/$(BIN_NAME): $(GO_SOURCES) $(EMBEDDED_ASSETS)
+vendor-frontend:
+	@echo "Downloading frontend dependencies..."
+	@mkdir -p web-mobile/vendor
+	@curl -sL https://unpkg.com/preact@10.13.1/dist/preact.min.js -o web-mobile/vendor/preact.min.js
+	@curl -sL https://unpkg.com/preact@10.13.1/hooks/dist/hooks.umd.js -o web-mobile/vendor/hooks.umd.js
+	@curl -sL https://unpkg.com/preact@10.13.1/compat/dist/compat.umd.js -o web-mobile/vendor/compat.umd.js
+
+esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
+	@echo "Pre-compiling JSX files..."
+	@mkdir -p web-mobile/dist
+	npx --yes esbuild web-mobile/js/bracket.js web-mobile/js/viewer.js web-mobile/js/admin.js web-mobile/js/app.js \
+		--outdir=web-mobile/dist --loader:.js=jsx \
+		--jsx-factory=React.createElement --jsx-fragment=React.Fragment
+
+$(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx $(GO_SOURCES) $(EMBEDDED_ASSETS)
 	@echo "Building $(BIN_NAME) version $(VERSION)..."
 	@mkdir -p $(BIN_PATH)
 	go generate ./...
@@ -130,6 +144,11 @@ run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."
 	$(BIN_PATH)/$(BIN_NAME) serve
 
+TOURNAMENT_DATA_DIR ?= ./tournament-data
+run-mobile: go/build ## Run the mobile-app locally (use TOURNAMENT_DATA_DIR to override folder)
+	@echo "Running $(BIN_NAME) mobile-app using folder $(TOURNAMENT_DATA_DIR)..."
+	@mkdir -p $(TOURNAMENT_DATA_DIR)
+	$(BIN_PATH)/$(BIN_NAME) mobile-app --folder $(TOURNAMENT_DATA_DIR)
 goreleaser/test: ## Test the goreleaser configuration locally
 	@echo "Testing goreleaser configuration..."
 	goreleaser --snapshot --skip=publish --clean

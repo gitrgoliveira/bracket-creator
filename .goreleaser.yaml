@@ -5,6 +5,8 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    - mkdir -p web-mobile/dist
+    - npx --yes esbuild web-mobile/js/bracket.js web-mobile/js/viewer.js web-mobile/js/admin.js web-mobile/js/app.js --outdir=web-mobile/dist --loader:.js=jsx --jsx-factory=React.createElement --jsx-fragment=React.Fragment
     - ./scripts/completions.sh
     - ./scripts/manpages.sh
 

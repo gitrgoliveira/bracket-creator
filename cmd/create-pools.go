@@ -322,6 +322,9 @@ func (o *poolOptions) createPools(entries []string) error {
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.mirror)
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(finals)-1), o.courts)
 
+	// Apply sheet protection to all sheets except data and Time Estimator
+	helper.ProtectAllSheets(f)
+
 	// Save the spreadsheet file
 	err = f.Write(o.outputWriter)
 	if err != nil {

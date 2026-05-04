@@ -10,23 +10,25 @@ import (
 type styleKey string
 
 const (
-	styleBorderTop        styleKey = "border_top"
-	styleBorderBottom     styleKey = "border_bottom"
-	styleBorderBottomLeft styleKey = "border_bottom_left"
-	styleBorderLeft       styleKey = "border_left"
-	styleTreeHeader       styleKey = "tree_header"
-	styleTreeTop          styleKey = "tree_top"
-	styleTreeBody         styleKey = "tree_body"
-	styleTreeBottom       styleKey = "tree_bottom"
-	styleTreeText         styleKey = "tree_text"
-	stylePoolHeader       styleKey = "pool_header"
-	styleRedHeader        styleKey = "red_header"
-	styleWhiteHeader      styleKey = "white_header"
-	styleText             styleKey = "text"
-	styleNameID           styleKey = "name_id"
-	styleNameIDPosition   styleKey = "name_id_position"
-	styleTime             styleKey = "time"
-	styleDuration         styleKey = "duration"
+	styleBorderTop            styleKey = "border_top"
+	styleBorderBottom         styleKey = "border_bottom"
+	styleBorderBottomLeft     styleKey = "border_bottom_left"
+	styleBorderLeft           styleKey = "border_left"
+	styleTreeHeader           styleKey = "tree_header"
+	styleTreeTop              styleKey = "tree_top"
+	styleTreeBody             styleKey = "tree_body"
+	styleTreeBottom           styleKey = "tree_bottom"
+	styleTreeText             styleKey = "tree_text"
+	stylePoolHeader           styleKey = "pool_header"
+	styleRedHeader            styleKey = "red_header"
+	styleWhiteHeader          styleKey = "white_header"
+	styleText                 styleKey = "text"
+	styleNameID               styleKey = "name_id"
+	styleNameIDPosition       styleKey = "name_id_position"
+	styleTime                 styleKey = "time"
+	styleDuration             styleKey = "duration"
+	styleUnlockedText         styleKey = "unlocked_text"
+	styleUnlockedBorderBottom styleKey = "unlocked_border_bottom"
 )
 
 var (
@@ -133,6 +135,7 @@ func getTreeHeaderStyle(f *excelize.File) int {
 func buildTreeHeaderStyle(f *excelize.File) int {
 	borderStyle := mustNewStyle(f, &excelize.Style{
 		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 12},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"EFEFEF"}, Pattern: 1},
 	})
 	return borderStyle
 }
@@ -227,6 +230,11 @@ func buildTreeTextStyle(f *excelize.File) int {
 		Border: []excelize.Border{
 			{Type: "bottom", Color: "000000", Style: 2},
 		},
+		Fill: excelize.Fill{
+			Type:    "pattern",
+			Color:   []string{"EFEFEF"},
+			Pattern: 1,
+		},
 	})
 	return style
 }
@@ -312,6 +320,25 @@ func buildTextStyle(f *excelize.File) int {
 	return style
 }
 
+func getGreyTextStyle(f *excelize.File) int {
+	return getCachedStyle(f, styleKey("grey_text"), buildGreyTextStyle)
+}
+
+func buildGreyTextStyle(f *excelize.File) int {
+	style := mustNewStyle(f, &excelize.Style{
+		Alignment: &excelize.Alignment{Horizontal: "center"},
+		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Border: []excelize.Border{
+			{Type: "top", Color: "000000", Style: 1},
+			{Type: "bottom", Color: "000000", Style: 1},
+			{Type: "left", Color: "000000", Style: 1},
+			{Type: "right", Color: "000000", Style: 1},
+		},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"EFEFEF"}, Pattern: 1},
+	})
+	return style
+}
+
 func getNameIDStyle(f *excelize.File) int {
 	return getCachedStyle(f, styleNameID, buildNameIDStyle)
 }
@@ -392,6 +419,43 @@ func buildDurationStyle(f *excelize.File) int {
 			{Type: "left", Color: "000000", Style: 1},
 			{Type: "right", Color: "000000", Style: 1},
 		},
+	})
+	return style
+}
+
+func getUnlockedTextStyle(f *excelize.File) int {
+	return getCachedStyle(f, styleUnlockedText, buildUnlockedTextStyle)
+}
+
+func buildUnlockedTextStyle(f *excelize.File) int {
+	style := mustNewStyle(f, &excelize.Style{
+		Alignment: &excelize.Alignment{Horizontal: "center"},
+		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Border: []excelize.Border{
+			{Type: "top", Color: "000000", Style: 1},
+			{Type: "bottom", Color: "000000", Style: 1},
+			{Type: "left", Color: "000000", Style: 1},
+			{Type: "right", Color: "000000", Style: 1},
+		},
+		Protection: &excelize.Protection{Locked: false},
+	})
+	return style
+}
+
+func getUnlockedBorderStyleBottom(f *excelize.File) int {
+	return getCachedStyle(f, styleUnlockedBorderBottom, buildUnlockedBorderStyleBottom)
+}
+
+func buildUnlockedBorderStyleBottom(f *excelize.File) int {
+	style := mustNewStyle(f, &excelize.Style{
+		Border: []excelize.Border{
+			{
+				Type:  "bottom",
+				Color: "000000",
+				Style: 2,
+			},
+		},
+		Protection: &excelize.Protection{Locked: false},
 	})
 	return style
 }

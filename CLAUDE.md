@@ -46,6 +46,28 @@ go test -cover ./internal/helper/...
 - **Seeding** (`helper/seed.go`): `StandardSeeding()` uses `generateBracketOrder()` for placement. `ApplySeeds()` handles collisions by swapping seed values. Names must match exactly (case-sensitive).
 - **Pool creation** (`helper/tournament.go`): Greedy algorithm with dojo-conflict avoidance. Pools distributed contiguously across courts (Shiaijo).
 - **Court-aware seeding** (`helper/seed.go`): `PoolSeeding(players, numPools, numCourts)` interleaves seeded players so that after `ReorderPoolsForCourts` the top seeds land in different courts and on opposite ends of each court's bracket.
+- **Pool Scoring & Tie-breaking**:
+    - **Individual Tournaments**:
+        1. Higher number of fights won.
+        2. Lower number of fights lost.
+        3. Higher number of hikiwake (Matches Tied).
+        4. Higher number of points scored.
+        5. Lower number of points lost.
+    - **Team Tournaments**:
+        1. Higher number of team matches won (W).
+        2. Lower number of team matches lost (L).
+        3. Higher number of draws in team matches (T).
+        4. Higher number of individual winners (IV).
+        5. Lower number of individual losses (IL).
+        6. Higher number of individual draws (IT).
+        7. Higher number of points scored (PW).
+        8. Lower number of points lost (PL).
+- **Team Match Winning Criteria**: An encounter between two teams is decided by:
+    1. Highest number of individual winners (Victories).
+    2. Highest number of points scored.
+    3. If both are equal, it's a draw (Tie) in pools, or requires a play-off (Encho) in elimination matches.
+- **Tie-marking Rule**: A match (individual or sub-match) is ONLY considered a tie if the operator enters an **'X'** (or 'x') in the "vs" column between the players. Equal scores without an 'X' are NOT treated as ties.
+- **Match Colors**: On tree/playoff brackets, the player on the top is always Red (Aka) and the bottom is White (Shiro).
 - **Court limit**: courts are labelled A–Z, so `--courts` is hard-capped at 26 and any value over that returns an error rather than silently truncating.
 
 ### Excel workbook construction

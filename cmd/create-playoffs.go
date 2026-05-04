@@ -255,6 +255,9 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.mirror)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
+	// Apply sheet protection to all sheets except data and Time Estimator
+	helper.ProtectAllSheets(f)
+
 	// Save the spreadsheet file
 	err = f.Write(o.outputWriter)
 	if err != nil {

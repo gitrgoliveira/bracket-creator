@@ -11,10 +11,14 @@ import (
 //go:embed web/*
 var webFiles embed.FS
 
+//go:embed web-mobile/*
+var mobileWebFiles embed.FS
+
 func main() {
-	res := resources.NewResources(webFiles)
+	res := resources.NewResources(webFiles, mobileWebFiles)
 
 	helper.WebFs = webFiles
+	helper.MobileWebFs = mobileWebFiles
 
 	cmd.ExecuteWithResources(res)
 }

@@ -7,17 +7,24 @@ import "io/fs"
 // Fields use the fs.FS interface so that both embed.FS (production) and
 // fstest.MapFS (tests) can be used.
 type Resources struct {
-	WebFiles fs.FS
+	WebFiles       fs.FS
+	MobileWebFiles fs.FS
 }
 
 // NewResources creates a new resources handler
-func NewResources(webFiles fs.FS) *Resources {
+func NewResources(webFiles, mobileWebFiles fs.FS) *Resources {
 	return &Resources{
-		WebFiles: webFiles,
+		WebFiles:       webFiles,
+		MobileWebFiles: mobileWebFiles,
 	}
 }
 
 // GetWebFS returns the embedded web file system
 func (r *Resources) GetWebFS() fs.FS {
 	return r.WebFiles
+}
+
+// GetMobileWebFS returns the embedded mobile web file system
+func (r *Resources) GetMobileWebFS() fs.FS {
+	return r.MobileWebFiles
 }

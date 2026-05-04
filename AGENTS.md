@@ -10,6 +10,15 @@ High-signal instructions for AI agents working in this repository.
 - **Embedding:** Only `web/*` is embedded via `//go:embed` in `main.go`. Rebuild with `make go/build` after modifying web assets.
 - **Court limit:** A–Z labels mean `--courts` is rejected if greater than 26.
 - **API Documentation:** The OpenAPI specification for the web API is located in `specs/openapi.yaml`.
+- **Pool Scoring Rules:**
+    - **Individual:** 1. Fights Won, 2. Fights Lost, 3. Hikiwake, 4. Points Scored, 5. Points Lost.
+    - **Team:** 1. Team W, 2. Team L, 3. Team T, 4. Individual Winners (IV), 5. Individual Losses (IL), 6. Individual Ties (IT), 7. Points Won (PW), 8. Points Lost (PL).
+- **Team Match Winning Criteria:**
+    1. Highest number of individual winners.
+    2. Highest number of points scored.
+    3. If tied: draw in pools, play-off in playoffs.
+- **Match Colors:** On tree/playoff brackets, the player on the top is Red (Aka) and the bottom is White (Shiro).
+- **Tie-marking Rule:** A match is only considered a tie (hikiwake) if an **'X'** is entered in the "vs" column. This column is unlocked on all sheets.
 
 ## Developer Workflow
 - **Standard Verification:** `make go/test` (runs lint + security + tests).

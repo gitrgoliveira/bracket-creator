@@ -13,7 +13,7 @@ import (
 // TestMain sets up appResources for tests.
 func TestMain(m *testing.M) {
 	// Wire a minimal Resources (web-files only) into appResources.
-	appResources = resources.NewResources(nil)
+	appResources = resources.NewResources(nil, nil)
 
 	code := m.Run()
 	os.Exit(code)

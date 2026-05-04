@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bracket Creator Mobile</title>
+    <link rel="stylesheet" href="css/styles.css">
+    
+    <!-- Load Preact locally -->
+    <script src="vendor/preact.min.js"></script>
+    <script src="vendor/hooks.umd.js"></script>
+    <script src="vendor/compat.umd.js"></script>
+    
+    <script>
+        console.log("Preact loaded:", !!window.preact);
+        console.log("PreactHooks loaded:", !!window.preactHooks);
+        console.log("PreactCompat loaded:", !!window.preactCompat);
+
+        // Alias for React/ReactDOM compatibility
+        window.React = window.preactCompat;
+        window.ReactDOM = window.preactCompat;
+
+        // React 18 createRoot polyfill for Preact
+        window.ReactDOM.createRoot = (container) => {
+            return {
+                render: (children) => {
+                    console.log("Mounting application...");
+                    window.preact.render(children, container);
+                }
+            };
+        };
+    </script>
+    
+</head>
+<body>
+    <div id="root"></div>
+
+    <script src="js/api.js"></script>
+    <script src="dist/bracket.js"></script>
+    <script src="dist/viewer.js"></script>
+    <script src="dist/admin.js"></script>
+    <script src="dist/app.js"></script>
+</body>
+</html>

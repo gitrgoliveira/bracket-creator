@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -430,10 +431,11 @@ func TestAddPoolsToSheet(t *testing.T) {
 
 			require.NoError(t, err)
 
-			// Verify Pool Draw title formula
+			// Verify Pool Draw title formula (normalize quotes)
 			titleFormula, err := f.GetCellFormula(SheetPoolDraw, "B2")
 			require.NoError(t, err)
-			assert.Equal(t, `IF(data!$B$1="","Tournament Pools",data!$B$1&" - Tournament Pools")`, titleFormula)
+			expectedTitle := `IF(data!$B$1="","Tournament Pools",data!$B$1&" - Tournament Pools")`
+			assert.Equal(t, strings.ReplaceAll(expectedTitle, "'", ""), strings.ReplaceAll(titleFormula, "'", ""))
 
 			// Verify formulas exist (spot check first pool if pools exist)
 			if len(tt.pools) > 0 {
@@ -441,7 +443,7 @@ func TestAddPoolsToSheet(t *testing.T) {
 				formula, err := f.GetCellFormula(SheetPoolDraw, "B5")
 				require.NoError(t, err)
 				expectedFormula := fmt.Sprintf("%s!%s", tt.pools[0].sheetName, tt.pools[0].cell)
-				assert.Equal(t, expectedFormula, formula)
+				assert.Equal(t, strings.ReplaceAll(expectedFormula, "'", ""), strings.ReplaceAll(formula, "'", ""))
 
 				// First player formula at B6
 				if len(tt.pools[0].Players) > 0 {
@@ -449,7 +451,7 @@ func TestAddPoolsToSheet(t *testing.T) {
 					require.NoError(t, err)
 					player := tt.pools[0].Players[0]
 					expectedFormula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)
-					assert.Equal(t, expectedFormula, formula)
+					assert.Equal(t, strings.ReplaceAll(expectedFormula, "'", ""), strings.ReplaceAll(formula, "'", ""))
 				}
 			}
 		})

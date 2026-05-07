@@ -72,7 +72,7 @@ func playerRef(p *Player) string {
 }
 
 func sheetRef(sheet, cell string) string {
-	return fmt.Sprintf("%s!%s", sheet, cell)
+	return fmt.Sprintf("'%s'!%s", sheet, cell)
 }
 
 func buildNameFormula(player Player, sanitized bool) string {
@@ -113,7 +113,7 @@ func writeCourtHeaders(f *excelize.File, sheetName string, numCourts int, header
 	}
 
 	for c := 0; c < numCourts; c++ {
-		courtStartCol := 1 + c*8
+		courtStartCol := 1 + c*CourtsColumnsPerCourt
 		courtEndCol := courtStartCol + 6
 		cStartColName := mustColumnName(courtStartCol)
 		cEndColName := mustColumnName(courtEndCol)
@@ -145,12 +145,43 @@ type playerMatchRecord struct {
 	side       string // "left" or "right"
 }
 
+// buildTeamWinnersFormula returns a SUMPRODUCT Excel formula counting individual
+// sub-match wins for one side across the row range [startRow, endRow].
+// middleCol is the "vs/X" column; left=true counts the left side's wins.
+func buildTeamWinnersFormula(middleCol, lVCol, lPCol, rVCol, rPCol string, startRow, endRow int, left bool) string {
+	mRange := fmt.Sprintf("%s%d:%s%d", middleCol, startRow, middleCol, endRow)
+	lcL := fmt.Sprintf(
+		`(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-","")))`,
+		lVCol, startRow, lVCol, endRow, lPCol, startRow, lPCol, endRow)
+	lcR := fmt.Sprintf(
+		`(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-","")))`,
+		rPCol, startRow, rPCol, endRow, rVCol, startRow, rVCol, endRow)
+	if left {
+		return fmt.Sprintf(`SUMPRODUCT((UPPER(%s)<>"X")*(%s>%s)*1)`, mRange, lcL, lcR)
+	}
+	return fmt.Sprintf(`SUMPRODUCT((UPPER(%s)<>"X")*(%s>%s)*1)`, mRange, lcR, lcL)
+}
+
+// buildTeamPointsFormula returns a SUMPRODUCT Excel formula summing the
+// point-character count for one side across [startRow, endRow].
+// left=true sums the left side (lVCol+lPCol); false sums the right (rPCol+rVCol).
+func buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol string, startRow, endRow int, left bool) string {
+	rangeA := fmt.Sprintf("%s%d:%s%d", lVCol, startRow, lVCol, endRow)
+	rangeB := fmt.Sprintf("%s%d:%s%d", lPCol, startRow, lPCol, endRow)
+	if !left {
+		rangeA = fmt.Sprintf("%s%d:%s%d", rPCol, startRow, rPCol, endRow)
+		rangeB = fmt.Sprintf("%s%d:%s%d", rVCol, startRow, rVCol, endRow)
+	}
+	return fmt.Sprintf(
+		`SUMPRODUCT(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s," ",""),"0",""),"-","")))`,
+		rangeA, rangeB)
+}
+
 func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, mirror bool) {
 	poolRow := startRow
 
 	startColName := colNames.startColName
 	middleColName := colNames.middleColName
-	rightVictoriesColName := colNames.rightVictoriesColName
 	endColName := colNames.endColName
 	startCell := startColName + fmt.Sprint(poolRow)
 	endCell := endColName + fmt.Sprint(poolRow)
@@ -200,14 +231,18 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 			}
 
 			// Unlock scoring columns (Victories, Points, and 'vs' for ties)
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(poolRow), colNames.rightVictoriesColName+fmt.Sprint(poolRow), styles.unlockedText))
+			if teamMatches > 0 {
+				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, middleColName+fmt.Sprint(poolRow), middleColName+fmt.Sprint(poolRow), styles.unlockedText))
+			} else {
+				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(poolRow), colNames.rightVictoriesColName+fmt.Sprint(poolRow), styles.unlockedText))
+			}
 
 			subMatchStartRow := poolRow + 1
 			for i := 0; i < teamMatches; i++ {
 				poolRow++
 				startCell = startColName + fmt.Sprint(poolRow)
 				endCell = endColName + fmt.Sprint(poolRow)
-				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.unlockedText))
+				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 				handleExcelError("SetCellInt", f.SetCellInt(sheetName, startCell, int64(i+1)))
 				handleExcelError("SetCellInt", f.SetCellInt(sheetName, endCell, int64(i+1)))
 
@@ -221,41 +256,11 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 				summaryRow := subMatchStartRow - 1
 				lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
 
-				// Use SUMPRODUCT for much shorter and more efficient formulas
-				// This avoids exceeding Excel's 8192 character limit for formulas
-				// Individual Winners (IV) for a side
-				buildWinnersFormula := func(left bool) string {
-					mRange := fmt.Sprintf("%s%d:%s%d", middleColName, subMatchStartRow, middleColName, subMatchEndRow)
-
-					// slt = total points of submatch for left
-					// slt = LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(lV," ",""),"0",""),"-","")) + LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(lP," ",""),"0",""),"-",""))
-					lcL := fmt.Sprintf(`(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-","")))`, lVCol, subMatchStartRow, lVCol, subMatchEndRow, lPCol, subMatchStartRow, lPCol, subMatchEndRow)
-					lcR := fmt.Sprintf(`(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-","")))`, rPCol, subMatchStartRow, rPCol, subMatchEndRow, rVCol, subMatchStartRow, rVCol, subMatchEndRow)
-
-					if left {
-						return fmt.Sprintf(`SUMPRODUCT((UPPER(%s)<>"X")*(%s>%s)*1)`, mRange, lcL, lcR)
-					}
-					return fmt.Sprintf(`SUMPRODUCT((UPPER(%s)<>"X")*(%s>%s)*1)`, mRange, lcR, lcL)
-				}
-
-				// Points Won (PW) for a side
-				buildPointsFormula := func(left bool) string {
-					rangeA := fmt.Sprintf("%s%d:%s%d", lVCol, subMatchStartRow, lVCol, subMatchEndRow)
-					rangeB := fmt.Sprintf("%s%d:%s%d", lPCol, subMatchStartRow, lPCol, subMatchEndRow)
-					if !left {
-						rangeA = fmt.Sprintf("%s%d:%s%d", rPCol, subMatchStartRow, rPCol, subMatchEndRow)
-						rangeB = fmt.Sprintf("%s%d:%s%d", rVCol, subMatchStartRow, rVCol, subMatchEndRow)
-					}
-					// SUMPRODUCT(LEN(SUBSTITUTE(rangeA," ","")) + LEN(SUBSTITUTE(rangeB," ","")))
-					// We use the same substitution rules as individual matches
-					return fmt.Sprintf(`SUMPRODUCT(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s," ",""),"0",""),"-","")))`, rangeA, rangeB)
-				}
-
 				// Write summary formulas to the team match summary row
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, summaryRow), buildWinnersFormula(true)))
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, summaryRow), buildPointsFormula(true)))
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, summaryRow), buildPointsFormula(false)))
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, summaryRow), buildWinnersFormula(false)))
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, summaryRow), buildTeamWinnersFormula(middleColName, lVCol, lPCol, rVCol, rPCol, subMatchStartRow, subMatchEndRow, true)))
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, summaryRow), buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol, subMatchStartRow, subMatchEndRow, true)))
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, summaryRow), buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol, subMatchStartRow, subMatchEndRow, false)))
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, summaryRow), buildTeamWinnersFormula(middleColName, lVCol, lPCol, rVCol, rPCol, subMatchStartRow, subMatchEndRow, false)))
 
 				if mirror {
 					playerMatchRows[match.SideA] = append(playerMatchRows[match.SideA], playerMatchRecord{row: subMatchStartRow, endRow: subMatchEndRow, summaryRow: summaryRow, side: "right"})
@@ -275,167 +280,247 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 
 	poolRow++ // Add a single row of space between the pool and the pool results
 
-	poolRow = printPoolResultsTable(f, sheetName, pool, poolRow, colNames, playerMatchRows, styles, mirror, teamMatches)
+	resultsTableStart := poolRow
+	poolRow = printPoolResultsTable(f, sheetName, pool, resultsTableStart, colNames, playerMatchRows, styles, mirror, teamMatches)
 	poolRow++
 
 	for result := 1; result <= len(pool.Players); result++ {
 		poolRow++
-		resColName := rightVictoriesColName
-		resEndColName := endColName
-		if teamMatches > 0 {
-			resColName = mustColumnName(colNames.startCol + 5)
-			resEndColName = mustColumnName(colNames.startCol + 6)
-			if result == 1 {
-				poolRow++ // Extra space before ranking
-				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resEndColName, poolRow), "Ranking"))
-				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", resColName, poolRow), fmt.Sprintf("%s%d", resEndColName, poolRow), styles.poolHeader))
-				poolRow++
+		resLabelColName := mustColumnName(colNames.startCol + 5) // F
+		resNameColName := mustColumnName(colNames.startCol + 6)  // G
+
+		if result == 1 {
+			poolRow++ // Extra space before ranking
+			resultsDataStart := resultsTableStart + 1
+			resultsDataEnd := resultsTableStart + len(pool.Players)
+			if teamMatches > 0 {
+				resultsDataEnd = resultsTableStart + (len(pool.Players) * 2) + 2
 			}
+
+			nameRange := fmt.Sprintf("$%s$%d:$%s$%d", colNames.startColName, resultsDataStart, colNames.startColName, resultsDataEnd)
+			rankRange := fmt.Sprintf("$%s$%d:$%s$%d", resNameColName, resultsDataStart, resNameColName, resultsDataEnd)
+
+			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resNameColName, poolRow), "Ranking"))
+			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", resLabelColName, poolRow), fmt.Sprintf("%s%d", resNameColName, poolRow), styles.poolHeader))
+
+			for i := range pool.Players {
+				rankNum := i + 1
+				label := fmt.Sprintf("%d.", rankNum)
+				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resLabelColName, poolRow+1+i), label))
+
+				// Formula to find the name of the player with this rank:
+				formula := fmt.Sprintf("IFERROR(INDEX(%s, MATCH(%d, %s, 0)), \"-\")", nameRange, rankNum, rankRange)
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", resNameColName, poolRow+1+i), formula))
+				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", resNameColName, poolRow+1+i), fmt.Sprintf("%s%d", resNameColName, poolRow+1+i), styles.unlockedBorderBottom))
+			}
+			poolRow += len(pool.Players) + 1
 		}
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resColName, poolRow), fmt.Sprintf("%d. ", result)))
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", resEndColName, poolRow), fmt.Sprintf("%s%d", resEndColName, poolRow), styles.unlockedBorderBottom))
 
 		if result <= numWinners {
 			matchWinners[fmt.Sprintf("%s-%s", pool.PoolName, getOrdinal(result))] = MatchWinner{
 				sheetName: sheetName,
-				cell:      fmt.Sprintf("%s%d", resEndColName, poolRow),
+				cell:      fmt.Sprintf("%s%d", resNameColName, poolRow),
 			}
 		}
 	}
 }
 
-func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startRow int, colNames matchColumnNames, playerMatchRows map[*Player][]playerMatchRecord, styles matchStyles, mirror bool, teamMatches int) int {
-	startColName := colNames.startColName
-	middleColName := colNames.middleColName
-	lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
-	headerRow := startRow
-	joinFormulas := func(parts []string) string {
-		if len(parts) == 0 {
-			return "0"
-		}
-		return strings.Join(parts, "+")
+// poolResultsCtx bundles the parameters shared across printPoolResultsTable helpers.
+type poolResultsCtx struct {
+	f               *excelize.File
+	sheetName       string
+	pool            Pool
+	colNames        matchColumnNames
+	playerMatchRows map[*Player][]playerMatchRecord
+	styles          matchStyles
+	startColName    string
+	middleColName   string
+	lVCol           string
+	lPCol           string
+	rVCol           string
+	rPCol           string
+	rankCol         string
+	scoreCol        string
+	joinFormulas    func([]string) string
+}
+
+// printTeamResultsTableSection writes the "Team Results" W/L/T table header and
+// per-player win/loss/tie formulas starting at headerRow.
+func printTeamResultsTableSection(ctx poolResultsCtx, headerRow int, cols []string) {
+	f, sheetName := ctx.f, ctx.sheetName
+	startColName, rankCol := ctx.startColName, ctx.rankCol
+	middleColName := ctx.middleColName
+	lVCol, lPCol, rVCol, rPCol := ctx.lVCol, ctx.lPCol, ctx.rVCol, ctx.rPCol
+	styles, joinFormulas := ctx.styles, ctx.joinFormulas
+	pool, playerMatchRows := ctx.pool, ctx.playerMatchRows
+
+	headers := []string{"W", "L", "T"}
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), "Team Results"))
+	for i, h := range headers {
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", cols[i], headerRow), h))
 	}
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rankCol, headerRow), "Rank"))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), fmt.Sprintf("%s%d", rankCol, headerRow), styles.poolHeader))
 
-	if teamMatches > 0 {
-		// Table 1: W, L, T
-		headers := []string{"W", "L", "T"}
-		cols := []string{
-			mustColumnName(colNames.startCol + 1), // W
-			mustColumnName(colNames.startCol + 2), // L
-			mustColumnName(colNames.startCol + 3), // T
-		}
-		for i, h := range headers {
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", cols[i], headerRow), h))
-		}
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), fmt.Sprintf("%s%d", cols[2], headerRow), styles.poolHeader))
+	for i, player := range pool.Players {
+		row := headerRow + 1 + i
+		leftSide, _ := getMatchSides(playerRef(&player), "", false)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), leftSide))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, row), fmt.Sprintf("%s%d", startColName, row), styles.text))
 
-		for i, player := range pool.Players {
-			row := headerRow + 1 + i
-			leftSide, _ := getMatchSides(playerRef(&player), "", false)
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), leftSide))
-
-			records := playerMatchRows[&pool.Players[i]]
-			var wF, lF, tF []string
-			for _, rec := range records {
-				if rec.endRow == 0 {
-					continue
-				}
-				isSummaryTie := fmt.Sprintf(`OR(%s%d="X",%s%d="x")`, middleColName, rec.summaryRow, middleColName, rec.summaryRow)
-
-				// Team totals from summary row
-				vl := fmt.Sprintf("%s%d", lVCol, rec.summaryRow)
-				vr := fmt.Sprintf("%s%d", rVCol, rec.summaryRow)
-				pl := fmt.Sprintf("%s%d", lPCol, rec.summaryRow)
-				pr := fmt.Sprintf("%s%d", rPCol, rec.summaryRow)
-
-				// Match is played if any sub-match has scores OR summary row has 'X'
-				played := fmt.Sprintf("OR(COUNTA(%s%d:%s%d,%s%d:%s%d)>0,%s)", lVCol, rec.row, lPCol, rec.endRow, rPCol, rec.row, rVCol, rec.endRow, isSummaryTie)
-
-				if rec.side == "left" {
-					wF = append(wF, fmt.Sprintf("IF(%s,IF(%s,0,IF(OR(%s>%s,AND(%s=%s,%s>%s)),1,0)),0)", played, isSummaryTie, vl, vr, vl, vr, pl, pr))
-					tF = append(tF, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isSummaryTie))
-					lF = append(lF, fmt.Sprintf("IF(%s,IF(%s,0,IF(OR(%s<%s,AND(%s=%s,%s<%s)),1,0)),0)", played, isSummaryTie, vl, vr, vl, vr, pl, pr))
-				} else {
-					wF = append(wF, fmt.Sprintf("IF(%s,IF(%s,0,IF(OR(%s>%s,AND(%s=%s,%s>%s)),1,0)),0)", played, isSummaryTie, vr, vl, vr, vl, pr, pl))
-					tF = append(tF, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isSummaryTie))
-					lF = append(lF, fmt.Sprintf("IF(%s,IF(%s,0,IF(OR(%s<%s,AND(%s=%s,%s<%s)),1,0)),0)", played, isSummaryTie, vr, vl, vr, vl, pr, pl))
-				}
+		records := playerMatchRows[&pool.Players[i]]
+		var wF, lF, tF []string
+		for _, rec := range records {
+			if rec.endRow == 0 {
+				continue
 			}
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols[0], row), joinFormulas(wF)))
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols[1], row), joinFormulas(lF)))
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols[2], row), joinFormulas(tF)))
-
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", cols[0], row), fmt.Sprintf("%s%d", cols[2], row), styles.text))
-		}
-
-		// One row of spacing between tables
-		headerRow = headerRow + len(pool.Players) + 2
-
-		// Table 2: IV, IL, IT, PW, PL
-		headers2 := []string{"IV", "IL", "IT", "PW", "PL"}
-		cols2 := []string{
-			mustColumnName(colNames.startCol + 1), // IV
-			mustColumnName(colNames.startCol + 2), // IL
-			mustColumnName(colNames.startCol + 3), // IT
-			mustColumnName(colNames.startCol + 4), // PW
-			mustColumnName(colNames.startCol + 5), // PL
-		}
-		for i, h := range headers2 {
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", cols2[i], headerRow), h))
-		}
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), fmt.Sprintf("%s%d", cols2[len(cols2)-1], headerRow), styles.poolHeader))
-
-		for i, player := range pool.Players {
-			row := headerRow + 1 + i
-			leftSide, _ := getMatchSides(playerRef(&player), "", false)
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), leftSide))
-
-			records := playerMatchRows[&pool.Players[i]]
-			var ivF, ilF, itF, pwF, plF []string
-			for _, rec := range records {
-				if rec.endRow == 0 {
-					continue
-				}
-				isSummaryTie := fmt.Sprintf(`OR(%s%d="X",%s%d="x")`, middleColName, rec.summaryRow, middleColName, rec.summaryRow)
-
-				vl := fmt.Sprintf("%s%d", lVCol, rec.summaryRow)
-				vr := fmt.Sprintf("%s%d", rVCol, rec.summaryRow)
-				pl := fmt.Sprintf("%s%d", lPCol, rec.summaryRow)
-				pr := fmt.Sprintf("%s%d", rPCol, rec.summaryRow)
-
-				played := fmt.Sprintf("OR(COUNTA(%s%d:%s%d,%s%d:%s%d)>0,%s)", lVCol, rec.row, lPCol, rec.endRow, rPCol, rec.row, rVCol, rec.endRow, isSummaryTie)
-
-				var vT []string
-				for r := rec.row; r <= rec.endRow; r++ {
-					isSubTie := fmt.Sprintf(`OR(%s%d="X",%s%d="x")`, middleColName, r, middleColName, r)
-					vT = append(vT, fmt.Sprintf("IF(%s,1,0)", isSubTie))
-				}
-				vt := fmt.Sprintf("(%s)", strings.Join(vT, "+"))
-
-				if rec.side == "left" {
-					ivF = append(ivF, fmt.Sprintf("IF(%s,%s,0)", played, vl))
-					ilF = append(ilF, fmt.Sprintf("IF(%s,%s,0)", played, vr))
-					itF = append(itF, fmt.Sprintf("IF(%s,%s,0)", played, vt))
-					pwF = append(pwF, pl)
-					plF = append(plF, pr)
-				} else {
-					ivF = append(ivF, fmt.Sprintf("IF(%s,%s,0)", played, vr))
-					ilF = append(ilF, fmt.Sprintf("IF(%s,%s,0)", played, vl))
-					itF = append(itF, fmt.Sprintf("IF(%s,%s,0)", played, vt))
-					pwF = append(pwF, pr)
-					plF = append(plF, pl)
-				}
+			isSummaryTie := fmt.Sprintf(`OR(%s%d="X",%s%d="x")`, middleColName, rec.summaryRow, middleColName, rec.summaryRow)
+			vl := fmt.Sprintf("%s%d", lVCol, rec.summaryRow)
+			vr := fmt.Sprintf("%s%d", rVCol, rec.summaryRow)
+			pl := fmt.Sprintf("%s%d", lPCol, rec.summaryRow)
+			pr := fmt.Sprintf("%s%d", rPCol, rec.summaryRow)
+			var subMatchXParts []string
+			for r := rec.row; r <= rec.endRow; r++ {
+				subMatchXParts = append(subMatchXParts, fmt.Sprintf(`%s%d="X"`, middleColName, r))
+				subMatchXParts = append(subMatchXParts, fmt.Sprintf(`%s%d="x"`, middleColName, r))
 			}
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[0], row), joinFormulas(ivF)))
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[1], row), joinFormulas(ilF)))
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[2], row), joinFormulas(itF)))
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[3], row), joinFormulas(pwF)))
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[4], row), joinFormulas(plF)))
-
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", cols2[0], row), fmt.Sprintf("%s%d", cols2[4], row), styles.text))
+			// isSummaryTie (a nested OR call) must go last: excelize's OR evaluator
+			// incorrectly returns FALSE when a nested OR sits in the 2nd position
+			// with additional arguments following it.
+			played := fmt.Sprintf("OR(COUNTA(%s%d:%s%d,%s%d:%s%d)>0,%s,%s)", lVCol, rec.row, lPCol, rec.endRow, rPCol, rec.row, rVCol, rec.endRow, strings.Join(subMatchXParts, ","), isSummaryTie)
+			isTeamTie := fmt.Sprintf("OR(%s,AND(%s=%s,%s=%s))", isSummaryTie, vl, vr, pl, pr)
+			if rec.side == "left" {
+				wF = append(wF, fmt.Sprintf("IF(%s,IF(%s,0,IF(OR(%s>%s,AND(%s=%s,%s>%s)),1,0)),0)", played, isTeamTie, vl, vr, vl, vr, pl, pr))
+				tF = append(tF, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTeamTie))
+				lF = append(lF, fmt.Sprintf("IF(%s,IF(%s,0,IF(OR(%s<%s,AND(%s=%s,%s<%s)),1,0)),0)", played, isTeamTie, vl, vr, vl, vr, pl, pr))
+			} else {
+				wF = append(wF, fmt.Sprintf("IF(%s,IF(%s,0,IF(OR(%s>%s,AND(%s=%s,%s>%s)),1,0)),0)", played, isTeamTie, vr, vl, vr, vl, pr, pl))
+				tF = append(tF, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTeamTie))
+				lF = append(lF, fmt.Sprintf("IF(%s,IF(%s,0,IF(OR(%s<%s,AND(%s=%s,%s<%s)),1,0)),0)", played, isTeamTie, vr, vl, vr, vl, pr, pl))
+			}
 		}
-		return headerRow + len(pool.Players)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols[0], row), joinFormulas(wF)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols[1], row), joinFormulas(lF)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols[2], row), joinFormulas(tF)))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", cols[0], row), fmt.Sprintf("%s%d", cols[2], row), styles.text))
 	}
+}
+
+// printTeamIndividualStatsSection writes the IV/IL/IT/PW/PL table and the
+// hierarchical score and rank formulas for team tournaments.
+// headerRow is Table 1's header row (used for score range and rank formula).
+// headerRow2 is Table 2's header row.
+// cols are Table 1's W/L/T column names, referenced by the score formula.
+// Returns the last data row written.
+func printTeamIndividualStatsSection(ctx poolResultsCtx, headerRow int, headerRow2 int, cols []string) int {
+	f, sheetName := ctx.f, ctx.sheetName
+	startColName, rankCol, scoreCol := ctx.startColName, ctx.rankCol, ctx.scoreCol
+	middleColName := ctx.middleColName
+	lVCol, lPCol, rVCol, rPCol := ctx.lVCol, ctx.lPCol, ctx.rVCol, ctx.rPCol
+	styles, joinFormulas := ctx.styles, ctx.joinFormulas
+	pool, playerMatchRows := ctx.pool, ctx.playerMatchRows
+	colNames := ctx.colNames
+
+	scoreRange := fmt.Sprintf("$%s$%d:$%s$%d", scoreCol, headerRow+1, scoreCol, headerRow+len(pool.Players))
+
+	cols2 := []string{
+		mustColumnName(colNames.startCol + 1), // IV
+		mustColumnName(colNames.startCol + 2), // IL
+		mustColumnName(colNames.startCol + 3), // IT
+		mustColumnName(colNames.startCol + 4), // PW
+		mustColumnName(colNames.startCol + 5), // PL
+	}
+	headers2 := []string{"IV", "IL", "IT", "PW", "PL"}
+	for i, h := range headers2 {
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", cols2[i], headerRow2), h))
+	}
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, headerRow2), fmt.Sprintf("%s%d", cols2[len(cols2)-1], headerRow2), styles.poolHeader))
+
+	for i, player := range pool.Players {
+		row := headerRow + 1 + i
+		row2 := headerRow2 + 1 + i
+		leftSide, _ := getMatchSides(playerRef(&player), "", false)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row2), leftSide))
+
+		records := playerMatchRows[&pool.Players[i]]
+		var ivF, ilF, itF, pwF, plF []string
+		for _, rec := range records {
+			if rec.endRow == 0 {
+				continue
+			}
+			isSummaryTie := fmt.Sprintf(`OR(%s%d="X",%s%d="x")`, middleColName, rec.summaryRow, middleColName, rec.summaryRow)
+			vl := fmt.Sprintf("%s%d", lVCol, rec.summaryRow)
+			vr := fmt.Sprintf("%s%d", rVCol, rec.summaryRow)
+			pl := fmt.Sprintf("%s%d", lPCol, rec.summaryRow)
+			pr := fmt.Sprintf("%s%d", rPCol, rec.summaryRow)
+			var subMatchXParts []string
+			for r := rec.row; r <= rec.endRow; r++ {
+				subMatchXParts = append(subMatchXParts, fmt.Sprintf(`UPPER(%s%d)="X"`, middleColName, r))
+			}
+			played := fmt.Sprintf("OR(COUNTA(%s%d:%s%d,%s%d:%s%d)>0,%s,%s)", lVCol, rec.row, lPCol, rec.endRow, rPCol, rec.row, rVCol, rec.endRow, isSummaryTie, strings.Join(subMatchXParts, ","))
+
+			var vT []string
+			for r := rec.row; r <= rec.endRow; r++ {
+				lcLSub := fmt.Sprintf(
+					`LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d," ",""),"0",""),"-",""))`,
+					lVCol, r, lPCol, r)
+				lcRSub := fmt.Sprintf(
+					`LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d," ",""),"0",""),"-",""))`,
+					rPCol, r, rVCol, r)
+				playedSub := fmt.Sprintf("COUNTA(%s%d,%s%d,%s%d,%s%d)>0", lVCol, r, lPCol, r, rPCol, r, rVCol, r)
+				isSubTie := fmt.Sprintf(
+					`OR(%s%d="X",%s%d="x",AND(%s,(%s)=(%s)))`,
+					middleColName, r, middleColName, r, playedSub, lcLSub, lcRSub)
+				vT = append(vT, fmt.Sprintf("IF(%s,1,0)", isSubTie))
+			}
+			vt := fmt.Sprintf("(%s)", strings.Join(vT, "+"))
+
+			if rec.side == "left" {
+				ivF = append(ivF, fmt.Sprintf("IF(%s,%s,0)", played, vl))
+				ilF = append(ilF, fmt.Sprintf("IF(%s,%s,0)", played, vr))
+				itF = append(itF, fmt.Sprintf("IF(%s,%s,0)", played, vt))
+				pwF = append(pwF, pl)
+				plF = append(plF, pr)
+			} else {
+				ivF = append(ivF, fmt.Sprintf("IF(%s,%s,0)", played, vr))
+				ilF = append(ilF, fmt.Sprintf("IF(%s,%s,0)", played, vl))
+				itF = append(itF, fmt.Sprintf("IF(%s,%s,0)", played, vt))
+				pwF = append(pwF, pr)
+				plF = append(plF, pl)
+			}
+		}
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[0], row2), joinFormulas(ivF)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[1], row2), joinFormulas(ilF)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[2], row2), joinFormulas(itF)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[3], row2), joinFormulas(pwF)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[4], row2), joinFormulas(plF)))
+
+		// Hierarchical Score Formula
+		scoreFormula := fmt.Sprintf("=(%s%d*1000000000)-(%s%d*10000000)+(%s%d*100000)+(%s%d*1000)-(%s%d*100)+(%s%d*10)+(%s%d*1)-(%s%d*0.01)",
+			cols[0], row, cols[1], row, cols[2], row, cols2[0], row2, cols2[1], row2, cols2[2], row2, cols2[3], row2, cols2[4], row2)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", scoreCol, row), scoreFormula))
+
+		// Rank Formula
+		rankFormula := fmt.Sprintf("RANK(%s%d,%s)+COUNTIF($%s$%d:%s%d,%s%d)",
+			scoreCol, row, scoreRange, scoreCol, headerRow, scoreCol, row-1, scoreCol, row)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rankCol, row), rankFormula))
+
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, row2), fmt.Sprintf("%s%d", cols2[4], row2), styles.text))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", rankCol, row), fmt.Sprintf("%s%d", rankCol, row), styles.unlockedText))
+	}
+	return headerRow2 + len(pool.Players)
+}
+
+// printIndividualResultsTableSection writes the individual-match Results table
+// (W/L/T/PW/PL/Rank) starting at headerRow.
+// Returns the last data row written.
+func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamMatches int) int {
+	f, sheetName := ctx.f, ctx.sheetName
+	startColName, rankCol, scoreCol := ctx.startColName, ctx.rankCol, ctx.scoreCol
+	middleColName := ctx.middleColName
+	lVCol, lPCol, rVCol, rPCol := ctx.lVCol, ctx.lPCol, ctx.rVCol, ctx.rPCol
+	styles, joinFormulas := ctx.styles, ctx.joinFormulas
+	pool, playerMatchRows := ctx.pool, ctx.playerMatchRows
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), "Results"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, headerRow), "W"))
@@ -443,51 +528,42 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), "T"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, headerRow), "PW"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, headerRow), "PL"))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rankCol, headerRow), "Rank"))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), fmt.Sprintf("%s%d", rankCol, headerRow), styles.poolHeader))
 
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), fmt.Sprintf("%s%d", rVCol, headerRow), styles.poolHeader))
+	scoreRange := fmt.Sprintf("$%s$%d:$%s$%d", scoreCol, headerRow+1, scoreCol, headerRow+len(pool.Players))
 
 	for i, player := range pool.Players {
 		row := headerRow + 1 + i
-
 		leftSide, _ := getMatchSides(playerRef(&player), "", false)
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), leftSide))
 
 		records := playerMatchRows[&pool.Players[i]]
-
 		var wFormulas, tFormulas, lFormulas, pwFormulas, plFormulas []string
 		for _, rec := range records {
 			var leftTotal, rightTotal, played string
-
 			if teamMatches > 0 && rec.endRow > 0 {
 				continue
 			}
-
 			if teamMatches == 0 {
-				// INDIVIDUAL MATCHES: Scores are letters (M, K, etc). One letter = one point.
-				// We strip out spaces, "0", and "-" so they can be used to mark a 0-0 tie without giving points.
 				lc := func(col string, r int) string {
 					return fmt.Sprintf(`LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d," ",""),"0",""),"-",""))`, col, r)
 				}
 				leftTotal = fmt.Sprintf("%s+%s", lc(lVCol, rec.row), lc(lPCol, rec.row))
 				rightTotal = fmt.Sprintf("%s+%s", lc(rPCol, rec.row), lc(rVCol, rec.row))
-
-				// COUNTA detects if the match was played, even if they typed "0" or "-"
-				// We also consider it played if it's marked as a tie with "X"
 				isTie := fmt.Sprintf(`OR(%s%d="X",%s%d="x")`, middleColName, rec.row, middleColName, rec.row)
 				played = fmt.Sprintf("OR(COUNTA(%s%d,%s%d,%s%d,%s%d)>0,%s)", lVCol, rec.row, lPCol, rec.row, rPCol, rec.row, rVCol, rec.row, isTie)
 			} else {
-				// TEAM MATCHES (Summary fallback): If endRow wasn't set, we assume rec.row is a summary row.
 				nv := func(col string, r int) string {
 					return fmt.Sprintf("IF(ISNUMBER(%s%d),%s%d,0)", col, r, col, r)
 				}
 				leftTotal = fmt.Sprintf("%s+%s", nv(lVCol, rec.row), nv(lPCol, rec.row))
 				rightTotal = fmt.Sprintf("%s+%s", nv(rPCol, rec.row), nv(rVCol, rec.row))
-
-				// Played if at least one of the summary cells has a number typed into it
 				played = fmt.Sprintf("OR(ISNUMBER(%s%d),ISNUMBER(%s%d),ISNUMBER(%s%d),ISNUMBER(%s%d))", lVCol, rec.row, lPCol, rec.row, rPCol, rec.row, rVCol, rec.row)
 			}
-
-			isTie := fmt.Sprintf(`OR(%s%d="X",%s%d="x")`, middleColName, rec.row, middleColName, rec.row)
+			isTie := fmt.Sprintf(
+				`OR(%s%d="X",%s%d="x",AND(%s,(%s)=(%s)))`,
+				middleColName, rec.row, middleColName, rec.row, played, leftTotal, rightTotal)
 			if rec.side == "left" {
 				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s>%s)*1),0)", played, isTie, leftTotal, rightTotal))
 				tFormulas = append(tFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
@@ -495,7 +571,6 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 				pwFormulas = append(pwFormulas, leftTotal)
 				plFormulas = append(plFormulas, rightTotal)
 			} else {
-				// Mirror logic for the right side
 				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s>%s)*1),0)", played, isTie, rightTotal, leftTotal))
 				tFormulas = append(tFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
 				lFormulas = append(lFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s<%s)*1),0)", played, isTie, rightTotal, leftTotal))
@@ -503,16 +578,71 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 				plFormulas = append(plFormulas, leftTotal)
 			}
 		}
-
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, row), joinFormulas(wFormulas)))
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, row), joinFormulas(lFormulas)))
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", middleColName, row), joinFormulas(tFormulas)))
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, row), joinFormulas(pwFormulas)))
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, row), joinFormulas(plFormulas)))
 
+		// Weighted Score formula
+		scoreFormula := fmt.Sprintf("=(%s%d*1000000)-(%s%d*10000)+(%s%d*100)+(%s%d*1)-(%s%d*0.01)",
+			lVCol, row, lPCol, row, middleColName, row, rPCol, row, rVCol, row)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", scoreCol, row), scoreFormula))
+
+		// Rank formula
+		rankFormula := fmt.Sprintf("RANK(%s%d,%s)+COUNTIF($%s$%d:%s%d,%s%d)",
+			scoreCol, row, scoreRange, scoreCol, headerRow, scoreCol, row-1, scoreCol, row)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rankCol, row), rankFormula))
+
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, row), fmt.Sprintf("%s%d", rVCol, row), styles.text))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", rankCol, row), fmt.Sprintf("%s%d", rankCol, row), styles.unlockedText))
 	}
 	return headerRow + len(pool.Players)
+}
+
+func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startRow int, colNames matchColumnNames, playerMatchRows map[*Player][]playerMatchRecord, styles matchStyles, mirror bool, teamMatches int) int {
+	lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
+	scoreCol := mustColumnName(colNames.startCol + 20)
+	rankCol := mustColumnName(colNames.startCol + 6)
+	handleExcelError("SetColVisible", f.SetColVisible(sheetName, scoreCol, false))
+
+	joinFormulas := func(parts []string) string {
+		if len(parts) == 0 {
+			return "0"
+		}
+		return strings.Join(parts, "+")
+	}
+
+	ctx := poolResultsCtx{
+		f:               f,
+		sheetName:       sheetName,
+		pool:            pool,
+		colNames:        colNames,
+		playerMatchRows: playerMatchRows,
+		styles:          styles,
+		startColName:    colNames.startColName,
+		middleColName:   colNames.middleColName,
+		lVCol:           lVCol,
+		lPCol:           lPCol,
+		rVCol:           rVCol,
+		rPCol:           rPCol,
+		rankCol:         rankCol,
+		scoreCol:        scoreCol,
+		joinFormulas:    joinFormulas,
+	}
+
+	headerRow := startRow
+	if teamMatches > 0 {
+		cols := []string{
+			mustColumnName(colNames.startCol + 1), // W
+			mustColumnName(colNames.startCol + 2), // L
+			mustColumnName(colNames.startCol + 3), // T
+		}
+		printTeamResultsTableSection(ctx, headerRow, cols)
+		headerRow2 := headerRow + len(pool.Players) + 2
+		return printTeamIndividualStatsSection(ctx, headerRow, headerRow2, cols)
+	}
+	return printIndividualResultsTableSection(ctx, headerRow, teamMatches)
 }
 
 func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, numCourts int, mirror bool) map[string]MatchWinner {
@@ -624,7 +754,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 			maxBlocks = append(maxBlocks, maxResultBlock)
 		}
 
-		totalPoolHeight := headerBlock
+		totalPoolHeight := headerBlock + 1 // One row of space before the next pool
 		for _, b := range maxBlocks {
 			totalPoolHeight += b
 		}
@@ -668,7 +798,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 		for c := 0; c < numCourts; c++ {
 			if i < len(poolsByCourt[c]) {
 				poolIdx := poolsByCourt[c][i]
-				startCol := 1 + c*8
+				startCol := 1 + c*CourtsColumnsPerCourt
 
 				if !configuredStartCols[startCol] {
 					setMatchColumnsWidthByStartCol(f, sheetName, startCol)
@@ -688,8 +818,8 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 		poolRow += totalPoolHeight
 	}
 
-	lastCourtStartCol := 1 + (numCourts-1)*8
-	maxColNum := lastCourtStartCol + 6
+	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
+	maxColNum := lastCourtStartCol + 7
 	maxColName := mustColumnName(maxColNum)
 
 	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, poolRow-1)
@@ -701,7 +831,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 
 	// Vertical page breaks before each court except the first
 	for c := 1; c < numCourts; c++ {
-		courtStartCol := 1 + c*8
+		courtStartCol := 1 + c*CourtsColumnsPerCourt
 		colName := mustColumnName(courtStartCol)
 		handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, colName+"1"))
 	}
@@ -766,7 +896,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	writeCourtHeaders(f, sheetName, numCourts, styles.poolHeader)
 
 	for c := 0; c < numCourts; c++ {
-		courtStartCol := 1 + c*8
+		courtStartCol := 1 + c*CourtsColumnsPerCourt
 		if !configuredStartCols[courtStartCol] {
 			setMatchColumnsWidthByStartCol(f, sheetName, courtStartCol)
 			configuredStartCols[courtStartCol] = true
@@ -818,10 +948,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 				}
 
 				eliminationMatch := eliminationMatchRound[i]
-				startCol := 1 + c*8
-				if numTeamMatches > 0 {
-					startCol = 1 + c*12
-				}
+				startCol := 1 + c*CourtsColumnsPerCourt
 				colNames, ok := colNamesByStartCol[startCol]
 				if !ok {
 					colNames = buildMatchColumnNames(startCol)
@@ -837,8 +964,8 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 		rowsSinceLastPageBreak += spaceLines
 	}
 
-	lastCourtStartCol := 1 + (numCourts-1)*8
-	maxColNum := lastCourtStartCol + 6
+	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
+	maxColNum := lastCourtStartCol + 7
 	maxColName := mustColumnName(maxColNum)
 
 	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, startRow-1)
@@ -850,7 +977,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 
 	// Vertical page breaks before each court except the first
 	for c := 1; c < numCourts; c++ {
-		courtStartCol := 1 + c*8
+		courtStartCol := 1 + c*CourtsColumnsPerCourt
 		colName := mustColumnName(courtStartCol)
 		handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, colName+"1"))
 	}
@@ -923,7 +1050,11 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 
 	// Unlock scoring columns (Victories, Points, and 'vs' for ties)
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(matchRow), colNames.rightVictoriesColName+fmt.Sprint(matchRow), styles.unlockedText))
+	if numTeamMatches > 0 {
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, middleColName+fmt.Sprint(matchRow), middleColName+fmt.Sprint(matchRow), styles.unlockedText))
+	} else {
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(matchRow), colNames.rightVictoriesColName+fmt.Sprint(matchRow), styles.unlockedText))
+	}
 
 	// adding the individual matches
 	firstTeamMatchRow := matchRow + 1
@@ -949,44 +1080,24 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 
 		lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
-		// Use SUMPRODUCT for much shorter and more efficient formulas
-		buildWinnersFormula := func(left bool) string {
-			mRange := fmt.Sprintf("%s%d:%s%d", middleColName, firstTeamMatchRow, middleColName, lastTeamMatchRow)
-			lcL := fmt.Sprintf(`(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-","")))`, lVCol, firstTeamMatchRow, lVCol, lastTeamMatchRow, lPCol, firstTeamMatchRow, lPCol, lastTeamMatchRow)
-			lcR := fmt.Sprintf(`(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-","")))`, rPCol, firstTeamMatchRow, rPCol, lastTeamMatchRow, rVCol, firstTeamMatchRow, rVCol, lastTeamMatchRow)
-			if left {
-				return fmt.Sprintf(`SUMPRODUCT((UPPER(%s)<>"X")*(%s>%s)*1)`, mRange, lcL, lcR)
-			}
-			return fmt.Sprintf(`SUMPRODUCT((UPPER(%s)<>"X")*(%s>%s)*1)`, mRange, lcR, lcL)
-		}
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow), "IV"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, matchRow), "PW"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, matchRow), "IV"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, matchRow), "PW"))
 
-		// Points Won (PW) for a side
-		buildPointsFormula := func(left bool) string {
-			rangeA := fmt.Sprintf("%s%d:%s%d", lVCol, firstTeamMatchRow, lVCol, lastTeamMatchRow)
-			rangeB := fmt.Sprintf("%s%d:%s%d", lPCol, firstTeamMatchRow, lPCol, lastTeamMatchRow)
-			if !left {
-				rangeA = fmt.Sprintf("%s%d:%s%d", rPCol, firstTeamMatchRow, rPCol, lastTeamMatchRow)
-				rangeB = fmt.Sprintf("%s%d:%s%d", rVCol, firstTeamMatchRow, rVCol, lastTeamMatchRow)
-			}
-			return fmt.Sprintf(`SUMPRODUCT(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s," ",""),"0",""),"-","")))`, rangeA, rangeB)
-		}
+		matchRow++
+		startCell = startColName + fmt.Sprint(matchRow)
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, "Victories / Points"))
+		endCell = endColName + fmt.Sprint(matchRow)
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, endCell, "Victories / Points"))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 
 		// Use formulas to tally victories and points from the individual team sub-match rows.
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow), buildWinnersFormula(true)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, matchRow), buildPointsFormula(true)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, matchRow), buildWinnersFormula(false)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, matchRow), buildPointsFormula(false)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow), buildTeamWinnersFormula(middleColName, lVCol, lPCol, rVCol, rPCol, firstTeamMatchRow, lastTeamMatchRow, true)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, matchRow), buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol, firstTeamMatchRow, lastTeamMatchRow, true)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, matchRow), buildTeamWinnersFormula(middleColName, lVCol, lPCol, rVCol, rPCol, firstTeamMatchRow, lastTeamMatchRow, false)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, matchRow), buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol, firstTeamMatchRow, lastTeamMatchRow, false)))
 
-		// Unlock final victory/points summary cells
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow), fmt.Sprintf("%s%d", lPCol, matchRow), styles.unlockedText))
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", rVCol, matchRow), fmt.Sprintf("%s%d", rPCol, matchRow), styles.unlockedText))
-		matchRow++
-
-		startCell = startColName + fmt.Sprint(matchRow)
-		endCell = endColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, "Victories / Points"))
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, endCell, "Victories / Points"))
 		matchRow++ // Add space after team match summary
 	}
 
@@ -1008,25 +1119,10 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 
 func setMatchColumnsWidthByStartCol(f *excelize.File, sheetName string, startCol int) {
 	startColName := mustColumnName(startCol)
-	bCol := mustColumnName(startCol + 1)
-	cCol := mustColumnName(startCol + 2)
-	middleColName := mustColumnName(startCol + 3)
-	eCol := mustColumnName(startCol + 4)
-	fCol := mustColumnName(startCol + 5)
-	endColName := mustColumnName(startCol + 6)
-	gCol := mustColumnName(startCol + 7)
-	iCol := mustColumnName(startCol + 9)
-	jCol := mustColumnName(startCol + 10)
-	gapCol := mustColumnName(startCol + 11)
-
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, startColName, startColName, 30))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, bCol, cCol, 5))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, middleColName, middleColName, 3))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, eCol, fCol, 5))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, endColName, endColName, 30))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, gCol, iCol, 5))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, jCol, jCol, 30))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, gapCol, gapCol, 2))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, startColName, startColName, matchNameColWidth))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, mustColumnName(startCol+1), mustColumnName(startCol+5), matchScoreColWidth))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, mustColumnName(startCol+6), mustColumnName(startCol+6), matchNameColWidth))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, mustColumnName(startCol+7), mustColumnName(startCol+7), matchSpacerColWidth))
 }
 
 func setupNamesToPrintLayout(f *excelize.File, sheetName string) {

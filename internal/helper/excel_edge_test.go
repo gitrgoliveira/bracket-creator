@@ -74,12 +74,9 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
-		// Results should still be printed at row 8
-		val, _ := f.GetCellValue(SheetPoolMatches, "F8")
-		if val != "1. " {
-			v7, _ := f.GetCellValue(SheetPoolMatches, "F7")
-			v9, _ := f.GetCellValue(SheetPoolMatches, "F9")
-			t.Errorf("expected result 1. at F8 for single player pool, got '%s' (F7='%s', F9='%s')", val, v7, v9)
+		val, _ := f.GetCellValue(SheetPoolMatches, "F10")
+		if val != "1." {
+			t.Errorf("expected result 1. at F10 for single player pool, got '%s'", val)
 		}
 	})
 
@@ -113,9 +110,8 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		PrintPoolMatches(f, pools, 1, 1, 1, false)
-		// Result 1 should be at row 18
 		val, _ := f.GetCellValue(SheetPoolMatches, "F18")
-		assert.Equal(t, "1. ", val, "expected result 1. at F18 for teamMatches=1, got '%s'", val)
+		assert.Equal(t, "1.", val, "expected result 1. at F18 for teamMatches=1, got '%s'", val)
 	})
 
 	t.Run("teamMatches = 10", func(t *testing.T) {
@@ -133,9 +129,8 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		PrintPoolMatches(f, pools, 10, 1, 1, false)
-		// Result 1 at row 27
 		val, _ := f.GetCellValue(SheetPoolMatches, "F27")
-		assert.Equal(t, "1. ", val, "expected result 1. at F27 for teamMatches=10, got '%s'", val)
+		assert.Equal(t, "1.", val, "expected result 1. at F27 for teamMatches=10, got '%s'", val)
 	})
 }
 

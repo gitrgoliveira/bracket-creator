@@ -107,7 +107,8 @@ func setScore(f *excelize.File, cell, value string) {
 // TestIndividualPoolScoringFormulas verifies that the W/L/T/PW/PL formula cells
 // in the pool results table compute correct values for typical scoring inputs.
 // Score letters (M, K, D, T, H) each count as one point; "0", "-", and spaces
-// are stripped and do not count. Ties require an explicit "X" in the vs column.
+// are stripped and do not count. Ties are detected when "X"/"x" is in the vs
+// column OR when both sides finish with equal score character counts (auto-tie).
 func TestIndividualPoolScoringFormulas(t *testing.T) {
 	type expect struct{ w, l, t, pw, pl string }
 	type tc struct {
@@ -173,6 +174,26 @@ func TestIndividualPoolScoringFormulas(t *testing.T) {
 			setup: func(f *excelize.File) {
 				setScore(f, "B4", "-")
 				setScore(f, "D4", "X")
+			},
+			alice: expect{"0", "0", "1", "0", "0"},
+			bob:   expect{"0", "0", "1", "0", "0"},
+		},
+		{
+			// Equal non-zero scores on both sides → auto-detected tie, no X needed.
+			name: "equal non-zero scores auto-detected as tie",
+			setup: func(f *excelize.File) {
+				setScore(f, "B4", "M")
+				setScore(f, "F4", "M")
+			},
+			alice: expect{"0", "0", "1", "1", "1"},
+			bob:   expect{"0", "0", "1", "1", "1"},
+		},
+		{
+			// Both sides enter "0" (explicit 0-0) → auto-detected tie, no X needed.
+			name: "both zero scores (0-0 played) auto-detected as tie",
+			setup: func(f *excelize.File) {
+				setScore(f, "B4", "0")
+				setScore(f, "F4", "0")
 			},
 			alice: expect{"0", "0", "1", "0", "0"},
 			bob:   expect{"0", "0", "1", "0", "0"},
@@ -315,9 +336,10 @@ func TestTeamSummaryRowFormulas(t *testing.T) {
 //	Bob  (right): B10=W, C10=L, D10=T
 //
 // Team match outcome: higher IV wins; equal IV → higher PW wins; still equal →
-// organizer must enter "X" in D4 (summary vs column) to record a tie.
-// Ties at the individual sub-match level (D5="X") only exclude that sub from IV;
-// they do NOT automatically mark the overall team match as a draw.
+// the match is automatically a draw (T=1). "X" in D4 also forces a draw.
+// Ties at the individual sub-match level (D5="X" or equal sub-match scores)
+// only exclude that sub from IV counts; the team-level draw is determined
+// independently from the summary-row IV and PW totals.
 func TestTeamWLTTableFormulas(t *testing.T) {
 	type expect struct{ w, l, t string }
 	type tc struct {
@@ -348,16 +370,35 @@ func TestTeamWLTTableFormulas(t *testing.T) {
 			bob:   expect{"0", "0", "1"},
 		},
 		{
-			// Equal IV (both 0) and equal PW without D4="X" → neither W nor T is recorded.
-			// The organizer must explicitly mark D4="X" to record the tie in the table.
-			name: "equal IV and PW without X shows zeros",
+			// Equal IV and equal PW → auto-detected team draw, no X needed.
+			name: "equal IV and PW auto-detected as team tie",
 			setup: func(f *excelize.File) {
 				setScore(f, "D5", "X") // sub tied → IV=0 for both sides
 				setScore(f, "B5", "M")
 				setScore(f, "F5", "M") // equal points
 			},
-			alice: expect{"0", "0", "0"},
-			bob:   expect{"0", "0", "0"},
+			alice: expect{"0", "0", "1"},
+			bob:   expect{"0", "0", "1"},
+		},
+		{
+			// Equal sub-match scores (no X) → auto-detected as team tie at both sub and team level.
+			name: "equal sub-match scores auto-detected as team tie",
+			setup: func(f *excelize.File) {
+				setScore(f, "B5", "M")
+				setScore(f, "F5", "M")
+			},
+			alice: expect{"0", "0", "1"},
+			bob:   expect{"0", "0", "1"},
+		},
+		{
+			// All sub-matches marked X with no score entries → team match is played and T=1.
+			// This is the common case where all individual fights are 0-0 draws.
+			name: "all sub-matches X with no scores gives team tie",
+			setup: func(f *excelize.File) {
+				setScore(f, "D5", "X")
+			},
+			alice: expect{"0", "0", "1"},
+			bob:   expect{"0", "0", "1"},
 		},
 		{
 			// Sub-match is tied (D5="X") so IV=0:0; left scored more total points
@@ -396,11 +437,12 @@ func TestTeamWLTTableFormulas(t *testing.T) {
 //	Bob  (right): B14=IV, C14=IL, D14=IT, E14=PW, F14=PL
 //
 // IV/IL are derived from the summary-row IV formulas (B4/F4); PW/PL reference
-// the summary-row PW columns (C4/E4). IT counts sub-match rows with "X"/"x" in D.
+// the summary-row PW columns (C4/E4). IT counts sub-match rows where "X"/"x"
+// is in D, or where the sub-match has been played and both sides have equal scores.
 //
-// Note: IT only registers when the match is considered "played" (at least one
-// score letter entered, or D4="X"). A tied sub-match (D5="X") alone does not
-// set played=true; a score entry in the same match is also needed.
+// Note: IT only registers when the team match is considered "played" (at least one
+// score cell in the sub-match rows is filled, or D4="X"). A tied sub-match (D5="X")
+// alone does not set played=true; a score entry in the same match is also needed.
 func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 	type expect struct{ iv, il, it, pw, pl string }
 	type tc struct {
@@ -425,17 +467,38 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 			// PW uses total score letters regardless of D5; PL is the opponent's PW.
 			name: "tied sub-match counts in IT; score letters still count in PW",
 			setup: func(f *excelize.File) {
-				setScore(f, "D5", "X") // sub tied
-				setScore(f, "B5", "M") // left scored — needed to set played=true
+				setScore(f, "D5", "X") // sub tied — D5="X" alone sets played=true
+				setScore(f, "B5", "M")
 			},
 			alice: expect{"0", "0", "1", "1", "0"},
 			bob:   expect{"0", "0", "1", "0", "1"},
+		},
+		{
+			// D5="X" alone (no score entries) marks the sub-match as played.
+			// IT=1 for both; PW=PL=0 since no score letters were entered.
+			name: "sub-match X alone sets played and counts as IT",
+			setup: func(f *excelize.File) {
+				setScore(f, "D5", "X")
+			},
+			alice: expect{"0", "0", "1", "0", "0"},
+			bob:   expect{"0", "0", "1", "0", "0"},
 		},
 		{
 			name:  "unplayed match returns all zeros",
 			setup: func(*excelize.File) {},
 			alice: expect{"0", "0", "0", "0", "0"},
 			bob:   expect{"0", "0", "0", "0", "0"},
+		},
+		{
+			// Equal scores in sub-match auto-detected as IT without X.
+			// IV=0 for both sides since equal scores don't count as a win.
+			name: "equal sub-match scores auto-detected as IT",
+			setup: func(f *excelize.File) {
+				setScore(f, "B5", "M")
+				setScore(f, "F5", "M")
+			},
+			alice: expect{"0", "0", "1", "1", "1"},
+			bob:   expect{"0", "0", "1", "1", "1"},
 		},
 	}
 

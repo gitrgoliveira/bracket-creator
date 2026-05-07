@@ -1,0 +1,210 @@
+package helper
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	excelize "github.com/xuri/excelize/v2"
+)
+
+func findResultsHeader(f *excelize.File, sheet string, courtIdx int) (int, error) {
+	startCol := 1 + courtIdx*8
+	colName := mustColumnName(startCol)
+
+	// Scan first 100 rows
+	for r := 1; r <= 100; r++ {
+		val, err := f.GetCellValue(sheet, fmt.Sprintf("%s%d", colName, r))
+		if err != nil {
+			return 0, err
+		}
+		if val == "Results" || val == "Team Results" {
+			return r, nil
+		}
+	}
+	return 0, fmt.Errorf("could not find results header")
+}
+
+func TestIndividualRanking(t *testing.T) {
+	sizes := []int{2, 3, 4}
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("Size_%d", size), func(t *testing.T) {
+			players := make([]Player, size)
+			for i := 0; i < size; i++ {
+				players[i] = Player{
+					Name:         fmt.Sprintf("Player %d", i+1),
+					sheetName:    "Pool Draw",
+					cell:         fmt.Sprintf("A%d", i+1),
+					PoolPosition: int64(i + 1),
+				}
+			}
+
+			pool := Pool{
+				PoolName: "Pool A",
+				Players:  players,
+				Matches:  []Match{}, // Simplified for test
+			}
+
+			f := excelize.NewFile()
+			sheet := SheetPoolMatches
+			f.NewSheet(sheet)
+			f.NewSheet("Pool Draw")
+
+			// Setup styles
+			styles := matchStyles{
+				poolHeader:   1,
+				text:         2,
+				unlockedText: 3,
+			}
+
+			colNames := buildMatchColumnNames(1)
+			matchWinners := make(map[string]MatchWinner)
+
+			// We need to provide dummy maxBlocks
+			maxBlocks := make([]int, 1)
+			maxBlocks[0] = size + 3
+
+			printSinglePool(f, sheet, pool, 1, 2, 0, 2, maxBlocks, colNames, styles, matchWinners, false)
+
+			headerRow, err := findResultsHeader(f, sheet, 0)
+			require.NoError(t, err)
+
+			// Player 1 should be Rank 1 if we set points
+			// Col G is Rank (startCol + 6)
+			p1RankCell := fmt.Sprintf("G%d", headerRow+1)
+
+			// Set values that should make Player 1 rank first
+			// Since we use a hidden score column, we'd need to set the match results...
+			// But for a unit test of the layout/formula structure, we can just check if formulas are present.
+
+			rank1Form, err := f.GetCellFormula(sheet, p1RankCell)
+			require.NoError(t, err)
+			assert.Contains(t, rank1Form, "RANK")
+
+			// Check ranking summary
+			// rankingHeaderRow is headerRow + size + 3 (approx)
+			// Actually let's just find it
+			var rankingHeaderRow int
+			for r := headerRow + size; r < headerRow+size+10; r++ {
+				val, _ := f.GetCellValue(sheet, fmt.Sprintf("G%d", r))
+				if val == "Ranking" {
+					rankingHeaderRow = r
+					break
+				}
+			}
+			require.NotZero(t, rankingHeaderRow, "could not find Ranking title")
+
+			p1RankingCell := fmt.Sprintf("G%d", rankingHeaderRow+1)
+			p1NameFormula, err := f.GetCellFormula(sheet, p1RankingCell)
+			require.NoError(t, err)
+			assert.Contains(t, p1NameFormula, "INDEX")
+			assert.Contains(t, p1NameFormula, "MATCH")
+		})
+	}
+}
+
+func TestTeamRanking(t *testing.T) {
+	teamSizes := []int{5, 7}
+	for _, size := range teamSizes {
+		t.Run(fmt.Sprintf("TeamSize_%d", size), func(t *testing.T) {
+			players := make([]Player, 3) // 3 teams in pool
+			for i := 0; i < 3; i++ {
+				players[i] = Player{
+					Name:         fmt.Sprintf("Team %d", i+1),
+					sheetName:    "Pool Draw",
+					cell:         fmt.Sprintf("A%d", i+1),
+					PoolPosition: int64(i + 1),
+				}
+			}
+
+			pool := Pool{
+				PoolName: "Pool A",
+				Players:  players,
+				Matches:  []Match{},
+			}
+
+			f := excelize.NewFile()
+			sheet := SheetPoolMatches
+			f.NewSheet(sheet)
+			f.NewSheet("Pool Draw")
+
+			styles := matchStyles{
+				poolHeader:   1,
+				text:         2,
+				unlockedText: 3,
+			}
+
+			colNames := buildMatchColumnNames(1)
+			matchWinners := make(map[string]MatchWinner)
+			maxBlocks := []int{5, 5, 5, 20} // 3 matches + results
+
+			printSinglePool(f, sheet, pool, 1, 2, size, 2, maxBlocks, colNames, styles, matchWinners, false)
+
+			headerRow, err := findResultsHeader(f, sheet, 0)
+			require.NoError(t, err)
+
+			// Team Results Rank should be in G
+			rankCell := fmt.Sprintf("G%d", headerRow+1)
+			rankForm, err := f.GetCellFormula(sheet, rankCell)
+			require.NoError(t, err)
+			assert.Contains(t, rankForm, "RANK")
+
+			// Check ranking title in H
+			var rankingHeaderRow int
+			for r := headerRow; r < headerRow+50; r++ {
+				val, _ := f.GetCellValue(sheet, fmt.Sprintf("G%d", r))
+				if val == "Ranking" {
+					rankingHeaderRow = r
+					break
+				}
+			}
+			require.NotZero(t, rankingHeaderRow, "could not find Ranking title in H")
+		})
+	}
+}
+
+func TestManualRankingOverride(t *testing.T) {
+	players := []Player{
+		{Name: "Player 1", sheetName: "Pool Draw", cell: "A1", PoolPosition: 1},
+		{Name: "Player 2", sheetName: "Pool Draw", cell: "A2", PoolPosition: 2},
+	}
+	pool := Pool{PoolName: "Pool A", Players: players}
+
+	f := excelize.NewFile()
+	sheet := SheetPoolMatches
+	f.NewSheet(sheet)
+	f.NewSheet("Pool Draw")
+	f.SetCellValue("Pool Draw", "A1", "Player 1")
+	f.SetCellValue("Pool Draw", "A2", "Player 2")
+
+	styles := matchStyles{poolHeader: 1, text: 2, unlockedText: 3}
+	colNames := buildMatchColumnNames(1)
+	matchWinners := make(map[string]MatchWinner)
+	printSinglePool(f, sheet, pool, 1, 2, 0, 2, []int{5, 10}, colNames, styles, matchWinners, false)
+
+	headerRow, _ := findResultsHeader(f, sheet, 0)
+
+	// Manually override rank in G
+	p1RankCell := fmt.Sprintf("G%d", headerRow+1)
+	p2RankCell := fmt.Sprintf("G%d", headerRow+2)
+
+	handleExcelError("SetCellValue", f.SetCellValue(sheet, p1RankCell, 2))
+	handleExcelError("SetCellValue", f.SetCellValue(sheet, p2RankCell, 1))
+
+	var rankingHeaderRow int
+	for r := headerRow; r < headerRow+20; r++ {
+		val, _ := f.GetCellValue(sheet, fmt.Sprintf("G%d", r))
+		if val == "Ranking" {
+			rankingHeaderRow = r
+			break
+		}
+	}
+
+	p1RankingCell := fmt.Sprintf("G%d", rankingHeaderRow+1)
+
+	// Recalculate and check
+	p1Name, err := f.CalcCellValue(sheet, p1RankingCell)
+	require.NoError(t, err)
+	assert.Equal(t, "Player 2", p1Name, "Ranking summary should reflect manual rank override")
+}

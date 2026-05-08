@@ -11,6 +11,13 @@ ARG VERSION
 ENV CGO_ENABLED=0
 
 WORKDIR /bracket-creator
+
+# Install Node.js for frontend build dependencies (npx esbuild)
+RUN apt-get update && apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

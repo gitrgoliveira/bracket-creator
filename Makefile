@@ -40,9 +40,9 @@ local/deps: ## Install project dependencies
 	@echo "Installing dependencies..."
 	go mod tidy
 	go install github.com/spf13/cobra-cli@v1.3.0
-	go install github.com/goreleaser/goreleaser@latest
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
-	go install github.com/securego/gosec/v2/cmd/gosec@latest
+	go install github.com/goreleaser/goreleaser/v2@latest
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.12.2
+	go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
 	@cd web-mobile && npm install

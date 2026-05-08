@@ -40,3 +40,11 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}
+
+      - name: Build and push Mobile Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.mobile
+          push: true
+          tags: ghcr.io/${{ github.repository }}-mobile:${{ env.IMAGE_TAG }}

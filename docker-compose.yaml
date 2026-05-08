@@ -3,10 +3,22 @@ version: '3.8'
 services:
   bracket-creator:
     build: .
-    image: ghcr.io/gitrgoliveira/bracket-creator:v0.14.0
+    image: ghcr.io/gitrgoliveira/bracket-creator:v0.16.0
     environment:
       - BIND_ADDRESS=0.0.0.0
       - PORT=8080
     ports:
       - "8080:8080"
+    restart: unless-stopped
+
+  bracket-creator-mobile:
+    build:
+      context: .
+      dockerfile: Dockerfile.mobile
+    image: ghcr.io/gitrgoliveira/bracket-creator-mobile:v0.16.0
+    environment:
+      - BIND_ADDRESS=0.0.0.0
+      - PORT=8080
+    ports:
+      - "8081:8080"
     restart: unless-stopped

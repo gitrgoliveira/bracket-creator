@@ -20,12 +20,14 @@
 
 **bracket-creator** is a CLI and web application for generating kendo tournament brackets as Excel spreadsheets. Give it a CSV of participants and it produces a fully formatted, print-ready `.xlsx` file with pool draws, match schedules, and elimination trees.
 
-## Formats
+## Tools
 
-| Format | Command | Use when |
-|--------|---------|----------|
-| **Pools & Playoffs** | `create-pools` | Round-robin pools followed by a knockout bracket |
-| **Playoffs Only** | `create-playoffs` | Direct single-elimination bracket |
+| Tool | Command | Use when |
+|------|---------|----------|
+| **Pools & Playoffs** | `create-pools` | Generate a pools + knockout bracket Excel file |
+| **Playoffs Only** | `create-playoffs` | Generate a straight knockout bracket Excel file |
+| **Bracket generator web UI** | `serve` | Browser-based bracket generation (no CSV editing needed) |
+| **Live tournament app** | `mobile-app` | Run pools and scores on the day, live on any device |
 
 ## Quick start
 
@@ -36,8 +38,11 @@ go install github.com/gitrgoliveira/bracket-creator@latest
 # Create a pools + playoffs bracket
 bracket-creator create-pools -f participants.csv -o tournament.xlsx
 
-# Or run the web UI
+# Or run the bracket generator web UI
 bracket-creator serve
+
+# Or run the live tournament app (for use on the day)
+bracket-creator mobile-app --folder ./tournament-data
 ```
 
 Open `tournament.xlsx` in Excel or LibreOffice and print.
@@ -58,3 +63,7 @@ If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar
 2. **Generate the bracket** — run `create-pools` or `create-playoffs` ([commands](user-guide/commands/create-pools.md))
 3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](user-guide/commands/create-pools.md#seeding))
 4. **Print** — the Excel file is laid out to print cleanly on A4/A3
+
+## On the day
+
+Use the **live tournament app** to manage pools and scores in real time across all devices on your network — no Excel required on the day. See the [mobile app guide](user-guide/mobile-app.md).

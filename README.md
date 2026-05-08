@@ -243,6 +243,51 @@ Straight knockout team competition with teams of 3:
 ./bin/bracket-creator create-playoffs -t 3 -f mock_data.csv -o output.xlsx
 ```
 
+## Mobile / Live Tournament App
+
+The `mobile-app` command starts a live tournament management server you can use **on the day** to draw pools, run matches, and display real-time results on any device (phone, tablet, laptop).
+
+```bash
+bracket-creator mobile-app --folder ./tournament-data
+```
+
+Or with the Makefile:
+
+```bash
+make run-mobile
+PORT=8082 make run-mobile                        # custom port
+TOURNAMENT_DATA_DIR=/path make run-mobile        # custom data folder
+```
+
+Then open [http://localhost:8080](http://localhost:8080) in your browser.
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Admin console** | Password-protected. Create competitions, upload participants, draw pools, manage the bracket, record scores. |
+| **Public viewer** | Accessible without a password. Shows the schedule, pool standings, and elimination bracket live. |
+| **Multiple competitions** | Run Teams, Men's Individual, Women's Individual etc. in parallel on separate shiai-jo. |
+| **Participant import** | Paste a CSV (with or without zekken/display names) or upload a file directly in the browser. The participant textarea shows **line numbers** for easy error spotting. |
+| **Seeds** | Import a seeds CSV to control bracket placement, or type seed numbers per participant. |
+| **Live updates** | Results broadcast to all connected viewers in real time via Server-Sent Events (SSE). |
+
+### Data format
+
+Tournament state lives in a folder (default `./tournament-data`):
+
+```
+tournament-data/
+  tournament.md              ← YAML front-matter: name, date, venue, courts, password
+  competitions/
+    teams/
+      config.md              ← YAML: kind, format, pool_size, courts, start_time, …
+      participants.csv       ← name[, zekken][, dojo][, dan]
+    women-up-to-2d/
+      config.md
+      participants.csv
+```
+
 ## How to Use the output files
 Generated workbooks are built from code (see `internal/excel/template.go`). To customise styling, edit the final output file directly.
 

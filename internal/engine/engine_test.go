@@ -829,6 +829,181 @@ func TestCalculatePoolStandings_IncompleteMatches(t *testing.T) {
 	}
 }
 
+func TestCalculatePoolStandings_WeightedScore(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "weighted-score"
+
+	createTestCompetition(t, store, compID, "pools", 3)
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie",
+	})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	// Alice: 2 wins, 0 losses, gave 3 ippons, took 1
+	// Bob: 1 win, 1 loss, gave 1 ippon, took 2
+	// Charlie: 0 wins, 2 losses, gave 1 ippon, took 2
+	for i, m := range matches {
+		if (m.SideA == "Alice" && m.SideB == "Bob") || (m.SideA == "Bob" && m.SideB == "Alice") {
+			matches[i].Winner = "Alice"
+			if m.SideA == "Alice" {
+				matches[i].IpponsA = []string{"M", "K"}
+				matches[i].IpponsB = []string{"D"}
+			} else {
+				matches[i].IpponsA = []string{"D"}
+				matches[i].IpponsB = []string{"M", "K"}
+			}
+		} else if (m.SideA == "Alice" && m.SideB == "Charlie") || (m.SideA == "Charlie" && m.SideB == "Alice") {
+			matches[i].Winner = "Alice"
+			if m.SideA == "Alice" {
+				matches[i].IpponsA = []string{"M"}
+				matches[i].IpponsB = []string{}
+			} else {
+				matches[i].IpponsA = []string{}
+				matches[i].IpponsB = []string{"M"}
+			}
+		} else {
+			matches[i].Winner = "Bob"
+			if m.SideA == "Bob" {
+				matches[i].IpponsA = []string{"M"}
+				matches[i].IpponsB = []string{"T"}
+			} else {
+				matches[i].IpponsA = []string{"T"}
+				matches[i].IpponsB = []string{"M"}
+			}
+		}
+		matches[i].Status = state.MatchStatusCompleted
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+
+	for _, poolStandings := range standings {
+		if len(poolStandings) != 3 {
+			continue
+		}
+		// Verify Points are computed using the weighted formula:
+		// Points = W*100_000_000 - L*1_000_000 + D*10_000 + G*100 - T
+		for _, s := range poolStandings {
+			expected := s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
+			assert.Equal(t, expected, s.Points, "Points should match weighted formula for %s", s.Player.Name)
+		}
+		// Ranking: Alice (2W) > Bob (1W,1L) > Charlie (0W,2L)
+		assert.Equal(t, "Alice", poolStandings[0].Player.Name)
+		assert.Equal(t, 2, poolStandings[0].Wins)
+		assert.True(t, poolStandings[0].Points > 0, "Alice should have positive Points")
+		assert.Equal(t, "Bob", poolStandings[1].Player.Name)
+		assert.True(t, poolStandings[0].Points > poolStandings[1].Points, "Alice should have higher Points than Bob")
+		assert.True(t, poolStandings[1].Points > poolStandings[2].Points, "Bob should have higher Points than Charlie")
+	}
+}
+
+func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-scoring"
+
+	comp := &state.Competition{
+		ID:           compID,
+		Name:         "Team Competition",
+		Kind:         "team",
+		Format:       "pools",
+		TeamSize:     3,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       "setup",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	saveTestParticipants(t, store, compID, []string{"TeamA", "TeamB", "TeamC"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	// TeamA vs TeamB: TeamA wins 2-1 in IV, 4-2 in PW
+	// TeamA vs TeamC: TeamA wins 3-0 in IV, 5-1 in PW
+	// TeamB vs TeamC: TeamB wins 2-1 in IV, 3-2 in PW
+	for i, m := range matches {
+		matches[i].Status = state.MatchStatusCompleted
+		if (m.SideA == "TeamA" && m.SideB == "TeamB") || (m.SideA == "TeamB" && m.SideB == "TeamA") {
+			matches[i].Winner = "TeamA"
+			a, b := "TeamA", "TeamB"
+			if m.SideA == "TeamB" {
+				a, b = "TeamB", "TeamA"
+			}
+			matches[i].SubResults = []state.SubMatchResult{
+				{Position: 1, SideA: a, SideB: b, IpponsA: []string{"M", "K"}, IpponsB: []string{"D"}, Winner: "TeamA"},
+				{Position: 2, SideA: a, SideB: b, IpponsA: []string{"M"}, IpponsB: []string{"M"}, Winner: "TeamB"},
+				{Position: 3, SideA: a, SideB: b, IpponsA: []string{"D"}, IpponsB: []string{}, Winner: "TeamA"},
+			}
+		} else if (m.SideA == "TeamA" && m.SideB == "TeamC") || (m.SideA == "TeamC" && m.SideB == "TeamA") {
+			matches[i].Winner = "TeamA"
+			a, c := "TeamA", "TeamC"
+			if m.SideA == "TeamC" {
+				a, c = "TeamC", "TeamA"
+			}
+			matches[i].SubResults = []state.SubMatchResult{
+				{Position: 1, SideA: a, SideB: c, IpponsA: []string{"M", "K"}, IpponsB: []string{}, Winner: "TeamA"},
+				{Position: 2, SideA: a, SideB: c, IpponsA: []string{"M"}, IpponsB: []string{"D"}, Winner: "TeamA"},
+				{Position: 3, SideA: a, SideB: c, IpponsA: []string{"M", "D"}, IpponsB: []string{}, Winner: "TeamA"},
+			}
+		} else {
+			matches[i].Winner = "TeamB"
+			b, c := "TeamB", "TeamC"
+			if m.SideA == "TeamC" {
+				b, c = "TeamC", "TeamB"
+			}
+			matches[i].SubResults = []state.SubMatchResult{
+				{Position: 1, SideA: b, SideB: c, IpponsA: []string{"M"}, IpponsB: []string{}, Winner: "TeamB"},
+				{Position: 2, SideA: b, SideB: c, IpponsA: []string{"M"}, IpponsB: []string{"K"}, Winner: "TeamC"},
+				{Position: 3, SideA: b, SideB: c, IpponsA: []string{"M"}, IpponsB: []string{"D"}, Winner: "TeamB"},
+			}
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+
+	for _, poolStandings := range standings {
+		if len(poolStandings) != 3 {
+			continue
+		}
+		// TeamA: 2W, 0L — IV: 5W 1L, PW: 9 given 2 taken
+		// TeamB: 1W, 1L — IV: 3W 2L 1D, PW: 5 given 5 taken
+		// TeamC: 0W, 2L — IV: 1W 6L, PW: 4 given 11 taken
+		assert.Equal(t, "TeamA", poolStandings[0].Player.Name)
+		assert.Equal(t, 2, poolStandings[0].Wins)
+		assert.Equal(t, 5, poolStandings[0].IndividualWins)
+		assert.Equal(t, 1, poolStandings[0].IndividualLosses)
+		assert.Equal(t, 9, poolStandings[0].PointsWon)
+
+		assert.Equal(t, "TeamB", poolStandings[1].Player.Name)
+		assert.Equal(t, 1, poolStandings[1].Wins)
+		assert.Equal(t, 1, poolStandings[1].Losses)
+
+		assert.Equal(t, "TeamC", poolStandings[2].Player.Name)
+		assert.Equal(t, 0, poolStandings[2].Wins)
+
+		// Verify team weighted formula is applied
+		for _, s := range poolStandings {
+			expected := s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
+				s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
+				s.PointsWon*100 - s.PointsLost
+			assert.Equal(t, expected, s.Points, "Team weighted formula mismatch for %s", s.Player.Name)
+		}
+
+		assert.True(t, poolStandings[0].Points > poolStandings[1].Points)
+		assert.True(t, poolStandings[1].Points > poolStandings[2].Points)
+	}
+}
+
 // --- Schedule Tests ---
 
 func TestGenerateSchedule_Pools(t *testing.T) {
@@ -975,5 +1150,337 @@ func TestPoolMatchIDs_AreUnique(t *testing.T) {
 	for _, m := range matches {
 		assert.False(t, ids[m.ID], "duplicate pool match ID: %s", m.ID)
 		ids[m.ID] = true
+	}
+}
+
+// --- Export Tests ---
+
+func TestExportCompetitionXlsx(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "export-test"
+
+	createTestCompetition(t, store, compID, "pools", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	data, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, data)
+	// Simple check for ZIP header (Excel files are ZIPs)
+	assert.Equal(t, []byte{0x50, 0x4b, 0x03, 0x04}, data[:4])
+}
+
+func TestExportCompetitionXlsx_NotFound(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+	data, err := eng.ExportCompetitionXlsx("nonexistent")
+	assert.Error(t, err)
+	assert.Nil(t, data)
+}
+
+// --- Match Court Update Tests ---
+
+func TestUpdateMatchCourt_Pool(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "court-pool"
+
+	createTestCompetition(t, store, compID, "pools", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	matchID := matches[0].ID
+
+	err = eng.UpdateMatchCourt(compID, matchID, "Court Z")
+	require.NoError(t, err)
+
+	// Verify persistence in matches
+	reloaded, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	found := false
+	for _, m := range reloaded {
+		if m.ID == matchID {
+			assert.Equal(t, "Court Z", m.Court)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+
+	// Verify persistence in schedule
+	schedule, err := store.LoadSchedule(compID)
+	require.NoError(t, err)
+	found = false
+	for _, s := range schedule {
+		if s.MatchRef == matchID {
+			assert.Equal(t, "Court Z", s.Court)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+}
+
+func TestUpdateMatchCourt_Bracket(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "court-bracket"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	matchID := bracket.Rounds[0][0].ID
+
+	err = eng.UpdateMatchCourt(compID, matchID, "Court X")
+	require.NoError(t, err)
+
+	// Verify persistence in bracket
+	reloaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Court X", reloaded.Rounds[0][0].Court)
+
+	// Verify persistence in schedule
+	schedule, err := store.LoadSchedule(compID)
+	require.NoError(t, err)
+	found := false
+	for _, s := range schedule {
+		if s.MatchRef == "R1-M"+matchID {
+			assert.Equal(t, "Court X", s.Court)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+}
+
+func TestUpdateMatchCourt_NotFound(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "court-not-found"
+	createTestCompetition(t, store, compID, "pools", 3)
+	saveTestParticipants(t, store, compID, []string{"A", "B", "C"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	err := eng.UpdateMatchCourt(compID, "nonexistent", "Z")
+	assert.Error(t, err)
+}
+
+// --- Bracket Winner Override Tests ---
+
+func TestOverrideBracketWinner(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "override-bracket"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	matchID := bracket.Rounds[0][0].ID // Alice vs Bob
+
+	err = eng.OverrideBracketWinner(compID, matchID, "Bob")
+	require.NoError(t, err)
+
+	// Verify propagation
+	reloaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", reloaded.Rounds[0][0].Winner)
+	assert.True(t, reloaded.Rounds[0][0].IsOverridden)
+	assert.Equal(t, "Bob", reloaded.Rounds[1][0].SideA)
+
+	// Verify override persistence
+	overrides, err := store.LoadOverrides(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", overrides.Winners[matchID])
+}
+
+func TestOverrideBracketWinner_AutoPropagation(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "override-auto"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	// 4 players, Alice vs Bob (M1), Charlie vs Dave (M2). Winner M1 vs Winner M2 (Final).
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+
+	// Mark second semifinal as Dave winning by bye (if possible) - or just score it normally
+	err = eng.RecordMatchResult(compID, bracket.Rounds[0][1].ID, state.MatchResult{
+		Winner: "Dave",
+		Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	// Now override first semifinal to Bob
+	err = eng.OverrideBracketWinner(compID, bracket.Rounds[0][0].ID, "Bob")
+	require.NoError(t, err)
+
+	reloaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", reloaded.Rounds[1][0].SideA)
+	assert.Equal(t, "Dave", reloaded.Rounds[1][0].SideB)
+}
+
+func TestOverrideBracketWinner_NotFound(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "override-not-found"
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	saveTestParticipants(t, store, compID, []string{"A", "B"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	err := eng.OverrideBracketWinner(compID, "m-999", "A")
+	assert.Error(t, err)
+}
+
+// --- Scoring and Standing Logic Tests ---
+
+func TestFormatScore_HansokuOnly(t *testing.T) {
+	score := formatScore([]string{}, 2)
+	assert.Equal(t, "(H2)", score)
+
+	score = formatScore([]string{"M"}, 1)
+	assert.Equal(t, "M (H1)", score)
+}
+
+func TestCalculatePoolStandings_WithManualOverrides(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "standings-override"
+
+	createTestCompetition(t, store, compID, "pools", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	pools, _ := store.LoadPools(compID)
+	poolName := pools[0].PoolName
+
+	// Manually override Bob to rank 1, Alice to rank 2, Charlie to rank 3
+	overrides := &state.Overrides{
+		PoolRanks: map[string]map[string]int{
+			poolName: {
+				"Bob":     1,
+				"Alice":   2,
+				"Charlie": 3,
+			},
+		},
+	}
+	require.NoError(t, store.SaveOverrides(compID, overrides))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+
+	poolStandings := standings[poolName]
+	assert.Equal(t, "Bob", poolStandings[0].Player.Name)
+	assert.Equal(t, 1, poolStandings[0].Rank)
+	assert.True(t, poolStandings[0].IsOverridden)
+
+	assert.Equal(t, "Alice", poolStandings[1].Player.Name)
+	assert.Equal(t, 2, poolStandings[1].Rank)
+	assert.True(t, poolStandings[1].IsOverridden)
+}
+
+func TestOverrideBracketWinner_SideB(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "override-sideb"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	saveTestParticipants(t, store, compID, []string{"A", "B", "C", "D"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, _ := store.LoadBracket(compID)
+	// Match 1 is index 0, Match 2 is index 1.
+	// Override Match 2 winner to "D"
+	err := eng.OverrideBracketWinner(compID, bracket.Rounds[0][1].ID, "D")
+	require.NoError(t, err)
+
+	reloaded, _ := store.LoadBracket(compID)
+	assert.Equal(t, "D", reloaded.Rounds[1][0].SideB)
+}
+
+func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "override-deep"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	// 5 players ensures padded to 8 slots -> 3 rounds
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "P3", "P4", "P5"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, _ := store.LoadBracket(compID)
+	// Find Alice vs Bob match. StandardSeeding will place them.
+	matchID := ""
+	for _, m := range bracket.Rounds[0] {
+		if (m.SideA == "Alice" && m.SideB == "Bob") || (m.SideA == "Bob" && m.SideB == "Alice") {
+			matchID = m.ID
+			break
+		}
+	}
+	require.NotEmpty(t, matchID)
+
+	err := eng.OverrideBracketWinner(compID, matchID, "Bob")
+	require.NoError(t, err)
+
+	reloaded, _ := store.LoadBracket(compID)
+	// Verify it reached at least Round 2
+	found := false
+	for _, m := range reloaded.Rounds[1] {
+		if m.SideA == "Bob" || m.SideB == "Bob" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Bob should have propagated to Round 2")
+}
+
+func TestCalculatePoolStandings_EdgeCases(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "standings-edges"
+
+	createTestCompetition(t, store, compID, "pools", 2)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob"}) // Pool of 2
+	require.NoError(t, eng.StartCompetition(compID))
+
+	// 1. Match ID with no hyphen
+	err := store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "NoHyphen", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
+	})
+	require.NoError(t, err)
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+
+	// Find any pool
+	var poolName string
+	var poolStandings []state.PlayerStanding
+	for name, s := range standings {
+		if len(s) > 0 {
+			poolName = name
+			poolStandings = s
+			break
+		}
+	}
+	require.NotEmpty(t, poolStandings, "should have at least one pool with players")
+
+	// Alice should have 0 wins because "NoHyphen" was skipped
+	for _, s := range poolStandings {
+		if s.Player.Name == "Alice" {
+			assert.Equal(t, 0, s.Wins)
+		}
+	}
+
+	// 2. Match with unknown player
+	err = store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: poolName + "-0", SideA: "Alice", SideB: "Unknown", Status: state.MatchStatusCompleted, Winner: "Alice"},
+	})
+	require.NoError(t, err)
+	standings, _ = eng.CalculatePoolStandings(compID)
+	for _, s := range standings {
+		for _, ps := range s {
+			if ps.Player.Name == "Alice" {
+				assert.Equal(t, 0, ps.Wins)
+			}
+		}
 	}
 }

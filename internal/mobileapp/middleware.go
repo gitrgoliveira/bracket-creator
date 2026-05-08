@@ -18,7 +18,7 @@ func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 
 		// If no tournament config exists yet (or it's the default blank one), only allow creating one
 		if t == nil || (t.Name == "New Tournament" && t.Password == "") {
-			if c.Request.Method == http.MethodPut && c.FullPath() == "/api/tournament" {
+			if (c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPost) && c.FullPath() == "/api/tournament" {
 				c.Next()
 				return
 			}

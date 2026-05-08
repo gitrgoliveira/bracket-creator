@@ -49,6 +49,9 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 		return nil, err
 	}
 
+	comp, _ := e.store.LoadCompetition(compId)
+	isTeam := comp != nil && comp.TeamSize > 0
+
 	// Map match results by pool — IDs are formatted as "PoolName-MatchIdx"
 	poolResults := make(map[string][]state.MatchResult)
 	for _, r := range results {
@@ -78,7 +81,7 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 				continue
 			}
 
-			// Wins/Losses
+			// Team W/L/D (or individual W/L/D)
 			if m.Winner == m.SideA {
 				sA.Wins++
 				sB.Losses++
@@ -90,30 +93,86 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 				sB.Draws++
 			}
 
-			// Ippons
-			sA.IpponsGiven += len(m.IpponsA)
-			sA.IpponsTaken += len(m.IpponsB)
-			sB.IpponsGiven += len(m.IpponsB)
-			sB.IpponsTaken += len(m.IpponsA)
+			if isTeam && len(m.SubResults) > 0 {
+				for _, sub := range m.SubResults {
+					sideAWin := sub.Winner == m.SideA || sub.Winner == sub.SideA
+					sideBWin := sub.Winner == m.SideB || sub.Winner == sub.SideB
+					switch {
+					case sideAWin:
+						sA.IndividualWins++
+						sB.IndividualLosses++
+					case sideBWin:
+						sB.IndividualWins++
+						sA.IndividualLosses++
+					case sub.Winner == "":
+						sA.IndividualDraws++
+						sB.IndividualDraws++
+					}
+					sA.PointsWon += len(sub.IpponsA)
+					sA.PointsLost += len(sub.IpponsB)
+					sB.PointsWon += len(sub.IpponsB)
+					sB.PointsLost += len(sub.IpponsA)
+				}
+			} else {
+				// Individual scoring: ippons at match level
+				sA.IpponsGiven += len(m.IpponsA)
+				sA.IpponsTaken += len(m.IpponsB)
+				sB.IpponsGiven += len(m.IpponsB)
+				sB.IpponsTaken += len(m.IpponsA)
+			}
 		}
 
 		var sorted []state.PlayerStanding
 		for _, s := range playerStandings {
+			if isTeam {
+				// Team weighted score (Excel formula):
+				// W × 1B − L × 10M + T × 100K + IV × 1000 − IL × 100 + IT × 10 + PW − PL × 0.01
+				// Scaled by 100 to use integers:
+				s.Points = s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
+					s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
+					s.PointsWon*100 - s.PointsLost
+			} else {
+				// Individual weighted score (Excel formula):
+				// W × 1,000,000 − L × 10,000 + D × 100 + PW × 1 − PL × 0.01
+				// Scaled by 100 to use integers:
+				s.Points = s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
+			}
 			sorted = append(sorted, *s)
 		}
 
 		sort.Slice(sorted, func(i, j int) bool {
-			if sorted[i].Wins != sorted[j].Wins {
-				return sorted[i].Wins > sorted[j].Wins
-			}
-			if sorted[i].IpponsGiven != sorted[j].IpponsGiven {
-				return sorted[i].IpponsGiven > sorted[j].IpponsGiven
-			}
-			return sorted[i].IpponsTaken < sorted[j].IpponsTaken
+			return sorted[i].Points > sorted[j].Points
 		})
+
+		// 4. Apply manual rank overrides
+		overrides, _ := e.store.LoadOverrides(compId)
+		if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
+			poolOverrides := overrides.PoolRanks[p.PoolName]
+			// Sort again by rank override
+			sort.Slice(sorted, func(i, j int) bool {
+				rankI, okI := poolOverrides[sorted[i].Player.Name]
+				rankJ, okJ := poolOverrides[sorted[j].Player.Name]
+				if okI && okJ {
+					return rankI < rankJ
+				}
+				if okI {
+					return true
+				}
+				if okJ {
+					return false
+				}
+				// Fallback to original order (computed ranks)
+				return sorted[i].Rank < sorted[j].Rank
+			})
+		}
 
 		for i := range sorted {
 			sorted[i].Rank = i + 1
+			if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
+				if _, ok := overrides.PoolRanks[p.PoolName][sorted[i].Player.Name]; ok {
+					sorted[i].IsOverridden = true
+				}
+			}
 		}
 		allStandings[p.PoolName] = sorted
 	}
@@ -173,4 +232,196 @@ func formatScore(ippons []string, hansoku int) string {
 		score += fmt.Sprintf("(H%d)", hansoku)
 	}
 	return score
+}
+
+func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string) error {
+	if strings.Contains(matchId, "Pool") {
+		return e.updatePoolMatchCourt(compId, matchId, newCourt)
+	}
+	return e.updateBracketMatchCourt(compId, matchId, newCourt)
+}
+
+func (e *Engine) updatePoolMatchCourt(compId string, matchId string, newCourt string) error {
+	results, err := e.store.LoadPoolMatches(compId)
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for i, r := range results {
+		if r.ID == matchId {
+			results[i].Court = newCourt
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("pool match %s not found", matchId)
+	}
+
+	if err := e.store.SavePoolMatches(compId, results); err != nil {
+		return err
+	}
+
+	return e.GenerateSchedule(compId)
+}
+
+func (e *Engine) updateBracketMatchCourt(compId string, matchId string, newCourt string) error {
+	bracket, err := e.store.LoadBracket(compId)
+	if err != nil {
+		return err
+	}
+	if bracket == nil {
+		return fmt.Errorf("bracket not found for competition %s", compId)
+	}
+
+	found := false
+	for rIdx, round := range bracket.Rounds {
+		for mIdx, m := range round {
+			if m.ID == matchId {
+				bracket.Rounds[rIdx][mIdx].Court = newCourt
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("bracket match %s not found", matchId)
+	}
+
+	if err := e.store.SaveBracket(compId, bracket); err != nil {
+		return err
+	}
+
+	return e.GenerateSchedule(compId)
+}
+
+func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string) error {
+	bracket, err := e.store.LoadBracket(compId)
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for rIdx := 0; rIdx < len(bracket.Rounds); rIdx++ {
+		for mIdx := 0; mIdx < len(bracket.Rounds[rIdx]); mIdx++ {
+			m := &bracket.Rounds[rIdx][mIdx]
+			if m.ID == matchId {
+				m.Winner = winnerName
+				m.IsOverridden = true
+				m.Status = state.MatchStatusCompleted
+				found = true
+
+				// Propagate winner to next rounds
+				currentWinner := winnerName
+				currentRIdx := rIdx
+				currentMIdx := mIdx
+
+				for currentRIdx < len(bracket.Rounds)-1 {
+					nextMatchIdx := currentMIdx / 2
+					nextMatch := &bracket.Rounds[currentRIdx+1][nextMatchIdx]
+
+					if currentMIdx%2 == 0 {
+						nextMatch.SideA = currentWinner
+					} else {
+						nextMatch.SideB = currentWinner
+					}
+
+					if nextMatch.SideA != "" && nextMatch.SideB == "" {
+						nextMatch.Winner = nextMatch.SideA
+						nextMatch.Status = state.MatchStatusCompleted
+						currentWinner = nextMatch.SideA
+						currentRIdx++
+						currentMIdx = nextMatchIdx
+					} else if nextMatch.SideA == "" && nextMatch.SideB != "" {
+						nextMatch.Winner = nextMatch.SideB
+						nextMatch.Status = state.MatchStatusCompleted
+						currentWinner = nextMatch.SideB
+						currentRIdx++
+						currentMIdx = nextMatchIdx
+					} else {
+						break
+					}
+				}
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("bracket match %s not found", matchId)
+	}
+
+	if err := e.store.SaveWinnerOverride(compId, matchId, winnerName); err != nil {
+		return err
+	}
+
+	return e.store.SaveBracket(compId, bracket)
+}
+
+func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt string) error {
+	if strings.Contains(matchId, "Pool") {
+		return e.updatePoolMatchTime(compId, matchId, scheduledAt)
+	}
+	return e.updateBracketMatchTime(compId, matchId, scheduledAt)
+}
+
+func (e *Engine) updatePoolMatchTime(compId string, matchId string, scheduledAt string) error {
+	results, err := e.store.LoadPoolMatches(compId)
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for i, r := range results {
+		if r.ID == matchId {
+			results[i].ScheduledAt = scheduledAt
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("pool match %s not found", matchId)
+	}
+
+	return e.store.SavePoolMatches(compId, results)
+}
+
+func (e *Engine) updateBracketMatchTime(compId string, matchId string, scheduledAt string) error {
+	bracket, err := e.store.LoadBracket(compId)
+	if err != nil {
+		return err
+	}
+	if bracket == nil {
+		return fmt.Errorf("bracket not found for competition %s", compId)
+	}
+
+	found := false
+	for rIdx, round := range bracket.Rounds {
+		for mIdx, m := range round {
+			if m.ID == matchId {
+				bracket.Rounds[rIdx][mIdx].ScheduledAt = scheduledAt
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("bracket match %s not found", matchId)
+	}
+
+	return e.store.SaveBracket(compId, bracket)
 }

@@ -9,9 +9,9 @@ import (
 )
 
 type Pool struct {
-	PoolName string
-	Players  []Player
-	Matches  []Match
+	PoolName string   `json:"poolName"`
+	Players  []Player `json:"players"`
+	Matches  []Match  `json:"matches,omitempty"`
 
 	// Excel coordinates
 	sheetName string
@@ -19,14 +19,14 @@ type Pool struct {
 }
 
 type Player struct {
-	Name        string
-	DisplayName string
-	Dojo        string
-	Metadata    []string
+	Name        string   `json:"name"`
+	DisplayName string   `json:"displayName"`
+	Dojo        string   `json:"dojo"`
+	Metadata    []string `json:"metadata,omitempty"`
 
-	PoolPosition int64
-	Seed         int
-	Number       string // e.g. "K1" — assigned when --number-prefix is set
+	PoolPosition int64  `json:"-"`
+	Seed         int    `json:"seed"`
+	Number       string `json:"number,omitempty"` // e.g. "K1" — assigned when --number-prefix is set
 
 	// Excel coordinates
 	sheetName  string
@@ -40,8 +40,8 @@ type MatchWinner struct {
 }
 
 type Match struct {
-	SideA *Player
-	SideB *Player
+	SideA *Player `json:"sideA"`
+	SideB *Player `json:"sideB"`
 }
 
 func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {

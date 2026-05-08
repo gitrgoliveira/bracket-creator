@@ -38,10 +38,14 @@ func (e *Engine) GenerateSchedule(compID string) error {
 		if bracket != nil {
 			for rIdx, round := range bracket.Rounds {
 				for _, m := range round {
+					court := m.Court
+					if court == "" {
+						court = "A" // Default court
+					}
 					entries = append(entries, state.ScheduleEntry{
 						MatchType: "bracket",
 						MatchRef:  fmt.Sprintf("R%d-M%s", rIdx+1, m.ID),
-						Court:     "A", // Default court
+						Court:     court,
 						Status:    string(m.Status),
 					})
 				}

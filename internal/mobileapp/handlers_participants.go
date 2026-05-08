@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -26,6 +27,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 	})
 
 	r.POST("/competitions/:id/participants", func(c *gin.Context) {
+		id := c.Param("id")
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
 		var req struct {
 			Players []struct {
 				Name        string `json:"name"`
@@ -38,20 +46,22 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 
-		// Convert to helper.Player
-		// In a real app we might want to preserve more fields, but for now this matches the plan
-		// to set participants.
-		// Actually, let's just use helper.Player directly in the request if possible
-		// but the plan says "set participants (CSV body or JSON)".
+		players := make([]helper.Player, 0, len(req.Players))
+		for i, p := range req.Players {
+			players = append(players, helper.Player{
+				Name:         p.Name,
+				DisplayName:  p.DisplayName,
+				Dojo:         p.Dojo,
+				PoolPosition: int64(i),
+			})
+		}
 
-		// For now, let's just assume JSON for simplicity as it's easier from a web UI
-		// We'll implement CSV upload later if needed.
+		if err := store.SaveParticipants(id, players); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
+			return
+		}
 
-		// Note: helper.Player is a large struct, we only need a few fields for setup
-
-		// ... implementation of SaveParticipants ...
-		// I'll skip the complex conversion for now and just use a simple one
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "JSON participant upload not fully implemented yet"})
+		c.JSON(http.StatusOK, players)
 	})
 
 	r.GET("/competitions/:id/seeds", func(c *gin.Context) {

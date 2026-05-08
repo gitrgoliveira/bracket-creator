@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -134,7 +135,7 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 		hansokuA, _ := strconv.Atoi(rec[7])
 		hansokuB, _ := strconv.Atoi(rec[8])
 
-		results = append(results, MatchResult{
+		m := MatchResult{
 			ID:       rec[0] + "-" + rec[1], // PoolName-MatchIdx
 			SideA:    rec[2],
 			SideB:    rec[3],
@@ -146,7 +147,13 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 			Decision: rec[9],
 			Status:   MatchStatus(rec[10]),
 			Court:    rec[11],
-		})
+		}
+
+		if len(rec) > 12 && rec[12] != "" {
+			_ = json.Unmarshal([]byte(rec[12]), &m.SubResults)
+		}
+
+		results = append(results, m)
 	}
 
 	return results, nil
@@ -166,7 +173,7 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	}()
 
 	writer := csv.NewWriter(f)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults"}); err != nil {
 		return err
 	}
 
@@ -176,6 +183,12 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 		matchIdx := ""
 		if len(parts) > 1 {
 			matchIdx = parts[1]
+		}
+
+		subJSON := ""
+		if len(r.SubResults) > 0 {
+			b, _ := json.Marshal(r.SubResults)
+			subJSON = string(b)
 		}
 
 		if err := writer.Write([]string{
@@ -191,6 +204,7 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 			r.Decision,
 			string(r.Status),
 			r.Court,
+			subJSON,
 		}); err != nil {
 			return err
 		}

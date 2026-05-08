@@ -24,6 +24,7 @@ type Competition struct {
 	RoundRobin     bool            `yaml:"round_robin" json:"roundRobin"`
 	Courts         []string        `yaml:"courts" json:"courts"`
 	StartTime      string          `yaml:"start_time" json:"startTime"`
+	Date           string          `yaml:"date" json:"date"`
 	Status         string          `yaml:"status" json:"status"`
 	Mirror         bool            `yaml:"mirror" json:"mirror"`
 	WithZekkenName bool            `yaml:"with_zekken_name" json:"withZekkenName"`
@@ -38,30 +39,49 @@ const (
 	MatchStatusCompleted MatchStatus = "completed"
 )
 
+type SubMatchResult struct {
+	Position int      `json:"position"`
+	SideA    string   `json:"sideA"`
+	SideB    string   `json:"sideB"`
+	IpponsA  []string `json:"ipponsA"`
+	IpponsB  []string `json:"ipponsB"`
+	HansokuA int      `json:"hansokuA"`
+	HansokuB int      `json:"hansokuB"`
+	Winner   string   `json:"winner"`
+	Decision string   `json:"decision"`
+}
+
 type MatchResult struct {
-	ID          string      `json:"id"`
-	SideA       string      `json:"sideA"` // Player Name
-	SideB       string      `json:"sideB"` // Player Name
-	Winner      string      `json:"winner"`
-	IpponsA     []string    `json:"ipponsA"` // M, K, D, T, H
-	IpponsB     []string    `json:"ipponsB"`
-	HansokuA    int         `json:"hansokuA"`
-	HansokuB    int         `json:"hansokuB"`
-	Decision    string      `json:"decision"` // hantei, etc
-	Status      MatchStatus `json:"status"`
-	Court       string      `json:"court"`
-	ScheduledAt string      `json:"scheduledAt"`
+	ID          string           `json:"id"`
+	SideA       string           `json:"sideA"` // Player/Team Name
+	SideB       string           `json:"sideB"`
+	Winner      string           `json:"winner"`
+	IpponsA     []string         `json:"ipponsA"` // M, K, D, T, H
+	IpponsB     []string         `json:"ipponsB"`
+	HansokuA    int              `json:"hansokuA"`
+	HansokuB    int              `json:"hansokuB"`
+	Decision    string           `json:"decision"`
+	Status      MatchStatus      `json:"status"`
+	Court       string           `json:"court"`
+	ScheduledAt string           `json:"scheduledAt"`
+	SubResults  []SubMatchResult `json:"subResults,omitempty"`
 }
 
 type PlayerStanding struct {
-	Player      helper.Player `json:"player"`
-	Wins        int           `json:"wins"`
-	Losses      int           `json:"losses"`
-	Draws       int           `json:"draws"`
-	IpponsGiven int           `json:"ipponsGiven"`
-	IpponsTaken int           `json:"ipponsTaken"`
-	Points      int           `json:"points"`
-	Rank        int           `json:"rank"`
+	Player           helper.Player `json:"player"`
+	Wins             int           `json:"wins"`
+	Losses           int           `json:"losses"`
+	Draws            int           `json:"draws"`
+	IpponsGiven      int           `json:"ipponsGiven"`
+	IpponsTaken      int           `json:"ipponsTaken"`
+	Points           int           `json:"points"`
+	Rank             int           `json:"rank"`
+	IsOverridden     bool          `json:"isOverridden"`
+	IndividualWins   int           `json:"individualWins,omitempty"`
+	IndividualLosses int           `json:"individualLosses,omitempty"`
+	IndividualDraws  int           `json:"individualDraws,omitempty"`
+	PointsWon        int           `json:"pointsWon,omitempty"`
+	PointsLost       int           `json:"pointsLost,omitempty"`
 }
 
 type BracketMatch struct {
@@ -73,8 +93,9 @@ type BracketMatch struct {
 	Court       string      `json:"court"`
 	ScheduledAt string      `json:"scheduledAt"`
 	// Additional fields from design
-	ScoreA string `json:"scoreA"`
-	ScoreB string `json:"scoreB"`
+	ScoreA       string `json:"scoreA"`
+	ScoreB       string `json:"scoreB"`
+	IsOverridden bool   `json:"isOverridden"`
 }
 
 type Bracket struct {

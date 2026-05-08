@@ -34,7 +34,70 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/court", func(c *gin.Context) {
-		// Placeholder for moving match to different court
+		id := c.Param("id")
+		mid := c.Param("mid")
+
+		var req struct {
+			Court string `json:"court"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := eng.UpdateMatchCourt(id, mid, req.Court); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Broadcast update
+		hub.Broadcast(EventScheduleUpdated, nil)
+		hub.Broadcast(EventMatchUpdated, gin.H{
+			"competitionId": id,
+			"matchId":       mid,
+			"court":         req.Court,
+		})
+
+		c.Status(http.StatusOK)
+	})
+
+	r.PUT("/competitions/:id/matches/:mid/override-winner", func(c *gin.Context) {
+		id := c.Param("id")
+		mid := c.Param("mid")
+		var req struct {
+			WinnerName string `json:"winnerName"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := eng.OverrideBracketWinner(id, mid, req.WinnerName); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventTournamentUpdated, nil)
+		c.Status(http.StatusOK)
+	})
+
+	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {
+		id := c.Param("id")
+		mid := c.Param("mid")
+		var req struct {
+			ScheduledAt string `json:"scheduledAt"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := eng.UpdateMatchTime(id, mid, req.ScheduledAt); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventScheduleUpdated, nil)
 		c.Status(http.StatusOK)
 	})
 }

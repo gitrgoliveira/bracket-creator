@@ -9,19 +9,24 @@
 - **CLI Framework:** [Cobra](https://github.com/spf13/cobra)
 - **Web Framework:** [Gin](https://github.com/gin-gonic/gin)
 - **Excel Manipulation:** [Excelize](https://github.com/xuri/excelize/v2)
-- **Frontend:** Vanilla HTML/JS (embedded in the Go binary)
+- **Frontend (bracket generator):** Vanilla HTML/JS embedded in the Go binary (`web/`)
+- **Frontend (mobile/live app):** Preact + JSX compiled by esbuild, embedded in the Go binary (`web-mobile/`)
 - **Containerization:** Docker & Docker Compose
 
 ### Architecture
-- `cmd/`: CLI command definitions (serve, create-playoffs, create-pools, version).
+- `cmd/`: CLI command definitions (serve, create-playoffs, create-pools, mobile-app, version).
 - `internal/`: Core logic and domain models.
-    - `domain/`: Domain entities (Tournament, Pool, Match, Player).
+    - `domain/`: Domain entities (Tournament, Pool, Match, Player, Seed).
     - `helper/`: Implementation of bracket generation, pool creation, Excel file creation, and business logic.
     - `excel/`: Lower-level Excel client and styling logic.
-    - `resources/`: Management of embedded assets.
-- `web/`: Frontend assets (HTML, CSS, JS) embedded into the binary using `go:embed`.
+    - `resources/`: Management of embedded assets (both `web/` and `web-mobile/`).
+    - `mobileapp/`: Gin HTTP handlers for the live tournament app. Handlers split by entity: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`. Real-time updates via SSE (`hub.go`). Password auth middleware (`middleware.go`).
+    - `state/`: File-backed store for the mobile app. Reads/writes `tournament.md` and per-competition `config.md` + `participants.csv` in the data folder.
+    - `engine/`: Thin adapter bridging `state.Competition` to `internal/helper` pool/bracket generation.
+- `web/`: Frontend assets for the bracket-generator web UI, embedded via `go:embed`.
+- `web-mobile/`: Preact/JSX frontend for the live tournament mobile app, embedded via `go:embed`. Pre-compiled to `web-mobile/dist/` by esbuild. Key components: `LinedTextarea` (numbered participant input), admin dashboard, live score editor, public viewer.
 - `tests/`: Integration tests for the Web API and CLI.
-- `specs/`: Contains the OpenAPI specification (`openapi.yaml`) for the web API.
+- `specs/`: OpenAPI specification (`openapi.yaml`) for the web API.
 
 ### Seeding Logic
 - **Playoffs (`StandardSeeding`)**: Uses a power-of-2 bracket distribution (e.g., seeds 1 and 2 on opposite halves). Includes displaced seed placement using a furthest-distance heuristic for out-of-range seeds.
@@ -79,7 +84,10 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 
 ### Key Commands
 - **Build the application:** `make go/build` (outputs to `./bin/bracket-creator`)
-- **Run the Web UI:** `make run` or `./bin/bracket-creator serve`
+- **Run the Web UI (bracket generator):** `make run` or `./bin/bracket-creator serve`
+- **Run the mobile/live app:** `make run-mobile` (default: `./tournament-data`, port 8080)
+  - Override port: `PORT=8082 make run-mobile`
+  - Override data dir: `TOURNAMENT_DATA_DIR=/path make run-mobile`
 - **Run Tests (fast):** `make go/test`
 - **Run Tests (with race detection):** `make go/test-race`
 - **Run Linters:** `make go/lint`

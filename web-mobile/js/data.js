@@ -15,14 +15,11 @@
 // Match: an atomic fight, owned by a pool or a bracket round. Stores court, scheduledAt,
 // status, score. Score can be edited at any time by an admin.
 
-const DOJOS = [
-  "Mumeishi", "Sanshukai", "Nenriki", "Kenshinkan", "Wakaba",
-  "Hizen", "Shobukan", "Edoya", "Tora", "Ryokushinkai",
-  "Hokushinkan", "Senshinkan",
-];
-const FIRST_M = ["Akira", "Hiroshi", "Kenji", "Takashi", "Sho", "Daichi", "Ren", "Marcus", "Liam", "Owen", "Felix", "Jonas", "Pierre", "Diego", "Arjun", "Tomas", "Kai", "Leon", "Noah", "Mateo", "Hugo", "Theo", "Ezra", "Kenta", "Yuto"];
-const FIRST_F = ["Sakura", "Aiko", "Mei", "Yui", "Hana", "Naomi", "Rika", "Kana", "Elena", "Sofia", "Anna", "Clara", "Maya", "Lin", "Iris", "Nora", "Yoko", "Mariko", "Emi", "Akari"];
-const LAST = ["Tanaka", "Sato", "Suzuki", "Watanabe", "Yamamoto", "Nakamura", "Kobayashi", "Ito", "Saito", "Kato", "Yoshida", "Mori", "Hayashi", "Shimizu", "Dupont", "Martin", "Schmidt", "Müller", "Rossi", "Garcia", "Silva", "Chen", "Park", "Kim", "Singh", "Patel", "Novak"];
+const DOJOS = ['Team Alpha', 'Team Beta', 'Team Chi', 'Team Delta', 'Team Epsilon', 'Team Eta', 'Team Gamma', 'Team Iota', 'Team Kappa', 'Team Lambda', 'Team Mu', 'Team Nu', 'Team Omega', 'Team Omicron', 'Team Phi', 'Team Pi', 'Team Psi', 'Team Rho', 'Team Sigma', 'Team Tau', 'Team Theta', 'Team Upsilon', 'Team Xi', 'Team Zeta'];
+const FIRST_M = ['Aaron', 'Albus', 'Arthur', 'Benjamin', 'Bilbo', 'Bram', 'Caleb', 'Charles', 'Daniel', 'Dylan', 'Eddard', 'Elijah', 'Finn', 'Frodo', 'Fyodor', 'Gabriel', 'Gandalf', 'George', 'Herman', 'Hudson', 'Inigo', 'Isaac', 'Jackson', 'Jon', 'Kaden', 'Kevin', 'Kurt', 'Legolas', 'Lewis', 'Liam', 'Luke', 'Mason', 'Michael', 'Moby', 'Nathan', 'Nathaniel', 'Neville', 'Nolan', 'Oliver', 'Oscar', 'Othello', 'Owen', 'Parker', 'Paul', 'Petyr', 'Philip', 'Quentin', 'Quinn', 'Quirinus', 'Ray', 'Robert', 'Ron', 'Ryan', 'Samwise', 'Sebastian', 'Steven', 'Thomas', 'Tristan', 'Tyrion', 'Ulysses', 'Uriel', 'Victor', 'Vincent', 'Voldemort', 'William', 'Willy', 'Xaro', 'Xavier', 'Yann', 'Yosef', 'Zachary'];
+const FIRST_F = ['Cersei', 'Daenerys', 'Emily', 'Hermione', 'Jane', 'Katniss', 'Mary', 'Sylvia', 'Ursula', 'Virginia', 'Ygritte'];
+const LAST = ['Adams', 'Allen', 'Anderson', 'Asimov', 'Austen', 'Baelish', 'Baggins', 'Blake', 'Bradbury', 'Bronte', 'Carroll', 'Clark', 'Conan', 'Defoe', 'Dick', 'Dickens', 'Dostoevsky', 'Dumbledore', 'Evans', 'Everdeen', 'Gamgee', 'Granger', 'Green', 'Greenleaf', 'Hall', 'Hardy', 'Harris', 'Hawthorne', 'Herbert', 'Hernandez', 'Hill', 'Jackson', 'K Dick', 'K Le Guin', 'King', 'Lannister', 'Lee', 'Lewis', 'Longbottom', 'Lopez', 'Martel', 'Martin', 'Martinez', 'Melville', 'Montoya', 'Moore', 'Orwell', 'Plath', 'Quirrell', 'Rodriguez', 'Scott', 'Shakespeare', 'Shelley', 'Snow', 'Stark', 'Stoker', 'Targaryen', 'Taylor', 'Thomas', 'Thompson', 'Vonnegut', 'Walker', 'Weasley', 'White', 'Wilde', 'Wilson', 'Wonka', 'Woolf', 'Wright', 'Xhoan Daxos', 'Young', 'the Grey'];
+
 
 function makePlayer(i, gender, prefix, seed) {
   const first = (gender === "F" ? FIRST_F : FIRST_M);
@@ -75,7 +72,7 @@ function buildBracket(players, courtsAssigned) {
 function advanceByes(rounds) {
   if (!rounds) return rounds;
   const r1 = rounds[0];
-  r1.forEach((m) => { if (m.sideA && !m.sideB) { m.winner = m.sideA; m.status = "complete"; m.score = { type: "bye" }; } else if (!m.sideA && m.sideB) { m.winner = m.sideB; m.status = "complete"; m.score = { type: "bye" }; } });
+  r1.forEach((m) => { if (m.sideA && !m.sideB) { m.winner = m.sideA; m.status = "completed"; m.score = { type: "bye" }; } else if (!m.sideA && m.sideB) { m.winner = m.sideB; m.status = "completed"; m.score = { type: "bye" }; } });
   if (rounds.length > 1) rounds[1].forEach((m, i) => { const a = r1[i * 2]; const b = r1[i * 2 + 1]; if (a.winner) m.sideA = a.winner; if (b.winner) m.sideB = b.winner; if (m.sideA && m.sideB) m.status = "scheduled"; });
   return rounds;
 }
@@ -85,17 +82,17 @@ function pickIppons(n) { const pool = ["M", "K", "D", "T"]; const out = []; for 
 function simulateRounds(rounds, completedRounds, includePartial = false) {
   for (let r = 0; r < completedRounds && r < rounds.length; r++) {
     rounds[r].forEach((m) => {
-      if (m.status === "complete") return;
-      if (!m.sideA || !m.sideB) { m.winner = m.sideA || m.sideB; m.status = m.winner ? "complete" : "pending"; if (m.winner) m.score = { type: "bye" }; return; }
+      if (m.status === "completed") return;
+      if (!m.sideA || !m.sideB) { m.winner = m.sideA || m.sideB; m.status = m.winner ? "completed" : "pending"; if (m.winner) m.score = { type: "bye" }; return; }
       const seedA = m.sideA.seed || 99; const seedB = m.sideB.seed || 99;
       const aWins = seedA < seedB ? Math.random() > 0.25 : Math.random() > 0.65;
-      m.winner = aWins ? m.sideA : m.sideB; m.status = "complete";
+      m.winner = aWins ? m.sideA : m.sideB; m.status = "completed";
       const winPts = Math.random() > 0.4 ? 2 : 1;
       m.score = { type: "ippon", winnerPts: winPts, loserPts: winPts === 2 && Math.random() > 0.5 ? 1 : 0, ippons: pickIppons(winPts) };
     });
     if (r + 1 < rounds.length) rounds[r + 1].forEach((m, i) => { const a = rounds[r][i * 2]; const b = rounds[r][i * 2 + 1]; if (a.winner) m.sideA = a.winner; if (b.winner) m.sideB = b.winner; if (m.sideA && m.sideB && m.status === "pending") m.status = "scheduled"; });
   }
-  if (includePartial && completedRounds < rounds.length) { const r = rounds[completedRounds]; if (r && r[0] && r[0].sideA && r[0].sideB) { r[0].status = "in_progress"; r[0].score = { type: "ippon", winnerPts: 1, loserPts: 0, ippons: ["M"], live: true }; } }
+  if (includePartial && completedRounds < rounds.length) { const r = rounds[completedRounds]; if (r && r[0] && r[0].sideA && r[0].sideB) { r[0].status = "running"; r[0].score = { type: "ippon", winnerPts: 1, loserPts: 0, ippons: ["M"], live: true }; } }
   return rounds;
 }
 
@@ -148,11 +145,11 @@ function simulatePools(pools, completedPct = 1) {
       if (i >= toComplete) return;
       const seedA = m.sideA.seed || 99; const seedB = m.sideB.seed || 99;
       const aWins = seedA < seedB ? Math.random() > 0.3 : Math.random() > 0.6;
-      m.winner = aWins ? m.sideA : m.sideB; m.status = "complete";
+      m.winner = aWins ? m.sideA : m.sideB; m.status = "completed";
       const winPts = Math.random() > 0.5 ? 2 : 1;
       m.score = { type: "ippon", winnerPts: winPts, loserPts: winPts === 2 && Math.random() > 0.5 ? 1 : 0, ippons: pickIppons(winPts) };
     });
-    if (toComplete < total) { const next = pool.matches[toComplete]; if (next) { next.status = "in_progress"; next.score = { type: "ippon", winnerPts: 1, loserPts: 0, ippons: ["K"], live: true }; } }
+    if (toComplete < total) { const next = pool.matches[toComplete]; if (next) { next.status = "running"; next.score = { type: "ippon", winnerPts: 1, loserPts: 0, ippons: ["K"], live: true }; } }
     pool.standings = computeStandings(pool);
   });
   return pools;
@@ -161,7 +158,7 @@ function computeStandings(pool) {
   const stats = {};
   pool.players.forEach((p) => { stats[p.id] = { player: p, wins: 0, losses: 0, ippons: 0, given: 0, played: 0 }; });
   pool.matches.forEach((m) => {
-    if (m.status !== "complete" || !m.winner) return;
+    if (m.status !== "completed" || !m.winner) return;
     const winId = m.winner.id; const loseId = m.sideA.id === winId ? m.sideB.id : m.sideA.id;
     stats[winId].wins++; stats[winId].played++; stats[loseId].losses++; stats[loseId].played++;
     if (m.score) { stats[winId].ippons += m.score.winnerPts || 0; stats[loseId].ippons += m.score.loserPts || 0; stats[winId].given += m.score.loserPts || 0; stats[loseId].given += m.score.winnerPts || 0; }
@@ -176,27 +173,33 @@ function poolWinners(pools) {
 // ---------- Competition ----------
 // kind: "individual" | "team"
 // format: "playoffs" | "pools"  (pools format always implies pools followed by a bracket)
-function buildCompetition({ id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, teamSize, poolMode, poolSize, winnersPerPool }) {
+function buildCompetition(args) {
+  if (!args) { console.error("buildCompetition: args is undefined!"); return null; }
+  const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName } = args;
+  console.log("buildCompetition: args", args);
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount, gender) : [];
   const c = {
     id, name, kind, gender, format, status,
     teamSize: teamSize || (kind === "team" ? 5 : 0),
+    poolSize: poolSize || 3,
+    poolSizeMode: poolMode || "max",
+    poolWinners: winnersPerPool || 2,
+    roundRobin: true, 
+    mirror: true, 
+    withZekkenName: withZekkenName || false,
     courts: courts || ["A", "B"],
     players,
     pools: null, bracket: null,
-    settings: {
-      poolMode: poolMode || "max",
-      poolSize: poolSize || 4,
-      winnersPerPool: winnersPerPool || 2,
-      roundRobin: true, mirror: true, withZekken: false,
-    },
     startTime: startTime || "09:00",
+    date: date || "",
   };
   if (status === "setup") return c;
+  
+  console.log("buildCompetition: c before pools/bracket", c);
 
   if (format === "pools") {
-    c.pools = buildPools(players, { poolMode: c.settings.poolMode, poolSize: c.settings.poolSize, winnersPerPool: c.settings.winnersPerPool, courts: c.courts });
+    c.pools = buildPools(players, { poolMode: c.poolSizeMode, poolSize: c.poolSize, winnersPerPool: c.poolWinners, courts: c.courts });
     if (status === "pools") {
       simulatePools(c.pools, 0.6);
       // ALSO build empty bracket scaffold so the playoffs tab is visible/in-progress alongside pools
@@ -274,13 +277,22 @@ const SAMPLE_TOURNAMENTS = [
   })(),
 ];
 
-window.SAMPLE_TOURNAMENTS = SAMPLE_TOURNAMENTS;
-window.buildTournament = buildTournament;
-window.buildCompetition = buildCompetition;
-window.competitionStatus = competitionStatus;
-window.buildBracket = buildBracket; window.advanceByes = advanceByes;
-window.simulateRounds = simulateRounds; window.scheduleRound = scheduleRound;
-window.buildPools = buildPools; window.simulatePools = simulatePools;
-window.computeStandings = computeStandings; window.makeCompetitors = makeCompetitors;
-window.standardSeedOrder = standardSeedOrder; window.nextPow2 = nextPow2;
-window.poolWinners = poolWinners;
+export { 
+  makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId, 
+  buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, 
+  buildPools, simulatePools, computeStandings, poolWinners, buildCompetition, 
+  buildTournament, competitionStatus, SAMPLE_TOURNAMENTS 
+};
+
+if (typeof window !== 'undefined') {
+  window.SAMPLE_TOURNAMENTS = SAMPLE_TOURNAMENTS;
+  window.buildTournament = buildTournament;
+  window.buildCompetition = buildCompetition;
+  window.competitionStatus = competitionStatus;
+  window.buildBracket = buildBracket; window.advanceByes = advanceByes;
+  window.simulateRounds = simulateRounds; window.scheduleRound = scheduleRound;
+  window.buildPools = buildPools; window.simulatePools = simulatePools;
+  window.computeStandings = computeStandings; window.makeCompetitors = makeCompetitors;
+  window.standardSeedOrder = standardSeedOrder; window.nextPow2 = nextPow2;
+  window.poolWinners = poolWinners;
+}

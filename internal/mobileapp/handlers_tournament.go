@@ -36,4 +36,20 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusOK, t)
 	})
+
+	r.POST("/tournament", func(c *gin.Context) {
+		var t state.Tournament
+		if err := c.ShouldBindJSON(&t); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := store.SaveTournament(&t); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventTournamentUpdated, nil)
+		c.JSON(http.StatusCreated, t)
+	})
 }

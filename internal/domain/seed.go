@@ -6,8 +6,8 @@ import (
 
 // SeedAssignment represents the mapping of a previous winner to a seed position.
 type SeedAssignment struct {
-	Name     string
-	SeedRank int
+	Name     string `json:"name"`
+	SeedRank int    `json:"seedRank"`
 }
 
 // Validate checks if the seed assignment is valid.

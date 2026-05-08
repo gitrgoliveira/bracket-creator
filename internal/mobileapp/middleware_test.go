@@ -137,7 +137,8 @@ func TestAuthMiddleware_WithTournament_EmptyPassword(t *testing.T) {
 func TestAuthMiddleware_LoadError(t *testing.T) {
 	store, r := setupMiddlewareTest(t)
 
-	// Make the tournament file unreadable to cause ReadFile to fail with permission denied
+	// Create a tournament file first, then make it unreadable to force a read error
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
 	path := filepath.Join(store.GetFolder(), "tournament.md")
 	os.Chmod(path, 0000)
 	defer os.Chmod(path, 0644) // Clean up for os.RemoveAll

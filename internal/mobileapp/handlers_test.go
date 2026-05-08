@@ -49,6 +49,9 @@ func TestTournamentHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
+	// Create initial tournament (no longer auto-created by store init)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Initial Tournament", Password: ""}))
+
 	// GET /api/tournament
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/tournament", nil)
@@ -58,7 +61,7 @@ func TestTournamentHandlers(t *testing.T) {
 	var tour state.Tournament
 	err := json.Unmarshal(w.Body.Bytes(), &tour)
 	assert.NoError(t, err)
-	assert.Equal(t, "New Tournament", tour.Name)
+	assert.Equal(t, "Initial Tournament", tour.Name)
 
 	// PUT /api/tournament
 	tour.Name = "Updated Tournament"
@@ -258,7 +261,7 @@ func TestParticipantHandlers(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotImplemented, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 
 	// GET /api/competitions/:id/seeds
 	w = httptest.NewRecorder()
@@ -391,6 +394,7 @@ func TestViewerHandlers(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Setup some data
+	store.SaveTournament(&state.Tournament{Name: "Test Tournament"})
 	comp := state.Competition{ID: "c1", Name: "Comp 1"}
 	store.SaveCompetition(&comp)
 

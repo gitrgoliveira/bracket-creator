@@ -7,11 +7,13 @@ High-signal instructions for AI agents working in this repository.
 - **Excel Generation:** Uses `excelize/v2`. The workbook is constructed from scratch in `internal/excel/template.go`. Coordinates and formulas are hardcoded in `internal/helper/` (e.g., `tree.go`, `excel.go`). Layout/page-break constants live in `internal/helper/constants.go`.
 - **Binary Trees:** Brackets are recursive binary trees (`Node` struct in `helper/tree.go`).
 - **Paging:** `helper.MaxPlayersPerTree = 16`. Brackets larger than 16 are subdivided into multiple sheets (pages) unless `--single-tree` is used.
-- **Embedding:** Only `web/*` is embedded via `//go:embed` in `main.go`. Rebuild with `make go/build` after modifying web assets.
+- **Embedding:** Both `web/*` and `web-mobile/*` are embedded via `//go:embed` in `main.go`. Rebuild with `make go/build` after modifying any web assets.
 - **Court limit:** A–Z labels mean `--courts` is rejected if greater than 26.
 - **Excel Layout:** Standardized on an **8-column per court** structure. Column A (Red Name) and Column G (White Name/Rank) are set to 30 units wide. Columns B–F and H are 5 units wide.
 - **Pool Spacing:** There is exactly one blank row of space between the end of one pool's ranking summary and the start of the next pool's header.
 - **API Documentation:** The OpenAPI specification for the web API is located in `specs/openapi.yaml`.
+- **Mobile App (`mobile-app` command):** A live tournament management server serving a Preact/JSX UI from `web-mobile/`. State is file-backed: `tournament-data/tournament.md` (YAML) and `tournament-data/competitions/<id>/config.md` + `participants.csv`. Backend in `internal/mobileapp/` (Gin handlers) and `internal/state/` (store). Real-time updates via SSE. Admin actions require `X-Tournament-Password` header. Run with `make run-mobile`.
+- **Known mobile-app gaps:** `Competition` struct (`internal/state/models.go`) has no `NumberPrefix` field despite the UI exposing one. `buildCompetition` in `web-mobile/js/data.js` hard-codes `withZekkenName: false`. `POST /api/competitions/:id/participants` is a 501 stub — participants arrive via the competition PUT body.
 - **Pool Scoring Rules:**
     - **Individual:** 1. Fights Won, 2. Fights Lost, 3. Hikiwake, 4. Points Scored, 5. Points Lost.
     - **Team:** 1. Team W, 2. Team L, 3. Team T, 4. Individual Winners (IV), 5. Individual Losses (IL), 6. Individual Ties (IT), 7. Points Won (PW), 8. Points Lost (PL).
@@ -43,3 +45,5 @@ High-signal instructions for AI agents working in this repository.
 - **Security only:** `make go/security`
 - **Single test:** `go test -v -run <TestName> ./internal/helper/...`
 - **Generate examples:** `make examples`
+- **Mobile app (local):** `make run-mobile` (default data dir `./tournament-data`, port 8080)
+- **Mobile app (custom port/dir):** `PORT=8082 TOURNAMENT_DATA_DIR=/path make run-mobile`

@@ -23,10 +23,9 @@ func TestNewStore_CreatesDirectories(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, store)
 
-	// Verify files/directories exist
+	// Verify directories exist (tournament.md is not auto-created; setup UI handles it)
 	assert.DirExists(t, storePath)
 	assert.DirExists(t, filepath.Join(storePath, "competitions"))
-	assert.FileExists(t, filepath.Join(storePath, "tournament.md"))
 }
 
 func TestNewStore_ExistingDirectory(t *testing.T) {
@@ -75,7 +74,7 @@ func TestStore_TournamentYAML(t *testing.T) {
 	assert.Equal(t, tourney.Password, loaded.Password)
 }
 
-func TestStore_TournamentYAML_AutoCreate(t *testing.T) {
+func TestStore_TournamentYAML_ReturnsNilWhenMissing(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -83,10 +82,10 @@ func TestStore_TournamentYAML_AutoCreate(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 
+	// tournament.md is not auto-created; LoadTournament returns nil when absent
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
-	assert.NotNil(t, loaded)
-	assert.Equal(t, "New Tournament", loaded.Name)
+	assert.Nil(t, loaded)
 }
 
 func TestStore_TournamentYAML_EmptyCourts(t *testing.T) {

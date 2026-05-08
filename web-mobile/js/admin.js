@@ -3,72 +3,121 @@
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
+function Breadcrumbs({ items }) {
+  return (
+    <div className="crumbs">
+      {items.map((item, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <span className="sep">/</span>}
+          {item.onClick ? (
+            <button onClick={item.onClick}>{item.label}</button>
+          ) : (
+            <span>{item.label}</span>
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, password }) {
   const [view, setView] = useStateA({ kind: "dashboard" });
+  // Hooks must be declared unconditionally before any conditional returns.
+  const [adminCompData, setAdminCompData] = useStateA(null);
+  const [adminLoading, setAdminLoading] = useStateA(false);
 
   const t = tournament;
 
   const updateCompetition = async (cid, next) => {
     try {
-        await window.API.updateCompetition(cid, next, password);
-        const comps = await window.API.fetchCompetitions();
-        onUpdate({ ...t, competitions: comps });
+      await window.API.updateCompetition(cid, next, password);
+      const comps = await window.API.fetchCompetitions();
+      onUpdate({ ...t, competitions: comps });
     } catch (e) {
-        alert("Failed to update competition: " + e.message);
+      alert("Failed to update competition: " + e.message);
     }
   };
 
   const moveMatchCourt = async (compId, matchId, newCourt) => {
     try {
-        // Placeholder API call
-        // await window.API.moveMatchCourt(compId, matchId, newCourt, password);
-        alert("Move court not yet implemented in API");
+      // Placeholder API call
+      // await window.API.moveMatchCourt(compId, matchId, newCourt, password);
+      alert("Move court not yet implemented in API");
     } catch (e) {
-        alert("Failed to move court: " + e.message);
+      alert("Failed to move court: " + e.message);
     }
   };
 
-  const editMatchScore = async (compId, matchId, result) => {
+  const editMatchScore = async (compId, matchId, result, match) => {
     try {
-        await window.API.recordScore(compId, matchId, result, password);
-        // Refresh competition data?
-        // For now just refresh the whole list or assume the caller handles UI update
-        const comps = await window.API.fetchCompetitions();
-        onUpdate({ ...t, competitions: comps });
+      await window.API.recordScore(compId, matchId, result, password, match);
+      const comps = await window.API.fetchCompetitions();
+      onUpdate({ ...t, competitions: comps });
     } catch (e) {
-        alert("Failed to record score: " + e.message);
+      alert("Failed to record score: " + e.message);
     }
   };
 
   const addCompetition = async (c) => {
     try {
-        await window.API.createCompetition(c, password);
-        const comps = await window.API.fetchCompetitions();
-        onUpdate({ ...t, competitions: comps });
+      await window.API.createCompetition(c, password);
+      const comps = await window.API.fetchCompetitions();
+      onUpdate({ ...t, competitions: comps });
     } catch (e) {
-        alert("Failed to add competition: " + e.message);
+      alert("Failed to add competition: " + e.message);
+      throw e;
     }
   };
 
   const updateTournament = async (patch) => {
-      try {
-          const next = { ...t, ...patch };
-          // If password was not in the patch, preserve the current session password
-          // (since tournament.password is cleared in the viewer API)
-          if (!patch.password) {
-              next.password = password;
-          }
-          await window.API.updateTournament(next, password);
-          onUpdate(next);
-      } catch (e) {
-          alert("Failed to update tournament: " + e.message);
+    try {
+      const next = { ...t, ...patch };
+      // If password was not in the patch, preserve the current session password
+      // (since tournament.password is cleared in the viewer API)
+      if (!patch.password) {
+        next.password = password;
       }
+      await window.API.updateTournament(next, password);
+      onUpdate(next);
+    } catch (e) {
+      alert("Failed to update tournament: " + e.message);
+    }
   };
+
+  useEffectA(() => {
+    if (view.kind === "competition") {
+      setAdminLoading(true);
+      window.API.fetchCompetitionDetails(view.id)
+        .then(data => {
+          setAdminCompData(data);
+          setAdminLoading(false);
+        })
+        .catch(err => {
+          console.error(err);
+          setAdminLoading(false);
+        });
+    } else {
+      setAdminCompData(null);
+    }
+  }, [view.id, view.kind]);
+
+  useEffectA(() => {
+    if (view.kind === "competition") {
+      const unsub = window.API.subscribeToEvents((event) => {
+        if (event.type === "competition_started" || event.type === "match_updated" || event.type === "tournament_updated") {
+          if (!event.data || !event.data.competitionId || view.id === event.data.competitionId) {
+            window.API.fetchCompetitionDetails(view.id).then(setAdminCompData);
+          }
+        }
+      });
+      return unsub;
+    }
+  }, [view.id, view.kind]);
 
   if (view.kind === "dashboard") {
     return <AdminDashboard
       tournament={t}
-      onOpenCompetition={(id) => setView({ kind: "competition", id, section: "overview" })}
+      onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
       onCreateCompetition={() => setView({ kind: "createComp" })}
       onEditTournament={() => setView({ kind: "editTournament" })}
       onOpenSchedule={() => setView({ kind: "schedule" })}
@@ -82,7 +131,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
     return <AdminCreateCompetition
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
-      onCreate={(c) => { addCompetition(c); setView({ kind: "competition", id: c.id, section: "participants" }); }}
+      onCreate={async (c) => {
+        try {
+          await addCompetition(c);
+          setView({ kind: "competition", id: c.id, section: "participants" });
+        } catch (_) {
+          // error already alerted inside addCompetition
+        }
+      }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
     />;
@@ -107,6 +163,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       tweaks={tweaks}
+      password={password}
     />;
   }
 
@@ -122,44 +179,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
     />;
   }
 
-  const [adminCompData, setAdminCompData] = useStateA(null);
-  const [adminLoading, setAdminLoading] = useStateA(false);
-
-  useEffectA(() => {
-    if (view.kind === "competition") {
-      setAdminLoading(true);
-      window.API.fetchCompetitionDetails(view.id)
-        .then(data => {
-          setAdminCompData(data);
-          setAdminLoading(false);
-        })
-        .catch(err => {
-          console.error(err);
-          setAdminLoading(false);
-        });
-    } else {
-      setAdminCompData(null);
-    }
-  }, [view.id, view.kind]);
-
-  useEffectA(() => {
-    if (view.kind === "competition") {
-        const unsub = window.API.subscribeToEvents((event) => {
-            if (event.type === "competition_started" || event.type === "match_updated") {
-                if (view.id === event.data.competitionId) {
-                    window.API.fetchCompetitionDetails(view.id).then(setAdminCompData);
-                }
-            }
-        });
-        return unsub;
-    }
-  }, [view.id, view.kind]);
-
   if (view.kind === "competition") {
     const c = t.competitions.find((cc) => cc.id === view.id);
     if (!c) return <div className="page"><div className="empty"><h3>Competition not found</h3></div></div>;
     if (adminLoading && !adminCompData) return <div className="page"><div className="loading">Loading details...</div></div>;
-    
+
     return <AdminCompetition
       tournament={t}
       competition={adminCompData?.config || c}
@@ -193,9 +217,6 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
       </div>
       <div className="topbar__spacer"></div>
       <button className="viewer-toggle" onClick={onViewerMode}>👁 Public viewer</button>
-      <div className="topbar__user">
-        <span className="dot"></span> sensei@dojo
-      </div>
       <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
     </div>
   );
@@ -203,10 +224,10 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
 
 function StatusBadge({ status }) {
   const map = {
-    setup: ["badge--setup", "Setup"],
-    pools: ["badge--pools", "Pools"],
-    playoffs: ["badge--playoffs", "Playoffs"],
-    completed: ["badge--completed", "Completed"],
+    setup: ["badge--setup", "⚙ Setup"],
+    pools: ["badge--pools", "▶ Pools"],
+    playoffs: ["badge--playoffs", "▶ Playoffs"],
+    completed: ["badge--completed", "✔ Completed"],
   };
   const [cls, label] = map[status] || ["badge--setup", status];
   return <span className={`badge ${cls}`}>{label}</span>;
@@ -228,7 +249,7 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
     const players = c.players || [];
     totalParticipants += players.length;
     const ms = window.compMatches ? window.compMatches(c).filter((m) => m && m.sideA && m.sideB) : [];
-    ms.forEach((m) => { totalMatches++; if (m.status === "complete") doneMatches++; if (m.status === "in_progress") liveMatches++; });
+    ms.forEach((m) => { totalMatches++; if (m.status === "completed") doneMatches++; if (m.status === "running") liveMatches++; });
   });
 
   const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
@@ -276,13 +297,13 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
             <span className="dot dot--live"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>
-            {running.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id)} />)}
+            {running.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, "scores")} />)}
           </div>
         </>)}
 
         <div className="section-title">All competitions</div>
         <div className="tlist">
-          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id)} />)}
+          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, c.status === "setup" ? "participants" : c.status === "pools" || c.status === "playoffs" ? "scores" : "overview")} />)}
           <button className="tcard tcard--add" onClick={onCreateCompetition}>
             <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>
@@ -296,15 +317,21 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
 
 function CompCard({ c, onOpen }) {
   let liveCount = 0;
-  if (c.pools) c.pools.forEach((p) => (p.matches || []).forEach((m) => m.status === "in_progress" && liveCount++));
-  if (c.bracket && c.bracket.rounds) c.bracket.rounds.forEach((r) => (r || []).forEach((m) => m.status === "in_progress" && liveCount++));
+  if (c.pools) c.pools.forEach((p) => (p.matches || []).forEach((m) => m.status === "running" && liveCount++));
+  if (c.bracket && c.bracket.rounds) c.bracket.rounds.forEach((r) => (r || []).forEach((m) => m.status === "running" && liveCount++));
   return (
     <button className="tcard" onClick={onOpen}>
       <div className="tcard__head">
         <div>
           <div className="tcard__eyebrow">{window.competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
           <div className="tcard__name">{c.name}</div>
-          <div className="tcard__meta">Starts {c.startTime} · {c.courts.join(", ")}</div>
+          <div className="tcard__meta">
+            {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
+            {c.date && c.startTime && " · "}
+            {c.startTime && `Starts ${c.startTime}`}
+            {" · "}
+            {c.courts.join(", ")}
+          </div>
         </div>
         <StatusBadge status={c.status} />
       </div>
@@ -328,7 +355,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page" style={{ maxWidth: 720 }}>
-        <div className="crumbs"><button onClick={onCancel}>{tournament.name}</button><span className="sep">/</span><span>Edit details</span></div>
+        <Breadcrumbs items={[
+          { label: tournament.name, onClick: onCancel },
+          { label: "Edit details" }
+        ]} />
         <div className="page-head"><h1 className="page-head__title">Edit tournament details</h1></div>
         <div className="card card--pad-lg">
           <div className="row">
@@ -364,19 +394,23 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [useSample, setUseSample] = useStateA(false);
   const [sampleSize, setSampleSize] = useStateA("medium");
   const [poolMode, setPoolMode] = useStateA("max");
-  const [poolSize, setPoolSize] = useStateA(4);
+  const [poolSize, setPoolSize] = useStateA(3);
   const [winners, setWinners] = useStateA(2);
   const [startTime, setStartTime] = useStateA("09:00");
+  const [date, setDate] = useStateA(tournament.date);
   const [teamSize, setTeamSize] = useStateA(5);
+  const [numberPrefix, setNumberPrefix] = useStateA("");
+  const [withZekken, setWithZekken] = useStateA(false);
   const [selectedCourts, setSelectedCourts] = useStateA(tournament.courts.slice(0, Math.min(2, tournament.courts.length)));
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
 
   const create = () => {
-    const id = "c-" + Date.now().toString(36);
     const finalName = name || (kind === "team"
       ? (gender === "F" ? "Women's Teams" : "Men's Teams")
       : (gender === "F" ? "Women's Individual" : gender === "M" ? "Men's Individual" : "Individual"));
+    const slug = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').substring(0, 50);
+    const id = slug || "c-" + Date.now().toString(36);
     const c = window.buildCompetition({
       id,
       name: finalName,
@@ -385,9 +419,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       sampleRoster: useSample ? sampleSize : null,
       seedCount: 0, status: "setup",
       startTime,
+      date,
       teamSize: kind === "team" ? teamSize : 0,
       courts: selectedCourts.length ? selectedCourts : [tournament.courts[0]],
       poolMode, poolSize, winnersPerPool: winners,
+      numberPrefix: numberPrefix.trim().substring(0, 3),
+      withZekkenName: kind === "individual" ? withZekken : false,
     });
     onCreate(c);
   };
@@ -396,7 +433,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page" style={{ maxWidth: 760 }}>
-        <div className="crumbs"><button onClick={onCancel}>{tournament.name}</button><span className="sep">/</span><span>Add competition</span></div>
+        <Breadcrumbs items={[
+          { label: tournament.name, onClick: onCancel },
+          { label: "Add competition" }
+        ]} />
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Add competition</h1>
@@ -431,6 +471,19 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             <div className="field">
               <label className="field__label">Start time</label>
               <input className="input" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="row">
+            <div className="field">
+              <label className="field__label">Date</label>
+              <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <div className="field__hint">Format: YYYY-MM-DD. For multi-day tournaments, specify which day this competition takes place.</div>
+            </div>
+            <div className="field">
+              <label className="field__label">Match number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
+              <input className="input" placeholder="e.g. A" maxLength="3" value={numberPrefix} onChange={(e) => setNumberPrefix(e.target.value)} style={{ maxWidth: 80 }} />
+              <div className="field__hint">Single letter prefix for match numbers (A1, B1…). Keeps numbers unique across competitions.</div>
             </div>
           </div>
 
@@ -499,6 +552,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
           )}
 
+          {kind === "individual" && (
+            <div className="field">
+              <label className="checkbox"><input type="checkbox" checked={withZekken} onChange={(e) => setWithZekken(e.target.checked)} /> Use Zekken display name</label>
+              <div className="field__hint" style={{ marginTop: 4 }}>When enabled, participant CSV uses three columns: Name, Zekken, Dojo.</div>
+            </div>
+          )}
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button className="btn" onClick={onCancel}>Cancel</button>
             <button className="btn btn--primary" onClick={create}>Create & continue →</button>
@@ -514,48 +574,59 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const t = tournament;
 
   const start = async () => {
-      try {
-          await window.API.startCompetition(c.id, password);
-          // Trigger a refresh of competition data in the parent
-          onUpdate(c); 
-          onSection(c.format === "pools" ? "pools" : "bracket");
-      } catch (e) {
-          alert("Failed to start competition: " + e.message);
-      }
+    try {
+      await window.API.startCompetition(c.id, password);
+      // Trigger a refresh of competition data in the parent
+      onUpdate(c);
+      onSection(c.format === "pools" ? "pools" : "bracket");
+    } catch (e) {
+      alert("Failed to start competition: " + e.message);
+    }
   };
 
   const sections = [
-    { sec: "Setup", items: [
-      { id: "overview", label: "Overview" },
-      { id: "participants", label: "Participants & seeds" },
-      { id: "settings", label: "Settings" },
-    ]},
-    { sec: "Run", items: [
-      pools ? { id: "pools", label: "Pools — live" } : null,
-      bracket ? { id: "bracket", label: "Bracket — live" } : null,
-      { id: "scores", label: "Scores — edit" },
-    ].filter(Boolean) },
-    { sec: "Output", items: [
-      { id: "export", label: "Export & print" },
-    ]},
+    {
+      sec: "Setup", items: [
+        { id: "overview", label: "Overview" },
+        { id: "participants", label: "Participants & seeds" },
+        { id: "settings", label: "Settings" },
+      ]
+    },
+    {
+      sec: "Run", items: [
+        pools ? { id: "pools", label: "Pools — live" } : null,
+        bracket ? { id: "bracket", label: "Bracket — live" } : null,
+        { id: "scores", label: "Scores — edit" },
+      ].filter(Boolean)
+    },
+    {
+      sec: "Output", items: [
+        { id: "export", label: "Export & print" },
+      ]
+    },
   ];
+
+  const currentItem = sections.flatMap(m => m.items).find(i => i.id === section);
 
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={t} />
       <div className="page page--wide" style={{ maxWidth: 1400 }}>
-        <div className="crumbs">
-          <button onClick={onBack}>{t.name}</button>
-          <span className="sep">/</span>
-          <span>{c.name}</span>
-        </div>
+        <Breadcrumbs items={[
+          { label: t.name, onClick: onBack },
+          { label: c.name, onClick: section === "overview" ? null : () => onSection("overview") },
+          currentItem && section !== "overview" ? { label: currentItem.label } : null
+        ].filter(Boolean)} />
         <div className="page-head">
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{c.name}</h1>
               <StatusBadge status={c.status} />
             </div>
-            <div className="page-head__sub">{window.competitionKindLabel(c)} · {c.players.length} {c.kind === "team" ? "teams" : "players"} · Starts {c.startTime} · {c.courts.join(", ")}</div>
+            <div className="page-head__sub">
+              {window.competitionKindLabel(c)} · {c.players.length} {c.kind === "team" ? "teams" : "players"} ·
+              {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {c.courts.join(", ")}
+            </div>
           </div>
           <div className="page-head__actions">
             {c.status === "setup" && c.players.length >= 2 && (
@@ -585,8 +656,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {section === "overview" && <AdminCompOverview c={c} onSection={onSection} />}
             {section === "participants" && <AdminParticipants c={c} onUpdate={onUpdate} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} />}
-            {section === "pools" && <AdminPools c={c} pools={pools} standings={standings} onUpdate={onUpdate} tweaks={tweaks} onEditScore={onEditScore} />}
-            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onUpdate={onUpdate} onMoveCourt={onMoveCourt} tweaks={tweaks} />}
+            {section === "pools" && <AdminPools c={c} pools={pools} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
+            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onUpdate={onUpdate} onMoveCourt={onMoveCourt} tweaks={tweaks} password={password} />}
             {section === "scores" && <AdminScoreEditor c={c} t={t} onEditScore={onEditScore} onMoveCourt={onMoveCourt} restrictToCompId={c.id} embedded />}
             {section === "export" && <AdminExport c={c} t={t} />}
           </div>
@@ -598,8 +669,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 
 function AdminCompOverview({ c, onSection }) {
   let total = 0, done = 0, live = 0;
-  if (c.pools) c.pools.forEach((p) => (p.matches || []).forEach((m) => { total++; if (m.status === "complete") done++; if (m.status === "in_progress") live++; }));
-  if (c.bracket && c.bracket.rounds) c.bracket.rounds.forEach((r) => (r || []).forEach((m) => { if (!m.sideA || !m.sideB) return; total++; if (m.status === "complete") done++; if (m.status === "in_progress") live++; }));
+  if (c.pools) c.pools.forEach((p) => (p.matches || []).forEach((m) => { total++; if (m.status === "completed") done++; if (m.status === "running") live++; }));
+  if (c.bracket && c.bracket.rounds) c.bracket.rounds.forEach((r) => (r || []).forEach((m) => { if (!m.sideA || !m.sideB) return; total++; if (m.status === "completed") done++; if (m.status === "running") live++; }));
   const pct = total ? Math.round((done / total) * 100) : 0;
   return (
     <div>
@@ -629,27 +700,85 @@ function AdminCompOverview({ c, onSection }) {
   );
 }
 
+function LinedTextarea({ value, onChange, rows, placeholder }) {
+  const textareaRef = useRefA(null);
+  const numsRef = useRefA(null);
+  const lineCount = Math.max(1, (value || '').split('\n').length);
+  const nums = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n');
+
+  const syncScroll = () => {
+    if (numsRef.current && textareaRef.current) {
+      numsRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
+  };
+
+  return (
+    <div className="lined-textarea">
+      <div ref={numsRef} className="lined-textarea__nums" aria-hidden="true">{nums}</div>
+      <textarea
+        ref={textareaRef}
+        className="lined-textarea__area"
+        value={value}
+        onChange={onChange}
+        onScroll={syncScroll}
+        rows={rows}
+        placeholder={placeholder}
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
+      />
+    </div>
+  );
+}
+
 function AdminParticipants({ c, onUpdate }) {
-  const [text, setText] = useStateA(() => c.players.map((p) => `${p.name}, ${p.dojo}`).join("\n"));
+  const [text, setText] = useStateA(() => (c.players || []).map((p) => {
+    if (c.withZekkenName && p.displayName) {
+      const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
+      return p.danGrade ? `${base}, ${p.danGrade}` : base;
+    }
+    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
+    return p.danGrade ? `${base}, ${p.danGrade}` : base;
+  }).join("\n"));
   const [dragOver, setDragOver] = useStateA(false);
   const fileRef = useRefA(null);
+  const seedFileRef = useRefA(null);
 
-  const lines = text.split("\n").filter((l) => l.trim());
-  const players = c.players;
-
-  const updateSeed = (idx, val) => {
-    const np = [...c.players];
-    const seed = parseInt(val);
-    np[idx] = { ...np[idx], seed: isNaN(seed) || seed <= 0 ? null : seed };
-    onUpdate({ ...c, players: np });
-  };
-  const apply = () => {
-    const np = lines.map((line, i) => {
-      const parts = line.split(",").map((s) => s.trim());
-      const existing = c.players[i];
-      return { id: existing?.id || `${c.id}-p${i + 1}`, name: parts[0], dojo: parts[1] || "", seed: existing?.seed || null };
-    });
-    onUpdate({ ...c, players: np });
+  const handleSeedFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const raw = e.target.result;
+      const np = [...(c.players || [])];
+      let updatedCount = 0;
+      
+      raw.split(/\r?\n/).forEach((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (i === 0 && /name/i.test(trimmed) && /seed|rank/i.test(trimmed)) return;
+        
+        const parts = trimmed.split(",").map(s => s.trim());
+        if (parts.length >= 2) {
+          const name = parts[0];
+          const seed = parseInt(parts[1]);
+          if (name && !isNaN(seed) && seed > 0) {
+            const pIdx = np.findIndex(p => p.name.toLowerCase() === name.toLowerCase() || (p.displayName && p.displayName.toLowerCase() === name.toLowerCase()));
+            if (pIdx >= 0) {
+              np[pIdx] = { ...np[pIdx], seed };
+              updatedCount++;
+            }
+          }
+        }
+      });
+      
+      if (updatedCount > 0) {
+        onUpdate({ ...c, players: np });
+        alert(`Successfully imported ${updatedCount} seeds.`);
+      } else {
+        alert("No matching participants found for the provided seeds.");
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleFile = (file) => {
@@ -657,20 +786,76 @@ function AdminParticipants({ c, onUpdate }) {
     const reader = new FileReader();
     reader.onload = (e) => {
       const raw = e.target.result;
-      // Lightweight CSV parse — handles "name, dojo" with optional header & quoted fields
       const out = [];
       raw.split(/\r?\n/).forEach((line, i) => {
         const trimmed = line.trim();
         if (!trimmed) return;
-        // skip a header row that says name/dojo
         if (i === 0 && /name/i.test(trimmed) && /dojo|club|team/i.test(trimmed)) return;
-        // naive split on commas / tabs / semicolons
-        const cells = trimmed.split(/[,;\t]/).map((s) => s.trim().replace(/^"|"$/g, ""));
-        if (cells[0]) out.push(`${cells[0]}${cells[1] ? `, ${cells[1]}` : ""}`);
+        out.push(trimmed);
       });
       setText(out.join("\n"));
     };
     reader.readAsText(file);
+  };
+
+  const lines = text.split("\n").filter((l) => l.trim());
+  const players = c.players || [];
+
+  const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
+  const gaps = [];
+  if (sortedSeeds.length > 0) {
+    const maxSeed = sortedSeeds[sortedSeeds.length - 1];
+    for (let s = 1; s <= maxSeed; s++) {
+      if (!sortedSeeds.includes(s)) gaps.push(s);
+    }
+  }
+  const hasGaps = gaps.length > 0;
+
+  const updateSeed = (idx, val) => {
+    const np = [...(c.players || [])];
+    const seed = parseInt(val);
+    np[idx] = { ...np[idx], seed: isNaN(seed) || seed <= 0 ? null : seed };
+    onUpdate({ ...c, players: np });
+  };
+
+  const apply = () => {
+    try {
+      console.log("AdminParticipants: Applying", lines.length, "lines");
+      const withZekken = c.withZekkenName;
+      const existingMap = new Map((c.players || []).map(p => [p.name, p]));
+      const np = lines.map((line, i) => {
+        const parts = line.split(",").map((s) => s.trim());
+        const name = parts[0] || "";
+        const existing = existingMap.get(name);
+        let displayName = "";
+        let dojo = "";
+
+        let danGrade = "";
+        if (withZekken) {
+          displayName = parts[1] || "";
+          dojo = parts[2] || "";
+          danGrade = parts[3] || "";
+        } else {
+          dojo = parts[1] || "";
+          danGrade = parts[2] || "";
+        }
+
+        return {
+          id: existing?.id || `${c.id}-p${i + 1}`,
+          name,
+          displayName,
+          dojo,
+          danGrade,
+          seed: existing?.seed || null
+        };
+      });
+      console.log("AdminParticipants: Final list", np);
+      onUpdate({ ...c, players: np });
+      alert(`Successfully applied ${np.length} players.`);
+    } catch (err) {
+      console.error("AdminParticipants: Apply failed", err);
+      alert("Failed to apply participants: " + err.message);
+    }
   };
 
   const onDrop = (e) => {
@@ -680,18 +865,46 @@ function AdminParticipants({ c, onUpdate }) {
     handleFile(file);
   };
 
+  const pasteFromExcel = async () => {
+    try {
+      const clipboardText = await navigator.clipboard.readText();
+      const lines = clipboardText.split(/\r?\n/);
+      const out = [];
+      lines.forEach((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        // Detect header row: if first row matches common patterns, skip it
+        if (i === 0 && /name|team|dojo|club/i.test(trimmed)) return;
+
+        // Normalise tabs to commas
+        let processed = trimmed.replace(/\t/g, ", ");
+        // Strip leading row numbers if any (e.g. "1, Name, Dojo")
+        processed = processed.replace(/^\d+,\s*/, "");
+        out.push(processed);
+      });
+      setText(out.join("\n"));
+    } catch (err) {
+      console.error("Paste failed", err);
+      alert("Failed to read clipboard: " + err.message + "\n\nMake sure you have granted clipboard permissions.");
+    }
+  };
+
   return (
-    <div className="row" style={{ gridTemplateColumns: "1.4fr 1fr", alignItems: "start" }}>
+    <div className="row" style={{ gridTemplateColumns: "2fr 1fr", alignItems: "start" }}>
       <div className="card">
         <div className="card__head">
           <div>
             <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
-            <div className="card__sub">{lines.length} entries · One per line, "{c.kind === "team" ? "Team name, Dojo" : "Name, Dojo"}"</div>
+            <div className="card__sub">
+              {lines.length} entries · One per line,
+              "{c.kind === "team" ? "Team name, Dojo" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan]"}"
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn btn--sm" onClick={pasteFromExcel}>Paste from Excel</button>
             <button className="btn btn--sm" onClick={() => fileRef.current?.click()}>Upload CSV</button>
             <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
-            <button className="btn btn--sm btn--primary" onClick={apply}>Apply</button>
+            <button className="btn btn--sm btn--primary" onClick={apply} disabled={hasGaps}>Apply</button>
           </div>
         </div>
 
@@ -705,10 +918,12 @@ function AdminParticipants({ c, onUpdate }) {
         >
           <div className="dropzone__icon">📥</div>
           <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Drop a CSV here, or click to browse"}</div>
-          <div className="dropzone__sub">Two columns: name, dojo · header row optional</div>
+          <div className="dropzone__sub">
+            {c.withZekkenName ? "Columns: name, zekken, dojo[, dan grade]" : "Columns: name, dojo[, dan grade]"} · header row optional
+          </div>
         </div>
 
-        <textarea className="textarea" value={text} onChange={(e) => setText(e.target.value)} rows="14" placeholder="Akira Tanaka, Mumeishi&#10;Hiroshi Sato, Sanshukai" />
+        <LinedTextarea value={text} onChange={(e) => setText(e.target.value)} rows={14} placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Mumeishi" : "Akira Tanaka, Mumeishi"} />
         <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by row order.</div>
       </div>
       <div className="card">
@@ -717,8 +932,17 @@ function AdminParticipants({ c, onUpdate }) {
             <div className="card__title">Seeding</div>
             <div className="card__sub">{players.filter((p) => p.seed).length} of {players.length} seeded</div>
           </div>
-          <button className="btn btn--sm" onClick={() => onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })}>Clear all</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn btn--sm" onClick={() => seedFileRef.current?.click()}>Import Seeds CSV</button>
+            <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
+            <button className="btn btn--sm" onClick={() => onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })}>Clear all</button>
+          </div>
         </div>
+        {hasGaps && (
+          <div className="alert alert--error" style={{ margin: "0 16px 16px" }}>
+            ❌ Seed gap detected: rank {gaps.join(", ")} {gaps.length > 1 ? "are" : "is"} missing. Seeds must be sequential (1, 2, 3…).
+          </div>
+        )}
         {players.length === 0 ? (
           <div className="empty" style={{ padding: 24 }}>
             <div className="icon">🌱</div>
@@ -745,8 +969,7 @@ function AdminParticipants({ c, onUpdate }) {
 }
 
 function AdminSettings({ c, tournament, onUpdate }) {
-  const s = c.settings;
-  const set = (k, v) => onUpdate({ ...c, settings: { ...s, [k]: v } });
+  const set = (k, v) => onUpdate({ ...c, [k]: v });
   const toggleCourt = (cc) => {
     const next = c.courts.includes(cc) ? c.courts.filter((x) => x !== cc) : [...c.courts, cc].sort();
     if (next.length) onUpdate({ ...c, courts: next });
@@ -756,6 +979,7 @@ function AdminSettings({ c, tournament, onUpdate }) {
       <div className="card__head"><div className="card__title">Competition settings</div></div>
       <div className="row">
         <div className="field"><label className="field__label">Display name</label><input className="input" value={c.name} onChange={(e) => onUpdate({ ...c, name: e.target.value })} /></div>
+        <div className="field"><label className="field__label">Date</label><input className="input" type="date" value={c.date} onChange={(e) => onUpdate({ ...c, date: e.target.value })} /><div className="field__hint">Format: YYYY-MM-DD</div></div>
         <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={c.startTime} onChange={(e) => onUpdate({ ...c, startTime: e.target.value })} /></div>
       </div>
       {c.kind === "team" && (
@@ -775,24 +999,31 @@ function AdminSettings({ c, tournament, onUpdate }) {
           <div className="field">
             <label className="field__label">Pool sizing mode</label>
             <div className="radio-group">
-              <button className={`radio-pill ${s.poolMode === "max" ? "is-active" : ""}`} onClick={() => set("poolMode", "max")}>Max per pool</button>
-              <button className={`radio-pill ${s.poolMode === "min" ? "is-active" : ""}`} onClick={() => set("poolMode", "min")}>Min per pool</button>
+              <button className={`radio-pill ${c.poolSizeMode === "max" ? "is-active" : ""}`} onClick={() => set("poolSizeMode", "max")}>Max per pool</button>
+              <button className={`radio-pill ${c.poolSizeMode === "min" ? "is-active" : ""}`} onClick={() => set("poolSizeMode", "min")}>Min per pool</button>
             </div>
           </div>
           <div className="row">
-            <div className="field"><label className="field__label">{s.poolMode === "max" ? "Maximum" : "Minimum"} per pool</label><input className="input" type="number" min="3" value={s.poolSize} onChange={(e) => set("poolSize", +e.target.value)} /></div>
-            <div className="field"><label className="field__label">Winners per pool</label><input className="input" type="number" min="1" value={s.winnersPerPool} onChange={(e) => set("winnersPerPool", +e.target.value)} /></div>
+            <div className="field"><label className="field__label">{c.poolSizeMode === "max" ? "Maximum" : "Minimum"} per pool</label><input className="input" type="number" min="3" value={c.poolSize} onChange={(e) => set("poolSize", +e.target.value)} /></div>
+            <div className="field"><label className="field__label">Winners per pool</label><input className="input" type="number" min="1" value={c.poolWinners} onChange={(e) => set("poolWinners", +e.target.value)} /></div>
           </div>
         </>
       )}
-      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={s.roundRobin} onChange={(e) => set("roundRobin", e.target.checked)} /> Round-robin in pools</label>
-      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={s.mirror} onChange={(e) => set("mirror", e.target.checked)} /> Mirror sides (White on left)</label>
-      <label className="checkbox"><input type="checkbox" checked={s.withZekken} onChange={(e) => set("withZekken", e.target.checked)} /> Use Zekken display name</label>
+      <div className="field">
+        <label className="field__label">Match number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
+        <input className="input" placeholder="e.g. A" maxLength="3" value={c.numberPrefix || ""} onChange={(e) => set("numberPrefix", e.target.value.substring(0, 3))} style={{ maxWidth: 80 }} />
+        <div className="field__hint">Single letter prefix for match numbers (A1, B1…). Keeps numbers unique across competitions.</div>
+      </div>
+      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={c.roundRobin} onChange={(e) => set("roundRobin", e.target.checked)} /> Round-robin in pools</label>
+      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={c.mirror} onChange={(e) => set("mirror", e.target.checked)} /> Mirror sides (White on left)</label>
+      {c.kind === "individual" && (
+        <label className="checkbox"><input type="checkbox" checked={c.withZekkenName} onChange={(e) => set("withZekkenName", e.target.checked)} /> Use Zekken display name</label>
+      )}
     </div>
   );
 }
 
-function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks }) {
+function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password }) {
   const [selected, setSelected] = useStateA(null);
   const scrollRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
@@ -803,7 +1034,7 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks }) {
     const flat = rounds.flatMap(r => r);
     const cur = flat.find(m => m.status === "running");
     if (cur) setAutoScrollId(cur.id + "::" + Date.now());
-  }, []); 
+  }, []);
 
   if (!bracket || !bracket.rounds) {
     return <div className="empty"><div className="icon">⚙</div><h3>Bracket not generated yet</h3><div>Start the competition to build the bracket.</div></div>;
@@ -814,17 +1045,25 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks }) {
     const m = bracket.rounds[selected.ri][selected.mi];
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     if (!winner) return;
-    
+
     const result = {
-        winner: winner,
-        status: "completed",
-        ipponsA: winnerSide === "a" ? [ipponLetter || "M"] : [],
-        ipponsB: winnerSide === "b" ? [ipponLetter || "M"] : [],
+      winner: winner,
+      status: "completed",
+      ipponsA: winnerSide === "a" ? [ipponLetter || "M"] : [],
+      ipponsB: winnerSide === "b" ? [ipponLetter || "M"] : [],
+      score: { type: "ippon", winnerPts: 1, loserPts: 0, ippons: [ipponLetter || "M"], fouls: { a: 0, b: 0 } },
     };
-    
-    window.API.recordScore(c.id, m.id, result)
-        .then(() => onUpdate(c))
-        .catch(err => alert(err.message));
+
+    window.API.recordScore(c.id, m.id, result, password, m)
+      .then(() => onUpdate(c))
+      .catch(err => alert(err.message));
+  };
+
+  const overrideWinner = (winnerName) => {
+    if (!selected) return;
+    window.API.overrideBracketWinner(c.id, selected.matchId, winnerName, password)
+      .then(() => onUpdate(c))
+      .catch(err => alert(err.message));
   };
   const selectedMatch = selected ? bracket.rounds[selected.ri][selected.mi] : null;
   return (
@@ -846,7 +1085,14 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks }) {
       </div>
       <div>
         {selectedMatch && selectedMatch.sideA && selectedMatch.sideB ? (
-          <LiveMatchPanel match={selectedMatch} compId={c.id} courts={t?.courts || []} onMoveCourt={onMoveCourt} onRecord={recordWinner} />
+          <LiveMatchPanel 
+            match={selectedMatch} 
+            compId={c.id} 
+            courts={t?.courts || []} 
+            onMoveCourt={onMoveCourt} 
+            onRecord={recordWinner}
+            onOverride={overrideWinner}
+          />
         ) : selectedMatch ? (
           <div className="empty"><h3>Match not ready</h3><div style={{ fontSize: 13 }}>Waiting for upstream winners.</div></div>
         ) : (
@@ -857,7 +1103,7 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks }) {
   );
 }
 
-function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord }) {
+function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord, onOverride }) {
   const [mode, setMode] = useStateA("tap");
   const [aPoints, setAPoints] = useStateA([]);
   const [bPoints, setBPoints] = useStateA([]);
@@ -868,7 +1114,7 @@ function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord }) {
     setCourtOpen(false);
   }, [match.id]);
   const a = match.sideA, b = match.sideB;
-  const isComplete = match.status === "complete";
+  const isComplete = match.status === "completed";
   return (
     <div className="live-panel">
       <div className="live-panel__head">
@@ -906,13 +1152,13 @@ function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord }) {
       </div>
       {mode === "tap" && (<>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--accent)" : "var(--line)", background: match.winner?.id === a.id ? "var(--accent)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
-            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em" }}>WHITE</div>
+          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
+            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", color: "var(--red)" }}>AKA (RED)</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{a.name}</div>
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{a.dojo}</div>
           </button>
-          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === b.id ? "var(--red)" : "var(--line)", background: match.winner?.id === b.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === b.id ? "white" : "inherit" }} onClick={() => onRecord("b", "ippon")}>
-            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em" }}>RED</div>
+          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === b.id ? "var(--accent)" : "var(--line)", background: match.winner?.id === b.id ? "var(--accent)" : "var(--surface)", color: match.winner?.id === b.id ? "white" : "inherit" }} onClick={() => onRecord("b", "ippon")}>
+            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em" }}>SHIRO (WHITE)</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{b.name}</div>
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{b.dojo}</div>
           </button>
@@ -921,28 +1167,28 @@ function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord }) {
       </>)}
       {mode === "card" && (
         <div className="score-card">
-          <div className="score-side score-side--white">
-            <div><div className="score-side__lbl">White</div><div className="score-side__name">{a.name}</div><div className="score-side__dojo">{a.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--primary" onClick={() => onRecord("a", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("a", "hantei")}>Hantei</button></div>
+          <div className="score-side score-side--red">
+            <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div><div className="score-side__dojo">{a.dojo}</div></div>
+            <div className="score-side__buttons"><button className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("a", "hantei")}>Hantei</button></div>
           </div>
           <div className="score-vs">VS</div>
-          <div className="score-side score-side--red">
-            <div><div className="score-side__lbl">Red</div><div className="score-side__name">{b.name}</div><div className="score-side__dojo">{b.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--danger" onClick={() => onRecord("b", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("b", "hantei")}>Hantei</button></div>
+          <div className="score-side score-side--white">
+            <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div><div className="score-side__dojo">{b.dojo}</div></div>
+            <div className="score-side__buttons"><button className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("b", "hantei")}>Hantei</button></div>
           </div>
         </div>
       )}
       {mode === "scoreboard" && (
         <div className="score-card">
-          <div className="score-side score-side--white">
-            <div><div className="score-side__lbl">White</div><div className="score-side__name">{a.name}</div></div>
-            <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</div>
-            <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
+          <div className="score-side score-side--red">
+            <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div></div>
+            <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--aka ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</div>
+            <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
           </div>
           <div className="score-vs">VS</div>
-          <div className="score-side score-side--red">
-            <div><div className="score-side__lbl">Red</div><div className="score-side__name">{b.name}</div></div>
-            <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt ${bPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{bPoints[i] || "·"}</span>))}</div>
+          <div className="score-side score-side--white">
+            <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div></div>
+            <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--shiro ${bPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{bPoints[i] || "·"}</span>))}</div>
             <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setBPoints([])}>↺</button></div>
           </div>
         </div>
@@ -960,11 +1206,36 @@ function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord }) {
           ✓ Recorded — {match.winner?.name} advances
         </div>
       )}
+      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
+        <button className="btn btn--sm btn--full" onClick={() => {
+          const name = prompt("Enter the name of the winner to override:", match.winner?.name || match.sideA?.name);
+          if (name) onOverride(name);
+        }}>Force winner (manual override)</button>
+      </div>
     </div>
   );
 }
 
-function AdminPools({ c, pools, standings, tweaks, onEditScore }) {
+function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
+  const resetOverrides = async () => {
+    if (!confirm("Are you sure you want to reset ALL manual overrides (ranks and winners) for this competition?")) return;
+    try {
+      await window.API.resetOverrides(c.id, password);
+    } catch (e) {
+      alert("Failed to reset overrides: " + e.message);
+    }
+  };
+
+  const overrideRank = async (poolName, playerName, rank) => {
+    try {
+      const nextRank = parseInt(rank);
+      if (isNaN(nextRank) || nextRank <= 0) return;
+      await window.API.overridePoolRank(c.id, poolName, playerName, nextRank, password);
+    } catch (e) {
+      alert("Failed to override rank: " + e.message);
+    }
+  };
+
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to draw pools.</div></div>;
   }
@@ -974,6 +1245,7 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore }) {
         <div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>{pools.length} pools</div>
         </div>
+        <button className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset all overrides</button>
       </div>
       <div className="pools-grid">
         {pools.map((pool) => {
@@ -986,21 +1258,50 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore }) {
                 </div>
               </div>
               <table className="pool__table">
-                <thead><tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">G</th><th className="num">T</th></tr></thead>
+                <thead>
+                  {c.kind === "team" || c.teamSize > 0 ? (
+                    <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">IT</th><th className="num">PW</th><th className="num">PL</th></tr>
+                  ) : (
+                    <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
+                  )}
+                </thead>
                 <tbody>
-                  {(poolStandings || pool.players.map((p) => ({ player: p, wins: 0, losses: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => (
+                  {(poolStandings || pool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
+                    const isTeamComp = c.kind === "team" || c.teamSize > 0;
+                    return (
                     <tr key={s.player.name}>
-                      <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
+                      <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+                        <input
+                          type="number"
+                          className="rank-input"
+                          value={s.rank || i + 1}
+                          onChange={(e) => overrideRank(pool.poolName, s.player.name, e.target.value)}
+                          style={{
+                            width: 32,
+                            border: s.isOverridden ? "1px solid var(--accent)" : "1px solid transparent",
+                            background: s.isOverridden ? "var(--accent-soft)" : "transparent",
+                            borderRadius: 4,
+                            textAlign: "center",
+                            fontSize: 12,
+                            fontWeight: s.isOverridden ? "700" : "400"
+                          }}
+                        />
+                      </td>
                       <td>
                         <div style={{ fontWeight: 500 }}>{s.player.name}</div>
                         {tweaks.showDojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
                       </td>
                       <td className="num">{s.wins}</td>
                       <td className="num">{s.losses}</td>
-                      <td className="num">{s.ipponsGiven}</td>
-                      <td className="num">{s.ipponsTaken}</td>
+                      <td className="num">{s.draws || 0}</td>
+                      {isTeamComp && <td className="num">{s.individualWins || 0}</td>}
+                      {isTeamComp && <td className="num">{s.individualLosses || 0}</td>}
+                      {isTeamComp && <td className="num">{s.individualDraws || 0}</td>}
+                      <td className="num">{isTeamComp ? (s.pointsWon || 0) : s.ipponsGiven}</td>
+                      <td className="num">{isTeamComp ? (s.pointsLost || 0) : s.ipponsTaken}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1012,10 +1313,32 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore }) {
 }
 
 // ---------- Tournament-wide schedule (admin) ----------
-function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks }) {
+// Estimate minutes from HH:MM string; returns null if invalid
+function timeToMinutes(t) {
+  if (!t) return null;
+  const [h, m] = t.split(":").map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+function minutesToTime(mins) {
+  const h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password }) {
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
   const [compFilter, setCompFilter] = useStateA("all");
+  const [tab, setTab] = useStateA("courts"); // courts | timeline
+  const [matchDuration, setMatchDuration] = useStateA(7); // minutes per match estimate
+  const [breakLabel, setBreakLabel] = useStateA("Lunch break");
+  const [breakTime, setBreakTime] = useStateA("12:00");
+  const [breakDur, setBreakDur] = useStateA(60);
+  // Per-competition auto-schedule: startTime + duration
+  const [autoComp, setAutoComp] = useStateA(tournament.competitions[0]?.id || "");
+  const [autoStart, setAutoStart] = useStateA(tournament.competitions[0]?.startTime || "09:00");
+  const [autoSaving, setAutoSaving] = useStateA(false);
 
   const allMatches = useMemoA(
     () => window.tournamentMatches(tournament).filter((m) => m.sideA && m.sideB),
@@ -1029,23 +1352,102 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
   courts.forEach((cc) => byCourt[cc] = []);
   filtered.forEach((m) => { (byCourt[m.court] = byCourt[m.court] || []).push(m); });
   Object.values(byCourt).forEach((list) => list.sort((a, b) => {
-    const order = { in_progress: 0, scheduled: 1, pending: 2, complete: 3 };
-    if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
+    const order = { running: 0, scheduled: 1, completed: 2 };
+    const ao = order[a.status] ?? 1;
+    const bo = order[b.status] ?? 1;
+    if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   }));
 
   const matchHasFilter = (m) => window.matchHighlightedBy(m, picked, dojoText);
   const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
 
+  // Duration estimation: earliest start to latest finish across all matches
+  const scheduledWithTimes = allMatches.filter(m => m.scheduledAt);
+  const firstTime = scheduledWithTimes.length > 0 ? scheduledWithTimes.reduce((mn, m) => !mn || m.scheduledAt < mn ? m.scheduledAt : mn, null) : null;
+  const lastTime = scheduledWithTimes.length > 0 ? scheduledWithTimes.reduce((mx, m) => !mx || m.scheduledAt > mx ? m.scheduledAt : mx, null) : null;
+  const durationEstimate = firstTime && lastTime ? (() => {
+    const a = timeToMinutes(firstTime);
+    const b = timeToMinutes(lastTime);
+    if (a === null || b === null) return null;
+    const diff = b - a + matchDuration;
+    return `${Math.floor(diff / 60)}h ${diff % 60}m`;
+  })() : null;
+
+  const saveMatchTime = async (m, newTime) => {
+    try {
+      await window.API.updateMatchTime(m.compId, m.id, newTime, password);
+    } catch (e) {
+      alert("Failed to update time: " + e.message);
+    }
+  };
+
+  // Auto-schedule: assign sequential times to matches within a competition per court
+  const autoSchedule = async () => {
+    const comp = tournament.competitions.find(c => c.id === autoComp);
+    if (!comp) return;
+    const compMatches = filtered.filter(m => m.compId === autoComp);
+    const byCt = {};
+    courts.forEach(cc => byCt[cc] = []);
+    compMatches.forEach(m => (byCt[m.court] = byCt[m.court] || []).push(m));
+
+    setAutoSaving(true);
+    try {
+      // Assign times: each court runs in parallel from autoStart, matches spaced by matchDuration
+      for (const [ct, list] of Object.entries(byCt)) {
+        let cursor = timeToMinutes(autoStart) || 540;
+        for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
+          await window.API.updateMatchTime(m.compId, m.id, minutesToTime(cursor), password);
+          cursor += matchDuration;
+        }
+      }
+    } catch (e) {
+      alert("Auto-schedule failed: " + e.message);
+    } finally {
+      setAutoSaving(false);
+    }
+  };
+
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page page--wide" style={{ maxWidth: 1400 }}>
-        <div className="crumbs"><button onClick={onBack}>{tournament.name}</button><span className="sep">/</span><span>Schedule</span></div>
+        <Breadcrumbs items={[
+          { label: tournament.name, onClick: onBack },
+          { label: "Schedule" }
+        ]} />
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Tournament schedule</h1>
-            <div className="page-head__sub">All matches across all competitions and shiaijo. Drag — or click court — to move a match.</div>
+            <div className="page-head__sub">Set match times, assign courts, and estimate duration.</div>
+          </div>
+        </div>
+
+        {/* Duration summary + auto-schedule controls */}
+        <div className="card card--pad-lg" style={{ marginBottom: 16 }}>
+          <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div className="field" style={{ minWidth: 180 }}>
+              <label className="field__label">Competition</label>
+              <select className="input" value={autoComp} onChange={e => { setAutoComp(e.target.value); const c = tournament.competitions.find(x => x.id === e.target.value); if (c?.startTime) setAutoStart(c.startTime); }}>
+                {tournament.competitions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label className="field__label">Start time</label>
+              <input className="input" type="time" value={autoStart} onChange={e => setAutoStart(e.target.value)} style={{ width: 120 }} />
+            </div>
+            <div className="field">
+              <label className="field__label">Minutes per match</label>
+              <input className="input" type="number" min="1" max="60" value={matchDuration} onChange={e => setMatchDuration(+e.target.value)} style={{ width: 80 }} />
+            </div>
+            <button className="btn btn--primary" onClick={autoSchedule} disabled={autoSaving} style={{ alignSelf: "flex-end" }}>
+              {autoSaving ? "Scheduling…" : "Auto-schedule competition"}
+            </button>
+            {durationEstimate && (
+              <div style={{ alignSelf: "flex-end", fontSize: 13, color: "var(--ink-3)", paddingBottom: 2 }}>
+                Est. duration: <strong>{durationEstimate}</strong> · {scheduledWithTimes.length} of {allMatches.length} timed
+              </div>
+            )}
           </div>
         </div>
 
@@ -1065,7 +1467,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
           <div className="tw-courts">
             {courts.map((cc) => {
               const list = byCourt[cc] || [];
-              const liveOn = list.find((m) => m.status === "in_progress");
+              const liveOn = list.find((m) => m.status === "running");
               return (
                 <div key={cc} className="tw-court">
                   <div className="tw-court__head">
@@ -1085,7 +1487,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
                       try {
                         const { compId, matchId } = JSON.parse(data);
                         onMoveCourt(compId, matchId, cc);
-                      } catch (err) {}
+                      } catch (err) { }
                     }}
                   >
                     {list.length === 0 ? (
@@ -1097,6 +1499,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
                         highlight={matchHasFilter(m)}
                         courts={courts}
                         onMove={(toCourt) => onMoveCourt(m.compId, m.id, toCourt)}
+                        onTimeChange={(newTime) => saveMatchTime(m, newTime)}
                       />
                     ))}
                   </div>
@@ -1110,13 +1513,20 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
   );
 }
 
-function AdminTWMatch({ m, highlight, courts, onMove }) {
+function AdminTWMatch({ m, highlight, courts, onMove, onTimeChange }) {
   const [popoverOpen, setPopoverOpen] = useStateA(false);
+  const [editingTime, setEditingTime] = useStateA(false);
+  const [timeVal, setTimeVal] = useStateA(m.scheduledAt || "");
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
+  const submitTime = (e) => {
+    e.preventDefault();
+    setEditingTime(false);
+    if (onTimeChange && timeVal !== m.scheduledAt) onTimeChange(timeVal);
+  };
   return (
     <div
-      className={`tw-match ${m.status === "in_progress" ? "tw-match--live" : ""} ${m.status === "complete" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`}
+      className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("application/json", JSON.stringify({ compId: m.compId, matchId: m.id }));
@@ -1125,19 +1535,47 @@ function AdminTWMatch({ m, highlight, courts, onMove }) {
       style={{ cursor: "grab", position: "relative" }}
     >
       <div>
-        <div className="tw-match__time">{m.scheduledAt || "—"}</div>
+        {editingTime ? (
+          <form onSubmit={submitTime} style={{ display: "flex", gap: 2 }}>
+            <input
+              autoFocus
+              type="time"
+              value={timeVal}
+              onChange={e => setTimeVal(e.target.value)}
+              onBlur={submitTime}
+              className="input"
+              style={{ width: 80, padding: "2px 4px", fontSize: 12, height: 26 }}
+              onClick={e => e.stopPropagation()}
+            />
+          </form>
+        ) : (
+          <button
+            className="tw-match__time tw-match__time--editable"
+            onClick={(e) => { e.stopPropagation(); if (onTimeChange) { setTimeVal(m.scheduledAt || ""); setEditingTime(true); } }}
+            title="Click to set time"
+          >
+            {m.scheduledAt || <span style={{ color: "var(--ink-4)", fontWeight: 400 }}>—</span>}
+            {onTimeChange && <span style={{ fontSize: 9, color: "var(--ink-4)", marginLeft: 2 }}>✎</span>}
+          </button>
+        )}
         <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
       </div>
       <div className="tw-match__players">
-        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>{m.sideA?.name || "TBD"}</div>
-        <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>{m.sideB?.name || "TBD"}</div>
+        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
+          <span className="tw-match__badge tw-match__badge--aka">A</span>
+          {m.sideA?.name || "TBD"}
+        </div>
+        <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
+          <span className="tw-match__badge tw-match__badge--shiro">S</span>
+          {m.sideB?.name || "TBD"}
+        </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-        {m.status === "complete" && m.score?.type === "ippon" && (
-          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{m.score.winnerPts}–{m.score.loserPts}</div>
+        {m.status === "completed" && (
+          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision)}</div>
         )}
-        {m.status === "in_progress" && <span className="bc-live">●</span>}
+        {m.status === "running" && <span className="bc-live">●</span>}
         <button
           className="tw-match__court-btn"
           onClick={(e) => { e.stopPropagation(); setPopoverOpen((o) => !o); }}
@@ -1164,7 +1602,10 @@ function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, on
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page page--wide" style={{ maxWidth: 1200 }}>
-        <div className="crumbs"><button onClick={onBack}>{tournament.name}</button><span className="sep">/</span><span>Scores</span></div>
+        <Breadcrumbs items={[
+          { label: tournament.name, onClick: onBack },
+          { label: "Scores" }
+        ]} />
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Score editor</h1>
@@ -1227,9 +1668,9 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, em
   const filtered = allMatches.filter((m) => {
     if (restrictToCompId && m.compId !== restrictToCompId) return false;
     if (compFilter !== "all" && m.compId !== compFilter) return false;
-    if (statusFilter === "live" && m.status !== "in_progress") return false;
+    if (statusFilter === "live" && m.status !== "running") return false;
     if (statusFilter === "scheduled" && m.status !== "scheduled") return false;
-    if (statusFilter === "complete" && m.status !== "complete") return false;
+    if (statusFilter === "complete" && m.status !== "completed") return false;
     if (!f) return true;
     return [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(f));
   });
@@ -1273,9 +1714,9 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, em
         {filtered.map((m) => {
           const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
           const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-          const isCorrection = m.status === "complete" && m.score?.corrected;
+          const isCorrection = m.status === "completed" && m.score?.corrected;
           return (
-            <div key={m.compId + m.id} className={`score-edit-row ${m.status === "in_progress" ? "score-edit-row--live" : ""} ${m.status === "complete" ? "score-edit-row--complete" : ""}`}>
+            <div key={m.compId + m.id} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
@@ -1283,27 +1724,27 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, em
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
                 <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
+                  <span className="se-color-badge se-color-badge--aka">AKA</span>
                   <div className="name">{m.sideA?.name}</div>
                   <div className="dojo">{m.sideA?.dojo}</div>
                 </div>
                 <div className="score-edit-row__score">
-                  {m.status === "complete" && m.score?.type === "ippon" && `${aWin ? m.score.winnerPts : m.score.loserPts}–${bWin ? m.score.winnerPts : m.score.loserPts}`}
-                  {m.status === "complete" && m.score?.type === "hantei" && "H"}
-                  {m.status === "complete" && m.score?.type === "hikiwake" && "△"}
-                  {m.status === "in_progress" && <span className="bc-live">●</span>}
+                  {m.status === "completed" && window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision)}
+                  {m.status === "running" && <span className="bc-live">●</span>}
                   {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                 </div>
                 <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
                   <div className="name">{m.sideB?.name}</div>
                   <div className="dojo">{m.sideB?.dojo}</div>
+                  <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 </div>
               </div>
               <div>
-                {m.status === "in_progress" && <span className="bc-live">● LIVE</span>}
-                {m.status === "complete" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
+                {m.status === "running" && <span className="bc-live">● LIVE</span>}
+                {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
               <button className="btn btn--sm score-edit-row__edit" onClick={() => setOpenMatch(m)}>
-                {m.status === "complete" ? "Correct" : "Score"}
+                {m.status === "completed" ? "Correct" : "Score"}
               </button>
             </div>
           );
@@ -1315,7 +1756,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, em
           match={openMatch}
           onClose={() => setOpenMatch(null)}
           onSubmit={(patch) => {
-            onEditScore(openMatch.compId, openMatch.id, patch);
+            onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
             setOpenMatch(null);
           }}
         />
@@ -1326,14 +1767,14 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, em
 
 function ScoreEditorModal({ match, onClose, onSubmit }) {
   const m = match;
-  const isComplete = m.status === "complete";
+  const isComplete = m.status === "completed";
   const isTeam = m.compKind === "team";
   const teamSize = m.teamSize || 5;
   if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} />;
   const initialAPts = m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] :
-                      m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? Array(m.score.loserPts || 0).fill("•") : [];
+    m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? Array(m.score.loserPts || 0).fill("•") : [];
   const initialBPts = m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] :
-                      m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? Array(m.score.loserPts || 0).fill("•") : [];
+    m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? Array(m.score.loserPts || 0).fill("•") : [];
 
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
@@ -1370,34 +1811,32 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
     if (resultType === "ippon") {
       const aLetters = aPts.filter((x) => x !== "•");
       const bLetters = bPts.filter((x) => x !== "•");
-      // Add Hansoku-awarded ippons (each pair of opponent fouls = one "H" point)
       const aAll = [...aLetters, ...Array(aHansokuPts).fill("H")];
       const bAll = [...bLetters, ...Array(bHansokuPts).fill("H")];
-      // Cap at 2 (kendo max)
       const aFinal = aAll.slice(0, 2);
       const bFinal = bAll.slice(0, 2);
       const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
       const fouls = { a: aFouls, b: bFouls };
       if (!winnerSide) {
-        patch = { winner: null, status: "complete", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
+        patch = { winner: null, ipponsA: aFinal, ipponsB: bFinal, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
       } else {
         const winner = winnerSide === "a" ? m.sideA : m.sideB;
         const winPts = winnerSide === "a" ? aFinal.length : bFinal.length;
         const losePts = winnerSide === "a" ? bFinal.length : aFinal.length;
         const ippons = winnerSide === "a" ? aFinal : bFinal;
-        patch = { winner, status: "complete", score: { type: "ippon", winnerPts: winPts, loserPts: losePts, ippons, fouls, corrected: isComplete, note } };
+        patch = { winner, ipponsA: aFinal, ipponsB: bFinal, status: "completed", score: { type: "ippon", winnerPts: winPts, loserPts: losePts, ippons, fouls, corrected: isComplete, note } };
       }
     } else if (resultType === "hantei") {
       const winner = hanteiSide === "a" ? m.sideA : m.sideB;
-      patch = { winner, status: "complete", score: { type: "hantei", winnerPts: 0, loserPts: 0, fouls: { a: aFouls, b: bFouls }, corrected: isComplete, note } };
+      patch = { winner, ipponsA: [], ipponsB: [], status: "completed", score: { type: "hantei", winnerPts: 0, loserPts: 0, fouls: { a: aFouls, b: bFouls }, corrected: isComplete, note } };
     } else if (resultType === "hikiwake") {
-      patch = { winner: null, status: "complete", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls: { a: aFouls, b: bFouls }, corrected: isComplete, note } };
+      patch = { winner: null, ipponsA: [], ipponsB: [], status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls: { a: aFouls, b: bFouls }, corrected: isComplete, note } };
     }
-    if (statusVal === "in_progress") {
-      patch = { ...patch, status: "in_progress", winner: null, score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls: { a: aFouls, b: bFouls }, live: true, corrected: isComplete, note } };
+    if (statusVal === "running") {
+      patch = { ...patch, status: "running", winner: null, ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"), score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls: { a: aFouls, b: bFouls }, live: true, corrected: isComplete, note } };
     }
     if (statusVal === "scheduled") {
-      patch = { winner: null, status: "scheduled", score: null };
+      patch = { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [] };
     }
     onSubmit(patch);
   };
@@ -1410,7 +1849,7 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
             {m.compName} · {m.phase === "pool" ? m.poolName : m.round} · Shiaijo {m.court} · {m.scheduledAt || "TBA"}
           </div>
           <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>
-            {isComplete ? "Correct match result" : m.status === "in_progress" ? "Edit live score" : "Record match result"}
+            {isComplete ? "Correct match result" : m.status === "running" ? "Edit live score" : "Record match result"}
           </div>
         </div>
         <div className="editor-modal__body">
@@ -1422,10 +1861,10 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
 
           {resultType === "ippon" && (
             <>
-              <div className="editor-side editor-side--white">
+              <div className="editor-side editor-side--red">
                 <div>
                   <div className="editor-side__name">{m.sideA?.name}</div>
-                  <div className="editor-side__dojo">White · {m.sideA?.dojo}</div>
+                  <div className="editor-side__dojo">Aka (Red) · {m.sideA?.dojo}</div>
                 </div>
                 <div className="editor-side__score">
                   {[0, 1].map((i) => (
@@ -1442,10 +1881,10 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
                 <button className="ipt-btn" onClick={() => setAPts([])}>Clear</button>
               </div>
 
-              <div className="editor-side editor-side--red">
+              <div className="editor-side editor-side--white">
                 <div>
                   <div className="editor-side__name">{m.sideB?.name}</div>
-                  <div className="editor-side__dojo">Red · {m.sideB?.dojo}</div>
+                  <div className="editor-side__dojo">Shiro (White) · {m.sideB?.dojo}</div>
                 </div>
                 <div className="editor-side__score">
                   {[0, 1].map((i) => (
@@ -1469,7 +1908,7 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
                 <label className="field__label">Hansoku (fouls)</label>
                 <div className="hansoku-grid">
                   <div className="hansoku-row">
-                    <span className="hansoku-row__label">White · {m.sideA?.name}</span>
+                    <span className="hansoku-row__label">Aka · {m.sideA?.name}</span>
                     <div className="hansoku-row__dots">
                       {[0, 1, 2, 3].map((i) => (
                         <button key={i} className={`hansoku-dot ${i < aFouls ? "is-on" : ""}`} onClick={() => setAFouls(i < aFouls ? i : i + 1)} title={`Foul ${i + 1}`}>
@@ -1477,10 +1916,10 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
                         </button>
                       ))}
                     </div>
-                    <span className="hansoku-row__hint">{aHansokuPts > 0 ? `→ +${aHansokuPts} ippon to Red` : "—"}</span>
+                    <span className="hansoku-row__hint">{aHansokuPts > 0 ? `→ +${aHansokuPts} ippon to Shiro` : "—"}</span>
                   </div>
                   <div className="hansoku-row">
-                    <span className="hansoku-row__label">Red · {m.sideB?.name}</span>
+                    <span className="hansoku-row__label">Shiro · {m.sideB?.name}</span>
                     <div className="hansoku-row__dots">
                       {[0, 1, 2, 3].map((i) => (
                         <button key={i} className={`hansoku-dot ${i < bFouls ? "is-on" : ""}`} onClick={() => setBFouls(i < bFouls ? i : i + 1)} title={`Foul ${i + 1}`}>
@@ -1488,7 +1927,7 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
                         </button>
                       ))}
                     </div>
-                    <span className="hansoku-row__hint">{bHansokuPts > 0 ? `→ +${bHansokuPts} ippon to White` : "—"}</span>
+                    <span className="hansoku-row__hint">{bHansokuPts > 0 ? `→ +${bHansokuPts} ippon to Aka` : "—"}</span>
                   </div>
                 </div>
                 <div className="field__hint">Two fouls award an ippon to the opponent. Tap a dot to set the count.</div>
@@ -1500,8 +1939,8 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
             <div className="field">
               <label className="field__label">Hantei winner</label>
               <div className="radio-group">
-                <button className={`radio-pill ${hanteiSide === "a" ? "is-active" : ""}`} onClick={() => setHanteiSide("a")}>White · {m.sideA?.name}</button>
-                <button className={`radio-pill ${hanteiSide === "b" ? "is-active" : ""}`} onClick={() => setHanteiSide("b")}>Red · {m.sideB?.name}</button>
+                <button className={`radio-pill ${hanteiSide === "a" ? "is-active" : ""}`} onClick={() => setHanteiSide("a")}>Aka · {m.sideA?.name}</button>
+                <button className={`radio-pill ${hanteiSide === "b" ? "is-active" : ""}`} onClick={() => setHanteiSide("b")}>Shiro · {m.sideB?.name}</button>
               </div>
             </div>
           )}
@@ -1510,8 +1949,8 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
             <label className="field__label">Match status</label>
             <div className="radio-group">
               <button className={`radio-pill ${statusVal === "scheduled" ? "is-active" : ""}`} onClick={() => setStatusVal("scheduled")}>Reset to scheduled</button>
-              <button className={`radio-pill ${statusVal === "in_progress" ? "is-active" : ""}`} onClick={() => setStatusVal("in_progress")}>Live (in progress)</button>
-              <button className={`radio-pill ${statusVal === "complete" ? "is-active" : ""}`} onClick={() => setStatusVal("complete")}>Final</button>
+              <button className={`radio-pill ${statusVal === "running" ? "is-active" : ""}`} onClick={() => setStatusVal("running")}>Live (in progress)</button>
+              <button className={`radio-pill ${statusVal === "completed" ? "is-active" : ""}`} onClick={() => setStatusVal("completed")}>Final</button>
             </div>
           </div>
 
@@ -1525,7 +1964,7 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
         </div>
         <div className="editor-modal__foot">
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn--primary" onClick={submit} disabled={statusVal === "complete" && resultType === "ippon" && aPts.length === 0 && bPts.length === 0}>
+          <button className="btn btn--primary" onClick={submit} disabled={statusVal === "completed" && resultType === "ippon" && aPts.length === 0 && bPts.length === 0}>
             {isComplete ? "Save correction" : "Save result"}
           </button>
         </div>
@@ -1534,14 +1973,221 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
   );
 }
 
+const TEAM_POSITIONS = ["Senpou", "Jihou", "Chuken", "Fukushou", "Taishou", "6th", "7th", "8th", "9th"];
+
+function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit }) {
+  const m = match;
+  const isComplete = m.status === "completed";
+  const positions = TEAM_POSITIONS.slice(0, teamSize);
+  const [statusVal, setStatusVal] = useStateA(m.status);
+  const [note, setNote] = useStateA("");
+
+  const existingSub = m.subResults || [];
+  const initSubs = positions.map((_, idx) => {
+    const existing = existingSub.find(s => s.position === idx + 1);
+    return {
+      aPts: existing ? (existing.ipponsA || []).filter(x => x !== "•") : [],
+      bPts: existing ? (existing.ipponsB || []).filter(x => x !== "•") : [],
+      aFouls: existing ? existing.hansokuA || 0 : 0,
+      bFouls: existing ? existing.hansokuB || 0 : 0,
+    };
+  });
+  const [subs, setSubs] = useStateA(initSubs);
+
+  const updateSub = (idx, fn) => setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s));
+
+  const subTotals = subs.map(s => {
+    const aH = Math.floor(s.bFouls / 2);
+    const bH = Math.floor(s.aFouls / 2);
+    const aT = s.aPts.length + aH;
+    const bT = s.bPts.length + bH;
+    const winner = aT > bT ? "a" : bT > aT ? "b" : null;
+    return { aTotal: aT, bTotal: bT, aHansoku: aH, bHansoku: bH, winner };
+  });
+
+  const ivA = subTotals.filter(s => s.winner === "a").length;
+  const ivB = subTotals.filter(s => s.winner === "b").length;
+  const pwA = subTotals.reduce((sum, s) => sum + s.aTotal, 0);
+  const pwB = subTotals.reduce((sum, s) => sum + s.bTotal, 0);
+  const teamWinner = ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null;
+
+  const submit = () => {
+    const subResults = subs.map((s, idx) => {
+      const t = subTotals[idx];
+      const aAll = [...s.aPts, ...Array(t.aHansoku).fill("H")].slice(0, 2);
+      const bAll = [...s.bPts, ...Array(t.bHansoku).fill("H")].slice(0, 2);
+      const w = t.winner === "a" ? m.sideA : t.winner === "b" ? m.sideB : null;
+      return {
+        position: idx + 1,
+        sideA: typeof m.sideA === "object" ? m.sideA?.name : m.sideA,
+        sideB: typeof m.sideB === "object" ? m.sideB?.name : m.sideB,
+        ipponsA: aAll,
+        ipponsB: bAll,
+        hansokuA: s.aFouls,
+        hansokuB: s.bFouls,
+        winner: w ? (typeof w === "object" ? w.name : w) : "",
+        decision: t.winner === null ? "hikewake" : "",
+      };
+    });
+
+    const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
+
+    let patch = {
+      winner,
+      status: statusVal === "scheduled" ? "scheduled" : statusVal === "running" ? "running" : "completed",
+      ipponsA: [],
+      ipponsB: [],
+      score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete, note },
+      subResults,
+    };
+    if (statusVal === "scheduled") {
+      patch = { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
+    }
+    onSubmit(patch);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="editor-modal editor-modal--team" onClick={(e) => e.stopPropagation()}>
+        <div className="editor-modal__head">
+          <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>
+            {m.compName} · {m.phase === "pool" ? m.poolName : m.round} · Shiaijo {m.court} · {m.scheduledAt || "TBA"}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>
+            {isComplete ? "Correct team result" : m.status === "running" ? "Edit live team score" : "Record team result"}
+          </div>
+        </div>
+        <div className="editor-modal__body">
+          <div className="team-header">
+            <div className="team-header__side team-header__side--red"><span className="team-header__color">AKA</span>{m.sideA?.name || m.sideA}</div>
+            <div className="team-header__vs">vs</div>
+            <div className="team-header__side team-header__side--white"><span className="team-header__color">SHIRO</span>{m.sideB?.name || m.sideB}</div>
+          </div>
+
+          {positions.map((pos, idx) => {
+            const s = subs[idx];
+            const t = subTotals[idx];
+            return (
+              <div key={idx} className="team-sub-match">
+                <div className="team-sub-match__pos">{pos}</div>
+                <div className="team-sub-match__row">
+                  <div className="team-sub-match__side">
+                    <div className="team-sub-match__pts">
+                      {[0, 1].map(i => (
+                        <button key={i} className={`editor-side__pt ${s.aPts[i] ? "editor-side__pt--filled" : ""}`}
+                          onClick={() => updateSub(idx, prev => ({ ...prev, aPts: prev.aPts.filter((_, j) => j !== i) }))}>{s.aPts[i] || "·"}</button>
+                      ))}
+                    </div>
+                    <div className="team-sub-match__btns">
+                      {["M", "K", "D", "T"].map(c => (
+                        <button key={c} className="ipt-btn ipt-btn--sm" onClick={() => updateSub(idx, prev => ({ ...prev, aPts: prev.aPts.length < 2 ? [...prev.aPts, c] : prev.aPts }))}>{c}</button>
+                      ))}
+                    </div>
+                    <div className="team-sub-match__fouls">
+                      {[0, 1, 2, 3].map(i => (
+                        <button key={i} className={`hansoku-dot hansoku-dot--sm ${i < s.aFouls ? "is-on" : ""}`}
+                          onClick={() => updateSub(idx, prev => ({ ...prev, aFouls: i < prev.aFouls ? i : i + 1 }))}>{i < s.aFouls ? "✕" : "·"}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={`team-sub-match__score ${t.winner === "a" ? "team-sub-match__score--a-win" : t.winner === "b" ? "team-sub-match__score--b-win" : ""}`}>
+                    {t.aTotal}–{t.bTotal}
+                  </div>
+                  <div className="team-sub-match__side team-sub-match__side--right">
+                    <div className="team-sub-match__pts">
+                      {[0, 1].map(i => (
+                        <button key={i} className={`editor-side__pt ${s.bPts[i] ? "editor-side__pt--filled" : ""}`}
+                          onClick={() => updateSub(idx, prev => ({ ...prev, bPts: prev.bPts.filter((_, j) => j !== i) }))}>{s.bPts[i] || "·"}</button>
+                      ))}
+                    </div>
+                    <div className="team-sub-match__btns">
+                      {["M", "K", "D", "T"].map(c => (
+                        <button key={c} className="ipt-btn ipt-btn--sm" onClick={() => updateSub(idx, prev => ({ ...prev, bPts: prev.bPts.length < 2 ? [...prev.bPts, c] : prev.bPts }))}>{c}</button>
+                      ))}
+                    </div>
+                    <div className="team-sub-match__fouls">
+                      {[0, 1, 2, 3].map(i => (
+                        <button key={i} className={`hansoku-dot hansoku-dot--sm ${i < s.bFouls ? "is-on" : ""}`}
+                          onClick={() => updateSub(idx, prev => ({ ...prev, bFouls: i < prev.bFouls ? i : i + 1 }))}>{i < s.bFouls ? "✕" : "·"}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="team-summary">
+            <div className={`team-summary__side ${teamWinner === "a" ? "team-summary__side--win" : ""}`}>
+              <div className="team-summary__label">IV: {ivA} · PW: {pwA}</div>
+            </div>
+            <div className="team-summary__result">
+              {teamWinner === "a" ? "WIN" : teamWinner === "b" ? "LOSS" : "DRAW"}
+              {" – "}
+              {teamWinner === "b" ? "WIN" : teamWinner === "a" ? "LOSS" : "DRAW"}
+            </div>
+            <div className={`team-summary__side ${teamWinner === "b" ? "team-summary__side--win" : ""}`}>
+              <div className="team-summary__label">IV: {ivB} · PW: {pwB}</div>
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="field__label">Match status</label>
+            <div className="radio-group">
+              <button className={`radio-pill ${statusVal === "scheduled" ? "is-active" : ""}`} onClick={() => setStatusVal("scheduled")}>Reset to scheduled</button>
+              <button className={`radio-pill ${statusVal === "running" ? "is-active" : ""}`} onClick={() => setStatusVal("running")}>Live (in progress)</button>
+              <button className={`radio-pill ${statusVal === "completed" ? "is-active" : ""}`} onClick={() => setStatusVal("completed")}>Final</button>
+            </div>
+          </div>
+
+          {isComplete && (
+            <div className="field">
+              <label className="field__label">Correction note (optional)</label>
+              <input className="input" placeholder="e.g. Reviewed video" value={note} onChange={(e) => setNote(e.target.value)} />
+            </div>
+          )}
+        </div>
+        <div className="editor-modal__foot">
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn--primary" onClick={submit}>{isComplete ? "Save correction" : "Save result"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminExport({ c, t }) {
-  const url = `https://${t.id}.bracket.kendo/${c.id}`;
+  const url = `${window.location.origin}/viewer.html?id=${t.id}#comp-${c.id}`;
+  
+  const downloadXlsx = async () => {
+    try {
+      const resp = await fetch(`/api/competitions/${c.id}/export`);
+      if (!resp.ok) throw new Error(await resp.text());
+      const blob = await resp.blob();
+      const dlUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = dlUrl;
+      a.download = `bracket-${c.id}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(dlUrl);
+    } catch (err) {
+      alert("Export failed: " + err.message);
+    }
+  };
+
+  const copyUrl = () => {
+    navigator.clipboard.writeText(url);
+    alert("URL copied to clipboard!");
+  };
+
   return (
     <div className="row">
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Export {c.name}</div>
         <div className="card__sub" style={{ marginBottom: 14 }}>Generate the official Excel workbook used during the day.</div>
-        <button className="btn btn--primary btn--full">Download .xlsx</button>
+        <button className="btn btn--primary btn--full" onClick={downloadXlsx}>Download .xlsx</button>
         <div className="field__hint" style={{ marginTop: 10 }}>Includes pool draws, pool matches, and elimination brackets with linked formulas.</div>
       </div>
       <div className="card">
@@ -1549,7 +2195,7 @@ function AdminExport({ c, t }) {
         <div className="card__sub" style={{ marginBottom: 14 }}>Players & spectators see this competition's bracket, schedule and results live.</div>
         <div style={{ display: "flex", gap: 8 }}>
           <input className="input" value={url} readOnly style={{ flex: 1 }} />
-          <button className="btn">Copy</button>
+          <button className="btn" onClick={copyUrl}>Copy</button>
         </div>
       </div>
     </div>

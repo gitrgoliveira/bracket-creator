@@ -23,7 +23,26 @@ func (s *Store) LoadParticipants(compID string, withZekkenName bool) ([]helper.P
 		return nil, err
 	}
 
-	return helper.CreatePlayers(lines, withZekkenName)
+	players, err := helper.CreatePlayers(lines, withZekkenName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge seeds if they exist. We ignore error here as seeds might not be set yet.
+	seeds, _ := helper.ParseSeedsFile(filepath.Join(s.folder, "competitions", compID, "seeds.csv"))
+	if len(seeds) > 0 {
+		seedMap := make(map[string]int)
+		for _, sd := range seeds {
+			seedMap[sd.Name] = sd.SeedRank
+		}
+		for i := range players {
+			if seed, ok := seedMap[players[i].Name]; ok {
+				players[i].Seed = seed
+			}
+		}
+	}
+
+	return players, nil
 }
 
 func (s *Store) SaveParticipants(compID string, players []helper.Player) error {

@@ -15,6 +15,9 @@ make go/test-race      # Lint + tests with race detection (slow)
 make go/lint           # golangci-lint only
 make run               # Build and start web server (localhost:8080)
 PORT=8081 make run      # Use alternate port
+make run-mobile        # Build and start the mobile/live app (localhost:8080, ./tournament-data)
+PORT=8082 make run-mobile   # Use alternate port
+TOURNAMENT_DATA_DIR=/path make run-mobile  # Custom data folder
 make examples          # Generate example Excel files from mock data
 
 # Run a single test
@@ -39,6 +42,10 @@ go test -cover ./internal/helper/...
 - **`internal/excel/`** — Excel file lifecycle (`Client`), sheet operations (`SheetManager`), style definitions.
 - **`internal/service/`** — Service layer abstraction over helper logic.
 - **`internal/resources/`** — Embedded file management. Resources flow: `main.go` embeds → `resources.NewResources()` → `cmd.ExecuteWithResources()`.
+- **`internal/mobileapp/`** — Gin HTTP handlers for the live tournament app (`mobile-app` command). Routes: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`. Real-time push via SSE (`hub.go`). Auth via `X-Tournament-Password` header (`middleware.go`).
+- **`internal/state/`** — File-backed state store for the mobile app. Tournament and competition config lives in `tournament-data/tournament.md` and `tournament-data/competitions/<id>/config.md` (YAML front-matter). Participants are in `participants.csv` alongside each config.
+- **`internal/engine/`** — Thin adapter that drives `internal/helper` pool/bracket generation from a `state.Competition`. Called by the `POST /api/competitions/:id/start` handler.
+- **`web-mobile/`** — Preact/JSX frontend for the mobile app, served embedded in the binary. Entry point: `web-mobile/index.html`. JS modules in `web-mobile/js/` (`admin.js`, `viewer.js`, `app.js`, `api.js`, `data.js`, `bracket.js`). CSS in `web-mobile/css/styles.css`. Pre-compiled to `web-mobile/dist/` by esbuild (run automatically as part of `make go/build`). Key component: `LinedTextarea` in `admin.js` — shows numbered line gutter alongside the participant paste box.
 
 ### Key Algorithms
 
@@ -94,7 +101,11 @@ The workbook is built entirely from code in `internal/excel/template.go` (`NewFi
 - `team-matches=0` means individual tournaments, not team tournaments
 - The `errcheck` linter is enabled (test files excepted). Don't introduce `_ =` or bare ignored returns in production code — wrap and propagate, or log via `handleExcelError`/`handleExcelDataError`
 - Web UI changes (`web/index.html`) should be validated in a running browser, not just by reading diffs — use `make run`
+- Mobile app frontend changes (`web-mobile/`) require rebuilding the binary to take effect — the files are embedded at `go build` time via `//go:embed web-mobile/*` in `main.go`. Run `make run-mobile` which rebuilds automatically, or run `make go/build` then restart.
 - Duplicate participant names in the CSV are rejected up front by `helper.CheckDuplicateEntries`; the web handler surfaces these to the user
+- `buildCompetition` in `web-mobile/js/data.js` (line ~190) hard-codes `withZekkenName: false` — it must be destructured from `args` and forwarded or new competitions will ignore the zekken setting chosen in the Add Competition form. Same applies to `numberPrefix`.
+- `POST /api/competitions/:id/participants` (`internal/mobileapp/handlers_participants.go`) is a 501 stub — participant upload goes through the `PUT /api/competitions/:id` body instead.
+- The `Competition` struct (`internal/state/models.go`) does not have a `NumberPrefix` field — the UI exposes one but it has no backend. Add `NumberPrefix string \`yaml:"number_prefix" json:"numberPrefix"\`` before wiring it through.
 
 
 # Validation

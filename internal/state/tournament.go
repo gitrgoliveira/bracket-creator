@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -24,7 +25,12 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 
 	var t Tournament
 	if err := parseFrontMatter(data, &t); err != nil {
-		return nil, err
+		// If it's not a front-matter file, return a default tournament
+		return &Tournament{
+			Name:  "New Tournament",
+			Date:  time.Now().Format("2006-01-02"),
+			Venue: "Venue TBA",
+		}, nil
 	}
 
 	return &t, nil

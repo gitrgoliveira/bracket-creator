@@ -52,6 +52,18 @@ const (
 // ValidateCourts so we never silently truncate a user-requested layout.
 const MaxCourts = 26
 
+// CourtsColumnsPerCourt is the number of Excel columns allocated to each
+// court (Shiaijo) on the Pool Matches and Elimination Matches sheets.
+// Layout: Name | V | P | vs | P | V | Name | Spacer = 8 columns.
+const CourtsColumnsPerCourt = 8
+
+// Column-width constants for match layout sheets.
+const (
+	matchNameColWidth   = 30
+	matchScoreColWidth  = 5
+	matchSpacerColWidth = 5
+)
+
 // Sheet names for every tab in the workbook. Use these constants wherever a
 // sheet name is needed so that a rename only requires one edit here.
 const (

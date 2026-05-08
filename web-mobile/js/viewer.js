@@ -21,7 +21,9 @@ function StatusBadge({ status }) {
 }
 
 function formatDate(d) {
+  if (!d) return "Date TBA";
   const date = new Date(d + "T00:00");
+  if (isNaN(date.getTime())) return "Date TBA";
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
@@ -60,7 +62,7 @@ function tournamentMatches(t) {
 // Next match to be played in this competition (live first, else first scheduled in time order)
 function currentMatchOf(c) {
   const ms = compMatches(c);
-  const live = ms.find((m) => m.status === "in_progress" && m.sideA && m.sideB);
+  const live = ms.find((m) => m.status === "running" && m.sideA && m.sideB);
   if (live) return live;
   const sched = ms.filter((m) => m.status === "scheduled" && m.sideA && m.sideB);
   sched.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"));
@@ -69,9 +71,21 @@ function currentMatchOf(c) {
 
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule }) {
   const t = tournament;
+  const comps = t.competitions || [];
+  const compsByDate = useMemo(() => {
+    const map = {};
+    comps.forEach((c) => {
+      const d = c.date || t.date || "";
+      if (!map[d]) map[d] = [];
+      map[d].push(c);
+    });
+    return map;
+  }, [comps, t.date]);
+  const dates = Object.keys(compsByDate).sort();
+
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
-  const live = allMatches.filter((m) => m.status === "in_progress");
+  const live = allMatches.filter((m) => m.status === "running");
   const upNext = allMatches.filter((m) => m.status === "scheduled" && m.sideA && m.sideB).slice(0, 3);
 
   return (
@@ -110,38 +124,53 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <span className="vlist-item__rowchev">→</span>
           </button>
 
-          <div className="section-title">Competitions</div>
-          <div className="vlist">
-            {(t.competitions || []).map((c) => {
-              const matches = compMatches(c).filter((m) => m.sideA && m.sideB); // exclude TBD placeholders
-              const total = matches.length;
-              const done = matches.filter((m) => m.status === "complete").length;
-              const liveCount = matches.filter((m) => m.status === "in_progress").length;
-              const pct = total ? Math.round((done / total) * 100) : 0;
-              return (
-                <button key={c.id} className="vlist-item vlist-item--comp" onClick={() => onSelectCompetition(c.id)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
-                      <div className="vlist-item__name">{c.name}</div>
-                      <div className="vlist-item__meta">
-                        {c.players.length} {c.kind === "team" ? "teams" : "players"} · {c.format === "pools" ? "Pools + Knockout" : "Knockout"} · Starts {c.startTime}
+          {dates.length === 0 ? (
+            <>
+              <div className="section-title">Competitions</div>
+              <div className="vlist">
+                <div className="empty">
+                  <div className="icon">⏳</div>
+                  <h3>No competitions yet</h3>
+                  <div style={{ fontSize: 13 }}>Check back soon for the tournament schedule and live updates.</div>
+                </div>
+              </div>
+            </>
+          ) : dates.map((d) => (
+            <div key={d}>
+              <div className="section-title">{formatDate(d)}</div>
+              <div className="vlist">
+                {compsByDate[d].map((c) => {
+                  const matches = compMatches(c).filter((m) => m.sideA && m.sideB);
+                  const total = matches.length;
+                  const done = matches.filter((m) => m.status === "completed").length;
+                  const liveCount = matches.filter((m) => m.status === "running").length;
+                  const pct = total ? Math.round((done / total) * 100) : 0;
+                  return (
+                    <button key={c.id} className="vlist-item vlist-item--comp" onClick={() => onSelectCompetition(c.id)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
+                          <div className="vlist-item__name">{c.name}</div>
+                          <div className="vlist-item__meta">
+                            {c.players.length} {c.kind === "team" ? "teams" : "players"} · {c.format === "pools" ? "Pools + Knockout" : "Knockout"} · Starts {c.startTime}
+                          </div>
+                        </div>
+                        <StatusBadge status={c.status} />
                       </div>
-                    </div>
-                    <StatusBadge status={c.status} />
-                  </div>
-                  {c.status !== "setup" && total > 0 && (
-                    <div className="vlist-item__progress">
-                      <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
-                      <div className="vlist-item__pct">
-                        {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : `${done}/${total} matches`}
-                      </div>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                      {c.status !== "setup" && total > 0 && (
+                        <div className="vlist-item__progress">
+                          <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
+                          <div className="vlist-item__pct">
+                            {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : `${done}/${total} matches`}
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
 
           {upNext.length > 0 && (
             <>
@@ -218,7 +247,11 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
         <div className="viewer__head">
           <button className="viewer__back" onClick={onBack} aria-label="Back">←</button>
           <div className="viewer__title-block">
-            <div className="viewer__eyebrow">{t.name}</div>
+            <div className="viewer__eyebrow">
+              {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
+              {c.date && c.startTime && " at "}
+              {c.startTime} · {c.courts.join(", ")}
+            </div>
             <div className="viewer__title">{c.name}</div>
             <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
@@ -260,7 +293,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             </div>
           )}
           {tab === "pools" && hasPools && (
-            <PoolsViewer pools={pools} standings={standings} tweaks={tweaks} />
+            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} />
           )}
           {tab === "results" && c.status === "completed" && bracket && (
             <ResultsViewer c={c} bracket={bracket} />
@@ -289,7 +322,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, liveMatches, upcomingMatches,
           <div className="my-match__name">{myPlayer.name}</div>
           <div className="my-match__round">
             {myUpcoming.phase === "pool" ? myUpcoming.poolName : myUpcoming.round}
-            {myUpcoming.status === "in_progress" ? " · LIVE NOW" : ""}
+            {myUpcoming.status === "running" ? " · LIVE NOW" : ""}
           </div>
           <div className="my-match__row">
             <div className="my-match__chip">
@@ -346,45 +379,90 @@ function ViewerOverview({ c, myPlayer, myUpcoming, liveMatches, upcomingMatches,
 function VSchedItem({ m, tweaks, showCompetition }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : null;
   return (
-    <div className={`vsched-item ${m.status === "in_progress" ? "vsched-item--live" : ""}`}>
+    <div className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""}`}>
       <div className="vsched-item__head">
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {showCompetition && m.compName ? <span>· {m.compName}</span> : null}
         {m.phase === "pool" ? <span>· {m.poolName}</span> : <span>· {m.round || ""}</span>}
-        {m.status === "in_progress" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
-        {m.status === "complete" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
+        {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
+        {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
       </div>
       <div className="vsched-item__players">
         <div className={`vsched-item__side ${aWin ? "vsched-item__side--w" : ""}`}>
+          <span className="vsched-item__color-badge vsched-item__color-badge--aka">AKA</span>
           <span className="n">{m.sideA?.name || "TBD"}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
-        {m.score?.type === "ippon" ? (
-          <span className="vsched-item__score">
-            {aWin ? m.score.winnerPts : m.score.loserPts}–{bWin ? m.score.winnerPts : m.score.loserPts}
-          </span>
+        {m.status === "completed" && scoreStr ? (
+          <span className="vsched-item__score">{scoreStr}</span>
+        ) : m.status === "completed" ? (
+          <span className="vsched-item__vs">—</span>
         ) : (
           <span className="vsched-item__vs">vs</span>
         )}
         <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
           <span className="n">{m.sideB?.name || "TBD"}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
+          <span className="vsched-item__color-badge vsched-item__color-badge--shiro">SHIRO</span>
         </div>
       </div>
     </div>
   );
 }
 
-function PoolsViewer({ pools, standings, tweaks }) {
+function PoolMatchRow({ m }) {
+  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
+  const aWin = winnerName && winnerName === aName;
+  const bWin = winnerName && winnerName === bName;
+
+  const scoreStr = m.status === "completed"
+    ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision)
+    : null;
+
+  return (
+    <div className="pool-match-row">
+      <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
+        <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
+        <span className="pool-match-row__name">{aName}</span>
+      </div>
+      <span className="pool-match-row__score">
+        {m.status === "completed" ? (
+          scoreStr || "—"
+        ) : m.status === "running" ? (
+          <span className="bc-live" style={{ fontSize: 10 }}>●</span>
+        ) : "–"}
+      </span>
+      <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
+        <span className="pool-match-row__name">{bName}</span>
+        <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
+      </div>
+    </div>
+  );
+}
+
+function PoolsViewer({ pools, standings, poolMatches, tweaks, competition }) {
+  const [expandedPools, setExpandedPools] = useState({});
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3></div>;
   }
+  const togglePool = (poolName) => setExpandedPools(prev => ({ ...prev, [poolName]: !prev[poolName] }));
+  const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
+        const matches = poolMatches ? poolMatches.filter(m => {
+          const id = m.id || "";
+          return id.startsWith(pool.poolName + "-");
+        }) : [];
+        const completedMatches = matches.filter(m => m.status === "completed");
+        const expanded = expandedPools[pool.poolName];
         return (
           <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
             <div className="pool__head">
@@ -394,33 +472,56 @@ function PoolsViewer({ pools, standings, tweaks }) {
             </div>
             <table className="pool__table">
               <thead>
-                <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">G</th><th className="num">T</th></tr>
+                {isTeam ? (
+                  <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">IT</th><th className="num">PW</th><th className="num">PL</th></tr>
+                ) : (
+                  <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
+                )}
               </thead>
               <tbody>
                 {poolStandings && poolStandings.length > 0 ? poolStandings.map((s, i) => (
                   <tr key={s.player.name}>
-                    <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
+                    <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
                     <td>
                       <div style={{ fontWeight: 500 }}>{s.player.name}</div>
                       {tweaks.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div> : null}
                     </td>
                     <td className="num">{s.wins}</td>
                     <td className="num">{s.losses}</td>
-                    <td className="num">{s.ipponsGiven}</td>
-                    <td className="num">{s.ipponsTaken}</td>
+                    <td className="num">{s.draws}</td>
+                    {isTeam && <td className="num">{s.individualWins || 0}</td>}
+                    {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                    {isTeam && <td className="num">{s.individualDraws || 0}</td>}
+                    <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
+                    <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
                   </tr>
-                )) : pool.players.map((p, i) => (
-                  <tr key={p.name}>
-                    <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
-                    <td>
-                      <div style={{ fontWeight: 500 }}>{p.name}</div>
-                      {tweaks.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{p.dojo}</div> : null}
-                    </td>
-                    <td className="num">—</td><td className="num">—</td><td className="num">—</td><td className="num">—</td>
-                  </tr>
-                ))}
+                )) : pool.players.map((p, i) => {
+                  const cols = isTeam ? 8 : 5;
+                  return (
+                    <tr key={p.name}>
+                      <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
+                      <td>
+                        <div style={{ fontWeight: 500 }}>{p.name}</div>
+                        {tweaks.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{p.dojo}</div> : null}
+                      </td>
+                      {Array.from({ length: cols }, (_, j) => <td key={j} className="num">—</td>)}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+            {matches.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <button className="btn btn--sm" style={{ fontSize: 11 }} onClick={() => togglePool(pool.poolName)}>
+                  {expanded ? "Hide matches" : `Show matches (${completedMatches.length}/${matches.length})`}
+                </button>
+                {expanded && (
+                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                    {matches.map(m => <PoolMatchRow key={m.id} m={m} />)}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
@@ -556,11 +657,15 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-window.PlayerMultiFilter = PlayerMultiFilter;
-window.applyFilters = applyFilters;
-window.matchHighlightedBy = matchHighlightedBy;
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, StatusBadge, formatDate, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf };
 
-// Tournament-wide schedule (across competitions) — court swimlanes + filter
+if (typeof window !== 'undefined') {
+    window.PlayerMultiFilter = PlayerMultiFilter;
+    window.applyFilters = applyFilters;
+    window.matchHighlightedBy = matchHighlightedBy;
+}
+
+// Tournament-wide schedule (across competitions) — grouped by day, then court swimlanes + filter
 function ScheduleViewer({ tournament, tweaks }) {
   const allMatches = useMemo(() => tournamentMatches(tournament).filter((m) => m.sideA && m.sideB), [tournament]);
   const courts = tournament.courts;
@@ -568,20 +673,46 @@ function ScheduleViewer({ tournament, tweaks }) {
   const [dojoText, setDojoText] = useState("");
   const [compFilter, setCompFilter] = useState("all");
 
+  // Derive unique days from competitions and matches
+  const allDates = useMemo(() => {
+    const days = new Set();
+    (tournament.competitions || []).forEach((c) => { if (c.date) days.add(c.date); });
+    allMatches.forEach((m) => { if (m.date) days.add(m.date); });
+    const sorted = Array.from(days).sort();
+    return sorted.length > 0 ? sorted : [""];
+  }, [tournament, allMatches]);
+
+  const [activeDay, setActiveDay] = useState(() => allDates[0] || "");
+
+  // When dates change (data loads), reset to first
+  React.useEffect(() => {
+    setActiveDay(prev => allDates.includes(prev) ? prev : (allDates[0] || ""));
+  }, [allDates]);
+
   const filtered = applyFilters(allMatches, picked, dojoText, compFilter);
 
-  // Group by court
+  // For day-based filtering: if no dates at all, show everything; otherwise filter by active day
+  const dayFiltered = allDates.length <= 1 && allDates[0] === ""
+    ? filtered
+    : filtered.filter((m) => {
+        const mDate = m.date || (tournament.competitions || []).find(c => c.id === m.compId)?.date || "";
+        return mDate === activeDay || (!mDate && activeDay === "");
+      });
+
   const byCourt = {};
   courts.forEach((cc) => byCourt[cc] = []);
-  filtered.forEach((m) => { (byCourt[m.court] = byCourt[m.court] || []).push(m); });
+  dayFiltered.forEach((m) => { (byCourt[m.court] = byCourt[m.court] || []).push(m); });
   Object.values(byCourt).forEach((list) => list.sort((a, b) => {
-    const order = { in_progress: 0, scheduled: 1, pending: 2, complete: 3 };
-    if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
+    const order = { running: 0, scheduled: 1, completed: 2 };
+    const ao = order[a.status] ?? 1;
+    const bo = order[b.status] ?? 1;
+    if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   }));
 
   const matchHasFilter = (m) => matchHighlightedBy(m, picked, dojoText);
   const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
+  const multiDay = allDates.length > 1 || (allDates.length === 1 && allDates[0] !== "");
 
   return (
     <div className="tw-sched">
@@ -594,13 +725,29 @@ function ScheduleViewer({ tournament, tweaks }) {
         {hasAnyFilter && (
           <button className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); }}>Clear</button>
         )}
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{filtered.length} of {allMatches.length} matches</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{dayFiltered.length} of {allMatches.length} matches</span>
       </div>
 
+      {multiDay && (
+        <div className="day-tabs">
+          {allDates.map((d) => (
+            <button key={d} className={`day-tab ${activeDay === d ? "is-active" : ""}`} onClick={() => setActiveDay(d)}>
+              {d ? formatDate(d) : "All days"}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="tw-courts">
-        {courts.map((cc) => {
+        {allMatches.length === 0 ? (
+          <div className="empty" style={{ gridColumn: "1 / -1" }}>
+            <div className="icon">🗓</div>
+            <h3>No matches scheduled yet</h3>
+            <div style={{ fontSize: 13 }}>The schedule will appear here once the tournament begins.</div>
+          </div>
+        ) : courts.map((cc) => {
           const list = byCourt[cc] || [];
-          const liveOn = list.find((m) => m.status === "in_progress");
+          const liveOn = list.find((m) => m.status === "running");
           return (
             <div key={cc} className="tw-court">
               <div className="tw-court__head">
@@ -628,21 +775,28 @@ function ScheduleViewer({ tournament, tweaks }) {
 function TWMatch({ m, highlight, tweaks }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : null;
   return (
-    <div className={`tw-match ${m.status === "in_progress" ? "tw-match--live" : ""} ${m.status === "complete" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`}>
+    <div className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`}>
       <div>
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
       </div>
       <div className="tw-match__players">
-        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>{m.sideA?.name || "TBD"}</div>
-        <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>{m.sideB?.name || "TBD"}</div>
+        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
+          <span className="tw-match__badge tw-match__badge--aka">A</span>
+          {m.sideA?.name || "TBD"}
+        </div>
+        <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
+          <span className="tw-match__badge tw-match__badge--shiro">S</span>
+          {m.sideB?.name || "TBD"}
+        </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
       <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>
-        {m.status === "complete" && m.score?.type === "ippon" && `${m.score.winnerPts}–${m.score.loserPts}`}
-        {m.status === "complete" && m.score?.type === "bye" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>BYE</span>}
-        {m.status === "in_progress" && <span className="bc-live">●</span>}
+        {m.status === "completed" && scoreStr}
+        {m.status === "completed" && m.score?.type === "bye" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>BYE</span>}
+        {m.status === "running" && <span className="bc-live">●</span>}
       </div>
     </div>
   );

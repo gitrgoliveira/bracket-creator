@@ -1,0 +1,14 @@
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./vitest.setup.js'],
+  },
+  esbuild: {
+    loader: 'jsx',
+    include: /js\/.*\.js$/,
+    exclude: [],
+  },
+});

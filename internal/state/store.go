@@ -41,17 +41,6 @@ func (s *Store) init() error {
 		return err
 	}
 
-	// Ensure tournament.md exists
-	tournamentPath := filepath.Join(s.folder, "tournament.md")
-	if _, err := os.Stat(tournamentPath); os.IsNotExist(err) {
-		t := &Tournament{
-			Name: "New Tournament",
-		}
-		if err := s.saveTournamentNoLock(t); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 

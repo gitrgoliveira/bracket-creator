@@ -14,16 +14,43 @@ function roundLabel(roundIdx, total) {
   return `Round ${roundIdx + 1}`;
 }
 
+// sideA = top = Aka (Red), sideB = bottom = Shiro (White)
+function sideLabel(side) {
+  return side === "a" ? "AKA" : "SHIRO";
+}
+
+// Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
+// Returns something like "MM–K", "M–", "△", "H"
+function formatIpponsScore(ipponsA, ipponsB, score, decision) {
+  if (decision === "hikewake") return "△";
+  if (score?.type === "hikiwake") return "△";
+  if (score?.type === "hantei") return "H";
+  if (score?.type === "bye") return "BYE";
+  const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
+  const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
+  if (!aStr && !bStr) {
+    // Fall back to numeric if ippons arrays are missing but score exists
+    if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
+      return `${score.winnerPts}–${score.loserPts}`;
+    }
+    return "";
+  }
+  return `${aStr || "·"}–${bStr || "·"}`;
+}
+
 function PlayerLine({ player, isWinner, side, showDojo, score, isTBD }) {
+  const isAka = side === "a";
   if (!player || isTBD) {
     return (
       <div className={`bc-side bc-side--empty bc-side--${side}`}>
+        <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
         <span className="bc-name bc-name--tbd">{isTBD ? "TBD" : "—"}</span>
       </div>
     );
   }
   return (
     <div className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}`}>
+      <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
       {player.seed ? <span className="bc-seed">{player.seed}</span> : <span className="bc-seed bc-seed--empty"></span>}
       <div className="bc-name-wrap">
         <span className="bc-name">{player.name}</span>
@@ -37,11 +64,15 @@ function PlayerLine({ player, isWinner, side, showDojo, score, isTBD }) {
 function MatchCard({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder }) {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
-  const live = match.status === "in_progress";
+  const live = match.status === "running";
   const isBye = match.score?.type === "bye";
 
-  const aScore = match.score && match.score.type === "ippon" ? (aWin ? match.score.winnerPts : match.score.loserPts) : null;
-  const bScore = match.score && match.score.type === "ippon" ? (bWin ? match.score.winnerPts : match.score.loserPts) : null;
+  // Show ippon-type scores (e.g. "MM", "K") instead of numeric counts
+  const ipponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
+  const ipponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
+  const isDone = match.status === "completed";
+  const aScore = isDone ? (ipponsA.join("") || null) : null;
+  const bScore = isDone ? (ipponsB.join("") || null) : null;
 
   // detect placeholder TBD (id starts with "tbd-")
   const aTBD = isPlaceholder || (match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-"));
@@ -52,7 +83,7 @@ function MatchCard({ match, variant, showDojo, onClick, highlighted, matchRef, i
       ref={matchRef}
       type="button"
       data-match-id={match.id}
-      className={`bc-match bc-match--v${variant} ${live ? "bc-match--live" : ""} ${match.status === "complete" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""}`}
+      className={`bc-match bc-match--v${variant} ${live ? "bc-match--live" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""}`}
       onClick={onClick}
       aria-label={`Match ${match.id}`}
     >
@@ -61,6 +92,8 @@ function MatchCard({ match, variant, showDojo, onClick, highlighted, matchRef, i
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
         {live ? <span className="bc-live">● LIVE</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
+        {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
+        {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
       </div>
       <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} />
       <div className="bc-divider"></div>
@@ -96,7 +129,6 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
           const aRight = aR.right - treeRect.left;
           const nLeft = nR.left - treeRect.left;
           const midX = (aRight + nLeft) / 2;
-          // Two horizontals from each source, vertical joiner, one horizontal into next.
           out.push({ d: `M ${aRight} ${aMidY} L ${midX} ${aMidY} L ${midX} ${bMidY} L ${aRight} ${bMidY}` });
           out.push({ d: `M ${midX} ${(aMidY + bMidY) / 2} L ${nLeft} ${nMidY}` });
         }
@@ -125,12 +157,8 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
 
-  // Bump version when rounds change so connectors recompute
   useEffectBC(() => { setVersion((v) => v + 1); }, [rounds]);
 
-  // Auto-scroll to a target match when its id changes.
-  // Strip the cache-busting suffix ("::<timestamp>") that callers append to
-  // force re-fire. Use rAF so the layout pass and ref callbacks complete first.
   useLayoutEffectBC(() => {
     if (!autoScrollMatchId) return;
     const realId = String(autoScrollMatchId).split("::")[0];
@@ -145,7 +173,6 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
       const targetTop = scrollEl.scrollTop + (elRect.top - scRect.top) - (scRect.height / 2 - elRect.height / 2);
       scrollEl.scrollTo({ left: Math.max(0, targetLeft), top: Math.max(0, targetTop), behavior: "smooth" });
     };
-    // double rAF: first paints, second guarantees refs are populated post-mount
     frame1 = requestAnimationFrame(() => { frame2 = requestAnimationFrame(run); });
     return () => { cancelAnimationFrame(frame1); cancelAnimationFrame(frame2); };
   }, [autoScrollMatchId, version]);
@@ -180,3 +207,5 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
 window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.roundLabel = roundLabel;
+window.formatIpponsScore = formatIpponsScore;
+window.sideLabel = sideLabel;

@@ -474,7 +474,7 @@ paths:
     post:
       tags: [participants]
       summary: Set participants (JSON)
-      description: Not yet fully implemented; returns 501.
+      description: Replaces the current participants list for the competition with the provided JSON.
       security:
         - TournamentPassword: []
       parameters:
@@ -491,8 +491,20 @@ paths:
                   items:
                     $ref: '#/components/schemas/Participant'
       responses:
-        '501':
-          description: Not implemented.
+        '200':
+          description: Participants successfully updated.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Player'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/seeds:
     get:
@@ -850,6 +862,9 @@ components:
         seed:
           type: integer
           description: Seed rank (0 = unseeded).
+        number:
+          type: string
+          description: Match number prefix + sequence (e.g. "K1"). Only present when number-prefix is set.
 
     Participant:
       type: object
@@ -864,9 +879,9 @@ components:
     SeedAssignment:
       type: object
       properties:
-        Name:
+        name:
           type: string
-        SeedRank:
+        seedRank:
           type: integer
           description: 1 = top seed.
 

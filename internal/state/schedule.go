@@ -7,11 +7,14 @@ import (
 )
 
 type ScheduleEntry struct {
-	MatchType   string `json:"matchType"` // pool | bracket
-	MatchRef    string `json:"matchRef"`  // ID of the match
+	MatchType   string `json:"matchType"` // pool | bracket | break
+	MatchRef    string `json:"matchRef"`  // ID of the match (empty for breaks)
 	Court       string `json:"court"`
-	ScheduledAt string `json:"scheduledAt"`
+	Date        string `json:"date"`        // YYYY-MM-DD — for multi-day tournaments
+	ScheduledAt string `json:"scheduledAt"` // HH:MM
 	Status      string `json:"status"`
+	IsBreak     bool   `json:"isBreak,omitempty"`
+	Label       string `json:"label,omitempty"` // display label for breaks
 }
 
 func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
@@ -41,13 +44,23 @@ func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
 		if i == 0 || len(rec) < 5 {
 			continue // skip header
 		}
-		schedule = append(schedule, ScheduleEntry{
+		e := ScheduleEntry{
 			MatchType:   rec[0],
 			MatchRef:    rec[1],
 			Court:       rec[2],
 			ScheduledAt: rec[3],
 			Status:      rec[4],
-		})
+		}
+		if len(rec) > 5 {
+			e.Date = rec[5]
+		}
+		if len(rec) > 6 {
+			e.IsBreak = rec[6] == "true"
+		}
+		if len(rec) > 7 {
+			e.Label = rec[7]
+		}
+		schedule = append(schedule, e)
 	}
 
 	return schedule, nil
@@ -67,8 +80,15 @@ func (s *Store) SaveSchedule(compID string, entries []ScheduleEntry) error {
 	}()
 
 	writer := csv.NewWriter(f)
-	if err := writer.Write([]string{"MatchType", "MatchRef", "Court", "ScheduledAt", "Status"}); err != nil {
+	if err := writer.Write([]string{"MatchType", "MatchRef", "Court", "ScheduledAt", "Status", "Date", "IsBreak", "Label"}); err != nil {
 		return err
+	}
+
+	isBreakStr := func(b bool) string {
+		if b {
+			return "true"
+		}
+		return ""
 	}
 
 	for _, e := range entries {
@@ -78,6 +98,9 @@ func (s *Store) SaveSchedule(compID string, entries []ScheduleEntry) error {
 			e.Court,
 			e.ScheduledAt,
 			e.Status,
+			e.Date,
+			isBreakStr(e.IsBreak),
+			e.Label,
 		}); err != nil {
 			return err
 		}

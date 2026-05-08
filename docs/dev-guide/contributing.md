@@ -39,6 +39,7 @@ When you are satisfied with the changes, we suggest you run:
 
 ```sh
 make go/test
+make go/test-race
 ```
 
 Before you commit the changes, we also suggest you run:

@@ -1,9 +1,11 @@
 package mobileapp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,6 +58,25 @@ func TestHub_Broadcast_MarshalError(t *testing.T) {
 type mockResponseWriter struct {
 	*httptest.ResponseRecorder
 	closeChan chan bool
+	mu        sync.Mutex
+}
+
+func (m *mockResponseWriter) Header() http.Header {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ResponseRecorder.Header()
+}
+
+func (m *mockResponseWriter) Write(b []byte) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ResponseRecorder.Write(b)
+}
+
+func (m *mockResponseWriter) WriteString(s string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ResponseRecorder.WriteString(s)
 }
 
 func (m *mockResponseWriter) CloseNotify() <-chan bool {
@@ -63,6 +84,21 @@ func (m *mockResponseWriter) CloseNotify() <-chan bool {
 }
 
 func (m *mockResponseWriter) Flush() {}
+
+func (m *mockResponseWriter) BodyString() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Body == nil {
+		return ""
+	}
+	return m.Body.String()
+}
+
+func (m *mockResponseWriter) HeaderGet(key string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ResponseRecorder.Header().Get(key)
+}
 
 func TestHubHandleEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -75,42 +111,67 @@ func TestHubHandleEvents(t *testing.T) {
 		ResponseRecorder: httptest.NewRecorder(),
 		closeChan:        closeChan,
 	}
-	req, _ := http.NewRequest("GET", "/events", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
 
+	done := make(chan struct{})
 	go func() {
 		r.ServeHTTP(w, req)
+		close(done)
 	}()
 
-	// Wait a bit for headers to be set
-	time.Sleep(50 * time.Millisecond)
-
-	assert.Equal(t, "text/event-stream", w.Header().Get("Content-Type"))
+	// Wait for subscription
+	timeout := time.After(1 * time.Second)
+	subscribed := false
+	for !subscribed {
+		select {
+		case <-timeout:
+			t.Fatal("timeout waiting for subscription")
+		default:
+			h.mu.RLock()
+			if len(h.clients) > 0 {
+				subscribed = true
+			}
+			h.mu.RUnlock()
+			if !subscribed {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}
 
 	// Broadcast an event and see if it appears in the body
 	h.Broadcast(EventMatchUpdated, "test-data")
 
+	// Wait a bit for processing
 	time.Sleep(50 * time.Millisecond)
 
-	// Check that data was written
-	assert.Contains(t, w.Body.String(), "test-data")
-
 	// Close the connection
+	cancel()
 	close(closeChan)
+
+	// Wait for handler to finish
+	select {
+	case <-done:
+		// OK
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for handler to finish")
+	}
+
+	// Now assertions are safe
+	assert.Contains(t, w.HeaderGet("Content-Type"), "text/event-stream")
+	assert.Contains(t, w.BodyString(), "test-data")
 }
 
 func TestHub_HandleEvents_Closure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewHub()
 
-	// We need to capture the channel that HandleEvents subscribes to
-	// This is a bit tricky because it's internal.
-	// But we can just use the Hub directly.
-
 	w := &mockResponseWriter{
 		ResponseRecorder: httptest.NewRecorder(),
 		closeChan:        make(chan bool),
 	}
 	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest("GET", "/events", nil)
 
 	// Start HandleEvents in a goroutine
 	done := make(chan bool)
@@ -120,20 +181,28 @@ func TestHub_HandleEvents_Closure(t *testing.T) {
 	}()
 
 	// Wait for subscription to happen
-	time.Sleep(50 * time.Millisecond)
-
-	// Now find the channel in h.clients and close it
-	h.mu.Lock()
+	timeout := time.After(1 * time.Second)
 	var internalCh chan string
-	for ch := range h.clients {
-		internalCh = ch
-		break
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("timeout waiting for subscription")
+		default:
+			h.mu.Lock()
+			for ch := range h.clients {
+				internalCh = ch
+				break
+			}
+			h.mu.Unlock()
+			if internalCh != nil {
+				goto Subscribed
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
-	h.mu.Unlock()
 
-	if internalCh != nil {
-		h.Unsubscribe(internalCh)
-	}
+Subscribed:
+	h.Unsubscribe(internalCh)
 
 	select {
 	case <-done:

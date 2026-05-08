@@ -99,7 +99,7 @@ func TestWithFile(t *testing.T) {
 
 ### 6. Run Tests
 ```bash
-make go/test  # lint + race detection + coverage
+make go/test-race  # lint + race detection + coverage
 ```
 
 ## Checklist

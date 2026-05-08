@@ -66,8 +66,10 @@ go test -cover ./internal/helper/...
     1. Highest number of individual winners (Victories).
     2. Highest number of points scored.
     3. If both are equal, it's a draw (Tie) in pools, or requires a play-off (Encho) in elimination matches.
-- **Tie-marking Rule**: A match (individual or sub-match) is ONLY considered a tie if the operator enters an **'X'** (or 'x') in the "vs" column between the players. Equal scores without an 'X' are NOT treated as ties.
+- **Tie-marking Rule**: A match (individual or sub-match) is a tie when the operator enters **'X'** (or 'x') in the "vs" column, **or when both sides finish with the same total score** (equal character-count after stripping spaces/zeros/dashes). For auto-detection, at least one score cell in that row must be non-empty. A team match is automatically a draw (T=1) when both IV and PW totals are equal.
 - **Match Colors**: On tree/playoff brackets, the player on the top is always Red (Aka) and the bottom is White (Shiro).
+- **Excel Layout**: Uses an **8-column per court** layout. Columns A and G (and their court-shifted counterparts) are 30 units wide; others are 5 units wide. A blank row separates pools vertically.
+- **Team Match Labels**: Summaries use **"IV"** (Individual Victories) and **"PW"** (Points Won).
 - **Court limit**: courts are labelled A–Z, so `--courts` is hard-capped at 26 and any value over that returns an error rather than silently truncating.
 
 ### Excel workbook construction

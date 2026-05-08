@@ -46,33 +46,18 @@ func TestPrintPoolMatchesAlignment(t *testing.T) {
 		numCourts := 2
 
 		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false)
-
 		if len(matchWinners) != 2 {
 			t.Errorf("expected 2 matchWinners, got %d", len(matchWinners))
 		}
 
-		// Max matches is 3.
-		// Header: 2 rows (2,3).
-		// Match 1: row 4.
-		// Match 2: row 5.
-		// Match 3: row 6.
-		// Results start at poolRow++ = 7.
-		// Let's check:
-		// m=0: row 4. poolRow=5.
-		// m=1: row 5. poolRow=6.
-		// m=2: row 6. poolRow=7.
-		// result=1: poolRow++=8.
-
-		valA1, _ := f.GetCellValue(SheetPoolMatches, "F12")
-		if valA1 != "1. " {
-			v7, _ := f.GetCellValue(SheetPoolMatches, "F11")
-			v9, _ := f.GetCellValue(SheetPoolMatches, "F13")
-			t.Errorf("Expected Pool A result 1. at F12, got '%s' (F11='%s', F13='%s')", valA1, v7, v9)
+		valA1, _ := f.GetCellValue(SheetPoolMatches, "F14")
+		if valA1 != "1." {
+			t.Errorf("Expected Pool A result 1. at F14, got '%s'", valA1)
 		}
 
-		valB1, _ := f.GetCellValue(SheetPoolMatches, "N13")
-		if valB1 != "1. " {
-			t.Errorf("Expected Pool B result 1. at N13, got '%s'", valB1)
+		valB1, _ := f.GetCellValue(SheetPoolMatches, "N15")
+		if valB1 != "1." {
+			t.Errorf("Expected Pool B result 1. at N15, got '%s'", valB1)
 		}
 	})
 }
@@ -103,10 +88,8 @@ func TestPrintPoolMatchesTeamAlignment(t *testing.T) {
 		// Results start at 3+9-2+1=11.
 		// Result 1 should be at row 20
 		val, _ := f.GetCellValue(SheetPoolMatches, "F20")
-		if val != "1. " {
-			valBefore, _ := f.GetCellValue(SheetPoolMatches, "E20")
-			valAfter, _ := f.GetCellValue(SheetPoolMatches, "G20")
-			t.Errorf("Expected result 1. at F20, got '%s' (E20='%s', G20='%s')", val, valBefore, valAfter)
+		if val != "1." {
+			t.Errorf("Expected result 1. at F20, got '%s'", val)
 		}
 	})
 }

@@ -1,31 +1,62 @@
 openapi: 3.1.0
 info:
   title: bracket-creator API
-  description: Web API for generating Kendo tournament brackets
-  version: 1.0.0
+  description: |
+    Web API for generating Kendo tournament brackets.
+
+    This spec covers two servers:
+    - **Bracket Generator** (`serve` command): Stateless, form-based bracket generation.
+    - **Mobile/Admin API** (`mobile-app` command): Stateful REST API for live tournament management.
+
+    The Mobile/Admin API routes under `/api/` (excluding `/api/viewer/`) require the
+    `X-Tournament-Password` header for authentication.
+  version: 2.0.0
+
 servers:
   - url: http://localhost:8080
-    description: Local development server
+    description: Bracket Generator (serve command)
+  - url: http://localhost:8081
+    description: Mobile/Admin API (mobile-app command)
+
+tags:
+  - name: bracket-generator
+    description: Stateless bracket/pool Excel generation (serve command)
+  - name: tournament
+    description: Tournament-level configuration (mobile-app command, requires auth)
+  - name: competitions
+    description: Competition management (mobile-app command, requires auth)
+  - name: participants
+    description: Participant and seed management (mobile-app command, requires auth)
+  - name: matches
+    description: Match scoring and overrides (mobile-app command, requires auth)
+  - name: viewer
+    description: Public read-only endpoints (mobile-app command, no auth required)
+  - name: system
+    description: Health and status endpoints
+
 paths:
+
+  # ── Bracket Generator ──────────────────────────────────────────────────────
+
   /api/parse-participants:
     post:
+      tags: [bracket-generator]
       summary: Parse and validate participants
-      description: Parses a CSV list of participants and returns a structured list. Can detect duplicates.
+      description: Parses a CSV list of participants and returns a structured list. Detects duplicates.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [playerList]
               properties:
                 playerList:
                   type: string
-                  description: The CSV formatted list of players.
+                  description: Newline-separated CSV of players.
                 withZekkenName:
                   type: boolean
-                  description: Whether the CSV includes Zekken names (Name, Zekken, Dojo).
-              required:
-                - playerList
+                  description: Whether the CSV uses the "Name, ZekkenName, Dojo" format.
       responses:
         '200':
           description: Successfully parsed participants.
@@ -39,91 +70,66 @@ paths:
                     items:
                       $ref: '#/components/schemas/Participant'
         '400':
-          description: Parsing error or duplicates found.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                  duplicates:
-                    type: array
-                    items:
-                      type: string
+          $ref: '#/components/responses/BadRequest'
 
   /create:
     post:
-      summary: Create tournament bracket
-      description: Generates an Excel spreadsheet containing the tournament bracket based on the provided configuration.
+      tags: [bracket-generator]
+      summary: Generate tournament bracket Excel file
+      description: Generates an Excel spreadsheet containing the tournament bracket.
       requestBody:
         required: true
         content:
           application/x-www-form-urlencoded:
             schema:
               type: object
+              required: [playerList, tournamentType]
               properties:
                 playerList:
                   type: string
-                  description: The CSV formatted list of players.
                 tournamentType:
                   type: string
                   enum: [pools, playoffs]
-                  description: The type of tournament to create.
                 singleTree:
                   type: string
                   enum: ["on", "off"]
-                  description: Whether to put all matches on a single tree.
                 withZekkenName:
                   type: string
                   enum: ["on", "off"]
-                  description: Whether the CSV includes Zekken names.
                 determined:
                   type: string
                   enum: ["on", "off"]
-                  description: Create determined tree format.
                 mirror:
                   type: string
                   enum: ["on", "off"]
-                  description: Create mirrored tree format.
                 titlePrefix:
                   type: string
-                  description: Prefix for match titles.
                 numberPrefix:
                   type: string
-                  description: Prefix for match numbers.
                 teamMatches:
                   type: integer
-                  description: Number of matches in a team (e.g. 5 for 5-person team).
+                  default: 0
                 winnersPerPool:
                   type: integer
                   default: 2
-                  description: Number of players advancing from each pool (pools mode only).
                 playersPerPool:
                   type: integer
                   default: 3
-                  description: Desired number of players per pool (pools mode only).
                 roundRobin:
                   type: string
                   enum: ["on", "off"]
-                  description: Generate round-robin match sheets for pools.
                 poolSizeMode:
                   type: string
                   enum: [max, exact]
-                  description: Whether playersPerPool is a maximum or an exact target.
                 courts:
                   type: integer
                   default: 2
-                  description: Number of courts to distribute pools/matches across.
                 seeds:
                   type: string
-                  description: JSON string representation of an array of SeedAssignment objects.
+                  description: JSON-encoded array of SeedAssignment objects.
                 downloadToken:
                   type: string
-                  description: Unique token for polling download status.
-              required:
-                - playerList
-                - tournamentType
+                  description: Token for polling /api/download-status.
       responses:
         '200':
           description: Excel file containing the generated bracket.
@@ -133,38 +139,24 @@ paths:
                 type: string
                 format: binary
         '400':
-          description: Invalid input parameters.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
+          $ref: '#/components/responses/BadRequest'
         '500':
-          description: Server error during bracket generation.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
+          $ref: '#/components/responses/InternalError'
 
   /api/download-status:
     get:
+      tags: [bracket-generator]
       summary: Check download status
-      description: Poll this endpoint to check if a previously requested file generation is complete.
+      description: Poll to check if a file generation triggered via /create is complete.
       parameters:
         - in: query
           name: token
+          required: true
           schema:
             type: string
-          required: true
-          description: The downloadToken passed to the /create endpoint.
       responses:
         '200':
-          description: Status of the download.
+          description: Download readiness status.
           content:
             application/json:
               schema:
@@ -175,11 +167,27 @@ paths:
 
   /api/status:
     get:
+      tags: [system]
       summary: Application status
-      description: Returns information about the running application, including version and build details.
+      description: Returns version and build details (bracket-generator serve command).
       responses:
         '200':
           description: Status information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppStatus'
+
+  # ── System ─────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      tags: [system]
+      summary: Health check
+      description: Returns 200 OK when the mobile-app server is running.
+      responses:
+        '200':
+          description: Server is healthy.
           content:
             application/json:
               schema:
@@ -187,35 +195,873 @@ paths:
                 properties:
                   status:
                     type: string
-                  version:
-                    type: string
-                  buildDate:
-                    type: string
-                  goVersion:
-                    type: string
-                  osArch:
-                    type: string
+                    example: ok
+
+  /api/events:
+    get:
+      tags: [system]
+      summary: Server-Sent Events stream
+      description: |
+        Subscribe to real-time tournament updates via SSE.
+        Event types: `match_updated`, `competition_started`, `tournament_updated`, `schedule_updated`.
+      responses:
+        '200':
+          description: SSE stream of tournament events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  # ── Tournament (Admin, requires auth) ──────────────────────────────────────
+
+  /api/tournament:
+    get:
+      tags: [tournament]
+      summary: Get tournament configuration
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Tournament configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tournament'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [tournament]
+      summary: Create tournament configuration
+      description: Creates a new tournament. Allowed without auth if no tournament exists yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tournament'
+      responses:
+        '201':
+          description: Tournament created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tournament'
+    put:
+      tags: [tournament]
+      summary: Update tournament configuration
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tournament'
+      responses:
+        '200':
+          description: Tournament updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tournament'
+
+  # ── Competitions (Admin, requires auth) ────────────────────────────────────
+
+  /api/competitions:
+    get:
+      tags: [competitions]
+      summary: List competitions
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Array of competitions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Competition'
+    post:
+      tags: [competitions]
+      summary: Create competition
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Competition'
+      responses:
+        '201':
+          description: Competition created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/competitions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: Get competition
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Competition details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [competitions]
+      summary: Update competition
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Competition'
+      responses:
+        '200':
+          description: Competition updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+    delete:
+      tags: [competitions]
+      summary: Delete competition
+      description: Only allowed when competition status is "setup" or empty.
+      security:
+        - TournamentPassword: []
+      responses:
+        '204':
+          description: Competition deleted.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/competitions/{id}/start:
+    post:
+      tags: [competitions]
+      summary: Start competition
+      description: Generates pools/bracket from the saved participant list and seeds.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Competition started.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/export:
+    get:
+      tags: [competitions]
+      summary: Export competition as Excel
+      description: Downloads an .xlsx file with the current bracket/pools state.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Excel file.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/overrides:
+    delete:
+      tags: [competitions]
+      summary: Reset all overrides
+      description: Clears all manual rank and bracket-winner overrides for this competition.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '204':
+          description: Overrides reset.
+
+  /api/competitions/{id}/schedule:
+    put:
+      tags: [competitions]
+      summary: Save schedule
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/ScheduleEntry'
+      responses:
+        '200':
+          description: Schedule saved.
+
+  /api/competitions/{id}/pools/{poolId}/override-rank:
+    put:
+      tags: [competitions]
+      summary: Override pool rank
+      description: Manually set a player's rank within a pool, overriding the computed value.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - in: path
+          name: poolId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerName, rank]
+              properties:
+                playerName:
+                  type: string
+                rank:
+                  type: integer
+      responses:
+        '200':
+          description: Rank override saved.
+
+  # ── Participants & Seeds (Admin, requires auth) ────────────────────────────
+
+  /api/competitions/{id}/participants:
+    get:
+      tags: [participants]
+      summary: Get participants
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: List of players.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Player'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [participants]
+      summary: Set participants (JSON)
+      description: Not yet fully implemented; returns 501.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                players:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Participant'
+      responses:
+        '501':
+          description: Not implemented.
+
+  /api/competitions/{id}/seeds:
+    get:
+      tags: [participants]
+      summary: Get seed assignments
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Current seed assignments.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SeedAssignment'
+    put:
+      tags: [participants]
+      summary: Save seed assignments
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/SeedAssignment'
+      responses:
+        '200':
+          description: Seeds saved.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SeedAssignment'
+
+  # ── Matches (Admin, requires auth) ─────────────────────────────────────────
+
+  /api/competitions/{id}/matches/{mid}/score:
+    put:
+      tags: [matches]
+      summary: Record match result
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MatchResult'
+      responses:
+        '200':
+          description: Result recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchResult'
+
+  /api/competitions/{id}/matches/{mid}/court:
+    put:
+      tags: [matches]
+      summary: Assign match to court
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [court]
+              properties:
+                court:
+                  type: string
+                  example: A
+      responses:
+        '200':
+          description: Court updated.
+
+  /api/competitions/{id}/matches/{mid}/override-winner:
+    put:
+      tags: [matches]
+      summary: Override bracket winner
+      description: Manually set the winner of a bracket match, bypassing score calculation.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [winnerName]
+              properties:
+                winnerName:
+                  type: string
+      responses:
+        '200':
+          description: Winner overridden.
+
+  /api/competitions/{id}/matches/{mid}/time:
+    put:
+      tags: [matches]
+      summary: Set match scheduled time
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheduledAt]
+              properties:
+                scheduledAt:
+                  type: string
+                  description: HH:MM scheduled time.
+                  example: "14:30"
+      responses:
+        '200':
+          description: Time updated.
+
+  # ── Viewer (Public, no auth) ───────────────────────────────────────────────
+
+  /api/viewer/tournament:
+    get:
+      tags: [viewer]
+      summary: Get public tournament info
+      description: Returns tournament details with password field redacted.
+      responses:
+        '200':
+          description: Public tournament info.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tournament'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/viewer/competitions:
+    get:
+      tags: [viewer]
+      summary: List competitions with players
+      description: Returns all competitions, each with their player list populated.
+      responses:
+        '200':
+          description: List of competitions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Competition'
+
+  /api/viewer/competitions/{id}:
+    get:
+      tags: [viewer]
+      summary: Get full competition state
+      description: Returns config, pools, pool matches, standings, bracket, and schedule.
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Full competition state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompetitionDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/viewer/schedule:
+    get:
+      tags: [viewer]
+      summary: Get combined schedule for all competitions
+      responses:
+        '200':
+          description: Aggregated schedule entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScheduleEntry'
 
 components:
+
+  securitySchemes:
+    TournamentPassword:
+      type: apiKey
+      in: header
+      name: X-Tournament-Password
+      description: Tournament admin password. Required for all `/api/` routes except `/api/viewer/` and `/api/events`.
+
+  parameters:
+    CompetitionId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+      description: Competition slug/ID (e.g. "mens-individual").
+    MatchId:
+      in: path
+      name: mid
+      required: true
+      schema:
+        type: string
+      description: Match ID (e.g. "pool-a-0" or "bracket-r1-m0").
+
+  responses:
+    BadRequest:
+      description: Invalid input.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Action not permitted in current state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
   schemas:
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    AppStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        version:
+          type: string
+        buildDate:
+          type: string
+        goVersion:
+          type: string
+        osArch:
+          type: string
+
+    Tournament:
+      type: object
+      properties:
+        name:
+          type: string
+        date:
+          type: string
+          description: Event date (YYYY-MM-DD).
+        venue:
+          type: string
+        courts:
+          type: array
+          items:
+            type: string
+          description: Court labels (e.g. ["A", "B"]).
+        password:
+          type: string
+          description: Admin password. Omitted from viewer responses.
+
+    Competition:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          description: "individual or team"
+          enum: [individual, team]
+        format:
+          type: string
+          description: "pools or playoffs"
+          enum: [pools, playoffs]
+        teamSize:
+          type: integer
+          description: Number of members per team (0 for individual).
+        poolSize:
+          type: integer
+        poolSizeMode:
+          type: string
+          enum: [max, exact]
+        poolWinners:
+          type: integer
+        roundRobin:
+          type: boolean
+        courts:
+          type: array
+          items:
+            type: string
+        startTime:
+          type: string
+        date:
+          type: string
+        status:
+          type: string
+          enum: [setup, active, complete, ""]
+        mirror:
+          type: boolean
+        withZekkenName:
+          type: boolean
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+
+    Player:
+      type: object
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        dojo:
+          type: string
+        seed:
+          type: integer
+          description: Seed rank (0 = unseeded).
+
     Participant:
       type: object
       properties:
         name:
           type: string
-          description: The name of the participant.
         displayName:
           type: string
-          description: The display name (potentially including Zekken name).
         dojo:
           type: string
-          description: The dojo or team affiliation.
+
     SeedAssignment:
       type: object
       properties:
         Name:
           type: string
-          description: The name of the participant to be seeded.
         SeedRank:
           type: integer
-          description: The rank of the seed (e.g., 1 for top seed).
+          description: 1 = top seed.
+
+    Pool:
+      type: object
+      properties:
+        poolName:
+          type: string
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+
+    MatchResult:
+      type: object
+      properties:
+        id:
+          type: string
+        sideA:
+          type: string
+        sideB:
+          type: string
+        winner:
+          type: string
+        ipponsA:
+          type: array
+          items:
+            type: string
+          description: "Ippon types scored by side A (M, K, D, T, H)."
+        ipponsB:
+          type: array
+          items:
+            type: string
+        hansokuA:
+          type: integer
+        hansokuB:
+          type: integer
+        decision:
+          type: string
+          description: "How the match was decided (e.g. X for hikiwake/tie)."
+        status:
+          type: string
+          enum: [scheduled, running, completed]
+        court:
+          type: string
+        scheduledAt:
+          type: string
+        subResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubMatchResult'
+
+    SubMatchResult:
+      type: object
+      description: Individual member match result within a team match.
+      properties:
+        position:
+          type: integer
+        sideA:
+          type: string
+        sideB:
+          type: string
+        ipponsA:
+          type: array
+          items:
+            type: string
+        ipponsB:
+          type: array
+          items:
+            type: string
+        hansokuA:
+          type: integer
+        hansokuB:
+          type: integer
+        winner:
+          type: string
+        decision:
+          type: string
+
+    BracketMatch:
+      type: object
+      properties:
+        id:
+          type: string
+        sideA:
+          type: string
+        sideB:
+          type: string
+        winner:
+          type: string
+        status:
+          type: string
+          enum: [scheduled, running, completed]
+        court:
+          type: string
+        scheduledAt:
+          type: string
+        scoreA:
+          type: string
+        scoreB:
+          type: string
+        isOverridden:
+          type: boolean
+
+    Bracket:
+      type: object
+      properties:
+        rounds:
+          type: array
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/BracketMatch'
+
+    PlayerStanding:
+      type: object
+      properties:
+        player:
+          $ref: '#/components/schemas/Player'
+        wins:
+          type: integer
+        losses:
+          type: integer
+        draws:
+          type: integer
+        ipponsGiven:
+          type: integer
+        ipponsTaken:
+          type: integer
+        points:
+          type: integer
+        rank:
+          type: integer
+        isOverridden:
+          type: boolean
+        individualWins:
+          type: integer
+        individualLosses:
+          type: integer
+        individualDraws:
+          type: integer
+        pointsWon:
+          type: integer
+        pointsLost:
+          type: integer
+
+    ScheduleEntry:
+      type: object
+      properties:
+        matchType:
+          type: string
+          enum: [pool, bracket, break]
+        matchRef:
+          type: string
+          description: Match ID (empty for breaks).
+        court:
+          type: string
+        date:
+          type: string
+          description: YYYY-MM-DD
+        scheduledAt:
+          type: string
+          description: HH:MM
+        status:
+          type: string
+        isBreak:
+          type: boolean
+        label:
+          type: string
+          description: Display label for break entries.
+
+    CompetitionDetail:
+      type: object
+      description: Full competition state returned by the viewer endpoint.
+      properties:
+        config:
+          $ref: '#/components/schemas/Competition'
+        pools:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pool'
+        poolMatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchResult'
+        standings:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/PlayerStanding'
+          description: Map of pool name to ordered standings.
+        bracket:
+          $ref: '#/components/schemas/Bracket'
+        schedule:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleEntry'

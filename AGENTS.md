@@ -9,6 +9,8 @@ High-signal instructions for AI agents working in this repository.
 - **Paging:** `helper.MaxPlayersPerTree = 16`. Brackets larger than 16 are subdivided into multiple sheets (pages) unless `--single-tree` is used.
 - **Embedding:** Only `web/*` is embedded via `//go:embed` in `main.go`. Rebuild with `make go/build` after modifying web assets.
 - **Court limit:** A–Z labels mean `--courts` is rejected if greater than 26.
+- **Excel Layout:** Standardized on an **8-column per court** structure. Column A (Red Name) and Column G (White Name/Rank) are set to 30 units wide. Columns B–F and H are 5 units wide.
+- **Pool Spacing:** There is exactly one blank row of space between the end of one pool's ranking summary and the start of the next pool's header.
 - **API Documentation:** The OpenAPI specification for the web API is located in `specs/openapi.yaml`.
 - **Pool Scoring Rules:**
     - **Individual:** 1. Fights Won, 2. Fights Lost, 3. Hikiwake, 4. Points Scored, 5. Points Lost.
@@ -17,8 +19,10 @@ High-signal instructions for AI agents working in this repository.
     1. Highest number of individual winners.
     2. Highest number of points scored.
     3. If tied: draw in pools, play-off in playoffs.
+- **Team Elimination Labels:** In team elimination match summaries, "V" is labeled as **"IV"** (Individual Victories) and "P" as **"PW"** (Points Won).
 - **Match Colors:** On tree/playoff brackets, the player on the top is Red (Aka) and the bottom is White (Shiro).
 - **Tie-marking Rule:** A match is only considered a tie (hikiwake) if an **'X'** is entered in the "vs" column. This column is unlocked on all sheets.
+- **Automated Pool Ranking:** Pool standings are calculated using weighted composite formulas in Excel/Google Sheets. The "Rank" column in the Results table is the source of truth for the "Ranking" section, which uses reactive `INDEX/MATCH` lookups. Operators can manually override rankings by typing over the formula in the "Rank" column.
 
 ## Developer Workflow
 - **Standard Verification:** `make go/test` (runs lint + security + tests).

@@ -31,7 +31,7 @@ Below you can find the steps for each of them.
 If you prefer to compile from source, `bracket-creator` is written in [Go](https://golang.org/).
 
 Prerequisites:
-- [Go 1.26.2+](https://golang.org/doc/install)
+- [Go 1.26.3+](https://golang.org/doc/install)
 
 ```bash
 git clone https://github.com/gitrgoliveira/bracket-creator.git

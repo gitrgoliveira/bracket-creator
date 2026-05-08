@@ -46,6 +46,12 @@ Rankings within pools are determined by the following criteria:
 6. Higher number of individual draws (IT).
 7. Higher number of points scored (PW).
 8. Lower number of points lost (PL).
+- **Automated Ranking Formulas:** Pool standings are automatically calculated using weighted composite scores.
+    - **Individual Formula:** `(W*1,000,000)-(L*10,000)+(T*100)+(PW*1)-(PL*0.01)`
+    - **Team Formula:** Uses an 8-tier hierarchical composite score representing the official tie-breaking rules.
+    - **Deterministic Tie-Breaking:** `RANK.EQ` combined with `COUNTIF` ensures unique rankings even in case of identical composite scores.
+    - **Reactive Propagation:** The "Ranking" summary section uses `INDEX/MATCH` formulas to automatically pull names from the Results table based on their calculated rank.
+    - **Operator Override:** Operators can manually intervene by typing over the formula in the "Rank" column; the Ranking section will automatically update to reflect the manual entry.
 
 ### Team Match Winning Criteria
 Individual encounters between teams are decided by:
@@ -59,10 +65,16 @@ A match (individual or sub-match) is ONLY considered a tie if the operator enter
 ### Match Colors
 On tree and playoff brackets, the player/team on the top of the bracket is always assigned the color **Red (Aka)** and the player/team on the bottom is assigned **White (Shiro)**.
 
+### Excel Layout Standards
+- **Court Structure:** Each court uses exactly **8 columns**. (Court A: A–H, Court B: I–P, etc.)
+- **Column Widths:** The first and seventh columns of each court (e.g., A and G) are 30 units wide for names/ranks. Intermediate columns (B–F and H) are 5 units wide.
+- **Pool Spacing:** A single blank row is maintained between the end of one pool and the start of the next to improve readability.
+- **Team Labels:** Team elimination match results use **"IV"** (Individual Victories) and **"PW"** (Points Won) as headers in the summary box.
+
 ## Building and Running
 
 ### Prerequisites
-- Go 1.26.2+
+- Go 1.26.3+
 - Make
 
 ### Key Commands

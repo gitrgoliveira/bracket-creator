@@ -3,6 +3,13 @@ version: "2"
 run:
   timeout: 5m
   modules-download-mode: readonly
+  skip-dirs:
+    - web-mobile/node_modules
+    - web/node_modules
+    - node_modules
+    - vendor
+
+
 
 linters:
   enable:
@@ -34,6 +41,10 @@ formatters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-dirs:
+    - web-mobile/node_modules
+    - web/node_modules
+    - node_modules
 
 output:
   formats:

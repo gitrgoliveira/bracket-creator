@@ -3,7 +3,7 @@ BIN_NAME := bracket-creator
 GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
-GO_VERSION := 1.26.2
+GO_VERSION := 1.26.3
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
@@ -26,7 +26,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/security js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -45,6 +45,7 @@ local/deps: ## Install project dependencies
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
+	@cd web-mobile && npm install
 
 go/fmt: ## Format Go code
 	@echo "Formatting Go code..."
@@ -52,7 +53,7 @@ go/fmt: ## Format Go code
 
 go/lint: go/fmt ## Run linters
 	@echo "Running linters..."
-	golangci-lint run ./...
+	golangci-lint run ./cmd/... ./internal/... ./tests/... .
 
 go/sec: ## Run security scans (gosec)
 	@echo "Running security scans..."
@@ -64,7 +65,23 @@ go/vuln: ## Run vulnerability check (govulncheck)
 
 go/security: go/sec go/vuln ## Run all security checks
 
-go/test: go/lint go/security ## Run tests
+js/lint: ## Run Javascript linters
+	@echo "Running Javascript linters..."
+	@cd web-mobile && npm run lint
+
+js/sec: ## Run Javascript security scans
+	@echo "Running Javascript security scans..."
+	@cd web-mobile && npm audit --audit-level=high
+
+js/security: js/sec ## Run all Javascript security checks
+
+js/test: ## Run JavaScript unit tests
+	@echo "Running JavaScript tests..."
+	@cd web-mobile && npm test
+
+js/validate: js/lint js/security js/test ## Run all Javascript checks
+
+go/test: go/lint go/security js/validate ## Run tests
 	@echo "Running tests..."
 	go test -cover ./cmd/... ./internal/... ./tests/...
 
@@ -84,7 +101,7 @@ vendor-frontend:
 esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 	@echo "Pre-compiling JSX files..."
 	@mkdir -p web-mobile/dist
-	npx --yes esbuild web-mobile/js/bracket.js web-mobile/js/viewer.js web-mobile/js/admin.js web-mobile/js/app.js \
+	npx --yes esbuild web-mobile/js/api.js web-mobile/js/data.js web-mobile/js/bracket.js web-mobile/js/viewer.js web-mobile/js/admin.js web-mobile/js/app.js \
 		--outdir=web-mobile/dist --loader:.js=jsx \
 		--jsx-factory=React.createElement --jsx-fragment=React.Fragment
 

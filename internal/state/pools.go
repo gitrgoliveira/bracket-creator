@@ -61,6 +61,9 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 			seed, _ := strconv.Atoi(rec[5])
 			player.Seed = seed
 		}
+		if len(rec) > 6 {
+			player.Number = rec[6]
+		}
 		p.Players = append(p.Players, player)
 	}
 
@@ -92,7 +95,7 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 			if player.Seed > 0 {
 				seedStr = strconv.Itoa(player.Seed)
 			}
-			if err := writer.Write([]string{p.PoolName, player.Name, strconv.Itoa(i), player.DisplayName, player.Dojo, seedStr}); err != nil {
+			if err := writer.Write([]string{p.PoolName, player.Name, strconv.Itoa(i), player.DisplayName, player.Dojo, seedStr, player.Number}); err != nil {
 				return err
 			}
 		}
@@ -152,6 +155,9 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 		if len(rec) > 12 && rec[12] != "" {
 			_ = json.Unmarshal([]byte(rec[12]), &m.SubResults)
 		}
+		if len(rec) > 13 {
+			m.ScheduledAt = rec[13]
+		}
 
 		results = append(results, m)
 	}
@@ -173,7 +179,7 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	}()
 
 	writer := csv.NewWriter(f)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt"}); err != nil {
 		return err
 	}
 
@@ -205,6 +211,7 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 			string(r.Status),
 			r.Court,
 			subJSON,
+			r.ScheduledAt,
 		}); err != nil {
 			return err
 		}

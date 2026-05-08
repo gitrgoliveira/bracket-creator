@@ -31,15 +31,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}()
 
 	// 1. Data sheet (Player Name, Dojo, Display Name)
-	helper.AddPoolDataToSheet(f, pools, comp.WithZekkenName, comp.Name)
+	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, comp.WithZekkenName, comp.Name)
 
 	// 2. Pool Draw sheet (reactive formula references to data sheet)
-	if err := helper.AddPoolsToSheet(f, pools); err != nil {
+	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
 		return nil, err
 	}
 
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references)
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.PoolWinners, len(comp.Courts), comp.Mirror)
+	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.PoolWinners, len(comp.Courts), comp.Mirror, poolCoords, playerCoords)
 
 	// 4. Tree sheets
 	finals := helper.GenerateFinals(pools, comp.PoolWinners)
@@ -74,7 +74,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 5. Names to Print sheet
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.WithZekkenName, len(comp.Courts))
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.WithZekkenName, len(comp.Courts), playerCoords)
 
 	// 6. Tags sheet
 	if err := helper.CreateTagsSheet(f, pools); err != nil {

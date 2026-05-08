@@ -212,9 +212,9 @@ func (o *poolOptions) createPools(entries []string) error {
 		fmt.Println("Using Zekken names")
 	}
 
-	helper.AddPoolDataToSheet(f, pools, o.withZekkenName, o.titlePrefix)
+	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, o.withZekkenName, o.titlePrefix)
 
-	if err := helper.AddPoolsToSheet(f, pools); err != nil {
+	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
 		fmt.Fprintf(os.Stderr, "Error adding pools to sheet: %v\n", err)
 	}
 	finals := helper.GenerateFinals(pools, o.poolWinners)
@@ -251,7 +251,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, o.mirror)
+	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, o.mirror, poolCoords, playerCoords)
 
 	treeSheet, err := f.GetSheetIndex(helper.SheetTree)
 	if err != nil {
@@ -291,7 +291,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 
 		poolStart, poolEnd := poolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
-		helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd])
+		helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
 	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		fmt.Println("Note: Tree sheet might not exist:", err)
@@ -308,7 +308,7 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	helper.FillInMatches(f, eliminationMatchRounds)
 
-	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, o.courts)
+	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, o.courts, playerCoords)
 
 	if err := helper.CreateTagsSheet(f, pools); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)

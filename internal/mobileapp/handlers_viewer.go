@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -26,12 +27,32 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 	r.GET("/competitions", func(c *gin.Context) {
 		ids, _ := store.ListCompetitions()
-		comps := []*state.Competition{}
-		for _, id := range ids {
-			comp, _ := store.LoadCompetition(id)
-			if comp != nil {
-				players, _ := store.LoadParticipants(id, comp.WithZekkenName)
+
+		// Preserve ordering by pre-allocating a slot per competition ID.
+		results := make([]*state.Competition, len(ids))
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+
+		for i, id := range ids {
+			wg.Add(1)
+			go func(idx int, compID string) {
+				defer wg.Done()
+				comp, _ := store.LoadCompetition(compID)
+				if comp == nil {
+					return
+				}
+				players, _ := store.LoadParticipants(compID, comp.WithZekkenName)
 				comp.Players = players
+				mu.Lock()
+				results[idx] = comp
+				mu.Unlock()
+			}(i, id)
+		}
+		wg.Wait()
+
+		comps := make([]*state.Competition, 0, len(ids))
+		for _, comp := range results {
+			if comp != nil {
 				comps = append(comps, comp)
 			}
 		}
@@ -49,47 +70,66 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		players, err := store.LoadParticipants(id, comp.WithZekkenName)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		comp.Players = players
 
-		// Return combined info: config, pools, poolMatches, standings, bracket, schedule
-		pools, err := store.LoadPools(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		poolMatches, err := store.LoadPoolMatches(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		standings, err := eng.CalculatePoolStandings(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		bracket, err := store.LoadBracket(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		schedule, err := store.LoadSchedule(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+		// Run all independent I/O concurrently.
+		var (
+			pools         any
+			poolMatches   any
+			standings     any
+			bracket       any
+			schedule      any
+			reservedSlots []state.ReservedSlot
+
+			playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr error
+		)
+
+		var wg sync.WaitGroup
+		wg.Add(6)
+		go func() {
+			defer wg.Done()
+			p, e := store.LoadParticipants(id, comp.WithZekkenName)
+			comp.Players = p
+			playersErr = e
+		}()
+		go func() {
+			defer wg.Done()
+			pools, poolsErr = store.LoadPools(id)
+		}()
+		go func() {
+			defer wg.Done()
+			poolMatches, poolMatchesErr = store.LoadPoolMatches(id)
+		}()
+		go func() {
+			defer wg.Done()
+			standings, standingsErr = eng.CalculatePoolStandings(id)
+		}()
+		go func() {
+			defer wg.Done()
+			bracket, bracketErr = store.LoadBracket(id)
+		}()
+		go func() {
+			defer wg.Done()
+			schedule, scheduleErr = store.LoadSchedule(id)
+		}()
+		wg.Wait()
+
+		reservedSlots, _ = store.LoadReservedSlots(id)
+
+		for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr} {
+			if e != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": e.Error()})
+				return
+			}
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"config":      comp,
-			"pools":       pools,
-			"poolMatches": poolMatches,
-			"standings":   standings,
-			"bracket":     bracket,
-			"schedule":    schedule,
+			"config":        comp,
+			"pools":         pools,
+			"poolMatches":   poolMatches,
+			"standings":     standings,
+			"bracket":       bracket,
+			"schedule":      schedule,
+			"reservedSlots": reservedSlots,
 		})
 	})
 

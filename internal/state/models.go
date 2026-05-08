@@ -28,6 +28,7 @@ type Competition struct {
 	Status         string          `yaml:"status" json:"status"`
 	Mirror         bool            `yaml:"mirror" json:"mirror"`
 	WithZekkenName bool            `yaml:"with_zekken_name" json:"withZekkenName"`
+	NumberPrefix   string          `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
 	Players        []helper.Player `yaml:"-" json:"players"`
 }
 
@@ -100,4 +101,13 @@ type BracketMatch struct {
 
 type Bracket struct {
 	Rounds [][]BracketMatch `json:"rounds"`
+}
+
+// ReservedSlot represents a placeholder participant that will be resolved to
+// the actual player who achieves a given rank in another competition.
+type ReservedSlot struct {
+	ID            string `json:"id"`            // unique slot ID
+	ParticipantID string `json:"participantID"` // ID of the placeholder in participants.csv
+	SourceCompID  string `json:"sourceCompID"`
+	SourceRank    int    `json:"sourceRank"`
 }

@@ -125,7 +125,21 @@ func TestCreatePlayersDuplicates(t *testing.T) {
 		t.Errorf("Unexpected error message: %v", err)
 	}
 
-	// Case 2: Same Zekken for different people (ALLOWED)
+	// Case 2: Exact duplicate in zekken format (REJECTED)
+	entriesZekkenDuplicate := []string{
+		"John Doe, JD, Dojo A",
+		"Jane Doe, JD, Dojo B",
+		"John Doe, JD, Dojo A",
+	}
+	_, err = CreatePlayers(entriesZekkenDuplicate, true)
+	if err == nil {
+		t.Fatal("Expected error for identical zekken entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate entry for participant 'John Doe'") {
+		t.Errorf("Unexpected error message: %v", err)
+	}
+
+	// Case 3: Same Zekken for different people (ALLOWED)
 	entriesSameZekken := []string{
 		"John Doe, JD, Dojo A",
 		"Jane Doe, JD, Dojo B",
@@ -509,12 +523,16 @@ func TestCreatePoolRoundRobinMatches(t *testing.T) {
 
 func TestConvertPlayersToWinners(t *testing.T) {
 	players := []Player{
-		{Name: "Alice", DisplayName: "A. SMITH", sheetName: "Sheet1", cell: "A1"},
-		{Name: "Bob", DisplayName: "B. JONES", sheetName: "Sheet1", cell: "A2"},
+		{Name: "Alice", DisplayName: "A. SMITH"},
+		{Name: "Bob", DisplayName: "B. JONES"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A1"}},
+		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A2"}},
 	}
 
 	t.Run("with sanitized names", func(t *testing.T) {
-		winners := ConvertPlayersToWinners(players, true)
+		winners := ConvertPlayersToWinners(players, true, pCoords)
 
 		if len(winners) != 2 {
 			t.Errorf("Expected 2 winners, got %d", len(winners))
@@ -530,7 +548,7 @@ func TestConvertPlayersToWinners(t *testing.T) {
 	})
 
 	t.Run("without sanitized names", func(t *testing.T) {
-		winners := ConvertPlayersToWinners(players, false)
+		winners := ConvertPlayersToWinners(players, false, pCoords)
 
 		if len(winners) != 2 {
 			t.Errorf("Expected 2 winners, got %d", len(winners))
@@ -1141,12 +1159,14 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 	tests := []struct {
 		name      string
 		players   []Player
+		pCoords   map[string]playerCellCoord
 		sanitized bool
 		validate  func(t *testing.T, winners map[string]MatchWinner)
 	}{
 		{
 			name:      "empty players list",
 			players:   []Player{},
+			pCoords:   map[string]playerCellCoord{},
 			sanitized: true,
 			validate: func(t *testing.T, winners map[string]MatchWinner) {
 				if len(winners) != 0 {
@@ -1157,8 +1177,12 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 		{
 			name: "duplicate display names with sanitized=true",
 			players: []Player{
-				{Name: "John Doe", DisplayName: "J. DOE", sheetName: "Sheet1", cell: "A1"},
-				{Name: "Jane Doe", DisplayName: "J. DOE", sheetName: "Sheet1", cell: "A2"},
+				{Name: "John Doe", DisplayName: "J. DOE"},
+				{Name: "Jane Doe", DisplayName: "J. DOE"},
+			},
+			pCoords: map[string]playerCellCoord{
+				playerCoordKey(Player{Name: "John Doe", DisplayName: "J. DOE"}): {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A1"}},
+				playerCoordKey(Player{Name: "Jane Doe", DisplayName: "J. DOE"}): {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A2"}},
 			},
 			sanitized: true,
 			validate: func(t *testing.T, winners map[string]MatchWinner) {
@@ -1176,12 +1200,15 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 		{
 			name: "duplicate names with sanitized=false",
 			players: []Player{
-				{Name: "John Smith", DisplayName: "J. SMITH", sheetName: "Sheet1", cell: "A1"},
-				{Name: "John Smith", DisplayName: "J. SMITH", sheetName: "Sheet2", cell: "B1"},
+				{Name: "John Smith", DisplayName: "J. SMITH"},
+				{Name: "John Smith", DisplayName: "J. SMITH"},
+			},
+			pCoords: map[string]playerCellCoord{
+				playerCoordKey(Player{Name: "John Smith", DisplayName: "J. SMITH"}): {cellCoord: cellCoord{sheetName: "Sheet2", cell: "B1"}},
 			},
 			sanitized: false,
 			validate: func(t *testing.T, winners map[string]MatchWinner) {
-				// Last one wins due to map overwrite
+				// Only one entry since both players share the same name key
 				if len(winners) != 1 {
 					t.Errorf("Expected 1 entry (overwritten), got %d", len(winners))
 				}
@@ -1195,7 +1222,10 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 		{
 			name: "single player",
 			players: []Player{
-				{Name: "Alice", DisplayName: "ALICE", sheetName: "Main", cell: "C5"},
+				{Name: "Alice", DisplayName: "ALICE"},
+			},
+			pCoords: map[string]playerCellCoord{
+				playerCoordKey(Player{Name: "Alice", DisplayName: "ALICE"}): {cellCoord: cellCoord{sheetName: "Main", cell: "C5"}},
 			},
 			sanitized: true,
 			validate: func(t *testing.T, winners map[string]MatchWinner) {
@@ -1218,7 +1248,7 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			winners := ConvertPlayersToWinners(tt.players, tt.sanitized)
+			winners := ConvertPlayersToWinners(tt.players, tt.sanitized, tt.pCoords)
 			tt.validate(t, winners)
 		})
 	}

@@ -15,6 +15,10 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []helper.Play
 		}
 	}
 
+	if comp.NumberPrefix != "" {
+		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
+	}
+
 	seededPlayers := helper.StandardSeeding(players)
 
 	// Create balanced tree

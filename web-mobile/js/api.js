@@ -101,7 +101,7 @@ function buildPlayerMap(comp) {
 function normalizePlayer(p) {
     if (!p) return p;
     if (p.name !== undefined) return p;
-    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "" };
+    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "" };
 }
 
 // Normalize an entire competition detail response from the viewer API
@@ -225,22 +225,34 @@ const API = {
         return res.ok;
     },
     subscribeToEvents(callback) {
-        const source = new EventSource('/api/events');
-        source.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                callback(data);
-            } catch (err) {
-                console.error("Error parsing SSE event:", err);
-            }
+        let source = null;
+        let retryTimer = null;
+        let cancelled = false;
+
+        const connect = () => {
+            if (cancelled) return;
+            source = new EventSource('/api/events');
+            source.onmessage = (event) => {
+                try {
+                    callback(JSON.parse(event.data));
+                } catch (err) {
+                    console.error("Error parsing SSE event:", err);
+                }
+            };
+            source.onerror = () => {
+                source.close();
+                source = null;
+                if (!cancelled) retryTimer = setTimeout(connect, 5000);
+            };
         };
-        source.onerror = (err) => {
-            console.error("SSE connection error:", err);
-            source.close();
-            // Reconnect after 5 seconds
-            setTimeout(() => this.subscribeToEvents(callback), 5000);
+
+        connect();
+
+        return () => {
+            cancelled = true;
+            clearTimeout(retryTimer);
+            source?.close();
         };
-        return () => source.close();
     },
     async recordScore(compID, matchID, result, password, match) {
         const payload = toBackendMatchResult(result, match || result);
@@ -306,6 +318,38 @@ const API = {
             body: JSON.stringify(entries)
         });
         return res.ok;
+    },
+    async addReservedSlot(compID, sourceCompID, sourceRank, password) {
+        const res = await fetch(`/api/competitions/${compID}/reserved-slots`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ sourceCompID, sourceRank })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to add reserved slot');
+        }
+        return res.json();
+    },
+    async deleteReservedSlot(compID, slotID, password) {
+        const res = await fetch(`/api/competitions/${compID}/reserved-slots/${slotID}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        return res.ok;
+    },
+    async importCompetitions(formData, password) {
+        const res = await fetch('/api/tournament/import', {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password },
+            body: formData
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Import failed');
+        return body;
     }
 };
 

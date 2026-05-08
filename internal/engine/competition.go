@@ -30,6 +30,12 @@ func (e *Engine) StartCompetition(id string) error {
 		return err
 	}
 
+	// Resolve any cross-competition reserved slots before generation.
+	players, err = e.resolveReservedSlots(id, players)
+	if err != nil {
+		return err
+	}
+
 	// Generate Pools or Bracket
 	if comp.Format == "pools" {
 		if err := e.generatePools(comp, players, seeds); err != nil {

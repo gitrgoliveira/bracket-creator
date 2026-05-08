@@ -108,7 +108,7 @@ func TestAddPoolDataToSheet(t *testing.T) {
 			_, err := f.NewSheet(SheetData)
 			require.NoError(t, err)
 
-			AddPoolDataToSheet(f, tt.pools, tt.sanitize, "")
+			poolCoords, playerCoords := AddPoolDataToSheet(f, tt.pools, tt.sanitize, "")
 
 			// Verify prefix label row
 			prefixLabel, err := f.GetCellValue(SheetData, "A1")
@@ -173,26 +173,22 @@ func TestAddPoolDataToSheet(t *testing.T) {
 				}
 			}
 
-			// Verify that pool and player cells are set correctly
-			// Note: The AddPoolDataToSheet function sets pool.cell for each player iteration,
-			// so the final value is the cell of the last player in the pool
+			// Verify that pool and player coords are set correctly in the returned maps
 			row = 3
-			for i, pool := range tt.pools {
-				assert.Equal(t, SheetData, tt.pools[i].sheetName)
-
+			for _, pool := range tt.pools {
 				lastPlayerRow := row + len(pool.Players) - 1
 				if len(pool.Players) > 0 {
+					coord := poolCoords[pool.PoolName]
+					assert.Equal(t, SheetData, coord.sheetName)
 					expectedPoolCell := fmt.Sprintf("$A$%d", lastPlayerRow)
-					assert.Equal(t, expectedPoolCell, pool.cell, "pool.cell should point to last player's row")
-				} else {
-					// Empty pool - cell is not set
-					assert.Equal(t, "", pool.cell)
+					assert.Equal(t, expectedPoolCell, coord.cell, "pool coord cell should point to last player's row")
 				}
 
-				for j := range pool.Players {
-					assert.Equal(t, SheetData, tt.pools[i].Players[j].sheetName)
+				for _, player := range pool.Players {
+					pCoord := playerCoords[playerCoordKey(player)]
+					assert.Equal(t, SheetData, pCoord.sheetName)
 					expectedPlayerCell := fmt.Sprintf("$B$%d", row)
-					assert.Equal(t, expectedPlayerCell, tt.pools[i].Players[j].cell)
+					assert.Equal(t, expectedPlayerCell, pCoord.cell)
 					row++
 				}
 			}
@@ -263,7 +259,7 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 			_, err := f.NewSheet(SheetData)
 			require.NoError(t, err)
 
-			AddPlayerDataToSheet(f, tt.players, tt.sanitize, "")
+			playerCoords := AddPlayerDataToSheet(f, tt.players, tt.sanitize, "")
 
 			// Verify prefix label row
 			prefixLabel, err := f.GetCellValue(SheetData, "A1")
@@ -327,79 +323,82 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 					assert.Equal(t, meta, metaValue)
 				}
 
-				// Verify player cell is set
+				// Verify player coord is set in the returned map
 				expectedCell := fmt.Sprintf("$B$%d", row)
-				assert.Equal(t, expectedCell, tt.players[i].cell)
-				assert.Equal(t, SheetData, tt.players[i].sheetName)
+				pCoord := playerCoords[playerCoordKey(player)]
+				assert.Equal(t, expectedCell, pCoord.cell)
+				assert.Equal(t, SheetData, pCoord.sheetName)
 			}
 		})
 	}
 }
 
 func TestAddPoolsToSheet(t *testing.T) {
+	type poolSpec struct {
+		poolName string
+		poolCell string
+		players  []struct {
+			name, cell string
+			pos        int
+		}
+	}
 	tests := []struct {
 		name    string
-		pools   []Pool
+		specs   []poolSpec
 		wantErr bool
 	}{
 		{
 			name: "basic pools with players",
-			pools: []Pool{
-				{
-					PoolName:  "Pool A",
-					sheetName: SheetData,
-					cell:      "$A$2",
-					Players: []Player{
-						{Name: "Player 1", sheetName: SheetData, cell: "$B$2", PoolPosition: 1},
-						{Name: "Player 2", sheetName: SheetData, cell: "$B$3", PoolPosition: 2},
-					},
-				},
-				{
-					PoolName:  "Pool B",
-					sheetName: SheetData,
-					cell:      "$A$4",
-					Players: []Player{
-						{Name: "Player 3", sheetName: SheetData, cell: "$B$4", PoolPosition: 1},
-						{Name: "Player 4", sheetName: SheetData, cell: "$B$5", PoolPosition: 2},
-					},
-				},
+			specs: []poolSpec{
+				{poolName: "Pool A", poolCell: "$A$2", players: []struct {
+					name, cell string
+					pos        int
+				}{
+					{"Player 1", "$B$2", 1}, {"Player 2", "$B$3", 2},
+				}},
+				{poolName: "Pool B", poolCell: "$A$4", players: []struct {
+					name, cell string
+					pos        int
+				}{
+					{"Player 3", "$B$4", 1}, {"Player 4", "$B$5", 2},
+				}},
 			},
 			wantErr: false,
 		},
 		{
 			name: "single pool",
-			pools: []Pool{
-				{
-					PoolName:  "Only Pool",
-					sheetName: SheetData,
-					cell:      "$A$2",
-					Players: []Player{
-						{Name: "Player 1", sheetName: SheetData, cell: "$B$2", PoolPosition: 1},
-					},
-				},
+			specs: []poolSpec{
+				{poolName: "Only Pool", poolCell: "$A$2", players: []struct {
+					name, cell string
+					pos        int
+				}{
+					{"Player 1", "$B$2", 1},
+				}},
 			},
 			wantErr: false,
 		},
 		{
 			name:    "empty pools",
-			pools:   []Pool{},
+			specs:   []poolSpec{},
 			wantErr: false,
 		},
 		{
 			name: "many pools (3 columns)",
-			pools: func() []Pool {
-				pools := make([]Pool, 9)
+			specs: func() []poolSpec {
+				specs := make([]poolSpec, 9)
 				for i := 0; i < 9; i++ {
-					pools[i] = Pool{
-						PoolName:  fmt.Sprintf("Pool %d", i+1),
-						sheetName: SheetData,
-						cell:      fmt.Sprintf("$A$%d", i+2),
-						Players: []Player{
-							{Name: fmt.Sprintf("Player %d", i+1), sheetName: SheetData, cell: fmt.Sprintf("$B$%d", i+2), PoolPosition: 1},
+					specs[i] = poolSpec{
+						poolName: fmt.Sprintf("Pool %d", i+1),
+						poolCell: fmt.Sprintf("$A$%d", i+2),
+						players: []struct {
+							name, cell string
+							pos        int
+						}{
+							{fmt.Sprintf("Player %d", i+1), fmt.Sprintf("$B$%d", i+2), 1},
 						},
 					}
 				}
-				return pools
+				return specs
 			}(),
 			wantErr: false,
 		},
@@ -409,6 +408,20 @@ func TestAddPoolsToSheet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := excelize.NewFile()
 			defer f.Close()
+
+			// Build pools and coord maps from specs
+			pools := make([]Pool, len(tt.specs))
+			poolCoords := make(map[string]cellCoord)
+			playerCoords := make(map[string]playerCellCoord)
+			for i, spec := range tt.specs {
+				players := make([]Player, len(spec.players))
+				for j, ps := range spec.players {
+					players[j] = Player{Name: ps.name, PoolPosition: int64(ps.pos)}
+					playerCoords[playerCoordKey(players[j])] = playerCellCoord{cellCoord: cellCoord{sheetName: SheetData, cell: ps.cell}}
+				}
+				pools[i] = Pool{PoolName: spec.poolName, Players: players}
+				poolCoords[spec.poolName] = cellCoord{sheetName: SheetData, cell: spec.poolCell}
+			}
 
 			// Create necessary sheets
 			_, err := f.NewSheet(SheetPoolDraw)
@@ -422,7 +435,7 @@ func TestAddPoolsToSheet(t *testing.T) {
 			err = f.SetCellValue(SheetPoolDraw, "B6", "Player 1")
 			require.NoError(t, err)
 
-			err = AddPoolsToSheet(f, tt.pools)
+			err = AddPoolsToSheet(f, pools, poolCoords, playerCoords)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -438,19 +451,21 @@ func TestAddPoolsToSheet(t *testing.T) {
 			assert.Equal(t, strings.ReplaceAll(expectedTitle, "'", ""), strings.ReplaceAll(titleFormula, "'", ""))
 
 			// Verify formulas exist (spot check first pool if pools exist)
-			if len(tt.pools) > 0 {
+			if len(pools) > 0 {
 				// Pool name formula at B5
 				formula, err := f.GetCellFormula(SheetPoolDraw, "B5")
 				require.NoError(t, err)
-				expectedFormula := fmt.Sprintf("%s!%s", tt.pools[0].sheetName, tt.pools[0].cell)
+				pc := poolCoords[pools[0].PoolName]
+				expectedFormula := fmt.Sprintf("%s!%s", pc.sheetName, pc.cell)
 				assert.Equal(t, strings.ReplaceAll(expectedFormula, "'", ""), strings.ReplaceAll(formula, "'", ""))
 
 				// First player formula at B6
-				if len(tt.pools[0].Players) > 0 {
+				if len(pools[0].Players) > 0 {
 					formula, err = f.GetCellFormula(SheetPoolDraw, "B6")
 					require.NoError(t, err)
-					player := tt.pools[0].Players[0]
-					expectedFormula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)
+					player := pools[0].Players[0]
+					pCoord := playerCoords[playerCoordKey(player)]
+					expectedFormula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, pCoord.sheetName, pCoord.cell)
 					assert.Equal(t, strings.ReplaceAll(expectedFormula, "'", ""), strings.ReplaceAll(formula, "'", ""))
 				}
 			}

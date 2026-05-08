@@ -75,7 +75,8 @@ describe('API Utils', () => {
         displayName: '',
         dojo: 'Dojo A',
         seed: 2,
-        number: ''
+        number: '',
+        tag: ''
       });
     });
   });

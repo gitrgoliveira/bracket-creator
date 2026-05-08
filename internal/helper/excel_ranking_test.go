@@ -34,8 +34,6 @@ func TestIndividualRanking(t *testing.T) {
 			for i := 0; i < size; i++ {
 				players[i] = Player{
 					Name:         fmt.Sprintf("Player %d", i+1),
-					sheetName:    "Pool Draw",
-					cell:         fmt.Sprintf("A%d", i+1),
 					PoolPosition: int64(i + 1),
 				}
 			}
@@ -43,7 +41,7 @@ func TestIndividualRanking(t *testing.T) {
 			pool := Pool{
 				PoolName: "Pool A",
 				Players:  players,
-				Matches:  []Match{}, // Simplified for test
+				Matches:  []Match{},
 			}
 
 			f := excelize.NewFile()
@@ -65,7 +63,17 @@ func TestIndividualRanking(t *testing.T) {
 			maxBlocks := make([]int, 1)
 			maxBlocks[0] = size + 3
 
-			printSinglePool(f, sheet, pool, 1, 2, 0, 2, maxBlocks, colNames, styles, matchWinners, false)
+			poolCoords := map[string]cellCoord{
+				"Pool A": {sheetName: "Pool Draw", cell: "A1"},
+			}
+			pCoords := make(map[string]playerCellCoord, size)
+			for i := 0; i < size; i++ {
+				pCoords[playerCoordKey(players[i])] = playerCellCoord{
+					cellCoord: cellCoord{sheetName: "Pool Draw", cell: fmt.Sprintf("A%d", i+1)},
+				}
+			}
+
+			printSinglePool(f, sheet, pool, 1, 2, 0, 2, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords)
 
 			headerRow, err := findResultsHeader(f, sheet, 0)
 			require.NoError(t, err)
@@ -112,8 +120,6 @@ func TestTeamRanking(t *testing.T) {
 			for i := 0; i < 3; i++ {
 				players[i] = Player{
 					Name:         fmt.Sprintf("Team %d", i+1),
-					sheetName:    "Pool Draw",
-					cell:         fmt.Sprintf("A%d", i+1),
 					PoolPosition: int64(i + 1),
 				}
 			}
@@ -139,7 +145,17 @@ func TestTeamRanking(t *testing.T) {
 			matchWinners := make(map[string]MatchWinner)
 			maxBlocks := []int{5, 5, 5, 20} // 3 matches + results
 
-			printSinglePool(f, sheet, pool, 1, 2, size, 2, maxBlocks, colNames, styles, matchWinners, false)
+			poolCoords := map[string]cellCoord{
+				"Pool A": {sheetName: "Pool Draw", cell: "A1"},
+			}
+			pCoords := make(map[string]playerCellCoord, 3)
+			for i := 0; i < 3; i++ {
+				pCoords[playerCoordKey(players[i])] = playerCellCoord{
+					cellCoord: cellCoord{sheetName: "Pool Draw", cell: fmt.Sprintf("A%d", i+1)},
+				}
+			}
+
+			printSinglePool(f, sheet, pool, 1, 2, size, 2, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords)
 
 			headerRow, err := findResultsHeader(f, sheet, 0)
 			require.NoError(t, err)
@@ -166,8 +182,8 @@ func TestTeamRanking(t *testing.T) {
 
 func TestManualRankingOverride(t *testing.T) {
 	players := []Player{
-		{Name: "Player 1", sheetName: "Pool Draw", cell: "A1", PoolPosition: 1},
-		{Name: "Player 2", sheetName: "Pool Draw", cell: "A2", PoolPosition: 2},
+		{Name: "Player 1", PoolPosition: 1},
+		{Name: "Player 2", PoolPosition: 2},
 	}
 	pool := Pool{PoolName: "Pool A", Players: players}
 
@@ -181,7 +197,14 @@ func TestManualRankingOverride(t *testing.T) {
 	styles := matchStyles{poolHeader: 1, text: 2, unlockedText: 3}
 	colNames := buildMatchColumnNames(1)
 	matchWinners := make(map[string]MatchWinner)
-	printSinglePool(f, sheet, pool, 1, 2, 0, 2, []int{5, 10}, colNames, styles, matchWinners, false)
+	poolCoords := map[string]cellCoord{
+		"Pool A": {sheetName: "Pool Draw", cell: "A1"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool Draw", cell: "A1"}},
+		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool Draw", cell: "A2"}},
+	}
+	printSinglePool(f, sheet, pool, 1, 2, 0, 2, []int{5, 10}, colNames, styles, matchWinners, false, poolCoords, pCoords)
 
 	headerRow, _ := findResultsHeader(f, sheet, 0)
 

@@ -79,7 +79,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 
 }
 
-func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
+func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) {
 	SetSheetLayoutPortraitA4Centered(f, sheetName)
 	treeHeaderStyle := getTreeHeaderStyle(f)
 	treeTopStyle := getTreeTopStyle(f)
@@ -89,8 +89,9 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 	row := TreeTitleRows + 1
 
 	for _, pool := range pools {
+		pc := poolCoords[pool.PoolName]
 		if err := f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row),
-			sheetRef(pool.sheetName, pool.cell)); err != nil {
+			sheetRef(pc.sheetName, pc.cell)); err != nil {
 			fmt.Printf("Warning: failed to set cell formula: %v\n", err)
 		}
 
@@ -104,11 +105,12 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool) {
 		}
 
 		for _, player := range pool.Players {
+			coord := pCoords[playerCoordKey(player)]
 			var formula string
-			if player.numberCell != "" {
-				formula = playerRef(&player)
+			if coord.numberCell != "" {
+				formula = playerRef(player.Name, coord)
 			} else {
-				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)
+				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, coord.sheetName, coord.cell)
 			}
 			if err := f.SetCellFormula(sheetName, fmt.Sprintf("A%d", row), formula); err != nil {
 				fmt.Printf("Warning: failed to set cell formula: %v\n", err)

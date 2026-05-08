@@ -175,7 +175,7 @@ function poolWinners(pools) {
 // format: "playoffs" | "pools"  (pools format always implies pools followed by a bracket)
 function buildCompetition(args) {
   if (!args) { console.error("buildCompetition: args is undefined!"); return null; }
-  const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName } = args;
+  const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix } = args;
   console.log("buildCompetition: args", args);
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount, gender) : [];
@@ -188,6 +188,7 @@ function buildCompetition(args) {
     roundRobin: true, 
     mirror: true, 
     withZekkenName: withZekkenName || false,
+    numberPrefix: numberPrefix || "",
     courts: courts || ["A", "B"],
     players,
     pools: null, bracket: null,
@@ -277,11 +278,40 @@ const SAMPLE_TOURNAMENTS = [
   })(),
 ];
 
-export { 
-  makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId, 
-  buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, 
-  buildPools, simulatePools, computeStandings, poolWinners, buildCompetition, 
-  buildTournament, competitionStatus, SAMPLE_TOURNAMENTS 
+const PARTICIPANT_TAGS = new Set(["manual", "registered", "transfer"]);
+
+// parseParticipantLines parses an array of non-empty CSV lines into player objects.
+// Used by both AdminParticipants.apply() and the live parse preview.
+function parseParticipantLines(lines, withZekken) {
+  return lines.map((line) => {
+    const parts = line.split(",").map((s) => s.trim());
+    const name = parts[0] || "";
+    let displayName = "", dojo = "", danGrade = "", tag = "";
+
+    // Detect trailing tag column (must be a known tag string, not a number)
+    const last = parts[parts.length - 1]?.toLowerCase();
+    if (PARTICIPANT_TAGS.has(last)) {
+      tag = last;
+      parts.pop();
+    }
+
+    if (withZekken) {
+      displayName = parts[1] || "";
+      dojo = parts[2] || "";
+      danGrade = parts[3] || "";
+    } else {
+      dojo = parts[1] || "";
+      danGrade = parts[2] || "";
+    }
+    return { name, displayName, dojo, danGrade, tag };
+  });
+}
+
+export {
+  makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
+  buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes,
+  buildPools, simulatePools, computeStandings, poolWinners, buildCompetition,
+  buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines
 };
 
 if (typeof window !== 'undefined') {
@@ -295,4 +325,5 @@ if (typeof window !== 'undefined') {
   window.computeStandings = computeStandings; window.makeCompetitors = makeCompetitors;
   window.standardSeedOrder = standardSeedOrder; window.nextPow2 = nextPow2;
   window.poolWinners = poolWinners;
+  window.parseParticipantLines = parseParticipantLines;
 }

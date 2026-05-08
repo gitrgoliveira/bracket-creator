@@ -45,21 +45,27 @@ import (
 func scoringSetup2Players(t *testing.T, teamMatches int) *excelize.File {
 	t.Helper()
 	pool := Pool{
-		PoolName:  "Pool A",
-		sheetName: SheetPoolDraw,
-		cell:      "B1",
+		PoolName: "Pool A",
 		Players: []Player{
-			{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"},
-			{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"},
+			{Name: "Alice"},
+			{Name: "Bob"},
 		},
 	}
 	pool.Matches = []Match{{SideA: &pool.Players[0], SideB: &pool.Players[1]}}
+
+	poolCoords := map[string]cellCoord{
+		"Pool A": {sheetName: SheetPoolDraw, cell: "B1"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(pool.Players[0]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
+		playerCoordKey(pool.Players[1]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
+	}
 
 	f := excelize.NewFile()
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, 1, false)
+	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, 1, false, poolCoords, pCoords)
 	return f
 }
 
@@ -68,13 +74,11 @@ func scoringSetup2Players(t *testing.T, teamMatches int) *excelize.File {
 func scoringSetup3PlayerRoundRobin(t *testing.T) *excelize.File {
 	t.Helper()
 	pool := Pool{
-		PoolName:  "Pool A",
-		sheetName: SheetPoolDraw,
-		cell:      "B1",
+		PoolName: "Pool A",
 		Players: []Player{
-			{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"},
-			{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"},
-			{Name: "Carol", sheetName: SheetPoolDraw, cell: "A3"},
+			{Name: "Alice"},
+			{Name: "Bob"},
+			{Name: "Carol"},
 		},
 	}
 	pool.Matches = []Match{
@@ -83,11 +87,20 @@ func scoringSetup3PlayerRoundRobin(t *testing.T) *excelize.File {
 		{SideA: &pool.Players[0], SideB: &pool.Players[2]},
 	}
 
+	poolCoords := map[string]cellCoord{
+		"Pool A": {sheetName: SheetPoolDraw, cell: "B1"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(pool.Players[0]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
+		playerCoordKey(pool.Players[1]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
+		playerCoordKey(pool.Players[2]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A3"}},
+	}
+
 	f := excelize.NewFile()
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false)
+	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords)
 	return f
 }
 

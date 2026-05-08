@@ -142,7 +142,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		assignPlayerNumbers(players, o.numberPrefix, 1)
 	}
 
-	helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
+	playerCoords := helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
 
 	// Reorder players based on seeds for standard bracket distribution
 	players = helper.StandardSeeding(players)
@@ -249,8 +249,8 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	}
 
 	// Convert all players for match-winner processing
-	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName)
-	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts)
+	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
 
 	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.mirror)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)

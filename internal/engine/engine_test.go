@@ -1484,3 +1484,119 @@ func TestCalculatePoolStandings_EdgeCases(t *testing.T) {
 		}
 	}
 }
+
+func TestStartCompetition_NumberPrefix_Pools(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "prefix-pools"
+
+	comp := &state.Competition{
+		ID: compID, Name: "Prefix Test", Kind: "individual", Format: "pools",
+		PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2, RoundRobin: true,
+		Courts: []string{"A"}, StartTime: "09:00", Status: "setup",
+		NumberPrefix: "K",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, pools)
+
+	seen := map[string]bool{}
+	for _, p := range pools {
+		for _, pl := range p.Players {
+			assert.NotEmpty(t, pl.Number, "player %s should have a number", pl.Name)
+			assert.True(t, len(pl.Number) > 1 && pl.Number[0] == 'K', "number %q should start with K", pl.Number)
+			assert.False(t, seen[pl.Number], "duplicate number %q", pl.Number)
+			seen[pl.Number] = true
+		}
+	}
+}
+
+func TestStartCompetition_NumberPrefix_Playoffs(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "prefix-playoffs"
+
+	comp := &state.Competition{
+		ID: compID, Name: "Prefix Playoffs", Kind: "individual", Format: "playoffs",
+		Courts: []string{"A"}, StartTime: "09:00", Status: "setup",
+		NumberPrefix: "A",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	// Confirm competition started (bracket generated) and NumberPrefix persisted.
+	updated, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "playoffs", updated.Status)
+	assert.Equal(t, "A", updated.NumberPrefix)
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, bracket.Rounds, "bracket should have rounds")
+}
+
+func TestUpdateMatchTime_Pool(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "time-pool"
+
+	createTestCompetition(t, store, compID, "pools", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	matchID := matches[0].ID
+
+	err = eng.UpdateMatchTime(compID, matchID, "10:00")
+	require.NoError(t, err)
+
+	// Verify persistence in matches
+	reloaded, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	found := false
+	for _, m := range reloaded {
+		if m.ID == matchID {
+			assert.Equal(t, "10:00", m.ScheduledAt)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+}
+
+func TestUpdateMatchTime_Bracket(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "time-bracket"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	matchID := bracket.Rounds[0][0].ID
+
+	err = eng.UpdateMatchTime(compID, matchID, "11:00")
+	require.NoError(t, err)
+
+	// Verify persistence in bracket
+	reloaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "11:00", reloaded.Rounds[0][0].ScheduledAt)
+}
+
+func TestUpdateMatchTime_NotFound(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "time-not-found"
+	createTestCompetition(t, store, compID, "pools", 3)
+	saveTestParticipants(t, store, compID, []string{"A", "B", "C"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	err := eng.UpdateMatchTime(compID, "nonexistent", "12:00")
+	assert.Error(t, err)
+}

@@ -51,17 +51,18 @@ func setupDataSheet(f *excelize.File, sanitize bool, hasNumber bool, titlePrefix
 	}
 }
 
-func (layout *dataColumnLayout) writePlayer(f *excelize.File, row int, player *Player, sanitize bool) {
+func (layout *dataColumnLayout) writePlayer(f *excelize.File, row int, player *Player, sanitize bool, pCoords map[string]playerCellCoord) {
 	sheetName := SheetData
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), player.Name))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), player.Dojo))
 	if sanitize {
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), player.DisplayName))
 	}
+	coord := playerCellCoord{cellCoord: cellCoord{sheetName: sheetName, cell: fmt.Sprintf("$B$%d", row)}}
 	if layout.hasNumber {
 		numberColName := mustColumnName(layout.numberColNum)
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", numberColName, row), player.Number))
-		player.numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
+		coord.numberCell = fmt.Sprintf("$%s$%d", numberColName, row)
 	}
 	for k, meta := range player.Metadata {
 		if k >= len(layout.metaCols) {
@@ -69,8 +70,7 @@ func (layout *dataColumnLayout) writePlayer(f *excelize.File, row int, player *P
 		}
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", layout.metaCols[k], row), meta))
 	}
-	player.sheetName = sheetName
-	player.cell = fmt.Sprintf("$B$%d", row)
+	pCoords[playerCoordKey(*player)] = coord
 }
 
 func finishDataSheet(f *excelize.File) {
@@ -81,7 +81,7 @@ func finishDataSheet(f *excelize.File) {
 	fmt.Printf("Data added to spreadsheet\n")
 }
 
-func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) {
+func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) (map[string]cellCoord, map[string]playerCellCoord) {
 	hasNumber := false
 	for i := range pools {
 		if len(pools[i].Players) > 0 && pools[i].Players[0].Number != "" {
@@ -91,39 +91,45 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	}
 	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Pool")
 
+	poolCoords := make(map[string]cellCoord, len(pools))
+	playerCoords := make(map[string]playerCellCoord)
+
 	row := 3
 	for i := range pools {
-		pools[i].sheetName = SheetData
 		for j := range pools[i].Players {
 			handleExcelError("SetCellValue", f.SetCellValue(SheetData, fmt.Sprintf("A%d", row), pools[i].PoolName))
-			layout.writePlayer(f, row, &pools[i].Players[j], sanitize)
-			pools[i].cell = fmt.Sprintf("$A$%d", row)
+			layout.writePlayer(f, row, &pools[i].Players[j], sanitize, playerCoords)
+			poolCoords[pools[i].PoolName] = cellCoord{sheetName: SheetData, cell: fmt.Sprintf("$A$%d", row)}
 			row++
 		}
 	}
 
 	finishDataSheet(f)
+	return poolCoords, playerCoords
 }
 
-func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) {
+func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) map[string]playerCellCoord {
 	hasNumber := len(players) > 0 && players[0].Number != ""
 	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Number")
+
+	playerCoords := make(map[string]playerCellCoord, len(players))
 
 	row := 3
 	for i := range players {
 		handleExcelError("SetCellInt", f.SetCellInt(SheetData, fmt.Sprintf("A%d", row), players[i].PoolPosition))
-		layout.writePlayer(f, row, &players[i], sanitize)
+		layout.writePlayer(f, row, &players[i], sanitize, playerCoords)
 		row++
 	}
 
 	finishDataSheet(f)
+	return playerCoords
 }
 
 // poolDrawColumnCount is the fixed number of columns on the Pool Draw sheet.
 // Columns B, D, F (indices 2, 4, 6) are the three pool columns.
 const poolDrawColumnCount = 3
 
-func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
+func AddPoolsToSheet(f *excelize.File, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord) error {
 	sheetName := SheetPoolDraw
 	SetSheetLayoutPortraitA4(f, sheetName)
 
@@ -244,9 +250,10 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 
 		// Write pool header.
 		headerCell := colName + fmt.Sprint(row)
+		pc := poolCoords[pool.PoolName]
 		handleExcelError("SetCellFormula",
 			f.SetCellFormula(sheetName, headerCell,
-				sheetRef(pool.sheetName, pool.cell)))
+				sheetRef(pc.sheetName, pc.cell)))
 		handleExcelError("SetCellStyle",
 			f.SetCellStyle(sheetName, headerCell, headerCell, headerCellStyle))
 		row++
@@ -254,11 +261,12 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool) error {
 		// Write player rows.
 		for _, player := range pool.Players {
 			cell := colName + fmt.Sprint(row)
+			coord := playerCoords[playerCoordKey(player)]
 			var formula string
-			if player.numberCell != "" {
-				formula = playerRef(&player)
+			if coord.numberCell != "" {
+				formula = playerRef(player.Name, coord)
 			} else {
-				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, player.sheetName, player.cell)
+				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, coord.sheetName, coord.cell)
 			}
 			handleExcelError("SetCellFormula",
 				f.SetCellFormula(sheetName, cell, formula))

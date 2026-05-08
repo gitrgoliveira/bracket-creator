@@ -3,6 +3,38 @@
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
+// Returns { total, done, live } match counts for a single competition object.
+function compMatchStats(c) {
+  let total = 0, done = 0, live = 0;
+  if (c.pools) {
+    c.pools.forEach((p) => (p.matches || []).forEach((m) => {
+      if (!m.sideA || !m.sideB) return;
+      total++;
+      if (m.status === "completed") done++;
+      if (m.status === "running") live++;
+    }));
+  }
+  if (c.bracket && c.bracket.rounds) {
+    c.bracket.rounds.forEach((r) => (r || []).forEach((m) => {
+      if (!m.sideA || !m.sideB) return;
+      total++;
+      if (m.status === "completed") done++;
+      if (m.status === "running") live++;
+    }));
+  }
+  return { total, done, live };
+}
+
+// Returns true when line (at index idx in the source array) looks like a CSV
+// header that should be skipped.  Checks the first line only.
+function looksLikeHeader(line, idx) {
+  if (idx !== 0) return false;
+  if (!/name|zekken|dojo|club|team|grade|dan/i.test(line)) return false;
+  const parts = line.split(",");
+  const last = parts[parts.length - 1].trim();
+  return isNaN(parseInt(last)) || parseInt(last) <= 0;
+}
+
 function Breadcrumbs({ items }) {
   return (
     <div className="crumbs">
@@ -10,7 +42,7 @@ function Breadcrumbs({ items }) {
         <React.Fragment key={i}>
           {i > 0 && <span className="sep">/</span>}
           {item.onClick ? (
-            <button onClick={item.onClick}>{item.label}</button>
+            <button onClick={() => { document.activeElement?.blur(); item.onClick(); }}>{item.label}</button>
           ) : (
             <span>{item.label}</span>
           )}
@@ -31,8 +63,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
   const updateCompetition = async (cid, next) => {
     try {
       await window.API.updateCompetition(cid, next, password);
-      const comps = await window.API.fetchCompetitions();
+      const [comps, details] = await Promise.all([
+        window.API.fetchCompetitions(),
+        view.kind === "competition" && view.id === cid
+          ? window.API.fetchCompetitionDetails(cid)
+          : Promise.resolve(null),
+      ]);
       onUpdate({ ...t, competitions: comps });
+      if (details) setAdminCompData(details);
     } catch (e) {
       alert("Failed to update competition: " + e.message);
     }
@@ -122,6 +160,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
       onEditTournament={() => setView({ kind: "editTournament" })}
       onOpenSchedule={() => setView({ kind: "schedule" })}
       onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
+      onOpenImport={() => setView({ kind: "import" })}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
     />;
@@ -179,6 +218,21 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
     />;
   }
 
+  if (view.kind === "import") {
+    return <AdminImportPage
+      tournament={t}
+      onBack={() => setView({ kind: "dashboard" })}
+      onImported={async () => {
+        const comps = await window.API.fetchCompetitions();
+        onUpdate({ ...t, competitions: comps });
+        setView({ kind: "dashboard" });
+      }}
+      onLogout={onLogout}
+      onViewerMode={onViewerMode}
+      password={password}
+    />;
+  }
+
   if (view.kind === "competition") {
     const c = t.competitions.find((cc) => cc.id === view.id);
     if (!c) return <div className="page"><div className="empty"><h3>Competition not found</h3></div></div>;
@@ -191,6 +245,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
       poolMatches={adminCompData?.poolMatches}
       standings={adminCompData?.standings}
       bracket={adminCompData?.bracket}
+      reservedSlots={adminCompData?.reservedSlots || []}
       section={view.section}
       onSection={(section) => setView({ ...view, section })}
       onBack={() => setView({ kind: "dashboard" })}
@@ -238,7 +293,7 @@ function formatDate(d) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onOpenSchedule, onOpenScoreEditor, onLogout, onViewerMode }) {
+function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onOpenSchedule, onOpenScoreEditor, onOpenImport, onLogout, onViewerMode }) {
   const t = tournament;
   const comps = t.competitions || [];
 
@@ -246,10 +301,9 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
   let totalMatches = 0, doneMatches = 0, liveMatches = 0;
   let totalParticipants = 0;
   comps.forEach((c) => {
-    const players = c.players || [];
-    totalParticipants += players.length;
-    const ms = window.compMatches ? window.compMatches(c).filter((m) => m && m.sideA && m.sideB) : [];
-    ms.forEach((m) => { totalMatches++; if (m.status === "completed") doneMatches++; if (m.status === "running") liveMatches++; });
+    totalParticipants += (c.players || []).length;
+    const s = compMatchStats(c);
+    totalMatches += s.total; doneMatches += s.done; liveMatches += s.live;
   });
 
   const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
@@ -308,6 +362,11 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
             <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
+          </button>
+          <button className="tcard tcard--add" onClick={onOpenImport}>
+            <div style={{ fontSize: 28, color: "var(--ink-3)" }}>📂</div>
+            <div style={{ fontWeight: 600, marginTop: 4 }}>Import competitions</div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>From folder with manifest.yaml</div>
           </button>
         </div>
       </div>
@@ -526,19 +585,19 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {format === "pools" && (
             <>
               <div className="field">
-                <label className="field__label">Pool sizing mode</label>
+                <label className="field__label">Pool size is a</label>
                 <div className="radio-group">
-                  <button className={`radio-pill ${poolMode === "max" ? "is-active" : ""}`} onClick={() => setPoolMode("max")}>Max players per pool</button>
-                  <button className={`radio-pill ${poolMode === "min" ? "is-active" : ""}`} onClick={() => setPoolMode("min")}>Min players per pool</button>
+                  <button className={`radio-pill ${poolMode === "max" ? "is-active" : ""}`} onClick={() => setPoolMode("max")}>maximum</button>
+                  <button className={`radio-pill ${poolMode === "min" ? "is-active" : ""}`} onClick={() => setPoolMode("min")}>minimum</button>
                 </div>
                 <div className="field__hint">
                   {poolMode === "max"
-                    ? "Pools will be created so no pool has more than the size below. More pools, smaller pools."
-                    : "Pools will be created so each has at least the size below. Fewer pools, larger pools."}
+                    ? "No pool will have more than the size below (more pools, smaller pools)."
+                    : "Each pool will have at least the size below (fewer pools, larger pools)."}
                 </div>
               </div>
               <div className="row">
-                <div className="field"><label className="field__label">{poolMode === "max" ? "Maximum" : "Minimum"} players per pool</label><input className="input" type="number" min="3" value={poolSize} onChange={(e) => setPoolSize(+e.target.value)} /></div>
+                <div className="field"><label className="field__label">Players per pool</label><input className="input" type="number" min="3" value={poolSize} onChange={(e) => setPoolSize(+e.target.value)} /></div>
                 <div className="field"><label className="field__label">Winners per pool</label><input className="input" type="number" min="1" value={winners} onChange={(e) => setWinners(+e.target.value)} /></div>
               </div>
             </>
@@ -569,7 +628,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   );
 }
 
-function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onUpdate, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password }) {
+function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, reservedSlots, section, onSection, onBack, onUpdate, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password }) {
   const c = competition;
   const t = tournament;
 
@@ -654,7 +713,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
           </div>
           <div>
             {section === "overview" && <AdminCompOverview c={c} onSection={onSection} />}
-            {section === "participants" && <AdminParticipants c={c} onUpdate={onUpdate} />}
+            {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} />}
             {section === "pools" && <AdminPools c={c} pools={pools} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
             {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onUpdate={onUpdate} onMoveCourt={onMoveCourt} tweaks={tweaks} password={password} />}
@@ -668,9 +727,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 }
 
 function AdminCompOverview({ c, onSection }) {
-  let total = 0, done = 0, live = 0;
-  if (c.pools) c.pools.forEach((p) => (p.matches || []).forEach((m) => { total++; if (m.status === "completed") done++; if (m.status === "running") live++; }));
-  if (c.bracket && c.bracket.rounds) c.bracket.rounds.forEach((r) => (r || []).forEach((m) => { if (!m.sideA || !m.sideB) return; total++; if (m.status === "completed") done++; if (m.status === "running") live++; }));
+  const { total, done, live } = compMatchStats(c);
   const pct = total ? Math.round((done / total) * 100) : 0;
   return (
     <div>
@@ -731,7 +788,17 @@ function LinedTextarea({ value, onChange, rows, placeholder }) {
   );
 }
 
-function AdminParticipants({ c, onUpdate }) {
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => Array.from({ length: n + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0));
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) d[i][j] = a[i-1] === b[j-1] ? d[i-1][j-1] : 1 + Math.min(d[i-1][j], d[i][j-1], d[i-1][j-1]);
+  return d[m][n];
+}
+
+function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password }) {
+  const [toast, setToast] = useStateA(null);
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+  const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [text, setText] = useStateA(() => (c.players || []).map((p) => {
     if (c.withZekkenName && p.displayName) {
       const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
@@ -751,12 +818,14 @@ function AdminParticipants({ c, onUpdate }) {
       const raw = e.target.result;
       const np = [...(c.players || [])];
       let updatedCount = 0;
-      
+      const unmatched = [];
+      const allNames = np.map(p => ({ name: p.name, display: p.displayName }));
+
       raw.split(/\r?\n/).forEach((line, i) => {
         const trimmed = line.trim();
         if (!trimmed) return;
         if (i === 0 && /name/i.test(trimmed) && /seed|rank/i.test(trimmed)) return;
-        
+
         const parts = trimmed.split(",").map(s => s.trim());
         if (parts.length >= 2) {
           const name = parts[0];
@@ -766,17 +835,22 @@ function AdminParticipants({ c, onUpdate }) {
             if (pIdx >= 0) {
               np[pIdx] = { ...np[pIdx], seed };
               updatedCount++;
+            } else {
+              // Find closest name suggestion
+              const key = name.toLowerCase();
+              let best = null, bestDist = Infinity;
+              allNames.forEach(({ name: n, display: d }) => {
+                const dist = Math.min(levenshtein(key, n.toLowerCase()), d ? levenshtein(key, d.toLowerCase()) : Infinity);
+                if (dist < bestDist) { bestDist = dist; best = n; }
+              });
+              unmatched.push({ name, suggestion: bestDist <= 4 ? best : null });
             }
           }
         }
       });
-      
-      if (updatedCount > 0) {
-        onUpdate({ ...c, players: np });
-        alert(`Successfully imported ${updatedCount} seeds.`);
-      } else {
-        alert("No matching participants found for the provided seeds.");
-      }
+
+      if (updatedCount > 0) onUpdate({ ...c, players: np });
+      setSeedImportResult({ updatedCount, unmatched });
     };
     reader.readAsText(file);
   };
@@ -789,8 +863,7 @@ function AdminParticipants({ c, onUpdate }) {
       const out = [];
       raw.split(/\r?\n/).forEach((line, i) => {
         const trimmed = line.trim();
-        if (!trimmed) return;
-        if (i === 0 && /name/i.test(trimmed) && /dojo|club|team/i.test(trimmed)) return;
+        if (!trimmed || looksLikeHeader(trimmed, i)) return;
         out.push(trimmed);
       });
       setText(out.join("\n"));
@@ -798,8 +871,11 @@ function AdminParticipants({ c, onUpdate }) {
     reader.readAsText(file);
   };
 
+  const [tagFilter, setTagFilter] = useStateA(null);
   const lines = text.split("\n").filter((l) => l.trim());
   const players = c.players || [];
+  const allTags = [...new Set(players.map(p => p.tag).filter(Boolean))];
+  const visiblePlayers = tagFilter ? players.filter(p => p.tag === tagFilter) : players;
 
   const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
   const gaps = [];
@@ -818,40 +894,82 @@ function AdminParticipants({ c, onUpdate }) {
     onUpdate({ ...c, players: np });
   };
 
+  const dragIdxRef = useRefA(null);
+  const moveSeedRow = (fromIdx, toIdx) => {
+    if (fromIdx === toIdx) return;
+    const np = [...(c.players || [])];
+    const [moved] = np.splice(fromIdx, 1);
+    np.splice(toIdx, 0, moved);
+    // Re-assign seeds by new position order (only for currently-seeded players)
+    const seededCount = np.filter(p => p.seed).length;
+    if (seededCount > 0) {
+      let rank = 1;
+      const renumbered = np.map(p => p.seed ? { ...p, seed: rank++ } : p);
+      onUpdate({ ...c, players: renumbered });
+    } else {
+      onUpdate({ ...c, players: np });
+    }
+  };
+
+  const [showSlotForm, setShowSlotForm] = useStateA(false);
+  const [slotSrcComp, setSlotSrcComp] = useStateA("");
+  const [slotRank, setSlotRank] = useStateA(1);
+  const [slotLoading, setSlotLoading] = useStateA(false);
+
+  const otherComps = (tournament?.competitions || []).filter(cc => cc.id !== c.id);
+
+  const addSlot = async () => {
+    if (!slotSrcComp || slotRank < 1) return;
+    setSlotLoading(true);
+    try {
+      await window.API.addReservedSlot(c.id, slotSrcComp, slotRank, password);
+      setShowSlotForm(false);
+      setSlotSrcComp("");
+      setSlotRank(1);
+      showToast("Reserved slot added");
+    } catch (e) {
+      alert("Failed to add reserved slot: " + e.message);
+    } finally {
+      setSlotLoading(false);
+    }
+  };
+
+  const removeSlot = async (slotID) => {
+    try {
+      await window.API.deleteReservedSlot(c.id, slotID, password);
+      showToast("Reserved slot removed");
+    } catch (e) {
+      alert("Failed to remove reserved slot: " + e.message);
+    }
+  };
+
   const apply = () => {
     try {
       console.log("AdminParticipants: Applying", lines.length, "lines");
       const withZekken = c.withZekkenName;
       const existingMap = new Map((c.players || []).map(p => [p.name, p]));
-      const np = lines.map((line, i) => {
-        const parts = line.split(",").map((s) => s.trim());
-        const name = parts[0] || "";
+      const parsed = window.parseParticipantLines(lines, withZekken);
+
+      // Duplicate detection (case-insensitive)
+      const nameSeen = new Map();
+      const dupes = [];
+      parsed.forEach(({ name }) => {
+        const key = name.toLowerCase();
+        if (nameSeen.has(key)) { if (!dupes.includes(name)) dupes.push(name); }
+        else nameSeen.set(key, true);
+      });
+      if (dupes.length > 0) {
+        alert(`Duplicate names detected — fix before saving:\n${dupes.join("\n")}`);
+        return;
+      }
+
+      const np = parsed.map(({ name, displayName, dojo, danGrade, tag }, i) => {
         const existing = existingMap.get(name);
-        let displayName = "";
-        let dojo = "";
-
-        let danGrade = "";
-        if (withZekken) {
-          displayName = parts[1] || "";
-          dojo = parts[2] || "";
-          danGrade = parts[3] || "";
-        } else {
-          dojo = parts[1] || "";
-          danGrade = parts[2] || "";
-        }
-
-        return {
-          id: existing?.id || `${c.id}-p${i + 1}`,
-          name,
-          displayName,
-          dojo,
-          danGrade,
-          seed: existing?.seed || null
-        };
+        return { id: existing?.id || `${c.id}-p${i + 1}`, name, displayName, dojo, danGrade, tag, seed: existing?.seed || null };
       });
       console.log("AdminParticipants: Final list", np);
       onUpdate({ ...c, players: np });
-      alert(`Successfully applied ${np.length} players.`);
+      showToast(`Saved ${np.length} ${c.kind === "team" ? "teams" : "players"}`);
     } catch (err) {
       console.error("AdminParticipants: Apply failed", err);
       alert("Failed to apply participants: " + err.message);
@@ -872,14 +990,9 @@ function AdminParticipants({ c, onUpdate }) {
       const out = [];
       lines.forEach((line, i) => {
         const trimmed = line.trim();
-        if (!trimmed) return;
-        // Detect header row: if first row matches common patterns, skip it
-        if (i === 0 && /name|team|dojo|club/i.test(trimmed)) return;
-
-        // Normalise tabs to commas
-        let processed = trimmed.replace(/\t/g, ", ");
-        // Strip leading row numbers if any (e.g. "1, Name, Dojo")
-        processed = processed.replace(/^\d+,\s*/, "");
+        if (!trimmed || looksLikeHeader(trimmed, i)) return;
+        // Normalise tabs to commas, strip leading row numbers (e.g. "1, Name, Dojo")
+        const processed = trimmed.replace(/\t/g, ", ").replace(/^\d+,\s*/, "");
         out.push(processed);
       });
       setText(out.join("\n"));
@@ -890,6 +1003,8 @@ function AdminParticipants({ c, onUpdate }) {
   };
 
   return (
+    <>
+    {toast && <div className="toast">{toast}</div>}
     <div className="row" style={{ gridTemplateColumns: "2fr 1fr", alignItems: "start" }}>
       <div className="card">
         <div className="card__head">
@@ -925,6 +1040,55 @@ function AdminParticipants({ c, onUpdate }) {
 
         <LinedTextarea value={text} onChange={(e) => setText(e.target.value)} rows={14} placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Mumeishi" : "Akira Tanaka, Mumeishi"} />
         <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by row order.</div>
+        {otherComps.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            {!showSlotForm ? (
+              <button className="btn btn--sm" onClick={() => setShowSlotForm(true)}>+ Reserved slot</button>
+            ) : (
+              <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Add reserved slot</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div style={{ flex: 2 }}>
+                    <div className="field__label">Source competition</div>
+                    <select className="field__select" value={slotSrcComp} onChange={e => setSlotSrcComp(e.target.value)}>
+                      <option value="">Select…</option>
+                      {otherComps.map(cc => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="field__label">Rank</div>
+                    <input className="field__input" type="number" min={1} value={slotRank} onChange={e => setSlotRank(+e.target.value)} />
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn btn--sm btn--primary" onClick={addSlot} disabled={!slotSrcComp || slotRank < 1 || slotLoading}>Add</button>
+                    <button className="btn btn--sm" onClick={() => setShowSlotForm(false)}>Cancel</button>
+                  </div>
+                </div>
+                <div className="field__hint">The placeholder participant will be replaced with the real player when the source competition reaches playoffs.</div>
+              </div>
+            )}
+          </div>
+        )}
+        {lines.length > 0 && (() => {
+          const preview = window.parseParticipantLines(lines.slice(0, 3), c.withZekkenName);
+          const cols = c.withZekkenName ? ["Name", "Zekken", "Dojo", "Dan"] : ["Name", "Dojo", "Dan"];
+          return (
+            <div style={{ marginTop: 8, overflowX: "auto" }}>
+              <table className="parse-preview">
+                <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
+                <tbody>{preview.map((p, i) => (
+                  <tr key={i}>
+                    <td className={!p.name ? "cell--missing" : ""}>{p.name || "—"}</td>
+                    {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "—"}</td>}
+                    <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "—"}</td>
+                    <td>{p.danGrade || "—"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+              <div className="field__hint">Preview of first {Math.min(lines.length, 3)} of {lines.length} rows</div>
+            </div>
+          );
+        })()}
       </div>
       <div className="card">
         <div className="card__head">
@@ -933,7 +1097,7 @@ function AdminParticipants({ c, onUpdate }) {
             <div className="card__sub">{players.filter((p) => p.seed).length} of {players.length} seeded</div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn btn--sm" onClick={() => seedFileRef.current?.click()}>Import Seeds CSV</button>
+            <button className="btn btn--sm" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
             <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
             <button className="btn btn--sm" onClick={() => onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })}>Clear all</button>
           </div>
@@ -941,6 +1105,32 @@ function AdminParticipants({ c, onUpdate }) {
         {hasGaps && (
           <div className="alert alert--error" style={{ margin: "0 16px 16px" }}>
             ❌ Seed gap detected: rank {gaps.join(", ")} {gaps.length > 1 ? "are" : "is"} missing. Seeds must be sequential (1, 2, 3…).
+          </div>
+        )}
+        {seedImportResult && (
+          <div style={{ margin: "0 16px 12px" }}>
+            {seedImportResult.updatedCount > 0 && (
+              <div className="alert alert--success" style={{ marginBottom: 6 }}>✔ Imported {seedImportResult.updatedCount} seed{seedImportResult.updatedCount !== 1 ? "s" : ""}.</div>
+            )}
+            {seedImportResult.unmatched.length > 0 && (
+              <div className="alert alert--warn">
+                ⚠ {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
+                <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                  {seedImportResult.unmatched.map(({ name, suggestion }) => (
+                    <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}> — did you mean <em>{suggestion}</em>?</span> : ""}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <button className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => setSeedImportResult(null)}>Dismiss</button>
+          </div>
+        )}
+        {allTags.length > 0 && (
+          <div style={{ padding: "0 16px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
+            {allTags.map(t => (
+              <button key={t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
+            ))}
           </div>
         )}
         {players.length === 0 ? (
@@ -951,39 +1141,268 @@ function AdminParticipants({ c, onUpdate }) {
           </div>
         ) : (
           <div className="seed-list">
-            {players.map((p, i) => (
-              <div key={p.id} className={`seed-row ${p.seed ? "has-seed" : ""}`}>
+            {visiblePlayers.map((p) => {
+              const i = players.indexOf(p);
+              return (
+              <div
+                key={p.id}
+                className={`seed-row ${p.seed ? "has-seed" : ""}`}
+                draggable
+                onDragStart={() => { dragIdxRef.current = i; }}
+                onDragOver={(e) => { e.preventDefault(); }}
+                onDrop={() => { moveSeedRow(dragIdxRef.current, i); dragIdxRef.current = null; }}
+                style={{ cursor: "grab" }}
+              >
+                <span className="seed-row__handle" title="Drag to reorder">⠿</span>
                 <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
-                <div>
-                  <div className="seed-row__name">{p.name}</div>
+                <div style={{ flex: 1 }}>
+                  <div className="seed-row__name">{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                   <div className="seed-row__dojo">{p.dojo}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <button className="btn btn--sm" style={{ padding: "1px 6px", fontSize: 11 }} onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0}>↑</button>
+                  <button className="btn btn--sm" style={{ padding: "1px 6px", fontSize: 11 }} onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1}>↓</button>
                 </div>
                 <input className="seed-row__input" type="number" placeholder="—" value={p.seed || ""} onChange={(e) => updateSeed(i, e.target.value)} />
               </div>
-            ))}
+              );
+            }
+            )}
           </div>
         )}
+      </div>
+    </div>
+    {reservedSlots && reservedSlots.length > 0 && (
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="card__head">
+          <div className="card__title">Reserved slots ({reservedSlots.length})</div>
+        </div>
+        <div className="card__body" style={{ padding: "0 0 8px" }}>
+          {reservedSlots.map(slot => {
+            const srcComp = (tournament?.competitions || []).find(cc => cc.id === slot.sourceCompID);
+            const ready = srcComp && (srcComp.status === "playoffs" || srcComp.status === "completed");
+            return (
+              <div key={slot.id} style={{ display: "flex", alignItems: "center", padding: "8px 16px", gap: 8, borderBottom: "1px solid var(--border)" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>
+                    {srcComp?.name || slot.sourceCompID} — rank {slot.sourceRank}
+                  </div>
+                  <span className={`tag-badge ${ready ? "" : "tag-badge--warn"}`}>
+                    {ready ? "✓ Source ready" : "⚠ Source not yet in playoffs"}
+                  </span>
+                </div>
+                <button className="btn btn--sm btn--danger" onClick={() => removeSlot(slot.id)} title="Remove reserved slot">✕</button>
+              </div>
+            );
+          })}
+          {reservedSlots.some(s => { const src = (tournament?.competitions || []).find(cc => cc.id === s.sourceCompID); return !src || (src.status !== "playoffs" && src.status !== "completed"); }) && (
+            <div className="alert alert--warn" style={{ margin: "12px 16px 4px" }}>
+              ⚠ Some reserved slots cannot be resolved yet. The competition cannot be started until all source competitions have reached playoffs.
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+    </>
+  );
+}
+
+function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMode, password }) {
+  const [files, setFiles] = useStateA([]);
+  const [preview, setPreview] = useStateA(null);
+  const [loading, setLoading] = useStateA(false);
+  const [results, setResults] = useStateA(null);
+  const [error, setError] = useStateA(null);
+  const folderRef = useRefA(null);
+  const filesRef = useRefA(null);
+
+  const collectFiles = (fileList) => {
+    const arr = Array.from(fileList);
+    setFiles(arr);
+    setPreview(null);
+    setResults(null);
+    setError(null);
+
+    // Try to parse manifest client-side for preview (JSON only — YAML needs server).
+    const manifestFile = arr.find(f => f.name === "manifest.yaml" || f.name === "manifest.yml" || f.name === "manifest.json");
+    if (manifestFile && manifestFile.name.endsWith(".json")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const m = JSON.parse(e.target.result);
+          setPreview(m.competitions || []);
+        } catch (_) { setPreview(null); }
+      };
+      reader.readAsText(manifestFile);
+    } else {
+      setPreview(null);
+    }
+  };
+
+  const doImport = async () => {
+    if (!files.length) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      files.forEach(f => fd.append("files", f, f.webkitRelativePath || f.name));
+      const res = await fetch("/api/tournament/import", {
+        method: "POST",
+        headers: { "X-Tournament-Password": password },
+        body: fd,
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body.error || "Import failed");
+      } else {
+        setResults(body.results || []);
+        const hasErrors = (body.results || []).some(r => r.error);
+        if (!hasErrors) {
+          setTimeout(onImported, 1500);
+        }
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const manifestFile = files.find(f => f.name === "manifest.yaml" || f.name === "manifest.yml" || f.name === "manifest.json");
+  const csvFiles = files.filter(f => f.name.endsWith(".csv"));
+
+  return (
+    <div className="app">
+      <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
+      <div className="page">
+        <Breadcrumbs items={[{ label: tournament?.name || "Tournament", onClick: onBack }, { label: "Import competitions" }]} />
+        <h2 style={{ margin: "0 0 16px" }}>Import competitions</h2>
+
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card__title">Select files</div>
+          <div className="card__body">
+            <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 0 }}>
+              Select a folder containing <strong>manifest.yaml</strong> and participant CSV files, or select the files individually.
+              The manifest must list competitions with their CSV file names.
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+              <button className="btn btn--primary" onClick={() => folderRef.current?.click()}>Select folder</button>
+              <button className="btn" onClick={() => filesRef.current?.click()}>Select files individually</button>
+            </div>
+            <input ref={folderRef} type="file" style={{ display: "none" }} webkitdirectory="true" multiple onChange={e => collectFiles(e.target.files)} />
+            <input ref={filesRef} type="file" style={{ display: "none" }} multiple accept=".yaml,.yml,.json,.csv,.txt" onChange={e => collectFiles(e.target.files)} />
+
+            {files.length > 0 && (
+              <div>
+                <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 6 }}>
+                  {files.length} file{files.length !== 1 ? "s" : ""} selected
+                  {manifestFile ? <span className="tag-badge">✓ manifest found: {manifestFile.name}</span> : <span className="tag-badge tag-badge--warn">⚠ no manifest.yaml found</span>}
+                  {csvFiles.length > 0 && <span style={{ marginLeft: 6, fontSize: 12 }}>· {csvFiles.length} CSV file{csvFiles.length !== 1 ? "s" : ""}</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {preview && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card__title">Preview ({preview.length} competitions)</div>
+            <div className="card__body">
+              <table className="parse-preview" style={{ width: "100%" }}>
+                <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Participants file</th><th>Seeds file</th></tr></thead>
+                <tbody>
+                  {preview.map(comp => (
+                    <tr key={comp.id || comp.name}>
+                      <td>{comp.id || "—"}</td>
+                      <td>{comp.name || "—"}</td>
+                      <td>{comp.format || "pools"}</td>
+                      <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || "—"}</td>
+                      <td>{comp.seeds || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
+
+        {results && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card__title">Import results</div>
+            <div className="card__body">
+              {results.map(r => (
+                <div key={r.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center" }}>
+                  <div style={{ flex: 1 }}>
+                    <strong>{r.name || r.id}</strong>
+                    {!r.error && <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 8 }}>{r.participantCount} participants{r.seedCount > 0 ? `, ${r.seedCount} seeds` : ""}</span>}
+                  </div>
+                  {r.error
+                    ? <span className="tag-badge tag-badge--warn">✕ {r.error}</span>
+                    : <span className="tag-badge">✓ imported</span>}
+                </div>
+              ))}
+              {!results.some(r => r.error) && (
+                <div className="alert alert--success" style={{ marginTop: 12 }}>All competitions imported successfully. Returning to dashboard…</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn btn--primary" onClick={doImport} disabled={!manifestFile || loading}>
+            {loading ? "Importing…" : "Import"}
+          </button>
+          <button className="btn" onClick={onBack}>Cancel</button>
+        </div>
       </div>
     </div>
   );
 }
 
 function AdminSettings({ c, tournament, onUpdate }) {
-  const set = (k, v) => onUpdate({ ...c, [k]: v });
+  const [lastSaved, setLastSaved] = useStateA(null);
+  const [saveErr, setSaveErr] = useStateA(null);
+  const debounceRef = useRefA(null);
+
+  // Immediate save for toggles/radio — no debounce.
+  const saveNow = (next) => {
+    Promise.resolve(onUpdate(next)).then(() => {
+      const now = new Date();
+      setLastSaved(`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`);
+      setSaveErr(null);
+    }).catch((e) => setSaveErr(e?.message || "Save failed"));
+  };
+
+  // Debounced save for text/number inputs — fires 400 ms after last keystroke.
+  const saveLater = (next) => {
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => saveNow(next), 400);
+    onUpdate(next); // sync local state immediately so the input stays responsive
+  };
+
+  const set = (k, v) => saveLater({ ...c, [k]: v });
+  const setNow = (k, v) => saveNow({ ...c, [k]: v });
   const toggleCourt = (cc) => {
     const next = c.courts.includes(cc) ? c.courts.filter((x) => x !== cc) : [...c.courts, cc].sort();
-    if (next.length) onUpdate({ ...c, courts: next });
+    if (next.length) saveNow({ ...c, courts: next });
   };
   return (
     <div className="card">
-      <div className="card__head"><div className="card__title">Competition settings</div></div>
+      <div className="card__head">
+        <div className="card__title">Competition settings</div>
+        <div style={{ fontSize: 12, color: saveErr ? "var(--red)" : "var(--ink-3)" }}>
+          {saveErr ? `⚠ ${saveErr}` : lastSaved ? `Saved ${lastSaved}` : ""}
+        </div>
+      </div>
       <div className="row">
-        <div className="field"><label className="field__label">Display name</label><input className="input" value={c.name} onChange={(e) => onUpdate({ ...c, name: e.target.value })} /></div>
-        <div className="field"><label className="field__label">Date</label><input className="input" type="date" value={c.date} onChange={(e) => onUpdate({ ...c, date: e.target.value })} /><div className="field__hint">Format: YYYY-MM-DD</div></div>
-        <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={c.startTime} onChange={(e) => onUpdate({ ...c, startTime: e.target.value })} /></div>
+        <div className="field"><label className="field__label">Display name</label><input className="input" value={c.name} onChange={(e) => set("name", e.target.value)} /></div>
+        <div className="field"><label className="field__label">Date</label><input className="input" type="date" value={c.date} onChange={(e) => set("date", e.target.value)} /><div className="field__hint">Format: YYYY-MM-DD</div></div>
+        <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={c.startTime} onChange={(e) => set("startTime", e.target.value)} /></div>
       </div>
       {c.kind === "team" && (
-        <div className="field"><label className="field__label">Team size</label><input className="input" type="number" min="1" value={c.teamSize} onChange={(e) => onUpdate({ ...c, teamSize: +e.target.value })} /></div>
+        <div className="field"><label className="field__label">Team size</label><input className="input" type="number" min="1" value={c.teamSize} onChange={(e) => set("teamSize", +e.target.value)} /></div>
       )}
       <div className="field">
         <label className="field__label">Assigned shiaijo</label>
@@ -997,14 +1416,14 @@ function AdminSettings({ c, tournament, onUpdate }) {
       {c.format === "pools" && (
         <>
           <div className="field">
-            <label className="field__label">Pool sizing mode</label>
+            <label className="field__label">Pool size is a</label>
             <div className="radio-group">
-              <button className={`radio-pill ${c.poolSizeMode === "max" ? "is-active" : ""}`} onClick={() => set("poolSizeMode", "max")}>Max per pool</button>
-              <button className={`radio-pill ${c.poolSizeMode === "min" ? "is-active" : ""}`} onClick={() => set("poolSizeMode", "min")}>Min per pool</button>
+              <button className={`radio-pill ${c.poolSizeMode === "max" ? "is-active" : ""}`} onClick={() => setNow("poolSizeMode", "max")}>maximum</button>
+              <button className={`radio-pill ${c.poolSizeMode === "min" ? "is-active" : ""}`} onClick={() => setNow("poolSizeMode", "min")}>minimum</button>
             </div>
           </div>
           <div className="row">
-            <div className="field"><label className="field__label">{c.poolSizeMode === "max" ? "Maximum" : "Minimum"} per pool</label><input className="input" type="number" min="3" value={c.poolSize} onChange={(e) => set("poolSize", +e.target.value)} /></div>
+            <div className="field"><label className="field__label">Players per pool</label><input className="input" type="number" min="3" value={c.poolSize} onChange={(e) => set("poolSize", +e.target.value)} /></div>
             <div className="field"><label className="field__label">Winners per pool</label><input className="input" type="number" min="1" value={c.poolWinners} onChange={(e) => set("poolWinners", +e.target.value)} /></div>
           </div>
         </>
@@ -1012,12 +1431,12 @@ function AdminSettings({ c, tournament, onUpdate }) {
       <div className="field">
         <label className="field__label">Match number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
         <input className="input" placeholder="e.g. A" maxLength="3" value={c.numberPrefix || ""} onChange={(e) => set("numberPrefix", e.target.value.substring(0, 3))} style={{ maxWidth: 80 }} />
-        <div className="field__hint">Single letter prefix for match numbers (A1, B1…). Keeps numbers unique across competitions.</div>
+        <div className="field__hint">Single letter prefix for player/match numbers (A1, B1…). Keeps numbers unique across competitions.</div>
       </div>
-      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={c.roundRobin} onChange={(e) => set("roundRobin", e.target.checked)} /> Round-robin in pools</label>
-      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={c.mirror} onChange={(e) => set("mirror", e.target.checked)} /> Mirror sides (White on left)</label>
+      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={c.roundRobin} onChange={(e) => setNow("roundRobin", e.target.checked)} /> Round-robin in pools</label>
+      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={c.mirror} onChange={(e) => setNow("mirror", e.target.checked)} /> Mirror sides (White on left)</label>
       {c.kind === "individual" && (
-        <label className="checkbox"><input type="checkbox" checked={c.withZekkenName} onChange={(e) => set("withZekkenName", e.target.checked)} /> Use Zekken display name</label>
+        <label className="checkbox"><input type="checkbox" checked={c.withZekkenName} onChange={(e) => setNow("withZekkenName", e.target.checked)} /> Use Zekken display name</label>
       )}
     </div>
   );

@@ -51,6 +51,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 	admin.Use(AuthMiddleware(store))
 	{
 		RegisterTournamentHandlers(admin, store, hub)
+		RegisterImportHandlers(admin, store, hub)
 		RegisterCompetitionHandlers(admin, store, eng, hub)
 		RegisterParticipantHandlers(admin, store)
 		RegisterMatchHandlers(admin, store, eng, hub)

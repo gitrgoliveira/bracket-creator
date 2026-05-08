@@ -71,10 +71,7 @@ func TestWriteTreeValue(t *testing.T) {
 
 	// Test 2: Test with matchWinners map (should create formula)
 	matchWinners := map[string]MatchWinner{
-		"Pool A-1st": {
-			sheetName: SheetPoolMatches,
-			cell:      "G10",
-		},
+		"Pool A-1st": {cellCoord: cellCoord{sheetName: SheetPoolMatches, cell: "G10"}},
 	}
 
 	writeTreeValue(f, sheetName, 1, 2, "Pool A-1st", matchWinners)
@@ -254,62 +251,70 @@ func TestAddPoolsToTreeTable(t *testing.T) {
 		name       string
 		poolCount  int
 		playerPer  int
-		setupPools func() []Pool
+		setupPools func() ([]Pool, map[string]cellCoord, map[string]playerCellCoord)
 	}{
 		{
 			name:      "single pool single player",
 			poolCount: 1,
 			playerPer: 1,
-			setupPools: func() []Pool {
-				return []Pool{
+			setupPools: func() ([]Pool, map[string]cellCoord, map[string]playerCellCoord) {
+				pools := []Pool{
 					{
-						sheetName: "Pool1",
-						cell:      "B2",
-						PoolName:  "Pool A",
+						PoolName: "Pool A",
 						Players: []Player{
-							{
-								Name:         "Player 1",
-								PoolPosition: 1,
-								sheetName:    "Pool1",
-								cell:         "B3",
-							},
+							{Name: "Player 1", PoolPosition: 1},
 						},
 					},
 				}
+				poolCoords := map[string]cellCoord{
+					"Pool A": {sheetName: "Pool1", cell: "B2"},
+				}
+				pCoords := map[string]playerCellCoord{
+					"Player 1": {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
+				}
+				return pools, poolCoords, pCoords
 			},
 		},
 		{
 			name:      "multiple pools multiple players",
 			poolCount: 3,
 			playerPer: 3,
-			setupPools: func() []Pool {
+			setupPools: func() ([]Pool, map[string]cellCoord, map[string]playerCellCoord) {
 				pools := []Pool{}
+				poolCoords := map[string]cellCoord{}
+				pCoords := map[string]playerCellCoord{}
 				for i := 1; i <= 3; i++ {
 					players := []Player{}
 					for j := 1; j <= 3; j++ {
-						players = append(players, Player{
-							Name:         "P" + string(rune(64+i)) + string(rune(48+j)),
-							PoolPosition: int64(j),
-							sheetName:    "Pool" + string(rune(64+i)),
-							cell:         "B" + string(rune(48+j*2)),
-						})
+						name := "P" + string(rune(64+i)) + string(rune(48+j))
+						p := Player{Name: name, PoolPosition: int64(j)}
+						players = append(players, p)
+						pCoords[playerCoordKey(p)] = playerCellCoord{
+							cellCoord: cellCoord{
+								sheetName: "Pool" + string(rune(64+i)),
+								cell:      "B" + string(rune(48+j*2)),
+							},
+						}
 					}
+					poolName := "Pool " + string(rune(64+i))
 					pools = append(pools, Pool{
+						PoolName: poolName,
+						Players:  players,
+					})
+					poolCoords[poolName] = cellCoord{
 						sheetName: "Pool" + string(rune(64+i)),
 						cell:      "B" + string(rune(48+i*2)),
-						PoolName:  "Pool " + string(rune(64+i)),
-						Players:   players,
-					})
+					}
 				}
-				return pools
+				return pools, poolCoords, pCoords
 			},
 		},
 		{
 			name:      "empty pools list",
 			poolCount: 0,
 			playerPer: 0,
-			setupPools: func() []Pool {
-				return []Pool{}
+			setupPools: func() ([]Pool, map[string]cellCoord, map[string]playerCellCoord) {
+				return []Pool{}, nil, nil
 			},
 		},
 	}
@@ -322,8 +327,8 @@ func TestAddPoolsToTreeTable(t *testing.T) {
 			sheet := "TreeSheet"
 			f.NewSheet(sheet)
 
-			pools := tt.setupPools()
-			AddPoolsToTree(f, sheet, pools)
+			pools, poolCoords, pCoords := tt.setupPools()
+			AddPoolsToTree(f, sheet, pools, poolCoords, pCoords)
 
 			rows, err := f.GetRows(sheet)
 			if err != nil {
@@ -533,10 +538,7 @@ func TestWriteTreeValueExtended(t *testing.T) {
 			startRow: 10,
 			value:    "Pool B-2nd",
 			matchWinners: map[string]MatchWinner{
-				"Pool B-2nd": {
-					sheetName: "MatchSheet",
-					cell:      "E5",
-				},
+				"Pool B-2nd": {cellCoord: cellCoord{sheetName: "MatchSheet", cell: "E5"}},
 			},
 			validateFunc: func(t *testing.T, f *excelize.File, sheet string, col int, startRow int) {
 				colLetter, _ := excelize.ColumnNumberToName(col + 1)
@@ -596,15 +598,28 @@ func contains(s, substr string) bool {
 // makeTestPool builds a minimal Pool with two players and one match,
 // suitable for PrintPoolMatches tests.
 func makeTestPool(name string) Pool {
-	playerA := &Player{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"}
-	playerB := &Player{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"}
+	playerA := &Player{Name: "Alice"}
+	playerB := &Player{Name: "Bob"}
 	return Pool{
-		PoolName:  name,
-		sheetName: SheetPoolDraw,
-		cell:      "B1",
-		Players:   []Player{*playerA, *playerB},
-		Matches:   []Match{{SideA: playerA, SideB: playerB}},
+		PoolName: name,
+		Players:  []Player{*playerA, *playerB},
+		Matches:  []Match{{SideA: playerA, SideB: playerB}},
 	}
+}
+
+// makeTestPoolCoordMaps builds coord maps for a slice of pools produced by makeTestPool.
+func makeTestPoolCoordMaps(pools []Pool) (map[string]cellCoord, map[string]playerCellCoord) {
+	poolCoords := make(map[string]cellCoord, len(pools))
+	pCoords := make(map[string]playerCellCoord)
+	for i, pool := range pools {
+		poolCoords[pool.PoolName] = cellCoord{sheetName: SheetPoolDraw, cell: fmt.Sprintf("B%d", i+1)}
+		for j, player := range pool.Players {
+			pCoords[playerCoordKey(player)] = playerCellCoord{
+				cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: fmt.Sprintf("A%d", i*2+j+1)},
+			}
+		}
+	}
+	return poolCoords, pCoords
 }
 
 func TestPrintPoolMatchesCourts(t *testing.T) {
@@ -656,8 +671,9 @@ func TestPrintPoolMatchesCourts(t *testing.T) {
 			for i := range pools {
 				pools[i] = makeTestPool(fmt.Sprintf("Pool %c", rune('A'+i)))
 			}
+			poolCoords, pCoords := makeTestPoolCoordMaps(pools)
 
-			matchWinners := PrintPoolMatches(f, pools, 0, 1, tt.numCourts, false)
+			matchWinners := PrintPoolMatches(f, pools, 0, 1, tt.numCourts, false, poolCoords, pCoords)
 
 			// Must have one matchWinner per pool (position 1)
 			if len(matchWinners) != tt.numPools {
@@ -736,11 +752,15 @@ func TestCreateNamesToPrint(t *testing.T) {
 	f.NewSheet(SheetNamesToPrint)
 
 	players := []Player{
-		{Name: "Player1", PoolPosition: 1, sheetName: "Pool1", cell: "B2"},
-		{Name: "Player2", PoolPosition: 2, sheetName: "Pool1", cell: "B3"},
+		{Name: "Player1", PoolPosition: 1},
+		{Name: "Player2", PoolPosition: 2},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}},
+		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesToPrint(f, players, false, 1)
+	CreateNamesToPrint(f, players, false, 1, pCoords)
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -763,16 +783,13 @@ func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
 	f.NewSheet(SheetNamesToPrint)
 
 	players := make([]Player, 8)
+	pCoords := make(map[string]playerCellCoord, 8)
 	for i := range 8 {
-		players[i] = Player{
-			Name:         fmt.Sprintf("Player%d", i+1),
-			PoolPosition: int64(i + 1),
-			sheetName:    "data",
-			cell:         fmt.Sprintf("B%d", i+2),
-		}
+		players[i] = Player{Name: fmt.Sprintf("Player%d", i+1), PoolPosition: int64(i + 1)}
+		pCoords[playerCoordKey(players[i])] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: fmt.Sprintf("B%d", i+2)}}
 	}
 
-	CreateNamesToPrint(f, players, false, 2)
+	CreateNamesToPrint(f, players, false, 2, pCoords)
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)
@@ -796,13 +813,17 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 		{
 			PoolName: "Pool A",
 			Players: []Player{
-				{Name: "Player1", PoolPosition: 1, sheetName: "Pool1", cell: "B2"},
-				{Name: "Player2", PoolPosition: 2, sheetName: "Pool1", cell: "B3"},
+				{Name: "Player1", PoolPosition: 1},
+				{Name: "Player2", PoolPosition: 2},
 			},
 		},
 	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(pools[0].Players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}},
+		playerCoordKey(pools[0].Players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
+	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, 1)
+	CreateNamesWithPoolToPrint(f, pools, false, 1, pCoords)
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -826,24 +847,33 @@ func TestCreateNamesWithPoolToPrint_MultiCourt(t *testing.T) {
 
 	pools := []Pool{
 		{PoolName: "Pool A", Players: []Player{
-			{Name: "P1", PoolPosition: 1, sheetName: "data", cell: "B2"},
-			{Name: "P2", PoolPosition: 2, sheetName: "data", cell: "B3"},
+			{Name: "P1", PoolPosition: 1},
+			{Name: "P2", PoolPosition: 2},
 		}},
 		{PoolName: "Pool B", Players: []Player{
-			{Name: "P3", PoolPosition: 1, sheetName: "data", cell: "B4"},
-			{Name: "P4", PoolPosition: 2, sheetName: "data", cell: "B5"},
+			{Name: "P3", PoolPosition: 1},
+			{Name: "P4", PoolPosition: 2},
 		}},
 		{PoolName: "Pool C", Players: []Player{
-			{Name: "P5", PoolPosition: 1, sheetName: "data", cell: "B6"},
-			{Name: "P6", PoolPosition: 2, sheetName: "data", cell: "B7"},
+			{Name: "P5", PoolPosition: 1},
+			{Name: "P6", PoolPosition: 2},
 		}},
 		{PoolName: "Pool D", Players: []Player{
-			{Name: "P7", PoolPosition: 1, sheetName: "data", cell: "B8"},
-			{Name: "P8", PoolPosition: 2, sheetName: "data", cell: "B9"},
+			{Name: "P7", PoolPosition: 1},
+			{Name: "P8", PoolPosition: 2},
 		}},
 	}
+	allPlayers := make([]Player, 0, 8)
+	for _, pool := range pools {
+		allPlayers = append(allPlayers, pool.Players...)
+	}
+	cells := []string{"B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"}
+	pCoords := make(map[string]playerCellCoord, 8)
+	for i, p := range allPlayers {
+		pCoords[playerCoordKey(p)] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: cells[i]}}
+	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, 2)
+	CreateNamesWithPoolToPrint(f, pools, false, 2, pCoords)
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)

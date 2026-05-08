@@ -1131,8 +1131,8 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 			},
 			pools: false,
 			matchWinners: map[string]MatchWinner{
-				"Winner1": {sheetName: "Sheet1", cell: "A1"},
-				"Winner2": {sheetName: "Sheet1", cell: "A2"},
+				"Winner1": {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A1"}},
+				"Winner2": {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A2"}},
 			},
 			shouldPanic: false,
 		},

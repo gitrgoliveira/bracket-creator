@@ -9,30 +9,38 @@ import (
 func TestPrintPoolMatchesAlignment(t *testing.T) {
 	// Create two pools with different match counts
 	// Pool A: 1 match
-	playerA1 := &Player{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"}
-	playerA2 := &Player{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"}
+	playerA1 := &Player{Name: "Alice"}
+	playerA2 := &Player{Name: "Bob"}
 	poolA := Pool{
-		PoolName:  "Pool A",
-		sheetName: SheetPoolDraw,
-		cell:      "B1",
-		Players:   []Player{*playerA1, *playerA2},
-		Matches:   []Match{{SideA: playerA1, SideB: playerA2}},
+		PoolName: "Pool A",
+		Players:  []Player{*playerA1, *playerA2},
+		Matches:  []Match{{SideA: playerA1, SideB: playerA2}},
 	}
 
 	// Pool B: 3 matches (3 players round robin: A-B, B-C, A-C)
-	playerB1 := &Player{Name: "Charlie", sheetName: SheetPoolDraw, cell: "A3"}
-	playerB2 := &Player{Name: "Dave", sheetName: SheetPoolDraw, cell: "A4"}
-	playerB3 := &Player{Name: "Eve", sheetName: SheetPoolDraw, cell: "A5"}
+	playerB1 := &Player{Name: "Charlie"}
+	playerB2 := &Player{Name: "Dave"}
+	playerB3 := &Player{Name: "Eve"}
 	poolB := Pool{
-		PoolName:  "Pool B",
-		sheetName: SheetPoolDraw,
-		cell:      "B2",
-		Players:   []Player{*playerB1, *playerB2, *playerB3},
+		PoolName: "Pool B",
+		Players:  []Player{*playerB1, *playerB2, *playerB3},
 		Matches: []Match{
 			{SideA: playerB1, SideB: playerB2},
 			{SideA: playerB2, SideB: playerB3},
 			{SideA: playerB1, SideB: playerB3},
 		},
+	}
+
+	poolCoords := map[string]cellCoord{
+		"Pool A": {sheetName: SheetPoolDraw, cell: "B1"},
+		"Pool B": {sheetName: SheetPoolDraw, cell: "B2"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(*playerA1): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
+		playerCoordKey(*playerA2): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
+		playerCoordKey(*playerB1): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A3"}},
+		playerCoordKey(*playerB2): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A4"}},
+		playerCoordKey(*playerB3): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A5"}},
 	}
 
 	t.Run("pool matches vertical alignment", func(t *testing.T) {
@@ -45,7 +53,7 @@ func TestPrintPoolMatchesAlignment(t *testing.T) {
 		pools := []Pool{poolA, poolB}
 		numCourts := 2
 
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false, poolCoords, pCoords)
 		if len(matchWinners) != 2 {
 			t.Errorf("expected 2 matchWinners, got %d", len(matchWinners))
 		}
@@ -63,16 +71,22 @@ func TestPrintPoolMatchesAlignment(t *testing.T) {
 }
 
 func TestPrintPoolMatchesTeamAlignment(t *testing.T) {
-	playerA1 := &Player{Name: "Alice", sheetName: SheetPoolDraw, cell: "A1"}
-	playerA2 := &Player{Name: "Bob", sheetName: SheetPoolDraw, cell: "A2"}
+	playerA1 := &Player{Name: "Alice"}
+	playerA2 := &Player{Name: "Bob"}
 	poolA := Pool{
-		PoolName:  "Pool A",
-		sheetName: SheetPoolDraw,
-		cell:      "B1",
-		Players:   []Player{*playerA1, *playerA2},
-		Matches:   []Match{{SideA: playerA1, SideB: playerA2}},
+		PoolName: "Pool A",
+		Players:  []Player{*playerA1, *playerA2},
+		Matches:  []Match{{SideA: playerA1, SideB: playerA2}},
 	}
 	pools := []Pool{poolA}
+
+	poolCoords := map[string]cellCoord{
+		"Pool A": {sheetName: SheetPoolDraw, cell: "B1"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(*playerA1): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
+		playerCoordKey(*playerA2): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
+	}
 
 	t.Run("team matches vertical alignment", func(t *testing.T) {
 		f := excelize.NewFile()
@@ -81,7 +95,7 @@ func TestPrintPoolMatchesTeamAlignment(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		// teamMatches = 3
-		PrintPoolMatches(f, pools, 3, 1, 1, false)
+		PrintPoolMatches(f, pools, 3, 1, 1, false, poolCoords, pCoords)
 
 		// Header(1) + Match(1+2+3+2+1+2=11) = 12. Result 1 at 13.
 		// Wait, startRow=2. PoolHeader=2. poolRow=3. Match1 starts at 3. Height 9.

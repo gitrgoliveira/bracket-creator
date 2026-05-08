@@ -1,0 +1,221 @@
+package state
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+)
+
+func (s *Store) LoadReservedSlots(compID string) ([]ReservedSlot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loadReservedSlotsLocked(compID)
+}
+
+func (s *Store) SaveReservedSlots(compID string, slots []ReservedSlot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveReservedSlotsLocked(compID, slots)
+}
+
+// loadReservedSlotsLocked reads reserved slots without acquiring the mutex.
+// Caller must hold at least s.mu.RLock.
+func (s *Store) loadReservedSlotsLocked(compID string) ([]ReservedSlot, error) {
+	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "reserved-slots.json"))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ReservedSlot{}, nil
+		}
+		return nil, err
+	}
+	var slots []ReservedSlot
+	if err := json.Unmarshal(data, &slots); err != nil {
+		return nil, err
+	}
+	return slots, nil
+}
+
+// saveReservedSlotsLocked writes reserved slots without acquiring the mutex.
+// Caller must hold s.mu.Lock.
+func (s *Store) saveReservedSlotsLocked(compID string, slots []ReservedSlot) error {
+	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "reserved-slots.json"))
+	data, err := json.MarshalIndent(slots, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+// loadParticipantsLocked reads participants without acquiring the mutex.
+// Caller must hold at least s.mu.RLock. Mirrors LoadParticipants.
+func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]helper.Player, error) {
+	path := filepath.Join(s.folder, "competitions", compID, "participants.csv")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return []helper.Player{}, nil
+	}
+
+	lines, err := helper.ReadEntriesFromFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	hasIDs := len(lines) > 0 && uuidRE.MatchString(strings.TrimSpace(strings.SplitN(lines[0], ",", 2)[0]))
+
+	var ids []string
+	var plainLines []string
+	if hasIDs {
+		for _, line := range lines {
+			id, rest, ok := strings.Cut(line, ",")
+			if !ok {
+				plainLines = append(plainLines, line)
+				ids = append(ids, "")
+				continue
+			}
+			ids = append(ids, strings.TrimSpace(id))
+			plainLines = append(plainLines, rest)
+		}
+	} else {
+		plainLines = lines
+	}
+
+	players, err := helper.CreatePlayers(plainLines, withZekkenName)
+	if err != nil {
+		return nil, err
+	}
+
+	if hasIDs {
+		for i := range players {
+			if i < len(ids) {
+				players[i].ID = ids[i]
+			}
+		}
+	}
+
+	seeds, _ := helper.ParseSeedsFile(filepath.Join(s.folder, "competitions", compID, "seeds.csv"))
+	if len(seeds) > 0 {
+		seedMap := make(map[string]int, len(seeds))
+		for _, sd := range seeds {
+			seedMap[sd.Name] = sd.SeedRank
+		}
+		for i := range players {
+			if seed, ok := seedMap[players[i].Name]; ok {
+				players[i].Seed = seed
+			}
+		}
+	}
+
+	return players, nil
+}
+
+// saveParticipantsLocked writes participants without acquiring the mutex.
+// Caller must hold s.mu.Lock. Mirrors SaveParticipants.
+func (s *Store) saveParticipantsLocked(compID string, players []helper.Player) error {
+	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "participants.csv"))
+	var sb strings.Builder
+	for _, p := range players {
+		id := p.ID
+		if id == "" {
+			id = newParticipantID()
+		}
+		var row string
+		if p.DisplayName != "" && p.DisplayName != p.Name {
+			row = fmt.Sprintf("%s, %s, %s", p.Name, p.DisplayName, p.Dojo)
+		} else {
+			row = fmt.Sprintf("%s, %s", p.Name, p.Dojo)
+		}
+		if p.Tag != "" {
+			row += ", " + p.Tag
+		}
+		sb.WriteString(id + ", " + row + "\n")
+	}
+	return os.WriteFile(path, []byte(sb.String()), 0600)
+}
+
+// AddReservedSlot creates a placeholder participant and a reserved-slot entry
+// linking it to sourceCompID at the given rank.  It returns the new slot.
+func (s *Store) AddReservedSlot(compID string, sourceCompID string, sourceRank int, withZekkenName bool) (*ReservedSlot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	slotID := newParticipantID()
+	partID := newParticipantID()
+
+	placeholder := helper.Player{
+		ID:          partID,
+		Name:        fmt.Sprintf("Reserved: %s rank %d", sourceCompID, sourceRank),
+		DisplayName: fmt.Sprintf("Rsv %s #%d", sourceCompID, sourceRank),
+		Dojo:        "TBD",
+		Tag:         "reserved",
+	}
+
+	players, err := s.loadParticipantsLocked(compID, withZekkenName)
+	if err != nil {
+		return nil, err
+	}
+	players = append(players, placeholder)
+	if err := s.saveParticipantsLocked(compID, players); err != nil {
+		return nil, err
+	}
+
+	slots, err := s.loadReservedSlotsLocked(compID)
+	if err != nil {
+		return nil, err
+	}
+	slot := ReservedSlot{
+		ID:            slotID,
+		ParticipantID: partID,
+		SourceCompID:  sourceCompID,
+		SourceRank:    sourceRank,
+	}
+	slots = append(slots, slot)
+	if err := s.saveReservedSlotsLocked(compID, slots); err != nil {
+		return nil, err
+	}
+
+	return &slot, nil
+}
+
+// RemoveReservedSlot deletes a slot and its placeholder participant.
+func (s *Store) RemoveReservedSlot(compID string, slotID string, withZekkenName bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	slots, err := s.loadReservedSlotsLocked(compID)
+	if err != nil {
+		return err
+	}
+
+	var partID string
+	var remaining []ReservedSlot
+	for _, sl := range slots {
+		if sl.ID == slotID {
+			partID = sl.ParticipantID
+		} else {
+			remaining = append(remaining, sl)
+		}
+	}
+	if partID == "" {
+		return fmt.Errorf("reserved slot %s not found", slotID)
+	}
+
+	if err := s.saveReservedSlotsLocked(compID, remaining); err != nil {
+		return err
+	}
+
+	players, err := s.loadParticipantsLocked(compID, withZekkenName)
+	if err != nil {
+		return err
+	}
+	filtered := make([]helper.Player, 0, len(players))
+	for _, p := range players {
+		if p.ID != partID {
+			filtered = append(filtered, p)
+		}
+	}
+	return s.saveParticipantsLocked(compID, filtered)
+}

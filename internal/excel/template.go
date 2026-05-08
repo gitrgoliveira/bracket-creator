@@ -4,6 +4,7 @@ package excel
 import (
 	"fmt"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	excelize "github.com/xuri/excelize/v2"
 )
 
@@ -15,14 +16,14 @@ func NewFileFromScratch() (*excelize.File, error) {
 	f := excelize.NewFile()
 
 	// excelize.NewFile always creates "Sheet1"; rename it to "data".
-	if err := f.SetSheetName("Sheet1", "data"); err != nil {
+	if err := f.SetSheetName("Sheet1", helper.SheetData); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("renaming Sheet1 to data: %w", err)
 	}
 
 	for _, name := range []string{
-		"Time Estimator", "Pool Draw", "Pool Matches",
-		"Elimination Matches", "Names to Print", "Tree",
+		helper.SheetTimeEstimator, helper.SheetPoolDraw, helper.SheetPoolMatches,
+		helper.SheetEliminationMatches, helper.SheetNamesToPrint, helper.SheetTree,
 	} {
 		if _, err := f.NewSheet(name); err != nil {
 			_ = f.Close()
@@ -38,7 +39,7 @@ func NewFileFromScratch() (*excelize.File, error) {
 	setupTreeSheet(f)
 
 	// Activate the "data" sheet on open.
-	if idx, err := f.GetSheetIndex("data"); err == nil {
+	if idx, err := f.GetSheetIndex(helper.SheetData); err == nil {
 		f.SetActiveSheet(idx)
 	}
 	return f, nil
@@ -70,7 +71,7 @@ func intPtr(i int) *int       { return &i }
 // ---------------------------------------------------------------------------
 
 func setupTimeEstimatorSheet(f *excelize.File) {
-	const s = "Time Estimator"
+	const s = helper.SheetTimeEstimator
 
 	// Column widths
 	logSetupErr("col A", f.SetColWidth(s, "A", "A", 21.83))
@@ -190,7 +191,7 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 // ---------------------------------------------------------------------------
 
 func setupPoolDrawSheet(f *excelize.File) {
-	const s = "Pool Draw"
+	const s = helper.SheetPoolDraw
 
 	// Spacer columns A/C/E/G = 8.83.
 	for _, col := range []string{"A", "C", "E", "G"} {
@@ -241,7 +242,7 @@ func setupPoolDrawSheet(f *excelize.File) {
 // ---------------------------------------------------------------------------
 
 func setupPoolMatchesSheet(f *excelize.File) {
-	const s = "Pool Matches"
+	const s = helper.SheetPoolMatches
 
 	// Column widths from the original template.
 	// The code overrides the columns it actively uses, so these serve as
@@ -263,7 +264,7 @@ func setupPoolMatchesSheet(f *excelize.File) {
 // ---------------------------------------------------------------------------
 
 func setupEliminationMatchesSheet(f *excelize.File) {
-	const s = "Elimination Matches"
+	const s = helper.SheetEliminationMatches
 
 	// Same column structure as Pool Matches.
 	for _, cw := range []struct {
@@ -283,7 +284,7 @@ func setupEliminationMatchesSheet(f *excelize.File) {
 // ---------------------------------------------------------------------------
 
 func setupNamesToPrintSheet(f *excelize.File) {
-	const s = "Names to Print"
+	const s = helper.SheetNamesToPrint
 
 	// Apply column-level default styles so any cell the code doesn't
 	// explicitly restyle still renders at the correct font size.
@@ -304,7 +305,7 @@ func setupNamesToPrintSheet(f *excelize.File) {
 // ---------------------------------------------------------------------------
 
 func setupTreeSheet(f *excelize.File) {
-	const s = "Tree"
+	const s = helper.SheetTree
 
 	// Column widths: A is the wide label column, B is a medium header column,
 	// and C onward are the narrow bracket-line columns.

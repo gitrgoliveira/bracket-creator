@@ -21,8 +21,8 @@ const (
 
 // SSEEvent represents the payload sent to clients
 type SSEEvent struct {
-	Type EventType   `json:"type"`
-	Data interface{} `json:"data"`
+	Type EventType `json:"type"`
+	Data any       `json:"data"`
 }
 
 // Hub manages active SSE connections and broadcasts events
@@ -57,7 +57,7 @@ func (h *Hub) Unsubscribe(ch chan string) {
 }
 
 // Broadcast sends an event to all subscribed clients
-func (h *Hub) Broadcast(eventType EventType, data interface{}) {
+func (h *Hub) Broadcast(eventType EventType, data any) {
 	event := SSEEvent{
 		Type: eventType,
 		Data: data,
@@ -69,12 +69,16 @@ func (h *Hub) Broadcast(eventType EventType, data interface{}) {
 	}
 
 	h.mu.RLock()
-	defer h.mu.RUnlock()
+	clients := make([]chan string, 0, len(h.clients))
 	for ch := range h.clients {
+		clients = append(clients, ch)
+	}
+	h.mu.RUnlock()
+
+	for _, ch := range clients {
 		select {
 		case ch <- string(payload):
 		default:
-			// Client slow, skip or buffer?
 		}
 	}
 }

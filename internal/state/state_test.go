@@ -38,6 +38,21 @@ func TestNewStore_ExistingDirectory(t *testing.T) {
 	assert.Equal(t, dir, store.GetFolder())
 }
 
+func TestNewStore_InitError(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Create a file where a directory should be
+	filePath := filepath.Join(dir, "a-file")
+	err = os.WriteFile(filePath, []byte("not a dir"), 0600)
+	require.NoError(t, err)
+
+	// Try to create store with s.folder pointing to that file (MkdirAll will fail)
+	_, err = NewStore(filePath)
+	assert.Error(t, err)
+}
+
 // --- Tournament YAML ---
 
 func TestStore_TournamentYAML(t *testing.T) {
@@ -108,6 +123,42 @@ func TestStore_TournamentYAML_EmptyCourts(t *testing.T) {
 	assert.Empty(t, loaded.Courts)
 }
 
+func TestStore_TournamentYAML_Fallback(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// Write invalid front matter
+	path := filepath.Join(dir, "tournament.md")
+	err = os.WriteFile(path, []byte("invalid content"), 0600)
+	require.NoError(t, err)
+
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "New Tournament", loaded.Name)
+}
+
+func TestStore_TournamentYAML_MalformedFrontMatter(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// Missing closing ---
+	path := filepath.Join(dir, "tournament.md")
+	err = os.WriteFile(path, []byte("---\nname: Foo\n"), 0600)
+	require.NoError(t, err)
+
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "New Tournament", loaded.Name)
+}
+
 // --- Participants CSV ---
 
 func TestStore_ParticipantsCSV(t *testing.T) {
@@ -137,6 +188,32 @@ func TestStore_ParticipantsCSV(t *testing.T) {
 	require.Len(t, loaded, 2)
 	assert.Equal(t, "Akira Tanaka", loaded[0].Name)
 	assert.Equal(t, "Mumeishi", loaded[0].Dojo)
+}
+
+func TestStore_ParticipantsCSV_MixedIDs(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "mixed"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	// Manually write CSV with mixed UUID/plain lines
+	path := filepath.Join(dir, "competitions", compID, "participants.csv")
+	// Second line has no comma, so it should be treated as plain name with no ID
+	content := "550e8400-e29b-41d4-a716-446655440000, Alice, DojoA\nBob\n"
+	err = os.WriteFile(path, []byte(content), 0600)
+	require.NoError(t, err)
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
+	assert.Empty(t, loaded[1].ID)
+	assert.Equal(t, "Bob", loaded[1].Name)
 }
 
 func TestStore_ParticipantsCSV_WithZekkenName(t *testing.T) {
@@ -624,6 +701,33 @@ func TestStore_Seeds_NotExists(t *testing.T) {
 	loaded, err := store.LoadSeeds("nonexistent")
 	require.NoError(t, err)
 	assert.Empty(t, loaded)
+}
+
+func TestStore_ResetOverrides(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "reset"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	err = store.SaveWinnerOverride(compID, "m1", "Winner")
+	require.NoError(t, err)
+
+	loaded, err := store.LoadOverrides(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, loaded.Winners)
+
+	err = store.ResetOverrides(compID)
+	require.NoError(t, err)
+
+	loaded, err = store.LoadOverrides(compID)
+	require.NoError(t, err)
+	assert.Empty(t, loaded.Winners)
+	assert.Empty(t, loaded.PoolRanks)
 }
 
 // --- Schedule ---

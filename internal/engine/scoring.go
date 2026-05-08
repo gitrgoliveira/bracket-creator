@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -8,35 +9,61 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func (e *Engine) RecordMatchResult(compId string, matchId string, result state.MatchResult) error {
-	// 1. Identify if it's a pool match or bracket match
-	if strings.Contains(matchId, "Pool") {
-		return e.recordPoolMatchResult(compId, matchId, result)
-	}
-	return e.recordBracketMatchResult(compId, matchId, result)
-}
+// errMatchNotFound is returned by withPoolMatch / withBracketMatch when no
+// match with the given ID exists in the respective data store.
+var errMatchNotFound = errors.New("match not found")
 
-func (e *Engine) recordPoolMatchResult(compId string, matchId string, result state.MatchResult) error {
+// withPoolMatch loads pool matches, calls mutate on the one matching matchId,
+// and saves the updated slice.  Returns errMatchNotFound (unwrapped) when the
+// ID is not present so callers can fall through to the bracket store.
+func (e *Engine) withPoolMatch(compId, matchId string, mutate func(*state.MatchResult)) error {
 	results, err := e.store.LoadPoolMatches(compId)
 	if err != nil {
 		return err
 	}
-
-	found := false
-	for i, r := range results {
-		if r.ID == matchId {
-			results[i] = result
-			results[i].ID = matchId
-			found = true
-			break
+	for i := range results {
+		if results[i].ID == matchId {
+			mutate(&results[i])
+			return e.store.SavePoolMatches(compId, results)
 		}
 	}
+	return errMatchNotFound
+}
 
-	if !found {
-		return fmt.Errorf("pool match %s not found", matchId)
+// withBracketMatch loads the bracket, calls mutate on the match matching
+// matchId, and saves the updated bracket.  Returns errMatchNotFound when not
+// present.
+func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.BracketMatch)) error {
+	bracket, err := e.store.LoadBracket(compId)
+	if err != nil {
+		return err
 	}
+	if bracket == nil {
+		return fmt.Errorf("bracket not found for competition %s", compId)
+	}
+	for rIdx := range bracket.Rounds {
+		for mIdx := range bracket.Rounds[rIdx] {
+			if bracket.Rounds[rIdx][mIdx].ID == matchId {
+				mutate(&bracket.Rounds[rIdx][mIdx])
+				return e.store.SaveBracket(compId, bracket)
+			}
+		}
+	}
+	return errMatchNotFound
+}
 
-	return e.store.SavePoolMatches(compId, results)
+func (e *Engine) RecordMatchResult(compId string, matchId string, result state.MatchResult) error {
+	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+		*r = result
+		r.ID = matchId // payload may arrive ID-less
+	})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, errMatchNotFound) {
+		return err
+	}
+	return e.recordBracketMatchResult(compId, matchId, result)
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {
@@ -235,69 +262,20 @@ func formatScore(ippons []string, hansoku int) string {
 }
 
 func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string) error {
-	if strings.Contains(matchId, "Pool") {
-		return e.updatePoolMatchCourt(compId, matchId, newCourt)
+	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+		r.Court = newCourt
+	})
+	if err == nil {
+		return e.GenerateSchedule(compId)
 	}
-	return e.updateBracketMatchCourt(compId, matchId, newCourt)
-}
-
-func (e *Engine) updatePoolMatchCourt(compId string, matchId string, newCourt string) error {
-	results, err := e.store.LoadPoolMatches(compId)
-	if err != nil {
+	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-
-	found := false
-	for i, r := range results {
-		if r.ID == matchId {
-			results[i].Court = newCourt
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return fmt.Errorf("pool match %s not found", matchId)
-	}
-
-	if err := e.store.SavePoolMatches(compId, results); err != nil {
+	if err = e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
+		m.Court = newCourt
+	}); err != nil {
 		return err
 	}
-
-	return e.GenerateSchedule(compId)
-}
-
-func (e *Engine) updateBracketMatchCourt(compId string, matchId string, newCourt string) error {
-	bracket, err := e.store.LoadBracket(compId)
-	if err != nil {
-		return err
-	}
-	if bracket == nil {
-		return fmt.Errorf("bracket not found for competition %s", compId)
-	}
-
-	found := false
-	for rIdx, round := range bracket.Rounds {
-		for mIdx, m := range round {
-			if m.ID == matchId {
-				bracket.Rounds[rIdx][mIdx].Court = newCourt
-				found = true
-				break
-			}
-		}
-		if found {
-			break
-		}
-	}
-
-	if !found {
-		return fmt.Errorf("bracket match %s not found", matchId)
-	}
-
-	if err := e.store.SaveBracket(compId, bracket); err != nil {
-		return err
-	}
-
 	return e.GenerateSchedule(compId)
 }
 
@@ -368,60 +346,16 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 }
 
 func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt string) error {
-	if strings.Contains(matchId, "Pool") {
-		return e.updatePoolMatchTime(compId, matchId, scheduledAt)
+	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+		r.ScheduledAt = scheduledAt
+	})
+	if err == nil {
+		return nil
 	}
-	return e.updateBracketMatchTime(compId, matchId, scheduledAt)
-}
-
-func (e *Engine) updatePoolMatchTime(compId string, matchId string, scheduledAt string) error {
-	results, err := e.store.LoadPoolMatches(compId)
-	if err != nil {
+	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-
-	found := false
-	for i, r := range results {
-		if r.ID == matchId {
-			results[i].ScheduledAt = scheduledAt
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return fmt.Errorf("pool match %s not found", matchId)
-	}
-
-	return e.store.SavePoolMatches(compId, results)
-}
-
-func (e *Engine) updateBracketMatchTime(compId string, matchId string, scheduledAt string) error {
-	bracket, err := e.store.LoadBracket(compId)
-	if err != nil {
-		return err
-	}
-	if bracket == nil {
-		return fmt.Errorf("bracket not found for competition %s", compId)
-	}
-
-	found := false
-	for rIdx, round := range bracket.Rounds {
-		for mIdx, m := range round {
-			if m.ID == matchId {
-				bracket.Rounds[rIdx][mIdx].ScheduledAt = scheduledAt
-				found = true
-				break
-			}
-		}
-		if found {
-			break
-		}
-	}
-
-	if !found {
-		return fmt.Errorf("bracket match %s not found", matchId)
-	}
-
-	return e.store.SaveBracket(compId, bracket)
+	return e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
+		m.ScheduledAt = scheduledAt
+	})
 }

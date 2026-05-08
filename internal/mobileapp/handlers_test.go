@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -38,6 +39,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Admin API
 	admin := r.Group("/api")
 	RegisterTournamentHandlers(admin, store, hub)
+	RegisterImportHandlers(admin, store, hub)
 	RegisterCompetitionHandlers(admin, store, eng, hub)
 	RegisterParticipantHandlers(admin, store)
 	RegisterMatchHandlers(admin, store, eng, hub)
@@ -444,4 +446,47 @@ func TestViewerHandlers(t *testing.T) {
 	req, _ = http.NewRequest("GET", "/api/viewer/competitions/not-exists", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestStartCompetition_BroadcastContract verifies the exact events emitted by
+// POST /competitions/:id/start. Only EventCompetitionStarted is sent; the
+// competition_started handler in app.js already calls load() so a separate
+// EventTournamentUpdated would cause a redundant second reload per viewer.
+func TestStartCompetition_BroadcastContract(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	comp := state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SaveParticipants("c1", []helper.Player{{Name: "P1"}, {Name: "P2"}}))
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/c1/start", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Broadcast is synchronous, so it is already in the buffered channel.
+	receiveEvent := func(d time.Duration) (SSEEvent, bool) {
+		select {
+		case msg := <-ch:
+			var e SSEEvent
+			require.NoError(t, json.Unmarshal([]byte(msg), &e))
+			return e, true
+		case <-time.After(d):
+			return SSEEvent{}, false
+		}
+	}
+
+	event, got := receiveEvent(100 * time.Millisecond)
+	require.True(t, got, "expected EventCompetitionStarted broadcast")
+	assert.Equal(t, EventCompetitionStarted, event.Type)
+	compData, isMap := event.Data.(map[string]any)
+	require.True(t, isMap, "EventCompetitionStarted data must be a map")
+	assert.Equal(t, "c1", compData["competitionId"])
+
+	_, extra := receiveEvent(10 * time.Millisecond)
+	assert.False(t, extra, "start must emit exactly 1 broadcast")
 }

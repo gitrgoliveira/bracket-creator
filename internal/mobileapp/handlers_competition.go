@@ -7,8 +7,39 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// saveCompetitionWithPlayers persists the competition config and, when players
+// are present, saves participants and extracts seed assignments.
+func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) error {
+	if err := store.SaveCompetition(comp); err != nil {
+		return err
+	}
+	if len(comp.Players) == 0 {
+		return nil
+	}
+	if err := store.SaveParticipants(comp.ID, comp.Players); err != nil {
+		return fmt.Errorf("failed to save participants: %w", err)
+	}
+	if assignments := extractSeeds(comp.Players); len(assignments) > 0 {
+		if err := store.SaveSeeds(comp.ID, assignments); err != nil {
+			fmt.Printf("Warning: failed to save seeds: %v\n", err)
+		}
+	}
+	return nil
+}
+
+func extractSeeds(players []helper.Player) []domain.SeedAssignment {
+	var out []domain.SeedAssignment
+	for _, p := range players {
+		if p.Seed > 0 {
+			out = append(out, domain.SeedAssignment{Name: p.Name, SeedRank: p.Seed})
+		}
+	}
+	return out
+}
 
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
 	r.GET("/competitions", func(c *gin.Context) {
@@ -40,33 +71,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if err := store.SaveCompetition(&comp); err != nil {
+		if err := saveCompetitionWithPlayers(&comp, store); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
-		}
-
-		// If players are provided in the request, save them too
-		if len(comp.Players) > 0 {
-			if err := store.SaveParticipants(comp.ID, comp.Players); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
-				return
-			}
-
-			// Also extract and save seeds
-			var assignments []domain.SeedAssignment
-			for _, p := range comp.Players {
-				if p.Seed > 0 {
-					assignments = append(assignments, domain.SeedAssignment{
-						Name:     p.Name,
-						SeedRank: p.Seed,
-					})
-				}
-			}
-			if len(assignments) > 0 {
-				if err := store.SaveSeeds(comp.ID, assignments); err != nil {
-					fmt.Printf("Warning: failed to save seeds: %v\n", err)
-				}
-			}
 		}
 
 		hub.Broadcast(EventTournamentUpdated, nil)
@@ -96,34 +103,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		comp.ID = id // ensure ID matches URL
 
-		if err := store.SaveCompetition(&comp); err != nil {
+		if err := saveCompetitionWithPlayers(&comp, store); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
-		}
-
-		// If players are provided in the request, save them too
-		if len(comp.Players) > 0 {
-			if err := store.SaveParticipants(id, comp.Players); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
-				return
-			}
-
-			// Also extract and save seeds
-			var assignments []domain.SeedAssignment
-			for _, p := range comp.Players {
-				if p.Seed > 0 {
-					assignments = append(assignments, domain.SeedAssignment{
-						Name:     p.Name,
-						SeedRank: p.Seed,
-					})
-				}
-			}
-			if len(assignments) > 0 {
-				if err := store.SaveSeeds(id, assignments); err != nil {
-					// We'll log the error but not fail the whole request as seeds might be incomplete during setup
-					fmt.Printf("Warning: failed to save seeds: %v\n", err)
-				}
-			}
 		}
 
 		hub.Broadcast(EventTournamentUpdated, nil)
@@ -157,6 +139,60 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
+	r.GET("/competitions/:id/reserved-slots", func(c *gin.Context) {
+		id := c.Param("id")
+		slots, err := store.LoadReservedSlots(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, slots)
+	})
+
+	r.POST("/competitions/:id/reserved-slots", func(c *gin.Context) {
+		id := c.Param("id")
+		var req struct {
+			SourceCompID string `json:"sourceCompID"`
+			SourceRank   int    `json:"sourceRank"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if req.SourceCompID == "" || req.SourceRank < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sourceCompID and sourceRank (>= 1) are required"})
+			return
+		}
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		slot, err := store.AddReservedSlot(id, req.SourceCompID, req.SourceRank, comp.WithZekkenName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		hub.Broadcast(EventTournamentUpdated, nil)
+		c.JSON(http.StatusCreated, slot)
+	})
+
+	r.DELETE("/competitions/:id/reserved-slots/:slotID", func(c *gin.Context) {
+		id := c.Param("id")
+		slotID := c.Param("slotID")
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if err := store.RemoveReservedSlot(id, slotID, comp.WithZekkenName); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		hub.Broadcast(EventTournamentUpdated, nil)
+		c.Status(http.StatusNoContent)
+	})
+
 	r.POST("/competitions/:id/start", func(c *gin.Context) {
 		id := c.Param("id")
 		if err := eng.StartCompetition(id); err != nil {
@@ -165,7 +201,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-		hub.Broadcast(EventTournamentUpdated, nil)
 		c.Status(http.StatusOK)
 	})
 

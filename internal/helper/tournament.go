@@ -8,35 +8,42 @@ import (
 	"golang.org/x/text/language"
 )
 
+// cellCoord holds an Excel workbook cell address; used only during workbook
+// generation and never serialised or stored on domain types.
+type cellCoord struct {
+	sheetName string
+	cell      string
+}
+
+// playerCellCoord extends cellCoord with an optional player-number cell.
+type playerCellCoord struct {
+	cellCoord
+	numberCell string // non-empty only when the player has a Number field
+}
+
 type Pool struct {
 	PoolName string   `json:"poolName"`
 	Players  []Player `json:"players"`
 	Matches  []Match  `json:"matches,omitempty"`
-
-	// Excel coordinates
-	sheetName string
-	cell      string
 }
 
 type Player struct {
+	ID          string   `json:"id,omitempty"` // stable UUID assigned at first persist
 	Name        string   `json:"name"`
 	DisplayName string   `json:"displayName"`
 	Dojo        string   `json:"dojo"`
 	Metadata    []string `json:"metadata,omitempty"`
+	Tag         string   `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer", "reserved"
 
 	PoolPosition int64  `json:"-"`
 	Seed         int    `json:"seed"`
 	Number       string `json:"number,omitempty"` // e.g. "K1" — assigned when --number-prefix is set
-
-	// Excel coordinates
-	sheetName  string
-	cell       string
-	numberCell string // e.g. "$D$3" — set when Number is populated
 }
+
+// MatchWinner records the Excel cell that contains a pool or elimination match
+// winner's name; used to build cross-sheet formula references in bracket trees.
 type MatchWinner struct {
-	// Excel coordinates
-	sheetName string
-	cell      string
+	cellCoord
 }
 
 type Match struct {
@@ -81,7 +88,14 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 			}
 			player.Dojo = line[2]
 			if len(line) > 3 {
-				player.Metadata = line[3:]
+				meta := line[3:]
+				if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
+					player.Tag = meta[len(meta)-1]
+					meta = meta[:len(meta)-1]
+				}
+				if len(meta) > 0 {
+					player.Metadata = meta
+				}
 			}
 		} else {
 			// backward compatibility: Name, Dojo
@@ -92,7 +106,14 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 				player.Dojo = line[1]
 			}
 			if len(line) > 2 {
-				player.Metadata = line[2:]
+				meta := line[2:]
+				if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
+					player.Tag = meta[len(meta)-1]
+					meta = meta[:len(meta)-1]
+				}
+				if len(meta) > 0 {
+					player.Metadata = meta
+				}
 			}
 		}
 		key := fmt.Sprintf("%s|%s|%s", player.Name, player.DisplayName, player.Dojo)
@@ -109,6 +130,14 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 	}
 
 	return players, nil
+}
+
+func isParticipantTag(s string) bool {
+	switch strings.ToLower(s) {
+	case "manual", "registered", "transfer", "reserved":
+		return true
+	}
+	return false
 }
 
 func sanitizeName(name string) string {
@@ -372,25 +401,25 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 
 }
 
-func ConvertPlayersToWinners(players []Player, sanitized bool) map[string]MatchWinner {
+// playerCoordKey returns the lookup key for a player in a coord map.
+// It mirrors the composite uniqueness key enforced by CreatePlayers, so two
+// players with the same name but different dojos get distinct entries.
+func playerCoordKey(p Player) string {
+	return p.Name + "|" + p.DisplayName + "|" + p.Dojo
+}
+
+func ConvertPlayersToWinners(players []Player, sanitized bool, pCoords map[string]playerCellCoord) map[string]MatchWinner {
 	matchWinners := make(map[string]MatchWinner, len(players))
-
-	if sanitized {
-		for _, player := range players {
-			matchWinners[player.DisplayName] = MatchWinner{
-				sheetName: player.sheetName,
-				cell:      player.cell,
-			}
+	for _, player := range players {
+		coord, ok := pCoords[playerCoordKey(player)]
+		if !ok {
+			continue
 		}
-
-	} else {
-		for _, player := range players {
-			matchWinners[player.Name] = MatchWinner{
-				sheetName: player.sheetName,
-				cell:      player.cell,
-			}
+		key := player.Name
+		if sanitized && player.DisplayName != "" {
+			key = player.DisplayName
 		}
+		matchWinners[key] = MatchWinner{cellCoord: coord.cellCoord}
 	}
-
 	return matchWinners
 }

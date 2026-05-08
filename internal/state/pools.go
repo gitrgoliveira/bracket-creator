@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -12,10 +11,15 @@ import (
 )
 
 func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "pools.csv"))
+	path := s.compPath(compID, "pools.csv")
+	// #nosec G304
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -76,10 +80,15 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 }
 
 func (s *Store) SavePools(compID string, pools []helper.Pool) error {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "pools.csv"))
+	path := s.compPath(compID, "pools.csv")
+	// #nosec G304
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -105,10 +114,15 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 }
 
 func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "pool-matches.csv"))
+	path := s.compPath(compID, "pool-matches.csv")
+	// #nosec G304
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -166,10 +180,15 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 }
 
 func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "pool-matches.csv"))
+	path := s.compPath(compID, "pool-matches.csv")
+	// #nosec G304
 	f, err := os.Create(path)
 	if err != nil {
 		return err

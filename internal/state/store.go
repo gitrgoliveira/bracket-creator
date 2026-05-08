@@ -48,6 +48,12 @@ func (s *Store) GetFolder() string {
 	return s.folder
 }
 
+// compPath builds and cleans the path to a file inside a competition directory.
+func (s *Store) compPath(compID string, parts ...string) string {
+	segments := append([]string{s.folder, "competitions", compID}, parts...)
+	return filepath.Clean(filepath.Join(segments...))
+}
+
 func ValidateCompetitionID(id string) error {
 	if id == "" {
 		return fmt.Errorf("competition ID cannot be empty")

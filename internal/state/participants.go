@@ -1,31 +1,18 @@
 package state
 
 import (
-	"crypto/rand"
 	"fmt"
 	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
-var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-
-func newParticipantID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
-}
-
 func (s *Store) LoadParticipants(compID string, withZekkenName bool) ([]helper.Player, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := filepath.Join(s.folder, "competitions", compID, "participants.csv")
+	path := s.compPath(compID, "participants.csv")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return []helper.Player{}, nil
 	}
@@ -69,7 +56,7 @@ func (s *Store) LoadParticipants(compID string, withZekkenName bool) ([]helper.P
 	}
 
 	// Merge seeds if they exist.
-	seeds, _ := helper.ParseSeedsFile(filepath.Join(s.folder, "competitions", compID, "seeds.csv"))
+	seeds, _ := helper.ParseSeedsFile(s.compPath(compID, "seeds.csv"))
 	if len(seeds) > 0 {
 		seedMap := make(map[string]int)
 		for _, sd := range seeds {
@@ -89,7 +76,7 @@ func (s *Store) SaveParticipants(compID string, players []helper.Player) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "participants.csv"))
+	path := s.compPath(compID, "participants.csv")
 	var sb strings.Builder
 	for _, p := range players {
 		id := p.ID

@@ -32,6 +32,7 @@ manpages
 bin/
 site/
 square_prep/*
+# !square_prep/lc2026/*
 # Universal and Go added by speckit
 vendor/
 Thumbs.db
@@ -40,6 +41,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.json
+!web-mobile/package.json
+!web-mobile/package-lock.json
+node_modules/
 specs/*
 !specs/openapi.yaml
 .specify

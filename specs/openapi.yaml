@@ -905,10 +905,12 @@ components:
 
     Competition:
       type: object
-      required: [id]
       properties:
         id:
           type: string
+          description: >
+            Unique competition identifier (alphanumeric, hyphens, underscores; max 64 chars).
+            Optional on POST — the server derives a slug from `name` when omitted.
         name:
           type: string
         kind:
@@ -964,6 +966,7 @@ components:
           type: string
         displayName:
           type: string
+          description: Display name shown on the bracket and Zekken. Defaults to a sanitized form of `name` when omitted.
         dojo:
           type: string
         metadata:

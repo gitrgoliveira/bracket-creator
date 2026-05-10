@@ -211,14 +211,33 @@ func TestRouterParseParticipants(t *testing.T) {
 			},
 		},
 		{
-			name: "zekken format missing dojo",
+			name: "zekken format two columns treated as name and dojo",
 			payload: map[string]interface{}{
-				"playerList":     "John Doe,Johnny",
+				"playerList":     "John Doe,Tokyo Dojo",
+				"withZekkenName": true,
+			},
+			expectedStatus: http.StatusOK,
+			expectError:    false,
+			assertions: func(t *testing.T, response map[string]interface{}) {
+				participants, ok := response["participants"].([]interface{})
+				require.True(t, ok)
+				require.Len(t, participants, 1)
+				first, ok := participants[0].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, "John Doe", first["name"])
+				assert.Equal(t, "Tokyo Dojo", first["dojo"])
+				assert.Equal(t, "J. DOE", first["displayName"])
+			},
+		},
+		{
+			name: "zekken format single column is invalid",
+			payload: map[string]interface{}{
+				"playerList":     "John Doe",
 				"withZekkenName": true,
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
-			expectedError:  "expected format 'Name, ZekkenName, Dojo'",
+			expectedError:  "participant validation failed",
 		},
 		{
 			name: "empty player list",

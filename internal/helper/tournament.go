@@ -72,29 +72,39 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		}
 
 		if withZekkenName {
-			// expected at least 3 columns: Name, ZekkenName, Dojo
-			if len(line) < 3 {
-				errors = append(errors, fmt.Sprintf("line %d: invalid entry: expected format 'Name, ZekkenName, Dojo' (got %d column(s))", i+1, len(line)))
-				continue
-			}
-			if line[2] == "" {
-				errors = append(errors, fmt.Sprintf("line %d: missing dojo in column 3; expected format 'Name, ZekkenName, Dojo'", i+1))
+			if len(line) < 2 {
+				errors = append(errors, fmt.Sprintf("entry %d: invalid format: expected at least 'Name, DisplayName, Dojo'", i+1))
 				continue
 			}
 			player.Name = c.String(line[0])
-			player.DisplayName = line[1]
-			if player.DisplayName == "" {
+			if len(line) == 2 {
+				// Tolerate 2-column rows (Name, Dojo) written without a distinct display name.
 				player.DisplayName = sanitizeName(line[0])
-			}
-			player.Dojo = line[2]
-			if len(line) > 3 {
-				meta := line[3:]
-				if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
-					player.Tag = meta[len(meta)-1]
-					meta = meta[:len(meta)-1]
+				player.Dojo = line[1]
+				if player.Dojo == "" {
+					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					continue
 				}
-				if len(meta) > 0 {
-					player.Metadata = meta
+			} else {
+				// 3+ columns: Name, DisplayName, Dojo
+				if line[2] == "" {
+					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					continue
+				}
+				player.DisplayName = line[1]
+				if player.DisplayName == "" {
+					player.DisplayName = sanitizeName(line[0])
+				}
+				player.Dojo = line[2]
+				if len(line) > 3 {
+					meta := line[3:]
+					if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
+						player.Tag = meta[len(meta)-1]
+						meta = meta[:len(meta)-1]
+					}
+					if len(meta) > 0 {
+						player.Metadata = meta
+					}
 				}
 			}
 		} else {
@@ -118,7 +128,7 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		}
 		key := fmt.Sprintf("%s|%s|%s", player.Name, player.DisplayName, player.Dojo)
 		if lineNo, seen := seenNames[key]; seen {
-			errors = append(errors, fmt.Sprintf("line %d: duplicate entry for participant '%s' from '%s' with zekken name '%s' (originally on line %d)", i+1, player.Name, player.Dojo, player.DisplayName, lineNo))
+			errors = append(errors, fmt.Sprintf("entry %d: duplicate participant '%s' from '%s' (display name: '%s', originally at entry %d)", i+1, player.Name, player.Dojo, player.DisplayName, lineNo))
 			continue
 		}
 		seenNames[key] = i + 1
@@ -126,7 +136,7 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 	}
 
 	if len(errors) > 0 {
-		return nil, fmt.Errorf("CSV validation failed:\n%s", strings.Join(errors, "\n"))
+		return nil, fmt.Errorf("participant validation failed:\n%s", strings.Join(errors, "\n"))
 	}
 
 	return players, nil

@@ -69,13 +69,19 @@ func TestCreatePlayersWithoutZekkenName(t *testing.T) {
 	assert.Equal(t, "NA", players[1].Dojo)
 }
 
-func TestCreatePlayersZekkenMissingDojo(t *testing.T) {
+func TestCreatePlayersZekkenTwoColumnFallback(t *testing.T) {
+	// 2-column entries in zekken mode are tolerated: second column becomes the Dojo,
+	// DisplayName is derived from the Name (same as withZekkenName=false behavior).
 	entries := []string{
-		"John Smith, クレスワェル",
+		"John Smith, Tokyo Dojo",
 	}
 
-	_, err := CreatePlayers(entries, true)
-	require.Error(t, err)
+	players, err := CreatePlayers(entries, true)
+	require.NoError(t, err)
+	require.Len(t, players, 1)
+	assert.Equal(t, "John Smith", players[0].Name)
+	assert.Equal(t, "J. SMITH", players[0].DisplayName)
+	assert.Equal(t, "Tokyo Dojo", players[0].Dojo)
 }
 
 func TestCreatePlayersWithMetadata(t *testing.T) {
@@ -121,7 +127,7 @@ func TestCreatePlayersDuplicates(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error for identical entry, got nil")
 	}
-	if !strings.Contains(err.Error(), "duplicate entry for participant 'John Doe'") {
+	if !strings.Contains(err.Error(), "duplicate participant 'John Doe'") {
 		t.Errorf("Unexpected error message: %v", err)
 	}
 
@@ -135,7 +141,7 @@ func TestCreatePlayersDuplicates(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error for identical zekken entry, got nil")
 	}
-	if !strings.Contains(err.Error(), "duplicate entry for participant 'John Doe'") {
+	if !strings.Contains(err.Error(), "duplicate participant 'John Doe'") {
 		t.Errorf("Unexpected error message: %v", err)
 	}
 
@@ -795,18 +801,23 @@ func TestCreatePlayersEdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name:        "zekken mode with only 2 columns",
-			entries:     []string{"John Doe, JD"},
-			withZekken:  true,
-			wantErr:     true,
-			errContains: "invalid entry: expected format 'Name, ZekkenName, Dojo'",
+			name:       "zekken mode with only 2 columns falls back gracefully",
+			entries:    []string{"John Doe, Dojo A"},
+			withZekken: true,
+			wantErr:    false,
+			validate: func(t *testing.T, players []Player) {
+				require.Len(t, players, 1)
+				assert.Equal(t, "John Doe", players[0].Name)
+				assert.Equal(t, "J. DOE", players[0].DisplayName)
+				assert.Equal(t, "Dojo A", players[0].Dojo)
+			},
 		},
 		{
 			name:        "zekken mode with empty dojo",
 			entries:     []string{"John Doe, JD, "},
 			withZekken:  true,
 			wantErr:     true,
-			errContains: "missing dojo in column 3",
+			errContains: "missing dojo",
 		},
 		{
 			name:       "non-zekken mode with single column",
@@ -888,7 +899,7 @@ func TestCreatePlayersEdgeCases(t *testing.T) {
 			entries:     []string{"John Doe, Dojo A", "John Doe, Dojo A", "Jane Smith, JS"},
 			withZekken:  true,
 			wantErr:     true,
-			errContains: "CSV validation failed",
+			errContains: "participant validation failed",
 		},
 	}
 

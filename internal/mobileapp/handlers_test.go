@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,8 +154,19 @@ func TestCompetitionHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// POST /api/competitions (missing ID)
+	// POST /api/competitions (no ID — auto-generated from name)
 	body, _ = json.Marshal(state.Competition{Name: "Missing ID"})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, w.Code)
+	var autoComp state.Competition
+	json.Unmarshal(w.Body.Bytes(), &autoComp)
+	assert.Equal(t, "missing-id", autoComp.ID)
+
+	// POST /api/competitions (no ID, name yields empty slug)
+	body, _ = json.Marshal(state.Competition{Name: "!!!"})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -226,6 +238,41 @@ func TestCompetitionHandlers(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCompetitionsEmptyList(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/competitions", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "[]", strings.TrimSpace(w.Body.String()))
+}
+
+func TestSlugifyID(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"normal name", "London Cup 2026", "london-cup-2026"},
+		{"extra spaces", "  My  Event ", "my-event"},
+		{"special chars", "London Cup (2026)!", "london-cup-2026"},
+		{"all special chars", "!!!", ""},
+		{"empty string", "", ""},
+		{"numeric start", "2026 Cup", "2026-cup"},
+		{"unicode letters stripped", "Tōkyō Cup", "t-ky-cup"},
+		{"long name truncated", strings.Repeat("a", 70), strings.Repeat("a", 64)},
+		{"truncate avoids trailing hyphen", strings.Repeat("a", 63) + "-extra", strings.Repeat("a", 63)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := slugifyID(tt.in)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestParticipantHandlers(t *testing.T) {

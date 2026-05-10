@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -10,6 +11,28 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// slugifyID derives a valid competition ID from a name: lowercase, non-alphanumeric
+// runs become a single hyphen, leading/trailing hyphens stripped, max 64 chars.
+func slugifyID(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var sb strings.Builder
+	prevHyphen := true
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			sb.WriteRune(r)
+			prevHyphen = false
+		} else if !prevHyphen {
+			sb.WriteRune('-')
+			prevHyphen = true
+		}
+	}
+	result := strings.TrimRight(sb.String(), "-")
+	if len(result) > 64 {
+		result = strings.TrimRight(result[:64], "-")
+	}
+	return result
+}
 
 // saveCompetitionWithPlayers persists the competition config and, when players
 // are present, saves participants and extracts seed assignments.
@@ -55,7 +78,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		var comps []*state.Competition
+		comps := make([]*state.Competition, 0)
 		for _, id := range ids {
 			comp, err := store.LoadCompetition(id)
 			if err == nil && comp != nil {
@@ -73,8 +96,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		if comp.ID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "competition ID is required"})
-			return
+			comp.ID = slugifyID(comp.Name)
+			if comp.ID == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "competition ID is required (could not derive one from name)"})
+				return
+			}
 		}
 
 		if _, err := saveCompetitionWithPlayers(&comp, store); err != nil {

@@ -87,3 +87,47 @@ func TestParticipants(t *testing.T) {
 	assert.Empty(t, loadedOldFormat[1].ID) // No UUID
 	assert.Equal(t, "Eve", loadedOldFormat[1].Name)
 }
+
+func TestParticipantsWithZekkenNameRoundTrip(t *testing.T) {
+	// Regression: SaveParticipants writes 2 columns when DisplayName==Name or is empty.
+	// LoadParticipants with withZekkenName=true must tolerate this and not error.
+	dir, err := os.MkdirTemp("", "participants-zekken-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "comp-zekken"
+	err = os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700)
+	require.NoError(t, err)
+
+	// Players where DisplayName is empty (will be omitted by SaveParticipants → 2-col row)
+	playersToSave := []helper.Player{
+		{Name: "Alice Smith", Dojo: "Dojo A"},                         // no DisplayName
+		{Name: "Bob Jones", DisplayName: "Bob Jones", Dojo: "Dojo B"}, // DisplayName == Name
+		{Name: "Carol", DisplayName: "C. CAROL", Dojo: "Dojo C"},      // distinct DisplayName
+	}
+	err = store.SaveParticipants(compID, playersToSave)
+	require.NoError(t, err)
+
+	// Loading with withZekkenName=true must succeed (no "validation failed" error)
+	loaded, err := store.LoadParticipants(compID, true)
+	require.NoError(t, err)
+	require.Len(t, loaded, 3)
+
+	// Alice: 2-col row → DisplayName derived from Name
+	assert.Equal(t, "Alice Smith", loaded[0].Name)
+	assert.NotEmpty(t, loaded[0].DisplayName)
+	assert.Equal(t, "Dojo A", loaded[0].Dojo)
+
+	// Bob: 2-col row (DisplayName == Name) → DisplayName derived from Name
+	assert.Equal(t, "Bob Jones", loaded[1].Name)
+	assert.NotEmpty(t, loaded[1].DisplayName)
+	assert.Equal(t, "Dojo B", loaded[1].Dojo)
+
+	// Carol: 3-col row → DisplayName preserved
+	assert.Equal(t, "Carol", loaded[2].Name)
+	assert.Equal(t, "C. CAROL", loaded[2].DisplayName)
+	assert.Equal(t, "Dojo C", loaded[2].Dojo)
+}

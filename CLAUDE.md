@@ -123,9 +123,6 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 - Web UI changes (`web/index.html`) should be validated in a running browser, not just by reading diffs — use `make run`
 - Mobile app frontend changes (`web-mobile/`) require rebuilding the binary to take effect — the files are embedded at `go build` time via `//go:embed web-mobile/*` in `main.go`. Run `make run-mobile` which rebuilds automatically, or run `make go/build` then restart.
 - Duplicate participant names in the CSV are rejected up front by `helper.CheckDuplicateEntries`; the web handler surfaces these to the user
-- `buildCompetition` in `web-mobile/js/data.js` (line ~190) hard-codes `withZekkenName: false` — it must be destructured from `args` and forwarded or new competitions will ignore the zekken setting chosen in the Add Competition form. Same applies to `numberPrefix`.
-- `POST /api/competitions/:id/participants` (`internal/mobileapp/handlers_participants.go`) is a 501 stub — participant upload goes through the `PUT /api/competitions/:id` body instead.
-- The `Competition` struct (`internal/state/models.go`) does not have a `NumberPrefix` field — the UI exposes one but it has no backend. Add `NumberPrefix string \`yaml:"number_prefix" json:"numberPrefix"\`` before wiring it through.
 
 
 # Validation

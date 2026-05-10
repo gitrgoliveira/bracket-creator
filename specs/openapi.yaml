@@ -265,6 +265,46 @@ paths:
               schema:
                 $ref: '#/components/schemas/Tournament'
 
+  /api/tournament/import:
+    post:
+      tags: [tournament]
+      summary: Import tournament configuration
+      description: |
+        Imports a tournament structure from a set of files (manifest.yaml, participants.csv, etc.)
+        via a multipart form upload.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '200':
+          description: Import result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        name: {type: string}
+                        participantCount: {type: integer}
+                        seedCount: {type: integer}
+                        error: {type: string}
+
   # ── Competitions (Admin, requires auth) ────────────────────────────────────
 
   /api/competitions:
@@ -399,6 +439,67 @@ paths:
       responses:
         '204':
           description: Overrides reset.
+
+  /api/competitions/{id}/reserved-slots:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: Get reserved slots
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: List of reserved slots.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReservedSlot'
+    post:
+      tags: [competitions]
+      summary: Add reserved slot
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceCompID, sourceRank]
+              properties:
+                sourceCompID:
+                  type: string
+                  description: ID of the competition to pull the player from.
+                sourceRank:
+                  type: integer
+                  description: Rank in the source competition (1-based).
+      responses:
+        '201':
+          description: Reserved slot created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservedSlot'
+
+  /api/competitions/{id}/reserved-slots/{slotID}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: slotID
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [competitions]
+      summary: Remove reserved slot
+      security:
+        - TournamentPassword: []
+      responses:
+        '204':
+          description: Reserved slot removed.
 
   /api/competitions/{id}/schedule:
     put:
@@ -845,6 +946,10 @@ components:
           type: boolean
         withZekkenName:
           type: boolean
+        numberPrefix:
+          type: string
+        hasParticipantIDs:
+          type: boolean
         players:
           type: array
           items:
@@ -853,11 +958,19 @@ components:
     Player:
       type: object
       properties:
+        id:
+          type: string
         name:
           type: string
         displayName:
           type: string
         dojo:
+          type: string
+        metadata:
+          type: array
+          items:
+            type: string
+        tag:
           type: string
         seed:
           type: integer
@@ -869,11 +982,19 @@ components:
     Participant:
       type: object
       properties:
+        id:
+          type: string
         name:
           type: string
         displayName:
           type: string
         dojo:
+          type: string
+        metadata:
+          type: array
+          items:
+            type: string
+        tag:
           type: string
 
     SeedAssignment:
@@ -1080,3 +1201,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ScheduleEntry'
+        reservedSlots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservedSlot'
+
+    ReservedSlot:
+      type: object
+      properties:
+        id:
+          type: string
+        participantID:
+          type: string
+        sourceCompID:
+          type: string
+        sourceRank:
+          type: integer

@@ -26,7 +26,7 @@
 - `web/`: Frontend assets for the bracket-generator web UI, embedded via `go:embed`.
 - `web-mobile/`: Preact/JSX frontend for the live tournament mobile app, embedded via `go:embed`. Pre-compiled to `web-mobile/dist/` by esbuild. Key components: `LinedTextarea` (numbered participant input), admin dashboard, live score editor, public viewer.
 - `tests/`: Integration tests for the Web API and CLI.
-- `specs/`: OpenAPI specification (`openapi.yaml`) for the web API.
+- `specs/`: OpenAPI specification (`openapi.yaml`) for the web API, fully synchronized with the backend implementation.
 
 ### Seeding Logic
 - **Playoffs (`StandardSeeding`)**: Uses a power-of-2 bracket distribution (e.g., seeds 1 and 2 on opposite halves). Includes displaced seed placement using a furthest-distance heuristic for out-of-range seeds.

@@ -11,9 +11,9 @@ High-signal instructions for AI agents working in this repository.
 - **Court limit:** A–Z labels mean `--courts` is rejected if greater than 26.
 - **Excel Layout:** Standardized on an **8-column per court** structure. Column A (Red Name) and Column G (White Name/Rank) are set to 30 units wide. Columns B–F and H are 5 units wide.
 - **Pool Spacing:** There is exactly one blank row of space between the end of one pool's ranking summary and the start of the next pool's header.
-- **API Documentation:** The OpenAPI specification for the web API is located in `specs/openapi.yaml`.
+- **API Documentation:** The OpenAPI specification for the web API is located in `specs/openapi.yaml` and is fully synchronized with the backend implementation.
 - **Mobile App (`mobile-app` command):** A live tournament management server serving a Preact/JSX UI from `web-mobile/`. State is file-backed: `tournament-data/tournament.md` (YAML) and `tournament-data/competitions/<id>/config.md` + `participants.csv`. Backend in `internal/mobileapp/` (Gin handlers) and `internal/state/` (store). Real-time updates via SSE. Admin actions require `X-Tournament-Password` header. Run with `make run-mobile`.
-- **Known mobile-app gaps:** `Competition` struct (`internal/state/models.go`) has no `NumberPrefix` field despite the UI exposing one. `buildCompetition` in `web-mobile/js/data.js` hard-codes `withZekkenName: false`. `POST /api/competitions/:id/participants` is a 501 stub — participants arrive via the competition PUT body.
+- **Live Updates:** Real-time updates via SSE. Admin actions require `X-Tournament-Password` header. Run with `make run-mobile`.
 - **Pool Scoring Rules:**
     - **Individual:** 1. Fights Won, 2. Fights Lost, 3. Hikiwake, 4. Points Scored, 5. Points Lost.
     - **Team:** 1. Team W, 2. Team L, 3. Team T, 4. Individual Winners (IV), 5. Individual Losses (IL), 6. Individual Ties (IT), 7. Points Won (PW), 8. Points Lost (PL).

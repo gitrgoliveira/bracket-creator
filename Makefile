@@ -167,8 +167,17 @@ run-mobile: go/build ## Run the mobile-app locally (use TOURNAMENT_DATA_DIR to o
 	@mkdir -p $(TOURNAMENT_DATA_DIR)
 	$(BIN_PATH)/$(BIN_NAME) mobile-app --folder $(TOURNAMENT_DATA_DIR)
 
-setup-lc2026: ## Setup London Cup 2026 tournament using mobile app API
-	@python3 scripts/setup_tournament.py
+example-mobile-app: go/build ## Setup London Cup style tournament using mobile app API
+	@echo "Starting temporary mobile app server..."
+	@rm -rf ./demo-data && mkdir -p ./demo-data
+	@$(BIN_PATH)/$(BIN_NAME) mobile-app --folder ./demo-data & \
+	PID=$$!; \
+	python3 scripts/setup_tournament.py; \
+	EXIT_CODE=$$?; \
+	echo "Terminating server (PID: $$PID)..."; \
+	kill $$PID; \
+	exit $$EXIT_CODE
+
 goreleaser/test: ## Test the goreleaser configuration locally
 	@echo "Testing goreleaser configuration..."
 	goreleaser --snapshot --skip=publish --clean

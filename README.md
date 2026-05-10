@@ -137,7 +137,7 @@ export PORT=8080
 ### CLI Parameters to create Pools
 Example command line to create pools with 5 players and 3 winners per pool:
 ```bash
-bracket-creator create-pools -z -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-example.xlsx
+bracket-creator create-pools -z -p 5 -w 3 -f ./test-data/mock_data_medium.csv -o ./pools-example.xlsx
 ```
 
 * `-d` / `-determined` - Do not shuffle the names read from the input file
@@ -159,7 +159,7 @@ bracket-creator create-pools -z -p 5 -w 3 -f ./mock_data_medium.csv -o ./pools-e
 ### CLI Parameters to create Playoffs
 Example command line to create team playoffs with 5 players per team:
 ```bash
-bracket-creator create-playoffs -t 5 -f ./mock_data_small.csv -o ./playoffs-example.xlsx
+bracket-creator create-playoffs -t 5 -f ./test-data/mock_data_small.csv -o ./playoffs-example.xlsx
 ```
 
 * `-d` / `-determined` - Do not shuffle the names read from the input file
@@ -191,7 +191,7 @@ Rank,Name
 Then pass it to the command with `--seeds`:
 
 ```bash
-bracket-creator create-playoffs -f ./players.csv -o ./playoffs.xlsx --seeds ./winners.csv
+bracket-creator create-playoffs -f ./test-data/players.csv -o ./playoffs.xlsx --seeds ./test-data/winners.csv
 ```
 
 **Important rules:**

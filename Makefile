@@ -115,18 +115,18 @@ examples: go/build ## Build locally and create example files
 	@echo "Cleaning previous examples..."
 	rm -f pools-example-*.xlsx playoffs-example-*.xlsx
 	@echo "Building examples..."
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./mock_data_small.csv -o ./pools-example-small.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -t 5 -f ./mock_data_small.csv -o ./playoffs-example-small.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./mock_data_medium_zekken.csv -o ./pools-example-medium.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./mock_data_medium_zekken.csv -o ./playoffs-example-medium.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-teams.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-teams-max-size.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./mock_data_large_zekken.csv -o ./pools-example-large-max-size.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./mock_data_large_zekken.csv -o ./playoffs-example-large.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./seeds_medium.csv -f ./mock_data_medium_zekken.csv -o ./pools-example-medium-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./seeds_medium.csv -f ./mock_data_medium_zekken.csv -o ./playoffs-example-medium-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./seeds_large.csv -f ./mock_data_large_zekken.csv -o ./pools-example-large-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./seeds_large.csv -f ./mock_data_large_zekken.csv -o ./playoffs-example-large-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./test-data/mock_data_small.csv -o ./pools-example-small.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -t 5 -f ./test-data/mock_data_small.csv -o ./playoffs-example-small.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./playoffs-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-teams.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-teams-max-size.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-max-size.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./playoffs-example-large.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./playoffs-example-medium-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./playoffs-example-large-seeded.xlsx
 	@echo "Examples successfully created!"
 
 docker/build: ## Build Docker image
@@ -166,6 +166,9 @@ run-mobile: go/build ## Run the mobile-app locally (use TOURNAMENT_DATA_DIR to o
 	@echo "Running $(BIN_NAME) mobile-app using folder $(TOURNAMENT_DATA_DIR)..."
 	@mkdir -p $(TOURNAMENT_DATA_DIR)
 	$(BIN_PATH)/$(BIN_NAME) mobile-app --folder $(TOURNAMENT_DATA_DIR)
+
+setup-lc2026: ## Setup London Cup 2026 tournament using mobile app API
+	@python3 scripts/setup_tournament.py
 goreleaser/test: ## Test the goreleaser configuration locally
 	@echo "Testing goreleaser configuration..."
 	goreleaser --snapshot --skip=publish --clean

@@ -1,5 +1,5 @@
 ---
-name: London Cup 2026
+name: London Cup Demo
 date: "2026-05-10"
 venue: London
 courts:

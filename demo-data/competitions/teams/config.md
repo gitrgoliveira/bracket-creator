@@ -11,8 +11,8 @@ round_robin: true
 courts:
     - A
     - B
-start_time: ""
-date: ""
+start_time: "09:30"
+date: "2026-05-10"
 status: pools
 mirror: false
 with_zekken_name: false

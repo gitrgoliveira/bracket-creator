@@ -1,20 +1,19 @@
 ---
-id: men-3d-and-up
-name: Men 3D and up
+id: 6d-and-up-playoffs
+name: 6D and up - Playoffs
 kind: ""
-format: pools
+format: playoffs
 team_size: 1
-pool_size: 3
+pool_size: 0
 pool_size_mode: ""
-pool_winners: 2
-round_robin: true
+pool_winners: 0
+round_robin: false
 courts:
     - A
     - B
 start_time: ""
 date: ""
-status: pools
+status: playoffs
 mirror: false
 with_zekken_name: true
-number_prefix: E
 ---

@@ -13,22 +13,28 @@ import (
 
 // saveCompetitionWithPlayers persists the competition config and, when players
 // are present, saves participants and extracts seed assignments.
-func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) error {
-	if err := store.SaveCompetition(comp); err != nil {
-		return err
+// Returns (true, nil) when the on-disk content changed, so callers can decide
+// whether to broadcast.
+func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bool, error) {
+	if len(comp.Players) > 0 {
+		comp.HasParticipantIDs = true // participants.csv always written with UUID IDs
+	}
+	changed, err := store.SaveCompetitionChanged(comp)
+	if err != nil {
+		return false, err
 	}
 	if len(comp.Players) == 0 {
-		return nil
+		return changed, nil
 	}
 	if err := store.SaveParticipants(comp.ID, comp.Players); err != nil {
-		return fmt.Errorf("failed to save participants: %w", err)
+		return false, fmt.Errorf("failed to save participants: %w", err)
 	}
 	if assignments := extractSeeds(comp.Players); len(assignments) > 0 {
 		if err := store.SaveSeeds(comp.ID, assignments); err != nil {
 			fmt.Printf("Warning: failed to save seeds: %v\n", err)
 		}
 	}
-	return nil
+	return changed, nil
 }
 
 func extractSeeds(players []helper.Player) []domain.SeedAssignment {
@@ -71,7 +77,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if err := saveCompetitionWithPlayers(&comp, store); err != nil {
+		if _, err := saveCompetitionWithPlayers(&comp, store); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -103,12 +109,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		comp.ID = id // ensure ID matches URL
 
-		if err := saveCompetitionWithPlayers(&comp, store); err != nil {
+		changed, err := saveCompetitionWithPlayers(&comp, store)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		hub.Broadcast(EventTournamentUpdated, nil)
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
 		c.JSON(http.StatusOK, comp)
 	})
 
@@ -230,12 +238,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if err := store.SaveRankOverride(id, poolId, req.PlayerName, req.Rank); err != nil {
+		changed, err := store.SaveRankOverrideChanged(id, poolId, req.PlayerName, req.Rank)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		hub.Broadcast(EventTournamentUpdated, nil)
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
 		c.Status(http.StatusOK)
 	})
 
@@ -247,23 +257,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if err := store.SaveSchedule(id, entries); err != nil {
+		changed, err := store.SaveScheduleChanged(id, entries)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		hub.Broadcast(EventScheduleUpdated, nil)
+		if changed {
+			hub.Broadcast(EventScheduleUpdated, nil)
+		}
 		c.Status(http.StatusOK)
 	})
 
 	r.DELETE("/competitions/:id/overrides", func(c *gin.Context) {
 		id := c.Param("id")
-		if err := store.ResetOverrides(id); err != nil {
+		changed, err := store.ResetOverridesChanged(id)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		hub.Broadcast(EventTournamentUpdated, nil)
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
 		c.Status(http.StatusNoContent)
 	})
 }

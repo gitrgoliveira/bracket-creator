@@ -95,6 +95,26 @@ The workbook is built entirely from code in `internal/excel/template.go` (`NewFi
 - **Assertions**: `testify/assert` for non-fatal, `require` for fatal
 - **Cleanup**: Always use `defer` for temp files, servers, and env vars
 
+## Participant CSV Schema (canonical)
+
+`participants.csv` stores one participant per line. Two formats are supported:
+
+**With UUIDs (new format)** — first field is a UUID v4 (lowercase hex):
+```
+<uuid>, Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
+```
+
+**Without UUIDs (legacy format)** — detected automatically when first field is not a UUID:
+```
+Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
+```
+
+- The zekken/display-name column is only present when `withZekkenName=true` for the competition.
+- `DanGrade` is optional; omit or leave empty.
+- `tag` is the last column when present and must be one of: `manual`, `registered`, `transfer`.
+- Seeds are stored separately in `seeds.csv` and merged at load time — do **not** include seed ranks in `participants.csv`.
+- The Go parser lives in `internal/state/participants.go`; the JS parser in `web-mobile/js/data.js:parseParticipantLines`. Keep both in sync with this schema when changing column layout.
+
 ## Common Pitfalls
 
 - Excel coordinates matter: changing match generation requires updating cell references and formula links across sheets

@@ -1149,7 +1149,7 @@ type nameEntry struct {
 }
 
 func courtSheetName(courtIdx int) string {
-	return fmt.Sprintf("%s %s", SheetNamesToPrint, string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIdx]))
+	return fmt.Sprintf("%s %s", SheetNamesToPrint, CourtLabel(courtIdx))
 }
 
 func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, numCourts int, pCoords map[string]playerCellCoord) {

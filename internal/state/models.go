@@ -13,23 +13,24 @@ type Tournament struct {
 }
 
 type Competition struct {
-	ID             string          `yaml:"id" json:"id"`
-	Name           string          `yaml:"name" json:"name"`
-	Kind           string          `yaml:"kind" json:"kind"`
-	Format         string          `yaml:"format" json:"format"`
-	TeamSize       int             `yaml:"team_size" json:"teamSize"`
-	PoolSize       int             `yaml:"pool_size" json:"poolSize"`
-	PoolSizeMode   string          `yaml:"pool_size_mode" json:"poolSizeMode"`
-	PoolWinners    int             `yaml:"pool_winners" json:"poolWinners"`
-	RoundRobin     bool            `yaml:"round_robin" json:"roundRobin"`
-	Courts         []string        `yaml:"courts" json:"courts"`
-	StartTime      string          `yaml:"start_time" json:"startTime"`
-	Date           string          `yaml:"date" json:"date"`
-	Status         string          `yaml:"status" json:"status"`
-	Mirror         bool            `yaml:"mirror" json:"mirror"`
-	WithZekkenName bool            `yaml:"with_zekken_name" json:"withZekkenName"`
-	NumberPrefix   string          `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
-	Players        []helper.Player `yaml:"-" json:"players"`
+	ID                string          `yaml:"id" json:"id"`
+	Name              string          `yaml:"name" json:"name"`
+	Kind              string          `yaml:"kind" json:"kind"`
+	Format            string          `yaml:"format" json:"format"`
+	TeamSize          int             `yaml:"team_size" json:"teamSize"`
+	PoolSize          int             `yaml:"pool_size" json:"poolSize"`
+	PoolSizeMode      string          `yaml:"pool_size_mode" json:"poolSizeMode"`
+	PoolWinners       int             `yaml:"pool_winners" json:"poolWinners"`
+	RoundRobin        bool            `yaml:"round_robin" json:"roundRobin"`
+	Courts            []string        `yaml:"courts" json:"courts"`
+	StartTime         string          `yaml:"start_time" json:"startTime"`
+	Date              string          `yaml:"date" json:"date"`
+	Status            string          `yaml:"status" json:"status"`
+	Mirror            bool            `yaml:"mirror" json:"mirror"`
+	WithZekkenName    bool            `yaml:"with_zekken_name" json:"withZekkenName"`
+	NumberPrefix      string          `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
+	HasParticipantIDs bool            `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
+	Players           []helper.Player `yaml:"-" json:"players"`
 }
 
 type MatchStatus string

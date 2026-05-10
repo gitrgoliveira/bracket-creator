@@ -35,6 +35,16 @@ function looksLikeHeader(line, idx) {
   return isNaN(parseInt(last)) || parseInt(last) <= 0;
 }
 
+function parsePastedRows(text, transform) {
+  const out = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    const trimmed = line.trim();
+    if (!trimmed || looksLikeHeader(trimmed, i)) return;
+    out.push(transform ? transform(trimmed) : trimmed);
+  });
+  return out;
+}
+
 function Breadcrumbs({ items }) {
   return (
     <div className="crumbs">
@@ -62,15 +72,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
 
   const updateCompetition = async (cid, next) => {
     try {
-      await window.API.updateCompetition(cid, next, password);
-      const [comps, details] = await Promise.all([
-        window.API.fetchCompetitions(),
-        view.kind === "competition" && view.id === cid
-          ? window.API.fetchCompetitionDetails(cid)
-          : Promise.resolve(null),
-      ]);
+      const updated = await window.API.updateCompetition(cid, next, password);
+      // Merge PUT response locally; SSE will reconcile cross-client.
+      const comps = (t.competitions || []).map(c => c.id === cid ? { ...c, ...updated } : c);
       onUpdate({ ...t, competitions: comps });
-      if (details) setAdminCompData(details);
+      if (view.kind === "competition" && view.id === cid) {
+        const details = await window.API.fetchCompetitionDetails(cid);
+        setAdminCompData(details);
+      }
     } catch (e) {
       alert("Failed to update competition: " + e.message);
     }
@@ -143,7 +152,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
     if (view.kind === "competition") {
       const unsub = window.API.subscribeToEvents((event) => {
         if (event.type === "competition_started" || event.type === "match_updated" || event.type === "tournament_updated") {
-          if (!event.data || !event.data.competitionId || view.id === event.data.competitionId) {
+          // tournament_updated carries null data (tournament-wide change) — always
+          // relevant.  match_updated / competition_started carry competitionId —
+          // skip if they belong to a different competition.
+          const relevant = event.type === "tournament_updated"
+            || !event.data?.competitionId
+            || event.data.competitionId === view.id;
+          if (relevant) {
             window.API.fetchCompetitionDetails(view.id).then(setAdminCompData);
           }
         }
@@ -277,34 +292,22 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   );
 }
 
-function StatusBadge({ status }) {
-  const map = {
-    setup: ["badge--setup", "⚙ Setup"],
-    pools: ["badge--pools", "▶ Pools"],
-    playoffs: ["badge--playoffs", "▶ Playoffs"],
-    completed: ["badge--completed", "✔ Completed"],
-  };
-  const [cls, label] = map[status] || ["badge--setup", status];
-  return <span className={`badge ${cls}`}>{label}</span>;
-}
-
-function formatDate(d) {
-  const date = new Date(d + "T00:00");
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
+const StatusBadge = window.StatusBadge;
+const formatDate = window.formatDate;
 
 function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onOpenSchedule, onOpenScoreEditor, onOpenImport, onLogout, onViewerMode }) {
   const t = tournament;
   const comps = t.competitions || [];
 
-  // global stats across all competitions
-  let totalMatches = 0, doneMatches = 0, liveMatches = 0;
-  let totalParticipants = 0;
-  comps.forEach((c) => {
-    totalParticipants += (c.players || []).length;
-    const s = compMatchStats(c);
-    totalMatches += s.total; doneMatches += s.done; liveMatches += s.live;
-  });
+  const { totalMatches, doneMatches, liveMatches, totalParticipants } = useMemoA(() => {
+    let totalMatches = 0, doneMatches = 0, liveMatches = 0, totalParticipants = 0;
+    comps.forEach((c) => {
+      totalParticipants += (c.players || []).length;
+      const s = compMatchStats(c);
+      totalMatches += s.total; doneMatches += s.done; liveMatches += s.live;
+    });
+    return { totalMatches, doneMatches, liveMatches, totalParticipants };
+  }, [comps]);
 
   const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
 
@@ -790,9 +793,17 @@ function LinedTextarea({ value, onChange, rows, placeholder }) {
 
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
-  const d = Array.from({ length: m + 1 }, (_, i) => Array.from({ length: n + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0));
-  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) d[i][j] = a[i-1] === b[j-1] ? d[i-1][j-1] : 1 + Math.min(d[i-1][j], d[i][j-1], d[i-1][j-1]);
-  return d[m][n];
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  const curr = new Array(n + 1);
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++)
+      curr[j] = a[i-1] === b[j-1] ? prev[j-1] : 1 + Math.min(prev[j], curr[j-1], prev[j-1]);
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
 }
 
 function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password }) {
@@ -859,33 +870,27 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-      const raw = e.target.result;
-      const out = [];
-      raw.split(/\r?\n/).forEach((line, i) => {
-        const trimmed = line.trim();
-        if (!trimmed || looksLikeHeader(trimmed, i)) return;
-        out.push(trimmed);
-      });
-      setText(out.join("\n"));
+      setText(parsePastedRows(e.target.result).join("\n"));
     };
     reader.readAsText(file);
   };
 
   const [tagFilter, setTagFilter] = useStateA(null);
-  const lines = text.split("\n").filter((l) => l.trim());
-  const players = c.players || [];
-  const allTags = [...new Set(players.map(p => p.tag).filter(Boolean))];
-  const visiblePlayers = tagFilter ? players.filter(p => p.tag === tagFilter) : players;
-
-  const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
-  const gaps = [];
-  if (sortedSeeds.length > 0) {
-    const maxSeed = sortedSeeds[sortedSeeds.length - 1];
-    for (let s = 1; s <= maxSeed; s++) {
-      if (!sortedSeeds.includes(s)) gaps.push(s);
+  const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
+  const players = useMemoA(() => c.players || [], [c.players]);
+  const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
+  const visiblePlayers = useMemoA(() => tagFilter ? players.filter(p => p.tag === tagFilter) : players, [players, tagFilter]);
+  const { sortedSeeds, gaps, hasGaps } = useMemoA(() => {
+    const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
+    const gaps = [];
+    if (sortedSeeds.length > 0) {
+      const maxSeed = sortedSeeds[sortedSeeds.length - 1];
+      for (let s = 1; s <= maxSeed; s++) {
+        if (!sortedSeeds.includes(s)) gaps.push(s);
+      }
     }
-  }
-  const hasGaps = gaps.length > 0;
+    return { sortedSeeds, gaps, hasGaps: gaps.length > 0 };
+  }, [players]);
 
   const updateSeed = (idx, val) => {
     const np = [...(c.players || [])];
@@ -986,16 +991,8 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
   const pasteFromExcel = async () => {
     try {
       const clipboardText = await navigator.clipboard.readText();
-      const lines = clipboardText.split(/\r?\n/);
-      const out = [];
-      lines.forEach((line, i) => {
-        const trimmed = line.trim();
-        if (!trimmed || looksLikeHeader(trimmed, i)) return;
-        // Normalise tabs to commas, strip leading row numbers (e.g. "1, Name, Dojo")
-        const processed = trimmed.replace(/\t/g, ", ").replace(/^\d+,\s*/, "");
-        out.push(processed);
-      });
-      setText(out.join("\n"));
+      // Normalise tabs to commas, strip leading row numbers (e.g. "1, Name, Dojo")
+      setText(parsePastedRows(clipboardText, (s) => s.replace(/\t/g, ", ").replace(/^\d+,\s*/, "")).join("\n"));
     } catch (err) {
       console.error("Paste failed", err);
       alert("Failed to read clipboard: " + err.message + "\n\nMake sure you have granted clipboard permissions.");
@@ -1522,15 +1519,44 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password }
   );
 }
 
+function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", align = "left" }) {
+  const [open, setOpen] = useStateA(false);
+  const ref = useRefA(null);
+  useEffectA(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        className={btnClassName}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        title="Change shiaijo"
+      >{label}{value} ▾</button>
+      {open && (
+        <div className="court-popover" style={{ [align === "right" ? "right" : "left"]: 0, top: "100%", marginTop: 4 }}>
+          {courts.map((cc) => (
+            <button
+              key={cc}
+              className={cc === value ? "is-current" : ""}
+              onClick={(e) => { e.stopPropagation(); setOpen(false); if (cc !== value) onChange(cc); }}
+            >{cc}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord, onOverride }) {
   const [mode, setMode] = useStateA("tap");
   const [aPoints, setAPoints] = useStateA([]);
   const [bPoints, setBPoints] = useStateA([]);
-  const [courtOpen, setCourtOpen] = useStateA(false);
   useEffectA(() => {
     setAPoints(match.score?.type === "ippon" && match.winner?.id === match.sideA?.id ? match.score.ippons || [] : []);
     setBPoints(match.score?.type === "ippon" && match.winner?.id === match.sideB?.id ? match.score.ippons || [] : []);
-    setCourtOpen(false);
   }, [match.id]);
   const a = match.sideA, b = match.sideB;
   const isComplete = match.status === "completed";
@@ -1538,26 +1564,17 @@ function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord, onOverri
     <div className="live-panel">
       <div className="live-panel__head">
         <div className="live-panel__title">Match · {match.id.slice(-6)}</div>
-        <div className="live-panel__court" style={{ position: "relative" }}>
+        <div className="live-panel__court">
           {onMoveCourt && courts && courts.length ? (
             <>
-              <button
-                className="live-panel__court-btn"
-                onClick={(e) => { e.stopPropagation(); setCourtOpen((o) => !o); }}
-                title="Change shiaijo"
-              >SHIAIJO {match.court} ▾</button>
+              <CourtPicker
+                value={match.court}
+                courts={courts}
+                onChange={(cc) => onMoveCourt(compId, match.id, cc)}
+                btnClassName="live-panel__court-btn"
+                label="SHIAIJO "
+              />
               <span> · {match.scheduledAt || "TBA"}</span>
-              {courtOpen && (
-                <div className="court-popover" style={{ left: 0, top: "100%", marginTop: 4 }}>
-                  {courts.map((cc) => (
-                    <button
-                      key={cc}
-                      className={cc === match.court ? "is-current" : ""}
-                      onClick={(e) => { e.stopPropagation(); setCourtOpen(false); if (cc !== match.court) onMoveCourt(compId, match.id, cc); }}
-                    >{cc}</button>
-                  ))}
-                </div>
-              )}
             </>
           ) : (
             <span>SHIAIJO {match.court} · {match.scheduledAt || "TBA"}</span>
@@ -1739,11 +1756,6 @@ function timeToMinutes(t) {
   if (isNaN(h) || isNaN(m)) return null;
   return h * 60 + m;
 }
-function minutesToTime(mins) {
-  const h = Math.floor(mins / 60) % 24;
-  const m = mins % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
 
 function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password }) {
   const [picked, setPicked] = useStateA([]);
@@ -1816,7 +1828,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
       for (const [ct, list] of Object.entries(byCt)) {
         let cursor = timeToMinutes(autoStart) || 540;
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
-          await window.API.updateMatchTime(m.compId, m.id, minutesToTime(cursor), password);
+          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", cursor), password);
           cursor += matchDuration;
         }
       }
@@ -1933,7 +1945,6 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
 }
 
 function AdminTWMatch({ m, highlight, courts, onMove, onTimeChange }) {
-  const [popoverOpen, setPopoverOpen] = useStateA(false);
   const [editingTime, setEditingTime] = useStateA(false);
   const [timeVal, setTimeVal] = useStateA(m.scheduledAt || "");
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
@@ -1995,21 +2006,14 @@ function AdminTWMatch({ m, highlight, courts, onMove, onTimeChange }) {
           <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision)}</div>
         )}
         {m.status === "running" && <span className="bc-live">●</span>}
-        <button
-          className="tw-match__court-btn"
-          onClick={(e) => { e.stopPropagation(); setPopoverOpen((o) => !o); }}
-        >Shiaijo {m.court} ▾</button>
-        {popoverOpen && (
-          <div className="court-popover" style={{ right: 0, top: "100%", marginTop: 4 }}>
-            {courts.map((cc) => (
-              <button
-                key={cc}
-                className={cc === m.court ? "is-current" : ""}
-                onClick={(e) => { e.stopPropagation(); setPopoverOpen(false); if (cc !== m.court) onMove(cc); }}
-              >{cc}</button>
-            ))}
-          </div>
-        )}
+        <CourtPicker
+          value={m.court}
+          courts={courts}
+          onChange={onMove}
+          btnClassName="tw-match__court-btn"
+          label="Shiaijo "
+          align="right"
+        />
       </div>
     </div>
   );
@@ -2038,36 +2042,16 @@ function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, on
 }
 
 function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
-  const [open, setOpen] = useStateA(false);
-  const ref = window.React.useRef(null);
-  window.React.useEffect(() => {
-    if (!open) return;
-    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
   if (!onMoveCourt || !courts.length) {
     return <div className="score-edit-row__court">{m.court}</div>;
   }
   return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        className="score-edit-row__court score-edit-row__court--btn"
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        title="Change shiaijo"
-      >{m.court} ▾</button>
-      {open && (
-        <div className="court-popover" style={{ left: 0, top: "100%", marginTop: 4 }}>
-          {courts.map((cc) => (
-            <button
-              key={cc}
-              className={cc === m.court ? "is-current" : ""}
-              onClick={(e) => { e.stopPropagation(); setOpen(false); if (cc !== m.court) onMoveCourt(m.compId, m.id, cc); }}
-            >{cc}</button>
-          ))}
-        </div>
-      )}
-    </div>
+    <CourtPicker
+      value={m.court}
+      courts={courts}
+      onChange={(cc) => onMoveCourt(m.compId, m.id, cc)}
+      btnClassName="score-edit-row__court score-edit-row__court--btn"
+    />
   );
 }
 
@@ -2226,38 +2210,30 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
   };
 
   const submit = () => {
-    let patch = {};
-    if (resultType === "ippon") {
-      const aLetters = aPts.filter((x) => x !== "•");
-      const bLetters = bPts.filter((x) => x !== "•");
-      const aAll = [...aLetters, ...Array(aHansokuPts).fill("H")];
-      const bAll = [...bLetters, ...Array(bHansokuPts).fill("H")];
-      const aFinal = aAll.slice(0, 2);
-      const bFinal = bAll.slice(0, 2);
-      const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-      const fouls = { a: aFouls, b: bFouls };
-      if (!winnerSide) {
-        patch = { winner: null, ipponsA: aFinal, ipponsB: bFinal, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
-      } else {
+    const fouls = { a: aFouls, b: bFouls };
+    const patchBuilders = {
+      scheduled: () => ({ winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [] }),
+      running: () => ({
+        status: "running", winner: null,
+        ipponsA: aPts.filter((x) => x !== "•"), ipponsB: bPts.filter((x) => x !== "•"),
+        score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete, note },
+      }),
+      ippon: () => {
+        const aLetters = aPts.filter((x) => x !== "•");
+        const bLetters = bPts.filter((x) => x !== "•");
+        const aFinal = [...aLetters, ...Array(aHansokuPts).fill("H")].slice(0, 2);
+        const bFinal = [...bLetters, ...Array(bHansokuPts).fill("H")].slice(0, 2);
+        const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
+        if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
         const winner = winnerSide === "a" ? m.sideA : m.sideB;
-        const winPts = winnerSide === "a" ? aFinal.length : bFinal.length;
-        const losePts = winnerSide === "a" ? bFinal.length : aFinal.length;
         const ippons = winnerSide === "a" ? aFinal : bFinal;
-        patch = { winner, ipponsA: aFinal, ipponsB: bFinal, status: "completed", score: { type: "ippon", winnerPts: winPts, loserPts: losePts, ippons, fouls, corrected: isComplete, note } };
-      }
-    } else if (resultType === "hantei") {
-      const winner = hanteiSide === "a" ? m.sideA : m.sideB;
-      patch = { winner, ipponsA: [], ipponsB: [], status: "completed", score: { type: "hantei", winnerPts: 0, loserPts: 0, fouls: { a: aFouls, b: bFouls }, corrected: isComplete, note } };
-    } else if (resultType === "hikiwake") {
-      patch = { winner: null, ipponsA: [], ipponsB: [], status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls: { a: aFouls, b: bFouls }, corrected: isComplete, note } };
-    }
-    if (statusVal === "running") {
-      patch = { ...patch, status: "running", winner: null, ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"), score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls: { a: aFouls, b: bFouls }, live: true, corrected: isComplete, note } };
-    }
-    if (statusVal === "scheduled") {
-      patch = { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [] };
-    }
-    onSubmit(patch);
+        return { winner, ipponsA: aFinal, ipponsB: bFinal, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete, note } };
+      },
+      hantei: () => ({ winner: hanteiSide === "a" ? m.sideA : m.sideB, ipponsA: [], ipponsB: [], status: "completed", score: { type: "hantei", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } }),
+      hikiwake: () => ({ winner: null, ipponsA: [], ipponsB: [], status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } }),
+    };
+    const key = statusVal === "scheduled" ? "scheduled" : statusVal === "running" ? "running" : resultType;
+    onSubmit(patchBuilders[key]?.() || {});
   };
 
   return (

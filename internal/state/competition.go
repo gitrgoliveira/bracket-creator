@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,8 +33,8 @@ func (s *Store) LoadCompetition(id string) (*Competition, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", id, "config.md"))
-	data, err := os.ReadFile(path)
+	path := s.compPath(id, "config.md")
+	data, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -49,26 +50,37 @@ func (s *Store) LoadCompetition(id string) (*Competition, error) {
 	return &c, nil
 }
 
-func (s *Store) SaveCompetition(c *Competition) error {
+// SaveCompetitionChanged persists c and reports whether the on-disk content
+// actually changed. Use this instead of SaveCompetition when you need to gate
+// a broadcast on a real mutation.
+func (s *Store) SaveCompetitionChanged(c *Competition) (bool, error) {
 	if err := ValidateCompetitionID(c.ID); err != nil {
-		return fmt.Errorf("invalid competition ID: %w", err)
+		return false, fmt.Errorf("invalid competition ID: %w", err)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	dir := filepath.Clean(filepath.Join(s.folder, "competitions", c.ID))
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
+	if err := os.MkdirAll(s.compPath(c.ID), 0700); err != nil {
+		return false, err
 	}
 
-	path := filepath.Clean(filepath.Join(dir, "config.md"))
-	data, err := writeFrontMatter(c)
+	path := s.compPath(c.ID, "config.md")
+	newData, err := writeFrontMatter(c)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, newData) { // #nosec G304
+		return false, nil
+	}
+
+	return true, os.WriteFile(path, newData, 0600)
+}
+
+func (s *Store) SaveCompetition(c *Competition) error {
+	_, err := s.SaveCompetitionChanged(c)
+	return err
 }
 
 func (s *Store) DeleteCompetition(id string) error {
@@ -79,6 +91,5 @@ func (s *Store) DeleteCompetition(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	dir := filepath.Join(s.folder, "competitions", id)
-	return os.RemoveAll(dir)
+	return os.RemoveAll(s.compPath(id))
 }

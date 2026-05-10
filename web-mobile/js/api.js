@@ -82,10 +82,8 @@ function normalizeMatch(m, playerMap) {
 function buildPlayerMap(comp) {
     const map = {};
     const add = (p) => {
-        const name = p.name || p.Name;
-        const dojo = p.dojo || p.Dojo || "";
-        const seed = p.seed || p.Seed || 0;
-        if (name) map[name] = { id: name, name, dojo, seed };
+        const norm = normalizePlayer(p);
+        if (norm.name) map[norm.name] = { id: norm.name, name: norm.name, dojo: norm.dojo || "", seed: norm.seed ?? 0 };
     };
     if (comp?.config?.players) comp.config.players.forEach(add);
     if (comp?.players) comp.players.forEach(add);
@@ -104,22 +102,25 @@ function normalizePlayer(p) {
     return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "" };
 }
 
-// Normalize an entire competition detail response from the viewer API
+// Normalize an entire competition detail response from the viewer API.
+// Returns a new object; the input is not mutated.
 function normalizeCompetitionDetail(data) {
     if (!data) return data;
 
+    const result = { ...data };
+
     // Normalize config.players (Go uses PascalCase, JS expects camelCase)
-    if (data.config && data.config.players) {
-        data.config.players = data.config.players.map(p => {
+    if (result.config && result.config.players) {
+        result.config = { ...result.config, players: result.config.players.map(p => {
             const norm = normalizePlayer(p);
             // Preserve id and seed null (normalizePlayer maps Seed:0 → seed:0, but JS uses null for "not seeded")
             return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
-        });
+        })};
     }
 
     // Normalize pools (Go: PoolName, Players → poolName, players)
-    if (data.pools) {
-        data.pools = data.pools.map(p => ({
+    if (result.pools) {
+        result.pools = result.pools.map(p => ({
             poolName: p.PoolName || p.poolName || "",
             players: (p.Players || p.players || []).map(normalizePlayer),
             matches: p.Matches || p.matches || [],
@@ -127,26 +128,28 @@ function normalizeCompetitionDetail(data) {
     }
 
     // Normalize standings player field
-    if (data.standings) {
-        for (const key of Object.keys(data.standings)) {
-            data.standings[key] = data.standings[key].map(s => ({
+    if (result.standings) {
+        const standings = {};
+        for (const key of Object.keys(result.standings)) {
+            standings[key] = result.standings[key].map(s => ({
                 ...s,
                 player: normalizePlayer(s.player),
             }));
         }
+        result.standings = standings;
     }
 
-    const playerMap = buildPlayerMap(data);
+    const playerMap = buildPlayerMap(result);
 
-    if (data.poolMatches) {
-        data.poolMatches = data.poolMatches.map(m => normalizeMatch(m, playerMap));
+    if (result.poolMatches) {
+        result.poolMatches = result.poolMatches.map(m => normalizeMatch(m, playerMap));
     }
-    if (data.bracket && data.bracket.rounds) {
-        data.bracket.rounds = data.bracket.rounds.map(round =>
+    if (result.bracket && result.bracket.rounds) {
+        result.bracket = { ...result.bracket, rounds: result.bracket.rounds.map(round =>
             round.map(m => normalizeMatch(m, playerMap))
-        );
+        )};
     }
-    return data;
+    return result;
 }
 
 const API = {

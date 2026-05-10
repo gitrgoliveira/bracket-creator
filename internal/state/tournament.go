@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,21 +37,29 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 	return &t, nil
 }
 
-func (s *Store) SaveTournament(t *Tournament) error {
+// SaveTournamentChanged persists t and reports whether the on-disk content
+// actually changed. Use this instead of SaveTournament when you need to gate
+// a broadcast on a real mutation.
+func (s *Store) SaveTournamentChanged(t *Tournament) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.saveTournamentNoLock(t)
-}
-
-func (s *Store) saveTournamentNoLock(t *Tournament) error {
 	path := filepath.Clean(filepath.Join(s.folder, "tournament.md"))
-	data, err := writeFrontMatter(t)
+	newData, err := writeFrontMatter(t)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, newData) { // #nosec G304
+		return false, nil
+	}
+
+	return true, os.WriteFile(path, newData, 0600)
+}
+
+func (s *Store) SaveTournament(t *Tournament) error {
+	_, err := s.SaveTournamentChanged(t)
+	return err
 }
 
 func parseFrontMatter(data []byte, v interface{}) error {

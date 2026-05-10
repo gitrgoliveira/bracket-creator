@@ -182,7 +182,7 @@ func TestReadEntriesFromFile(t *testing.T) {
 			setupFile:   false,
 			filePath:    "nonexistent.txt",
 			wantErr:     true,
-			errContains: "does not exist",
+			errContains: "no such file or directory",
 		},
 		{
 			name:        "directory traversal attempt with relative path",

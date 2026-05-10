@@ -21,6 +21,10 @@ const FIRST_F = ['Cersei', 'Daenerys', 'Emily', 'Hermione', 'Jane', 'Katniss', '
 const LAST = ['Adams', 'Allen', 'Anderson', 'Asimov', 'Austen', 'Baelish', 'Baggins', 'Blake', 'Bradbury', 'Bronte', 'Carroll', 'Clark', 'Conan', 'Defoe', 'Dick', 'Dickens', 'Dostoevsky', 'Dumbledore', 'Evans', 'Everdeen', 'Gamgee', 'Granger', 'Green', 'Greenleaf', 'Hall', 'Hardy', 'Harris', 'Hawthorne', 'Herbert', 'Hernandez', 'Hill', 'Jackson', 'K Dick', 'K Le Guin', 'King', 'Lannister', 'Lee', 'Lewis', 'Longbottom', 'Lopez', 'Martel', 'Martin', 'Martinez', 'Melville', 'Montoya', 'Moore', 'Orwell', 'Plath', 'Quirrell', 'Rodriguez', 'Scott', 'Shakespeare', 'Shelley', 'Snow', 'Stark', 'Stoker', 'Targaryen', 'Taylor', 'Thomas', 'Thompson', 'Vonnegut', 'Walker', 'Weasley', 'White', 'Wilde', 'Wilson', 'Wonka', 'Woolf', 'Wright', 'Xhoan Daxos', 'Young', 'the Grey'];
 
 
+function assignCourt(matchIdx, courts) {
+  return courts[matchIdx % courts.length];
+}
+
 function makePlayer(i, gender, prefix, seed) {
   const first = (gender === "F" ? FIRST_F : FIRST_M);
   const fn = first[i % first.length];
@@ -57,13 +61,13 @@ function buildBracket(players, courtsAssigned) {
   const rounds = [];
   let r1 = [];
   for (let i = 0; i < slots.length; i += 2) {
-    r1.push({ id: `m-r1-${i / 2}-${_matchSeq++}`, sideA: slots[i], sideB: slots[i + 1], winner: null, court: courts[Math.floor(i / 2) % courts.length], scheduledAt: null, status: "scheduled", score: null });
+    r1.push({ id: `m-r1-${i / 2}-${_matchSeq++}`, sideA: slots[i], sideB: slots[i + 1], winner: null, court: assignCourt(Math.floor(i / 2), courts), scheduledAt: null, status: "scheduled", score: null });
   }
   rounds.push(r1);
   let prev = r1;
   while (prev.length > 1) {
     const next = [];
-    for (let i = 0; i < prev.length; i += 2) next.push({ id: `m-r${rounds.length + 1}-${i / 2}-${_matchSeq++}`, sideA: null, sideB: null, winner: null, court: courts[Math.floor(i / 2) % courts.length], scheduledAt: null, status: "pending", score: null });
+    for (let i = 0; i < prev.length; i += 2) next.push({ id: `m-r${rounds.length + 1}-${i / 2}-${_matchSeq++}`, sideA: null, sideB: null, winner: null, court: assignCourt(Math.floor(i / 2), courts), scheduledAt: null, status: "pending", score: null });
     rounds.push(next); prev = next;
   }
   return rounds;
@@ -123,7 +127,7 @@ function buildPools(players, opts = {}) {
     numPools = Math.max(1, Math.ceil(players.length / poolSize));
   }
   const pools = [];
-  for (let i = 0; i < numPools; i++) pools.push({ id: `pool-${String.fromCharCode(65 + i)}-${_matchSeq++}`, name: `Pool ${String.fromCharCode(65 + i)}`, court: courts[i % courts.length], players: [], matches: [], standings: [], winnersPerPool });
+  for (let i = 0; i < numPools; i++) pools.push({ id: `pool-${String.fromCharCode(65 + i)}-${_matchSeq++}`, name: `Pool ${String.fromCharCode(65 + i)}`, court: assignCourt(i, courts), players: [], matches: [], standings: [], winnersPerPool });
   // snake distribute by seed so each pool gets a balanced spread
   const sorted = [...players].sort((a, b) => (a.seed || 99) - (b.seed || 99));
   sorted.forEach((p, idx) => {
@@ -173,20 +177,20 @@ function poolWinners(pools) {
 // ---------- Competition ----------
 // kind: "individual" | "team"
 // format: "playoffs" | "pools"  (pools format always implies pools followed by a bracket)
-function buildCompetition(args) {
-  if (!args) { console.error("buildCompetition: args is undefined!"); return null; }
+function buildEmptyCompetition(args) {
+  if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
   const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix } = args;
   console.log("buildCompetition: args", args);
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount, gender) : [];
-  const c = {
+  return {
     id, name, kind, gender, format, status,
     teamSize: teamSize || (kind === "team" ? 5 : 0),
     poolSize: poolSize || 3,
     poolSizeMode: poolMode || "max",
     poolWinners: winnersPerPool || 2,
-    roundRobin: true, 
-    mirror: true, 
+    roundRobin: true,
+    mirror: true,
     withZekkenName: withZekkenName || false,
     numberPrefix: numberPrefix || "",
     courts: courts || ["A", "B"],
@@ -195,34 +199,39 @@ function buildCompetition(args) {
     startTime: startTime || "09:00",
     date: date || "",
   };
-  if (status === "setup") return c;
-  
-  console.log("buildCompetition: c before pools/bracket", c);
+}
 
-  if (format === "pools") {
-    c.pools = buildPools(players, { poolMode: c.poolSizeMode, poolSize: c.poolSize, winnersPerPool: c.poolWinners, courts: c.courts });
-    if (status === "pools") {
+function applyFormat(c) {
+  if (c.status === "setup") return c;
+  console.log("buildCompetition: c before pools/bracket", c);
+  if (c.format === "pools") {
+    c.pools = buildPools(c.players, { poolMode: c.poolSizeMode, poolSize: c.poolSize, winnersPerPool: c.poolWinners, courts: c.courts });
+    if (c.status === "pools") {
       simulatePools(c.pools, 0.6);
       // ALSO build empty bracket scaffold so the playoffs tab is visible/in-progress alongside pools
       // (some federations seed playoffs early; others wait — we show it as TBD).
       const placeholder = c.pools.map((_, i) => ({ id: `tbd-${i}`, name: `TBD`, dojo: "", seed: null }));
       c.bracket = buildBracket(placeholder.slice(0, Math.min(placeholder.length, 8)), c.courts);
-    } else if (status === "playoffs") {
+    } else if (c.status === "playoffs") {
       simulatePools(c.pools, 1);
       c.bracket = buildBracket(poolWinners(c.pools), c.courts); advanceByes(c.bracket);
       simulateRounds(c.bracket, 1, true);
-    } else if (status === "completed") {
+    } else if (c.status === "completed") {
       simulatePools(c.pools, 1);
       c.bracket = buildBracket(poolWinners(c.pools), c.courts); advanceByes(c.bracket);
       simulateRounds(c.bracket, c.bracket.length);
     }
   } else {
-    c.bracket = buildBracket(players, c.courts); advanceByes(c.bracket);
-    if (status === "playoffs") simulateRounds(c.bracket, Math.max(1, Math.floor(c.bracket.length / 2)), true);
-    if (status === "completed") simulateRounds(c.bracket, c.bracket.length);
+    c.bracket = buildBracket(c.players, c.courts); advanceByes(c.bracket);
+    if (c.status === "playoffs") simulateRounds(c.bracket, Math.max(1, Math.floor(c.bracket.length / 2)), true);
+    if (c.status === "completed") simulateRounds(c.bracket, c.bracket.length);
   }
   if (c.bracket && c.bracket[0]) scheduleRound(c.bracket[0], c.startTime, 5, c.courts);
   return c;
+}
+
+function buildCompetition(args) {
+  return applyFormat(buildEmptyCompetition(args));
 }
 
 // ---------- Tournament ----------
@@ -310,8 +319,10 @@ function parseParticipantLines(lines, withZekken) {
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
   buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes,
-  buildPools, simulatePools, computeStandings, poolWinners, buildCompetition,
-  buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines
+  buildPools, simulatePools, computeStandings, poolWinners,
+  buildEmptyCompetition, applyFormat, buildCompetition,
+  buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
+  assignCourt
 };
 
 if (typeof window !== 'undefined') {
@@ -326,4 +337,5 @@ if (typeof window !== 'undefined') {
   window.standardSeedOrder = standardSeedOrder; window.nextPow2 = nextPow2;
   window.poolWinners = poolWinners;
   window.parseParticipantLines = parseParticipantLines;
+  window.addMinutes = addMinutes;
 }

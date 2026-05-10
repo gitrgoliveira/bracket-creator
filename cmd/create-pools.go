@@ -194,7 +194,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	if o.numberPrefix != "" {
 		counter := 1
 		for i := range pools {
-			counter = assignPlayerNumbers(pools[i].Players, o.numberPrefix, counter)
+			counter = helper.AssignPlayerNumbers(pools[i].Players, o.numberPrefix, counter)
 		}
 	}
 
@@ -221,21 +221,13 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	fmt.Printf("There will be %d finalists\n", len(finals))
 
-	maxPlayersPerTree := helper.MaxPlayersPerTree
-	numPages, err := helper.RoundToPowerOf2(float64(len(finals)), float64(maxPlayersPerTree))
-	if err != nil {
-		return err
-	}
-	if numPages < 1 || o.singleTree {
-		numPages = 1
-	}
 	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool exists)
 	if o.courts > numPools {
 		o.courts = numPools
 	}
-	// Ensure enough tree pages for the number of courts
-	if courtPages := helper.NextPow2(o.courts); courtPages > numPages {
-		numPages = courtPages
+	numPages, err := helper.TreePageLayout(len(finals), o.courts, o.singleTree)
+	if err != nil {
+		return err
 	}
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
@@ -274,19 +266,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		fmt.Printf("With tree Depth: %d\n", depth)
 		startRow := helper.TreeTitleRows + 1
 
-		// pagesPerCourt should be >= 1 because numPages >= NextPow2(courts) >= courts,
-		// but SubdivideTree may return fewer subtrees than requested for small
-		// brackets. Guard against the divide-by-zero in that degenerate case
-		// rather than relying on the invariant alone.
-		pagesPerCourt := len(subtrees) / o.courts
-		if pagesPerCourt < 1 {
-			pagesPerCourt = 1
-		}
-		courtIndex := i / pagesPerCourt
-		if courtIndex >= o.courts {
-			courtIndex = o.courts - 1
-		}
-		courtLabel := string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIndex])
+		courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), o.courts, i))
 		helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 
@@ -348,10 +328,7 @@ func poolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (sta
 	if pagesPerCourt < 1 {
 		pagesPerCourt = 1
 	}
-	courtIdx := subtreeIdx / pagesPerCourt
-	if courtIdx >= numCourts {
-		courtIdx = numCourts - 1
-	}
+	courtIdx := helper.SubtreeCourtIndex(numSubtrees, numCourts, subtreeIdx)
 	pageWithinCourt := subtreeIdx % pagesPerCourt
 
 	// Derive court block boundaries from the same assignment used by Pool Matches.

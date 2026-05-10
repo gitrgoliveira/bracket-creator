@@ -37,8 +37,10 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		return nil, err
 	}
 
-	poolMap := make(map[string]*helper.Pool)
-	var poolOrder []string
+	// poolIdx maps pool name → index into pools so we can append players in-place
+	// without a separate order slice or a final copy pass.
+	poolIdx := make(map[string]int)
+	var pools []helper.Pool
 
 	for _, rec := range records {
 		if len(rec) < 2 {
@@ -47,11 +49,11 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		poolName := rec[0]
 		playerName := rec[1]
 
-		p, ok := poolMap[poolName]
+		idx, ok := poolIdx[poolName]
 		if !ok {
-			p = &helper.Pool{PoolName: poolName}
-			poolMap[poolName] = p
-			poolOrder = append(poolOrder, poolName)
+			idx = len(pools)
+			poolIdx[poolName] = idx
+			pools = append(pools, helper.Pool{PoolName: poolName})
 		}
 
 		player := helper.Player{Name: playerName}
@@ -68,12 +70,7 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		if len(rec) > 6 {
 			player.Number = rec[6]
 		}
-		p.Players = append(p.Players, player)
-	}
-
-	var pools []helper.Pool
-	for _, name := range poolOrder {
-		pools = append(pools, *poolMap[name])
+		pools[idx].Players = append(pools[idx].Players, player)
 	}
 
 	return pools, nil

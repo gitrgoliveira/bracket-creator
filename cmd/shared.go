@@ -9,11 +9,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
-// assignPlayerNumbers delegates to helper.AssignPlayerNumbers.
-func assignPlayerNumbers(players []helper.Player, prefix string, start int) int {
-	return helper.AssignPlayerNumbers(players, prefix, start)
-}
-
 // openOutputFile opens (or creates) the file at outputPath for appending and
 // returns the file and a buffered writer over it.  The caller must defer
 // both Close and Flush.

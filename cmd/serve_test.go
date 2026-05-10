@@ -660,3 +660,73 @@ func TestRouterCreateEndpoint_Mirroring(t *testing.T) {
 		})
 	}
 }
+
+func TestRouterCreateEndpoint_DuplicateEntries(t *testing.T) {
+	router := NewRouter()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	writer.WriteField("playerList", "John Doe,Dojo1\nJohn Doe,Dojo1")
+	writer.WriteField("tournamentType", "playoffs")
+	writer.Close()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/create", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var response map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &response)
+	assert.Contains(t, response["error"], "Duplicate participant entries")
+}
+
+func TestRouterParseParticipants_InvalidJSON(t *testing.T) {
+	router := NewRouter()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/parse-participants", strings.NewReader("invalid json"))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestRouterParseParticipants_DuplicateEntries(t *testing.T) {
+	router := NewRouter()
+
+	payload := map[string]interface{}{
+		"playerList": "John Doe,Dojo1\nJohn Doe,Dojo1",
+	}
+	body, _ := json.Marshal(payload)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/parse-participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var response map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &response)
+	assert.Contains(t, response["error"], "Duplicate participant entries")
+}
+
+func TestRouterCreateEndpoint_InvalidIntParams(t *testing.T) {
+	router := NewRouter()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4")
+	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("teamMatches", "invalid")
+	writer.WriteField("courts", "invalid")
+	writer.Close()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/create", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(w, req)
+
+	// Should succeed because invalid ints default to defaults
+	assert.Equal(t, http.StatusOK, w.Code)
+}

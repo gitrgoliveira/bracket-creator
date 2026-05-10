@@ -2,6 +2,8 @@ package engine
 
 import (
 	"fmt"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 func (e *Engine) StartCompetition(id string) error {
@@ -17,7 +19,17 @@ func (e *Engine) StartCompetition(id string) error {
 		return fmt.Errorf("competition %s already started", id)
 	}
 
-	players, err := e.store.LoadParticipants(id, comp.WithZekkenName)
+	// Only pass HasIDs hint when explicitly true; false means unset (let
+	// auto-detect run) to avoid misclassifying UUID-prefixed files.
+	var hasIDsHint *bool
+	if comp.HasParticipantIDs {
+		t := true
+		hasIDsHint = &t
+	}
+	players, err := e.store.LoadParticipantsOpt(id, comp.WithZekkenName, state.LoadParticipantsOpts{
+		WithSeeds: true,
+		HasIDs:    hasIDsHint,
+	})
 	if err != nil {
 		return err
 	}

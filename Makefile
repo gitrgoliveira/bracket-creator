@@ -101,7 +101,7 @@ vendor-frontend:
 esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 	@echo "Pre-compiling JSX files..."
 	@mkdir -p web-mobile/dist
-	npx --yes esbuild web-mobile/js/api.js web-mobile/js/data.js web-mobile/js/bracket.js web-mobile/js/viewer.js web-mobile/js/admin.js web-mobile/js/app.js \
+	npx --yes esbuild web-mobile/js/api.js web-mobile/js/data.js web-mobile/js/bracket.js web-mobile/js/ui.js web-mobile/js/viewer.js web-mobile/js/admin.js web-mobile/js/app.js \
 		--outdir=web-mobile/dist --loader:.js=jsx \
 		--jsx-factory=React.createElement --jsx-fragment=React.Fragment
 

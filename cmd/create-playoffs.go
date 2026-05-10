@@ -139,7 +139,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	}
 
 	if o.numberPrefix != "" {
-		assignPlayerNumbers(players, o.numberPrefix, 1)
+		helper.AssignPlayerNumbers(players, o.numberPrefix, 1)
 	}
 
 	playerCoords := helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
@@ -160,25 +160,17 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	}
 	fmt.Printf("There will be %d finalists\n", len(names))
 
-	maxPlayersPerTree := helper.MaxPlayersPerTree
-	numPages, err := helper.RoundToPowerOf2(float64(len(names)), float64(maxPlayersPerTree))
-	if err != nil {
-		return err
-	}
-	if numPages < 1 || o.singleTree {
-		numPages = 1
-	}
 	// Apply default for courts if unset
 	if o.courts < 1 {
 		o.courts = 2
 	}
-	// Clamp courts to actual number of tree pages
-	if o.courts > numPages {
-		o.courts = numPages
+	// Clamp courts to avoid creating unnecessary tree pages (pre-compute rough page count).
+	if roughPages, _ := helper.RoundToPowerOf2(float64(len(names)), float64(helper.MaxPlayersPerTree)); o.courts > roughPages && roughPages > 0 {
+		o.courts = roughPages
 	}
-	// Ensure enough tree pages for the number of courts
-	if courtPages := helper.NextPow2(o.courts); courtPages > numPages {
-		numPages = courtPages
+	numPages, err := helper.TreePageLayout(len(names), o.courts, o.singleTree)
+	if err != nil {
+		return err
 	}
 	fmt.Printf("Spread across %d tree pages\n", numPages)
 
@@ -210,14 +202,8 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		fmt.Printf("With tree Depth: %d\n", depth)
 		startRow := helper.TreeTitleRows + 1
 		// Group consecutive tree sheets under the same Shiaijo label
-		pagesPerCourt := len(subtrees) / o.courts
-		if pagesPerCourt > 0 {
-			courtIndex := i / pagesPerCourt
-			if courtIndex >= o.courts {
-				courtIndex = o.courts - 1
-			}
-			courtLabel := string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[courtIndex])
-			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
+		if len(subtrees) > 0 {
+			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), o.courts, i)))
 		}
 
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)

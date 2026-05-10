@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -25,8 +24,7 @@ func (s *Store) SaveReservedSlots(compID string, slots []ReservedSlot) error {
 // loadReservedSlotsLocked reads reserved slots without acquiring the mutex.
 // Caller must hold at least s.mu.RLock.
 func (s *Store) loadReservedSlotsLocked(compID string) ([]ReservedSlot, error) {
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "reserved-slots.json"))
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(s.compPath(compID, "reserved-slots.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []ReservedSlot{}, nil
@@ -43,7 +41,7 @@ func (s *Store) loadReservedSlotsLocked(compID string) ([]ReservedSlot, error) {
 // saveReservedSlotsLocked writes reserved slots without acquiring the mutex.
 // Caller must hold s.mu.Lock.
 func (s *Store) saveReservedSlotsLocked(compID string, slots []ReservedSlot) error {
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "reserved-slots.json"))
+	path := s.compPath(compID, "reserved-slots.json")
 	data, err := json.MarshalIndent(slots, "", "  ")
 	if err != nil {
 		return err
@@ -54,7 +52,7 @@ func (s *Store) saveReservedSlotsLocked(compID string, slots []ReservedSlot) err
 // loadParticipantsLocked reads participants without acquiring the mutex.
 // Caller must hold at least s.mu.RLock. Mirrors LoadParticipants.
 func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]helper.Player, error) {
-	path := filepath.Join(s.folder, "competitions", compID, "participants.csv")
+	path := s.compPath(compID, "participants.csv")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return []helper.Player{}, nil
 	}
@@ -64,7 +62,7 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]he
 		return nil, err
 	}
 
-	hasIDs := len(lines) > 0 && uuidRE.MatchString(strings.TrimSpace(strings.SplitN(lines[0], ",", 2)[0]))
+	hasIDs := len(lines) > 0 && uuidRE(strings.TrimSpace(strings.SplitN(lines[0], ",", 2)[0]))
 
 	var ids []string
 	var plainLines []string
@@ -96,7 +94,7 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]he
 		}
 	}
 
-	seeds, _ := helper.ParseSeedsFile(filepath.Join(s.folder, "competitions", compID, "seeds.csv"))
+	seeds, _ := helper.ParseSeedsFile(s.compPath(compID, "seeds.csv"))
 	if len(seeds) > 0 {
 		seedMap := make(map[string]int, len(seeds))
 		for _, sd := range seeds {
@@ -115,7 +113,7 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]he
 // saveParticipantsLocked writes participants without acquiring the mutex.
 // Caller must hold s.mu.Lock. Mirrors SaveParticipants.
 func (s *Store) saveParticipantsLocked(compID string, players []helper.Player) error {
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "participants.csv"))
+	path := s.compPath(compID, "participants.csv")
 	var sb strings.Builder
 	for _, p := range players {
 		id := p.ID

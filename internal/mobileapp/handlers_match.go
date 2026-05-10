@@ -50,8 +50,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			return
 		}
 
-		// Broadcast update
-		hub.Broadcast(EventScheduleUpdated, nil)
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,

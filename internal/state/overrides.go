@@ -1,9 +1,9 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
-	"path/filepath"
 )
 
 type Overrides struct {
@@ -26,8 +26,7 @@ func (s *Store) SaveOverrides(compID string, o *Overrides) error {
 // loadOverridesLocked reads overrides without acquiring the mutex.
 // Caller must hold at least s.mu.RLock.
 func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
-	path := filepath.Join(s.folder, "competitions", compID, "overrides.json")
-	data, err := os.ReadFile(filepath.Clean(path))
+	data, err := os.ReadFile(s.compPath(compID, "overrides.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Overrides{
@@ -53,38 +52,62 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 // saveOverridesLocked writes overrides without acquiring the mutex.
 // Caller must hold s.mu.Lock.
 func (s *Store) saveOverridesLocked(compID string, o *Overrides) error {
-	dir := filepath.Join(s.folder, "competitions", compID)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(s.compPath(compID), 0700); err != nil {
 		return err
 	}
-	path := filepath.Join(dir, "overrides.json")
 	data, err := json.MarshalIndent(o, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Clean(path), data, 0600)
+	return os.WriteFile(s.compPath(compID, "overrides.json"), data, 0600)
+}
+
+// modifyOverridesChanged loads, mutates, and saves overrides under a single
+// write lock, reporting whether the marshalled content changed.
+func (s *Store) modifyOverridesChanged(compID string, fn func(*Overrides)) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o, err := s.loadOverridesLocked(compID)
+	if err != nil {
+		return false, err
+	}
+	// Snapshot before mutation for comparison (compact marshal; indent is cosmetic).
+	before, err := json.Marshal(o)
+	if err != nil {
+		return false, err
+	}
+	fn(o)
+	after, err := json.Marshal(o)
+	if err != nil {
+		return false, err
+	}
+	if bytes.Equal(before, after) {
+		return false, nil
+	}
+	return true, s.saveOverridesLocked(compID, o)
 }
 
 // modifyOverrides loads, mutates, and saves overrides under a single write lock,
 // eliminating the Load(RLock) → mutate → Save(Lock) lost-update window.
 func (s *Store) modifyOverrides(compID string, fn func(*Overrides)) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	o, err := s.loadOverridesLocked(compID)
-	if err != nil {
-		return err
-	}
-	fn(o)
-	return s.saveOverridesLocked(compID, o)
+	_, err := s.modifyOverridesChanged(compID, fn)
+	return err
 }
 
-func (s *Store) SaveRankOverride(compID, poolID, playerName string, rank int) error {
-	return s.modifyOverrides(compID, func(o *Overrides) {
+// SaveRankOverrideChanged saves the rank override and reports whether the
+// overrides file actually changed. Use this to gate broadcasts.
+func (s *Store) SaveRankOverrideChanged(compID, poolID, playerName string, rank int) (bool, error) {
+	return s.modifyOverridesChanged(compID, func(o *Overrides) {
 		if o.PoolRanks[poolID] == nil {
 			o.PoolRanks[poolID] = make(map[string]int)
 		}
 		o.PoolRanks[poolID][playerName] = rank
 	})
+}
+
+func (s *Store) SaveRankOverride(compID, poolID, playerName string, rank int) error {
+	_, err := s.SaveRankOverrideChanged(compID, poolID, playerName, rank)
+	return err
 }
 
 func (s *Store) SaveWinnerOverride(compID, matchID, winnerName string) error {
@@ -93,10 +116,16 @@ func (s *Store) SaveWinnerOverride(compID, matchID, winnerName string) error {
 	})
 }
 
+// ResetOverridesChanged clears all overrides and reports whether the file changed
+// (false when overrides were already empty).
+func (s *Store) ResetOverridesChanged(compID string) (bool, error) {
+	return s.modifyOverridesChanged(compID, func(o *Overrides) {
+		o.PoolRanks = make(map[string]map[string]int)
+		o.Winners = make(map[string]string)
+	})
+}
+
 func (s *Store) ResetOverrides(compID string) error {
-	o := &Overrides{
-		PoolRanks: make(map[string]map[string]int),
-		Winners:   make(map[string]string),
-	}
-	return s.SaveOverrides(compID, o)
+	_, err := s.ResetOverridesChanged(compID)
+	return err
 }

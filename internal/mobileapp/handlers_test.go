@@ -301,6 +301,27 @@ func TestParticipantHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	os.RemoveAll(seedsPath)
+
+	// POST /api/competitions/:id/participants (invalid JSON)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/c1/participants", bytes.NewBufferString(`{invalid`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// POST /api/competitions/:id/participants (not found)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/nonexistent/participants", bytes.NewBufferString(`{"players": []}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// PUT /api/competitions/:id/seeds (invalid JSON)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/c1/seeds", bytes.NewBufferString(`{invalid`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestMatchHandlers(t *testing.T) {
@@ -446,6 +467,17 @@ func TestViewerHandlers(t *testing.T) {
 	req, _ = http.NewRequest("GET", "/api/viewer/competitions/not-exists", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// GET /api/viewer/competitions (load error)
+	// We already have c1 and c2. Let's make c1/config.md unreadable.
+	path := filepath.Join(tempDir, "competitions", "c1", "config.md")
+	os.Remove(path)
+	os.MkdirAll(path, 0755)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/viewer/competitions/c1", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	os.RemoveAll(path)
 }
 
 // TestStartCompetition_BroadcastContract verifies the exact events emitted by

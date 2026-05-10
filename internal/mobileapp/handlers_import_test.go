@@ -190,6 +190,50 @@ competitions:
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp["results"][0].Error, "not found in upload")
 	})
+
+	t.Run("Import Error - Missing ID", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - name: "Missing ID"
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+
+		var resp map[string][]ImportResult
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.Equal(t, "missing id", resp["results"][0].Error)
+	})
+
+	t.Run("Import Error - Participants Parse Error", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "comp-bad-part"
+    participants: "bad.csv"
+`))
+		playersPart, _ := writer.CreateFormFile("files", "bad.csv")
+		// Duplicate names trigger a validation error in helper.CreatePlayers
+		playersPart.Write([]byte("Player A,Dojo A\nPlayer A,Dojo A"))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+
+		var resp map[string][]ImportResult
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.Contains(t, resp["results"][0].Error, "parse participants")
+	})
 }
 
 func TestParseSeedsBytes(t *testing.T) {

@@ -1,9 +1,9 @@
 package state
 
 import (
+	"bytes"
 	"encoding/csv"
 	"os"
-	"path/filepath"
 )
 
 type ScheduleEntry struct {
@@ -21,8 +21,8 @@ func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "schedule.csv"))
-	f, err := os.Open(path)
+	path := s.compPath(compID, "schedule.csv")
+	f, err := os.Open(path) // #nosec G304 — path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []ScheduleEntry{}, nil
@@ -66,45 +66,54 @@ func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
 	return schedule, nil
 }
 
-func (s *Store) SaveSchedule(compID string, entries []ScheduleEntry) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "schedule.csv"))
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	writer := csv.NewWriter(f)
-	if err := writer.Write([]string{"MatchType", "MatchRef", "Court", "ScheduledAt", "Status", "Date", "IsBreak", "Label"}); err != nil {
-		return err
-	}
-
+func serializeSchedule(entries []ScheduleEntry) ([]byte, error) {
 	isBreakStr := func(b bool) string {
 		if b {
 			return "true"
 		}
 		return ""
 	}
-
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.Write([]string{"MatchType", "MatchRef", "Court", "ScheduledAt", "Status", "Date", "IsBreak", "Label"}); err != nil {
+		return nil, err
+	}
 	for _, e := range entries {
-		if err := writer.Write([]string{
-			e.MatchType,
-			e.MatchRef,
-			e.Court,
-			e.ScheduledAt,
-			e.Status,
-			e.Date,
-			isBreakStr(e.IsBreak),
-			e.Label,
+		if err := w.Write([]string{
+			e.MatchType, e.MatchRef, e.Court, e.ScheduledAt, e.Status,
+			e.Date, isBreakStr(e.IsBreak), e.Label,
 		}); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	writer.Flush()
-	return writer.Error()
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// SaveScheduleChanged persists entries and reports whether the on-disk content
+// actually changed. Use this instead of SaveSchedule when you need to gate a
+// broadcast on a real mutation.
+func (s *Store) SaveScheduleChanged(compID string, entries []ScheduleEntry) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := s.compPath(compID, "schedule.csv")
+	newData, err := serializeSchedule(entries)
+	if err != nil {
+		return false, err
+	}
+
+	if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, newData) { // #nosec G304
+		return false, nil
+	}
+
+	return true, os.WriteFile(path, newData, 0600)
+}
+
+func (s *Store) SaveSchedule(compID string, entries []ScheduleEntry) error {
+	_, err := s.SaveScheduleChanged(compID, entries)
+	return err
 }

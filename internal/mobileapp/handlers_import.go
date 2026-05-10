@@ -1,6 +1,8 @@
 package mobileapp
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -62,6 +64,8 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
 		}
 
 		// Build a map of filename → file contents from all uploaded files.
+		// Store by the original (possibly path-prefixed) filename only; findFile
+		// handles base-name fallback so we don't need to double-index.
 		fileMap := make(map[string][]byte)
 		for _, headers := range form.File {
 			for _, fh := range headers {
@@ -70,12 +74,7 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
 					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("cannot read %s: %v", fh.Filename, err)})
 					return
 				}
-				// Index by both full name and base name (after last slash) to handle
-				// folder paths that browsers include with webkitdirectory.
 				fileMap[fh.Filename] = data
-				if base := baseName(fh.Filename); base != fh.Filename {
-					fileMap[base] = data
-				}
 			}
 		}
 
@@ -199,7 +198,7 @@ func readFormFile(fh *multipart.FileHeader) ([]byte, error) {
 
 func findManifest(files map[string][]byte) ([]byte, string) {
 	for _, name := range []string{"manifest.yaml", "manifest.yml", "manifest.json"} {
-		if data, ok := files[name]; ok {
+		if data := findFile(files, name); data != nil {
 			return data, name
 		}
 	}
@@ -227,8 +226,9 @@ func baseName(path string) string {
 
 func csvLines(data []byte) []string {
 	var lines []string
-	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimRight(line, "\r")
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		line := strings.TrimRight(sc.Text(), "\r")
 		if strings.TrimSpace(line) != "" {
 			lines = append(lines, line)
 		}

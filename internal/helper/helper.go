@@ -98,6 +98,11 @@ func ValidateCourts(n int) error {
 	return nil
 }
 
+// CourtLabel returns the letter label (A–Z) for a zero-based court index.
+func CourtLabel(i int) string {
+	return string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i])
+}
+
 func OrderStringsAlphabetically(strings []*Node) []*Node {
 	sort.Slice(strings, func(i, j int) bool {
 		strA := strings[i]
@@ -142,11 +147,6 @@ func ReadEntriesFromFile(filePath string) ([]string, error) {
 	cleanPath := filepath.Clean(filePath)
 	if strings.Contains(cleanPath, "..") {
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
-	}
-
-	// Check if the file exists
-	if _, err := os.Stat(cleanPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("file does not exist: %s", cleanPath)
 	}
 
 	// #nosec G304 - file path is validated above
@@ -199,6 +199,21 @@ func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
 		}
 	}
 	return result, nil
+}
+
+// SubtreeCourtIndex returns the zero-based court index for tree subtree idx
+// when numSubtrees are spread across numCourts. Mirrors the grouping used by
+// poolBoundsForSubtree so that court labels are always consistent.
+func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
+	pagesPerCourt := numSubtrees / numCourts
+	if pagesPerCourt < 1 {
+		pagesPerCourt = 1
+	}
+	courtIdx := idx / pagesPerCourt
+	if courtIdx >= numCourts {
+		courtIdx = numCourts - 1
+	}
+	return courtIdx
 }
 
 // ReorderPoolsForCourts deinterleaves pools so that when divided into

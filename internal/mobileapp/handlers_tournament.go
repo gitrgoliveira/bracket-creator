@@ -28,12 +28,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
-		if err := store.SaveTournament(&t); err != nil {
+		changed, err := store.SaveTournamentChanged(&t)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		hub.Broadcast(EventTournamentUpdated, nil)
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
 		c.JSON(http.StatusOK, t)
 	})
 
@@ -44,7 +46,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
-		if err := store.SaveTournament(&t); err != nil {
+		if _, err := store.SaveTournamentChanged(&t); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

@@ -3,15 +3,14 @@ package state
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 )
 
 func (s *Store) LoadBracket(compID string) (*Bracket, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "bracket.json"))
-	data, err := os.ReadFile(path)
+	path := s.compPath(compID, "bracket.json")
+	data, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Bracket{Rounds: [][]BracketMatch{}}, nil
@@ -31,7 +30,7 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "bracket.json"))
+	path := s.compPath(compID, "bracket.json")
 	data, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
 		return err

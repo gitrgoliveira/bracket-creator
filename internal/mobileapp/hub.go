@@ -79,6 +79,10 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 		select {
 		case ch <- string(payload):
 		default:
+			// Buffer full: unsubscribe this client so it reconnects rather
+			// than silently falling behind. HandleEvents sees channel close
+			// and returns false, ending the stream → JS EventSource reconnects.
+			h.Unsubscribe(ch)
 		}
 	}
 }

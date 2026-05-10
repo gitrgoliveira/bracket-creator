@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -53,9 +54,9 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 }
 
 func (e *Engine) RecordMatchResult(compId string, matchId string, result state.MatchResult) error {
+	result.ID = matchId // normalize ID-less payloads before overwriting
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
 		*r = result
-		r.ID = matchId // payload may arrive ID-less
 	})
 	if err == nil {
 		return nil
@@ -67,6 +68,49 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result state.M
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {
+	// Fast path: return cached result when neither pool-matches nor overrides changed.
+	pmMtime := e.store.FileMtime(compId, "pool-matches.csv")
+	ovMtime := e.store.FileMtime(compId, "overrides.json")
+	if v, ok := e.standingsCache.Load(compId); ok {
+		cached := v.(*standingsCacheEntry)
+		if cached.poolMatchesMtime == pmMtime && cached.overridesMtime == ovMtime {
+			return cached.result, nil
+		}
+	}
+
+	// Single-flight: collapse concurrent cold-cache callers into one compute.
+	flightV, _ := e.standingsFlight.LoadOrStore(compId, &sync.Once{})
+	once := flightV.(*sync.Once)
+	var (
+		flightResult map[string][]state.PlayerStanding
+		flightErr    error
+	)
+	once.Do(func() {
+		defer e.standingsFlight.Delete(compId)
+		flightResult, flightErr = e.computeStandings(compId)
+		if flightErr == nil {
+			e.standingsCache.Store(compId, &standingsCacheEntry{
+				poolMatchesMtime: pmMtime,
+				overridesMtime:   ovMtime,
+				result:           flightResult,
+			})
+		}
+	})
+	if flightErr != nil {
+		return nil, flightErr
+	}
+	if flightResult != nil {
+		return flightResult, nil
+	}
+	// Lost the flight race — read from cache populated by the winner.
+	if v, ok := e.standingsCache.Load(compId); ok {
+		return v.(*standingsCacheEntry).result, nil
+	}
+	// Narrow window: cache was invalidated between Do completion and this Load.
+	return e.CalculatePoolStandings(compId)
+}
+
+func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStanding, error) {
 	pools, err := e.store.LoadPools(compId)
 	if err != nil {
 		return nil, err
@@ -171,11 +215,10 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 			return sorted[i].Points > sorted[j].Points
 		})
 
-		// 4. Apply manual rank overrides
+		// Apply manual rank overrides
 		overrides, _ := e.store.LoadOverrides(compId)
 		if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
 			poolOverrides := overrides.PoolRanks[p.PoolName]
-			// Sort again by rank override
 			sort.Slice(sorted, func(i, j int) bool {
 				rankI, okI := poolOverrides[sorted[i].Player.Name]
 				rankJ, okJ := poolOverrides[sorted[j].Player.Name]
@@ -188,7 +231,6 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 				if okJ {
 					return false
 				}
-				// Fallback to original order (computed ranks)
 				return sorted[i].Rank < sorted[j].Rank
 			})
 		}
@@ -261,12 +303,28 @@ func formatScore(ippons []string, hansoku int) string {
 	return score
 }
 
+// patchScheduleCourt updates the court for a single match entry in place,
+// avoiding a full schedule regeneration on every court change.
+func (e *Engine) patchScheduleCourt(compId, matchId, newCourt string) error {
+	entries, err := e.store.LoadSchedule(compId)
+	if err != nil {
+		return err
+	}
+	for i := range entries {
+		// Pool entries: MatchRef == matchId; bracket entries: MatchRef == "R{n}-M{matchId}".
+		if entries[i].MatchRef == matchId || strings.HasSuffix(entries[i].MatchRef, "-M"+matchId) {
+			entries[i].Court = newCourt
+		}
+	}
+	return e.store.SaveSchedule(compId, entries)
+}
+
 func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string) error {
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
 		r.Court = newCourt
 	})
 	if err == nil {
-		return e.GenerateSchedule(compId)
+		return e.patchScheduleCourt(compId, matchId, newCourt)
 	}
 	if !errors.Is(err, errMatchNotFound) {
 		return err
@@ -276,7 +334,7 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 	}); err != nil {
 		return err
 	}
-	return e.GenerateSchedule(compId)
+	return e.patchScheduleCourt(compId, matchId, newCourt)
 }
 
 func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string) error {
@@ -338,11 +396,19 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 		return fmt.Errorf("bracket match %s not found", matchId)
 	}
 
-	if err := e.store.SaveWinnerOverride(compId, matchId, winnerName); err != nil {
+	// Save bracket first: it is the display source of truth. If this fails,
+	// neither record changes and the UI stays consistent.
+	if err := e.store.SaveBracket(compId, bracket); err != nil {
 		return err
 	}
 
-	return e.store.SaveBracket(compId, bracket)
+	// Record the override for auditing. A failure here leaves the bracket
+	// display correct; log but don't surface as an error.
+	if err := e.store.SaveWinnerOverride(compId, matchId, winnerName); err != nil {
+		fmt.Printf("warning: failed to persist winner override audit record for %s: %v\n", matchId, err)
+	}
+
+	return nil
 }
 
 func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt string) error {

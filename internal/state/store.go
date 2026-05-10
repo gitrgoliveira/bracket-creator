@@ -54,6 +54,16 @@ func (s *Store) compPath(compID string, parts ...string) string {
 	return filepath.Clean(filepath.Join(segments...))
 }
 
+// FileMtime returns the UnixNano mtime of a file inside a competition directory.
+// Returns 0 if the file does not exist or stat fails.
+func (s *Store) FileMtime(compID, filename string) int64 {
+	info, err := os.Stat(s.compPath(compID, filename))
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().UnixNano()
+}
+
 func ValidateCompetitionID(id string) error {
 	if id == "" {
 		return fmt.Errorf("competition ID cannot be empty")

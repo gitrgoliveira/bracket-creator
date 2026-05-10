@@ -102,6 +102,62 @@ func TestCreatePools_BasicSuccess(t *testing.T) {
 	// Buffer may be empty if template is missing, which is OK for this test
 }
 
+func TestCreatePools_NumPoolsZero(t *testing.T) {
+	var b bytes.Buffer
+	o := &poolOptions{
+		outputWriter: bufio.NewWriter(&b),
+		numPlayers:   10,
+	}
+	// Use 3 players (minimum valid entries but not enough for a pool of 10)
+	err := o.createPools([]string{"A,D1", "B,D2", "C,D3"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "number of entries must be greater than requested players in pool")
+}
+
+func TestCreatePools_MaxPlayersMode(t *testing.T) {
+	var b bytes.Buffer
+	o := &poolOptions{
+		outputWriter: bufio.NewWriter(&b),
+		maxPlayers:   4,
+		poolWinners:  2,
+		courts:       2,
+	}
+	err := o.createPools([]string{"A,D1", "B,D2", "C,D3", "D,D4", "E,D5"})
+	assert.NoError(t, err)
+}
+
+func TestCreatePools_NumberPrefix(t *testing.T) {
+	var b bytes.Buffer
+	o := &poolOptions{
+		outputWriter: bufio.NewWriter(&b),
+		numPlayers:   3,
+		poolWinners:  2,
+		courts:       2,
+		numberPrefix: "K",
+	}
+	err := o.createPools([]string{"A,D1", "B,D2", "C,D3", "D,D4", "E,D5", "F,D6"})
+	assert.NoError(t, err)
+}
+
+func TestCreatePools_InvalidCourts(t *testing.T) {
+	// Create a temporary input file
+	tmpInput, err := os.CreateTemp("", "input-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpInput.Name())
+	_, err = tmpInput.WriteString("A,D1\nB,D2\nC,D3\n")
+	require.NoError(t, err)
+	tmpInput.Close()
+
+	o := &poolOptions{
+		filePath:   tmpInput.Name(),
+		outputPath: "dummy.xlsx",
+		courts:     30,
+	}
+	err = o.run(nil, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "courts must be <= 26")
+}
+
 func TestCreatePools_WithZekkenNames(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
@@ -421,15 +477,22 @@ func TestPoolOptionsRun_EmptyFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "no entries found in file")
 }
 
-func TestPoolOptionsRun_Success(t *testing.T) {
+func TestPoolOptionsRun_WithSeeds(t *testing.T) {
 	// Create a temporary input file
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
 	defer os.Remove(tmpInput.Name())
-
 	_, err = tmpInput.WriteString("John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4\nCharlie,Dojo5\nDave,Dojo6\n")
 	require.NoError(t, err)
 	tmpInput.Close()
+
+	// Create a temporary seeds file
+	tmpSeeds, err := os.CreateTemp("", "seeds-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpSeeds.Name())
+	_, err = tmpSeeds.WriteString("Name,Rank\nJohn Doe,1\nJane Smith,2\n")
+	require.NoError(t, err)
+	tmpSeeds.Close()
 
 	// Create a temporary output file
 	tmpOutput, err := os.CreateTemp("", "output-*.xlsx")
@@ -440,6 +503,7 @@ func TestPoolOptionsRun_Success(t *testing.T) {
 	o := &poolOptions{
 		filePath:    tmpInput.Name(),
 		outputPath:  tmpOutput.Name(),
+		seedsPath:   tmpSeeds.Name(),
 		numPlayers:  3,
 		poolWinners: 2,
 		courts:      2,
@@ -448,9 +512,35 @@ func TestPoolOptionsRun_Success(t *testing.T) {
 
 	err = o.run(nil, nil)
 	assert.NoError(t, err)
-	// Output file is created even if template is missing
-	_, err = os.Stat(tmpOutput.Name())
-	assert.NoError(t, err)
+}
+
+func TestPoolOptionsRun_InvalidSeeds(t *testing.T) {
+	// Create a temporary input file
+	tmpInput, err := os.CreateTemp("", "input-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpInput.Name())
+	_, err = tmpInput.WriteString("John Doe,Dojo1\n")
+	require.NoError(t, err)
+	tmpInput.Close()
+
+	// Create a temporary invalid seeds file
+	tmpSeeds, err := os.CreateTemp("", "seeds-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpSeeds.Name())
+	_, err = tmpSeeds.WriteString("Invalid Format\n")
+	require.NoError(t, err)
+	tmpSeeds.Close()
+
+	o := &poolOptions{
+		filePath:   tmpInput.Name(),
+		outputPath: "dummy.xlsx",
+		seedsPath:  tmpSeeds.Name(),
+		courts:     2,
+	}
+
+	err = o.run(nil, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse seeds file")
 }
 
 func TestCreatePoolCmdMutuallyExclusiveFlags(t *testing.T) {

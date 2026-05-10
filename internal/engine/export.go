@@ -44,14 +44,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// 4. Tree sheets
 	finals := helper.GenerateFinals(pools, comp.PoolWinners)
 	if len(finals) > 0 {
-		maxPlayersPerTree := helper.MaxPlayersPerTree
-		numPages, _ := helper.RoundToPowerOf2(float64(len(finals)), float64(maxPlayersPerTree))
-		if numPages < 1 {
-			numPages = 1
-		}
-		if courtPages := helper.NextPow2(len(comp.Courts)); courtPages > numPages {
-			numPages = courtPages
-		}
+		numPages, _ := helper.TreePageLayout(len(finals), len(comp.Courts), false)
 
 		tree := helper.CreateBalancedTree(finals)
 		subtrees := helper.SubdivideTree(tree, numPages)

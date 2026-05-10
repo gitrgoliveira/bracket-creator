@@ -284,6 +284,25 @@ func NextPow2(n int) int {
 	return p
 }
 
+// TreePageLayout computes the number of tree sheet pages needed for numPlayers
+// competitors assigned to numCourts Shiaijo. When singleTree is true the
+// result is always 1 (unless court expansion requires more, which singleTree
+// suppresses). numCourts must be clamped by the caller before calling if
+// caller-specific rules apply (e.g. capping at numPools).
+func TreePageLayout(numPlayers, numCourts int, singleTree bool) (int, error) {
+	numPages, err := RoundToPowerOf2(float64(numPlayers), float64(MaxPlayersPerTree))
+	if err != nil {
+		return 0, err
+	}
+	if numPages < 1 || singleTree {
+		numPages = 1
+	}
+	if courtPages := NextPow2(numCourts); courtPages > numPages {
+		numPages = courtPages
+	}
+	return numPages, nil
+}
+
 func getOrdinal(n int) string {
 	if n <= 0 {
 		return strconv.Itoa(n)

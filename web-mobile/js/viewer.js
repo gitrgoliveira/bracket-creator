@@ -2,30 +2,8 @@
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
 const { useState, useMemo, useRef: useRefV } = React;
-
-function StatusBadge({ status }) {
-  const map = {
-    setup: ["badge--setup", "Setup"],
-    pools: ["badge--pools", "Pools"],
-    playoffs: ["badge--playoffs", "Playoffs"],
-    completed: ["badge--completed", "Completed"],
-  };
-  const [cls, label] = map[status] || ["badge--setup", status];
-  const showLive = status === "pools" || status === "playoffs";
-  return (
-    <span className={`badge ${cls}`}>
-      {showLive && <span className="dot dot--live" style={{ marginRight: 4 }}></span>}
-      {label}
-    </span>
-  );
-}
-
-function formatDate(d) {
-  if (!d) return "Date TBA";
-  const date = new Date(d + "T00:00");
-  if (isNaN(date.getTime())) return "Date TBA";
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
+const StatusBadge = window.StatusBadge;
+const formatDate = window.formatDate;
 
 function competitionKindLabel(c) {
   // c may be a kind string for backward-compat or a competition obj
@@ -155,7 +133,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                             {c.players.length} {c.kind === "team" ? "teams" : "players"} · {c.format === "pools" ? "Pools + Knockout" : "Knockout"} · Starts {c.startTime}
                           </div>
                         </div>
-                        <StatusBadge status={c.status} />
+                        <StatusBadge status={c.status} showLiveDot />
                       </div>
                       {c.status !== "setup" && total > 0 && (
                         <div className="vlist-item__progress">
@@ -255,7 +233,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             <div className="viewer__title">{c.name}</div>
             <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
-          <StatusBadge status={c.status} />
+          <StatusBadge status={c.status} showLiveDot />
         </div>
         <div className="viewer__tabs">
           {tabs.map((tb) => (
@@ -657,7 +635,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, StatusBadge, formatDate, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

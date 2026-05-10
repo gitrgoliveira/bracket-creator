@@ -29,8 +29,9 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		ids, _ := store.ListCompetitions()
 
 		// Preserve ordering by pre-allocating a slot per competition ID.
+		// Each goroutine writes to a unique index so no mutex is needed;
+		// wg.Wait() provides the happens-before for reads below.
 		results := make([]*state.Competition, len(ids))
-		var mu sync.Mutex
 		var wg sync.WaitGroup
 
 		for i, id := range ids {
@@ -41,11 +42,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				if comp == nil {
 					return
 				}
-				players, _ := store.LoadParticipants(compID, comp.WithZekkenName)
+				hasIDs := comp.HasParticipantIDs
+				players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: &hasIDs})
 				comp.Players = players
-				mu.Lock()
 				results[idx] = comp
-				mu.Unlock()
 			}(i, id)
 		}
 		wg.Wait()
@@ -80,14 +80,24 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			schedule      any
 			reservedSlots []state.ReservedSlot
 
-			playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr error
+			playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr, reservedSlotsErr error
 		)
 
 		var wg sync.WaitGroup
-		wg.Add(6)
+		wg.Add(7)
 		go func() {
 			defer wg.Done()
-			p, e := store.LoadParticipants(id, comp.WithZekkenName)
+			// Only pass HasIDs=true hint; false means unset so auto-detect
+			// still runs for competitions created before the flag existed.
+			var hasIDsHint *bool
+			if comp.HasParticipantIDs {
+				t := true
+				hasIDsHint = &t
+			}
+			p, e := store.LoadParticipantsOpt(id, comp.WithZekkenName, state.LoadParticipantsOpts{
+				WithSeeds: true,
+				HasIDs:    hasIDsHint,
+			})
 			comp.Players = p
 			playersErr = e
 		}()
@@ -111,11 +121,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			defer wg.Done()
 			schedule, scheduleErr = store.LoadSchedule(id)
 		}()
+		go func() {
+			defer wg.Done()
+			reservedSlots, reservedSlotsErr = store.LoadReservedSlots(id)
+		}()
 		wg.Wait()
 
-		reservedSlots, _ = store.LoadReservedSlots(id)
-
-		for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr} {
+		for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr, reservedSlotsErr} {
 			if e != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": e.Error()})
 				return
@@ -135,9 +147,22 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 	r.GET("/schedule", func(c *gin.Context) {
 		ids, _ := store.ListCompetitions()
+		// Pre-allocate one slot per competition so goroutines write to unique
+		// indices without a mutex. wg.Wait() provides the happens-before for
+		// the reads below.
+		perComp := make([][]state.ScheduleEntry, len(ids))
+		var wg sync.WaitGroup
+		for i, id := range ids {
+			wg.Add(1)
+			go func(idx int, compID string) {
+				defer wg.Done()
+				s, _ := store.LoadSchedule(compID)
+				perComp[idx] = s
+			}(i, id)
+		}
+		wg.Wait()
 		allEntries := []state.ScheduleEntry{}
-		for _, id := range ids {
-			s, _ := store.LoadSchedule(id)
+		for _, s := range perComp {
 			allEntries = append(allEntries, s...)
 		}
 		c.JSON(http.StatusOK, allEntries)

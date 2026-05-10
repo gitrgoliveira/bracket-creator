@@ -3,7 +3,6 @@ package state
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -15,19 +14,22 @@ func (s *Store) LoadSeeds(compID string) ([]domain.SeedAssignment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := filepath.Join(s.folder, "competitions", compID, "seeds.csv")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return []domain.SeedAssignment{}, nil
+	path := s.compPath(compID, "seeds.csv")
+	result, err := helper.ParseSeedsFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []domain.SeedAssignment{}, nil
+		}
+		return nil, err
 	}
-
-	return helper.ParseSeedsFile(path)
+	return result, nil
 }
 
 func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := filepath.Clean(filepath.Join(s.folder, "competitions", compID, "seeds.csv"))
+	path := s.compPath(compID, "seeds.csv")
 
 	// Sort by rank for readability
 	sort.Slice(assignments, func(i, j int) bool {

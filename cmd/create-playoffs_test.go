@@ -3,11 +3,74 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestPlayoffOptionsRun_Success(t *testing.T) {
+	// Create a temporary input file
+	tmpInput, err := os.CreateTemp("", "input-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpInput.Name())
+	_, err = tmpInput.WriteString("John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4\n")
+	require.NoError(t, err)
+	tmpInput.Close()
+
+	// Create a temporary output file
+	tmpOutput, err := os.CreateTemp("", "output-*.xlsx")
+	require.NoError(t, err)
+	defer os.Remove(tmpOutput.Name())
+	tmpOutput.Close()
+
+	o := &playoffOptions{
+		filePath:   tmpInput.Name(),
+		outputPath: tmpOutput.Name(),
+		determined: true,
+		courts:     2,
+	}
+
+	err = o.run(nil, nil)
+	assert.NoError(t, err)
+}
+
+func TestPlayoffOptionsRun_WithSeeds(t *testing.T) {
+	// Create a temporary input file
+	tmpInput, err := os.CreateTemp("", "input-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpInput.Name())
+	_, err = tmpInput.WriteString("John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4\n")
+	require.NoError(t, err)
+	tmpInput.Close()
+
+	// Create a temporary seeds file
+	tmpSeeds, err := os.CreateTemp("", "seeds-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpSeeds.Name())
+	_, err = tmpSeeds.WriteString("Name,Rank\nJohn Doe,1\nJane Smith,2\n")
+	require.NoError(t, err)
+	tmpSeeds.Close()
+
+	// Create a temporary output file
+	tmpOutput, err := os.CreateTemp("", "output-*.xlsx")
+	require.NoError(t, err)
+	defer os.Remove(tmpOutput.Name())
+	tmpOutput.Close()
+
+	o := &playoffOptions{
+		filePath:   tmpInput.Name(),
+		outputPath: tmpOutput.Name(),
+		seedsPath:  tmpSeeds.Name(),
+		determined: true,
+		courts:     2,
+	}
+
+	err = o.run(nil, nil)
+	assert.NoError(t, err)
+}
 
 func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 
@@ -90,4 +153,25 @@ func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
 	err := o.createPlayoffs(entries)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse seeds file")
+}
+
+func TestCreatePlayoffs_DuplicateEntries(t *testing.T) {
+	var b bytes.Buffer
+	o := &playoffOptions{
+		outputWriter: bufio.NewWriter(&b),
+	}
+	err := o.createPlayoffs([]string{"Alice", "Alice"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate participant entries")
+}
+
+func TestCreatePlayoffs_WithZekken(t *testing.T) {
+	var b bytes.Buffer
+	o := &playoffOptions{
+		outputWriter:   bufio.NewWriter(&b),
+		withZekkenName: true,
+		courts:         2,
+	}
+	err := o.createPlayoffs([]string{"Alice,Ali,D1", "Bob,Bobby,D2"})
+	assert.NoError(t, err)
 }

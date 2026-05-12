@@ -10,36 +10,29 @@ import (
 )
 
 func (s *Store) LoadReservedSlots(compID string) ([]ReservedSlot, error) {
-	mu := s.getCompLock(compID)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	cache := s.getFileCache(compID, "reserved-slots.json")
-	cache.mu.RLock()
-	mtime := s.FileMtime(compID, "reserved-slots.json")
-	if cache.data != nil && cache.mtime == mtime {
-		res := s.copyReservedSlots(cache.data.([]ReservedSlot))
-		cache.mu.RUnlock()
-		return res, nil
-	}
-	cache.mu.RUnlock()
-
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	// Re-check after acquiring write lock
-	if cache.data != nil && cache.mtime == mtime {
-		return s.copyReservedSlots(cache.data.([]ReservedSlot)), nil
-	}
-
-	slots, err := s.loadReservedSlotsLocked(compID)
+	data, err := s.loadCached(compID, "reserved-slots.json", parseReservedSlotsFile)
 	if err != nil {
 		return nil, err
 	}
+	return s.copyReservedSlots(data.([]ReservedSlot)), nil
+}
 
-	cache.data = slots
-	cache.mtime = mtime
-
-	return s.copyReservedSlots(slots), nil
+func parseReservedSlotsFile(path string) (any, error) {
+	data, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ReservedSlot{}, nil
+		}
+		return nil, err
+	}
+	var slots []ReservedSlot
+	if err := json.Unmarshal(data, &slots); err != nil {
+		return nil, err
+	}
+	if slots == nil {
+		slots = []ReservedSlot{}
+	}
+	return slots, nil
 }
 
 func (s *Store) copyReservedSlots(slots []ReservedSlot) []ReservedSlot {
@@ -60,18 +53,11 @@ func (s *Store) SaveReservedSlots(compID string, slots []ReservedSlot) error {
 // loadReservedSlotsLocked reads reserved slots without acquiring the mutex.
 // Caller must hold at least s.mu.RLock.
 func (s *Store) loadReservedSlotsLocked(compID string) ([]ReservedSlot, error) {
-	data, err := os.ReadFile(s.compPath(compID, "reserved-slots.json"))
+	data, err := parseReservedSlotsFile(s.compPath(compID, "reserved-slots.json"))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []ReservedSlot{}, nil
-		}
 		return nil, err
 	}
-	var slots []ReservedSlot
-	if err := json.Unmarshal(data, &slots); err != nil {
-		return nil, err
-	}
-	return slots, nil
+	return data.([]ReservedSlot), nil
 }
 
 // saveReservedSlotsLocked writes reserved slots without acquiring the mutex.

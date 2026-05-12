@@ -58,13 +58,33 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
 
-		// 3. Success: pools status (started) — deletion is now allowed regardless of status
-		comp3 := state.Competition{ID: "delete-started", Status: "pools"}
+		// 3. Reject: pools status (in progress) — must be invalidated first.
+		comp3 := state.Competition{ID: "delete-started", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp3)
 		w = httptest.NewRecorder()
 		req, _ = http.NewRequest("DELETE", "/api/competitions/delete-started", nil)
 		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Contains(t, w.Body.String(), "in progress")
+
+		// 4. Invalidate the started competition, then deletion succeeds.
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("POST", "/api/competitions/delete-started/invalidate", nil)
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("DELETE", "/api/competitions/delete-started", nil)
+		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
+
+		// 5. Invalidate rejects a competition that hasn't started.
+		comp4 := state.Competition{ID: "invalidate-setup", Status: state.CompStatusSetup}
+		store.SaveCompetition(&comp4)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("POST", "/api/competitions/invalidate-setup/invalidate", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("Reserved Slots", func(t *testing.T) {

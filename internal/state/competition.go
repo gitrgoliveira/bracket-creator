@@ -32,48 +32,29 @@ func (s *Store) LoadCompetition(id string) (*Competition, error) {
 		return nil, fmt.Errorf("invalid competition ID: %w", err)
 	}
 
-	mu := s.getCompLock(id)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	cache := s.getFileCache(id, "config.md")
-	cache.mu.RLock()
-	mtime := s.FileMtime(id, "config.md")
-	if cache.data != nil && cache.mtime == mtime {
-		c := s.copyCompetition(cache.data.(*Competition))
-		cache.mu.RUnlock()
-		return c, nil
+	data, err := s.loadCached(id, "config.md", parseCompetitionFile)
+	if err != nil {
+		return nil, err
 	}
-	cache.mu.RUnlock()
-
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	// Re-check after acquiring write lock
-	mtime = s.FileMtime(id, "config.md")
-	if cache.data != nil && cache.mtime == mtime {
-		return s.copyCompetition(cache.data.(*Competition)), nil
+	if data == nil {
+		return nil, nil
 	}
+	return s.copyCompetition(data.(*Competition)), nil
+}
 
-	path := s.compPath(id, "config.md")
-	data, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
+func parseCompetitionFile(path string) (any, error) {
+	raw, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
-			cache.data = nil
-			cache.mtime = 0
 			return nil, nil
 		}
 		return nil, err
 	}
-
 	var c Competition
-	if err := parseFrontMatter(data, &c); err != nil {
+	if err := parseFrontMatter(raw, &c); err != nil {
 		return nil, err
 	}
-
-	cache.data = &c
-	cache.mtime = mtime
-
-	return s.copyCompetition(&c), nil
+	return &c, nil
 }
 
 func (s *Store) copyCompetition(c *Competition) *Competition {
@@ -118,7 +99,17 @@ func (s *Store) SaveCompetitionChanged(c *Competition) (bool, error) {
 		return false, nil
 	}
 
-	return true, os.WriteFile(path, newData, 0600)
+	if err := os.WriteFile(path, newData, 0600); err != nil {
+		return false, err
+	}
+
+	cache := s.getFileCache(c.ID, "config.md")
+	cache.mu.Lock()
+	cache.data = s.copyCompetition(c)
+	cache.mtime = s.FileMtime(c.ID, "config.md")
+	cache.mu.Unlock()
+
+	return true, nil
 }
 
 func (s *Store) SaveCompetition(c *Competition) error {
@@ -135,5 +126,9 @@ func (s *Store) DeleteCompetition(id string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return os.RemoveAll(s.compPath(id))
+	if err := os.RemoveAll(s.compPath(id)); err != nil {
+		return err
+	}
+	s.compCache.Delete(id)
+	return nil
 }

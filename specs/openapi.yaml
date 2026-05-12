@@ -393,16 +393,47 @@ paths:
     delete:
       tags: [competitions]
       summary: Delete competition
-      description: Only allowed when competition status is "setup" or empty.
+      description: |
+        Allowed when the competition has not yet started (`setup`), has finished
+        (`completed`), or has been declared invalid (`invalid`). Started
+        competitions (`pools`/`playoffs`) must first be invalidated via
+        `POST /api/competitions/{id}/invalidate`.
       security:
         - TournamentPassword: []
       responses:
         '204':
           description: Competition deleted.
-        '403':
-          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: Competition is in progress and must be invalidated first.
+
+  /api/competitions/{id}/invalidate:
+    post:
+      tags: [competitions]
+      summary: Mark in-progress competition as invalid
+      description: |
+        Transitions a competition from `pools` or `playoffs` to `invalid`,
+        which is the prerequisite for deletion of an already-started
+        competition. Returns 400 if the competition is not in an in-progress
+        state.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Competition marked as invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/start:
     post:
@@ -1113,8 +1144,10 @@ components:
           description: >
             Lifecycle state. Set by the server — do not supply on create/update.
             `setup` → not yet started; `pools` → pools phase active;
-            `playoffs` → knockout phase active; `completed` → finished.
-          enum: [setup, pools, playoffs, completed, ""]
+            `playoffs` → knockout phase active; `completed` → finished;
+            `invalid` → operator-declared invalid, prerequisite for deleting
+            an already-started competition.
+          enum: [setup, pools, playoffs, completed, invalid, ""]
         mirror:
           type: boolean
         withZekkenName:

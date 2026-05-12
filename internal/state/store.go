@@ -81,6 +81,44 @@ func (s *Store) getFileCache(compID, filename string) *fileCache {
 	return f.(*fileCache)
 }
 
+// loadCached returns the cached value for (compID, filename). On a cache hit
+// (file mtime matches cached mtime) the cached pointer is returned directly;
+// callers are responsible for deep-copying before exposing it. On a miss, the
+// per-comp read lock and the file-cache write lock are held while parse runs.
+// parse receives the on-disk path and must return the value to cache (an empty
+// container for "file does not exist", or nil when that's the intended sentinel
+// — see LoadCompetition).
+func (s *Store) loadCached(compID, filename string, parse func(path string) (any, error)) (any, error) {
+	mu := s.getCompLock(compID)
+	mu.RLock()
+	defer mu.RUnlock()
+
+	cache := s.getFileCache(compID, filename)
+	mtime := s.FileMtime(compID, filename)
+
+	cache.mu.RLock()
+	if cache.data != nil && cache.mtime == mtime {
+		data := cache.data
+		cache.mu.RUnlock()
+		return data, nil
+	}
+	cache.mu.RUnlock()
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.data != nil && cache.mtime == mtime {
+		return cache.data, nil
+	}
+
+	data, err := parse(s.compPath(compID, filename))
+	if err != nil {
+		return nil, err
+	}
+	cache.data = data
+	cache.mtime = mtime
+	return data, nil
+}
+
 // compPath builds and cleans the path to a file inside a competition directory.
 func (s *Store) compPath(compID string, parts ...string) string {
 	segments := append([]string{s.folder, "competitions", compID}, parts...)

@@ -18,33 +18,17 @@ type ScheduleEntry struct {
 }
 
 func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
-	mu := s.getCompLock(compID)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	cache := s.getFileCache(compID, "schedule.csv")
-	cache.mu.RLock()
-	mtime := s.FileMtime(compID, "schedule.csv")
-	if cache.data != nil && cache.mtime == mtime {
-		res := s.copySchedule(cache.data.([]ScheduleEntry))
-		cache.mu.RUnlock()
-		return res, nil
+	data, err := s.loadCached(compID, "schedule.csv", parseScheduleFile)
+	if err != nil {
+		return nil, err
 	}
-	cache.mu.RUnlock()
+	return s.copySchedule(data.([]ScheduleEntry)), nil
+}
 
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	// Re-check after acquiring write lock
-	if cache.data != nil && cache.mtime == mtime {
-		return s.copySchedule(cache.data.([]ScheduleEntry)), nil
-	}
-
-	path := s.compPath(compID, "schedule.csv")
+func parseScheduleFile(path string) (any, error) {
 	f, err := os.Open(path) // #nosec G304 — path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
-			cache.data = []ScheduleEntry{}
-			cache.mtime = mtime
 			return []ScheduleEntry{}, nil
 		}
 		return nil, err
@@ -53,8 +37,7 @@ func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
 		_ = f.Close()
 	}()
 
-	reader := csv.NewReader(f)
-	records, err := reader.ReadAll()
+	records, err := csv.NewReader(f).ReadAll()
 	if err != nil {
 		return nil, err
 	}
@@ -82,11 +65,10 @@ func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
 		}
 		schedule = append(schedule, e)
 	}
-
-	cache.data = schedule
-	cache.mtime = mtime
-
-	return s.copySchedule(schedule), nil
+	if schedule == nil {
+		schedule = []ScheduleEntry{}
+	}
+	return schedule, nil
 }
 
 func (s *Store) copySchedule(entries []ScheduleEntry) []ScheduleEntry {
@@ -129,8 +111,9 @@ func serializeSchedule(entries []ScheduleEntry) ([]byte, error) {
 // actually changed. Use this instead of SaveSchedule when you need to gate a
 // broadcast on a real mutation.
 func (s *Store) SaveScheduleChanged(compID string, entries []ScheduleEntry) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	path := s.compPath(compID, "schedule.csv")
 	newData, err := serializeSchedule(entries)
@@ -142,7 +125,20 @@ func (s *Store) SaveScheduleChanged(compID string, entries []ScheduleEntry) (boo
 		return false, nil
 	}
 
-	return true, os.WriteFile(path, newData, 0600)
+	if err := os.WriteFile(path, newData, 0600); err != nil {
+		return false, err
+	}
+
+	if entries == nil {
+		entries = []ScheduleEntry{}
+	}
+	cache := s.getFileCache(compID, "schedule.csv")
+	cache.mu.Lock()
+	cache.data = s.copySchedule(entries)
+	cache.mtime = s.FileMtime(compID, "schedule.csv")
+	cache.mu.Unlock()
+
+	return true, nil
 }
 
 func (s *Store) SaveSchedule(compID string, entries []ScheduleEntry) error {

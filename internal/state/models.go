@@ -41,6 +41,7 @@ const (
 	CompStatusPools    CompetitionStatus = "pools"
 	CompStatusPlayoffs CompetitionStatus = "playoffs"
 	CompStatusComplete CompetitionStatus = "completed"
+	CompStatusInvalid  CompetitionStatus = "invalid"
 )
 
 type MatchStatus string

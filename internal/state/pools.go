@@ -15,35 +15,18 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		return nil, err
 	}
 
-	mu := s.getCompLock(compID)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	cache := s.getFileCache(compID, "pools.csv")
-	cache.mu.RLock()
-	mtime := s.FileMtime(compID, "pools.csv")
-	if cache.data != nil && cache.mtime == mtime {
-		res := s.copyPools(cache.data.([]helper.Pool))
-		cache.mu.RUnlock()
-		return res, nil
+	data, err := s.loadCached(compID, "pools.csv", parsePoolsFile)
+	if err != nil {
+		return nil, err
 	}
-	cache.mu.RUnlock()
+	return s.copyPools(data.([]helper.Pool)), nil
+}
 
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	// Re-check after acquiring write lock
-	if cache.data != nil && cache.mtime == mtime {
-		return s.copyPools(cache.data.([]helper.Pool)), nil
-	}
-
-	path := s.compPath(compID, "pools.csv")
-
+func parsePoolsFile(path string) (any, error) {
 	// #nosec G304
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cache.data = []helper.Pool{}
-			cache.mtime = mtime
 			return []helper.Pool{}, nil
 		}
 		return nil, err
@@ -52,8 +35,7 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		_ = f.Close()
 	}()
 
-	reader := csv.NewReader(f)
-	records, err := reader.ReadAll()
+	records, err := csv.NewReader(f).ReadAll()
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +43,7 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 	// poolIdx maps pool name → index into pools so we can append players in-place
 	// without a separate order slice or a final copy pass.
 	poolIdx := make(map[string]int)
-	var pools []helper.Pool
+	pools := []helper.Pool{}
 
 	for _, rec := range records {
 		if len(rec) < 2 {
@@ -93,11 +75,7 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		}
 		pools[idx].Players = append(pools[idx].Players, player)
 	}
-
-	cache.data = pools
-	cache.mtime = mtime
-
-	return s.copyPools(pools), nil
+	return pools, nil
 }
 
 func (s *Store) copyPools(pools []helper.Pool) []helper.Pool {
@@ -181,7 +159,20 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 		}
 	}
 	writer.Flush()
-	return writer.Error()
+	if err := writer.Error(); err != nil {
+		return err
+	}
+
+	if pools == nil {
+		pools = []helper.Pool{}
+	}
+	cache := s.getFileCache(compID, "pools.csv")
+	cache.mu.Lock()
+	cache.data = s.copyPools(pools)
+	cache.mtime = s.FileMtime(compID, "pools.csv")
+	cache.mu.Unlock()
+
+	return nil
 }
 
 func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
@@ -189,34 +180,18 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 		return nil, err
 	}
 
-	mu := s.getCompLock(compID)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	cache := s.getFileCache(compID, "pool-matches.csv")
-	cache.mu.RLock()
-	mtime := s.FileMtime(compID, "pool-matches.csv")
-	if cache.data != nil && cache.mtime == mtime {
-		res := s.copyMatchResults(cache.data.([]MatchResult))
-		cache.mu.RUnlock()
-		return res, nil
+	data, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
+	if err != nil {
+		return nil, err
 	}
-	cache.mu.RUnlock()
+	return s.copyMatchResults(data.([]MatchResult)), nil
+}
 
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	// Re-check after acquiring write lock
-	if cache.data != nil && cache.mtime == mtime {
-		return s.copyMatchResults(cache.data.([]MatchResult)), nil
-	}
-
-	path := s.compPath(compID, "pool-matches.csv")
+func parsePoolMatchesFile(path string) (any, error) {
 	// #nosec G304
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cache.data = []MatchResult{}
-			cache.mtime = mtime
 			return []MatchResult{}, nil
 		}
 		return nil, err
@@ -225,13 +200,12 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 		_ = f.Close()
 	}()
 
-	reader := csv.NewReader(f)
-	records, err := reader.ReadAll()
+	records, err := csv.NewReader(f).ReadAll()
 	if err != nil {
 		return nil, err
 	}
 
-	var results []MatchResult
+	results := []MatchResult{}
 	for i, rec := range records {
 		if i == 0 && len(rec) > 0 && rec[0] == "PoolName" {
 			continue // skip header
@@ -266,11 +240,7 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 
 		results = append(results, m)
 	}
-
-	cache.data = results
-	cache.mtime = mtime
-
-	return s.copyMatchResults(results), nil
+	return results, nil
 }
 
 func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {

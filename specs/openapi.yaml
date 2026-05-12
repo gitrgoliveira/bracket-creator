@@ -408,6 +408,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           description: Competition is in progress and must be invalidated first.
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/invalidate:
     post:

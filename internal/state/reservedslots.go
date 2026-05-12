@@ -45,13 +45,17 @@ func (s *Store) copyReservedSlots(slots []ReservedSlot) []ReservedSlot {
 }
 
 func (s *Store) SaveReservedSlots(compID string, slots []ReservedSlot) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
 	return s.saveReservedSlotsLocked(compID, slots)
 }
 
-// loadReservedSlotsLocked reads reserved slots without acquiring the mutex.
-// Caller must hold at least s.mu.RLock.
+// loadReservedSlotsLocked reads reserved slots without acquiring a lock.
+// Caller must hold the per-comp lock for compID.
 func (s *Store) loadReservedSlotsLocked(compID string) ([]ReservedSlot, error) {
 	data, err := parseReservedSlotsFile(s.compPath(compID, "reserved-slots.json"))
 	if err != nil {
@@ -60,19 +64,30 @@ func (s *Store) loadReservedSlotsLocked(compID string) ([]ReservedSlot, error) {
 	return data.([]ReservedSlot), nil
 }
 
-// saveReservedSlotsLocked writes reserved slots without acquiring the mutex.
-// Caller must hold s.mu.Lock.
+// saveReservedSlotsLocked writes reserved slots without acquiring a lock and
+// warms the file cache. Caller must hold the per-comp write lock for compID.
 func (s *Store) saveReservedSlotsLocked(compID string, slots []ReservedSlot) error {
 	path := s.compPath(compID, "reserved-slots.json")
 	data, err := json.MarshalIndent(slots, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	if slots == nil {
+		slots = []ReservedSlot{}
+	}
+	cache := s.getFileCache(compID, "reserved-slots.json")
+	cache.mu.Lock()
+	cache.data = s.copyReservedSlots(slots)
+	cache.mtime = s.FileMtime(compID, "reserved-slots.json")
+	cache.mu.Unlock()
+	return nil
 }
 
-// loadParticipantsLocked reads participants without acquiring the mutex.
-// Caller must hold at least s.mu.RLock. Mirrors LoadParticipants.
+// loadParticipantsLocked reads participants without acquiring a lock.
+// Caller must hold the per-comp lock for compID. Mirrors LoadParticipants.
 func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]helper.Player, error) {
 	path := s.compPath(compID, "participants.csv")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -132,8 +147,9 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]he
 	return players, nil
 }
 
-// saveParticipantsLocked writes participants without acquiring the mutex.
-// Caller must hold s.mu.Lock. Mirrors SaveParticipants.
+// saveParticipantsLocked writes participants without acquiring a lock and
+// invalidates the participant caches. Caller must hold the per-comp write lock
+// for compID. Mirrors SaveParticipants.
 func (s *Store) saveParticipantsLocked(compID string, players []helper.Player) error {
 	path := s.compPath(compID, "participants.csv")
 	var sb strings.Builder
@@ -153,14 +169,28 @@ func (s *Store) saveParticipantsLocked(compID string, players []helper.Player) e
 		}
 		sb.WriteString(id + ", " + row + "\n")
 	}
-	return os.WriteFile(path, []byte(sb.String()), 0600)
+	if err := os.WriteFile(path, []byte(sb.String()), 0600); err != nil {
+		return err
+	}
+	for _, key := range []string{"participants.csv", "participants_with_seeds.csv"} {
+		cache := s.getFileCache(compID, key)
+		cache.mu.Lock()
+		cache.data = nil
+		cache.mtime = 0
+		cache.mu.Unlock()
+	}
+	return nil
 }
 
 // AddReservedSlot creates a placeholder participant and a reserved-slot entry
 // linking it to sourceCompID at the given rank.  It returns the new slot.
 func (s *Store) AddReservedSlot(compID string, sourceCompID string, sourceRank int, withZekkenName bool) (*ReservedSlot, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	slots, err := s.loadReservedSlotsLocked(compID)
 	if err != nil {
@@ -208,8 +238,12 @@ func (s *Store) AddReservedSlot(compID string, sourceCompID string, sourceRank i
 
 // RemoveReservedSlot deletes a slot and its placeholder participant.
 func (s *Store) RemoveReservedSlot(compID string, slotID string, withZekkenName bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	slots, err := s.loadReservedSlotsLocked(compID)
 	if err != nil {

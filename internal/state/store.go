@@ -93,6 +93,9 @@ func (s *Store) getFileCache(compID, filename string) *fileCache {
 // — see LoadCompetition; nil values do not cache-hit and will be re-parsed on
 // each call).
 func (s *Store) loadCached(compID, filename string, parse func(path string) (any, error)) (any, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()

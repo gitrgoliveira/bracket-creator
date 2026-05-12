@@ -395,10 +395,9 @@ paths:
       summary: Delete competition
       description: |
         Idempotent — returns 204 even when the competition does not exist.
-        Allowed when the competition has not yet started (`setup`), has finished
-        (`completed`), or has been declared invalid (`invalid`). Started
-        competitions (`pools`/`playoffs`) must first be invalidated via
-        `POST /api/competitions/{id}/invalidate`.
+        Allowed in any non-in-progress state (`setup`, `pending`, `completed`,
+        `invalid`, or unset). In-progress competitions (`pools`/`playoffs`)
+        must first be invalidated via `POST /api/competitions/{id}/invalidate`.
       security:
         - TournamentPassword: []
       responses:
@@ -408,6 +407,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           description: Competition is in progress and must be invalidated first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -1148,7 +1151,7 @@ components:
             Lifecycle state. Set by the server — do not supply on create/update.
             `setup` → not yet started; `pending` → equivalent to `setup` for
             start-eligibility (legacy state, still accepted by
-            `POST /competitions/{id}/start`); `pools` → pools phase active;
+            `POST /api/competitions/{id}/start`); `pools` → pools phase active;
             `playoffs` → knockout phase active; `completed` → finished;
             `invalid` → operator-declared invalid, prerequisite for deleting
             an already-started competition.

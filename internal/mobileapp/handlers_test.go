@@ -190,7 +190,18 @@ func TestCompetitionHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DELETE /api/competitions/:id (already started — now allowed)
+	// DELETE /api/competitions/:id (already started — rejected; must invalidate first)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/competitions/c1", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code)
+
+	// Invalidate, then DELETE succeeds.
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/c1/invalidate", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/competitions/c1", nil)
 	r.ServeHTTP(w, req)

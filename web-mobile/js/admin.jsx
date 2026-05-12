@@ -429,6 +429,12 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 
+function initialSectionFor(status) {
+  if (status === "setup") return "participants";
+  if (status === "pools" || status === "playoffs") return "scores";
+  return "overview";
+}
+
 function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -515,7 +521,7 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
 
         <div className="section-title">All competitions</div>
         <div className="tlist">
-          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, c.status === "setup" ? "participants" : c.status === "pools" || c.status === "playoffs" ? "scores" : "overview")} onStart={() => onStartCompetition(c.id)} />)}
+          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} />)}
           <button className="tcard tcard--add" onClick={onCreateCompetition}>
             <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>

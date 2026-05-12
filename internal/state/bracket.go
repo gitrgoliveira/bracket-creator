@@ -6,48 +6,29 @@ import (
 )
 
 func (s *Store) LoadBracket(compID string) (*Bracket, error) {
-	mu := s.getCompLock(compID)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	cache := s.getFileCache(compID, "bracket.json")
-	cache.mu.RLock()
-	mtime := s.FileMtime(compID, "bracket.json")
-	if cache.data != nil && cache.mtime == mtime {
-		res := s.copyBracket(cache.data.(*Bracket))
-		cache.mu.RUnlock()
-		return res, nil
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
 	}
-	cache.mu.RUnlock()
-
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	// Re-check after acquiring write lock
-	if cache.data != nil && cache.mtime == mtime {
-		return s.copyBracket(cache.data.(*Bracket)), nil
+	data, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	if err != nil {
+		return nil, err
 	}
+	return s.copyBracket(data.(*Bracket)), nil
+}
 
-	path := s.compPath(compID, "bracket.json")
-	data, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
+func parseBracketFile(path string) (any, error) {
+	raw, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
-			b := &Bracket{Rounds: [][]BracketMatch{}}
-			cache.data = b
-			cache.mtime = mtime
-			return b, nil
+			return &Bracket{Rounds: [][]BracketMatch{}}, nil
 		}
 		return nil, err
 	}
-
 	var b Bracket
-	if err := json.Unmarshal(data, &b); err != nil {
+	if err := json.Unmarshal(raw, &b); err != nil {
 		return nil, err
 	}
-
-	cache.data = &b
-	cache.mtime = mtime
-
-	return s.copyBracket(&b), nil
+	return &b, nil
 }
 
 func (s *Store) copyBracket(b *Bracket) *Bracket {

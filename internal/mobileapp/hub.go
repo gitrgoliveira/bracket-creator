@@ -43,7 +43,10 @@ func NewHub() *Hub {
 func (h *Hub) Subscribe() chan string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	ch := make(chan string, 100) // Increased buffer size
+	// Buffer absorbs short bursts (bulk-score and schedule updates) for ~300
+	// concurrent SSE clients; truly stalled clients are detected via the
+	// non-blocking send in Broadcast and unsubscribed.
+	ch := make(chan string, 100)
 	h.clients[ch] = true
 	return ch
 }

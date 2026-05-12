@@ -174,6 +174,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 	r.DELETE("/competitions/:id", func(c *gin.Context) {
 		id := c.Param("id")
+		if err := state.ValidateCompetitionID(id); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// If the config loads cleanly, gate on status. If it doesn't load
+		// (corrupt or unparseable config.md), fall through to delete so the
+		// operator can recover from a broken competition.
+		if comp, err := store.LoadCompetition(id); err == nil && comp != nil {
+			switch comp.Status {
+			case state.CompStatusPools, state.CompStatusPlayoffs:
+				c.JSON(http.StatusConflict, gin.H{"error": "competition is in progress; mark it invalid before deleting"})
+				return
+			}
+		}
 		if err := store.DeleteCompetition(id); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -181,6 +195,34 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.Status(http.StatusNoContent)
+	})
+
+	r.POST("/competitions/:id/invalidate", func(c *gin.Context) {
+		id := c.Param("id")
+		if err := state.ValidateCompetitionID(id); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if comp.Status != state.CompStatusPools && comp.Status != state.CompStatusPlayoffs {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("only in-progress competitions can be invalidated (current status: %q)", comp.Status)})
+			return
+		}
+		comp.Status = state.CompStatusInvalid
+		if _, err := saveCompetitionWithPlayers(comp, store); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		hub.Broadcast(EventTournamentUpdated, nil)
+		c.JSON(http.StatusOK, comp)
 	})
 
 	r.GET("/competitions/:id/reserved-slots", func(c *gin.Context) {

@@ -162,3 +162,52 @@ func TestResolveReservedSlots_Errors(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not reached playoffs yet")
 }
+
+func TestResolveReservedSlots_Duplicate(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-slots-dup-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	// Source competition with a winner
+	srcID := "source-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: srcID, Name: "Source", Status: "completed"}))
+	require.NoError(t, store.SaveParticipants(srcID, []helper.Player{{Name: "Robert Young", Dojo: "Team Alpha"}}))
+	require.NoError(t, store.SaveBracket(srcID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{Winner: "Robert Young", Status: state.MatchStatusCompleted}}},
+	}))
+
+	// Target competition that ALREADY has "Robert Young"
+	targetID := "target-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: targetID, Name: "Target"}))
+
+	// Two players: one real "Robert Young", one placeholder for Rank 1 of source
+	players := []helper.Player{
+		{ID: "Existing-ID", Name: "Robert Young", Dojo: "Team Alpha"},
+		{ID: "Placeholder-ID", Name: "Reserved: source-comp rank 1", Tag: "reserved"},
+	}
+	require.NoError(t, store.SaveParticipants(targetID, players))
+
+	slots := []state.ReservedSlot{
+		{ID: "Slot-ID", ParticipantID: "Placeholder-ID", SourceCompID: srcID, SourceRank: 1},
+	}
+	require.NoError(t, store.SaveReservedSlots(targetID, slots))
+
+	// Resolve slots
+	resolved, err := eng.resolveReservedSlots(targetID, players)
+	require.NoError(t, err)
+
+	// SHOULD now only have 1 player! (the existing one)
+	assert.Len(t, resolved, 1)
+	assert.Equal(t, "Robert Young", resolved[0].Name)
+	assert.Equal(t, "Existing-ID", resolved[0].ID)
+
+	// The reserved slot should have been UPDATED to point to the existing ID
+	updatedSlots, err := store.LoadReservedSlots(targetID)
+	require.NoError(t, err)
+	require.Len(t, updatedSlots, 1)
+	assert.Equal(t, "Existing-ID", updatedSlots[0].ParticipantID)
+}

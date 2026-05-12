@@ -22,12 +22,15 @@ function sideLabel(side) {
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
 // Returns something like "MM–K", "M–", "△", "H"
 function formatIpponsScore(ipponsA, ipponsB, score, decision) {
-  if (decision === "hikewake") return "△";
-  if (score?.type === "hikiwake") return "△";
-  if (score?.type === "hantei") return "H";
   if (score?.type === "bye") return "BYE";
+  if (score?.type === "hantei") return "H";
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
+  const isDraw = decision === "hikewake" || score?.type === "hikiwake";
+  if (isDraw) {
+    // No-score draw → X; with scores → △
+    return (!aStr && !bStr) ? "X" : "△";
+  }
   if (!aStr && !bStr) {
     // Fall back to numeric if ippons arrays are missing but score exists
     if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
@@ -38,7 +41,7 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision) {
   return `${aStr || "·"}–${bStr || "·"}`;
 }
 
-function PlayerLine({ player, isWinner, side, showDojo, score, isTBD }) {
+const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD }) => {
   const isAka = side === "a";
   if (!player || isTBD) {
     return (
@@ -59,22 +62,21 @@ function PlayerLine({ player, isWinner, side, showDojo, score, isTBD }) {
       {score != null ? <span className="bc-score">{score}</span> : null}
     </div>
   );
-}
+});
+PlayerLine.displayName = "PlayerLine";
 
-function MatchCard({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder }) {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const live = match.status === "running";
   const isBye = match.score?.type === "bye";
 
-  // Show ippon-type scores (e.g. "MM", "K") instead of numeric counts
   const ipponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
   const ipponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
   const isDone = match.status === "completed";
   const aScore = isDone ? (ipponsA.join("") || null) : null;
   const bScore = isDone ? (ipponsB.join("") || null) : null;
 
-  // detect placeholder TBD (id starts with "tbd-")
   const aTBD = isPlaceholder || (match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-"));
   const bTBD = isPlaceholder || (match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-"));
 
@@ -100,7 +102,8 @@ function MatchCard({ match, variant, showDojo, onClick, highlighted, matchRef, i
       <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} />
     </button>
   );
-}
+});
+MatchCard.displayName = "MatchCard";
 
 // Computes connector lines from the DOM positions of each match card,
 // then draws them in an absolutely positioned SVG.
@@ -209,3 +212,5 @@ window.MatchCard = MatchCard;
 window.roundLabel = roundLabel;
 window.formatIpponsScore = formatIpponsScore;
 window.sideLabel = sideLabel;
+
+export { formatIpponsScore, sideLabel, roundLabel };

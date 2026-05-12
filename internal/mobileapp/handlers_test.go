@@ -175,11 +175,11 @@ func TestCompetitionHandlers(t *testing.T) {
 
 	// GET /api/competitions (list error) - removing failing chmod test
 
-	// DELETE /api/competitions/:id (not found)
+	// DELETE /api/competitions/:id (idempotent — non-existent ID returns 204)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/competitions/not-exists", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusNoContent, w.Code)
 
 	// POST /api/competitions/:id/start
 	comp = state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
@@ -190,17 +190,17 @@ func TestCompetitionHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DELETE /api/competitions/:id (already started)
+	// DELETE /api/competitions/:id (already started — now allowed)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/competitions/c1", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Equal(t, http.StatusNoContent, w.Code)
 
 	// POST /api/competitions/:id/start (not found)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions/not-exists/start", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// POST /api/competitions (save error)
 	os.RemoveAll(filepath.Join(tempDir, "competitions"))

@@ -554,7 +554,7 @@ func TestStore_Competition_CRUD(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(comp))
 	loaded, err = store.LoadCompetition("mens-individual")
 	require.NoError(t, err)
-	assert.Equal(t, "pools", loaded.Status)
+	assert.Equal(t, CompStatusPools, loaded.Status)
 
 	// Delete
 	require.NoError(t, store.DeleteCompetition("mens-individual"))

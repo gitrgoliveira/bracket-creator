@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -16,11 +17,10 @@ func (e *Engine) GetBracketRanking(compID string, rank int) (*helper.Player, err
 		return nil, fmt.Errorf("cannot load bracket for %q: %w", compID, err)
 	}
 	if bracket == nil || len(bracket.Rounds) == 0 {
-		return nil, fmt.Errorf("no bracket data for competition %q", compID)
+		return nil, notFoundErrorf("no bracket data for competition %q", compID)
 	}
 
 	finalRound := bracket.Rounds[len(bracket.Rounds)-1]
-
 	var winnerName string
 	switch rank {
 	case 1:
@@ -60,7 +60,7 @@ func (e *Engine) GetBracketRanking(compID string, rank int) (*helper.Player, err
 	}
 
 	if winnerName == "" {
-		return nil, fmt.Errorf("rank %d not found in completed bracket for competition %q", rank, compID)
+		return nil, notFoundErrorf("rank %d not found in completed bracket for competition %q", rank, compID)
 	}
 
 	// Resolve full player record from source participants.
@@ -76,8 +76,47 @@ func (e *Engine) GetBracketRanking(compID string, rank int) (*helper.Player, err
 	return &helper.Player{Name: winnerName}, nil
 }
 
+// GetPoolRanking returns the player who achieved rank in the pool standings of compID.
+// If multiple pools exist, SourceRank is treated as a global index across all pools
+// ordered by pool name (e.g., Rank 1 = Winner of Pool 1, Rank 2 = Winner of Pool 2).
+func (e *Engine) GetPoolRanking(compID string, rank int) (*helper.Player, error) {
+	standings, err := e.CalculatePoolStandings(compID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(standings) == 0 {
+		return nil, notFoundErrorf("no pool standings found for competition %q", compID)
+	}
+
+	// Sort pool names to ensure deterministic rank mapping
+	var poolNames []string
+	for k := range standings {
+		poolNames = append(poolNames, k)
+	}
+	sort.Strings(poolNames)
+
+	// If rank is within pool winner range (e.g., 16 pools, rank 1-16)
+	// We map it to the first player of each pool.
+	poolIdx := (rank - 1) % len(poolNames)
+	rankInPool := (rank - 1) / len(poolNames)
+
+	poolName := poolNames[poolIdx]
+	poolStandings, ok := standings[poolName]
+	if !ok {
+		return nil, notFoundErrorf("pool %q not found in standings for competition %q", poolName, compID)
+	}
+
+	if rankInPool < len(poolStandings) {
+		return &poolStandings[rankInPool].Player, nil
+	}
+
+	return nil, notFoundErrorf("rank %d (calculated as Pool %q, Index %d) not found in pool standings for competition %q",
+		rank, poolName, rankInPool, compID)
+}
+
 // resolveReservedSlots replaces placeholder participants (Tag="reserved") with
-// real players from source competition bracket results.
+// real players from source competition results (bracket or pools).
 func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([]helper.Player, error) {
 	slots, err := e.store.LoadReservedSlots(compID)
 	if err != nil {
@@ -87,29 +126,79 @@ func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([
 		return players, nil
 	}
 
-	for _, slot := range slots {
+	slotsChanged := false
+	var toRemove []string
+
+	for sIdx, slot := range slots {
 		srcComp, err := e.store.LoadCompetition(slot.SourceCompID)
 		if err != nil || srcComp == nil {
-			return nil, fmt.Errorf("reserved slot source competition %q not found", slot.SourceCompID)
-		}
-		if srcComp.Status != "playoffs" && srcComp.Status != "completed" {
-			return nil, fmt.Errorf("reserved slot source %q has not reached playoffs yet (status: %s)", srcComp.Name, srcComp.Status)
+			return nil, notFoundErrorf("reserved slot source competition %q not found", slot.SourceCompID)
 		}
 
-		real, err := e.GetBracketRanking(slot.SourceCompID, slot.SourceRank)
+		var real *helper.Player
+		if srcComp.Format == "pools" {
+			if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
+				return nil, validationErrorf("reserved slot source %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
+			}
+			real, err = e.GetPoolRanking(slot.SourceCompID, slot.SourceRank)
+		} else {
+			if srcComp.Status != state.CompStatusPlayoffs && srcComp.Status != state.CompStatusComplete {
+				return nil, validationErrorf("reserved slot source %q has not reached playoffs yet (status: %s)", srcComp.Name, srcComp.Status)
+			}
+			real, err = e.GetBracketRanking(slot.SourceCompID, slot.SourceRank)
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("cannot resolve rank %d from %q: %w", slot.SourceRank, slot.SourceCompID, err)
 		}
 
+		// Find placeholder and check for existing name
+		var existingIdx = -1
+		var placeholderIdx = -1
 		for i := range players {
 			if players[i].ID == slot.ParticipantID {
-				players[i].Name = real.Name
-				players[i].DisplayName = real.DisplayName
-				players[i].Dojo = real.Dojo
-				players[i].Tag = "" // no longer a placeholder
-				break
+				placeholderIdx = i
+			} else if players[i].Name == real.Name {
+				existingIdx = i
 			}
 		}
+
+		if placeholderIdx == -1 {
+			continue // Already resolved or removed?
+		}
+
+		if existingIdx != -1 {
+			// Player already exists! Link slot to existing player and remove placeholder
+			slots[sIdx].ParticipantID = players[existingIdx].ID
+			slotsChanged = true
+			toRemove = append(toRemove, slot.ParticipantID)
+		} else {
+			// Update placeholder with real player info
+			players[placeholderIdx].Name = real.Name
+			players[placeholderIdx].DisplayName = real.DisplayName
+			players[placeholderIdx].Dojo = real.Dojo
+			players[placeholderIdx].Tag = "" // no longer a placeholder
+		}
+	}
+
+	if slotsChanged {
+		if err := e.store.SaveReservedSlots(compID, slots); err != nil {
+			return nil, fmt.Errorf("failed to save updated reserved slots: %w", err)
+		}
+	}
+
+	if len(toRemove) > 0 {
+		filtered := make([]helper.Player, 0, len(players))
+		removeMap := make(map[string]bool)
+		for _, id := range toRemove {
+			removeMap[id] = true
+		}
+		for _, p := range players {
+			if !removeMap[p.ID] {
+				filtered = append(filtered, p)
+			}
+		}
+		players = filtered
 	}
 
 	return players, nil

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel } from '../viewer.js';
-import { formatDate } from '../ui.js';
+import { applyFilters, matchHighlightedBy, competitionKindLabel } from '../viewer.jsx';
+import { formatDate } from '../ui.jsx';
 
 describe('Viewer Utils', () => {
   describe('formatDate', () => {

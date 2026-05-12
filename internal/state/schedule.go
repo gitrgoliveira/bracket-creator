@@ -10,7 +10,7 @@ type ScheduleEntry struct {
 	MatchType   string `json:"matchType"` // pool | bracket | break
 	MatchRef    string `json:"matchRef"`  // ID of the match (empty for breaks)
 	Court       string `json:"court"`
-	Date        string `json:"date"`        // YYYY-MM-DD — for multi-day tournaments
+	Date        string `json:"date"`        // DD-MM-YYYY — for multi-day tournaments
 	ScheduledAt string `json:"scheduledAt"` // HH:MM
 	Status      string `json:"status"`
 	IsBreak     bool   `json:"isBreak,omitempty"`
@@ -18,13 +18,33 @@ type ScheduleEntry struct {
 }
 
 func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	mu := s.getCompLock(compID)
+	mu.RLock()
+	defer mu.RUnlock()
+
+	cache := s.getFileCache(compID, "schedule.csv")
+	cache.mu.RLock()
+	mtime := s.FileMtime(compID, "schedule.csv")
+	if cache.data != nil && cache.mtime == mtime {
+		res := s.copySchedule(cache.data.([]ScheduleEntry))
+		cache.mu.RUnlock()
+		return res, nil
+	}
+	cache.mu.RUnlock()
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	// Re-check after acquiring write lock
+	if cache.data != nil && cache.mtime == mtime {
+		return s.copySchedule(cache.data.([]ScheduleEntry)), nil
+	}
 
 	path := s.compPath(compID, "schedule.csv")
 	f, err := os.Open(path) // #nosec G304 — path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
+			cache.data = []ScheduleEntry{}
+			cache.mtime = mtime
 			return []ScheduleEntry{}, nil
 		}
 		return nil, err
@@ -63,7 +83,19 @@ func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
 		schedule = append(schedule, e)
 	}
 
-	return schedule, nil
+	cache.data = schedule
+	cache.mtime = mtime
+
+	return s.copySchedule(schedule), nil
+}
+
+func (s *Store) copySchedule(entries []ScheduleEntry) []ScheduleEntry {
+	if entries == nil {
+		return nil
+	}
+	res := make([]ScheduleEntry, len(entries))
+	copy(res, entries)
+	return res
 }
 
 func serializeSchedule(entries []ScheduleEntry) ([]byte, error) {

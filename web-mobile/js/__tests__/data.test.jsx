@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { 
   standardSeedOrder, nextPow2, buildBracket, advanceByes, 
   buildPools, computeStandings 
-} from '../data.js';
+} from '../data.jsx';
 
 describe('Data Utils', () => {
   describe('standardSeedOrder', () => {

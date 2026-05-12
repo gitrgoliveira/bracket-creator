@@ -13,6 +13,27 @@ var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 type Store struct {
 	folder string
 	mu     sync.RWMutex
+
+	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
+	compMu sync.Map
+
+	// cache for tournament configuration to avoid redundant disk I/O.
+	tournamentMu sync.RWMutex
+	cachedTourn  *Tournament
+	tournMtime   int64
+
+	// cache for competition-level files
+	compCache sync.Map // map[string]*compCache
+}
+
+type compCache struct {
+	files sync.Map // map[string]*fileCache
+}
+
+type fileCache struct {
+	mu    sync.RWMutex
+	data  any
+	mtime int64
 }
 
 func NewStore(folder string) (*Store, error) {
@@ -44,8 +65,20 @@ func (s *Store) init() error {
 	return nil
 }
 
+func (s *Store) getCompLock(id string) *sync.RWMutex {
+	actual, _ := s.compMu.LoadOrStore(id, &sync.RWMutex{})
+	return actual.(*sync.RWMutex)
+}
+
 func (s *Store) GetFolder() string {
 	return s.folder
+}
+
+func (s *Store) getFileCache(compID, filename string) *fileCache {
+	c, _ := s.compCache.LoadOrStore(compID, &compCache{})
+	cc := c.(*compCache)
+	f, _ := cc.files.LoadOrStore(filename, &fileCache{})
+	return f.(*fileCache)
 }
 
 // compPath builds and cleans the path to a file inside a competition directory.

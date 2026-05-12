@@ -51,10 +51,11 @@ func TestViewerHandlers_Standalone(t *testing.T) {
 	req, _ = http.NewRequest("GET", "/api/viewer/competitions", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	var comps []state.Competition
+	var comps []map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &comps)
 	assert.Len(t, comps, 1)
-	assert.Equal(t, "c1", comps[0].ID)
+	config := comps[0]["config"].(map[string]interface{})
+	assert.Equal(t, "c1", config["id"])
 
 	// 5. GET /api/viewer/competitions/:id - Success
 	w = httptest.NewRecorder()

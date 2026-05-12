@@ -15,14 +15,35 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		return nil, err
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	mu := s.getCompLock(compID)
+	mu.RLock()
+	defer mu.RUnlock()
+
+	cache := s.getFileCache(compID, "pools.csv")
+	cache.mu.RLock()
+	mtime := s.FileMtime(compID, "pools.csv")
+	if cache.data != nil && cache.mtime == mtime {
+		res := s.copyPools(cache.data.([]helper.Pool))
+		cache.mu.RUnlock()
+		return res, nil
+	}
+	cache.mu.RUnlock()
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	// Re-check after acquiring write lock
+	if cache.data != nil && cache.mtime == mtime {
+		return s.copyPools(cache.data.([]helper.Pool)), nil
+	}
 
 	path := s.compPath(compID, "pools.csv")
+
 	// #nosec G304
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cache.data = []helper.Pool{}
+			cache.mtime = mtime
 			return []helper.Pool{}, nil
 		}
 		return nil, err
@@ -73,7 +94,58 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		pools[idx].Players = append(pools[idx].Players, player)
 	}
 
-	return pools, nil
+	cache.data = pools
+	cache.mtime = mtime
+
+	return s.copyPools(pools), nil
+}
+
+func (s *Store) copyPools(pools []helper.Pool) []helper.Pool {
+	if pools == nil {
+		return nil
+	}
+	res := make([]helper.Pool, len(pools))
+	for i, p := range pools {
+		res[i] = p
+		if p.Players != nil {
+			res[i].Players = make([]helper.Player, len(p.Players))
+			copy(res[i].Players, p.Players)
+		}
+	}
+	return res
+}
+
+func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
+	if results == nil {
+		return nil
+	}
+	res := make([]MatchResult, len(results))
+	for i, r := range results {
+		res[i] = r
+		if r.IpponsA != nil {
+			res[i].IpponsA = make([]string, len(r.IpponsA))
+			copy(res[i].IpponsA, r.IpponsA)
+		}
+		if r.IpponsB != nil {
+			res[i].IpponsB = make([]string, len(r.IpponsB))
+			copy(res[i].IpponsB, r.IpponsB)
+		}
+		if r.SubResults != nil {
+			res[i].SubResults = make([]SubMatchResult, len(r.SubResults))
+			for j, sr := range r.SubResults {
+				res[i].SubResults[j] = sr
+				if sr.IpponsA != nil {
+					res[i].SubResults[j].IpponsA = make([]string, len(sr.IpponsA))
+					copy(res[i].SubResults[j].IpponsA, sr.IpponsA)
+				}
+				if sr.IpponsB != nil {
+					res[i].SubResults[j].IpponsB = make([]string, len(sr.IpponsB))
+					copy(res[i].SubResults[j].IpponsB, sr.IpponsB)
+				}
+			}
+		}
+	}
+	return res
 }
 
 func (s *Store) SavePools(compID string, pools []helper.Pool) error {
@@ -81,10 +153,12 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 		return err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	path := s.compPath(compID, "pools.csv")
+
 	// #nosec G304
 	f, err := os.Create(path)
 	if err != nil {
@@ -115,14 +189,34 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 		return nil, err
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	mu := s.getCompLock(compID)
+	mu.RLock()
+	defer mu.RUnlock()
+
+	cache := s.getFileCache(compID, "pool-matches.csv")
+	cache.mu.RLock()
+	mtime := s.FileMtime(compID, "pool-matches.csv")
+	if cache.data != nil && cache.mtime == mtime {
+		res := s.copyMatchResults(cache.data.([]MatchResult))
+		cache.mu.RUnlock()
+		return res, nil
+	}
+	cache.mu.RUnlock()
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	// Re-check after acquiring write lock
+	if cache.data != nil && cache.mtime == mtime {
+		return s.copyMatchResults(cache.data.([]MatchResult)), nil
+	}
 
 	path := s.compPath(compID, "pool-matches.csv")
 	// #nosec G304
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cache.data = []MatchResult{}
+			cache.mtime = mtime
 			return []MatchResult{}, nil
 		}
 		return nil, err
@@ -173,7 +267,10 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 		results = append(results, m)
 	}
 
-	return results, nil
+	cache.data = results
+	cache.mtime = mtime
+
+	return s.copyMatchResults(results), nil
 }
 
 func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
@@ -181,8 +278,9 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 		return err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	path := s.compPath(compID, "pool-matches.csv")
 	// #nosec G304
@@ -233,5 +331,15 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 		}
 	}
 	writer.Flush()
-	return writer.Error()
+	if err := writer.Error(); err != nil {
+		return err
+	}
+
+	cache := s.getFileCache(compID, "pool-matches.csv")
+	cache.mu.Lock()
+	cache.data = s.copyMatchResults(results)
+	cache.mtime = s.FileMtime(compID, "pool-matches.csv")
+	cache.mu.Unlock()
+
+	return nil
 }

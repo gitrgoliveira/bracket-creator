@@ -1,7 +1,7 @@
 // Admin side — single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
+const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Returns { total, done, live } match counts for a single competition object.
 function compMatchStats(c) {
@@ -29,10 +29,14 @@ function compMatchStats(c) {
 // header that should be skipped.  Checks the first line only.
 function looksLikeHeader(line, idx) {
   if (idx !== 0) return false;
-  if (!/name|zekken|dojo|club|team|grade|dan/i.test(line)) return false;
-  const parts = line.split(",");
-  const last = parts[parts.length - 1].trim();
-  return isNaN(parseInt(last)) || parseInt(last) <= 0;
+  // More robust header detection: contains multiple keywords commonly found in headers
+  const keywords = ['name', 'zekken', 'dojo', 'club', 'team', 'grade', 'dan', 'rank'];
+  const lower = line.toLowerCase();
+  const matched = keywords.filter(k => lower.includes(k));
+  // If it contains at least 2 keywords, it's likely a header.
+  // Or if it matches a very specific pattern like "Name, Dojo".
+  if (matched.length >= 2) return true;
+  return false;
 }
 
 function parsePastedRows(text, transform) {
@@ -45,6 +49,58 @@ function parsePastedRows(text, transform) {
   return out;
 }
 
+function normalizeDate(d) {
+  if (!d) return d;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  const match = d.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (match) {
+    return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  }
+  return d;
+}
+
+const pluralize = window.pluralize;
+
+function patchCompetitionData(prev, event) {
+  if (!prev || !event.data) return prev;
+  const { result, results } = event.data;
+  const resultsToApply = results || (result ? [result] : []);
+  if (resultsToApply.length === 0) return prev;
+
+  const resultMap = new Map(resultsToApply.map(r => [r.id, r]));
+  const next = { ...prev };
+  let changed = false;
+
+  if (next.poolMatches) {
+    next.poolMatches = next.poolMatches.map(m => {
+      const update = resultMap.get(m.id);
+      if (update) { changed = true; return { ...m, ...update }; }
+      return m;
+    });
+  }
+
+  if (next.bracket && next.bracket.rounds) {
+    let bChanged = false;
+    const rounds = next.bracket.rounds.map(round =>
+      round.map(m => {
+        const update = resultMap.get(m.id);
+        if (update) {
+          bChanged = true; changed = true;
+          // Map MatchResult to BracketMatch fields if needed
+          const patch = { ...update };
+          if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
+          if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
+          return { ...m, ...patch };
+        }
+        return m;
+      })
+    );
+    if (bChanged) next.bracket = { ...next.bracket, rounds };
+  }
+
+  return changed ? next : prev;
+}
+
 function Breadcrumbs({ items }) {
   return (
     <div className="crumbs">
@@ -52,7 +108,10 @@ function Breadcrumbs({ items }) {
         <React.Fragment key={i}>
           {i > 0 && <span className="sep">/</span>}
           {item.onClick ? (
-            <button onClick={() => { document.activeElement?.blur(); item.onClick(); }}>{item.label}</button>
+            <button onClick={() => { document.activeElement?.blur(); item.onClick(); }}>
+              {i === 0 && <span style={{ marginRight: 4 }}>←</span>}
+              {item.label}
+            </button>
           ) : (
             <span>{item.label}</span>
           )}
@@ -62,8 +121,10 @@ function Breadcrumbs({ items }) {
   );
 }
 
-function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, password }) {
-  const [view, setView] = useStateA({ kind: "dashboard" });
+function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast }) {
+  const [internalView, setInternalView] = useStateA({ kind: "dashboard" });
+  const view = propView || internalView;
+  const setView = propSetView || setInternalView;
   // Hooks must be declared unconditionally before any conditional returns.
   const [adminCompData, setAdminCompData] = useStateA(null);
   const [adminLoading, setAdminLoading] = useStateA(false);
@@ -81,17 +142,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
         setAdminCompData(details);
       }
     } catch (e) {
-      alert("Failed to update competition: " + e.message);
+      showToast(e.message, "error");
     }
   };
 
   const moveMatchCourt = async (compId, matchId, newCourt) => {
     try {
-      // Placeholder API call
-      // await window.API.moveMatchCourt(compId, matchId, newCourt, password);
-      alert("Move court not yet implemented in API");
+      await window.API.moveMatchCourt(compId, matchId, newCourt, password);
+      const comps = await window.API.fetchCompetitions();
+      onUpdate({ ...t, competitions: comps });
     } catch (e) {
-      alert("Failed to move court: " + e.message);
+      showToast(e.message, "error");
     }
   };
 
@@ -101,18 +162,75 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
       const comps = await window.API.fetchCompetitions();
       onUpdate({ ...t, competitions: comps });
     } catch (e) {
-      alert("Failed to record score: " + e.message);
+      showToast(e.message, "error");
+      throw e;
     }
   };
 
   const addCompetition = async (c) => {
     try {
-      await window.API.createCompetition(c, password);
+      const created = await window.API.createCompetition(c, password);
       const comps = await window.API.fetchCompetitions();
       onUpdate({ ...t, competitions: comps });
+      return created;
     } catch (e) {
-      alert("Failed to add competition: " + e.message);
+      showToast(e.message, "error");
       throw e;
+    }
+  };
+
+  const startAllCompetitions = async () => {
+    const setupComps = (t.competitions || []).filter(c => c.status === "setup" && (c.players || []).length >= 2);
+    if (setupComps.length === 0) return;
+
+    showToast(`Starting ${setupComps.length} competitions…`);
+
+    setAdminLoading(true);
+    const results = await Promise.allSettled(setupComps.map(c => window.API.startCompetition(c.id, password)));
+
+    let success = 0, fail = 0;
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") success++;
+      else {
+        console.error(`Failed to start ${setupComps[i].name}:`, r.reason);
+        fail++;
+      }
+    });
+
+    const comps = await window.API.fetchCompetitions();
+    onUpdate({ ...t, competitions: comps });
+    setAdminLoading(false);
+
+    if (fail > 0) {
+      showToast(`Started ${success} competitions, but ${fail} failed.`, "error");
+    } else if (success > 0) {
+      showToast(`Successfully started all ${success} competitions.`);
+    }
+  };
+
+  const createPlayoff = async (sourceId) => {
+    try {
+      const created = await window.API.createPlayoff(sourceId, password);
+      const comps = await window.API.fetchCompetitions();
+      onUpdate({ ...t, competitions: comps });
+      setView({ kind: "competition", id: created.id, section: "participants" });
+      showToast(`Playoff "${created.name}" created`);
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+  };
+
+  const startCompetition = async (cid) => {
+    const c = t.competitions.find(cc => cc.id === cid);
+    if (!c) return;
+    showToast(`Starting ${c.name}…`);
+    try {
+      await window.API.startCompetition(cid, password);
+      const comps = await window.API.fetchCompetitions();
+      onUpdate({ ...t, competitions: comps });
+      showToast(`${c.name} started`);
+    } catch (e) {
+      showToast(e.message, "error");
     }
   };
 
@@ -123,11 +241,15 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
       // (since tournament.password is cleared in the viewer API)
       if (!patch.password) {
         next.password = password;
+      } else {
+        // New password provided in the patch - update parent state and storage
+        if (onPasswordChange) onPasswordChange(patch.password);
       }
       await window.API.updateTournament(next, password);
       onUpdate(next);
+      showToast("Tournament updated");
     } catch (e) {
-      alert("Failed to update tournament: " + e.message);
+      showToast(e.message, "error");
     }
   };
 
@@ -151,6 +273,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
   useEffectA(() => {
     if (view.kind === "competition") {
       const unsub = window.API.subscribeToEvents((event) => {
+        const jitter = Math.random() * 500;
         if (event.type === "competition_started" || event.type === "match_updated" || event.type === "tournament_updated") {
           // tournament_updated carries null data (tournament-wide change) — always
           // relevant.  match_updated / competition_started carry competitionId —
@@ -159,7 +282,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
             || !event.data?.competitionId
             || event.data.competitionId === view.id;
           if (relevant) {
-            window.API.fetchCompetitionDetails(view.id).then(setAdminCompData);
+            // Apply partial update immediately for responsive UI
+            if (event.type === "match_updated") {
+              setAdminCompData(prev => patchCompetitionData(prev, event));
+            }
+            // Still trigger full refresh (jittered) to reconcile standings/propagation
+            setTimeout(() => window.API.fetchCompetitionDetails(view.id).then(setAdminCompData), jitter);
           }
         }
       });
@@ -176,8 +304,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
       onOpenSchedule={() => setView({ kind: "schedule" })}
       onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
       onOpenImport={() => setView({ kind: "import" })}
+      onStartAll={startAllCompetitions}
+      onStartCompetition={startCompetition}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
+      onUpdate={onUpdate}
     />;
   }
 
@@ -187,9 +318,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
       onCancel={() => setView({ kind: "dashboard" })}
       onCreate={async (c) => {
         try {
-          await addCompetition(c);
-          setView({ kind: "competition", id: c.id, section: "participants" });
-        } catch (_) {
+          const created = await addCompetition(c);
+          setView({ kind: "competition", id: created.id, section: "participants" });
+        } catch {
           // error already alerted inside addCompetition
         }
       }}
@@ -264,13 +395,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, tweaks, passwo
       section={view.section}
       onSection={(section) => setView({ ...view, section })}
       onBack={() => setView({ kind: "dashboard" })}
+      onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
+      onCreatePlayoff={createPlayoff}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       tweaks={tweaks}
       password={password}
+      showToast={showToast}
     />;
   }
 }
@@ -295,9 +429,27 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 
-function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onOpenSchedule, onOpenScoreEditor, onOpenImport, onLogout, onViewerMode }) {
+function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate }) {
   const t = tournament;
   const comps = t.competitions || [];
+
+  useEffectA(() => {
+    const unsub = window.API.subscribeToEvents((event) => {
+      const jitter = Math.random() * 500;
+      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_deleted") {
+        // Refresh everything on the dashboard
+        setTimeout(() => {
+          Promise.all([
+            window.API.fetchTournament(),
+            window.API.fetchCompetitions()
+          ]).then(([tourney, competitions]) => {
+            onUpdate({ ...tourney, competitions });
+          }).catch(err => console.error("Dashboard refresh failed", err));
+        }, jitter);
+      }
+    });
+    return unsub;
+  }, []);
 
   const { totalMatches, doneMatches, liveMatches, totalParticipants } = useMemoA(() => {
     let totalMatches = 0, doneMatches = 0, liveMatches = 0, totalParticipants = 0;
@@ -322,11 +474,14 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
               <StatusBadge status={t.status} />
             </div>
             <div className="page-head__sub">
-              {formatDate(t.date)} · {t.venue} · {t.courts.length} shiaijo · {comps.length} competition{comps.length === 1 ? "" : "s"} · {totalParticipants} participants
+              {formatDate(t.date)} · {t.venue} · {pluralize(t.courts.length, "shiaijo (court)", "shiaijo (courts)")} · {pluralize(comps.length, "competition")} · {pluralize(totalParticipants, "participant")}
             </div>
           </div>
           <div className="page-head__actions">
             <button className="btn" onClick={onEditTournament}>Edit details</button>
+            {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
+              <button className="btn btn--danger" onClick={onStartAll}>Start all</button>
+            )}
             <button className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
           </div>
         </div>
@@ -354,13 +509,13 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
             <span className="dot dot--live"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>
-            {running.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, "scores")} />)}
+            {running.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, "scores")} onStart={() => onStartCompetition(c.id)} />)}
           </div>
         </>)}
 
         <div className="section-title">All competitions</div>
         <div className="tlist">
-          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, c.status === "setup" ? "participants" : c.status === "pools" || c.status === "playoffs" ? "scores" : "overview")} />)}
+          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, c.status === "setup" ? "participants" : c.status === "pools" || c.status === "playoffs" ? "scores" : "overview")} onStart={() => onStartCompetition(c.id)} />)}
           <button className="tcard tcard--add" onClick={onCreateCompetition}>
             <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>
@@ -377,12 +532,14 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
   );
 }
 
-function CompCard({ c, onOpen }) {
+function CompCard({ c, onOpen, onStart }) {
   let liveCount = 0;
   if (c.pools) c.pools.forEach((p) => (p.matches || []).forEach((m) => m.status === "running" && liveCount++));
   if (c.bracket && c.bracket.rounds) c.bracket.rounds.forEach((r) => (r || []).forEach((m) => m.status === "running" && liveCount++));
+  const playerCount = (c.players || []).length;
+
   return (
-    <button className="tcard" onClick={onOpen}>
+    <div className="tcard" onClick={onOpen}>
       <div className="tcard__head">
         <div>
           <div className="tcard__eyebrow">{window.competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
@@ -398,12 +555,23 @@ function CompCard({ c, onOpen }) {
         <StatusBadge status={c.status} />
       </div>
       <div className="tcard__stats">
-        <div className="tcard__stat"><div className="v">{(c.players || []).length}</div><div className="l">{c.kind === "team" ? "Teams" : "Players"}</div></div>
-        <div className="tcard__stat"><div className="v">{c.courts.length}</div><div className="l">Shiaijo</div></div>
+        <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
+        <div className="tcard__stat"><div className="v">{c.courts.length}</div><div className="l">{pluralize(c.courts.length, "Shiaijo", "Shiaijo")}</div></div>
         <div className="tcard__stat"><div className="v">{c.format === "pools" ? "Pools" : "KO"}</div><div className="l">Format</div></div>
         {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Live</div></div>}
       </div>
-    </button>
+      <div className="tcard__actions">
+        {c.status === "setup" && playerCount >= 2 && (
+          <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
+        )}
+        {(c.status === "pools" || c.status === "playoffs") && (
+          <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Live Scoring →</button>
+        )}
+        {c.status === "completed" && (
+          <button className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View Results</button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -413,6 +581,25 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [date, setDate] = useStateA(tournament.date);
   const [courts, setCourts] = useStateA(tournament.courts.length);
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
+  const [error, setError] = useStateA("");
+
+  const handleSave = () => {
+    if (!name.trim()) { setError("Tournament name is required."); return; }
+    const norm = normalizeDate(date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(norm)) { setError("Invalid date format. Use DD-MM-YYYY."); return; }
+    const year = parseInt(norm.substring(0, 4));
+    if (year < 1900 || year > 2100) { setError("Year must be between 1900 and 2100."); return; }
+    if (courts < 1 || courts > 26) { setError("Number of courts must be between 1 and 26."); return; }
+
+    onSave({
+      name,
+      venue,
+      date: norm,
+      password: pass || undefined,
+      courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
+    });
+  };
+
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
@@ -422,25 +609,30 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           { label: "Edit details" }
         ]} />
         <div className="page-head"><h1 className="page-head__title">Edit tournament details</h1></div>
+        {error && <div className="auth__error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="card card--pad-lg">
           <div className="row">
-            <div className="field"><label className="field__label">Name</label><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div className="field"><label className="field__label">Date</label><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+            <div className="field"><label className="field__label">Name</label><input className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} /></div>
+            <div className="field">
+              <label className="field__label">Date</label>
+              <input className="input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setError(""); }} />
+              <div className="field__hint">Format: DD-MM-YYYY</div>
+            </div>
           </div>
-          <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
+          <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
           <div className="field">
             <label className="field__label">Number of Shiaijo (courts)</label>
-            <input className="input" type="number" min="1" max="26" value={courts} onChange={(e) => setCourts(+e.target.value)} />
-            <div className="field__hint">Shiaijo are shared by all competitions. Each competition can be assigned a subset.</div>
+            <input className="input" type="number" min="1" max="26" value={courts} onChange={(e) => { setCourts(+e.target.value); setError(""); }} />
+            <div className="field__hint">Enter a number (1-26). Courts will be automatically labeled A, B, C, etc.</div>
           </div>
           <div className="field">
             <label className="field__label">Admin Password</label>
-            <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" />
+            <input className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
             <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button className="btn" onClick={onCancel}>Cancel</button>
-            <button className="btn btn--primary" onClick={() => onSave({ name, venue, date, password: pass || undefined, courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)) })}>Save</button>
+            <button className="btn btn--primary" onClick={handleSave}>Save changes</button>
           </div>
         </div>
       </div>
@@ -464,6 +656,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [numberPrefix, setNumberPrefix] = useStateA("");
   const [withZekken, setWithZekken] = useStateA(false);
   const [selectedCourts, setSelectedCourts] = useStateA(tournament.courts.slice(0, Math.min(2, tournament.courts.length)));
+  const [error, setError] = useStateA("");
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
 
@@ -471,6 +664,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     const finalName = name || (kind === "team"
       ? (gender === "F" ? "Women's Teams" : "Men's Teams")
       : (gender === "F" ? "Women's Individual" : gender === "M" ? "Men's Individual" : "Individual"));
+
+    const exists = (tournament.competitions || []).some(cc => cc.name.toLowerCase() === finalName.toLowerCase());
+    if (exists) {
+      setError(`A competition named "${finalName}" already exists. Please use a unique name.`);
+      return;
+    }
+
     const slug = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').substring(0, 50);
     const id = slug || "c-" + Date.now().toString(36);
     const c = window.buildCompetition({
@@ -506,21 +706,23 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           </div>
         </div>
 
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
+
         <div className="card card--pad-lg">
           <div className="field">
             <label className="field__label">Competition type</label>
             <div className="radio-group">
-              <button className={`radio-pill ${kind === "individual" ? "is-active" : ""}`} onClick={() => setKind("individual")}>Individual</button>
-              <button className={`radio-pill ${kind === "team" ? "is-active" : ""}`} onClick={() => setKind("team")}>Team</button>
+              <button className={`radio-pill ${kind === "individual" ? "is-active" : ""}`} type="button" onClick={() => setKind("individual")}>Individual</button>
+              <button className={`radio-pill ${kind === "team" ? "is-active" : ""}`} type="button" onClick={() => setKind("team")}>Team</button>
             </div>
           </div>
 
           <div className="field">
             <label className="field__label">Category (optional)</label>
             <div className="radio-group">
-              <button className={`radio-pill ${gender === "M" ? "is-active" : ""}`} onClick={() => setGender("M")}>Men</button>
-              <button className={`radio-pill ${gender === "F" ? "is-active" : ""}`} onClick={() => setGender("F")}>Women</button>
-              <button className={`radio-pill ${gender === "X" ? "is-active" : ""}`} onClick={() => setGender("X")}>Mixed / Other</button>
+              <button className={`radio-pill ${gender === "M" ? "is-active" : ""}`} type="button" onClick={() => setGender("M")}>Men</button>
+              <button className={`radio-pill ${gender === "F" ? "is-active" : ""}`} type="button" onClick={() => setGender("F")}>Women</button>
+              <button className={`radio-pill ${gender === "X" ? "is-active" : ""}`} type="button" onClick={() => setGender("X")}>Mixed / Other</button>
             </div>
             <div className="field__hint">Used for the display label and in name suggestions. You can change later.</div>
           </div>
@@ -528,7 +730,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <div className="row">
             <div className="field">
               <label className="field__label">Display name</label>
-              <input className="input" placeholder="e.g. Men's Individual" value={name} onChange={(e) => setName(e.target.value)} />
+              <input className="input" placeholder="e.g. Men's Individual" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
             </div>
             <div className="field">
               <label className="field__label">Start time</label>
@@ -540,20 +742,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             <div className="field">
               <label className="field__label">Date</label>
               <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-              <div className="field__hint">Format: YYYY-MM-DD. For multi-day tournaments, specify which day this competition takes place.</div>
+              <div className="field__hint">Format: DD-MM-YYYY. For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">
-              <label className="field__label">Match number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
+              <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
               <input className="input" placeholder="e.g. A" maxLength="3" value={numberPrefix} onChange={(e) => setNumberPrefix(e.target.value)} style={{ maxWidth: 80 }} />
-              <div className="field__hint">Single letter prefix for match numbers (A1, B1…). Keeps numbers unique across competitions.</div>
+              <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
             </div>
           </div>
 
           <div className="field">
             <label className="field__label">Format</label>
             <div className="radio-group">
-              <button className={`radio-pill ${format === "playoffs" ? "is-active" : ""}`} onClick={() => setFormat("playoffs")}>Knockout only</button>
-              <button className={`radio-pill ${format === "pools" ? "is-active" : ""}`} onClick={() => setFormat("pools")}>Pools + Knockout</button>
+              <button className={`radio-pill ${format === "playoffs" ? "is-active" : ""}`} type="button" onClick={() => setFormat("playoffs")}>Knockout only</button>
+              <button className={`radio-pill ${format === "pools" ? "is-active" : ""}`} type="button" onClick={() => setFormat("pools")}>Pools + Knockout</button>
             </div>
             <div className="field__hint">"Pools + Knockout" runs round-robin pools first, then top finishers advance to a knockout bracket.</div>
           </div>
@@ -567,22 +769,22 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </label>
             {useSample && (
               <div className="radio-group" style={{ marginTop: 8 }}>
-                <button className={`radio-pill ${sampleSize === "small" ? "is-active" : ""}`} onClick={() => setSampleSize("small")}>Small (8)</button>
-                <button className={`radio-pill ${sampleSize === "medium" ? "is-active" : ""}`} onClick={() => setSampleSize("medium")}>Medium (16)</button>
-                <button className={`radio-pill ${sampleSize === "large" ? "is-active" : ""}`} onClick={() => setSampleSize("large")}>Large (32)</button>
+                <button className={`radio-pill ${sampleSize === "small" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("small")}>Small (8)</button>
+                <button className={`radio-pill ${sampleSize === "medium" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("medium")}>Medium (16)</button>
+                <button className={`radio-pill ${sampleSize === "large" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("large")}>Large (32)</button>
               </div>
             )}
             <div className="field__hint">Leave off to add real participants in the next step.</div>
           </div>
 
           <div className="field">
-            <label className="field__label">Assigned shiaijo</label>
+            <label className="field__label">Assigned shiaijo (courts)</label>
             <div className="radio-group">
               {tournament.courts.map((cc) => (
-                <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} onClick={() => toggleCourt(cc)}>Shiaijo {cc}</button>
+                <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
               ))}
             </div>
-            <div className="field__hint">Concurrency for this competition equals the number of courts assigned. Different competitions can share courts; the schedule prevents conflicts.</div>
+            <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Different competitions can share shiaijo (courts); the schedule prevents conflicts.</div>
           </div>
 
           {format === "pools" && (
@@ -590,8 +792,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <div className="field">
                 <label className="field__label">Pool size is a</label>
                 <div className="radio-group">
-                  <button className={`radio-pill ${poolMode === "max" ? "is-active" : ""}`} onClick={() => setPoolMode("max")}>maximum</button>
-                  <button className={`radio-pill ${poolMode === "min" ? "is-active" : ""}`} onClick={() => setPoolMode("min")}>minimum</button>
+                  <button className={`radio-pill ${poolMode === "max" ? "is-active" : ""}`} type="button" onClick={() => setPoolMode("max")}>maximum</button>
+                  <button className={`radio-pill ${poolMode === "min" ? "is-active" : ""}`} type="button" onClick={() => setPoolMode("min")}>minimum</button>
                 </div>
                 <div className="field__hint">
                   {poolMode === "max"
@@ -609,7 +811,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {kind === "team" && (
             <div className="field">
               <label className="field__label">Team size</label>
-              <input className="input" type="number" min="1" max="9" value={teamSize} onChange={(e) => setTeamSize(+e.target.value)} />
+              <window.StableInput className="input" type="number" min="1" max="9" value={teamSize} onChange={(val) => setTeamSize(val)} />
               <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
             </div>
           )}
@@ -631,24 +833,42 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   );
 }
 
-function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, reservedSlots, section, onSection, onBack, onUpdate, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password }) {
+function AdminCompetition({ tournament, competition, pools, _poolMatches, standings, bracket, reservedSlots, section, onSection, onBack, onOpenCompetition, onUpdate, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
+  const [starting, setStarting] = useStateA(false);
+
+  const isDateValid = (date) => {
+    if (!date) return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+    const year = parseInt(date.substring(0, 4));
+    return year >= 1900 && year <= 2100;
+  };
 
   const start = async () => {
+    showToast(`Starting ${c.name}…`);
+
+    setStarting(true);
     try {
-      await window.API.startCompetition(c.id, password);
-      // Trigger a refresh of competition data in the parent
-      onUpdate(c);
-      onSection(c.format === "pools" ? "pools" : "bracket");
+      const updated = await window.API.startCompetition(c.id, password);
+      // Directly update the local state without calling updateCompetition (PUT)
+      // updated is a CompetitionDetail (config, pools, bracket…); extract the flat config for the list
+      const flatComp = updated.config || updated;
+      const comps = (t.competitions || []).map(cc => cc.id === c.id ? { ...cc, ...flatComp } : cc);
+      onUpdate({ ...t, competitions: comps });
+      showToast(`${c.name} started`);
+      onSection("scores");
     } catch (e) {
-      alert("Failed to start competition: " + e.message);
+      console.error("Start competition failed:", e);
+      showToast(e.message, "error");
+    } finally {
+      setStarting(false);
     }
   };
 
   const sections = [
     {
-      sec: "Setup", items: [
+      sec: "Preparation", items: [
         { id: "overview", label: "Overview" },
         { id: "participants", label: "Participants & seeds" },
         { id: "settings", label: "Settings" },
@@ -675,7 +895,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={t} />
       <div className="page page--wide" style={{ maxWidth: 1400 }}>
         <Breadcrumbs items={[
-          { label: t.name, onClick: onBack },
+          { label: "Dashboard", onClick: onBack },
           { label: c.name, onClick: section === "overview" ? null : () => onSection("overview") },
           currentItem && section !== "overview" ? { label: currentItem.label } : null
         ].filter(Boolean)} />
@@ -690,10 +910,27 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {c.courts.join(", ")}
             </div>
           </div>
-          <div className="page-head__actions">
+          <div className="page-head__actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
             {c.status === "setup" && c.players.length >= 2 && (
-              <button className="btn btn--primary" onClick={start}>Start competition →</button>
+              <>
+                <button className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting}>
+                  {starting && <span className="spinner" />}
+                  {starting ? "Starting…" : "Start competition →"}
+                </button>
+                {!isDateValid(c.date) && (
+                  <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600 }}>
+                    ⚠ Cannot start: invalid date in Settings tab (e.g. "{c.date}")
+                  </div>
+                )}
+              </>
             )}
+            {c.format === "pools" && c.status !== "setup" && onCreatePlayoff && (() => {
+              const playoffName = c.name + " - Playoffs";
+              const hasPlayoff = (t.competitions || []).some(cc => cc.name === playoffName);
+              return hasPlayoff
+                ? <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>Playoff bracket already created</div>
+                : <button className="btn btn--primary" onClick={() => onCreatePlayoff(c.id)}>Create playoff bracket →</button>;
+            })()}
           </div>
         </div>
 
@@ -710,16 +947,16 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             <div>
               <div className="side-nav__sec">Other competitions</div>
               {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
-                <button key={cc.id} onClick={onBack}>{cc.name}</button>
+                <button key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
               ))}
             </div>
           </div>
           <div>
             {section === "overview" && <AdminCompOverview c={c} onSection={onSection} />}
-            {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} />}
-            {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} />}
+            {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
+            {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} />}
             {section === "pools" && <AdminPools c={c} pools={pools} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
-            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onUpdate={onUpdate} onMoveCourt={onMoveCourt} tweaks={tweaks} password={password} />}
+            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onUpdate={onUpdate} onMoveCourt={onMoveCourt} tweaks={tweaks} password={password} showToast={showToast} />}
             {section === "scores" && <AdminScoreEditor c={c} t={t} onEditScore={onEditScore} onMoveCourt={onMoveCourt} restrictToCompId={c.id} embedded />}
             {section === "export" && <AdminExport c={c} t={t} />}
           </div>
@@ -796,20 +1033,20 @@ function levenshtein(a, b) {
   if (m === 0) return n;
   if (n === 0) return m;
   let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  const curr = new Array(n + 1);
+  let curr = new Array(n + 1);
   for (let i = 1; i <= m; i++) {
     curr[0] = i;
     for (let j = 1; j <= n; j++)
-      curr[j] = a[i-1] === b[j-1] ? prev[j-1] : 1 + Math.min(prev[j], curr[j-1], prev[j-1]);
+      curr[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
     [prev, curr] = [curr, prev];
   }
   return prev[n];
 }
 
-function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password }) {
-  const [toast, setToast] = useStateA(null);
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, showToast, onSection }) {
+  const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
+  const [importSummary, setImportSummary] = useStateA(null);
   const [text, setText] = useStateA(() => (c.players || []).map((p) => {
     if (c.withZekkenName && p.displayName) {
       const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
@@ -821,6 +1058,22 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
   const [dragOver, setDragOver] = useStateA(false);
   const fileRef = useRefA(null);
   const seedFileRef = useRefA(null);
+  const textFocusRef = useRefA(false);
+
+  const generateText = (playersList) => (playersList || []).map((p) => {
+    if (c.withZekkenName && p.displayName) {
+      const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
+      return p.danGrade ? `${base}, ${p.danGrade}` : base;
+    }
+    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
+    return p.danGrade ? `${base}, ${p.danGrade}` : base;
+  }).join("\n");
+
+  useEffectA(() => {
+    if (!textFocusRef.current) {
+      setText(generateText(c.players || []));
+    }
+  }, [c.players, c.withZekkenName]);
 
   const handleSeedFile = (file) => {
     if (!file) return;
@@ -835,33 +1088,47 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
       raw.split(/\r?\n/).forEach((line, i) => {
         const trimmed = line.trim();
         if (!trimmed) return;
-        if (i === 0 && /name/i.test(trimmed) && /seed|rank/i.test(trimmed)) return;
+        // Skip header if it looks like one
+        if (i === 0 && (/name/i.test(trimmed) || /zekken/i.test(trimmed)) && /seed|rank/i.test(trimmed)) return;
 
         const parts = trimmed.split(",").map(s => s.trim());
         if (parts.length >= 2) {
           const name = parts[0];
-          const seed = parseInt(parts[1]);
+          const seedStr = parts[1];
+          const seed = parseInt(seedStr);
+
           if (name && !isNaN(seed) && seed > 0) {
-            const pIdx = np.findIndex(p => p.name.toLowerCase() === name.toLowerCase() || (p.displayName && p.displayName.toLowerCase() === name.toLowerCase()));
+            const nameLower = name.toLowerCase();
+            const pIdx = np.findIndex(p =>
+              p.name.toLowerCase() === nameLower ||
+              (p.displayName && p.displayName.toLowerCase() === nameLower) ||
+              p.name.toLowerCase().includes(nameLower) ||
+              nameLower.includes(p.name.toLowerCase())
+            );
+
             if (pIdx >= 0) {
               np[pIdx] = { ...np[pIdx], seed };
               updatedCount++;
             } else {
               // Find closest name suggestion
-              const key = name.toLowerCase();
               let best = null, bestDist = Infinity;
               allNames.forEach(({ name: n, display: d }) => {
-                const dist = Math.min(levenshtein(key, n.toLowerCase()), d ? levenshtein(key, d.toLowerCase()) : Infinity);
+                const d1 = levenshtein(nameLower, n.toLowerCase());
+                const d2 = d ? levenshtein(nameLower, d.toLowerCase()) : Infinity;
+                const dist = Math.min(d1, d2);
                 if (dist < bestDist) { bestDist = dist; best = n; }
               });
-              unmatched.push({ name, suggestion: bestDist <= 4 ? best : null });
+              unmatched.push({ name, seed, suggestion: bestDist <= 5 ? best : null });
             }
           }
         }
       });
 
-      if (updatedCount > 0) onUpdate({ ...c, players: np });
-      setSeedImportResult({ updatedCount, unmatched });
+      if (updatedCount > 0) {
+        onUpdate({ ...c, players: np });
+        showToast(`Matched ${updatedCount} seeds`);
+      }
+      setSeedImportResult({ updatedCount, unmatched, totalRows: updatedCount + unmatched.length });
     };
     reader.readAsText(file);
   };
@@ -870,7 +1137,15 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-      setText(parsePastedRows(e.target.result).join("\n"));
+      const parsedLines = parsePastedRows(e.target.result);
+      const newText = parsedLines.join("\n");
+      setText(newText);
+      
+      const newCount = parsedLines.length;
+      const existingCount = (c.players || []).length;
+      setImportSummary({ newCount, existingCount });
+      
+      showToast(`CSV loaded: ${newCount} entries.`);
     };
     reader.readAsText(file);
   };
@@ -880,7 +1155,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
   const players = useMemoA(() => c.players || [], [c.players]);
   const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
   const visiblePlayers = useMemoA(() => tagFilter ? players.filter(p => p.tag === tagFilter) : players, [players, tagFilter]);
-  const { sortedSeeds, gaps, hasGaps } = useMemoA(() => {
+  const { gaps, hasGaps } = useMemoA(() => {
     const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
     const gaps = [];
     if (sortedSeeds.length > 0) {
@@ -889,7 +1164,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
         if (!sortedSeeds.includes(s)) gaps.push(s);
       }
     }
-    return { sortedSeeds, gaps, hasGaps: gaps.length > 0 };
+    return { gaps, hasGaps: gaps.length > 0 };
   }, [players]);
 
   const updateSeed = (idx, val) => {
@@ -900,6 +1175,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
   };
 
   const dragIdxRef = useRefA(null);
+  const [dragOverIdx, setDragOverIdx] = useStateA(null);
   const moveSeedRow = (fromIdx, toIdx) => {
     if (fromIdx === toIdx) return;
     const np = [...(c.players || [])];
@@ -914,6 +1190,20 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
     } else {
       onUpdate({ ...c, players: np });
     }
+  };
+
+  const shuffleUnseeded = () => {
+    const np = [...(c.players || [])];
+    const unseeded = np.filter(p => !p.seed);
+    if (unseeded.length < 2) return;
+    for (let i = unseeded.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [unseeded[i], unseeded[j]] = [unseeded[j], unseeded[i]];
+    }
+    let uIdx = 0;
+    const shuffled = np.map(p => p.seed ? p : unseeded[uIdx++]);
+    onUpdate({ ...c, players: shuffled });
+    showToast("Unseeded list shuffled");
   };
 
   const [showSlotForm, setShowSlotForm] = useStateA(false);
@@ -964,20 +1254,29 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
         else nameSeen.set(key, true);
       });
       if (dupes.length > 0) {
-        alert(`Duplicate names detected — fix before saving:\n${dupes.join("\n")}`);
+        showToast(`Duplicate names detected: ${dupes.join(", ")}`, "error");
         return;
       }
 
+      let added = 0, updatedCount = 0;
       const np = parsed.map(({ name, displayName, dojo, danGrade, tag }, i) => {
         const existing = existingMap.get(name);
+        if (existing) updatedCount++; else added++;
         return { id: existing?.id || `${c.id}-p${i + 1}`, name, displayName, dojo, danGrade, tag, seed: existing?.seed || null };
       });
       console.log("AdminParticipants: Final list", np);
       onUpdate({ ...c, players: np });
-      showToast(`Saved ${np.length} ${c.kind === "team" ? "teams" : "players"}`);
+      
+      const label = c.kind === "team" ? "team" : "participant";
+      let msg = `Saved ${pluralize(np.length, label)}`;
+      if (added > 0 || updatedCount > 0) {
+        msg += ` (${added} new, ${updatedCount} updated)`;
+      }
+      showToast(msg);
+      setImportSummary(null);
     } catch (err) {
       console.error("AdminParticipants: Apply failed", err);
-      alert("Failed to apply participants: " + err.message);
+      showToast("Failed to apply participants: " + err.message, "error");
     }
   };
 
@@ -999,207 +1298,274 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password })
     }
   };
 
+  const downloadTemplate = () => {
+    const content = c.kind === "team"
+      ? "Team Name, Dojo\nTora A, Tora Dojo London\n"
+      : c.withZekkenName
+        ? "Name, Zekken, Dojo, Dan\nAkira Tanaka, TANAKA, Mumeishi, 3\n"
+        : "Name, Dojo, Dan\nAkira Tanaka, Mumeishi, 3\n";
+    const blob = new Blob([content], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "participants_template.csv";
+    a.click();
+  };
+
+  const isStarted = c.status !== "setup";
   return (
     <>
-    {toast && <div className="toast">{toast}</div>}
-    <div className="row" style={{ gridTemplateColumns: "2fr 1fr", alignItems: "start" }}>
-      <div className="card">
-        <div className="card__head">
-          <div>
-            <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
-            <div className="card__sub">
-              {lines.length} entries · One per line,
-              "{c.kind === "team" ? "Team name, Dojo" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan]"}"
+      {isStarted && (
+        <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
+          <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
+        </div>
+      )}
+      <div className="row row--equal" style={{ alignItems: "start" }}>
+        <div className="card">
+          <div className="card__head">
+            <div>
+              <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
+              <div className="card__sub">
+                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Mumeishi, 3</span>
+              </div>
+              <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
+                Format: "{c.kind === "team" ? "Team name, Dojo" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
+                <br />* Dan = kendo grade (optional)
+                <br /><button className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button className="btn btn--sm" type="button" onClick={pasteFromExcel} title="Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV">Paste clipboard</button>
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps}>Apply changes</button>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn btn--sm" onClick={pasteFromExcel}>Paste from Excel</button>
-            <button className="btn btn--sm" onClick={() => fileRef.current?.click()}>Upload CSV</button>
-            <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
-            <button className="btn btn--sm btn--primary" onClick={apply} disabled={hasGaps}>Apply</button>
-          </div>
-        </div>
 
-        <div
-          className={`dropzone ${dragOver ? "dropzone--active" : ""}`}
-          onClick={() => fileRef.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-          style={{ marginBottom: 10 }}
-        >
-          <div className="dropzone__icon">📥</div>
-          <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Drop a CSV here, or click to browse"}</div>
-          <div className="dropzone__sub">
-            {c.withZekkenName ? "Columns: name, zekken, dojo[, dan grade]" : "Columns: name, dojo[, dan grade]"} · header row optional
-          </div>
-        </div>
-
-        <LinedTextarea value={text} onChange={(e) => setText(e.target.value)} rows={14} placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Mumeishi" : "Akira Tanaka, Mumeishi"} />
-        <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by row order.</div>
-        {otherComps.length > 0 && (
-          <div style={{ marginTop: 10 }}>
-            {!showSlotForm ? (
-              <button className="btn btn--sm" onClick={() => setShowSlotForm(true)}>+ Reserved slot</button>
-            ) : (
-              <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>Add reserved slot</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                  <div style={{ flex: 2 }}>
-                    <div className="field__label">Source competition</div>
-                    <select className="field__select" value={slotSrcComp} onChange={e => setSlotSrcComp(e.target.value)}>
-                      <option value="">Select…</option>
-                      {otherComps.map(cc => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div className="field__label">Rank</div>
-                    <input className="field__input" type="number" min={1} value={slotRank} onChange={e => setSlotRank(+e.target.value)} />
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn btn--sm btn--primary" onClick={addSlot} disabled={!slotSrcComp || slotRank < 1 || slotLoading}>Add</button>
-                    <button className="btn btn--sm" onClick={() => setShowSlotForm(false)}>Cancel</button>
-                  </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            <div
+              className={`dropzone ${dragOver ? "dropzone--active" : ""}`}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              style={{ flex: 1, height: 80, minHeight: 80 }}
+            >
+              <div className="dropzone__icon">📥</div>
+              <div>
+                <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
+                <div className="dropzone__sub">
+                  {c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Mumeishi, 3)"}
                 </div>
-                <div className="field__hint">The placeholder participant will be replaced with the real player when the source competition reaches playoffs.</div>
               </div>
-            )}
-          </div>
-        )}
-        {lines.length > 0 && (() => {
-          const preview = window.parseParticipantLines(lines.slice(0, 3), c.withZekkenName);
-          const cols = c.withZekkenName ? ["Name", "Zekken", "Dojo", "Dan"] : ["Name", "Dojo", "Dan"];
-          return (
-            <div style={{ marginTop: 8, overflowX: "auto" }}>
-              <table className="parse-preview">
-                <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
-                <tbody>{preview.map((p, i) => (
-                  <tr key={i}>
-                    <td className={!p.name ? "cell--missing" : ""}>{p.name || "—"}</td>
-                    {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "—"}</td>}
-                    <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "—"}</td>
-                    <td>{p.danGrade || "—"}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-              <div className="field__hint">Preview of first {Math.min(lines.length, 3)} of {lines.length} rows</div>
+              <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
             </div>
-          );
-        })()}
-      </div>
-      <div className="card">
-        <div className="card__head">
-          <div>
-            <div className="card__title">Seeding</div>
-            <div className="card__sub">{players.filter((p) => p.seed).length} of {players.length} seeded</div>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn btn--sm" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
-            <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
-            <button className="btn btn--sm" onClick={() => onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })}>Clear all</button>
-          </div>
-        </div>
-        {hasGaps && (
-          <div className="alert alert--error" style={{ margin: "0 16px 16px" }}>
-            ❌ Seed gap detected: rank {gaps.join(", ")} {gaps.length > 1 ? "are" : "is"} missing. Seeds must be sequential (1, 2, 3…).
-          </div>
-        )}
-        {seedImportResult && (
-          <div style={{ margin: "0 16px 12px" }}>
-            {seedImportResult.updatedCount > 0 && (
-              <div className="alert alert--success" style={{ marginBottom: 6 }}>✔ Imported {seedImportResult.updatedCount} seed{seedImportResult.updatedCount !== 1 ? "s" : ""}.</div>
-            )}
-            {seedImportResult.unmatched.length > 0 && (
-              <div className="alert alert--warn">
-                ⚠ {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
-                <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
-                  {seedImportResult.unmatched.map(({ name, suggestion }) => (
-                    <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}> — did you mean <em>{suggestion}</em>?</span> : ""}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <button className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => setSeedImportResult(null)}>Dismiss</button>
-          </div>
-        )}
-        {allTags.length > 0 && (
-          <div style={{ padding: "0 16px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
-            {allTags.map(t => (
-              <button key={t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
-            ))}
-          </div>
-        )}
-        {players.length === 0 ? (
-          <div className="empty" style={{ padding: 24 }}>
-            <div className="icon">🌱</div>
-            <h3>No participants yet</h3>
-            <div style={{ fontSize: 12 }}>Add names on the left, then "Apply".</div>
-          </div>
-        ) : (
-          <div className="seed-list">
-            {visiblePlayers.map((p) => {
-              const i = players.indexOf(p);
-              return (
-              <div
-                key={p.id}
-                className={`seed-row ${p.seed ? "has-seed" : ""}`}
-                draggable
-                onDragStart={() => { dragIdxRef.current = i; }}
-                onDragOver={(e) => { e.preventDefault(); }}
-                onDrop={() => { moveSeedRow(dragIdxRef.current, i); dragIdxRef.current = null; }}
-                style={{ cursor: "grab" }}
-              >
-                <span className="seed-row__handle" title="Drag to reorder">⠿</span>
-                <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
-                <div style={{ flex: 1 }}>
-                  <div className="seed-row__name">{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
-                  <div className="seed-row__dojo">{p.dojo}</div>
+
+          {importSummary && (
+            <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>✔ Loaded <strong>{importSummary.newCount}</strong> entries. {importSummary.existingCount > 0 ? `This will replace ${importSummary.existingCount} existing ${c.kind === "team" ? "teams" : "players"} on Apply.` : ""}</span>
+              <button className="btn btn--sm btn--ghost" onClick={() => setImportSummary(null)}>Dismiss</button>
+            </div>
+          )}
+
+          <LinedTextarea 
+            value={text} 
+            onChange={(e) => setText(e.target.value)} 
+            onFocus={() => { textFocusRef.current = true; }}
+            onBlur={() => { textFocusRef.current = false; }}
+            rows={14} 
+            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Mumeishi" : "Akira Tanaka, Mumeishi"} 
+          />
+          <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by row order.</div>
+          {otherComps.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              {!showSlotForm ? (
+                <button className="btn btn--sm" onClick={() => setShowSlotForm(true)}>+ Reserved slot</button>
+              ) : (
+                <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>Add reserved slot</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div style={{ flex: 2 }}>
+                      <div className="field__label">Source competition</div>
+                      <select className="field__select" value={slotSrcComp} onChange={e => setSlotSrcComp(e.target.value)}>
+                        <option value="">Select…</option>
+                        {otherComps.map(cc => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div className="field__label">Rank</div>
+                      <input className="field__input" type="number" min={1} value={slotRank} onChange={e => setSlotRank(+e.target.value)} />
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn btn--sm btn--primary" onClick={addSlot} disabled={!slotSrcComp || slotRank < 1 || slotLoading}>Add</button>
+                      <button className="btn btn--sm" onClick={() => setShowSlotForm(false)}>Cancel</button>
+                    </div>
+                  </div>
+                  <div className="field__hint">The placeholder participant will be replaced with the real player when the source competition reaches playoffs.</div>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  <button className="btn btn--sm" style={{ padding: "1px 6px", fontSize: 11 }} onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0}>↑</button>
-                  <button className="btn btn--sm" style={{ padding: "1px 6px", fontSize: 11 }} onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1}>↓</button>
-                </div>
-                <input className="seed-row__input" type="number" placeholder="—" value={p.seed || ""} onChange={(e) => updateSeed(i, e.target.value)} />
-              </div>
-              );
-            }
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-    {reservedSlots && reservedSlots.length > 0 && (
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="card__head">
-          <div className="card__title">Reserved slots ({reservedSlots.length})</div>
-        </div>
-        <div className="card__body" style={{ padding: "0 0 8px" }}>
-          {reservedSlots.map(slot => {
-            const srcComp = (tournament?.competitions || []).find(cc => cc.id === slot.sourceCompID);
-            const ready = srcComp && (srcComp.status === "playoffs" || srcComp.status === "completed");
+              )}
+            </div>
+          )}
+          {lines.length > 0 && (() => {
+            const previewLimit = showAllPreview ? lines.length : 10;
+            const preview = window.parseParticipantLines(lines.slice(0, previewLimit), c.withZekkenName);
+            const cols = c.withZekkenName ? ["Name", "Zekken", "Dojo", "Dan"] : ["Name", "Dojo", "Dan"];
             return (
-              <div key={slot.id} style={{ display: "flex", alignItems: "center", padding: "8px 16px", gap: 8, borderBottom: "1px solid var(--border)" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>
-                    {srcComp?.name || slot.sourceCompID} — rank {slot.sourceRank}
-                  </div>
-                  <span className={`tag-badge ${ready ? "" : "tag-badge--warn"}`}>
-                    {ready ? "✓ Source ready" : "⚠ Source not yet in playoffs"}
-                  </span>
+              <div style={{ marginTop: 8, overflowX: "auto" }}>
+                <table className="parse-preview">
+                  <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
+                  <tbody>{preview.map((p, i) => (
+                    <tr key={i}>
+                      <td className={!p.name ? "cell--missing" : ""}>{p.name || "—"}</td>
+                      {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "—"}</td>}
+                      <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "—"}</td>
+                      <td>{p.danGrade || "—"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                  <div className="field__hint">Preview of {Math.min(lines.length, previewLimit)} of {lines.length} rows</div>
+                  {lines.length > 10 && (
+                    <button className="btn btn--ghost btn--sm" style={{ color: "var(--accent)", padding: "2px 6px" }} onClick={() => setShowAllPreview(!showAllPreview)}>
+                      {showAllPreview ? "Show less" : "Show all"}
+                    </button>
+                  )}
                 </div>
-                <button className="btn btn--sm btn--danger" onClick={() => removeSlot(slot.id)} title="Remove reserved slot">✕</button>
               </div>
             );
-          })}
-          {reservedSlots.some(s => { const src = (tournament?.competitions || []).find(cc => cc.id === s.sourceCompID); return !src || (src.status !== "playoffs" && src.status !== "completed"); }) && (
-            <div className="alert alert--warn" style={{ margin: "12px 16px 4px" }}>
-              ⚠ Some reserved slots cannot be resolved yet. The competition cannot be started until all source competitions have reached playoffs.
+          })()}
+        </div>
+        <div className="card">
+          <div className="card__head">
+            <div>
+              <div className="card__title">Seeding</div>
+              <div className="card__sub">{players.filter((p) => p.seed).length} of {players.length} seeded</div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0} title="Shuffle unseeded players">Shuffle unseeded</button>
+              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
+              <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
+              <button className="btn btn--sm" type="button" onClick={() => onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })}>Clear seeds</button>
+            </div>
+          </div>
+          <div className="card__body" style={{ paddingTop: 0, paddingBottom: 8 }}>
+            <div className="field__hint" style={{ marginBottom: 12 }}>
+              Assign seed ranks (1, 2, 3…) to separate top players. Seeds 1 and 2 will be placed on opposite sides of the bracket.
+              Drag rows to change order.
+            </div>
+          </div>
+          {hasGaps && (
+            <div className="alert alert--error" style={{ margin: "0 16px 16px" }}>
+              ❌ Seed gap detected: rank {gaps.join(", ")} {gaps.length > 1 ? "are" : "is"} missing. Seeds must be sequential (1, 2, 3…).
+            </div>
+          )}
+          {seedImportResult && (
+            <div style={{ margin: "0 16px 12px" }}>
+              <div className="alert alert--success" style={{ marginBottom: 6 }}>
+                ✔ Matched {seedImportResult.updatedCount} of {seedImportResult.totalRows} seeded players.
+              </div>
+              {seedImportResult.unmatched.length > 0 && (
+                <div className="alert alert--warn">
+                  ⚠ {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
+                  <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                    {seedImportResult.unmatched.map(({ name, suggestion }) => (
+                      <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}> — did you mean <em>{suggestion}</em>?</span> : ""}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <button className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => setSeedImportResult(null)}>Dismiss</button>
+            </div>
+          )}
+          {allTags.length > 0 && (
+            <div style={{ padding: "0 16px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
+              {allTags.map(t => (
+                <button key={t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
+              ))}
+            </div>
+          )}
+          {players.length === 0 ? (
+            <div className="empty" style={{ padding: 24 }}>
+              <div className="icon">🌱</div>
+              <h3>No participants yet</h3>
+              <div style={{ fontSize: 12 }}>Add names on the left, then "Apply".</div>
+            </div>
+          ) : (
+            <div className="seed-list">
+              {visiblePlayers.map((p) => {
+                const i = players.indexOf(p);
+                return (
+                  <div
+                    key={p.id}
+                    className={`seed-row ${p.seed ? "has-seed" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
+                    draggable
+                    onDragStart={() => { dragIdxRef.current = i; }}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverIdx(i); }}
+                    onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
+                    onDrop={() => { 
+                      moveSeedRow(dragIdxRef.current, i); 
+                      dragIdxRef.current = null; 
+                      setDragOverIdx(null); 
+                    }}
+                    style={{ cursor: "grab" }}
+                  >
+                    <span className="seed-row__handle" title="Drag to reorder">⠿</span>
+                    <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
+                    <div style={{ flex: 1 }}>
+                      <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
+                      <div className="seed-row__dojo">{p.dojo}</div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <button className="btn btn--sm" style={{ padding: "1px 6px", fontSize: 11 }} onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0}>↑</button>
+                      <button className="btn btn--sm" style={{ padding: "1px 6px", fontSize: 11 }} onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1}>↓</button>
+                    </div>
+                     <window.StableInput
+                        className="seed-row__input"
+                        type="number"
+                        placeholder="—"
+                        value={p.seed || ""}
+                        onChange={(val) => updateSeed(i, val)}
+                        autoSelect={false}
+                      />
+                  </div>
+                );
+              }
+              )}
             </div>
           )}
         </div>
       </div>
-    )}
+      {reservedSlots && reservedSlots.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card__head">
+            <div className="card__title">Reserved slots ({reservedSlots.length})</div>
+          </div>
+          <div className="card__body" style={{ padding: "0 0 8px" }}>
+            {reservedSlots.map(slot => {
+              const srcComp = (tournament?.competitions || []).find(cc => cc.id === slot.sourceCompID);
+              const ready = srcComp && (srcComp.status === "playoffs" || srcComp.status === "completed");
+              return (
+                <div key={slot.id} style={{ display: "flex", alignItems: "center", padding: "8px 16px", gap: 8, borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500, fontSize: 13 }}>
+                      {srcComp?.name || slot.sourceCompID} — rank {slot.sourceRank}
+                    </div>
+                    <span className={`tag-badge ${ready ? "" : "tag-badge--warn"}`}>
+                      {ready ? "✓ Source ready" : "⚠ Source not yet in playoffs"}
+                    </span>
+                  </div>
+                  <button className="btn btn--sm btn--danger" onClick={() => removeSlot(slot.id)} title="Remove reserved slot">✕</button>
+                </div>
+              );
+            })}
+            {reservedSlots.some(s => { const src = (tournament?.competitions || []).find(cc => cc.id === s.sourceCompID); return !src || (src.status !== "playoffs" && src.status !== "completed"); }) && (
+              <div className="alert alert--warn" style={{ margin: "12px 16px 4px" }}>
+                ⚠ Some reserved slots cannot be resolved yet. The competition cannot be started until all source competitions have reached playoffs.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1228,7 +1594,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
         try {
           const m = JSON.parse(e.target.result);
           setPreview(m.competitions || []);
-        } catch (_) { setPreview(null); }
+        } catch { setPreview(null); }
       };
       reader.readAsText(manifestFile);
     } else {
@@ -1238,6 +1604,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
 
   const doImport = async () => {
     if (!files.length) return;
+    if (!confirm("Are you sure you want to import these competitions? This will add new competitions to the tournament.")) return;
     setLoading(true);
     setError(null);
     try {
@@ -1333,7 +1700,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                 <div key={r.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center" }}>
                   <div style={{ flex: 1 }}>
                     <strong>{r.name || r.id}</strong>
-                    {!r.error && <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 8 }}>{r.participantCount} participants{r.seedCount > 0 ? `, ${r.seedCount} seeds` : ""}</span>}
+                    {!r.error && <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 8 }}>{pluralize(r.participantCount, "participant")} {r.seedCount > 0 ? `, ${pluralize(r.seedCount, "seed")}` : ""}</span>}
                   </div>
                   {r.error
                     ? <span className="tag-badge tag-badge--warn">✕ {r.error}</span>
@@ -1358,88 +1725,170 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   );
 }
 
-function AdminSettings({ c, tournament, onUpdate }) {
+function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast }) {
   const [lastSaved, setLastSaved] = useStateA(null);
   const [saveErr, setSaveErr] = useStateA(null);
+  const [deleting, setDeleting] = useStateA(false);
+  const [local, setLocal] = useStateA({ ...c });
   const debounceRef = useRefA(null);
 
-  // Immediate save for toggles/radio — no debounce.
+  useEffectA(() => {
+    setLocal(prev => {
+      if (debounceRef.current) return prev;
+      return { ...prev, ...c };
+    });
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName]);
+
   const saveNow = (next) => {
-    Promise.resolve(onUpdate(next)).then(() => {
+    const norm = normalizeDate(next.date);
+    if (norm && !/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+      setSaveErr("Invalid date format. Use DD-MM-YYYY.");
+      return;
+    }
+    const year = parseInt(norm.substring(0, 4));
+    if (year < 1900 || year > 2100) {
+      setSaveErr("Year must be between 1900 and 2100.");
+      return;
+    }
+
+    if (next.name.toLowerCase() !== c.name.toLowerCase()) {
+      const exists = (tournament.competitions || []).some(cc => cc.id !== c.id && cc.name.toLowerCase() === next.name.toLowerCase());
+      if (exists) {
+        setSaveErr(`Competition name "${next.name}" is already in use.`);
+        return;
+      }
+    }
+
+    const finalNext = { ...c, ...next, date: norm };
+    Promise.resolve(onUpdate(finalNext)).then(() => {
       const now = new Date();
-      setLastSaved(`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`);
+      setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);
       setSaveErr(null);
-    }).catch((e) => setSaveErr(e?.message || "Save failed"));
+    }).catch((e) => {
+      setSaveErr(e?.message || "Save failed");
+      showToast(e?.message || "Save failed", "error");
+    });
   };
 
-  // Debounced save for text/number inputs — fires 400 ms after last keystroke.
   const saveLater = (next) => {
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => saveNow(next), 400);
-    onUpdate(next); // sync local state immediately so the input stays responsive
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      saveNow(next);
+    }, 400);
   };
 
-  const set = (k, v) => saveLater({ ...c, [k]: v });
-  const setNow = (k, v) => saveNow({ ...c, [k]: v });
-  const toggleCourt = (cc) => {
-    const next = c.courts.includes(cc) ? c.courts.filter((x) => x !== cc) : [...c.courts, cc].sort();
-    if (next.length) saveNow({ ...c, courts: next });
+  const update = (k, v) => {
+    const next = { ...local, [k]: v };
+    setLocal(next);
+    saveLater(next);
   };
+
+  const updateNow = (k, v) => {
+    const next = { ...local, [k]: v };
+    setLocal(next);
+    saveNow(next);
+  };
+
+  const toggleCourt = (cc) => {
+    const nextCourts = local.courts.includes(cc) ? local.courts.filter((x) => x !== cc) : [...local.courts, cc].sort();
+    if (nextCourts.length) updateNow("courts", nextCourts);
+  };
+
   return (
     <div className="card">
       <div className="card__head">
         <div className="card__title">Competition settings</div>
-        <div style={{ fontSize: 12, color: saveErr ? "var(--red)" : "var(--ink-3)" }}>
-          {saveErr ? `⚠ ${saveErr}` : lastSaved ? `Saved ${lastSaved}` : ""}
+        <div style={{
+          fontSize: 12.5,
+          padding: "4px 8px",
+          borderRadius: 4,
+          background: saveErr ? "var(--red-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
+          color: saveErr ? "var(--red)" : "var(--accent)",
+          fontWeight: 600,
+          transition: "all 300ms"
+        }}>
+          {saveErr ? `⚠ ${saveErr}` : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
         </div>
       </div>
       <div className="row">
-        <div className="field"><label className="field__label">Display name</label><input className="input" value={c.name} onChange={(e) => set("name", e.target.value)} /></div>
-        <div className="field"><label className="field__label">Date</label><input className="input" type="date" value={c.date} onChange={(e) => set("date", e.target.value)} /><div className="field__hint">Format: YYYY-MM-DD</div></div>
-        <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={c.startTime} onChange={(e) => set("startTime", e.target.value)} /></div>
+        <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
+        <div className="field">
+          <label className="field__label">Date</label>
+          <input className="input" type="date" min="2020-01-01" max="2100-12-31" value={local.date} onChange={(e) => update("date", e.target.value)} />
+          <div className="field__hint">Format: DD-MM-YYYY</div>
+        </div>
+        <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>
       </div>
-      {c.kind === "team" && (
-        <div className="field"><label className="field__label">Team size</label><input className="input" type="number" min="1" value={c.teamSize} onChange={(e) => set("teamSize", +e.target.value)} /></div>
+      {local.kind === "team" && (
+        <div className="field"><label className="field__label">Team size</label><input className="input" type="number" min="1" max="100" value={local.teamSize} onChange={(e) => update("teamSize", +e.target.value)} /></div>
       )}
       <div className="field">
-        <label className="field__label">Assigned shiaijo</label>
+        <label className="field__label">Assigned shiaijo (courts)</label>
         <div className="radio-group">
           {tournament.courts.map((cc) => (
-            <button key={cc} className={`radio-pill ${c.courts.includes(cc) ? "is-active" : ""}`} onClick={() => toggleCourt(cc)}>Shiaijo {cc}</button>
+            <button key={cc} className={`radio-pill ${local.courts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
           ))}
         </div>
-        <div className="field__hint">Concurrency = number of courts assigned. Schedule prevents double-booking with other competitions.</div>
+        <div className="field__hint">Concurrency = number of shiaijo (courts) assigned. Schedule prevents double-booking with other competitions.</div>
       </div>
-      {c.format === "pools" && (
+      {local.format === "pools" && (
         <>
           <div className="field">
             <label className="field__label">Pool size is a</label>
             <div className="radio-group">
-              <button className={`radio-pill ${c.poolSizeMode === "max" ? "is-active" : ""}`} onClick={() => setNow("poolSizeMode", "max")}>maximum</button>
-              <button className={`radio-pill ${c.poolSizeMode === "min" ? "is-active" : ""}`} onClick={() => setNow("poolSizeMode", "min")}>minimum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "max")}>maximum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "min")}>minimum</button>
             </div>
           </div>
           <div className="row">
-            <div className="field"><label className="field__label">Players per pool</label><input className="input" type="number" min="3" value={c.poolSize} onChange={(e) => set("poolSize", +e.target.value)} /></div>
-            <div className="field"><label className="field__label">Winners per pool</label><input className="input" type="number" min="1" value={c.poolWinners} onChange={(e) => set("poolWinners", +e.target.value)} /></div>
+            <div className="field"><label className="field__label">Players per pool</label><input className="input" type="number" min="3" value={local.poolSize} onChange={(e) => update("poolSize", +e.target.value)} /></div>
+            <div className="field"><label className="field__label">Winners per pool</label><input className="input" type="number" min="1" value={local.poolWinners} onChange={(e) => update("poolWinners", +e.target.value)} /></div>
           </div>
         </>
       )}
       <div className="field">
-        <label className="field__label">Match number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
-        <input className="input" placeholder="e.g. A" maxLength="3" value={c.numberPrefix || ""} onChange={(e) => set("numberPrefix", e.target.value.substring(0, 3))} style={{ maxWidth: 80 }} />
-        <div className="field__hint">Single letter prefix for player/match numbers (A1, B1…). Keeps numbers unique across competitions.</div>
+        <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
+        <input className="input" placeholder="e.g. A" maxLength="3" value={local.numberPrefix || ""} onChange={(e) => update("numberPrefix", e.target.value.substring(0, 3))} style={{ maxWidth: 80 }} />
+        <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
       </div>
-      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={c.roundRobin} onChange={(e) => setNow("roundRobin", e.target.checked)} /> Round-robin in pools</label>
-      <label className="checkbox" style={{ marginBottom: 8 }}><input type="checkbox" checked={c.mirror} onChange={(e) => setNow("mirror", e.target.checked)} /> Mirror sides (White on left)</label>
-      {c.kind === "individual" && (
-        <label className="checkbox"><input type="checkbox" checked={c.withZekkenName} onChange={(e) => setNow("withZekkenName", e.target.checked)} /> Use Zekken display name</label>
-      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} /> Round-robin in pools</label>
+<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={local.kind === "team"} /> Use Zekken display name</label>
+          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)" }}>
+        <button className="btn btn--danger btn--ghost" disabled={deleting} onClick={async () => {
+          const started = local.status && local.status !== "setup" && local.status !== "pending";
+          const msg = started
+            ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
+            : `Are you sure you want to delete "${local.name}"? This action cannot be undone.`;
+          if (confirm(msg)) {
+            setDeleting(true);
+            try {
+              const ok = await window.API.deleteCompetition(local.id, password);
+              if (ok) onBack();
+              else showToast("Failed to delete competition.", "error");
+            } catch (e) {
+              console.error("Delete competition failed:", e);
+              showToast(e.message, "error");
+            } finally {
+              setDeleting(false);
+            }
+          }
+        }}>
+          {deleting && <span className="spinner" />}
+          {deleting ? "Deleting…" : "Delete competition"}
+        </button>
+        <div className="field__hint" style={{ marginTop: 4 }}>Deleting a started competition will remove all matches and results.</div>
+      </div>
     </div>
   );
 }
 
-function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password }) {
+function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password, showToast }) {
   const [selected, setSelected] = useStateA(null);
   const scrollRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
@@ -1456,7 +1905,7 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password }
     return <div className="empty"><div className="icon">⚙</div><h3>Bracket not generated yet</h3><div>Start the competition to build the bracket.</div></div>;
   }
   const select = (m, ri, mi) => setSelected({ matchId: m.id, ri, mi });
-  const recordWinner = (winnerSide, mode = "ippon", ipponLetter = null) => {
+  const recordWinner = (winnerSide, _mode = "ippon", ipponLetter = null) => {
     if (!selected) return;
     const m = bracket.rounds[selected.ri][selected.mi];
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
@@ -1472,14 +1921,14 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password }
 
     window.API.recordScore(c.id, m.id, result, password, m)
       .then(() => onUpdate(c))
-      .catch(err => alert(err.message));
+      .catch(err => showToast(err.message, "error"));
   };
 
   const overrideWinner = (winnerName) => {
     if (!selected) return;
     window.API.overrideBracketWinner(c.id, selected.matchId, winnerName, password)
       .then(() => onUpdate(c))
-      .catch(err => alert(err.message));
+      .catch(err => showToast(err.message, "error"));
   };
   const selectedMatch = selected ? bracket.rounds[selected.ri][selected.mi] : null;
   return (
@@ -1501,11 +1950,11 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password }
       </div>
       <div>
         {selectedMatch && selectedMatch.sideA && selectedMatch.sideB ? (
-          <LiveMatchPanel 
-            match={selectedMatch} 
-            compId={c.id} 
-            courts={t?.courts || []} 
-            onMoveCourt={onMoveCourt} 
+          <LiveMatchPanel
+            match={selectedMatch}
+            compId={c.id}
+            courts={t?.courts || []}
+            onMoveCourt={onMoveCourt}
             onRecord={recordWinner}
             onOverride={overrideWinner}
           />
@@ -1550,7 +1999,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   );
 }
 
-function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord, onOverride }) {
+const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecord, onOverride }) => {
   const [mode, setMode] = useStateA("tap");
   const [aPoints, setAPoints] = useStateA([]);
   const [bPoints, setBPoints] = useStateA([]);
@@ -1650,7 +2099,8 @@ function LiveMatchPanel({ match, compId, courts, onMoveCourt, onRecord, onOverri
       </div>
     </div>
   );
-}
+});
+LiveMatchPanel.displayName = "LiveMatchPanel";
 
 function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
   const resetOverrides = async () => {
@@ -1672,25 +2122,133 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
     }
   };
 
+  const [selectedPoolName, setSelectedPoolName] = useStateA(null);
+
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to draw pools.</div></div>;
+  }
+
+  const selectedPool = selectedPoolName ? pools.find(p => p.poolName === selectedPoolName) : null;
+
+  if (selectedPool) {
+    const poolStandings = standings ? standings[selectedPool.poolName] : null;
+    const court = c.courts[pools.indexOf(selectedPool) % c.courts.length];
+    return (
+      <div className="pool-detail">
+        <div style={{ marginBottom: 16 }}>
+          <button className="btn btn--sm" onClick={() => setSelectedPoolName(null)}>← All pools</button>
+        </div>
+        <div className="card">
+          <div className="card__head">
+            <div>
+              <h2 className="page-head__title">{selectedPool.poolName}</h2>
+              <div className="card__sub">Shiaijo {court} · {pluralize(selectedPool.players.length, "participant")}</div>
+            </div>
+            <button className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset rankings</button>
+          </div>
+
+          <div className="field__hint" style={{ marginBottom: 12 }}>
+            Rankings are calculated automatically based on wins, points, and sub-scores.
+            Enter a number in the "#" column to manually override the rank.
+          </div>
+
+          <table className="pool__table" style={{ fontSize: 14 }}>
+            <thead>
+              {c.kind === "team" || c.teamSize > 0 ? (
+                <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">IT</th><th className="num">PW</th><th className="num">PL</th></tr>
+              ) : (
+                <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
+              )}
+            </thead>
+            <tbody>
+              {(poolStandings || selectedPool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
+                const isTeamComp = c.kind === "team" || c.teamSize > 0;
+                return (
+                  <tr key={s.player.name}>
+                    <td style={{ width: 60 }}>
+                      <input
+                        type="number"
+                        className="input"
+                        value={s.rank || i + 1}
+                        onChange={(e) => overrideRank(selectedPool.poolName, s.player.name, e.target.value)}
+                        style={{
+                          width: 44,
+                          padding: "4px 8px",
+                          border: s.isOverridden ? "1px solid var(--accent)" : "1px solid var(--line)",
+                          background: s.isOverridden ? "var(--accent-soft)" : "transparent",
+                          textAlign: "center",
+                          fontWeight: s.isOverridden ? "700" : "400"
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{s.player.name}</div>
+                      {tweaks.showDojo && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
+                    </td>
+                    <td className="num">{s.wins}</td>
+                    <td className="num">{s.losses}</td>
+                    <td className="num">{s.draws || 0}</td>
+                    {isTeamComp && <td className="num">{s.individualWins || 0}</td>}
+                    {isTeamComp && <td className="num">{s.individualLosses || 0}</td>}
+                    {isTeamComp && <td className="num">{s.individualDraws || 0}</td>}
+                    <td className="num">{isTeamComp ? (s.pointsWon || 0) : s.ipponsGiven}</td>
+                    <td className="num">{isTeamComp ? (s.pointsLost || 0) : s.ipponsTaken}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <div style={{ marginTop: 24 }}>
+            <h3 className="section-title">Match Results</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {selectedPool.matches.map(m => (
+                <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
+                  <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id.split('-').pop()}</div>
+                  <div className="sched-row__players">
+                    <div className="sched-row__side" style={{ textAlign: "right" }}>
+                      <div className="name" style={{ fontSize: 13 }}>{m.sideA?.name || m.sideA}</div>
+                    </div>
+                    <div className="sched-row__vs">vs</div>
+                    <div className="sched-row__side">
+                      <div className="name" style={{ fontSize: 13 }}>{m.sideB?.name || m.sideB}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
+                      {m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : m.status === "running" ? "● LIVE" : "—"}
+                    </div>
+                    <button className="btn btn--sm" onClick={() => onEditScore(c.id, m.id, null, m)}>
+                      {m.status === "completed" ? "Edit" : "Score"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{pools.length} pools</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{pluralize(pools.length, "pool")}</div>
         </div>
         <button className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset all overrides</button>
       </div>
       <div className="pools-grid">
         {pools.map((pool) => {
           const poolStandings = standings ? standings[pool.poolName] : null;
+          const court = c.courts[pools.indexOf(pool) % c.courts.length];
+          const isDone = pool.matches && pool.matches.every(m => m.status === "completed");
           return (
-            <div key={pool.poolName} className="pool">
+            <div key={pool.poolName} className={`pool ${isDone ? "pool--done" : ""}`} onClick={() => setSelectedPoolName(pool.poolName)} style={{ cursor: "pointer" }}>
               <div className="pool__head">
-                <div>
+                <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
                   <div className="pool__name">{pool.poolName}</div>
+                  <div className="tag-badge" style={{ margin: 0 }}>SHIAIJO {court}</div>
                 </div>
               </div>
               <table className="pool__table">
@@ -1705,41 +2263,62 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                   {(poolStandings || pool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
                     const isTeamComp = c.kind === "team" || c.teamSize > 0;
                     return (
-                    <tr key={s.player.name}>
-                      <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-                        <input
-                          type="number"
-                          className="rank-input"
-                          value={s.rank || i + 1}
-                          onChange={(e) => overrideRank(pool.poolName, s.player.name, e.target.value)}
-                          style={{
-                            width: 32,
-                            border: s.isOverridden ? "1px solid var(--accent)" : "1px solid transparent",
-                            background: s.isOverridden ? "var(--accent-soft)" : "transparent",
-                            borderRadius: 4,
-                            textAlign: "center",
-                            fontSize: 12,
-                            fontWeight: s.isOverridden ? "700" : "400"
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <div style={{ fontWeight: 500 }}>{s.player.name}</div>
-                        {tweaks.showDojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
-                      </td>
-                      <td className="num">{s.wins}</td>
-                      <td className="num">{s.losses}</td>
-                      <td className="num">{s.draws || 0}</td>
-                      {isTeamComp && <td className="num">{s.individualWins || 0}</td>}
-                      {isTeamComp && <td className="num">{s.individualLosses || 0}</td>}
-                      {isTeamComp && <td className="num">{s.individualDraws || 0}</td>}
-                      <td className="num">{isTeamComp ? (s.pointsWon || 0) : s.ipponsGiven}</td>
-                      <td className="num">{isTeamComp ? (s.pointsLost || 0) : s.ipponsTaken}</td>
-                    </tr>
+                      <tr key={s.player.name}>
+                        <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+                          <input
+                            type="number"
+                            className="rank-input"
+                            value={s.rank || i + 1}
+                            onChange={(e) => overrideRank(pool.poolName, s.player.name, e.target.value)}
+                            style={{
+                              width: 32,
+                              border: s.isOverridden ? "1px solid var(--accent)" : "1px solid transparent",
+                              background: s.isOverridden ? "var(--accent-soft)" : "transparent",
+                              borderRadius: 4,
+                              textAlign: "center",
+                              fontSize: 12,
+                              fontWeight: s.isOverridden ? "700" : "400"
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 500 }}>{s.player.name}</div>
+                          {tweaks.showDojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
+                        </td>
+                        <td className="num">{s.wins}</td>
+                        <td className="num">{s.losses}</td>
+                        <td className="num">{s.draws || 0}</td>
+                        {isTeamComp && <td className="num">{s.individualWins || 0}</td>}
+                        {isTeamComp && <td className="num">{s.individualLosses || 0}</td>}
+                        {isTeamComp && <td className="num">{s.individualDraws || 0}</td>}
+                        <td className="num">{isTeamComp ? (s.pointsWon || 0) : s.ipponsGiven}</td>
+                        <td className="num">{isTeamComp ? (s.pointsLost || 0) : s.ipponsTaken}</td>
+                      </tr>
                     );
                   })}
                 </tbody>
               </table>
+              {pool.matches && pool.matches.length > 0 && (
+                <div style={{ marginTop: 12, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", marginBottom: 6 }}>Matches</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {pool.matches.map(m => (
+                      <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center", padding: "2px 0" }}>
+                        <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id.split('-').pop()}</div>
+                        <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideA?.name || m.sideA}</span>
+                          <span style={{ color: "var(--ink-4)", fontSize: 10 }}>vs</span>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideB?.name || m.sideB}</span>
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                          {m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : m.status === "running" ? "● LIVE" : "—"}
+                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={() => onEditScore(c.id, m.id, null, m)}>Score</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -1757,15 +2336,11 @@ function timeToMinutes(t) {
   return h * 60 + m;
 }
 
-function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password }) {
+function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLogout, onViewerMode, _tweaks, password }) {
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
   const [compFilter, setCompFilter] = useStateA("all");
-  const [tab, setTab] = useStateA("courts"); // courts | timeline
-  const [matchDuration, setMatchDuration] = useStateA(7); // minutes per match estimate
-  const [breakLabel, setBreakLabel] = useStateA("Lunch break");
-  const [breakTime, setBreakTime] = useStateA("12:00");
-  const [breakDur, setBreakDur] = useStateA(60);
+  const [matchDuration, setMatchDuration] = useStateA(3); // minutes per match estimate
   // Per-competition auto-schedule: startTime + duration
   const [autoComp, setAutoComp] = useStateA(tournament.competitions[0]?.id || "");
   const [autoStart, setAutoStart] = useStateA(tournament.competitions[0]?.startTime || "09:00");
@@ -1825,7 +2400,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
     setAutoSaving(true);
     try {
       // Assign times: each court runs in parallel from autoStart, matches spaced by matchDuration
-      for (const [ct, list] of Object.entries(byCt)) {
+      for (const [_ct, list] of Object.entries(byCt)) {
         let cursor = timeToMinutes(autoStart) || 540;
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
           await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", cursor), password);
@@ -1865,7 +2440,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
             </div>
             <div className="field">
               <label className="field__label">Start time</label>
-              <input className="input" type="time" value={autoStart} onChange={e => setAutoStart(e.target.value)} style={{ width: 120 }} />
+              <window.StableInput className="input" type="time" value={autoStart} onChange={val => setAutoStart(val)} style={{ width: 120 }} />
             </div>
             <div className="field">
               <label className="field__label">Minutes per match</label>
@@ -1918,7 +2493,9 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
                       try {
                         const { compId, matchId } = JSON.parse(data);
                         onMoveCourt(compId, matchId, cc);
-                      } catch (err) { }
+                      } catch (err) {
+                        console.error("Failed to parse drop data:", err);
+                      }
                     }}
                   >
                     {list.length === 0 ? (
@@ -1944,7 +2521,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onEditScore, onLog
   );
 }
 
-function AdminTWMatch({ m, highlight, courts, onMove, onTimeChange }) {
+const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange }) => {
   const [editingTime, setEditingTime] = useStateA(false);
   const [timeVal, setTimeVal] = useStateA(m.scheduledAt || "");
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
@@ -1967,11 +2544,11 @@ function AdminTWMatch({ m, highlight, courts, onMove, onTimeChange }) {
       <div>
         {editingTime ? (
           <form onSubmit={submitTime} style={{ display: "flex", gap: 2 }}>
-            <input
+            <window.StableInput
               autoFocus
               type="time"
               value={timeVal}
-              onChange={e => setTimeVal(e.target.value)}
+              onChange={val => setTimeVal(val)}
               onBlur={submitTime}
               className="input"
               style={{ width: 80, padding: "2px 4px", fontSize: 12, height: 26 }}
@@ -1991,19 +2568,19 @@ function AdminTWMatch({ m, highlight, courts, onMove, onTimeChange }) {
         <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
       </div>
       <div className="tw-match__players">
-        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
-          <span className="tw-match__badge tw-match__badge--aka">A</span>
-          {m.sideA?.name || "TBD"}
-        </div>
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--shiro">S</span>
           {m.sideB?.name || "TBD"}
+        </div>
+        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
+          <span className="tw-match__badge tw-match__badge--aka">A</span>
+          {m.sideA?.name || "TBD"}
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
         {m.status === "completed" && (
-          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision)}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)}</div>
         )}
         {m.status === "running" && <span className="bc-live">●</span>}
         <CourtPicker
@@ -2017,16 +2594,17 @@ function AdminTWMatch({ m, highlight, courts, onMove, onTimeChange }) {
       </div>
     </div>
   );
-}
+});
+AdminTWMatch.displayName = "AdminTWMatch";
 
 // ---------- Score editor ----------
-function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, tweaks }) {
+function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, _tweaks }) {
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page page--wide" style={{ maxWidth: 1200 }}>
         <Breadcrumbs items={[
-          { label: tournament.name, onClick: onBack },
+          { label: "Dashboard", onClick: onBack },
           { label: "Scores" }
         ]} />
         <div className="page-head">
@@ -2055,7 +2633,7 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
   );
 }
 
-function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, embedded }) {
+function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, _embedded }) {
   const [filter, setFilter] = useStateA("");
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
   const [statusFilter, setStatusFilter] = useStateA("all");
@@ -2107,7 +2685,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, em
           <button className={statusFilter === "scheduled" ? "is-active" : ""} onClick={() => setStatusFilter("scheduled")}>Scheduled</button>
           <button className={statusFilter === "complete" ? "is-active" : ""} onClick={() => setStatusFilter("complete")}>Completed</button>
         </div>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{filtered.length} matches</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{pluralize(filtered.length, "match", "matches")}</span>
       </div>
 
       <div className="score-editor__list">
@@ -2126,21 +2704,21 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, em
               </div>
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
-                <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
-                  <span className="se-color-badge se-color-badge--aka">AKA</span>
-                  <div className="name">{m.sideA?.name}</div>
-                  <div className="dojo">{m.sideA?.dojo}</div>
-                </div>
-                <div className="score-edit-row__score">
-                  {m.status === "completed" && window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision)}
-                  {m.status === "running" && <span className="bc-live">●</span>}
-                  {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
-                </div>
-                <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                  <div className="name">{m.sideB?.name}</div>
-                  <div className="dojo">{m.sideB?.dojo}</div>
-                  <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
-                </div>
+                  <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
+                    <div className="name">{m.sideB?.name}</div>
+                    <div className="dojo">{m.sideB?.dojo}</div>
+                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
+                  </div>
+                  <div className="score-edit-row__score">
+                    {m.status === "completed" && window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)}
+                    {m.status === "running" && <span className="bc-live">●</span>}
+                    {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
+                  </div>
+                  <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
+                    <span className="se-color-badge se-color-badge--aka">AKA</span>
+                    <div className="name">{m.sideA?.name}</div>
+                    <div className="dojo">{m.sideA?.dojo}</div>
+                  </div>
               </div>
               <div>
                 {m.status === "running" && <span className="bc-live">● LIVE</span>}
@@ -2154,43 +2732,77 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, em
         })}
       </div>
 
-      {openMatch && (
-        <ScoreEditorModal
-          match={openMatch}
-          onClose={() => setOpenMatch(null)}
-          onSubmit={(patch) => {
-            onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-            setOpenMatch(null);
-          }}
-        />
-      )}
+      {openMatch && (() => {
+        const openIdx = filtered.findIndex(m => m.compId + m.id === openMatch.compId + openMatch.id);
+        const prevMatch = openIdx > 0 ? filtered[openIdx - 1] : null;
+        const nextMatch = openIdx < filtered.length - 1 ? filtered[openIdx + 1] : null;
+        return (
+          <ScoreEditorModal
+            key={openMatch.compId + '-' + openMatch.id}
+            match={openMatch}
+            tournament={tournament}
+            prevMatch={prevMatch}
+            nextMatch={nextMatch}
+            onPrev={() => setOpenMatch(prevMatch)}
+            onNext={() => setOpenMatch(nextMatch)}
+            onClose={() => setOpenMatch(null)}
+            onSubmit={async (patch) => {
+              try {
+                await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
+                setOpenMatch(null);
+              } catch (_err) {
+                // Error handled by onEditScore/toast, but we catch here to keep modal open
+              }
+            }}
+            onSubmitAndNext={nextMatch ? async (patch) => {
+              try {
+                await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
+                setOpenMatch(nextMatch);
+              } catch (_err) { /* keep modal open on error */ }
+            } : null}
+          />
+        );
+      })()}
     </div>
   );
 }
 
-function ScoreEditorModal({ match, onClose, onSubmit }) {
+// Reusable foul counter: independent +/- buttons per side with clear labeling
+function FoulCounter({ label, fouls, setFouls, color, hansokuPts }) {
+  return (
+    <div className={`foul-counter foul-counter--${color}`}>
+      <div className="foul-counter__label">{label} Fouls</div>
+      <div className="foul-counter__controls">
+        <button className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(f => Math.max(0, f - 1))} disabled={fouls === 0}>−</button>
+        <div className="foul-counter__count">
+          <span className={`foul-counter__num ${fouls >= 2 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
+          {hansokuPts > 0 && <span className="foul-counter__h">→ +{hansokuPts}H to opp.</span>}
+        </div>
+        <button className="foul-counter__btn foul-counter__btn--inc" onClick={() => setFouls(f => Math.min(4, f + 1))} disabled={fouls >= 4}>+</button>
+      </div>
+    </div>
+  );
+}
+
+function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext }) {
   const m = match;
   const isComplete = m.status === "completed";
   const isTeam = m.compKind === "team";
   const teamSize = m.teamSize || 5;
-  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} />;
-  const initialAPts = m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] :
-    m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? Array(m.score.loserPts || 0).fill("•") : [];
-  const initialBPts = m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] :
-    m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? Array(m.score.loserPts || 0).fill("•") : [];
+  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} />;
+
+  const initialAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
+  const initialBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
 
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
-  // Hansoku (fouls). 2 fouls on one side awards an "H" ippon to the OTHER side.
-  const [aFouls, setAFouls] = useStateA(m.score?.fouls?.a || 0);
-  const [bFouls, setBFouls] = useStateA(m.score?.fouls?.b || 0);
-  const [resultType, setResultType] = useStateA(m.score?.type || "ippon"); // ippon | hantei
-  const [hanteiSide, setHanteiSide] = useStateA(m.score?.type === "hantei" && m.winner?.id === m.sideB?.id ? "b" : "a");
-  const [statusVal, setStatusVal] = useStateA(m.status);
+  const [aFouls, setAFouls] = useStateA(m.hansokuA || m.score?.fouls?.a || 0);
+  const [bFouls, setBFouls] = useStateA(m.hansokuB || m.score?.fouls?.b || 0);
   const [note, setNote] = useStateA("");
+  const [submitting, setSubmitting] = useStateA(false);
 
-  // Hansoku → ippon awarded to opponent on every 2nd foul (i.e. fouls/2 floor)
-  const aHansokuPts = Math.floor(bFouls / 2); // points awarded to A from B's fouls
+  // Hansoku → ippon awarded to opponent on every 2nd foul
+  const aHansokuPts = Math.floor(bFouls / 2);
   const bHansokuPts = Math.floor(aFouls / 2);
   const aTotal = aPts.filter((x) => x !== "•").length + aHansokuPts;
   const bTotal = bPts.filter((x) => x !== "•").length + bHansokuPts;
@@ -2199,154 +2811,118 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
     if (side === "a") setAPts((p) => p.length < 2 ? [...p, letter] : p);
     else setBPts((p) => p.length < 2 ? [...p, letter] : p);
   };
-  const addFoul = (side) => {
-    if (side === "a") setAFouls((f) => Math.min(f + 1, 4));
-    else setBFouls((f) => Math.min(f + 1, 4));
-  };
-
   const removePt = (side, idx) => {
     if (side === "a") setAPts((p) => p.filter((_, i) => i !== idx));
     else setBPts((p) => p.filter((_, i) => i !== idx));
   };
 
-  const submit = () => {
+  const buildPatch = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
-    const patchBuilders = {
-      scheduled: () => ({ winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [] }),
-      running: () => ({
-        status: "running", winner: null,
-        ipponsA: aPts.filter((x) => x !== "•"), ipponsB: bPts.filter((x) => x !== "•"),
-        score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete, note },
-      }),
-      ippon: () => {
-        const aLetters = aPts.filter((x) => x !== "•");
-        const bLetters = bPts.filter((x) => x !== "•");
-        const aFinal = [...aLetters, ...Array(aHansokuPts).fill("H")].slice(0, 2);
-        const bFinal = [...bLetters, ...Array(bHansokuPts).fill("H")].slice(0, 2);
-        const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-        if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
-        const winner = winnerSide === "a" ? m.sideA : m.sideB;
-        const ippons = winnerSide === "a" ? aFinal : bFinal;
-        return { winner, ipponsA: aFinal, ipponsB: bFinal, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete, note } };
-      },
-      hantei: () => ({ winner: hanteiSide === "a" ? m.sideA : m.sideB, ipponsA: [], ipponsB: [], status: "completed", score: { type: "hantei", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } }),
-      hikiwake: () => ({ winner: null, ipponsA: [], ipponsB: [], status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } }),
+    if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0 };
+    if (targetStatus === "running") return {
+      status: "running", winner: null,
+      ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"),
+      hansokuA: aFouls, hansokuB: bFouls,
+      score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete, note },
     };
-    const key = statusVal === "scheduled" ? "scheduled" : statusVal === "running" ? "running" : resultType;
-    onSubmit(patchBuilders[key]?.() || {});
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
+    // ippon
+    const aLetters = aPts.filter(x => x !== "•");
+    const bLetters = bPts.filter(x => x !== "•");
+    const aFinal = [...aLetters, ...Array(aHansokuPts).fill("H")].slice(0, 2);
+    const bFinal = [...bLetters, ...Array(bHansokuPts).fill("H")].slice(0, 2);
+    const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
+    const winner = winnerSide === "a" ? m.sideA : m.sideB;
+    const ippons = winnerSide === "a" ? aFinal : bFinal;
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete, note } };
   };
+
+  const doSubmit = async (fn) => {
+    setSubmitting(true);
+    try { await fn(); } finally { setSubmitting(false); }
+  };
+
+  const [isDrawToggled, setIsDrawToggled] = useStateA(m.score?.type === "hikiwake" || m.decision === "hikewake");
+
+  // Arranged as [left, right] — left is always SHIRO (White), right is always AKA (Red)
+  const sides = [
+    { key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls, setFouls: setBFouls, hansokuPts: bHansokuPts, color: "shiro", label: "SHIRO (White)" },
+    { key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls, setFouls: setAFouls, hansokuPts: aHansokuPts, color: "aka", label: "AKA (Red)" },
+  ];
+
+  const canFinish = isDrawToggled || aTotal > 0 || bTotal > 0;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="editor-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="editor-modal editor-modal--lg" onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
-          <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>
-            {m.compName} · {m.phase === "pool" ? m.poolName : m.round} · Shiaijo {m.court} · {m.scheduledAt || "TBA"}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+              {m.compName} · {m.phase === "pool" ? m.poolName : m.round}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, letterSpacing: "-0.01em" }}>
+              Shiaijo {m.court} · {m.scheduledAt || "Live"}
+            </div>
           </div>
-          <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>
-            {isComplete ? "Correct match result" : m.status === "running" ? "Edit live score" : "Record match result"}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--live" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
+              {isComplete ? "CORRECTION" : m.status === "running" ? "● LIVE" : "PRE-MATCH"}
+            </div>
+            <button className="btn btn--ghost btn--sm" onClick={onClose} style={{ padding: "2px 8px" }}>✕ Close</button>
           </div>
         </div>
+
         <div className="editor-modal__body">
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button className={`chip-toggle ${resultType === "ippon" ? "is-active" : ""}`} onClick={() => setResultType("ippon")}>Ippon (timed)</button>
-            <button className={`chip-toggle ${resultType === "hantei" ? "is-active" : ""}`} onClick={() => setResultType("hantei")}>Hantei</button>
-            <button className={`chip-toggle ${resultType === "hikiwake" ? "is-active" : ""}`} onClick={() => setResultType("hikiwake")}>Hikiwake (draw)</button>
-          </div>
-
-          {resultType === "ippon" && (
-            <>
-              <div className="editor-side editor-side--red">
-                <div>
-                  <div className="editor-side__name">{m.sideA?.name}</div>
-                  <div className="editor-side__dojo">Aka (Red) · {m.sideA?.dojo}</div>
-                </div>
-                <div className="editor-side__score">
-                  {[0, 1].map((i) => (
-                    <button key={i} className={`editor-side__pt ${aPts[i] ? "editor-side__pt--filled" : ""}`} onClick={() => removePt("a", i)} title={aPts[i] ? "Click to remove" : "Empty"}>
-                      {aPts[i] || "·"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: -8 }}>
-                {["M", "K", "D", "T"].map((cc) => (
-                  <button key={cc} className="ipt-btn" onClick={() => addPt("a", cc)}>+ {cc}</button>
-                ))}
-                <button className="ipt-btn" onClick={() => setAPts([])}>Clear</button>
-              </div>
-
-              <div className="editor-side editor-side--white">
-                <div>
-                  <div className="editor-side__name">{m.sideB?.name}</div>
-                  <div className="editor-side__dojo">Shiro (White) · {m.sideB?.dojo}</div>
-                </div>
-                <div className="editor-side__score">
-                  {[0, 1].map((i) => (
-                    <button key={i} className={`editor-side__pt ${bPts[i] ? "editor-side__pt--filled" : ""}`} onClick={() => removePt("b", i)}>
-                      {bPts[i] || "·"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: -8 }}>
-                {["M", "K", "D", "T"].map((cc) => (
-                  <button key={cc} className="ipt-btn" onClick={() => addPt("b", cc)}>+ {cc}</button>
-                ))}
-                <button className="ipt-btn" onClick={() => setBPts([])}>Clear</button>
-              </div>
-              <div className="field__hint">
-                M = Men · K = Kote · D = Do · T = Tsuki. Tap a recorded ippon to remove it.
-              </div>
-
-              <div className="field">
-                <label className="field__label">Hansoku (fouls)</label>
-                <div className="hansoku-grid">
-                  <div className="hansoku-row">
-                    <span className="hansoku-row__label">Aka · {m.sideA?.name}</span>
-                    <div className="hansoku-row__dots">
-                      {[0, 1, 2, 3].map((i) => (
-                        <button key={i} className={`hansoku-dot ${i < aFouls ? "is-on" : ""}`} onClick={() => setAFouls(i < aFouls ? i : i + 1)} title={`Foul ${i + 1}`}>
-                          {i < aFouls ? "✕" : "·"}
-                        </button>
-                      ))}
+          <div className="scoring-board">
+              {/* Score slots + point buttons */}
+              <div className="sb-match">
+                {sides.map((s, idx) => (
+                  <React.Fragment key={s.key}>
+                    <div className={`sb-side sb-side--${s.color}`}>
+                      <div className="sb-name">{s.name}</div>
+                      <div className="sb-dojo">{s.label}</div>
+                      <div className="sb-slots">
+                        {[0, 1].map((i) => (
+                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} title="Click to remove">
+                            {s.pts[i] || "·"}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="sb-points-grid">
+                        {["M", "K", "D", "T", "H"].map((cc) => (
+                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={s.pts.length >= 2}>{cc}</button>
+                        ))}
+                      </div>
                     </div>
-                    <span className="hansoku-row__hint">{aHansokuPts > 0 ? `→ +${aHansokuPts} ippon to Shiro` : "—"}</span>
-                  </div>
-                  <div className="hansoku-row">
-                    <span className="hansoku-row__label">Shiro · {m.sideB?.name}</span>
-                    <div className="hansoku-row__dots">
-                      {[0, 1, 2, 3].map((i) => (
-                        <button key={i} className={`hansoku-dot ${i < bFouls ? "is-on" : ""}`} onClick={() => setBFouls(i < bFouls ? i : i + 1)} title={`Foul ${i + 1}`}>
-                          {i < bFouls ? "✕" : "·"}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="hansoku-row__hint">{bHansokuPts > 0 ? `→ +${bHansokuPts} ippon to Aka` : "—"}</span>
-                  </div>
-                </div>
-                <div className="field__hint">Two fouls award an ippon to the opponent. Tap a dot to set the count.</div>
+                    {idx === 0 && (
+                      <div className="sb-center">
+                        {isDrawToggled ? (
+                          <button className="sb-draw-toggle sb-draw-toggle--active" onClick={() => { setIsDrawToggled(false); }} title="Cancel draw">X</button>
+                        ) : aTotal === 0 && bTotal === 0 ? (
+                          <button className="sb-draw-toggle" onClick={() => { setIsDrawToggled(true); setAPts([]); setBPts([]); }} title="Mark as draw (hikiwake)">vs</button>
+                        ) : (
+                          <div className="sb-vs">{`${bTotal}–${aTotal}`}</div>
+                        )}
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))}
               </div>
-            </>
-          )}
 
-          {resultType === "hantei" && (
-            <div className="field">
-              <label className="field__label">Hantei winner</label>
-              <div className="radio-group">
-                <button className={`radio-pill ${hanteiSide === "a" ? "is-active" : ""}`} onClick={() => setHanteiSide("a")}>Aka · {m.sideA?.name}</button>
-                <button className={`radio-pill ${hanteiSide === "b" ? "is-active" : ""}`} onClick={() => setHanteiSide("b")}>Shiro · {m.sideB?.name}</button>
+              {/* Independent foul counters */}
+              <div className="sb-fouls">
+                {sides.map((s) => (
+                  <FoulCounter
+                    key={s.key}
+                    label={s.label}
+                    fouls={s.fouls}
+                    setFouls={s.setFouls}
+                    color={s.color}
+                    hansokuPts={s.hansokuPts}
+                  />
+                ))}
               </div>
-            </div>
-          )}
-
-          <div className="field">
-            <label className="field__label">Match status</label>
-            <div className="radio-group">
-              <button className={`radio-pill ${statusVal === "scheduled" ? "is-active" : ""}`} onClick={() => setStatusVal("scheduled")}>Reset to scheduled</button>
-              <button className={`radio-pill ${statusVal === "running" ? "is-active" : ""}`} onClick={() => setStatusVal("running")}>Live (in progress)</button>
-              <button className={`radio-pill ${statusVal === "completed" ? "is-active" : ""}`} onClick={() => setStatusVal("completed")}>Final</button>
-            </div>
           </div>
 
           {isComplete && (
@@ -2357,25 +2933,50 @@ function ScoreEditorModal({ match, onClose, onSubmit }) {
             </div>
           )}
         </div>
-        <div className="editor-modal__foot">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn--primary" onClick={submit} disabled={statusVal === "completed" && resultType === "ippon" && aPts.length === 0 && bPts.length === 0}>
-            {isComplete ? "Save correction" : "Save result"}
-          </button>
+
+        {/* Sticky navigation + action footer */}
+        <div className="editor-modal__foot editor-modal__foot--nav">
+          <div className="score-nav">
+            {prevMatch ? (
+              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
+            ) : <span />}
+
+            <div className="score-nav__actions">
+              {m.status === "scheduled" && (
+                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>
+                  ▶ Start Match
+                </button>
+              )}
+              <button className="btn" onClick={onClose} disabled={submitting}>Cancel</button>
+              {onSubmitAndNext ? (
+                <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmitAndNext(buildPatch("completed")))} disabled={submitting || !canFinish}>
+                  {submitting ? "Saving…" : "Finish + Start Next →"}
+                </button>
+              ) : (
+                <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmit(buildPatch("completed")))} disabled={submitting || !canFinish}>
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish"}
+                </button>
+              )}
+            </div>
+
+            {nextMatch ? (
+              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
+            ) : <span />}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-const TEAM_POSITIONS = ["Senpou", "Jihou", "Chuken", "Fukushou", "Taishou", "6th", "7th", "8th", "9th"];
+const TEAM_POSITIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
-function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit }) {
+function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext }) {
   const m = match;
   const isComplete = m.status === "completed";
   const positions = TEAM_POSITIONS.slice(0, teamSize);
-  const [statusVal, setStatusVal] = useStateA(m.status);
   const [note, setNote] = useStateA("");
+  const [submitting, setSubmitting] = useStateA(false);
 
   const existingSub = m.subResults || [];
   const initSubs = positions.map((_, idx) => {
@@ -2406,7 +3007,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit }) {
   const pwB = subTotals.reduce((sum, s) => sum + s.bTotal, 0);
   const teamWinner = ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null;
 
-  const submit = () => {
+  const buildPatch = (targetStatus) => {
+    if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
     const subResults = subs.map((s, idx) => {
       const t = subTotals[idx];
       const aAll = [...s.aPts, ...Array(t.aHansoku).fill("H")].slice(0, 2);
@@ -2424,115 +3026,153 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit }) {
         decision: t.winner === null ? "hikewake" : "",
       };
     });
-
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
-
-    let patch = {
+    return {
       winner,
-      status: statusVal === "scheduled" ? "scheduled" : statusVal === "running" ? "running" : "completed",
+      status: targetStatus === "running" ? "running" : "completed",
       ipponsA: [],
       ipponsB: [],
       score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete, note },
       subResults,
     };
-    if (statusVal === "scheduled") {
-      patch = { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
-    }
-    onSubmit(patch);
   };
+
+  const doSubmit = async (fn) => {
+    setSubmitting(true);
+    try { await fn(); } finally { setSubmitting(false); }
+  };
+
+  // left = SHIRO (White), right = AKA (Red)
+  const teamSides = [
+    { key: "b", name: m.sideB?.name || m.sideB, label: "SHIRO (White)", color: "shiro", iv: ivB, pw: pwB },
+    { key: "a", name: m.sideA?.name || m.sideA, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
+  ];
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="editor-modal editor-modal--team" onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
-          <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>
-            {m.compName} · {m.phase === "pool" ? m.poolName : m.round} · Shiaijo {m.court} · {m.scheduledAt || "TBA"}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+              {m.compName} · {m.phase === "pool" ? m.poolName : m.round}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, letterSpacing: "-0.01em" }}>
+              Shiaijo {m.court} · {m.scheduledAt || "Live"}
+            </div>
           </div>
-          <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>
-            {isComplete ? "Correct team result" : m.status === "running" ? "Edit live team score" : "Record team result"}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--live" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
+              {isComplete ? "CORRECTION" : m.status === "running" ? "● LIVE" : "PRE-MATCH"}
+            </div>
+            <button className="btn btn--ghost btn--sm" onClick={onClose} style={{ padding: "2px 8px" }}>✕ Close</button>
           </div>
         </div>
+
         <div className="editor-modal__body">
-          <div className="team-header">
-            <div className="team-header__side team-header__side--red"><span className="team-header__color">AKA</span>{m.sideA?.name || m.sideA}</div>
-            <div className="team-header__vs">vs</div>
-            <div className="team-header__side team-header__side--white"><span className="team-header__color">SHIRO</span>{m.sideB?.name || m.sideB}</div>
+          {/* Team header */}
+          <div className="sb-match" style={{ marginBottom: 16 }}>
+            {teamSides.map((s, idx) => (
+              <React.Fragment key={s.key}>
+                <div className={`sb-side sb-side--${s.color}`}>
+                  <div className="sb-name">{s.name}</div>
+                  <div className="sb-dojo">{s.label}</div>
+                </div>
+                {idx === 0 && (
+                  <div className="sb-center">
+                    <div className="sb-vs">VS</div>
+                  </div>
+                )}
+              </React.Fragment>
+            ))}
           </div>
 
+          {/* Individual match rows */}
           {positions.map((pos, idx) => {
             const s = subs[idx];
             const t = subTotals[idx];
+
+            // Each row: [left side, center score, right side] — left=SHIRO, right=AKA
+            const rowSides = [
+              { key: "b", pts: s.bPts, fouls: s.bFouls, hansokuPts: t.bHansoku,
+                setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts })),
+                setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f })),
+                color: "shiro", label: "SHIRO" },
+              { key: "a", pts: s.aPts, fouls: s.aFouls, hansokuPts: t.aHansoku,
+                setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts })),
+                setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f })),
+                color: "aka", label: "AKA" },
+            ];
+
+            const scoreDisplay = (() => {
+              if (t.winner === null && t.aTotal === 0 && t.bTotal === 0) return <span style={{ color: "var(--ink-3)" }}>–</span>;
+              if (t.winner === null) return <span className="tsm-draw">X</span>;
+              return <span>{`${t.bTotal}–${t.aTotal}`}</span>;
+            })();
+
             return (
               <div key={idx} className="team-sub-match">
-                <div className="team-sub-match__pos">{pos}</div>
+                <div className="team-sub-match__pos">Match {pos}</div>
                 <div className="team-sub-match__row">
-                  <div className="team-sub-match__side">
-                    <div className="team-sub-match__pts">
-                      {[0, 1].map(i => (
-                        <button key={i} className={`editor-side__pt ${s.aPts[i] ? "editor-side__pt--filled" : ""}`}
-                          onClick={() => updateSub(idx, prev => ({ ...prev, aPts: prev.aPts.filter((_, j) => j !== i) }))}>{s.aPts[i] || "·"}</button>
-                      ))}
-                    </div>
-                    <div className="team-sub-match__btns">
-                      {["M", "K", "D", "T"].map(c => (
-                        <button key={c} className="ipt-btn ipt-btn--sm" onClick={() => updateSub(idx, prev => ({ ...prev, aPts: prev.aPts.length < 2 ? [...prev.aPts, c] : prev.aPts }))}>{c}</button>
-                      ))}
-                    </div>
-                    <div className="team-sub-match__fouls">
-                      {[0, 1, 2, 3].map(i => (
-                        <button key={i} className={`hansoku-dot hansoku-dot--sm ${i < s.aFouls ? "is-on" : ""}`}
-                          onClick={() => updateSub(idx, prev => ({ ...prev, aFouls: i < prev.aFouls ? i : i + 1 }))}>{i < s.aFouls ? "✕" : "·"}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className={`team-sub-match__score ${t.winner === "a" ? "team-sub-match__score--a-win" : t.winner === "b" ? "team-sub-match__score--b-win" : ""}`}>
-                    {t.aTotal}–{t.bTotal}
-                  </div>
-                  <div className="team-sub-match__side team-sub-match__side--right">
-                    <div className="team-sub-match__pts">
-                      {[0, 1].map(i => (
-                        <button key={i} className={`editor-side__pt ${s.bPts[i] ? "editor-side__pt--filled" : ""}`}
-                          onClick={() => updateSub(idx, prev => ({ ...prev, bPts: prev.bPts.filter((_, j) => j !== i) }))}>{s.bPts[i] || "·"}</button>
-                      ))}
-                    </div>
-                    <div className="team-sub-match__btns">
-                      {["M", "K", "D", "T"].map(c => (
-                        <button key={c} className="ipt-btn ipt-btn--sm" onClick={() => updateSub(idx, prev => ({ ...prev, bPts: prev.bPts.length < 2 ? [...prev.bPts, c] : prev.bPts }))}>{c}</button>
-                      ))}
-                    </div>
-                    <div className="team-sub-match__fouls">
-                      {[0, 1, 2, 3].map(i => (
-                        <button key={i} className={`hansoku-dot hansoku-dot--sm ${i < s.bFouls ? "is-on" : ""}`}
-                          onClick={() => updateSub(idx, prev => ({ ...prev, bFouls: i < prev.bFouls ? i : i + 1 }))}>{i < s.bFouls ? "✕" : "·"}</button>
-                      ))}
-                    </div>
-                  </div>
+                  {rowSides.map((rs, rsIdx) => (
+                    <React.Fragment key={rs.key}>
+                      <div className={`team-sub-match__side ${rsIdx === 1 ? "team-sub-match__side--right" : ""}`}>
+                        <div className="tsm-side-label">{rs.label}</div>
+                        {/* Point slots */}
+                        <div className="team-sub-match__pts">
+                          {[0, 1].map(i => (
+                            <button key={i} className={`editor-side__pt ${rs.pts[i] ? "editor-side__pt--filled" : ""}`}
+                              onClick={() => rs.setPts(rs.pts.filter((_, j) => j !== i))} title="Click to remove">
+                              {rs.pts[i] || "·"}
+                            </button>
+                          ))}
+                        </div>
+                        {/* Point buttons incl. H */}
+                        <div className="team-sub-match__btns">
+                          {["M", "K", "D", "T", "H"].map(cc => (
+                            <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
+                              onClick={() => rs.setPts(rs.pts.length < 2 ? [...rs.pts, cc] : rs.pts)}
+                              disabled={rs.pts.length >= 2}>{cc}</button>
+                          ))}
+                        </div>
+                        {/* Independent foul counter */}
+                        <div className="tsm-fouls">
+                          <span className="tsm-fouls__label">{rs.label} Fouls</span>
+                          <div className="tsm-fouls__controls">
+                            <button className="tsm-fouls__btn" onClick={() => rs.setFouls(f => Math.max(0, f - 1))} disabled={rs.fouls === 0}>−</button>
+                            <span className={`tsm-fouls__count ${rs.fouls >= 2 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
+                            <button className="tsm-fouls__btn" onClick={() => rs.setFouls(f => Math.min(4, f + 1))} disabled={rs.fouls >= 4}>+</button>
+                          </div>
+                          {rs.hansokuPts > 0 && <span className="tsm-fouls__h">→ +{rs.hansokuPts}H</span>}
+                        </div>
+                      </div>
+                      {rsIdx === 0 && (
+                        <div className={`team-sub-match__score ${t.winner === "b" ? "team-sub-match__score--a-win" : t.winner === "a" ? "team-sub-match__score--b-win" : ""}`}>
+                          {scoreDisplay}
+                        </div>
+                      )}
+                    </React.Fragment>
+                  ))}
                 </div>
               </div>
             );
           })}
 
+          {/* Team summary */}
           <div className="team-summary">
-            <div className={`team-summary__side ${teamWinner === "a" ? "team-summary__side--win" : ""}`}>
-              <div className="team-summary__label">IV: {ivA} · PW: {pwA}</div>
-            </div>
-            <div className="team-summary__result">
-              {teamWinner === "a" ? "WIN" : teamWinner === "b" ? "LOSS" : "DRAW"}
-              {" – "}
-              {teamWinner === "b" ? "WIN" : teamWinner === "a" ? "LOSS" : "DRAW"}
-            </div>
-            <div className={`team-summary__side ${teamWinner === "b" ? "team-summary__side--win" : ""}`}>
-              <div className="team-summary__label">IV: {ivB} · PW: {pwB}</div>
-            </div>
-          </div>
-
-          <div className="field">
-            <label className="field__label">Match status</label>
-            <div className="radio-group">
-              <button className={`radio-pill ${statusVal === "scheduled" ? "is-active" : ""}`} onClick={() => setStatusVal("scheduled")}>Reset to scheduled</button>
-              <button className={`radio-pill ${statusVal === "running" ? "is-active" : ""}`} onClick={() => setStatusVal("running")}>Live (in progress)</button>
-              <button className={`radio-pill ${statusVal === "completed" ? "is-active" : ""}`} onClick={() => setStatusVal("completed")}>Final</button>
-            </div>
+            {teamSides.map((ts, idx) => (
+              <React.Fragment key={ts.key}>
+                <div className="team-summary__side">
+                  <div className="team-summary__label">{ts.label}</div>
+                  <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
+                </div>
+                {idx === 0 && (
+                  <div className="team-summary__result">
+                    {teamWinner === "a" ? "AKA WIN" : teamWinner === "b" ? "SHIRO WIN" : "DRAW"}
+                    <div style={{ fontSize: 14, opacity: 0.6, marginTop: 4 }}>RESULT</div>
+                  </div>
+                )}
+              </React.Fragment>
+            ))}
           </div>
 
           {isComplete && (
@@ -2542,9 +3182,31 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit }) {
             </div>
           )}
         </div>
-        <div className="editor-modal__foot">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn--primary" onClick={submit}>{isComplete ? "Save correction" : "Save result"}</button>
+
+        <div className="editor-modal__foot editor-modal__foot--nav">
+          <div className="score-nav">
+            {prevMatch ? (
+              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
+            ) : <span />}
+            <div className="score-nav__actions">
+              {m.status === "scheduled" && (
+                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>▶ Start</button>
+              )}
+              <button className="btn" onClick={onClose} disabled={submitting}>Cancel</button>
+              {onSubmitAndNext ? (
+                <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmitAndNext(buildPatch("completed")))} disabled={submitting}>
+                  {submitting ? "Saving…" : "Finish + Start Next →"}
+                </button>
+              ) : (
+                <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmit(buildPatch("completed")))} disabled={submitting}>
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish"}
+                </button>
+              )}
+            </div>
+            {nextMatch ? (
+              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
+            ) : <span />}
+          </div>
         </div>
       </div>
     </div>
@@ -2553,7 +3215,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit }) {
 
 function AdminExport({ c, t }) {
   const url = `${window.location.origin}/viewer.html?id=${t.id}#comp-${c.id}`;
-  
+
   const downloadXlsx = async () => {
     try {
       const resp = await fetch(`/api/competitions/${c.id}/export`);

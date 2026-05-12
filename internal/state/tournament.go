@@ -12,29 +12,79 @@ import (
 )
 
 func (s *Store) LoadTournament() (*Tournament, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	s.tournamentMu.RLock()
 	path := filepath.Clean(filepath.Join(s.folder, "tournament.md"))
-	data, err := os.ReadFile(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil // Not found
+			s.tournamentMu.RUnlock()
+			s.tournamentMu.Lock()
+			defer s.tournamentMu.Unlock()
+			s.cachedTourn = nil
+			s.tournMtime = 0
+			return nil, nil
 		}
+		s.tournamentMu.RUnlock()
+		return nil, err
+	}
+
+	mtime := info.ModTime().UnixNano()
+	if s.cachedTourn != nil && s.tournMtime == mtime {
+		t := s.copyTournament(s.cachedTourn)
+		s.tournamentMu.RUnlock()
+		return t, nil
+	}
+	s.tournamentMu.RUnlock()
+
+	s.tournamentMu.Lock()
+	defer s.tournamentMu.Unlock()
+
+	// Re-check after acquiring write lock
+	info, err = os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.cachedTourn = nil
+			s.tournMtime = 0
+			return nil, nil
+		}
+		return nil, err
+	}
+	mtime = info.ModTime().UnixNano()
+	if s.cachedTourn != nil && s.tournMtime == mtime {
+		return s.copyTournament(s.cachedTourn), nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return nil, err
 	}
 
 	var t Tournament
 	if err := parseFrontMatter(data, &t); err != nil {
 		// If it's not a front-matter file, return a default tournament
-		return &Tournament{
+		t = Tournament{
 			Name:  "New Tournament",
 			Date:  time.Now().Format("2006-01-02"),
 			Venue: "Venue TBA",
-		}, nil
+		}
 	}
 
-	return &t, nil
+	s.cachedTourn = &t
+	s.tournMtime = mtime
+
+	return s.copyTournament(s.cachedTourn), nil
+}
+
+func (s *Store) copyTournament(t *Tournament) *Tournament {
+	if t == nil {
+		return nil
+	}
+	cp := *t
+	if t.Courts != nil {
+		cp.Courts = make([]string, len(t.Courts))
+		copy(cp.Courts, t.Courts)
+	}
+	return &cp
 }
 
 // SaveTournamentChanged persists t and reports whether the on-disk content
@@ -43,6 +93,9 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 func (s *Store) SaveTournamentChanged(t *Tournament) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.tournamentMu.Lock()
+	defer s.tournamentMu.Unlock()
 
 	path := filepath.Clean(filepath.Join(s.folder, "tournament.md"))
 	newData, err := writeFrontMatter(t)
@@ -54,7 +107,18 @@ func (s *Store) SaveTournamentChanged(t *Tournament) (bool, error) {
 		return false, nil
 	}
 
-	return true, os.WriteFile(path, newData, 0600)
+	if err := os.WriteFile(path, newData, 0600); err != nil {
+		return false, err
+	}
+
+	// Update cache
+	s.cachedTourn = t
+	info, _ := os.Stat(path)
+	if info != nil {
+		s.tournMtime = info.ModTime().UnixNano()
+	}
+
+	return true, nil
 }
 
 func (s *Store) SaveTournament(t *Tournament) error {

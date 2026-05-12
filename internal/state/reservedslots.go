@@ -10,9 +10,45 @@ import (
 )
 
 func (s *Store) LoadReservedSlots(compID string) ([]ReservedSlot, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.loadReservedSlotsLocked(compID)
+	mu := s.getCompLock(compID)
+	mu.RLock()
+	defer mu.RUnlock()
+
+	cache := s.getFileCache(compID, "reserved-slots.json")
+	cache.mu.RLock()
+	mtime := s.FileMtime(compID, "reserved-slots.json")
+	if cache.data != nil && cache.mtime == mtime {
+		res := s.copyReservedSlots(cache.data.([]ReservedSlot))
+		cache.mu.RUnlock()
+		return res, nil
+	}
+	cache.mu.RUnlock()
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	// Re-check after acquiring write lock
+	if cache.data != nil && cache.mtime == mtime {
+		return s.copyReservedSlots(cache.data.([]ReservedSlot)), nil
+	}
+
+	slots, err := s.loadReservedSlotsLocked(compID)
+	if err != nil {
+		return nil, err
+	}
+
+	cache.data = slots
+	cache.mtime = mtime
+
+	return s.copyReservedSlots(slots), nil
+}
+
+func (s *Store) copyReservedSlots(slots []ReservedSlot) []ReservedSlot {
+	if slots == nil {
+		return nil
+	}
+	res := make([]ReservedSlot, len(slots))
+	copy(res, slots)
+	return res
 }
 
 func (s *Store) SaveReservedSlots(compID string, slots []ReservedSlot) error {
@@ -140,6 +176,16 @@ func (s *Store) AddReservedSlot(compID string, sourceCompID string, sourceRank i
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	slots, err := s.loadReservedSlotsLocked(compID)
+	if err != nil {
+		return nil, err
+	}
+	for _, sl := range slots {
+		if sl.SourceCompID == sourceCompID && sl.SourceRank == sourceRank {
+			return &sl, nil
+		}
+	}
+
 	slotID := newParticipantID()
 	partID := newParticipantID()
 
@@ -160,10 +206,6 @@ func (s *Store) AddReservedSlot(compID string, sourceCompID string, sourceRank i
 		return nil, err
 	}
 
-	slots, err := s.loadReservedSlotsLocked(compID)
-	if err != nil {
-		return nil, err
-	}
 	slot := ReservedSlot{
 		ID:            slotID,
 		ParticipantID: partID,

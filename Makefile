@@ -101,8 +101,8 @@ vendor-frontend:
 esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 	@echo "Pre-compiling JSX files..."
 	@mkdir -p web-mobile/dist
-	npx --yes esbuild web-mobile/js/api.js web-mobile/js/data.js web-mobile/js/bracket.js web-mobile/js/ui.js web-mobile/js/viewer.js web-mobile/js/admin.js web-mobile/js/app.js \
-		--outdir=web-mobile/dist --loader:.js=jsx \
+	npx --yes esbuild web-mobile/js/*.jsx \
+		--outdir=web-mobile/dist --loader:.jsx=jsx \
 		--jsx-factory=React.createElement --jsx-fragment=React.Fragment
 
 $(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx $(GO_SOURCES) $(EMBEDDED_ASSETS)
@@ -167,8 +167,8 @@ run-mobile: go/build ## Run the mobile-app locally (use TOURNAMENT_DATA_DIR to o
 	@mkdir -p $(TOURNAMENT_DATA_DIR)
 	$(BIN_PATH)/$(BIN_NAME) mobile-app --folder $(TOURNAMENT_DATA_DIR)
 
-example-mobile-app: go/build ## Setup London Cup style tournament using mobile app API
-	@echo "Starting temporary mobile app server..."
+mobile-app-example: go/build ## Setup and run a full tournament demo using mobile app API
+	@echo "Starting temporary mobile app server for demo..."
 	@rm -rf ./demo-data && mkdir -p ./demo-data
 	@$(BIN_PATH)/$(BIN_NAME) mobile-app --folder ./demo-data & \
 	PID=$$!; \

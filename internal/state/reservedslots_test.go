@@ -150,3 +150,42 @@ func TestStore_ReservedSlots_LoadParticipantsLocked_WithSeeds(t *testing.T) {
 	}
 	assert.NotNil(t, slot)
 }
+
+func TestStore_AddReservedSlot_Idempotency(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-idempotency-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	// Add slot first time
+	slot1, err := store.AddReservedSlot(compID, "source", 1, false)
+	require.NoError(t, err)
+
+	players1, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	assert.Len(t, players1, 1)
+
+	// Add SAME slot second time
+	slot2, err := store.AddReservedSlot(compID, "source", 1, false)
+	require.NoError(t, err)
+
+	// Should be the SAME slot!
+	assert.Equal(t, slot1.ID, slot2.ID)
+	assert.Equal(t, slot1.ParticipantID, slot2.ParticipantID)
+
+	// Participants should NOT have increased
+	players2, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	assert.Len(t, players2, 1)
+	assert.Equal(t, players1, players2)
+
+	// Slots should NOT have increased
+	slots, err := store.LoadReservedSlots(compID)
+	require.NoError(t, err)
+	assert.Len(t, slots, 1)
+}

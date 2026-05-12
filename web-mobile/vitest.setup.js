@@ -8,6 +8,7 @@ global.React = {
   useMemo: (fn) => fn(),
   useRef: (val) => ({ current: val }),
   useLayoutEffect: vi.fn(),
+  memo: (c) => c,
 };
 
 // Mock other browser globals if needed

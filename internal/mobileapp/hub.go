@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,7 +43,7 @@ func NewHub() *Hub {
 func (h *Hub) Subscribe() chan string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	ch := make(chan string, 10)
+	ch := make(chan string, 100) // Increased buffer size
 	h.clients[ch] = true
 	return ch
 }
@@ -50,6 +52,10 @@ func (h *Hub) Subscribe() chan string {
 func (h *Hub) Unsubscribe(ch chan string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.unsubscribeLocked(ch)
+}
+
+func (h *Hub) unsubscribeLocked(ch chan string) {
 	if _, ok := h.clients[ch]; ok {
 		delete(h.clients, ch)
 		close(ch)
@@ -75,15 +81,21 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 	}
 	h.mu.RUnlock()
 
+	var dead []chan string
 	for _, ch := range clients {
 		select {
 		case ch <- string(payload):
 		default:
-			// Buffer full: unsubscribe this client so it reconnects rather
-			// than silently falling behind. HandleEvents sees channel close
-			// and returns false, ending the stream → JS EventSource reconnects.
-			h.Unsubscribe(ch)
+			dead = append(dead, ch)
 		}
+	}
+
+	if len(dead) > 0 {
+		h.mu.Lock()
+		for _, ch := range dead {
+			h.unsubscribeLocked(ch)
+		}
+		h.mu.Unlock()
 	}
 }
 
@@ -93,19 +105,43 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		ch := h.Subscribe()
 		defer h.Unsubscribe(ch)
 
+		// Set SSE headers
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
-		c.Header("Transfer-Encoding", "chunked")
+		// X-Accel-Buffering: no is important for Nginx and other proxies to not buffer the stream
+		c.Header("X-Accel-Buffering", "no")
+		// Prevent browsers from sniffing content type
+		c.Header("X-Content-Type-Options", "nosniff")
+
+		// Important: Flush the headers immediately so the browser sees the connection as "Open"
+		// instead of "Pending" until the first event or heartbeat.
+		c.Writer.WriteHeader(http.StatusOK)
+		c.Writer.Flush()
+
+		// Send an initial comment to keep the connection alive and confirm it's open
+		if _, err := c.Writer.Write([]byte(": open\n\n")); err == nil {
+			c.Writer.Flush()
+		}
+
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
 
 		c.Stream(func(w io.Writer) bool {
 			select {
 			case msg, ok := <-ch:
 				if ok {
 					c.SSEvent("message", msg)
+					c.Writer.Flush() // Ensure the message is sent immediately
 					return true
 				}
 				return false
+			case <-ticker.C:
+				if _, err := w.Write([]byte(": keep-alive\n\n")); err != nil {
+					return false
+				}
+				c.Writer.Flush() // Ensure heartbeat is sent immediately
+				return true
 			case <-c.Request.Context().Done():
 				return false
 			}

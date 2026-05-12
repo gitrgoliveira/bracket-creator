@@ -9,6 +9,100 @@ import (
 )
 
 func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
+	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
+		id := c.Param("id")
+		var results []state.MatchResult
+		if err := c.ShouldBindJSON(&results); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		type scoreError struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		}
+		var errs []scoreError
+		succeeded := 0
+		for i := range results {
+			if err := eng.RecordMatchResult(id, results[i].ID, &results[i]); err != nil {
+				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
+			} else {
+				succeeded++
+			}
+		}
+
+		if succeeded > 0 {
+			hub.Broadcast(EventMatchUpdated, gin.H{
+				"competitionId": id,
+				"results":       results,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"succeeded": succeeded, "errors": errs})
+	})
+
+	r.PUT("/competitions/:id/matches/:mid/quick-score", func(c *gin.Context) {
+		id := c.Param("id")
+		mid := c.Param("mid")
+		var req struct {
+			SideA     string `json:"sideA"`
+			SideB     string `json:"sideB"`
+			TeamAWins int    `json:"teamAWins"`
+			TeamBWins int    `json:"teamBWins"`
+			Draws     int    `json:"draws"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if req.SideA == "" || req.SideB == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sideA and sideB are required"})
+			return
+		}
+
+		// Determine team winner per kendo rules: most individual wins wins.
+		winner := ""
+		switch {
+		case req.TeamAWins > req.TeamBWins:
+			winner = req.SideA
+		case req.TeamBWins > req.TeamAWins:
+			winner = req.SideB
+		}
+
+		// Synthesise SubResults so standings IV/IL/IT counts are correct.
+		// SideA/SideB must be set so the empty-Winner draw case doesn't
+		// accidentally match `sub.Winner == sub.SideA` in computeStandings.
+		subResults := make([]state.SubMatchResult, 0, req.TeamAWins+req.TeamBWins+req.Draws)
+		pos := 1
+		for range req.TeamAWins {
+			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: req.SideA})
+			pos++
+		}
+		for range req.TeamBWins {
+			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: req.SideB})
+			pos++
+		}
+		for range req.Draws {
+			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: ""})
+			pos++
+		}
+
+		result := state.MatchResult{
+			ID:         mid,
+			SideA:      req.SideA,
+			SideB:      req.SideB,
+			Winner:     winner,
+			Status:     state.MatchStatusCompleted,
+			SubResults: subResults,
+		}
+		if err := eng.RecordMatchResult(id, mid, &result); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+		c.JSON(http.StatusOK, result)
+	})
+
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id := c.Param("id")
 		mid := c.Param("mid")
@@ -18,7 +112,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			return
 		}
 
-		if err := eng.RecordMatchResult(id, mid, result); err != nil {
+		if err := eng.RecordMatchResult(id, mid, &result); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

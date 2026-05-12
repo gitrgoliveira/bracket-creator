@@ -135,7 +135,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		Mirror:         entry.Mirror,
 		StartTime:      entry.StartTime,
 		Date:           entry.Date,
-		Status:         "setup",
+		Status:         state.CompStatusSetup,
 	}
 	if len(comp.Courts) == 0 {
 		comp.Courts = []string{"A"}

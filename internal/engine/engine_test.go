@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -68,7 +69,7 @@ func TestStartCompetition_PoolsFormat_BasicGeneration(t *testing.T) {
 	// Verify competition status updated
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, "pools", comp.Status)
+	assert.Equal(t, state.CompStatusPools, comp.Status)
 
 	// Verify pools were generated
 	pools, err := store.LoadPools(compID)
@@ -276,7 +277,7 @@ func TestStartCompetition_PlayoffsFormat_Basic(t *testing.T) {
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, "playoffs", comp.Status)
+	assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
 
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -514,7 +515,7 @@ func TestRecordBracketMatchResult_PropagatesWinner(t *testing.T) {
 
 	// Score first semifinal: Alice beats Bob
 	firstMatchID := bracket.Rounds[0][0].ID
-	err = eng.RecordMatchResult(compID, firstMatchID, state.MatchResult{
+	err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
 		Winner:  "Alice",
 		IpponsA: []string{"M", "K"},
 		Status:  state.MatchStatusCompleted,
@@ -542,7 +543,7 @@ func TestRecordBracketMatchResult_SecondMatch_PropagatesAsSideB(t *testing.T) {
 
 	// Score second semifinal: Dave beats Charlie
 	secondMatchID := bracket.Rounds[0][1].ID
-	err = eng.RecordMatchResult(compID, secondMatchID, state.MatchResult{
+	err = eng.RecordMatchResult(compID, secondMatchID, &state.MatchResult{
 		Winner: "Dave",
 		Status: state.MatchStatusCompleted,
 	})
@@ -566,11 +567,11 @@ func TestRecordBracketMatchResult_FullTournament(t *testing.T) {
 	require.NoError(t, err)
 
 	// Score both semifinals
-	require.NoError(t, eng.RecordMatchResult(compID, bracket.Rounds[0][0].ID, state.MatchResult{
+	require.NoError(t, eng.RecordMatchResult(compID, bracket.Rounds[0][0].ID, &state.MatchResult{
 		Winner: bracket.Rounds[0][0].SideA,
 		Status: state.MatchStatusCompleted,
 	}))
-	require.NoError(t, eng.RecordMatchResult(compID, bracket.Rounds[0][1].ID, state.MatchResult{
+	require.NoError(t, eng.RecordMatchResult(compID, bracket.Rounds[0][1].ID, &state.MatchResult{
 		Winner: bracket.Rounds[0][1].SideB,
 		Status: state.MatchStatusCompleted,
 	}))
@@ -580,7 +581,7 @@ func TestRecordBracketMatchResult_FullTournament(t *testing.T) {
 	require.NoError(t, err)
 
 	finalID := bracket.Rounds[1][0].ID
-	require.NoError(t, eng.RecordMatchResult(compID, finalID, state.MatchResult{
+	require.NoError(t, eng.RecordMatchResult(compID, finalID, &state.MatchResult{
 		Winner: bracket.Rounds[1][0].SideA,
 		Status: state.MatchStatusCompleted,
 	}))
@@ -600,7 +601,7 @@ func TestRecordBracketMatchResult_NotFound(t *testing.T) {
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
-	err := eng.RecordMatchResult(compID, "m-nonexistent", state.MatchResult{
+	err := eng.RecordMatchResult(compID, "m-nonexistent", &state.MatchResult{
 		Winner: "Alice",
 		Status: state.MatchStatusCompleted,
 	})
@@ -626,7 +627,7 @@ func TestRecordPoolMatchResult(t *testing.T) {
 
 	// Record a result for the first match
 	matchID := matches[0].ID
-	err = eng.RecordMatchResult(compID, matchID, state.MatchResult{
+	err = eng.RecordMatchResult(compID, matchID, &state.MatchResult{
 		ID:      matchID,
 		SideA:   matches[0].SideA,
 		SideB:   matches[0].SideB,
@@ -662,7 +663,7 @@ func TestRecordPoolMatchResult_NotFound(t *testing.T) {
 	require.NoError(t, eng.StartCompetition(compID))
 
 	// Pool match IDs contain "Pool" in them
-	err := eng.RecordMatchResult(compID, "Pool Z-99", state.MatchResult{
+	err := eng.RecordMatchResult(compID, "Pool Z-99", &state.MatchResult{
 		Winner: "Alice",
 		Status: state.MatchStatusCompleted,
 	})
@@ -1309,7 +1310,7 @@ func TestOverrideBracketWinner_AutoPropagation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Mark second semifinal as Dave winning by bye (if possible) - or just score it normally
-	err = eng.RecordMatchResult(compID, bracket.Rounds[0][1].ID, state.MatchResult{
+	err = eng.RecordMatchResult(compID, bracket.Rounds[0][1].ID, &state.MatchResult{
 		Winner: "Dave",
 		Status: state.MatchStatusCompleted,
 	})
@@ -1532,7 +1533,7 @@ func TestStartCompetition_NumberPrefix_Playoffs(t *testing.T) {
 	// Confirm competition started (bracket generated) and NumberPrefix persisted.
 	updated, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, "playoffs", updated.Status)
+	assert.Equal(t, state.CompStatusPlayoffs, updated.Status)
 	assert.Equal(t, "A", updated.NumberPrefix)
 
 	bracket, err := store.LoadBracket(compID)
@@ -1599,4 +1600,180 @@ func TestUpdateMatchTime_NotFound(t *testing.T) {
 
 	err := eng.UpdateMatchTime(compID, "nonexistent", "12:00")
 	assert.Error(t, err)
+}
+
+func TestStartCompetition_TeamSizeFallback(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-comp"
+
+	comp := &state.Competition{
+		ID:       compID,
+		Name:     "Team Competition",
+		Kind:     "team",
+		Format:   "pools",
+		PoolSize: 3,
+		Status:   "setup",
+		Courts:   []string{"A"},
+	}
+	// Note: TeamSize is 0
+	require.NoError(t, store.SaveCompetition(comp))
+	saveTestParticipants(t, store, compID, []string{"Team A", "Team B", "Team C"})
+
+	err := eng.StartCompetition(compID)
+	require.NoError(t, err)
+
+	// Verify TeamSize was defaulted to 5
+	updated, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, 5, updated.TeamSize)
+}
+
+func TestRecordMatchResult_PreservesSides(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "preservation-test"
+
+	createTestCompetition(t, store, compID, "pools", 3)
+	// Create pool matches
+	matchID := "Pool A-0"
+	matches := []state.MatchResult{
+		{
+			ID:     matchID,
+			SideA:  "Player A",
+			SideB:  "Player B",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	err := store.SavePoolMatches(compID, matches)
+	require.NoError(t, err)
+
+	// Update match without SideA/SideB
+	update := &state.MatchResult{
+		ID:     matchID,
+		Winner: "Player A",
+		Status: state.MatchStatusCompleted,
+	}
+
+	err = eng.RecordMatchResult(compID, matchID, update)
+	require.NoError(t, err)
+
+	// Verify that Sides were preserved in the update object (passed as pointer)
+	assert.Equal(t, "Player A", update.SideA)
+	assert.Equal(t, "Player B", update.SideB)
+
+	// Verify that Sides were preserved in the store
+	loadedMatches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, loadedMatches, 1)
+
+	m := loadedMatches[0]
+	assert.Equal(t, "Player A", m.SideA)
+	assert.Equal(t, "Player B", m.SideB)
+	assert.Equal(t, "Player A", m.Winner)
+	assert.Equal(t, state.MatchStatusCompleted, m.Status)
+}
+
+// --- Court Pre-Assignment Tests ---
+
+func TestStartCompetition_PoolCourtDistribution(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "court-dist-pools"
+
+	// createTestCompetition uses Courts: []string{"A", "B"}
+	createTestCompetition(t, store, compID, "pools", 3)
+	// 6 players → 2 pools. AssignPoolsToCourts(2, 2) → [0, 1]
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+
+	courts := map[string]int{}
+	for _, m := range matches {
+		courts[m.Court]++
+	}
+	assert.Greater(t, courts["A"], 0, "court A should have matches")
+	assert.Greater(t, courts["B"], 0, "court B should have matches")
+
+	for _, m := range matches {
+		if strings.HasPrefix(m.ID, "Pool A-") {
+			assert.Equal(t, "A", m.Court, "Pool A match %s should be on court A", m.ID)
+		}
+		if strings.HasPrefix(m.ID, "Pool B-") {
+			assert.Equal(t, "B", m.Court, "Pool B match %s should be on court B", m.ID)
+		}
+	}
+}
+
+func TestStartCompetition_BracketCourtDistribution(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "court-dist-bracket"
+
+	// createTestCompetition uses Courts: []string{"A", "B"}
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	// 8 players → pow2=8, 4 first-round matches split across 2 courts
+	saveTestParticipants(t, store, compID, []string{
+		"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
+	})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket)
+	require.NotEmpty(t, bracket.Rounds)
+
+	// First round: 4 matches. SubtreeCourtIndex(4, 2, slot) assigns:
+	// matches 0,1 (slots 0,1) → court A; matches 2,3 (slots 2,3) → court B
+	firstRound := bracket.Rounds[0]
+	assert.Len(t, firstRound, 4)
+
+	courts := map[string]int{}
+	for _, m := range firstRound {
+		courts[m.Court]++
+	}
+	assert.Equal(t, 2, courts["A"], "2 first-round matches should be on court A")
+	assert.Equal(t, 2, courts["B"], "2 first-round matches should be on court B")
+
+	// All non-bye matches in any round should have a court assigned
+	for rIdx, round := range bracket.Rounds {
+		for _, m := range round {
+			if m.Status != state.MatchStatusCompleted {
+				assert.NotEmpty(t, m.Court, "round %d match %s should have a court assigned", rIdx, m.ID)
+			}
+		}
+	}
+}
+
+func TestStartCompetition_SingleCourtFallback(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "single-court"
+
+	comp := &state.Competition{
+		ID:           compID,
+		Name:         "Single Court",
+		Kind:         "individual",
+		Format:       "pools",
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       "setup",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4", "P5", "P6"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	for _, m := range matches {
+		assert.Equal(t, "A", m.Court, "all matches should be on court A with single court")
+	}
 }

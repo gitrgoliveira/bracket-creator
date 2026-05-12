@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"fmt"
-
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -12,11 +10,15 @@ func (e *Engine) StartCompetition(id string) error {
 		return err
 	}
 	if comp == nil {
-		return fmt.Errorf("competition %s not found", id)
+		return notFoundErrorf("competition %s not found", id)
 	}
 
-	if comp.Status != "setup" && comp.Status != "" {
-		return fmt.Errorf("competition %s already started", id)
+	if comp.Status != state.CompStatusSetup && comp.Status != "" && comp.Status != state.CompStatusPending {
+		return validationErrorf("competition %s already started", id)
+	}
+
+	if comp.Kind == "team" && comp.TeamSize == 0 {
+		comp.TeamSize = 5 // Default for Kendo
 	}
 
 	// Only pass HasIDs hint when explicitly true; false means unset (let
@@ -34,7 +36,7 @@ func (e *Engine) StartCompetition(id string) error {
 		return err
 	}
 	if len(players) == 0 {
-		return fmt.Errorf("no participants found for competition %s", id)
+		return validationErrorf("no participants found for competition %s", id)
 	}
 
 	seeds, err := e.store.LoadSeeds(id)
@@ -53,15 +55,19 @@ func (e *Engine) StartCompetition(id string) error {
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
-		comp.Status = "pools"
+		comp.Status = state.CompStatusPools
 	} else {
 		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
 			return err
 		}
-		comp.Status = "playoffs"
+		comp.Status = state.CompStatusPlayoffs
 	}
 
 	if err := e.store.SaveCompetition(comp); err != nil {
+		return err
+	}
+
+	if err := e.store.SaveParticipants(id, players); err != nil {
 		return err
 	}
 

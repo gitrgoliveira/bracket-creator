@@ -40,7 +40,7 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 		return err
 	}
 	if bracket == nil {
-		return fmt.Errorf("bracket not found for competition %s", compId)
+		return notFoundErrorf("bracket not found for competition %s", compId)
 	}
 	for rIdx := range bracket.Rounds {
 		for mIdx := range bracket.Rounds[rIdx] {
@@ -53,10 +53,17 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 	return errMatchNotFound
 }
 
-func (e *Engine) RecordMatchResult(compId string, matchId string, result state.MatchResult) error {
+func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		*r = result
+		// Preserve SideA and SideB if missing in update payload
+		if result.SideA == "" {
+			result.SideA = r.SideA
+		}
+		if result.SideB == "" {
+			result.SideB = r.SideB
+		}
+		*r = *result
 	})
 	if err == nil {
 		return nil
@@ -202,11 +209,17 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 				s.Points = s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
 					s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
 					s.PointsWon*100 - s.PointsLost
+				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | IV:%d IL:%d IT:%d | PW:%d PL:%d",
+					s.Wins, s.Losses, s.Draws,
+					s.IndividualWins, s.IndividualLosses, s.IndividualDraws,
+					s.PointsWon, s.PointsLost)
 			} else {
 				// Individual weighted score (Excel formula):
 				// W × 1,000,000 − L × 10,000 + D × 100 + PW × 1 − PL × 0.01
 				// Scaled by 100 to use integers:
 				s.Points = s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
+				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | P:%d-%d",
+					s.Wins, s.Losses, s.Draws, s.IpponsGiven, s.IpponsTaken)
 			}
 			sorted = append(sorted, *s)
 		}
@@ -249,13 +262,13 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 	return allStandings, nil
 }
 
-func (e *Engine) recordBracketMatchResult(compId string, matchId string, result state.MatchResult) error {
+func (e *Engine) recordBracketMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	bracket, err := e.store.LoadBracket(compId)
 	if err != nil {
 		return err
 	}
 	if bracket == nil {
-		return fmt.Errorf("bracket not found for competition %s", compId)
+		return notFoundErrorf("bracket not found for competition %s", compId)
 	}
 
 	found := false
@@ -268,15 +281,7 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 				bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
 				found = true
 
-				// Propagate winner to next round
-				if rIdx < len(bracket.Rounds)-1 {
-					nextMatchIdx := mIdx / 2
-					if mIdx%2 == 0 {
-						bracket.Rounds[rIdx+1][nextMatchIdx].SideA = result.Winner
-					} else {
-						bracket.Rounds[rIdx+1][nextMatchIdx].SideB = result.Winner
-					}
-				}
+				e.propagateBracketWinner(bracket, rIdx, mIdx)
 				break
 			}
 		}
@@ -286,10 +291,75 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 	}
 
 	if !found {
-		return fmt.Errorf("bracket match %s not found", matchId)
+		return notFoundErrorf("bracket match %s not found", matchId)
 	}
 
 	return e.store.SaveBracket(compId, bracket)
+}
+
+func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) {
+	if rIdx >= len(bracket.Rounds)-1 {
+		return
+	}
+	m := bracket.Rounds[rIdx][mIdx]
+	nextMatchIdx := mIdx / 2
+	nextM := &bracket.Rounds[rIdx+1][nextMatchIdx]
+
+	if mIdx%2 == 0 {
+		nextM.SideA = m.Winner
+	} else {
+		nextM.SideB = m.Winner
+	}
+
+	// Try to resolve the OTHER side if it's a "Winner of" placeholder
+	if strings.HasPrefix(nextM.SideA, "Winner of") {
+		// nextM.SideA is "Winner of rX-mY"
+		r, m := parseWinnerOf(nextM.SideA, len(bracket.Rounds))
+		if r >= 0 && r < len(bracket.Rounds) && m >= 0 && m < len(bracket.Rounds[r]) {
+			srcM := bracket.Rounds[r][m]
+			if srcM.Status == state.MatchStatusCompleted {
+				nextM.SideA = srcM.Winner
+			}
+		}
+	}
+	if strings.HasPrefix(nextM.SideB, "Winner of") {
+		r, m := parseWinnerOf(nextM.SideB, len(bracket.Rounds))
+		if r >= 0 && r < len(bracket.Rounds) && m >= 0 && m < len(bracket.Rounds[r]) {
+			srcM := bracket.Rounds[r][m]
+			if srcM.Status == state.MatchStatusCompleted {
+				nextM.SideB = srcM.Winner
+			}
+		}
+	}
+
+	// Recursive resolution
+	if nextM.SideA != "" && nextM.SideB == "" && !strings.HasPrefix(nextM.SideA, "Winner of") {
+		nextM.Winner = nextM.SideA
+		nextM.Status = state.MatchStatusCompleted
+		e.propagateBracketWinner(bracket, rIdx+1, nextMatchIdx)
+	} else if nextM.SideA == "" && nextM.SideB != "" && !strings.HasPrefix(nextM.SideB, "Winner of") {
+		nextM.Winner = nextM.SideB
+		nextM.Status = state.MatchStatusCompleted
+		e.propagateBracketWinner(bracket, rIdx+1, nextMatchIdx)
+	} else if nextM.SideA == "" && nextM.SideB == "" {
+		nextM.Status = state.MatchStatusCompleted
+		e.propagateBracketWinner(bracket, rIdx+1, nextMatchIdx)
+	}
+}
+
+// parseWinnerOf parses "Winner of rX-mY" and returns (rIdx, mIdx)
+// Depth in the string is 1-based (root is 1). Rounds in bracket are 0-indexed (Round 1 is index 0).
+// Depth d corresponds to Round (maxDepth - d).
+func parseWinnerOf(s string, numRounds int) (int, int) {
+	var depth, matchIdx int
+	_, err := fmt.Sscanf(s, "Winner of r%d-m%d", &depth, &matchIdx)
+	if err != nil {
+		return -1, -1
+	}
+	// depth 1 is the final (last round).
+	// rounds are 0..numRounds-1.
+	// depth d = round index (numRounds - d).
+	return numRounds - depth, matchIdx
 }
 
 func formatScore(ippons []string, hansoku int) string {
@@ -353,37 +423,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 				m.Status = state.MatchStatusCompleted
 				found = true
 
-				// Propagate winner to next rounds
-				currentWinner := winnerName
-				currentRIdx := rIdx
-				currentMIdx := mIdx
-
-				for currentRIdx < len(bracket.Rounds)-1 {
-					nextMatchIdx := currentMIdx / 2
-					nextMatch := &bracket.Rounds[currentRIdx+1][nextMatchIdx]
-
-					if currentMIdx%2 == 0 {
-						nextMatch.SideA = currentWinner
-					} else {
-						nextMatch.SideB = currentWinner
-					}
-
-					if nextMatch.SideA != "" && nextMatch.SideB == "" {
-						nextMatch.Winner = nextMatch.SideA
-						nextMatch.Status = state.MatchStatusCompleted
-						currentWinner = nextMatch.SideA
-						currentRIdx++
-						currentMIdx = nextMatchIdx
-					} else if nextMatch.SideA == "" && nextMatch.SideB != "" {
-						nextMatch.Winner = nextMatch.SideB
-						nextMatch.Status = state.MatchStatusCompleted
-						currentWinner = nextMatch.SideB
-						currentRIdx++
-						currentMIdx = nextMatchIdx
-					} else {
-						break
-					}
-				}
+				e.propagateBracketWinner(bracket, rIdx, mIdx)
 				break
 			}
 		}
@@ -393,7 +433,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 	}
 
 	if !found {
-		return fmt.Errorf("bracket match %s not found", matchId)
+		return notFoundErrorf("bracket match %s not found", matchId)
 	}
 
 	// Save bracket first: it is the display source of truth. If this fails,

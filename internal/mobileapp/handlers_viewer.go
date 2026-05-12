@@ -31,7 +31,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// Preserve ordering by pre-allocating a slot per competition ID.
 		// Each goroutine writes to a unique index so no mutex is needed;
 		// wg.Wait() provides the happens-before for reads below.
-		results := make([]*state.Competition, len(ids))
+		results := make([]any, len(ids))
 		var wg sync.WaitGroup
 
 		for i, id := range ids {
@@ -45,12 +45,21 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				hasIDs := comp.HasParticipantIDs
 				players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: &hasIDs})
 				comp.Players = players
-				results[idx] = comp
+
+				// Global views like Scoring/Schedule need matches and brackets
+				poolMatches, _ := store.LoadPoolMatches(compID)
+				bracket, _ := store.LoadBracket(compID)
+
+				results[idx] = gin.H{
+					"config":      comp,
+					"poolMatches": poolMatches,
+					"bracket":     bracket,
+				}
 			}(i, id)
 		}
 		wg.Wait()
 
-		comps := make([]*state.Competition, 0, len(ids))
+		comps := make([]any, 0, len(ids))
 		for _, comp := range results {
 			if comp != nil {
 				comps = append(comps, comp)

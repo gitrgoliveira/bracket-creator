@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -139,9 +138,9 @@ func TestAuthMiddleware_LoadError(t *testing.T) {
 
 	// Create a tournament file first, then make it unreadable to force a read error
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
-	path := filepath.Join(store.GetFolder(), "tournament.md")
-	os.Chmod(path, 0000)
-	defer os.Chmod(path, 0644) // Clean up for os.RemoveAll
+	dir := store.GetFolder()
+	os.Chmod(dir, 0000)
+	defer os.Chmod(dir, 0755) // Clean up for os.RemoveAll
 
 	req := httptest.NewRequest(http.MethodGet, "/api/competitions", nil)
 	w := httptest.NewRecorder()

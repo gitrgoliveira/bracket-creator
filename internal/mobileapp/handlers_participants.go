@@ -36,9 +36,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 
 		var req struct {
 			Players []struct {
-				Name        string `json:"name"`
-				DisplayName string `json:"displayName"`
-				Dojo        string `json:"dojo"`
+				Name        string   `json:"name"`
+				DisplayName string   `json:"displayName"`
+				Dojo        string   `json:"dojo"`
+				Metadata    []string `json:"metadata"`
+				Tag         string   `json:"tag"`
 			} `json:"players"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -52,6 +54,8 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 				Name:         p.Name,
 				DisplayName:  p.DisplayName,
 				Dojo:         p.Dojo,
+				Metadata:     p.Metadata,
+				Tag:          p.Tag,
 				PoolPosition: int64(i),
 			})
 		}

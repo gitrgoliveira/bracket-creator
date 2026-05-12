@@ -181,10 +181,6 @@ func NewRouter() *gin.Engine {
 		singleTree := c.PostForm("singleTree") == "on"
 		withZekkenName := c.PostForm("withZekkenName") == "on"
 		determined := c.PostForm("determined") == "on"
-		// Mirror defaults to true. Since checkboxes only send a value when checked, we use the
-		// 'form_submitted' hidden field to distinguish between an unchecked box (mirror=false)
-		// and an API call/initial load where the parameter is missing (mirror=true).
-		mirror := c.PostForm("form_submitted") == "" || c.PostForm("mirror") == "on"
 		titlePrefix := c.PostForm("titlePrefix")
 		numberPrefix := c.PostForm("numberPrefix")
 
@@ -293,7 +289,6 @@ func NewRouter() *gin.Engine {
 				maxPlayers:      maxPlayers,
 				poolWinners:     winnersPerPool,
 				courts:          courts,
-				mirror:          mirror,
 				titlePrefix:     titlePrefix,
 				numberPrefix:    numberPrefix,
 				SeedAssignments: seedAssignments,
@@ -316,7 +311,6 @@ func NewRouter() *gin.Engine {
 				determined:      determined,
 				teamMatches:     teamMatches,
 				courts:          courts,
-				mirror:          mirror,
 				titlePrefix:     titlePrefix,
 				numberPrefix:    numberPrefix,
 				SeedAssignments: seedAssignments,

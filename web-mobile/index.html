@@ -1,16 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Bracket Creator Mobile</title>
-    <link rel="stylesheet" href="css/styles.css">
-    
+    <base href="/">
+    <link rel="stylesheet" href="/css/styles.css">
+
     <!-- Load Preact locally -->
-    <script src="vendor/preact.min.js"></script>
-    <script src="vendor/hooks.umd.js"></script>
-    <script src="vendor/compat.umd.js"></script>
-    
+    <script src="/vendor/preact.min.js"></script>
+    <script src="/vendor/hooks.umd.js"></script>
+    <script src="/vendor/compat.umd.js"></script>
+
     <script>
         console.log("Preact loaded:", !!window.preact);
         console.log("PreactHooks loaded:", !!window.preactHooks);
@@ -30,17 +32,19 @@
             };
         };
     </script>
-    
+
 </head>
+
 <body>
     <div id="root"></div>
 
-    <script type="module" src="dist/api.js?v=4"></script>
-    <script type="module" src="dist/data.js?v=4"></script>
-    <script type="module" src="dist/bracket.js?v=4"></script>
-    <script type="module" src="dist/ui.js?v=4"></script>
-    <script type="module" src="dist/viewer.js?v=4"></script>
-    <script type="module" src="dist/admin.js?v=4"></script>
-    <script type="module" src="dist/app.js?v=4"></script>
+    <script type="module" src="/dist/api.js?v=4"></script>
+    <script type="module" src="/dist/data.js?v=4"></script>
+    <script type="module" src="/dist/bracket.js?v=4"></script>
+    <script type="module" src="/dist/ui.js?v=4"></script>
+    <script type="module" src="/dist/viewer.js?v=4"></script>
+    <script type="module" src="/dist/admin.js?v=4"></script>
+    <script type="module" src="/dist/app.js?v=4"></script>
 </body>
+
 </html>

@@ -41,16 +41,28 @@ func (e *Engine) generatePools(comp *state.Competition, players []helper.Player,
 		return err
 	}
 
-	// Save pool matches as MatchResults
+	numCourts := len(comp.Courts)
+	if numCourts == 0 {
+		numCourts = 1
+	}
+	courtAssign, err := helper.AssignPoolsToCourts(len(pools), numCourts)
+	if err != nil {
+		return fmt.Errorf("assigning pools to courts: %w", err)
+	}
+
 	var results []state.MatchResult
-	for _, p := range pools {
+	for pi, p := range pools {
+		court := ""
+		if len(comp.Courts) > 0 {
+			court = comp.Courts[courtAssign[pi]]
+		}
 		for i, m := range p.Matches {
 			results = append(results, state.MatchResult{
 				ID:          p.PoolName + "-" + strconv.Itoa(i),
 				SideA:       m.SideA.Name,
 				SideB:       m.SideB.Name,
 				Status:      state.MatchStatusScheduled,
-				Court:       comp.Courts[0], // Default to first court, can be updated by scheduler
+				Court:       court,
 				ScheduledAt: comp.StartTime,
 			})
 		}

@@ -1,6 +1,5 @@
 // Status enum mapping: backend uses "completed"/"running"/"scheduled"
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
-const STATUS_REVERSE = { "completed": "complete", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
 
@@ -43,10 +42,14 @@ function normalizeMatch(m, playerMap) {
     if (typeof norm.sideA === "string" && norm.sideA) {
         const p = playerMap?.[norm.sideA];
         norm.sideA = p || { id: norm.sideA, name: norm.sideA };
+    } else if (!norm.sideA) {
+        norm.sideA = { id: "", name: "" };
     }
     if (typeof norm.sideB === "string" && norm.sideB) {
         const p = playerMap?.[norm.sideB];
         norm.sideB = p || { id: norm.sideB, name: norm.sideB };
+    } else if (!norm.sideB) {
+        norm.sideB = { id: "", name: "" };
     }
     // Normalize winner from string to object
     if (typeof norm.winner === "string" && norm.winner) {
@@ -155,32 +158,49 @@ function normalizeCompetitionDetail(data) {
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to fetch tournament (Status ${res.status})`);
+        }
         return res.json();
     },
     async fetchCompetitions() {
         const res = await fetch('/api/viewer/competitions');
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to fetch competitions (Status ${res.status})`);
+        }
         const comps = await res.json();
         if (!Array.isArray(comps)) return comps;
-        return comps.map(c => ({
-            ...c,
-            players: (c.players || []).map(normalizePlayer),
-        }));
+        return comps.map(item => {
+            const c = item.config || item;
+            const norm = {
+                ...c,
+                poolMatches: item.poolMatches,
+                bracket: item.bracket,
+                players: (c.players || []).map(normalizePlayer),
+            };
+            // Run normalization on the matches as well
+            return normalizeCompetitionDetail(norm);
+        });
     },
     async fetchCompetitionDetails(id) {
         const res = await fetch(`/api/viewer/competitions/${id}`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to fetch competition details (Status ${res.status})`);
+        }
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
     async createTournament(config) {
         const res = await fetch('/api/tournament', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
         });
         if (!res.ok) {
-            const err = await res.json();
+            const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to create tournament");
         }
         return res.json();
@@ -194,6 +214,10 @@ const API = {
             },
             body: JSON.stringify(config)
         });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to update tournament");
+        }
         return res.json();
     },
     async updateCompetition(id, config, password) {
@@ -205,6 +229,10 @@ const API = {
             },
             body: JSON.stringify(config)
         });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to update competition");
+        }
         return res.json();
     },
     async createCompetition(config, password) {
@@ -216,16 +244,23 @@ const API = {
             },
             body: JSON.stringify(config)
         });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to create competition");
+        }
         return res.json();
     },
     async startCompetition(id, password) {
         const res = await fetch(`/api/competitions/${id}/start`, {
             method: 'POST',
-            headers: {
-                'X-Tournament-Password': password
-            }
+            headers: { 'X-Tournament-Password': password }
         });
-        return res.ok;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to start competition");
+        }
+        const data = await res.json();
+        return normalizeCompetitionDetail(data);
     },
     subscribeToEvents(callback) {
         let source = null;
@@ -243,7 +278,7 @@ const API = {
                 }
             };
             source.onerror = () => {
-                source.close();
+                if (source) source.close();
                 source = null;
                 if (!cancelled) retryTimer = setTimeout(connect, 5000);
             };
@@ -254,7 +289,7 @@ const API = {
         return () => {
             cancelled = true;
             clearTimeout(retryTimer);
-            source?.close();
+            if (source) source.close();
         };
     },
     async recordScore(compID, matchID, result, password, match) {
@@ -267,6 +302,10 @@ const API = {
             },
             body: JSON.stringify(payload)
         });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to record score");
+        }
         return res.json();
     },
     async overridePoolRank(compID, poolID, playerName, rank, password) {
@@ -278,7 +317,11 @@ const API = {
             },
             body: JSON.stringify({ playerName, rank })
         });
-        return res.ok;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to override rank");
+        }
+        return res.json();
     },
     async overrideBracketWinner(compID, matchID, winnerName, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/override-winner`, {
@@ -289,16 +332,22 @@ const API = {
             },
             body: JSON.stringify({ winnerName })
         });
-        return res.ok;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to override winner");
+        }
+        return res.json();
     },
     async resetOverrides(compID, password) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {
             method: 'DELETE',
-            headers: {
-                'X-Tournament-Password': password
-            }
+            headers: { 'X-Tournament-Password': password }
         });
-        return res.ok;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to reset overrides");
+        }
+        return res.json();
     },
     async updateMatchTime(compID, matchID, scheduledAt, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/time`, {
@@ -309,7 +358,26 @@ const API = {
             },
             body: JSON.stringify({ scheduledAt })
         });
-        return res.ok;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to update match time");
+        }
+        return true;
+    },
+    async moveMatchCourt(compID, matchID, court, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/court`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ court })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to move match court");
+        }
+        return true;
     },
     async updateSchedule(compID, entries, password) {
         const res = await fetch(`/api/competitions/${compID}/schedule`, {
@@ -320,7 +388,11 @@ const API = {
             },
             body: JSON.stringify(entries)
         });
-        return res.ok;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to update schedule");
+        }
+        return true;
     },
     async addReservedSlot(compID, sourceCompID, sourceRank, password) {
         const res = await fetch(`/api/competitions/${compID}/reserved-slots`, {
@@ -342,7 +414,11 @@ const API = {
             method: 'DELETE',
             headers: { 'X-Tournament-Password': password }
         });
-        return res.ok;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to delete reserved slot");
+        }
+        return true;
     },
     async importCompetitions(formData, password) {
         const res = await fetch('/api/tournament/import', {
@@ -350,9 +426,33 @@ const API = {
             headers: { 'X-Tournament-Password': password },
             body: formData
         });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.error || 'Import failed');
-        return body;
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || 'Import failed');
+        }
+        return res.json();
+    },
+    async createPlayoff(sourceId, password) {
+        const res = await fetch(`/api/competitions/${sourceId}/playoffs`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to create playoff");
+        }
+        return res.json();
+    },
+    async deleteCompetition(id, password) {
+        const res = await fetch(`/api/competitions/${id}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to delete competition");
+        }
+        return true;
     }
 };
 

@@ -42,11 +42,27 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Delete Competition", func(t *testing.T) {
-		comp := state.Competition{ID: "delete-me", Status: "setup"}
+		// 1. Success: setup status
+		comp := state.Competition{ID: "delete-setup", Status: "setup"}
 		store.SaveCompetition(&comp)
-
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/api/competitions/delete-me", nil)
+		req, _ := http.NewRequest("DELETE", "/api/competitions/delete-setup", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+
+		// 2. Success: pending status (new fix)
+		comp2 := state.Competition{ID: "delete-pending", Status: "pending"}
+		store.SaveCompetition(&comp2)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("DELETE", "/api/competitions/delete-pending", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+
+		// 3. Success: pools status (started) — deletion is now allowed regardless of status
+		comp3 := state.Competition{ID: "delete-started", Status: "pools"}
+		store.SaveCompetition(&comp3)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("DELETE", "/api/competitions/delete-started", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
@@ -120,5 +136,45 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		req, _ := http.NewRequest("DELETE", "/api/competitions/reset-comp/overrides", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("Unique Competition Names", func(t *testing.T) {
+		// 1. Create original
+		comp1 := state.Competition{ID: "original", Name: "Kendo Cup"}
+		body, _ := json.Marshal(comp1)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusCreated, w.Code)
+
+		// 2. Create duplicate (case insensitive)
+		comp2 := state.Competition{ID: "duplicate", Name: "kendo cup"}
+		body, _ = json.Marshal(comp2)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "already exists")
+
+		// 3. Create another
+		comp3 := state.Competition{ID: "another", Name: "Other Cup"}
+		body, _ = json.Marshal(comp3)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusCreated, w.Code)
+
+		// 4. Update to duplicate name
+		comp3.Name = "KENDO CUP"
+		body, _ = json.Marshal(comp3)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("PUT", "/api/competitions/another", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "already exists")
 	})
 }

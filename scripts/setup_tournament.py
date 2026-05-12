@@ -22,41 +22,52 @@ CATEGORIES = [
         "seeds": "team_registrations_2026_seeds.csv",
         "team_size": 5,
         "zekken": False,
+        "startTime": "09:30",
+        "date": "2026-05-10" # Saturday in our demo
     },
     {
         "title": "Women up to 2D",
         "csv": "individual_women_up_to_2nd_2026.csv",
-        "seeds": "individual_women_up_to_2nd_2026_seeds.csv",
         "zekken": True,
         "number_prefix": "A",
+        "startTime": "09:00",
+        "date": "2026-05-11"
     },
     {
         "title": "Men up to 2D",
         "csv": "individual_men_up_to_2nd_2026.csv",
-        "seeds": "individual_men_up_to_2nd_2026_seeds.csv",
         "zekken": True,
         "number_prefix": "B",
+        "startTime": "09:00",
+        "date": "2026-05-11"
     },
     {
         "title": "6D and up",
         "csv": "individual_6plus_mixed_2026.csv",
-        "seeds": "individual_6plus_mixed_2026_seeds.csv",
         "zekken": True,
         "number_prefix": "C",
+        "startTime": "11:00",
+        "date": "2026-05-11" # Sunday in our demo
     },
     {
         "title": "Women 3D and up",
         "csv": "individual_women_3rd_and_above_2026.csv",
         "seeds": "individual_women_3rd_and_above_2026_seeds.csv",
+        "promote_from": "women-up-to-2d-playoffs",
         "zekken": True,
         "number_prefix": "D",
+        "startTime": "12:30",
+        "date": "2026-05-11"
     },
     {
         "title": "Men 3D and up",
         "csv": "individual_men_3rd_and_above_2026.csv",
         "seeds": "individual_men_3rd_and_above_2026_seeds.csv",
+        "promote_from": "men-up-to-2d-playoffs",
         "zekken": True,
         "number_prefix": "E",
+        "startTime": "13:30",
+        "date": "2026-05-11"
     },
 ]
 
@@ -82,7 +93,7 @@ def setup_tournament():
     if resp.status_code == 404:
         print("Creating tournament...")
         payload = {
-            "name": "London Cup 2026",
+            "name": "London Cup Demo",
             "date": "2026-05-10",
             "venue": "London",
             "courts": ["A", "B"],
@@ -96,23 +107,15 @@ def setup_tournament():
 def parse_participants(csv_path):
     participants = []
     if not os.path.exists(csv_path):
-        print(f"Warning: CSV file not found: {csv_path}")
         return []
     with open(csv_path, 'r', encoding='utf-8') as f:
         reader = csv.reader(f)
         for row in reader:
             if not row or len(row) < 2:
                 continue
-            # individual_women_up_to_2nd_2026.csv: Name, ZekkenName, Dojo, Dan grade
-            # team_registrations_2026.csv: Team Name, Dojo Name
             if len(row) >= 3:
                 name = row[0].strip()
                 display_name = row[1].strip()
-                # Workaround for backend bug: if display_name == name, SaveParticipants writes 2 columns
-                # which fails validation if withZekkenName is true.
-                if display_name == name:
-                    display_name = display_name + " " 
-                
                 participants.append({
                     "name": name,
                     "displayName": display_name,
@@ -128,7 +131,7 @@ def parse_participants(csv_path):
 
 def parse_seeds(csv_path):
     seeds = []
-    if not os.path.exists(csv_path):
+    if csv_path is None or not os.path.exists(csv_path):
         return []
     with open(csv_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -139,74 +142,235 @@ def parse_seeds(csv_path):
             })
     return seeds
 
+def run_competition_setup(cat):
+    title = cat['title']
+    comp_id = slugify(title)
+    csv_path = os.path.join(DATA_DIR, cat['csv'])
+    seeds_path = os.path.join(DATA_DIR, cat.get('seeds', "")) if cat.get('seeds') else None
+
+    print(f"Creating competition: {title} (ID: {comp_id})")
+    payload = {
+        "id": comp_id,
+        "name": title,
+        "format": "pools",
+        "poolSize": 3,
+        "poolWinners": 2,
+        "roundRobin": True,
+        "courts": ["A", "B"],
+        "withZekkenName": cat.get('zekken', True),
+        "numberPrefix": cat.get('number_prefix', ""),
+        "teamSize": cat.get('team_size', 1),
+        "startTime": cat.get('startTime', ""),
+        "date": cat.get('date', ""),
+        "status": "setup"
+    }
+    requests.post(f"{BASE_URL}/api/competitions", json=payload, headers=HEADERS).raise_for_status()
+
+    participants = parse_participants(csv_path)
+
+    if participants:
+        requests.post(f"{BASE_URL}/api/competitions/{comp_id}/participants",
+                             json={"players": participants}, headers=HEADERS).raise_for_status()
+
+    # Link reserved slots — AddReservedSlot creates the placeholder participant automatically.
+    if cat.get('promote_from'):
+        for i in range(1, 3):
+            requests.post(f"{BASE_URL}/api/competitions/{comp_id}/reserved-slots",
+                                 json={"sourceCompID": cat['promote_from'], "sourceRank": i},
+                                 headers=HEADERS).raise_for_status()
+
+    seeds = parse_seeds(seeds_path)
+    if seeds:
+        requests.put(f"{BASE_URL}/api/competitions/{comp_id}/seeds", 
+                            json=seeds, headers=HEADERS).raise_for_status()
+
+    # Start competition
+    try:
+        requests.post(f"{BASE_URL}/api/competitions/{comp_id}/start", headers=HEADERS).raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print(f"Error starting competition {comp_id}: {e}")
+        if e.response is not None:
+            print(f"Response: {e.response.text}")
+        raise
+    print(f"Competition {title} started.")
+    return comp_id
+
+SIMULATION_DATA_PATH = os.path.join(os.path.dirname(__file__), "simulation_data.json")
+with open(SIMULATION_DATA_PATH, "r") as f:
+    SIM_DATA = json.load(f)
+
+def get_predictable_result(is_team, index, can_draw=True):
+    if is_team:
+        data = SIM_DATA["team_scores"][index % len(SIM_DATA["team_scores"])]
+        if not can_draw and data['winner_side'] == "DRAW":
+            return get_predictable_result(is_team, index + 1, can_draw)
+        return data
+    else:
+        data = SIM_DATA["individual_scores"][index % len(SIM_DATA["individual_scores"])]
+        if not can_draw and data['winner_side'] == "DRAW":
+            return get_predictable_result(is_team, index + 1, can_draw)
+        return data
+
+def score_all_matches(comp_id):
+    print(f"Running competition {comp_id}...")
+    
+    iteration = 0
+    while iteration < 100:
+        iteration += 1
+        resp = requests.get(f"{BASE_URL}/api/viewer/competitions/{comp_id}")
+        resp.raise_for_status()
+        detail = resp.json()
+        
+        is_pools = detail['config']['format'] == 'pools'
+        is_team = detail['config'].get('teamSize', 1) > 1
+        
+        # Identify unscored matches
+        pool_matches = [m for m in detail.get('poolMatches', []) if m.get('status') != 'completed']
+        
+        bracket_matches = []
+        bracket = detail.get('bracket', {})
+        if bracket and 'rounds' in bracket:
+            for round_matches in bracket['rounds']:
+                for m in round_matches:
+                    if m.get('status') != 'completed' and not m['sideA'].startswith("Winner of") and not m['sideB'].startswith("Winner of") and m['sideA'] != "" and m['sideB'] != "":
+                        bracket_matches.append(m)
+        
+        to_score = pool_matches + bracket_matches
+        if not to_score:
+            print(f"No more matches to score for {comp_id}.")
+            break
+            
+        print(f"Found {len(to_score)} matches to score (Iteration {iteration})...")
+        
+        for i, match in enumerate(to_score):
+            mid = match['id']
+            sideA = match['sideA']
+            sideB = match['sideB']
+            
+            if is_team:
+                res_data = get_predictable_result(True, i + iteration)
+                payload = {
+                    "sideA": sideA,
+                    "sideB": sideB,
+                    "teamAWins": res_data["winsA"],
+                    "teamBWins": res_data["winsB"],
+                    "draws": res_data["draws"]
+                }
+                requests.put(f"{BASE_URL}/api/competitions/{comp_id}/matches/{mid}/quick-score", 
+                                    json=payload, headers=HEADERS).raise_for_status()
+                print(f"  Quick-scored {mid}: {sideA} vs {sideB} -> {res_data['winner_side']}")
+            else:
+                res_data = get_predictable_result(False, i + iteration)
+                
+                # If it's a playoff, we can't have a draw
+                if not is_pools and res_data.get("decision") == "X":
+                    winner = sideA
+                    ipponsA = ["M"]
+                    ipponsB = []
+                    decision = ""
+                else:
+                    winner = ""
+                    if res_data["winner_side"] == "A": winner = sideA
+                    elif res_data["winner_side"] == "B": winner = sideB
+                    ipponsA = res_data["ipponsA"]
+                    ipponsB = res_data["ipponsB"]
+                    decision = res_data.get("decision", "")
+
+                payload = {
+                    "id": mid,
+                    "sideA": sideA,
+                    "sideB": sideB,
+                    "winner": winner,
+                    "ipponsA": ipponsA,
+                    "ipponsB": ipponsB,
+                    "decision": decision,
+                    "status": "completed"
+                }
+                requests.put(f"{BASE_URL}/api/competitions/{comp_id}/matches/{mid}/score", 
+                                    json=payload, headers=HEADERS).raise_for_status()
+                print(f"  Scored {mid}: {sideA} vs {sideB} -> {res_data['winner_side']} ({len(ipponsA)}-{len(ipponsB)})")
+            
+            # Small delay for realism
+            time.sleep(0.05)
+
+    # Print summary (using the new readable scoreSummary if available)
+    resp = requests.get(f"{BASE_URL}/api/viewer/competitions/{comp_id}")
+    detail = resp.json()
+    if detail['config']['format'] == 'pools':
+        standings = detail.get('standings', {})
+        for pool, std in standings.items():
+            print(f"Final Standings for {pool}:")
+            for entry in std:
+                score_info = entry.get('scoreSummary', f"Points: {entry['points']}")
+                print(f"  {entry['rank']}. {entry['player']['name']} | {score_info}")
+    else:
+        bracket = detail.get('bracket', {})
+        if bracket and 'rounds' in bracket:
+            final_round = bracket['rounds'][-1]
+            if final_round and final_round[0]['status'] == 'completed':
+                print(f"Tournament Winner: {final_round[0]['winner']}")
+
+def create_linked_playoff(pool_comp_id, cat):
+    print(f"Creating linked playoff for {pool_comp_id}...")
+    
+    # We now use the dedicated API endpoint for this!
+    resp = requests.post(f"{BASE_URL}/api/competitions/{pool_comp_id}/playoffs", 
+                                headers=HEADERS)
+    
+    if resp.status_code == 201:
+        playoff_id = resp.json()['id']
+        print(f"Playoff competition {playoff_id} created by API and linked to {pool_comp_id}.")
+        return playoff_id
+    
+    # Minimal fallback for older API versions or if it fails
+    print(f"Playoff endpoint failed ({resp.status_code}), falling back to manual setup.")
+    payload = {
+        "name": f"{cat['title']} - Playoffs",
+        "format": "playoffs",
+        "courts": ["A", "B"],
+        "withZekkenName": cat.get('zekken', False),
+        "status": "setup"
+    }
+    resp = requests.post(f"{BASE_URL}/api/competitions", json=payload, headers=HEADERS)
+    resp.raise_for_status()
+    playoff_id = resp.json()['id']
+    return playoff_id
+
 def main():
     wait_for_server()
     setup_tournament()
 
-    # Get existing competitions to avoid duplicates
-    resp = requests.get(f"{BASE_URL}/api/competitions", headers=HEADERS)
-    resp.raise_for_status()
-    data = resp.json()
-    if data is None:
-        existing_competitions = {}
-    else:
-        existing_competitions = {c['name']: c['id'] for c in data}
-
     for cat in CATEGORIES:
-        title = cat['title']
-        comp_id = slugify(title)
-        csv_path = os.path.join(DATA_DIR, cat['csv'])
-        seeds_path = os.path.join(DATA_DIR, cat['seeds'])
+        # 1. Setup Pools
+        pool_comp_id = run_competition_setup(cat)
+        
+        # 2. Setup Linked Playoff
+        playoff_id = create_linked_playoff(pool_comp_id, cat)
+        
 
-        if title in existing_competitions:
-            print(f"Competition '{title}' already exists. Skipping creation.")
-            comp_id = existing_competitions[title]
-        else:
-            print(f"Creating competition: {title} (ID: {comp_id})")
-            payload = {
-                "id": comp_id,
-                "name": title,
-                "format": "pools",
-                "poolSize": 3,
-                "poolWinners": 2,
-                "roundRobin": True,
-                "courts": ["A", "B"],
-                "withZekkenName": cat.get('zekken', True),
-                "numberPrefix": cat.get('number_prefix', ""),
-                "teamSize": cat.get('team_size', 1),
-                "status": "setup"
-            }
-            resp = requests.post(f"{BASE_URL}/api/competitions", json=payload, headers=HEADERS)
-            if resp.status_code != 201:
-                print(f"Error creating competition {title}: {resp.text}")
-                continue
-            comp_id = resp.json()['id']
+        # 3. Run Pools
+        score_all_matches(pool_comp_id)
+        
+        # 3.5 Mark pools as completed
+        resp = requests.get(f"{BASE_URL}/api/competitions/{pool_comp_id}", headers=HEADERS)
+        if resp.status_code == 200:
+            comp_data = resp.json()
+            comp_data["status"] = "completed"
+            requests.put(f"{BASE_URL}/api/competitions/{pool_comp_id}", json=comp_data, headers=HEADERS).raise_for_status()
+            print(f"Marked {pool_comp_id} as completed.")
 
-        # Set participants
-        participants = parse_participants(csv_path)
-        if participants:
-            print(f"Setting {len(participants)} participants for {title}")
-            resp = requests.post(f"{BASE_URL}/api/competitions/{comp_id}/participants", 
-                                 json={"players": participants}, headers=HEADERS)
-            if resp.status_code != 200:
-                print(f"Error setting participants for {title}: {resp.text}")
+        
+        # 4. Start and Run Playoffs (Promotion happens automatically!)
+        try:
+            requests.post(f"{BASE_URL}/api/competitions/{playoff_id}/start", headers=HEADERS).raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            print(f"Error starting playoff {playoff_id}: {e}")
+            if e.response is not None:
+                print(f"Response: {e.response.text}")
+            raise
+        score_all_matches(playoff_id)
 
-        # Set seeds
-        seeds = parse_seeds(seeds_path)
-        if seeds:
-            print(f"Setting {len(seeds)} seeds for {title}")
-            resp = requests.put(f"{BASE_URL}/api/competitions/{comp_id}/seeds", 
-                                json=seeds, headers=HEADERS)
-            if resp.status_code != 200:
-                print(f"Error setting seeds for {title}: {resp.text}")
-
-        # Start competition (generate pools)
-        print(f"Starting competition: {title}")
-        resp = requests.post(f"{BASE_URL}/api/competitions/{comp_id}/start", headers=HEADERS)
-        if resp.status_code != 200:
-             print(f"Warning: Failed to start competition {title}: {resp.text}")
-
-    print("Tournament setup complete!")
+    print("Tournament full simulation complete!")
 
 if __name__ == "__main__":
     main()

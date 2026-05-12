@@ -14,7 +14,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 	if comp == nil {
-		return nil, fmt.Errorf("competition %s not found", id)
+		return nil, notFoundErrorf("competition %s not found", id)
 	}
 
 	pools, err := e.store.LoadPools(id)

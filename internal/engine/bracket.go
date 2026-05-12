@@ -41,11 +41,18 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []helper.Play
 	tree := helper.CreateBalancedTree(leafValues)
 	maxDepth := helper.CalculateDepth(tree)
 
+	numCourts := len(comp.Courts)
+	if numCourts == 0 {
+		numCourts = 1
+	}
+	numRound1Matches := pow2 / 2
+
 	var rounds [][]state.BracketMatch
 	// Round 1 is the first level of matches (just above leaves)
 	// Depth starts at 1 (root). Leaves are at maxDepth.
 	// We want rounds from maxDepth-1 down to 1.
 	for d := maxDepth - 1; d >= 1; d-- {
+		rIdx := (maxDepth - 1) - d // 0 = first round, increases toward final
 		nodes := helper.TraverseRounds(tree, 1, d)
 		var roundMatches []state.BracketMatch
 		for i, n := range nodes {
@@ -70,12 +77,21 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []helper.Play
 			// If both sides are empty (byes), we might still want to show the match
 			// but marked as completed/skipped.
 
+			// Derive court from the first-round slot this match covers.
+			// Match (rIdx, i) is rooted above first-round slot i * 2^rIdx.
+			firstRoundSlot := i * (1 << rIdx)
+			courtIdx := helper.SubtreeCourtIndex(numRound1Matches, numCourts, firstRoundSlot)
+			court := ""
+			if len(comp.Courts) > 0 {
+				court = comp.Courts[courtIdx]
+			}
+
 			match := state.BracketMatch{
 				ID:          fmt.Sprintf("m-r%d-%d", maxDepth-d, i),
 				SideA:       sideA,
 				SideB:       sideB,
 				Status:      state.MatchStatusScheduled,
-				Court:       comp.Courts[0],
+				Court:       court,
 				ScheduledAt: comp.StartTime,
 			}
 
@@ -97,6 +113,16 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []helper.Play
 
 	bracket := &state.Bracket{
 		Rounds: rounds,
+	}
+
+	// Post-process: Propagate auto-resolved winners across all rounds
+	for rIdx := 0; rIdx < len(bracket.Rounds)-1; rIdx++ {
+		for mIdx := 0; mIdx < len(bracket.Rounds[rIdx]); mIdx++ {
+			m := &bracket.Rounds[rIdx][mIdx]
+			if m.Status == state.MatchStatusCompleted {
+				e.propagateBracketWinner(bracket, rIdx, mIdx)
+			}
+		}
 	}
 
 	return e.store.SaveBracket(comp.ID, bracket)

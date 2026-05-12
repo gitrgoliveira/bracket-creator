@@ -12,7 +12,7 @@ func (e *Engine) GenerateSchedule(compID string) error {
 		return err
 	}
 	if comp == nil {
-		return fmt.Errorf("competition %s not found", compID)
+		return notFoundErrorf("competition %s not found", compID)
 	}
 
 	var entries []state.ScheduleEntry

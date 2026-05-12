@@ -14,8 +14,14 @@ function competitionKindLabel(c) {
   return base;
 }
 
+const pluralize = window.pluralize;
+
 function compMatches(c) {
   const out = [];
+
+  // Setup-mode: no backend data yet, return empty (no client-side preview)
+  if (c.status === "setup") return out;
+
   const poolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
   poolMatches.forEach(m => out.push({ ...m, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize }));
 
@@ -34,7 +40,9 @@ function compMatches(c) {
 }
 
 function tournamentMatches(t) {
-  return (t.competitions || []).flatMap(compMatches);
+  return (t.competitions || [])
+    .filter(c => c.status !== "setup")
+    .flatMap(compMatches);
 }
 
 // Next match to be played in this competition (live first, else first scheduled in time order)
@@ -61,10 +69,15 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   }, [comps, t.date]);
   const dates = Object.keys(compsByDate).sort();
 
+  const [courtFilter, setCourtFilter] = useState("all");
+  const [selectedMatch, setSelectedMatch] = useState(null);
+
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
-  const live = allMatches.filter((m) => m.status === "running");
-  const upNext = allMatches.filter((m) => m.status === "scheduled" && m.sideA && m.sideB).slice(0, 3);
+  const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status !== "setup").map(c => c.id)), [t.competitions]);
+  const live = allMatches.filter((m) => m.status === "running" && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
+  let upNext = allMatches.filter((m) => m.status === "scheduled" && m.sideA && m.sideB && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
+  if (courtFilter === "all") upNext = upNext.slice(0, 3);
 
   return (
     <div className="viewer">
@@ -81,11 +94,18 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         </div>
 
         <div className="viewer__body">
+          <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
+             <select className="input" style={{ width: "auto" }} value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
+               <option value="all">All Shiaijo</option>
+               {(t.courts || ["A"]).map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
+             </select>
+          </div>
+
           {live.length > 0 && (
             <div className="hero-live">
-              <div className="hero-live__lbl"><span className="dot dot--live"></span> LIVE NOW · {live.length} match{live.length === 1 ? "" : "es"}</div>
+              <div className="hero-live__lbl"><span className="dot dot--live"></span> LIVE NOW · {pluralize(live.length, "match", "matches")}</div>
               <div className="vsched" style={{ marginTop: 8 }}>
-                {live.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition />)}
+                {live.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
             </div>
           )}
@@ -97,7 +117,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <span className="vlist-item__icon">🗓</span>
             <div className="vlist-item__rowbody">
               <div className="vlist-item__rowtitle">Full schedule</div>
-              <div className="vlist-item__rowsub">{allMatches.filter((m) => m.sideA && m.sideB).length} matches across {tournament.courts.length} shiaijo · search by player or team</div>
+              <div className="vlist-item__rowsub">{pluralize(allMatches.filter((m) => m.sideA && m.sideB).length, "match", "matches")} across {pluralize(tournament.courts.length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
             </div>
             <span className="vlist-item__rowchev">→</span>
           </button>
@@ -139,7 +159,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                         <div className="vlist-item__progress">
                           <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
                           <div className="vlist-item__pct">
-                            {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : `${done}/${total} matches`}
+                            {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
                           </div>
                         </div>
                       )}
@@ -154,19 +174,19 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <>
               <div className="section-title" style={{ marginTop: 20 }}>Up next · {upNext.length}</div>
               <div className="vsched">
-                {upNext.map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition />)}
+                {upNext.map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
             </>
           )}
         </div>
       </div>
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
     </div>
   );
 }
 
-function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onAdminClick, tweaks }) {
+function ViewerCompetition({ _tournament, competition, pools, poolMatches, standings, bracket, onBack, _onAdminClick, tweaks }) {
   const [tab, setTab] = useState("overview");
-  const t = tournament;
   const c = competition;
 
   const allMatches = useMemo(() => {
@@ -185,7 +205,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     return out;
   }, [pools, poolMatches, bracket]);
 
-  const liveMatches = allMatches.filter((m) => m.status === "running");
+  const liveMatches = allMatches.filter((m) => m.status === "running" && m.sideA && m.sideB);
   const upcomingMatches = allMatches.filter((m) => m.status === "scheduled" && m.sideA && m.sideB).slice(0, 3);
   const recentMatches = allMatches.filter((m) => m.status === "completed" && m.winner).slice(-5).reverse();
 
@@ -193,8 +213,24 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   const myPlayer = null;
   const myUpcoming = null;
 
+  const derivedBracket = useMemo(() => {
+    if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;
+    if (c.format === "pools" && pools && pools.length > 0) {
+      const placeholders = [];
+      const winners = c.poolWinners || 2;
+      pools.forEach(p => {
+        for(let i=0; i<winners; i++) {
+           let rank = i===0?'1st':i===1?'2nd':i===2?'3rd':(i+1)+'th';
+           placeholders.push({ id: `tbd-${p.poolName}-${i}`, name: `${p.poolName} ${rank}`, dojo: "", seed: null });
+        }
+      });
+      return { rounds: window.buildBracket(placeholders, c.courts) };
+    }
+    return null;
+  }, [bracket, c, pools]);
+
   const hasPools = !!pools && pools.length > 0;
-  const hasBracket = !!bracket && bracket.rounds && bracket.rounds.length > 0;
+  const hasBracket = !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
   const tabs = [
     { id: "overview", label: "Overview" },
     hasPools ? { id: "pools", label: "Pools" } : null,
@@ -212,6 +248,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
 
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);
   const bracketScrollRef = useRefV(null);
+  const [selectedMatch, setSelectedMatch] = useState(null);
 
   React.useEffect(() => {
     if (tab === "bracket" && currentMatch) {
@@ -248,41 +285,127 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
               c={c}
               myPlayer={myPlayer}
               myUpcoming={myUpcoming}
+              currentMatch={currentMatch}
               liveMatches={liveMatches}
               upcomingMatches={upcomingMatches}
               recentMatches={recentMatches}
               tweaks={tweaks}
+              onMatchClick={setSelectedMatch}
             />
           )}
-          {tab === "bracket" && bracket && (
+          {tab === "bracket" && derivedBracket && (
             <div style={{ marginLeft: -16, marginRight: -16 }}>
               <div ref={bracketScrollRef} className="bracket-canvas" style={{ borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
                 <div className="bracket-canvas__inner" style={{ padding: 18 }}>
                   <window.BracketTree
-                    rounds={bracket.rounds}
+                    rounds={derivedBracket.rounds}
                     variant={tweaks.cardVariant}
                     showDojo={tweaks.showDojo}
                     highlightedMatchId={currentMatch?.id}
                     autoScrollMatchId={bracketScrollTarget}
                     scrollContainerRef={bracketScrollRef}
+                    onMatchClick={(m) => setSelectedMatch(m)}
                   />
                 </div>
               </div>
             </div>
           )}
           {tab === "pools" && hasPools && (
-            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} />
+            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} />
           )}
-          {tab === "results" && c.status === "completed" && bracket && (
-            <ResultsViewer c={c} bracket={bracket} />
+          {tab === "results" && c.status === "completed" && derivedBracket && (
+            <ResultsViewer c={c} bracket={derivedBracket} />
           )}
         </div>
       </div>
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
     </div>
   );
 }
 
-function ViewerOverview({ c, myPlayer, myUpcoming, liveMatches, upcomingMatches, recentMatches, tweaks }) {
+// Inline match detail card — shown directly on the page (no modal needed).
+function MatchDetailCard({ match, onClose }) {
+  if (!match) return null;
+  const isTeam = match.compKind === "team" || match.teamSize > 0;
+  const aName = match.sideA?.name || "TBD";
+  const bName = match.sideB?.name || "TBD";
+  const aWin = match.winner?.id === match.sideA?.id && match.winner?.id;
+  const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
+  const isLive = match.status === "running";
+  const isDone = match.status === "completed";
+
+  return (
+    <div className="match-detail-card">
+      <div className="match-detail-card__head">
+        <div className="match-detail-card__meta">
+          <span>Shiaijo {match.court}</span>
+          <span>·</span>
+          <span>{match.phase === "pool" ? match.poolName : (match.round || "")}</span>
+          {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {isLive && <span className="bc-live">● LIVE</span>}
+          {isDone && <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>FINAL</span>}
+          {onClose && <button className="match-detail-card__close" onClick={onClose} aria-label="Close">×</button>}
+        </div>
+      </div>
+
+      <div className="match-detail-card__players">
+        <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
+          <span className="match-detail-card__color-badge match-detail-card__color-badge--shiro">SHIRO</span>
+          <span className="match-detail-card__name">{bName}</span>
+        </div>
+        <div className="match-detail-card__score">
+          {isDone ? (() => {
+            const scoreStr = window.formatIpponsScore(match.ipponsB, match.ipponsA, match.score, match.decision);
+            return <span>{scoreStr || "—"}</span>;
+          })() : <span className="match-detail-card__vs">vs</span>}
+        </div>
+        <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
+          <span className="match-detail-card__name">{aName}</span>
+          <span className="match-detail-card__color-badge match-detail-card__color-badge--aka">AKA</span>
+        </div>
+      </div>
+
+      {isDone && !isTeam && (
+        <div className="match-detail-card__ippons">
+          <div className="match-detail-card__ippons-side">
+            <span className="match-detail-card__ippons-val">{(match.ipponsB || []).filter(x => x && x !== "•").join("") || "—"}</span>
+            {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
+          </div>
+          <div className="match-detail-card__ippons-center">
+            {match.score?.type === "hantei" && <span className="match-detail-card__decision">Hantei</span>}
+            {(match.score?.type === "hikiwake" || match.decision === "hikewake") && <span className="match-detail-card__decision">Draw</span>}
+          </div>
+          <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
+            <span className="match-detail-card__ippons-val">{(match.ipponsA || []).filter(x => x && x !== "•").join("") || "—"}</span>
+            {match.hansokuA > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuA}</span>}
+          </div>
+        </div>
+      )}
+
+      {isDone && isTeam && match.subResults && match.subResults.length > 0 && (
+        <div className="match-detail-card__team-subs">
+          {match.subResults.map((sub, i) => {
+            const sA = (sub.ipponsA || []).filter(x => x && x !== "•").join("") || "—";
+            const sB = (sub.ipponsB || []).filter(x => x && x !== "•").join("") || "—";
+            return (
+              <div key={i} className="match-detail-card__sub-row">
+                <span className="match-detail-card__sub-score">{sB}</span>
+                <span className="match-detail-card__sub-pos">Match {sub.position || i + 1}</span>
+                <span className="match-detail-card__sub-score match-detail-card__sub-score--right">{sA}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, onMatchClick }) {
+  const [expandedMatchId, setExpandedMatchId] = useState(null);
+
   if (c.status === "setup") {
     return (
       <div className="empty" style={{ padding: 32 }}>
@@ -292,6 +415,12 @@ function ViewerOverview({ c, myPlayer, myUpcoming, liveMatches, upcomingMatches,
       </div>
     );
   }
+
+  const handleMatchClick = (m) => {
+    setExpandedMatchId(prev => prev === m.id ? null : m.id);
+    if (onMatchClick) onMatchClick(m);
+  };
+
   return (
     <div>
       {myUpcoming && myPlayer ? (
@@ -325,28 +454,63 @@ function ViewerOverview({ c, myPlayer, myUpcoming, liveMatches, upcomingMatches,
         </div>
       ) : null}
 
-      {liveMatches.length > 0 && (
+      {/* Current match — shown inline, before Up Next */}
+      {currentMatch && currentMatch.status === "running" && (
+        <div style={{ marginBottom: 12 }}>
+          <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span className="dot dot--live"></span> ON NOW
+          </div>
+          <MatchDetailCard match={currentMatch} />
+        </div>
+      )}
+
+      {/* Live matches beyond the single current match */}
+      {liveMatches.length > 1 && (
         <>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="dot dot--live"></span> LIVE NOW
+            <span className="dot dot--live"></span> LIVE NOW · {liveMatches.length}
           </div>
           <div className="vsched">
-            {liveMatches.map((m) => <VSchedItem key={m.id} m={m} tweaks={tweaks} />)}
+            {liveMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
+              <React.Fragment key={m.id}>
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
+                {expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+              </React.Fragment>
+            ))}
           </div>
         </>
       )}
 
-      <div className="section-title">Up next · {upcomingMatches.length}</div>
-      <div className="vsched">
-        {upcomingMatches.length === 0 ? <div className="empty"><h3>Nothing scheduled</h3></div> :
-          upcomingMatches.map((m) => <VSchedItem key={m.id} m={m} tweaks={tweaks} />)}
-      </div>
+      {/* Up next */}
+      {upcomingMatches.length > 0 && (
+        <>
+          <div className="section-title">Up next · {upcomingMatches.length}</div>
+          <div className="vsched">
+            {upcomingMatches.map((m) => (
+              <React.Fragment key={m.id}>
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
+                {expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+              </React.Fragment>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* No live or upcoming */}
+      {!currentMatch && upcomingMatches.length === 0 && liveMatches.length === 0 && (
+        <div className="empty" style={{ padding: 20 }}><h3>Nothing scheduled</h3></div>
+      )}
 
       {recentMatches.length > 0 && (
         <>
           <div className="section-title">Recent results</div>
           <div className="vsched">
-            {recentMatches.map((m) => <VSchedItem key={m.id} m={m} tweaks={tweaks} />)}
+            {recentMatches.map((m) => (
+              <React.Fragment key={m.id}>
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => setExpandedMatchId(prev => prev === m.id ? null : m.id)} />
+                {expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+              </React.Fragment>
+            ))}
           </div>
         </>
       )}
@@ -354,12 +518,12 @@ function ViewerOverview({ c, myPlayer, myUpcoming, liveMatches, upcomingMatches,
   );
 }
 
-function VSchedItem({ m, tweaks, showCompetition }) {
+const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : null;
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision) : null;
   return (
-    <div className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""}`}>
+    <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="vsched-item__head">
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
@@ -369,10 +533,10 @@ function VSchedItem({ m, tweaks, showCompetition }) {
         {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
       </div>
       <div className="vsched-item__players">
-        <div className={`vsched-item__side ${aWin ? "vsched-item__side--w" : ""}`}>
-          <span className="vsched-item__color-badge vsched-item__color-badge--aka">AKA</span>
-          <span className="n">{m.sideA?.name || "TBD"}</span>
-          {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
+        <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
+          <span className="n">{m.sideB?.name || "TBD"}</span>
+          {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
+          <span className="vsched-item__color-badge vsched-item__color-badge--shiro">SHIRO</span>
         </div>
         {m.status === "completed" && scoreStr ? (
           <span className="vsched-item__score">{scoreStr}</span>
@@ -381,17 +545,18 @@ function VSchedItem({ m, tweaks, showCompetition }) {
         ) : (
           <span className="vsched-item__vs">vs</span>
         )}
-        <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
-          <span className="n">{m.sideB?.name || "TBD"}</span>
-          {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
-          <span className="vsched-item__color-badge vsched-item__color-badge--shiro">SHIRO</span>
+        <div className={`vsched-item__side ${aWin ? "vsched-item__side--w" : ""}`}>
+          <span className="vsched-item__color-badge vsched-item__color-badge--aka">AKA</span>
+          <span className="n">{m.sideA?.name || "TBD"}</span>
+          {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>
-    </div>
+    </button>
   );
-}
+});
+VSchedItem.displayName = "VSchedItem";
 
-function PoolMatchRow({ m }) {
+const PoolMatchRow = React.memo(({ m, onClick }) => {
   const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
   const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
   const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
@@ -399,14 +564,14 @@ function PoolMatchRow({ m }) {
   const bWin = winnerName && winnerName === bName;
 
   const scoreStr = m.status === "completed"
-    ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision)
+    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)
     : null;
 
   return (
-    <div className="pool-match-row">
-      <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
-        <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
-        <span className="pool-match-row__name">{aName}</span>
+    <button className="pool-match-row" onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
+      <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
+        <span className="pool-match-row__name">{bName}</span>
+        <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
       </div>
       <span className="pool-match-row__score">
         {m.status === "completed" ? (
@@ -415,43 +580,134 @@ function PoolMatchRow({ m }) {
           <span className="bc-live" style={{ fontSize: 10 }}>●</span>
         ) : "–"}
       </span>
-      <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
-        <span className="pool-match-row__name">{bName}</span>
-        <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
+      <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
+        <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
+        <span className="pool-match-row__name">{aName}</span>
+      </div>
+    </button>
+  );
+});
+PoolMatchRow.displayName = "PoolMatchRow";
+
+// Round-robin matrix for a single pool. Rows = players (AKA), cols = players (SHIRO).
+// Diagonal and upper triangle are empty; lower triangle shows result from match AKA vs SHIRO.
+function PoolMatrix({ pool, matches, tweaks }) {
+  const players = pool.players || [];
+  if (players.length < 2) return null;
+
+  // Build a lookup: (aName, bName) → match
+  const matchMap = {};
+  matches.forEach(m => {
+    const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+    const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+    if (aName && bName) {
+      matchMap[`${aName}||${bName}`] = m;
+      matchMap[`${bName}||${aName}`] = m;
+    }
+  });
+
+  const shortName = (p) => {
+    const n = p.name || "";
+    const parts = n.split(" ");
+    return parts.length > 1 ? parts[0][0] + ". " + parts.slice(1).join(" ") : n;
+  };
+
+  return (
+    <div className="pool-matrix-wrap">
+      <table className="pool-matrix">
+        <thead>
+          <tr>
+            <th className="pool-matrix__corner"></th>
+            {players.map((p, i) => (
+              <th key={p.name} className="pool-matrix__col-head" title={p.name}>{i + 1}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {players.map((rowPlayer, ri) => (
+            <tr key={rowPlayer.name}>
+              <td className="pool-matrix__row-head" title={rowPlayer.name}>
+                <span className="pool-matrix__num">{ri + 1}</span>
+                <span className="pool-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
+              </td>
+              {players.map((colPlayer, ci) => {
+                if (ri === ci) return <td key={colPlayer.name} className="pool-matrix__cell pool-matrix__cell--self">—</td>;
+                const m = matchMap[`${rowPlayer.name}||${colPlayer.name}`];
+                if (!m) return <td key={colPlayer.name} className="pool-matrix__cell pool-matrix__cell--empty"></td>;
+
+                const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+                const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
+                const rowIsAka = aName === rowPlayer.name;
+
+                if (m.status !== "completed") {
+                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}`}>
+                    {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
+                  </td>;
+                }
+
+                const ipponsA = (m.ipponsA || []).filter(x => x && x !== "•");
+                const ipponsB = (m.ipponsB || []).filter(x => x && x !== "•");
+                const rowIppons = rowIsAka ? ipponsA : ipponsB;
+                const rowWon = winnerName && winnerName === rowPlayer.name;
+                const isDraw = m.decision === "hikewake" || m.score?.type === "hikiwake";
+
+                let cellContent;
+                if (isDraw) {
+                  cellContent = <span className="pool-matrix__draw">X</span>;
+                } else if (rowWon) {
+                  cellContent = <span className="pool-matrix__win">{rowIppons.join("") || "W"}</span>;
+                } else {
+                  cellContent = <span className="pool-matrix__loss">{rowIppons.join("") || "L"}</span>;
+                }
+
+                return (
+                  <td key={colPlayer.name} className={`pool-matrix__cell ${rowWon ? "pool-matrix__cell--win" : isDraw ? "pool-matrix__cell--draw" : "pool-matrix__cell--loss"}`}>
+                    {cellContent}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="pool-matrix__legend">
+        <span className="pool-matrix__legend-item pool-matrix__legend-item--win">W = win</span>
+        <span className="pool-matrix__legend-item pool-matrix__legend-item--loss">L = loss</span>
+        <span className="pool-matrix__legend-item pool-matrix__legend-item--draw">X = draw</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>Row plays AKA vs col SHIRO</span>
       </div>
     </div>
   );
 }
 
-function PoolsViewer({ pools, standings, poolMatches, tweaks, competition }) {
-  const [expandedPools, setExpandedPools] = useState({});
+function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick }) {
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3></div>;
   }
-  const togglePool = (poolName) => setExpandedPools(prev => ({ ...prev, [poolName]: !prev[poolName] }));
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
         const matches = poolMatches ? poolMatches.filter(m => {
           const id = m.id || "";
           return id.startsWith(pool.poolName + "-");
         }) : [];
-        const completedMatches = matches.filter(m => m.status === "completed");
-        const expanded = expandedPools[pool.poolName];
         return (
           <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
             <div className="pool__head">
-              <div>
-                <div className="pool__name">{pool.poolName}</div>
+              <div className="pool__name">{pool.poolName}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                {matches.filter(m => m.status === "completed").length}/{matches.length} matches
               </div>
             </div>
+
+            {/* Standings table */}
             <table className="pool__table">
               <thead>
                 {isTeam ? (
-                  <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">IT</th><th className="num">PW</th><th className="num">PL</th></tr>
+                  <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">PW</th><th className="num">PL</th></tr>
                 ) : (
                   <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
                 )}
@@ -469,12 +725,11 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition }) {
                     <td className="num">{s.draws}</td>
                     {isTeam && <td className="num">{s.individualWins || 0}</td>}
                     {isTeam && <td className="num">{s.individualLosses || 0}</td>}
-                    {isTeam && <td className="num">{s.individualDraws || 0}</td>}
                     <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
                     <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
                   </tr>
                 )) : pool.players.map((p, i) => {
-                  const cols = isTeam ? 8 : 5;
+                  const cols = isTeam ? 7 : 5;
                   return (
                     <tr key={p.name}>
                       <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
@@ -488,16 +743,20 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition }) {
                 })}
               </tbody>
             </table>
-            {matches.length > 0 && (
-              <div style={{ marginTop: 8 }}>
-                <button className="btn btn--sm" style={{ fontSize: 11 }} onClick={() => togglePool(pool.poolName)}>
-                  {expanded ? "Hide matches" : `Show matches (${completedMatches.length}/${matches.length})`}
-                </button>
-                {expanded && (
-                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-                    {matches.map(m => <PoolMatchRow key={m.id} m={m} />)}
-                  </div>
-                )}
+
+            {/* Round-robin matrix — always visible */}
+            {matches.length > 0 && !isTeam && (
+              <div style={{ marginTop: 12 }}>
+                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} />
+              </div>
+            )}
+
+            {/* Team matches: show as list (no matrix for team) */}
+            {matches.length > 0 && isTeam && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {matches.map(m => <PoolMatchRow key={m.id} m={m} onClick={() => onMatchClick && onMatchClick(m)} />)}
+                </div>
               </div>
             )}
           </div>
@@ -581,7 +840,7 @@ function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, setDojoTex
       {open && (
         <div className="pmf__dropdown">
           <div className="pmf__dropdown-head">
-            {q ? `${matches.length} match${matches.length === 1 ? "" : "es"}` : `${roster.length} participants — type to search`}
+            {q ? pluralize(matches.length, "match", "matches") : `${pluralize(roster.length, "participant")} — type to search`}
             {(picked.length > 0 || dojoText) && (
               <button className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setQuery(""); }}>Clear all</button>
             )}
@@ -649,7 +908,7 @@ function ScheduleViewer({ tournament, tweaks }) {
   const courts = tournament.courts;
   const [picked, setPicked] = useState([]);
   const [dojoText, setDojoText] = useState("");
-  const [compFilter, setCompFilter] = useState("all");
+  const [courtFilter, setCourtFilter] = useState("all");
 
   // Derive unique days from competitions and matches
   const allDates = useMemo(() => {
@@ -661,6 +920,7 @@ function ScheduleViewer({ tournament, tweaks }) {
   }, [tournament, allMatches]);
 
   const [activeDay, setActiveDay] = useState(() => allDates[0] || "");
+  const [compFilter, setCompFilter] = useState("all");
 
   // When dates change (data loads), reset to first
   React.useEffect(() => {
@@ -689,7 +949,7 @@ function ScheduleViewer({ tournament, tweaks }) {
   }));
 
   const matchHasFilter = (m) => matchHighlightedBy(m, picked, dojoText);
-  const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
+  const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all" || courtFilter !== "all";
   const multiDay = allDates.length > 1 || (allDates.length === 1 && allDates[0] !== "");
 
   return (
@@ -700,10 +960,14 @@ function ScheduleViewer({ tournament, tweaks }) {
           <option value="all">All competitions</option>
           {(tournament.competitions || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+        <select className="input" style={{ width: "auto" }} value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
+          <option value="all">All Shiaijo</option>
+          {courts.map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
+        </select>
         {hasAnyFilter && (
-          <button className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); }}>Clear</button>
+          <button className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); setCourtFilter("all"); }}>Clear</button>
         )}
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{dayFiltered.length} of {allMatches.length} matches</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{pluralize(dayFiltered.length, "match", "matches")} of {allMatches.length}</span>
       </div>
 
       {multiDay && (
@@ -726,6 +990,7 @@ function ScheduleViewer({ tournament, tweaks }) {
         ) : courts.map((cc) => {
           const list = byCourt[cc] || [];
           const liveOn = list.find((m) => m.status === "running");
+          if (courtFilter !== "all" && cc !== courtFilter) return null;
           return (
             <div key={cc} className="tw-court">
               <div className="tw-court__head">
@@ -739,7 +1004,7 @@ function ScheduleViewer({ tournament, tweaks }) {
                 {list.length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "20px 8px", textAlign: "center" }}>No matches</div>
                 ) : list.map((m) => (
-                  <TWMatch key={m.compId + m.id} m={m} highlight={matchHasFilter(m)} tweaks={tweaks} />
+                  <TWMatch key={m.compId + m.id} m={m} highlight={matchHasFilter(m)} tweaks={tweaks} onClick={() => tweaks.onMatchClick && tweaks.onMatchClick(m)} />
                 ))}
               </div>
             </div>
@@ -750,24 +1015,24 @@ function ScheduleViewer({ tournament, tweaks }) {
   );
 }
 
-function TWMatch({ m, highlight, tweaks }) {
+function TWMatch({ m, highlight, _tweaks, onClick }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : null;
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision) : null;
   return (
-    <div className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`}>
+    <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div>
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
       </div>
       <div className="tw-match__players">
-        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
-          <span className="tw-match__badge tw-match__badge--aka">A</span>
-          {m.sideA?.name || "TBD"}
-        </div>
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--shiro">S</span>
           {m.sideB?.name || "TBD"}
+        </div>
+        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
+          <span className="tw-match__badge tw-match__badge--aka">A</span>
+          {m.sideA?.name || "TBD"}
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
@@ -776,11 +1041,11 @@ function TWMatch({ m, highlight, tweaks }) {
         {m.status === "completed" && m.score?.type === "bye" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>BYE</span>}
         {m.status === "running" && <span className="bc-live">●</span>}
       </div>
-    </div>
+    </button>
   );
 }
 
-function ResultsViewer({ c, bracket }) {
+function ResultsViewer({ _c, bracket }) {
   const final = bracket.rounds[bracket.rounds.length - 1][0];
   const sf = bracket.rounds[bracket.rounds.length - 2] || [];
   const champion = final.winner;
@@ -825,6 +1090,8 @@ function ResultsViewer({ c, bracket }) {
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)
 function ViewerSchedule({ tournament, onBack, tweaks }) {
+  const [selectedMatch, setSelectedMatch] = useState(null);
+  const extendedTweaks = { ...tweaks, onMatchClick: setSelectedMatch };
   return (
     <div className="viewer">
       <div className="viewer__shell">
@@ -837,8 +1104,97 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
           </div>
         </div>
         <div className="viewer__body">
-          <ScheduleViewer tournament={tournament} tweaks={tweaks} />
+          <ScheduleViewer tournament={tournament} tweaks={extendedTweaks} />
         </div>
+      </div>
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
+    </div>
+  );
+}
+
+function MatchViewerModal({ match, onClose }) {
+  if (!match) return null;
+  const isTeam = match.compKind === "team" || match.teamSize > 0;
+  const aName = match.sideA?.name || "TBD";
+  const bName = match.sideB?.name || "TBD";
+  const aWin = match.winner?.id === match.sideA?.id;
+  const bWin = match.winner?.id === match.sideB?.id;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="card" onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Match Details</h2>
+          <button className="btn btn--ghost btn--sm" onClick={onClose}>Close</button>
+        </div>
+        <div style={{ marginBottom: 16, fontSize: 13, color: "var(--ink-3)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Shiaijo {match.court} · {match.phase === "pool" ? match.poolName : match.round}</span>
+          <window.StatusBadge status={match.status} showLiveDot={match.status === "running"} />
+        </div>
+        
+        <div className="se-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <div className={`se-head__side ${bWin ? "se-head__side--w" : ""}`} style={{ flex: 1 }}>
+             <div className="se-head__name" style={{ fontWeight: 600 }}>{bName}</div>
+             <div className="se-head__badge se-head__badge--shiro" style={{ display: "inline-block", background: "#fff", color: "#000", border: "1px solid #ddd", padding: "2px 6px", fontSize: 11, borderRadius: 4, marginTop: 4 }}>SHIRO</div>
+          </div>
+          <div className="se-head__vs" style={{ padding: "0 16px", color: "var(--ink-3)" }}>vs</div>
+          <div className={`se-head__side ${aWin ? "se-head__side--w" : ""}`} style={{ flex: 1, textAlign: "right" }}>
+             <div className="se-head__name" style={{ fontWeight: 600 }}>{aName}</div>
+             <div className="se-head__badge se-head__badge--aka" style={{ display: "inline-block", background: "var(--red)", color: "#fff", padding: "2px 6px", fontSize: 11, borderRadius: 4, marginTop: 4 }}>AKA</div>
+          </div>
+        </div>
+
+        {isTeam ? (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 8, fontSize: 12, fontWeight: 600, color: "var(--ink-3)" }}>
+              <div style={{ width: 80 }}>SHIRO</div>
+              <div style={{ flex: 1, textAlign: "center" }}>Position</div>
+              <div style={{ width: 80, textAlign: "right" }}>AKA</div>
+            </div>
+            {match.subResults && match.subResults.length > 0 ? match.subResults.map((sub, i) => {
+               const sIpponsB = (sub.ipponsB || []).filter(x => x && x !== "•").join("");
+               const sIpponsA = (sub.ipponsA || []).filter(x => x && x !== "•").join("");
+               const hansokuB = sub.hansokuB || 0;
+               const hansokuA = sub.hansokuA || 0;
+               return (
+                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line-light)" }}>
+                   <div style={{ width: 80, display: "flex", flexDirection: "column" }}>
+                     <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsB || "—"}</span>
+                     {hansokuB > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuB}</span>}
+                   </div>
+                   <div style={{ flex: 1, textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>
+                     Match {sub.position || i+1}
+                   </div>
+                   <div style={{ width: 80, textAlign: "right", display: "flex", flexDirection: "column" }}>
+                     <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsA || "—"}</span>
+                     {hansokuA > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuA}</span>}
+                   </div>
+                 </div>
+               );
+            }) : (
+              <div style={{ textAlign: "center", padding: 20, color: "var(--ink-3)" }}>No individual match details available.</div>
+            )}
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", background: "var(--bg-2)", borderRadius: 8, padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flex: 1 }}>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>{(match.ipponsB || []).filter(x => x && x !== "•").join("") || "—"}</div>
+                  {match.hansokuB > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuB}</div>}
+               </div>
+               <div style={{ fontSize: 24, color: "var(--ink-3)", padding: "0 16px" }}>-</div>
+               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flex: 1 }}>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>{(match.ipponsA || []).filter(x => x && x !== "•").join("") || "—"}</div>
+                  {match.hansokuA > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuA}</div>}
+               </div>
+            </div>
+            {match.score?.type === "hantei" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
+            {match.score?.type === "hikiwake" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Draw (Hikiwake)</div>}
+            {match.score?.type === "bye" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>BYE</div>}
+          </div>
+        )}
       </div>
     </div>
   );

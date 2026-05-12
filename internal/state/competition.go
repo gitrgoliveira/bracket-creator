@@ -130,5 +130,6 @@ func (s *Store) DeleteCompetition(id string) error {
 		return err
 	}
 	s.compCache.Delete(id)
+	s.compMu.Delete(id)
 	return nil
 }

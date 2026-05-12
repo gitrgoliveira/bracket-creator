@@ -1146,11 +1146,13 @@ components:
           type: string
           description: >
             Lifecycle state. Set by the server — do not supply on create/update.
-            `setup` → not yet started; `pools` → pools phase active;
+            `setup` → not yet started; `pending` → equivalent to `setup` for
+            start-eligibility (legacy state, still accepted by
+            `POST /competitions/{id}/start`); `pools` → pools phase active;
             `playoffs` → knockout phase active; `completed` → finished;
             `invalid` → operator-declared invalid, prerequisite for deleting
             an already-started competition.
-          enum: [setup, pools, playoffs, completed, invalid, ""]
+          enum: [setup, pending, pools, playoffs, completed, invalid, ""]
         mirror:
           type: boolean
         withZekkenName:

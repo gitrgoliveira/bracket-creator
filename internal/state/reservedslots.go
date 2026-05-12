@@ -10,6 +10,9 @@ import (
 )
 
 func (s *Store) LoadReservedSlots(compID string) ([]ReservedSlot, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
 	data, err := s.loadCached(compID, "reserved-slots.json", parseReservedSlotsFile)
 	if err != nil {
 		return nil, err

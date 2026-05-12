@@ -6,6 +6,9 @@ import (
 )
 
 func (s *Store) LoadBracket(compID string) (*Bracket, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
 	data, err := s.loadCached(compID, "bracket.json", parseBracketFile)
 	if err != nil {
 		return nil, err

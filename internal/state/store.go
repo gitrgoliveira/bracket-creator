@@ -84,19 +84,23 @@ func (s *Store) getFileCache(compID, filename string) *fileCache {
 // loadCached returns the cached value for (compID, filename). On a cache hit
 // (file mtime matches cached mtime) the cached pointer is returned directly;
 // callers are responsible for deep-copying before exposing it. On a miss, the
-// per-comp read lock and the file-cache write lock are held while parse runs.
+// per-comp read lock and the file-cache write lock are held while parse runs,
+// and the file's mtime is re-read after parse so the cached entry reflects the
+// on-disk state at the time the file was actually read.
+//
 // parse receives the on-disk path and must return the value to cache (an empty
 // container for "file does not exist", or nil when that's the intended sentinel
-// — see LoadCompetition).
+// — see LoadCompetition; nil values do not cache-hit and will be re-parsed on
+// each call).
 func (s *Store) loadCached(compID, filename string, parse func(path string) (any, error)) (any, error) {
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
 
 	cache := s.getFileCache(compID, filename)
-	mtime := s.FileMtime(compID, filename)
 
 	cache.mu.RLock()
+	mtime := s.FileMtime(compID, filename)
 	if cache.data != nil && cache.mtime == mtime {
 		data := cache.data
 		cache.mu.RUnlock()
@@ -106,6 +110,7 @@ func (s *Store) loadCached(compID, filename string, parse func(path string) (any
 
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
+	mtime = s.FileMtime(compID, filename)
 	if cache.data != nil && cache.mtime == mtime {
 		return cache.data, nil
 	}
@@ -115,7 +120,7 @@ func (s *Store) loadCached(compID, filename string, parse func(path string) (any
 		return nil, err
 	}
 	cache.data = data
-	cache.mtime = mtime
+	cache.mtime = s.FileMtime(compID, filename)
 	return data, nil
 }
 

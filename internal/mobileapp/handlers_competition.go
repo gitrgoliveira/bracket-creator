@@ -174,12 +174,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 	r.DELETE("/competitions/:id", func(c *gin.Context) {
 		id := c.Param("id")
-		comp, err := store.LoadCompetition(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if err := state.ValidateCompetitionID(id); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if comp != nil {
+		// If the config loads cleanly, gate on status. If it doesn't load
+		// (corrupt or unparseable config.md), fall through to delete so the
+		// operator can recover from a broken competition.
+		if comp, err := store.LoadCompetition(id); err == nil && comp != nil {
 			switch comp.Status {
 			case state.CompStatusPools, state.CompStatusPlayoffs:
 				c.JSON(http.StatusConflict, gin.H{"error": "competition is in progress; mark it invalid before deleting"})
@@ -197,6 +199,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 	r.POST("/competitions/:id/invalidate", func(c *gin.Context) {
 		id := c.Param("id")
+		if err := state.ValidateCompetitionID(id); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

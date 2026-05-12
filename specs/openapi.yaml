@@ -394,6 +394,7 @@ paths:
       tags: [competitions]
       summary: Delete competition
       description: |
+        Idempotent — returns 204 even when the competition does not exist.
         Allowed when the competition has not yet started (`setup`), has finished
         (`completed`), or has been declared invalid (`invalid`). Started
         competitions (`pools`/`playoffs`) must first be invalidated via
@@ -402,9 +403,9 @@ paths:
         - TournamentPassword: []
       responses:
         '204':
-          description: Competition deleted.
-        '404':
-          $ref: '#/components/responses/NotFound'
+          description: Competition deleted (or did not exist).
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '409':
           description: Competition is in progress and must be invalidated first.
 

@@ -18,6 +18,9 @@ type ScheduleEntry struct {
 }
 
 func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
 	data, err := s.loadCached(compID, "schedule.csv", parseScheduleFile)
 	if err != nil {
 		return nil, err
@@ -111,6 +114,9 @@ func serializeSchedule(entries []ScheduleEntry) ([]byte, error) {
 // actually changed. Use this instead of SaveSchedule when you need to gate a
 // broadcast on a real mutation.
 func (s *Store) SaveScheduleChanged(compID string, entries []ScheduleEntry) (bool, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return false, err
+	}
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()

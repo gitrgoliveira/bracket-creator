@@ -980,8 +980,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 }
 
 function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
-  const { total, done, live } = compMatchStats({ ...c, pools, poolMatches, bracket });
+  // Prefer the props passed from the detail fetch, but fall back to whatever
+  // is already on `c` when the detail hasn't loaded yet (or errored). Using ??
+  // avoids overwriting non-null fields on `c` with undefined prop values.
+  const statsSource = { ...c, pools: pools ?? c.pools, poolMatches: poolMatches ?? c.poolMatches, bracket: bracket ?? c.bracket };
+  const { total, done, live } = compMatchStats(statsSource);
   const pct = total ? Math.round((done / total) * 100) : 0;
+  const effectiveBracket = bracket ?? c.bracket;
   return (
     <div>
       <div className="stats-strip">
@@ -1001,7 +1006,7 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
           <div className="card__title" style={{ marginBottom: 6 }}>Scores →</div>
           <div className="card__sub">Update or correct match results</div>
         </button>
-        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(bracket ? "bracket" : "pools")}>
+        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}>
           <div className="card__title" style={{ marginBottom: 6 }}>Live results →</div>
           <div className="card__sub">Visual bracket / pool standings</div>
         </button>

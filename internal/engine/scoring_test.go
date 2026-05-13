@@ -271,6 +271,21 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		comp, _ := store.LoadCompetition(koID)
 		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
 	})
+
+	t.Run("transitions when there are zero pool matches", func(t *testing.T) {
+		// e.g. a single-participant pools comp where no match was generated.
+		// Without this branch the competition would be stuck in `pools` forever.
+		emptyID := "auto-complete-empty"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: emptyID, Name: "Empty", Format: "pools", Status: state.CompStatusPools,
+		}))
+		require.NoError(t, store.SavePoolMatches(emptyID, []state.MatchResult{}))
+		done, err := eng.MaybeAutoCompletePools(emptyID)
+		require.NoError(t, err)
+		assert.True(t, done)
+		comp, _ := store.LoadCompetition(emptyID)
+		assert.Equal(t, state.CompStatusComplete, comp.Status)
+	})
 }
 
 // Regression test for the bug where scoring a match cleared its court and

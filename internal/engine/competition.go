@@ -24,9 +24,10 @@ func (e *Engine) MaybeAutoCompletePools(compId string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if len(matches) == 0 {
-		return false, nil
-	}
+	// A pools competition with zero matches has nothing left to score, so we
+	// treat it as complete rather than leaving it stuck in CompStatusPools.
+	// This is a corner case (single-participant pool, or any started pools
+	// comp that legitimately generated zero matches), not the hot path.
 	for _, m := range matches {
 		if m.Status != state.MatchStatusCompleted {
 			return false, nil

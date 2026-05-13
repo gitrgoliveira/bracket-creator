@@ -2050,7 +2050,8 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{b.dojo}</div>
           </button>
           <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
-            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", color: "var(--red)" }}>AKA (RED)</div>
+            {/* Label tinted red when unselected (button is on white), inherits white when selected (button background is red) */}
+            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", color: match.winner?.id === a.id ? "inherit" : "var(--red)" }}>AKA (RED)</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{a.name}</div>
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{a.dojo}</div>
           </button>
@@ -2801,8 +2802,9 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
   const initialAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const initialBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
 
-  const initialAFouls = m.hansokuA || m.score?.fouls?.a || 0;
-  const initialBFouls = m.hansokuB || m.score?.fouls?.b || 0;
+  // Use ?? not || so an explicit 0 isn't treated as "unset"
+  const initialAFouls = m.hansokuA ?? m.score?.fouls?.a ?? 0;
+  const initialBFouls = m.hansokuB ?? m.score?.fouls?.b ?? 0;
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
   const [aFouls, setAFouls] = useStateA(initialAFouls);

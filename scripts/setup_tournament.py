@@ -345,6 +345,7 @@ def wait_for_status(comp_id, expected, timeout_s=5.0, interval_s=0.2):
     """
     deadline = time.time() + timeout_s
     last_status = None
+    resp = None  # guard against UnboundLocalError if every attempt raises ConnectionError
     while time.time() < deadline:
         try:
             resp = requests.get(f"{BASE_URL}/api/competitions/{comp_id}", headers=HEADERS)
@@ -363,9 +364,10 @@ def wait_for_status(comp_id, expected, timeout_s=5.0, interval_s=0.2):
             if last_status == expected:
                 return last_status
         time.sleep(interval_s)
+    http_info = f" (HTTP {resp.status_code})" if resp is not None else " (no successful response)"
     raise RuntimeError(
         f"[FAIL] {comp_id}: expected status {expected!r} within {timeout_s}s, "
-        f"last seen {last_status!r} (HTTP {resp.status_code}). "
+        f"last seen {last_status!r}{http_info}. "
         f"Backend auto-completion may have regressed."
     )
 

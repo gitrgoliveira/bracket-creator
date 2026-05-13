@@ -34,10 +34,14 @@ func (e *Engine) MaybeAutoCompletePools(compId string) (bool, error) {
 	}
 
 	comp.Status = state.CompStatusComplete
-	if err := e.store.SaveCompetition(comp); err != nil {
+	// Use SaveCompetitionChanged so that concurrent score submissions that both
+	// see all matches completed only broadcast once: the second writer finds the
+	// file bytes unchanged and gets changed=false, returning false to its caller.
+	changed, err := e.store.SaveCompetitionChanged(comp)
+	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return changed, nil
 }
 
 func (e *Engine) StartCompetition(id string) error {

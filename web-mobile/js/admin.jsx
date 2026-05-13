@@ -501,22 +501,32 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
   const comps = t.competitions || [];
 
   useEffectA(() => {
+    // Coalesce bursts of events into a single dashboard refresh. On a busy
+    // event the SSE stream can fire dozens of match_updated per minute, and
+    // each one previously triggered a full tournament+competitions fetch.
+    let pending = null;
+    const scheduleRefresh = () => {
+      if (pending) return;
+      const jitter = 500 + Math.random() * 1000; // 500-1500ms window
+      pending = setTimeout(() => {
+        pending = null;
+        Promise.all([
+          window.API.fetchTournament(),
+          window.API.fetchCompetitions()
+        ]).then(([tourney, competitions]) => {
+          onUpdate({ ...tourney, competitions });
+        }).catch(err => console.error("Dashboard refresh failed", err));
+      }, jitter);
+    };
     const unsub = window.API.subscribeToEvents((event) => {
-      const jitter = Math.random() * 500;
       if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted" || event.type === "match_updated") {
-        // Refresh everything on the dashboard so live-match counts and
-        // status badges stay current as competitions progress.
-        setTimeout(() => {
-          Promise.all([
-            window.API.fetchTournament(),
-            window.API.fetchCompetitions()
-          ]).then(([tourney, competitions]) => {
-            onUpdate({ ...tourney, competitions });
-          }).catch(err => console.error("Dashboard refresh failed", err));
-        }, jitter);
+        scheduleRefresh();
       }
     });
-    return unsub;
+    return () => {
+      if (pending) clearTimeout(pending);
+      unsub();
+    };
   }, []);
 
   const { totalMatches, doneMatches, liveMatches, totalParticipants } = useMemoA(() => {

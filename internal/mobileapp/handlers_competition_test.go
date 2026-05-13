@@ -135,6 +135,31 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
+	t.Run("Override Rank Rejects Invalid Input", func(t *testing.T) {
+		comp := state.Competition{ID: "rank-bad-comp"}
+		store.SaveCompetition(&comp)
+
+		cases := []struct {
+			name string
+			body map[string]any
+		}{
+			{"empty player name", map[string]any{"playerName": "", "rank": 1}},
+			{"zero rank", map[string]any{"playerName": "Player 1", "rank": 0}},
+			{"negative rank", map[string]any{"playerName": "Player 1", "rank": -3}},
+			{"absurdly large rank", map[string]any{"playerName": "Player 1", "rank": 99999}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				reqBody, _ := json.Marshal(tc.body)
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequest("PUT", "/api/competitions/rank-bad-comp/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+				req.Header.Set("Content-Type", "application/json")
+				r.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusBadRequest, w.Code)
+			})
+		}
+	})
+
 	t.Run("Save Schedule", func(t *testing.T) {
 		comp := state.Competition{ID: "sched-comp"}
 		store.SaveCompetition(&comp)

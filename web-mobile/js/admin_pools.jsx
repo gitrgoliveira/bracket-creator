@@ -68,6 +68,7 @@ function RankInput({ initial, className, onCommit, style }) {
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
       onClick={(e) => e.stopPropagation()}
+      autoComplete="off"
       style={style}
     />
   );

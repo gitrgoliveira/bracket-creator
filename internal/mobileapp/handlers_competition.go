@@ -371,6 +371,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// Defense-in-depth: the JS client already guards isNaN/<=0, but a stale
+		// or hand-crafted request could persist garbage rank values. Reject
+		// non-positive ranks (and anything implausibly large — no real pool
+		// has 1000+ participants).
+		if req.PlayerName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "playerName is required"})
+			return
+		}
+		if req.Rank <= 0 || req.Rank > 1000 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer ≤ 1000"})
+			return
+		}
 
 		changed, err := store.SaveRankOverrideChanged(id, poolId, req.PlayerName, req.Rank)
 		if err != nil {

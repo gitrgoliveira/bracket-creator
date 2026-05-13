@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBulkScoreHandler(t *testing.T) {
@@ -240,4 +242,79 @@ func TestMatchHandlers_Extended(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+}
+
+// TestScoreHandler_CompletionBroadcastContract verifies that scoring the final
+// pool match emits EventCompetitionCompleted exactly once, and that scoring a
+// non-final match does not emit it.
+func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	comp := state.Competition{
+		ID:     "pools1",
+		Format: "pools",
+		Status: state.CompStatusPools,
+	}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SaveParticipants("pools1", []helper.Player{
+		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
+	}))
+	require.NoError(t, store.SavePoolMatches("pools1", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2"},
+		{ID: "PoolA-2", SideA: "P1", SideB: "P3"},
+	}))
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	drainFor := func(d time.Duration) []SSEEvent {
+		var events []SSEEvent
+		deadline := time.After(d)
+		for {
+			select {
+			case msg := <-ch:
+				var e SSEEvent
+				require.NoError(t, json.Unmarshal([]byte(msg), &e))
+				events = append(events, e)
+			case <-deadline:
+				return events
+			}
+		}
+	}
+
+	scoreMatch := func(mid, winner string) {
+		body, _ := json.Marshal(state.MatchResult{
+			ID: mid, SideA: "P1", SideB: "P2",
+			Winner: winner, Status: state.MatchStatusCompleted,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/pools1/matches/"+mid+"/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+
+	// Partial completion — no EventCompetitionCompleted
+	scoreMatch("PoolA-1", "P1")
+	partialEvents := drainFor(30 * time.Millisecond)
+	for _, e := range partialEvents {
+		assert.NotEqual(t, EventCompetitionCompleted, e.Type,
+			"partial completion must not broadcast competition_completed")
+	}
+
+	// Final match — EventCompetitionCompleted must be emitted exactly once
+	scoreMatch("PoolA-2", "P1")
+	finalEvents := drainFor(100 * time.Millisecond)
+
+	completedCount := 0
+	for _, e := range finalEvents {
+		if e.Type == EventCompetitionCompleted {
+			completedCount++
+			compData, isMap := e.Data.(map[string]any)
+			require.True(t, isMap, "competition_completed data must be a map")
+			assert.Equal(t, "pools1", compData["competitionId"])
+		}
+	}
+	assert.Equal(t, 1, completedCount, "final match must emit competition_completed exactly once")
 }

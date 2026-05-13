@@ -52,6 +52,21 @@ const (
 	MatchStatusCompleted MatchStatus = "completed"
 )
 
+// DecisionDraw is the canonical value for a tied (hikiwake) match. The
+// legacy spelling "hikewake" (missing the 'i') was used historically and is
+// still accepted by IsDraw() for backward compatibility on existing data,
+// but all new writes use this canonical spelling.
+const (
+	DecisionDraw       = "hikiwake"
+	decisionDrawLegacy = "hikewake"
+)
+
+// IsDraw reports whether a match decision string represents a draw.
+// Accepts both the canonical "hikiwake" and the legacy "hikewake".
+func IsDraw(decision string) bool {
+	return decision == DecisionDraw || decision == decisionDrawLegacy
+}
+
 type SubMatchResult struct {
 	Position int      `json:"position"`
 	SideA    string   `json:"sideA"`

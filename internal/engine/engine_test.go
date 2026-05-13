@@ -733,10 +733,10 @@ func TestCalculatePoolStandings_AllDraws(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 
-	// All matches are draws (hikewake)
+	// All matches are draws (hikiwake)
 	for i := range matches {
 		matches[i].Status = state.MatchStatusCompleted
-		matches[i].Decision = "hikewake"
+		matches[i].Decision = state.DecisionDraw
 		matches[i].Winner = ""
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))

@@ -375,7 +375,7 @@ function MatchDetailCard({ match, onClose }) {
           </div>
           <div className="match-detail-card__ippons-center">
             {match.score?.type === "hantei" && <span className="match-detail-card__decision">Hantei</span>}
-            {(match.score?.type === "hikiwake" || match.decision === "hikewake") && <span className="match-detail-card__decision">Draw</span>}
+            {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
           </div>
           <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
             <span className="match-detail-card__ippons-val">{(match.ipponsA || []).filter(x => x && x !== "•").join("") || "—"}</span>
@@ -649,7 +649,7 @@ function PoolMatrix({ pool, matches, tweaks }) {
                 const ipponsB = (m.ipponsB || []).filter(x => x && x !== "•");
                 const rowIppons = rowIsAka ? ipponsA : ipponsB;
                 const rowWon = winnerName && winnerName === rowPlayer.name;
-                const isDraw = m.decision === "hikewake" || m.score?.type === "hikiwake";
+                const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
 
                 let cellContent;
                 if (isDraw) {

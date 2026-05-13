@@ -22,6 +22,13 @@ function RankInput({ initial, className, onCommit, style }) {
   const [v, setV] = useStateA(String(initial));
   const focusedRef = useRefA(false);
   const focusValueRef = useRefA(String(initial));
+  // Esc handler sets this, blur handler checks and clears. Avoids a
+  // React-async-state hazard: setV(String(initial)) from the Esc path
+  // is queued, but e.currentTarget.blur() fires handleBlur synchronously,
+  // so handleBlur's closure still sees the stale (typed) v. Without this
+  // ref, Esc would proceed past the "no-edit" early-return and commit
+  // the typed value — the opposite of cancel.
+  const cancelRef = useRefA(false);
   useEffectA(() => {
     if (!focusedRef.current) setV(String(initial));
   }, [initial]);
@@ -31,6 +38,10 @@ function RankInput({ initial, className, onCommit, style }) {
   };
   const handleBlur = () => {
     focusedRef.current = false;
+    if (cancelRef.current) {
+      cancelRef.current = false;
+      return; // Esc was pressed — don't commit.
+    }
     // User focused but didn't type anything. If `initial` changed under
     // them while focused (SSE), sync to the latest server value rather
     // than committing the stale focus-time value.
@@ -39,7 +50,7 @@ function RankInput({ initial, className, onCommit, style }) {
       return;
     }
     const next = parseInt(v);
-    if (!Number.isFinite(next) || next <= 0) {
+    if (!Number.isFinite(next) || next <= 0 || next > 1000) {
       setV(String(initial));
       return;
     }
@@ -51,16 +62,16 @@ function RankInput({ initial, className, onCommit, style }) {
       e.currentTarget.blur();
     } else if (e.key === "Escape") {
       e.preventDefault();
+      cancelRef.current = true;
       setV(String(initial));
-      // Reset the focus snapshot so the subsequent blur is treated as
-      // "no edit" rather than triggering revert-to-initial twice.
-      focusValueRef.current = String(initial);
       e.currentTarget.blur();
     }
   };
   return (
     <input
       type="number"
+      min="1"
+      max="1000"
       className={className}
       value={v}
       onChange={(e) => setV(e.target.value)}

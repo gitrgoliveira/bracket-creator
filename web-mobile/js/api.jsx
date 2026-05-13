@@ -326,7 +326,11 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to override rank");
         }
-        return res.json();
+        // Backend returns 200 with empty body. Calling .json() on an
+        // empty body throws SyntaxError per the Fetch spec, which would
+        // surface to the user as an alert("Failed: Unexpected end of
+        // JSON input") right after a successful save.
+        return true;
     },
     async overrideBracketWinner(compID, matchID, winnerName, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/override-winner`, {
@@ -341,7 +345,8 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to override winner");
         }
-        return res.json();
+        // Backend returns 200 with empty body — see overridePoolRank.
+        return true;
     },
     async resetOverrides(compID, password) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {
@@ -352,7 +357,8 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to reset overrides");
         }
-        return res.json();
+        // Backend returns 204 No Content — .json() would reject.
+        return true;
     },
     async updateMatchTime(compID, matchID, scheduledAt, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/time`, {

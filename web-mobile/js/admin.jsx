@@ -2851,6 +2851,10 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
     try { await fn(); } finally { setSubmitting(false); }
   };
 
+  // Both spellings are intentional: `score.type` uses the correct "hikiwake"
+  // while the `decision` protocol string is the long-standing "hikewake"
+  // (without the i) — see api.jsx and scoring.go. Don't "fix" without a repo-
+  // wide migration.
   const initialIsDrawToggled = m.score?.type === "hikiwake" || m.decision === "hikewake";
   const [isDrawToggled, setIsDrawToggled] = useStateA(initialIsDrawToggled);
 

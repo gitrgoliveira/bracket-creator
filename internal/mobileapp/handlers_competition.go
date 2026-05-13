@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -302,6 +303,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
+
+		// A pools competition that generated zero matches (e.g. single
+		// participant) has nothing to score, so trip the auto-complete check
+		// at start time. The non-zero case will trip via score handlers.
+		// Same sanitized-header contract as tryAutoCompletePools — see
+		// AutoCompleteErrorHeader/Value in hub.go.
+		if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
+			log.Printf("MaybeAutoCompletePools(%s) after start: %v", id, err)
+			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
+		} else if autoCompleted {
+			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
+			// Reflect the auto-complete in the response body so the caller doesn't
+			// see a stale "pools" status. The persisted file is already updated.
+			comp.Status = state.CompStatusComplete
+		}
+
 		c.JSON(http.StatusOK, comp)
 	})
 
@@ -393,7 +410,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if src.Format != "pools" {
+		if src.Format != state.CompFormatPools {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "source competition must use pools format"})
 			return
 		}
@@ -413,7 +430,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		playoff := state.Competition{
 			Name:           src.Name + " - Playoffs",
-			Format:         "playoffs",
+			Format:         state.CompFormatPlayoffs,
 			Courts:         src.Courts,
 			WithZekkenName: src.WithZekkenName,
 			NumberPrefix:   src.NumberPrefix,

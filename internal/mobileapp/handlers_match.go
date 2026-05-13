@@ -1,12 +1,32 @@
 package mobileapp
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// tryAutoCompletePools runs the auto-complete check after a successful score
+// write. The score itself has already been recorded, so we don't fail the
+// request when the auto-complete check errors; instead we log full details
+// server-side and set AutoCompleteErrorHeader to a generic sentinel so
+// clients can detect the failure (and refresh) without us leaking
+// internal store details. Broadcasts EventCompetitionCompleted when the
+// transition actually happens.
+func tryAutoCompletePools(c *gin.Context, eng *engine.Engine, hub *Hub, compID string) {
+	autoCompleted, err := eng.MaybeAutoCompletePools(compID)
+	if err != nil {
+		log.Printf("MaybeAutoCompletePools(%s): %v", compID, err)
+		c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
+		return
+	}
+	if autoCompleted {
+		hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": compID})
+	}
+}
 
 func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
@@ -22,22 +42,25 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			Error   string `json:"error"`
 		}
 		var errs []scoreError
-		succeeded := 0
+		// Only successfully-recorded results go into the SSE broadcast so
+		// clients never patch with values the engine rejected.
+		var successful []state.MatchResult
 		for i := range results {
 			if err := eng.RecordMatchResult(id, results[i].ID, &results[i]); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 			} else {
-				succeeded++
+				successful = append(successful, results[i])
 			}
 		}
 
-		if succeeded > 0 {
+		if len(successful) > 0 {
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
-				"results":       results,
+				"results":       successful,
 			})
+			tryAutoCompletePools(c, eng, hub, id)
 		}
-		c.JSON(http.StatusOK, gin.H{"succeeded": succeeded, "errors": errs})
+		c.JSON(http.StatusOK, gin.H{"succeeded": len(successful), "errors": errs})
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/quick-score", func(c *gin.Context) {
@@ -100,6 +123,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 		}
 
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+		tryAutoCompletePools(c, eng, hub, id)
 		c.JSON(http.StatusOK, result)
 	})
 
@@ -123,6 +147,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			"matchId":       mid,
 			"result":        result,
 		})
+		tryAutoCompletePools(c, eng, hub, id)
 
 		c.JSON(http.StatusOK, result)
 	})

@@ -539,13 +539,21 @@ func TestViewerHandlers(t *testing.T) {
 }
 
 // TestStartCompetition_BroadcastContract verifies the exact events emitted by
-// POST /competitions/:id/start. Only EventCompetitionStarted is sent; the
-// competition_started handler in app.js already calls load() so a separate
+// POST /competitions/:id/start in the common case (playoffs format, or pools
+// with at least one un-completed match): only EventCompetitionStarted is sent.
+// The competition_started handler in app.js already calls load() so a separate
 // EventTournamentUpdated would cause a redundant second reload per viewer.
+//
+// The start handler ALSO invokes MaybeAutoCompletePools, which for a pools
+// competition that finishes generation with every match already completed (a
+// theoretical zero-match edge case) would additionally emit
+// EventCompetitionCompleted. That branch is covered at the engine layer by
+// TestMaybeAutoCompletePools/transitions_when_there_are_zero_pool_matches.
 func TestStartCompetition_BroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
+	// Format omitted → playoffs path; MaybeAutoCompletePools is a no-op.
 	comp := state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
 	require.NoError(t, store.SaveCompetition(&comp))
 	require.NoError(t, store.SaveParticipants("c1", []helper.Player{{Name: "P1"}, {Name: "P2"}}))
@@ -578,5 +586,5 @@ func TestStartCompetition_BroadcastContract(t *testing.T) {
 	assert.Equal(t, "c1", compData["competitionId"])
 
 	_, extra := receiveEvent(10 * time.Millisecond)
-	assert.False(t, extra, "start must emit exactly 1 broadcast")
+	assert.False(t, extra, "start must emit exactly 1 broadcast for the common case")
 }

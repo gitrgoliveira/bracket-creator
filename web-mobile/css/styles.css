@@ -80,6 +80,16 @@ a:hover {
 }
 
 /* ---------- Top bar (admin) ---------- */
+/* The .topbar-stack wrapper is sticky; topbar + live-strip sit inside as
+   normal flow, so the topbar can size to its content (font scaling / zoom
+   never clip the brand block, and the live-strip stays glued underneath
+   without a hardcoded offset). */
+.topbar-stack {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
 .topbar {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -87,15 +97,21 @@ a:hover {
   align-items: center;
   gap: 14px;
   padding: 10px 20px;
-  position: sticky;
-  top: 0;
-  z-index: 30;
 }
 
 .topbar__brand {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0; /* allow truncation when the title block sits next to a wide spacer */
+  overflow: hidden;
+}
+
+.topbar__title,
+.topbar__sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .topbar__logo {
@@ -168,6 +184,68 @@ a:hover {
   border-color: var(--ink-4);
 }
 
+/* ---------- Live status strip (under topbar) ---------- */
+/* Stickiness is provided by the parent .topbar-stack so the strip never
+   needs to know the topbar's height — it sits naturally below in flow. */
+.live-strip {
+  background: var(--red-soft);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.live-strip__lbl {
+  font-weight: 700;
+  color: var(--red);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-strip__chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.live-strip__chip {
+  background: var(--surface);
+  border: 1px solid var(--red);
+  border-radius: 999px;
+  padding: 3px 10px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.live-strip__chip:hover {
+  background: var(--red);
+  color: white;
+}
+
+.live-strip__court {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.live-strip__names {
+  font-size: 12px;
+}
+
+.live-strip__more {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
 /* ---------- Page container ---------- */
 .page {
   padding: 24px 32px;
@@ -178,6 +256,15 @@ a:hover {
 
 .page--wide {
   max-width: none;
+}
+
+.page-head__eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 
 .page-head {

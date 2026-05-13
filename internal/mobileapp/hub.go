@@ -15,10 +15,21 @@ import (
 type EventType string
 
 const (
-	EventMatchUpdated       EventType = "match_updated"
-	EventCompetitionStarted EventType = "competition_started"
-	EventTournamentUpdated  EventType = "tournament_updated"
-	EventScheduleUpdated    EventType = "schedule_updated"
+	EventMatchUpdated         EventType = "match_updated"
+	EventCompetitionStarted   EventType = "competition_started"
+	EventCompetitionCompleted EventType = "competition_completed"
+	EventTournamentUpdated    EventType = "tournament_updated"
+	EventScheduleUpdated      EventType = "schedule_updated"
+)
+
+// AutoCompleteErrorHeader is set on score/start responses when the
+// post-write MaybeAutoCompletePools check itself errored. The value is a
+// deliberately generic sentinel (AutoCompleteErrorValue) so we don't leak
+// filesystem paths or other internal store details to clients — full error
+// detail is logged server-side.
+const (
+	AutoCompleteErrorHeader = "X-Auto-Complete-Error"
+	AutoCompleteErrorValue  = "failed"
 )
 
 // SSEEvent represents the payload sent to clients

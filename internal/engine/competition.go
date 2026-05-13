@@ -4,6 +4,47 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// MaybeAutoCompletePools transitions a pools-format competition from
+// CompStatusPools to CompStatusComplete when every pool match has been
+// recorded as completed. It is a no-op for any other format or status,
+// or when at least one pool match is still scheduled/running.
+//
+// Returns true if the transition was performed. Callers should broadcast
+// EventCompetitionCompleted when true.
+func (e *Engine) MaybeAutoCompletePools(compID string) (bool, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return false, err
+	}
+	if comp == nil || comp.Format != state.CompFormatPools || comp.Status != state.CompStatusPools {
+		return false, nil
+	}
+
+	matches, err := e.store.LoadPoolMatches(compID)
+	if err != nil {
+		return false, err
+	}
+	// A pools competition with zero matches has nothing left to score, so we
+	// treat it as complete rather than leaving it stuck in CompStatusPools.
+	// This is a corner case (single-participant pool, or any started pools
+	// comp that legitimately generated zero matches), not the hot path.
+	for _, m := range matches {
+		if m.Status != state.MatchStatusCompleted {
+			return false, nil
+		}
+	}
+
+	comp.Status = state.CompStatusComplete
+	// Use SaveCompetitionChanged so that concurrent score submissions that both
+	// see all matches completed only broadcast once: the second writer finds the
+	// file bytes unchanged and gets changed=false, returning false to its caller.
+	changed, err := e.store.SaveCompetitionChanged(comp)
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
 func (e *Engine) StartCompetition(id string) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -51,7 +92,7 @@ func (e *Engine) StartCompetition(id string) error {
 	}
 
 	// Generate Pools or Bracket
-	if comp.Format == "pools" {
+	if comp.Format == state.CompFormatPools {
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}

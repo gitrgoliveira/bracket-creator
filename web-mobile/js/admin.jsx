@@ -3,6 +3,28 @@
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
+const REFRESHABLE_EVENTS = new Set([
+  "competition_started",
+  "competition_completed",
+  "match_updated",
+  "tournament_updated",
+]);
+
+// Maximum live-match chips rendered in the topbar status strip before the
+// "+N more" overflow indicator kicks in.
+const LIVE_STRIP_MAX_CHIPS = 6;
+
+// sideA/sideB can be a string (raw backend shape), an object with .name
+// (normalizeMatch output, which substitutes {id:"",name:""} for missing sides),
+// or null. Return the participant's display name, or "" when no real side is
+// present. Used by compMatchStats and AdminTopbar's live-strip filter, so the
+// two stay in lockstep about what "has a real side" means.
+function sideName(side) {
+  if (!side) return "";
+  if (typeof side === "string") return side;
+  return side.name || "";
+}
+
 // Returns { total, done, live } match counts for a single competition object.
 // Accepts either:
 //   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
@@ -11,18 +33,11 @@ const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: u
 // endpoints when match counts are needed.
 function compMatchStats(c) {
   let total = 0, done = 0, live = 0;
-  // sideA/sideB can be: a string (raw backend shape), an object {id,name}
-  // (normalizeMatch shape, which substitutes {id:"",name:""} for missing
-  // sides), or null. Truthy-checking the side itself is not enough — we have
-  // to look at the actual participant name so byes and unresolved bracket
-  // slots don't get counted toward total/done/live.
-  const hasName = (side) => {
-    if (!side) return false;
-    if (typeof side === "string") return side.length > 0;
-    return !!(side.name && side.name.length > 0);
-  };
+  // Truthy-checking the side itself isn't enough — normalizeMatch substitutes
+  // {id:"",name:""} for missing sides, which is truthy. sideName() returns
+  // "" for those, so byes and unresolved bracket slots stay uncounted.
   const count = (m) => {
-    if (!m || !hasName(m.sideA) || !hasName(m.sideB)) return;
+    if (!m || !sideName(m.sideA) || !sideName(m.sideB)) return;
     total++;
     if (m.status === "completed") done++;
     if (m.status === "running") live++;
@@ -143,7 +158,21 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const [adminCompData, setAdminCompData] = useStateA(null);
   const [adminLoading, setAdminLoading] = useStateA(false);
 
+  // Expose a navigation helper used by AdminTopbar's live-strip chips,
+  // avoiding prop-drilling through every screen. Set once per mount.
+  useEffectA(() => {
+    window.__adminNavigateToScore = (compId) => setView({ kind: "competition", id: compId, section: "scores" });
+    return () => { delete window.__adminNavigateToScore; };
+  }, [setView]);
+
   const t = tournament;
+  // Refs so the SSE subscription can read the latest tournament/onUpdate
+  // without being torn down every time the tournament object is replaced.
+  const tRef = useRefA(t);
+  const onUpdateRef = useRefA(onUpdate);
+  // Refs are read by the SSE subscription (which has narrower deps to avoid
+  // teardown); refresh them only when the underlying props change.
+  useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
 
   const updateCompetition = async (cid, next) => {
     try {
@@ -289,28 +318,106 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   useEffectA(() => {
     if (view.kind === "competition") {
+      // `cancelled` is the master gate: cleanup flips it true, and every
+      // async resolution paths through it before calling state setters.
+      // This is what makes navigation-during-in-flight-fetch safe.
+      let cancelled = false;
+      const compId = view.id;
+      const timers = new Set();
+      const schedule = (fn) => {
+        const id = setTimeout(() => {
+          timers.delete(id);
+          if (cancelled) return;
+          fn(compId);
+        }, Math.random() * 500);
+        timers.add(id);
+      };
+      // Coalesce tournament-wide refreshes across all events so the topbar's
+      // live-strip stays current without firing one fetchCompetitions() per
+      // match update.
+      let pendingTournament = null;
+      let tournamentFetching = false;
+      // Tracks whether any event in the coalesced burst needs the tournament
+      // config refetched (name/date/venue/courts). Match-level events only
+      // need the competitions list; tournament_updated needs both.
+      let pendingNeedsTournamentFetch = false;
+      const scheduleTournamentRefresh = (needsTournament) => {
+        if (needsTournament) pendingNeedsTournamentFetch = true;
+        if (pendingTournament || tournamentFetching) return;
+        const jitter = 500 + Math.random() * 1000;
+        pendingTournament = setTimeout(() => {
+          pendingTournament = null;
+          if (cancelled) return;
+          // tournamentFetching keeps the coalescing gate closed until the
+          // fetch settles, so an event arriving during the in-flight window
+          // can't kick off a second concurrent fetch that might resolve
+          // out-of-order and clobber fresher data.
+          tournamentFetching = true;
+          const fetchTournament = pendingNeedsTournamentFetch;
+          pendingNeedsTournamentFetch = false;
+          const work = fetchTournament
+            ? Promise.all([window.API.fetchTournament(), window.API.fetchCompetitions()])
+                .then(([tourney, comps]) => ({ tourney, comps }))
+            : window.API.fetchCompetitions().then(comps => ({ tourney: null, comps }));
+          work
+            .then(({ tourney, comps }) => {
+              if (cancelled) return;
+              const base = tourney || tRef.current;
+              onUpdateRef.current({ ...base, competitions: comps });
+            })
+            .catch(err => console.error("Failed to refresh tournament/competitions", err))
+            .finally(() => { tournamentFetching = false; });
+        }, jitter);
+      };
       const unsub = window.API.subscribeToEvents((event) => {
-        const jitter = Math.random() * 500;
-        if (event.type === "competition_started" || event.type === "match_updated" || event.type === "tournament_updated") {
+        if (cancelled) return;
+        if (REFRESHABLE_EVENTS.has(event.type)) {
           // tournament_updated carries null data (tournament-wide change) — always
-          // relevant.  match_updated / competition_started carry competitionId —
-          // skip if they belong to a different competition.
+          // relevant.  match_updated / competition_started / competition_completed
+          // carry competitionId — skip if they belong to a different competition.
           const relevant = event.type === "tournament_updated"
             || !event.data?.competitionId
-            || event.data.competitionId === view.id;
+            || event.data.competitionId === compId;
           if (relevant) {
             // Apply partial update immediately for responsive UI
             if (event.type === "match_updated") {
               setAdminCompData(prev => patchCompetitionData(prev, event));
             }
             // Still trigger full refresh (jittered) to reconcile standings/propagation
-            setTimeout(() => window.API.fetchCompetitionDetails(view.id).then(setAdminCompData), jitter);
+            schedule((targetId) => {
+              window.API.fetchCompetitionDetails(targetId)
+                .then(data => {
+                  // Cancelled flag is the primary navigation guard. The id
+                  // check is belt-and-braces in case a fetch comes back with
+                  // unexpected data shape.
+                  if (cancelled || data?.config?.id !== targetId) return;
+                  setAdminCompData(data);
+                })
+                .catch(err => console.error("Failed to refresh competition details", err));
+            });
+          }
+          // Any of these may change the topbar live-strip (matches becoming
+          // live/done in *other* competitions, a comp starting, a dependent
+          // playoff unblocking, …). Coalesced so a burst is one fetch.
+          // tournament_updated also needs the tournament config itself.
+          if (event.type === "match_updated"
+              || event.type === "competition_started"
+              || event.type === "competition_completed") {
+            scheduleTournamentRefresh(false);
+          } else if (event.type === "tournament_updated") {
+            scheduleTournamentRefresh(true);
           }
         }
       });
-      return unsub;
+      return () => {
+        cancelled = true;
+        timers.forEach(clearTimeout);
+        timers.clear();
+        if (pendingTournament) clearTimeout(pendingTournament);
+        unsub();
+      };
     }
-  }, [view.id, view.kind]);
+  }, [view.id, view.kind]); // t and onUpdate accessed via refs to avoid churn
 
   if (view.kind === "dashboard") {
     return <AdminDashboard
@@ -429,18 +536,67 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 }
 
 function AdminTopbar({ onLogout, onViewerMode, tournament }) {
+  // Render running matches as chips below the topbar so admins always
+  // know what's live, regardless of which screen they're on. Clicking
+  // a chip jumps to that competition's score editor via the global
+  // navigator helper set up by AdminApp. sideName (hoisted to module
+  // scope) handles the three possible side shapes; chips with no real
+  // name on either side are filtered out.
+  const liveMatches = useMemoA(() => {
+    if (!tournament || !window.compMatches) return [];
+    return (tournament.competitions || [])
+      .flatMap(cc => window.compMatches(cc))
+      .filter(m => m.status === "running" && sideName(m.sideA) && sideName(m.sideB));
+  }, [tournament]);
+  const onOpenScore = (m) => {
+    if (typeof window.__adminNavigateToScore === "function") {
+      window.__adminNavigateToScore(m.compId);
+    }
+  };
+
   return (
-    <div className="topbar">
-      <div className="topbar__brand">
-        <div className="topbar__logo">BC</div>
-        <div>
-          <div className="topbar__title">{tournament?.name || "Bracket Creator"}</div>
-          <div className="topbar__sub">Admin console</div>
+    // Wrap topbar + live-strip in a single sticky container so they scroll
+    // together. This lets the topbar size naturally (min-height instead of a
+    // fixed height) — robust to font scaling / browser zoom — while still
+    // keeping the live-strip visually anchored beneath it.
+    <div className="topbar-stack">
+      <div className="topbar">
+        <div className="topbar__brand">
+          <div className="topbar__logo">BC</div>
+          <div>
+            <div className="topbar__title">{tournament?.name || "Bracket Creator"}</div>
+            <div className="topbar__sub">Admin console</div>
+          </div>
         </div>
+        <div className="topbar__spacer"></div>
+        <button className="viewer-toggle" onClick={onViewerMode}>👁 Public viewer</button>
+        <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
-      <div className="topbar__spacer"></div>
-      <button className="viewer-toggle" onClick={onViewerMode}>👁 Public viewer</button>
-      <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
+      {liveMatches.length > 0 && (
+        <div className="live-strip" role="region" aria-label={`${pluralize(liveMatches.length, "match", "matches")} live`}>
+          <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
+          <div className="live-strip__chips">
+            {liveMatches.slice(0, LIVE_STRIP_MAX_CHIPS).map(m => {
+              const a = sideName(m.sideA);
+              const b = sideName(m.sideB);
+              const courtLabel = m.court ? `Shiaijo ${m.court}` : "Unassigned";
+              const courtPhrase = m.court ? `on Shiaijo ${m.court}` : "with no court assigned";
+              return (
+                <button
+                  key={`${m.compId}:${m.id}`}
+                  className="live-strip__chip"
+                  onClick={() => onOpenScore && onOpenScore(m)}
+                  aria-label={`Open score editor for ${b} versus ${a} ${courtPhrase}`}
+                >
+                  <span className="live-strip__court">{courtLabel}</span>
+                  <span className="live-strip__names">{b} – {a}</span>
+                </button>
+              );
+            })}
+            {liveMatches.length > LIVE_STRIP_MAX_CHIPS && <span className="live-strip__more">+{liveMatches.length - LIVE_STRIP_MAX_CHIPS} more</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -459,21 +615,38 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
   const comps = t.competitions || [];
 
   useEffectA(() => {
+    // Coalesce bursts of events into a single dashboard refresh. On a busy
+    // event the SSE stream can fire dozens of match_updated per minute, and
+    // each one previously triggered a full tournament+competitions fetch.
+    let pending = null;
+    let fetching = false;
+    const scheduleRefresh = () => {
+      if (pending || fetching) return;
+      const jitter = 500 + Math.random() * 1000; // 500-1500ms window
+      pending = setTimeout(() => {
+        pending = null;
+        // Keep the gate closed for the duration of the fetch so a second
+        // burst can't fire a concurrent request that might resolve
+        // out-of-order and clobber fresher data.
+        fetching = true;
+        Promise.all([
+          window.API.fetchTournament(),
+          window.API.fetchCompetitions()
+        ]).then(([tourney, competitions]) => {
+          onUpdate({ ...tourney, competitions });
+        }).catch(err => console.error("Dashboard refresh failed", err))
+          .finally(() => { fetching = false; });
+      }, jitter);
+    };
     const unsub = window.API.subscribeToEvents((event) => {
-      const jitter = Math.random() * 500;
-      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_deleted") {
-        // Refresh everything on the dashboard
-        setTimeout(() => {
-          Promise.all([
-            window.API.fetchTournament(),
-            window.API.fetchCompetitions()
-          ]).then(([tourney, competitions]) => {
-            onUpdate({ ...tourney, competitions });
-          }).catch(err => console.error("Dashboard refresh failed", err));
-        }, jitter);
+      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted" || event.type === "match_updated") {
+        scheduleRefresh();
       }
     });
-    return unsub;
+    return () => {
+      if (pending) clearTimeout(pending);
+      unsub();
+    };
   }, []);
 
   const { totalMatches, doneMatches, liveMatches, totalParticipants } = useMemoA(() => {
@@ -924,6 +1097,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         ].filter(Boolean)} />
         <div className="page-head">
           <div>
+            <div className="page-head__eyebrow">{t.name} ›</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{c.name}</h1>
               <StatusBadge status={c.status} />
@@ -2532,7 +2706,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
                       <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "20px 8px", textAlign: "center" }}>No matches assigned to this shiaijo</div>
                     ) : list.map((m) => (
                       <AdminTWMatch
-                        key={m.compId + m.id}
+                        key={`${m.compId}:${m.id}`}
                         m={m}
                         highlight={matchHasFilter(m)}
                         courts={courts}
@@ -2727,7 +2901,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, _e
           const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
           const isCorrection = m.status === "completed" && m.score?.corrected;
           return (
-            <div key={m.compId + m.id} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
+            <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
@@ -2763,7 +2937,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, _e
       </div>
 
       {openMatch && (() => {
-        const openIdx = filtered.findIndex(m => m.compId + m.id === openMatch.compId + openMatch.id);
+        const openIdx = filtered.findIndex(m => `${m.compId}:${m.id}` === `${openMatch.compId}:${openMatch.id}`);
         const prevMatch = openIdx > 0 ? filtered[openIdx - 1] : null;
         const nextMatch = openIdx < filtered.length - 1 ? filtered[openIdx + 1] : null;
         return (

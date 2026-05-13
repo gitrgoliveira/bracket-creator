@@ -295,18 +295,30 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       }
 
       // ID generation: existing players keep their stable id; new players
-      // get the next free `${c.id}-pN` slot. Tracking used ids prevents a
-      // new player's index-based id from colliding with an existing
-      // player's id when the visible row order differs from the original
-      // assignment order (e.g. after drag-reordering seeds).
+      // get the next free `${c.id}-pN` slot. Two-pass approach so the
+      // visible row order can't cause collisions:
+      //   Pass 1: pre-populate `usedIds` with the ids of every existing
+      //           player whose name is still in the parsed list (i.e.
+      //           rows that will be kept). Without this, a new
+      //           participant appearing BEFORE an existing one would
+      //           be assigned the existing one's slot — and then the
+      //           existing player would later return their own id from
+      //           existingMap, producing duplicate ids in `np`.
+      //   Pass 2: iterate parsed, mint new ids by skipping any
+      //           `${c.id}-pN` already in usedIds.
+      // IDs of *removed* players are intentionally not reserved, so
+      // their slots can be reused for new participants.
       let added = 0, updatedCount = 0;
+      const parsedKeys = new Set(parsed.map(p => p.name.toLowerCase()));
       const usedIds = new Set();
+      (c.players || []).forEach(p => {
+        if (parsedKeys.has(p.name.toLowerCase())) usedIds.add(p.id);
+      });
       let nextSlot = 1;
       const np = parsed.map(({ name, displayName, dojo, danGrade, tag }) => {
         const existing = existingMap.get(name.toLowerCase());
         if (existing) {
           updatedCount++;
-          usedIds.add(existing.id);
           return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null };
         }
         added++;

@@ -263,23 +263,23 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   };
 
   useEffectA(() => {
-    if (view.kind === "competition") {
-      // Clear stale data from the previously-viewed competition so the
-      // header/modal don't briefly render with another comp's identity.
-      setAdminCompData(prev => (prev && prev.config && prev.config.id === view.id) ? prev : null);
-      setAdminLoading(true);
-      window.API.fetchCompetitionDetails(view.id)
-        .then(data => {
-          setAdminCompData(data);
-          setAdminLoading(false);
-        })
-        .catch(err => {
-          console.error(err);
-          setAdminLoading(false);
-        });
-    } else {
+    if (view.kind !== "competition") {
       setAdminCompData(null);
+      return;
     }
+    let cancelled = false;
+    // Clear stale data from the previously-viewed competition so the
+    // header/modal don't briefly render with another comp's identity.
+    setAdminCompData(prev => (prev && prev.config && prev.config.id === view.id) ? prev : null);
+    setAdminLoading(true);
+    window.API.fetchCompetitionDetails(view.id)
+      .then(data => {
+        if (!cancelled) { setAdminCompData(data); setAdminLoading(false); }
+      })
+      .catch(err => {
+        if (!cancelled) { console.error(err); setAdminLoading(false); }
+      });
+    return () => { cancelled = true; };
   }, [view.id, view.kind]);
 
   useEffectA(() => {

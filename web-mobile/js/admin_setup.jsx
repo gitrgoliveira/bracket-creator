@@ -205,11 +205,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           </div>
 
           <div className="field">
-            <label className="field__label">
-              <label className="checkbox" style={{ display: "inline-flex" }}>
-                <input type="checkbox" checked={useSample} onChange={(e) => setUseSample(e.target.checked)} />
-                Pre-fill with sample roster
-              </label>
+            <label className="checkbox field__label" style={{ display: "inline-flex" }}>
+              <input type="checkbox" checked={useSample} onChange={(e) => setUseSample(e.target.checked)} />
+              Pre-fill with sample roster
             </label>
             {useSample && (
               <div className="radio-group" style={{ marginTop: 8 }}>

@@ -108,17 +108,18 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                 <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
                   <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id.split('-').pop()}</div>
                   <div className="sched-row__players">
+                    {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
                     <div className="sched-row__side" style={{ textAlign: "right" }}>
-                      <div className="name" style={{ fontSize: 13 }}>{m.sideA?.name || m.sideA}</div>
+                      <div className="name" style={{ fontSize: 13 }}>{m.sideB?.name || m.sideB}</div>
                     </div>
                     <div className="sched-row__vs">vs</div>
                     <div className="sched-row__side">
-                      <div className="name" style={{ fontSize: 13 }}>{m.sideB?.name || m.sideB}</div>
+                      <div className="name" style={{ fontSize: 13 }}>{m.sideA?.name || m.sideA}</div>
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
-                      {m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : m.status === "running" ? "● LIVE" : "—"}
+                      {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision) : m.status === "running" ? "● LIVE" : "—"}
                     </div>
                     <button className="btn btn--sm" onClick={() => onEditScore(c.id, m.id, null, m)}>
                       {m.status === "completed" ? "Edit" : "Score"}
@@ -221,13 +222,14 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                     {pool.matches.map(m => (
                       <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center", padding: "2px 0" }}>
                         <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id.split('-').pop()}</div>
+                        {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
                         <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideA?.name || m.sideA}</span>
-                          <span style={{ color: "var(--ink-4)", fontSize: 10 }}>vs</span>
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideB?.name || m.sideB}</span>
+                          <span style={{ color: "var(--ink-4)", fontSize: 10 }}>vs</span>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideA?.name || m.sideA}</span>
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-                          {m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : m.status === "running" ? "● LIVE" : "—"}
+                          {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision) : m.status === "running" ? "● LIVE" : "—"}
                           <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); onEditScore(c.id, m.id, null, m); }}>Score</button>
                         </div>
                       </div>

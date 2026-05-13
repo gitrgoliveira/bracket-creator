@@ -49,6 +49,7 @@ specs/*
 .specify
 .agent*
 .playwright-mcp
+.claude/skills/speckit-*
 
 # Beads / Dolt files (added by bd init)
 .dolt/

@@ -170,9 +170,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // without being torn down every time the tournament object is replaced.
   const tRef = useRefA(t);
   const onUpdateRef = useRefA(onUpdate);
-  // Intentionally no deps array — this effect runs after every render to keep
-  // the refs in sync with the latest props for the SSE handler to read.
-  useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; });
+  // Refs are read by the SSE subscription (which has narrower deps to avoid
+  // teardown); refresh them only when the underlying props change.
+  useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
 
   const updateCompetition = async (cid, next) => {
     try {

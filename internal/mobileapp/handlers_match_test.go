@@ -268,21 +268,6 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	ch := hub.Subscribe()
 	defer hub.Unsubscribe(ch)
 
-	drainFor := func(d time.Duration) []SSEEvent {
-		var events []SSEEvent
-		deadline := time.After(d)
-		for {
-			select {
-			case msg := <-ch:
-				var e SSEEvent
-				require.NoError(t, json.Unmarshal([]byte(msg), &e))
-				events = append(events, e)
-			case <-deadline:
-				return events
-			}
-		}
-	}
-
 	// Omit sideA/sideB from the patch so the engine preserves the stored
 	// participants. Hardcoding "P1"/"P2" for every match would mutate
 	// PoolA-2 (which has P1 vs P3) and mask side-preservation bugs.
@@ -301,26 +286,15 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 
 	// Partial completion — no EventCompetitionCompleted
 	scoreMatch("PoolA-1", "P1")
-	partialEvents := drainFor(30 * time.Millisecond)
-	for _, e := range partialEvents {
-		assert.NotEqual(t, EventCompetitionCompleted, e.Type,
-			"partial completion must not broadcast competition_completed")
-	}
+	partial := drainHubEvents(t, ch, 30*time.Millisecond)
+	assert.Equal(t, 0, countCompletedEvents(t, partial, "pools1"),
+		"partial completion must not broadcast competition_completed")
 
 	// Final match — EventCompetitionCompleted must be emitted exactly once
 	scoreMatch("PoolA-2", "P1")
-	finalEvents := drainFor(100 * time.Millisecond)
-
-	completedCount := 0
-	for _, e := range finalEvents {
-		if e.Type == EventCompetitionCompleted {
-			completedCount++
-			compData, isMap := e.Data.(map[string]any)
-			require.True(t, isMap, "competition_completed data must be a map")
-			assert.Equal(t, "pools1", compData["competitionId"])
-		}
-	}
-	assert.Equal(t, 1, completedCount, "final match must emit competition_completed exactly once")
+	final := drainHubEvents(t, ch, 100*time.Millisecond)
+	assert.Equal(t, 1, countCompletedEvents(t, final, "pools1"),
+		"final match must emit competition_completed exactly once")
 }
 
 // drainHubEvents pulls every queued event off the given hub-subscriber

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { arraysEqual } from '../data.jsx';
 
 // We re-implement pluralize here to verify the logic we added to admin.jsx
 function pluralize(count, singular, plural) {
@@ -102,10 +103,8 @@ describe('ScoreEditorModal draw toggle', () => {
 });
 
 // --- Dirty-state and handleDismiss logic ---
-function arraysEqual(a, b) {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
-}
-
+// isDirty uses the real arraysEqual from data.jsx (imported above), so the
+// test fails if the production implementation changes.
 function isDirty(state, initial) {
   return (
     !arraysEqual(state.aPts, initial.aPts) ||

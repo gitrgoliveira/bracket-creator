@@ -2801,10 +2801,12 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
   const initialAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const initialBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
 
+  const initialAFouls = m.hansokuA || m.score?.fouls?.a || 0;
+  const initialBFouls = m.hansokuB || m.score?.fouls?.b || 0;
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
-  const [aFouls, setAFouls] = useStateA(m.hansokuA || m.score?.fouls?.a || 0);
-  const [bFouls, setBFouls] = useStateA(m.hansokuB || m.score?.fouls?.b || 0);
+  const [aFouls, setAFouls] = useStateA(initialAFouls);
+  const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [submitting, setSubmitting] = useStateA(false);
 
   // Hansoku → ippon awarded to opponent on every 2nd foul
@@ -2860,12 +2862,9 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
 
   const canFinish = isDrawToggled || aTotal > 0 || bTotal > 0;
 
-  const initialAFouls = m.hansokuA || m.score?.fouls?.a || 0;
-  const initialBFouls = m.hansokuB || m.score?.fouls?.b || 0;
-  const arraysEqual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
   const isDirty =
-    !arraysEqual(aPts, initialAPts) ||
-    !arraysEqual(bPts, initialBPts) ||
+    !window.arraysEqual(aPts, initialAPts) ||
+    !window.arraysEqual(bPts, initialBPts) ||
     aFouls !== initialAFouls ||
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled;
@@ -2891,7 +2890,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
             <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--live" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● LIVE" : "PRE-MATCH"}
             </div>
-            <button className="btn btn--ghost btn--sm" onClick={handleDismiss} style={{ padding: "2px 8px" }}>✕ Close</button>
+            <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>
           </div>
         </div>
 

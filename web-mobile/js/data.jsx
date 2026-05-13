@@ -316,13 +316,19 @@ function parseParticipantLines(lines, withZekken) {
   });
 }
 
+// Pure utility — used by ScoreEditorModal for isDirty checks; exported so tests
+// can import the real implementation rather than re-implementing it.
+function arraysEqual(a, b) {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
   buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes,
   buildPools, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt
+  assignCourt, arraysEqual
 };
 
 if (typeof window !== 'undefined') {
@@ -338,4 +344,5 @@ if (typeof window !== 'undefined') {
   window.poolWinners = poolWinners;
   window.parseParticipantLines = parseParticipantLines;
   window.addMinutes = addMinutes;
+  window.arraysEqual = arraysEqual;
 }

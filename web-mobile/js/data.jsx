@@ -329,7 +329,7 @@ export {
   buildPools, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt
+  assignCourt, mergeMatchPatch
 };
 
 if (typeof window !== 'undefined') {

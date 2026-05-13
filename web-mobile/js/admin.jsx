@@ -2862,28 +2862,16 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
   // Keyboard shortcuts:
   //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
   //   m/k/d/t/h        → award point to SHIRO (white, sideB)
-  //   x                → toggle hikiwake (draw)
-  //   ←/→              → previous / next match
+  //   x / X            → toggle hikiwake (draw)
+  //   ←/→              → previous / next match (skipped inside text-entry elements)
   //   Enter            → finish (or finish + start next when available)
-  //   Esc              → close the modal
-  // Skipped when focus is on any interactive element (inputs, buttons, links)
-  // so native keyboard activation keeps working and typing doesn't trigger scoring.
+  //   Esc              → close the modal (always fires, even from buttons/links)
+  // Scoring shortcuts (Enter/M/K/D/T/H/X) are skipped when any interactive
+  // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
   kbRef.current = { submitting, canFinish, isDrawToggled, onClose, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
 
   useEffectA(() => {
-    // text-entry: blocks navigation keys (← →) to avoid clobbering cursor movement
-    const isTextEntry = (el) => {
-      if (!el) return false;
-      const tag = (el.tagName || "").toLowerCase();
-      return tag === "input" || tag === "textarea" || tag === "select" || !!el.isContentEditable;
-    };
-    // interactive: blocks scoring shortcuts (Enter/M/K/D/T/H/X) when focus is on controls
-    const isInteractiveTarget = (el) => {
-      if (!el) return false;
-      const tag = (el.tagName || "").toLowerCase();
-      return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
-    };
     const onKeyDown = (ev) => {
       const s = kbRef.current;
       if (s.submitting) return;
@@ -2893,13 +2881,13 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
       if (ev.key === "Escape") { ev.preventDefault(); s.onClose(); return; }
 
       // Navigation blocked only inside text-entry elements (preserves cursor movement)
-      if (!isTextEntry(ev.target)) {
+      if (!window.isTextEntry(ev.target)) {
         if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
         if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
       }
 
       // Scoring shortcuts blocked when any interactive element has focus
-      if (isInteractiveTarget(ev.target)) return;
+      if (window.isInteractiveTarget(ev.target)) return;
 
       if (ev.key === "Enter" && s.canFinish) {
         ev.preventDefault();
@@ -2915,9 +2903,9 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
         ev.preventDefault();
         // Pressing a point key exits draw mode first
         if (s.isDrawToggled) setIsDrawToggled(false);
-        // Capital letter (Shift held) → AKA; lowercase → SHIRO.
-        const isUpper = k === upper && k !== upper.toLowerCase();
-        s.addPt(isUpper ? "a" : "b", upper);
+        // Shift held → AKA (red); no Shift → SHIRO (white). ev.shiftKey is used
+        // instead of uppercase detection to avoid Caps Lock misrouting.
+        s.addPt(ev.shiftKey ? "a" : "b", upper);
         return;
       }
       if (k === "x" || k === "X") {

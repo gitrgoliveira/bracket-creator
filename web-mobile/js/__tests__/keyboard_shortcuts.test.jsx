@@ -1,25 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-
-// Pure logic extracted from the ScoreEditorModal keyboard handler for unit testing.
-
-function isTextEntry(el) {
-  if (!el) return false;
-  const tag = (el.tagName || "").toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select" || !!el.isContentEditable;
-}
-
-function isInteractiveTarget(el) {
-  if (!el) return false;
-  const tag = (el.tagName || "").toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
-}
-
-// Mirrors admin.jsx: lowercase → SHIRO (b), uppercase → AKA (a)
-function sideForKey(k) {
-  const upper = k.toUpperCase();
-  const isUpper = k === upper && k !== upper.toLowerCase();
-  return isUpper ? "a" : "b";
-}
+import { describe, it, expect } from 'vitest';
+import { isTextEntry, isInteractiveTarget } from '../ui.jsx';
 
 // Mirrors the scoring-key filter from admin.jsx
 function isScoringKey(k) {
@@ -70,24 +50,6 @@ describe('isInteractiveTarget', () => {
   });
 });
 
-describe('key-to-side mapping', () => {
-  it('lowercase keys map to SHIRO (b)', () => {
-    expect(sideForKey("m")).toBe("b");
-    expect(sideForKey("k")).toBe("b");
-    expect(sideForKey("d")).toBe("b");
-    expect(sideForKey("t")).toBe("b");
-    expect(sideForKey("h")).toBe("b");
-  });
-
-  it('uppercase keys map to AKA (a)', () => {
-    expect(sideForKey("M")).toBe("a");
-    expect(sideForKey("K")).toBe("a");
-    expect(sideForKey("D")).toBe("a");
-    expect(sideForKey("T")).toBe("a");
-    expect(sideForKey("H")).toBe("a");
-  });
-});
-
 describe('scoring key filter', () => {
   it('accepts MKDTH (case-insensitive)', () => {
     for (const k of ["m", "k", "d", "t", "h", "M", "K", "D", "T", "H"]) {
@@ -109,7 +71,8 @@ describe('scoring key filter', () => {
 });
 
 describe('keyboard shortcut routing', () => {
-  // Simulates the keyboard handler decision tree
+  // Simulates the keyboard handler decision tree using the real isTextEntry /
+  // isInteractiveTarget implementations imported from ui.jsx.
   function handleKey(ev, state) {
     const { submitting, isDrawToggled, canFinish, hasPrev, hasNext } = state;
     if (submitting) return "noop/submitting";
@@ -130,7 +93,8 @@ describe('keyboard shortcut routing', () => {
     const upper = k.toUpperCase();
     if ("MKDTH".includes(upper) && k.length === 1) {
       const isDrawClear = isDrawToggled;
-      const side = sideForKey(k);
+      // ev.shiftKey determines side — matches admin.jsx production logic
+      const side = ev.shiftKey ? "a" : "b";
       return `action/pt/${side}${isDrawClear ? "/cleardraw" : ""}`;
     }
     if (k === "x" || k === "X") {
@@ -140,64 +104,67 @@ describe('keyboard shortcut routing', () => {
   }
 
   const base = { submitting: false, isDrawToggled: false, canFinish: true, hasPrev: true, hasNext: true };
+  const body = { tagName: "DIV" };
+  const btn = { tagName: "BUTTON" };
+  const inp = { tagName: "INPUT" };
 
   it('Escape closes from body', () => {
-    expect(handleKey({ key: "Escape", target: { tagName: "DIV" } }, base)).toBe("action/close");
+    expect(handleKey({ key: "Escape", target: body }, base)).toBe("action/close");
   });
 
   it('Escape closes even from button', () => {
-    expect(handleKey({ key: "Escape", target: { tagName: "BUTTON" } }, base)).toBe("action/close");
+    expect(handleKey({ key: "Escape", target: btn }, base)).toBe("action/close");
   });
 
   it('Escape closes even from input', () => {
-    expect(handleKey({ key: "Escape", target: { tagName: "INPUT" } }, base)).toBe("action/close");
+    expect(handleKey({ key: "Escape", target: inp }, base)).toBe("action/close");
   });
 
   it('ArrowLeft navigates when not in text-entry', () => {
-    expect(handleKey({ key: "ArrowLeft", target: { tagName: "DIV" } }, base)).toBe("action/prev");
+    expect(handleKey({ key: "ArrowLeft", target: body }, base)).toBe("action/prev");
   });
 
   it('ArrowLeft blocked inside input (cursor movement)', () => {
-    expect(handleKey({ key: "ArrowLeft", target: { tagName: "INPUT" } }, base)).toBe("noop/interactive");
+    expect(handleKey({ key: "ArrowLeft", target: inp }, base)).toBe("noop/interactive");
   });
 
   it('ArrowLeft allowed from button (not text-entry)', () => {
-    expect(handleKey({ key: "ArrowLeft", target: { tagName: "BUTTON" } }, base)).toBe("action/prev");
+    expect(handleKey({ key: "ArrowLeft", target: btn }, base)).toBe("action/prev");
   });
 
   it('scoring key M blocked from button', () => {
-    expect(handleKey({ key: "m", target: { tagName: "BUTTON" } }, base)).toBe("noop/interactive");
+    expect(handleKey({ key: "m", shiftKey: false, target: btn }, base)).toBe("noop/interactive");
   });
 
-  it('lowercase m adds point to SHIRO (b)', () => {
-    expect(handleKey({ key: "m", target: { tagName: "DIV" } }, base)).toBe("action/pt/b");
+  it('lowercase m (no Shift) awards point to SHIRO (b)', () => {
+    expect(handleKey({ key: "m", shiftKey: false, target: body }, base)).toBe("action/pt/b");
   });
 
-  it('uppercase M adds point to AKA (a)', () => {
-    expect(handleKey({ key: "M", target: { tagName: "DIV" } }, base)).toBe("action/pt/a");
+  it('Shift+m awards point to AKA (a)', () => {
+    expect(handleKey({ key: "M", shiftKey: true, target: body }, base)).toBe("action/pt/a");
   });
 
   it('X toggles draw on when no draw', () => {
-    expect(handleKey({ key: "x", target: { tagName: "DIV" } }, base)).toBe("action/draw/on");
+    expect(handleKey({ key: "x", target: body }, base)).toBe("action/draw/on");
   });
 
   it('X toggles draw off when draw is active', () => {
-    expect(handleKey({ key: "x", target: { tagName: "DIV" } }, { ...base, isDrawToggled: true })).toBe("action/draw/off");
+    expect(handleKey({ key: "x", target: body }, { ...base, isDrawToggled: true })).toBe("action/draw/off");
   });
 
   it('scoring key while draw active clears draw and adds point', () => {
-    expect(handleKey({ key: "m", target: { tagName: "DIV" } }, { ...base, isDrawToggled: true })).toBe("action/pt/b/cleardraw");
+    expect(handleKey({ key: "m", shiftKey: false, target: body }, { ...base, isDrawToggled: true })).toBe("action/pt/b/cleardraw");
   });
 
   it('Enter submits when canFinish', () => {
-    expect(handleKey({ key: "Enter", target: { tagName: "DIV" } }, base)).toBe("action/finish");
+    expect(handleKey({ key: "Enter", target: body }, base)).toBe("action/finish");
   });
 
   it('Enter does nothing when canFinish=false', () => {
-    expect(handleKey({ key: "Enter", target: { tagName: "DIV" } }, { ...base, canFinish: false })).toBe("noop/unhandled");
+    expect(handleKey({ key: "Enter", target: body }, { ...base, canFinish: false })).toBe("noop/unhandled");
   });
 
   it('noop when submitting', () => {
-    expect(handleKey({ key: "m", target: { tagName: "DIV" } }, { ...base, submitting: true })).toBe("noop/submitting");
+    expect(handleKey({ key: "m", shiftKey: false, target: body }, { ...base, submitting: true })).toBe("noop/submitting");
   });
 });

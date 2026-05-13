@@ -106,13 +106,34 @@ function useEscapeToClose(onClose) {
   const cbRef = useRef(onClose);
   useEffect(() => { cbRef.current = onClose; }, [onClose]);
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") cbRef.current(); };
+    const onKey = (e) => {
+      if (e.key === "Escape" && typeof cbRef.current === "function") {
+        e.preventDefault();
+        cbRef.current();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose };
+// Returns true when el is a text-entry element (blocks navigation shortcuts
+// to avoid clobbering cursor movement in inputs).
+function isTextEntry(el) {
+  if (!el) return false;
+  const tag = (el.tagName || "").toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || !!el.isContentEditable;
+}
+
+// Returns true when el is any interactive element (blocks scoring shortcuts
+// so native keyboard activation of buttons/links still works).
+function isInteractiveTarget(el) {
+  if (!el) return false;
+  const tag = (el.tagName || "").toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
+}
+
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -121,5 +142,7 @@ if (typeof window !== "undefined") {
   window.StableInput = StableInput;
   window.pluralize = pluralize;
   window.useEscapeToClose = useEscapeToClose;
+  window.isTextEntry = isTextEntry;
+  window.isInteractiveTarget = isInteractiveTarget;
 }
 

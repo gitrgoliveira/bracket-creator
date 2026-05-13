@@ -341,9 +341,24 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       };
     });
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
+    // When transitioning to "running" (▶ Start), teamWinner is typically
+    // null (0–0). Don't emit score.type: "hikiwake" — toBackendMatchResult
+    // maps score.type to decision, which would persist a draw decision on
+    // a live match. Send live: true with no completed-state semantics so
+    // the backend leaves decision empty until the match actually finishes.
+    if (targetStatus === "running") {
+      return {
+        winner: null,
+        status: "running",
+        ipponsA: [],
+        ipponsB: [],
+        score: { type: "ippon", winnerPts: 0, loserPts: 0, fouls: { a: 0, b: 0 }, live: true, corrected: isComplete },
+        subResults,
+      };
+    }
     return {
       winner,
-      status: targetStatus === "running" ? "running" : "completed",
+      status: "completed",
       ipponsA: [],
       ipponsB: [],
       score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete },

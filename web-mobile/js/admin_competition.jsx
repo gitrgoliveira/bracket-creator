@@ -280,7 +280,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
         <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>
       </div>
       {local.kind === "team" && (
-        <div className="field"><label className="field__label">Team size</label><input className="input" type="number" min="1" max="100" value={local.teamSize} onChange={(e) => update("teamSize", +e.target.value)} /></div>
+        <div className="field">
+          <label className="field__label">Team size</label>
+          {/* TeamScoreEditorModal renders positions 1–9 (TEAM_POSITIONS); */}
+          {/* cap here matches AdminCreateCompetition (max="9") so the */}
+          {/* scoring UI and backend stay in sync. */}
+          <input className="input" type="number" min="1" max="9" value={local.teamSize} onChange={(e) => update("teamSize", +e.target.value)} />
+        </div>
       )}
       <div className="field">
         <label className="field__label">Assigned shiaijo (courts)</label>

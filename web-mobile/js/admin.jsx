@@ -2805,7 +2805,6 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
   const [bPts, setBPts] = useStateA(initialBPts);
   const [aFouls, setAFouls] = useStateA(m.hansokuA || m.score?.fouls?.a || 0);
   const [bFouls, setBFouls] = useStateA(m.hansokuB || m.score?.fouls?.b || 0);
-  const [note, setNote] = useStateA("");
   const [submitting, setSubmitting] = useStateA(false);
 
   // Hansoku → ippon awarded to opponent on every 2nd foul
@@ -2830,19 +2829,19 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
       status: "running", winner: null,
       ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"),
       hansokuA: aFouls, hansokuB: bFouls,
-      score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete, note },
+      score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
     };
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete } };
     // ippon
     const aLetters = aPts.filter(x => x !== "•");
     const bLetters = bPts.filter(x => x !== "•");
     const aFinal = [...aLetters, ...Array(aHansokuPts).fill("H")].slice(0, 2);
     const bFinal = [...bLetters, ...Array(bHansokuPts).fill("H")].slice(0, 2);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete } };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete, note } };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete } };
   };
 
   const doSubmit = async (fn) => {
@@ -2869,8 +2868,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
     !arraysEqual(bPts, initialBPts) ||
     aFouls !== initialAFouls ||
     bFouls !== initialBFouls ||
-    isDrawToggled !== initialIsDrawToggled ||
-    note !== "";
+    isDrawToggled !== initialIsDrawToggled;
   const handleDismiss = () => {
     if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
     onClose();
@@ -2921,7 +2919,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
                     {idx === 0 && (
                       <div className="sb-center">
                         {isDrawToggled ? (
-                          <button className="sb-draw-toggle sb-draw-toggle--active" onClick={() => { setIsDrawToggled(false); }} title="Cancel draw">X</button>
+                          <button className="sb-draw-toggle sb-draw-toggle--active" onClick={() => { setIsDrawToggled(false); }} title="Cancel draw" aria-label="Cancel draw (hikiwake)">X</button>
                         ) : (
                           <>
                             {(aTotal > 0 || bTotal > 0) && <div className="sb-vs">{`${bTotal}–${aTotal}`}</div>}
@@ -2929,6 +2927,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
                               className="sb-draw-toggle"
                               onClick={() => { setIsDrawToggled(true); setAPts([]); setBPts([]); }}
                               title="Mark as draw (hikiwake)"
+                              aria-label="Mark as draw (hikiwake)"
                             >{aTotal === 0 && bTotal === 0 ? "vs" : "X"}</button>
                           </>
                         )}
@@ -2953,13 +2952,6 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
               </div>
           </div>
 
-          {isComplete && (
-            <div className="field">
-              <label className="field__label">Correction note (optional)</label>
-              <input className="input" placeholder="e.g. Reviewed video, ippon awarded to White" value={note} onChange={(e) => setNote(e.target.value)} />
-              <div className="field__hint">Recorded as audit trail. Subsequent rounds will be re-propagated automatically.</div>
-            </div>
-          )}
         </div>
 
         {/* Sticky navigation + action footer */}
@@ -3003,7 +2995,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const m = match;
   const isComplete = m.status === "completed";
   const positions = TEAM_POSITIONS.slice(0, teamSize);
-  const [note, setNote] = useStateA("");
   const [submitting, setSubmitting] = useStateA(false);
 
   const existingSub = m.subResults || [];
@@ -3060,7 +3051,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       status: targetStatus === "running" ? "running" : "completed",
       ipponsA: [],
       ipponsB: [],
-      score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete, note },
+      score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete },
       subResults,
     };
   };
@@ -3203,12 +3194,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             ))}
           </div>
 
-          {isComplete && (
-            <div className="field">
-              <label className="field__label">Correction note (optional)</label>
-              <input className="input" placeholder="e.g. Reviewed video" value={note} onChange={(e) => setNote(e.target.value)} />
-            </div>
-          )}
         </div>
 
         <div className="editor-modal__foot editor-modal__foot--nav">

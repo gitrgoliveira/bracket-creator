@@ -457,11 +457,19 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // know what's live, regardless of which screen they're on. Clicking
   // a chip jumps to that competition's score editor via the global
   // navigator helper set up by AdminApp.
+  // sideA/sideB may be a string (raw backend), an object with .name
+  // (normalised), or an empty {id:"",name:""} placeholder. Extract names
+  // defensively and skip chips where either side has no real name.
+  const sideName = (side) => {
+    if (!side) return "";
+    if (typeof side === "string") return side;
+    return side.name || "";
+  };
   const liveMatches = useMemoA(() => {
     if (!tournament || !window.compMatches) return [];
     return (tournament.competitions || [])
       .flatMap(cc => window.compMatches(cc))
-      .filter(m => m.status === "running" && m.sideA && m.sideB);
+      .filter(m => m.status === "running" && sideName(m.sideA) && sideName(m.sideB));
   }, [tournament]);
   const onOpenScore = (m) => {
     if (typeof window.__adminNavigateToScore === "function") {
@@ -487,17 +495,21 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         <div className="live-strip" role="status" aria-label={`${liveMatches.length} matches live`}>
           <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
           <div className="live-strip__chips">
-            {liveMatches.slice(0, 6).map(m => (
-              <button
-                key={`${m.compId}:${m.id}`}
-                className="live-strip__chip"
-                onClick={() => onOpenScore && onOpenScore(m)}
-                title={`${m.sideB.name} – ${m.sideA.name}`}
-              >
-                <span className="live-strip__court">Shiaijo {m.court}</span>
-                <span className="live-strip__names">{m.sideB.name} – {m.sideA.name}</span>
-              </button>
-            ))}
+            {liveMatches.slice(0, 6).map(m => {
+              const a = sideName(m.sideA);
+              const b = sideName(m.sideB);
+              return (
+                <button
+                  key={`${m.compId}:${m.id}`}
+                  className="live-strip__chip"
+                  onClick={() => onOpenScore && onOpenScore(m)}
+                  title={`${b} – ${a}`}
+                >
+                  <span className="live-strip__court">Shiaijo {m.court}</span>
+                  <span className="live-strip__names">{b} – {a}</span>
+                </button>
+              );
+            })}
             {liveMatches.length > 6 && <span className="live-strip__more">+{liveMatches.length - 6} more</span>}
           </div>
         </div>

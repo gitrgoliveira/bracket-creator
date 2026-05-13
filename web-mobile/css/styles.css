@@ -1,7 +1,10 @@
 /* Bracket Creator — clean utilitarian, polished */
 
 :root {
-  --topbar-h: 50px;
+  /* Topbar uses fixed `height` (not min-height) so the live-strip's
+     `top: var(--topbar-h)` aligns perfectly. Value must accommodate the
+     brand title (15px/1.4) + sub (12px/1.4) ≈ 38px + 10px×2 padding = 58px. */
+  --topbar-h: 60px;
   --accent: #1d3557;
   --accent-soft: #e7eaf3;
   --accent-fg: #ffffff;
@@ -99,6 +102,15 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0; /* allow truncation when the title block sits next to a wide spacer */
+  overflow: hidden;
+}
+
+.topbar__title,
+.topbar__sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .topbar__logo {

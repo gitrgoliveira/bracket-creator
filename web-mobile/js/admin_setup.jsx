@@ -1,7 +1,7 @@
 // Tournament-edit, competition-create, and bulk-import pages. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const normalizeDate = window.normalizeDate;
 const pluralize = window.pluralize;
@@ -104,6 +104,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       return;
     }
 
+    const normDate = normalizeDate(date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normDate)) {
+      setError("Invalid date. Please pick a valid day.");
+      return;
+    }
+    const year = parseInt(normDate.substring(0, 4));
+    if (year < 1900 || year > 2100) {
+      setError("Year must be between 1900 and 2100.");
+      return;
+    }
+
     const slug = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').substring(0, 50);
     const id = slug || "c-" + Date.now().toString(36);
     const c = window.buildCompetition({
@@ -114,7 +125,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       sampleRoster: useSample ? sampleSize : null,
       seedCount: 0, status: "setup",
       startTime,
-      date,
+      date: normDate,
       teamSize: kind === "team" ? teamSize : 0,
       courts: selectedCourts.length ? selectedCourts : [tournament.courts[0]],
       poolMode, poolSize, winnersPerPool: winners,
@@ -272,6 +283,15 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const [preview, setPreview] = useStateA(null);
   const [loading, setLoading] = useStateA(false);
   const [results, setResults] = useStateA(null);
+  // Tracks the success-confirmation timer so we can cancel it if the page
+  // unmounts before onImported fires (avoids stray navigation after teardown).
+  const importedTimerRef = useRefA(null);
+  useEffectA(() => () => {
+    if (importedTimerRef.current) {
+      clearTimeout(importedTimerRef.current);
+      importedTimerRef.current = null;
+    }
+  }, []);
   const [error, setError] = useStateA(null);
   const folderRef = useRefA(null);
   const filesRef = useRefA(null);
@@ -319,7 +339,10 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
         setResults(body.results || []);
         const hasErrors = (body.results || []).some(r => r.error);
         if (!hasErrors) {
-          setTimeout(onImported, 1500);
+          importedTimerRef.current = setTimeout(() => {
+            importedTimerRef.current = null;
+            onImported();
+          }, 1500);
         }
       }
     } catch (e) {

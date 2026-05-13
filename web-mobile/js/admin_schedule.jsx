@@ -60,6 +60,10 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
   const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
 
   // Duration estimation: earliest start to latest finish across all matches
+  // matchDuration is bound to a <input type="number"> whose value can become
+  // NaN if cleared. Coerce to a sane fallback before any arithmetic so the
+  // duration estimate and auto-schedule loop don't propagate NaN.
+  const safeMatchDuration = Number.isFinite(matchDuration) && matchDuration >= 1 ? matchDuration : 3;
   const scheduledWithTimes = allMatches.filter(m => m.scheduledAt);
   const firstTime = scheduledWithTimes.length > 0 ? scheduledWithTimes.reduce((mn, m) => !mn || m.scheduledAt < mn ? m.scheduledAt : mn, null) : null;
   const lastTime = scheduledWithTimes.length > 0 ? scheduledWithTimes.reduce((mx, m) => !mx || m.scheduledAt > mx ? m.scheduledAt : mx, null) : null;
@@ -67,7 +71,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
     const a = timeToMinutes(firstTime);
     const b = timeToMinutes(lastTime);
     if (a === null || b === null) return null;
-    const diff = b - a + matchDuration;
+    const diff = b - a + safeMatchDuration;
     return `${Math.floor(diff / 60)}h ${diff % 60}m`;
   })() : null;
 
@@ -100,7 +104,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
         let cursor = timeToMinutes(autoStart) || 540;
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
           await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", cursor), password);
-          cursor += matchDuration;
+          cursor += safeMatchDuration;
         }
       }
     } catch (e) {

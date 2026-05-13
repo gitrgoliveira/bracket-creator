@@ -291,11 +291,27 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         return;
       }
 
+      // ID generation: existing players keep their stable id; new players
+      // get the next free `${c.id}-pN` slot. Tracking used ids prevents a
+      // new player's index-based id from colliding with an existing
+      // player's id when the visible row order differs from the original
+      // assignment order (e.g. after drag-reordering seeds).
       let added = 0, updatedCount = 0;
-      const np = parsed.map(({ name, displayName, dojo, danGrade, tag }, i) => {
+      const usedIds = new Set();
+      let nextSlot = 1;
+      const np = parsed.map(({ name, displayName, dojo, danGrade, tag }) => {
         const existing = existingMap.get(name);
-        if (existing) updatedCount++; else added++;
-        return { id: existing?.id || `${c.id}-p${i + 1}`, name, displayName, dojo, danGrade, tag, seed: existing?.seed || null };
+        if (existing) {
+          updatedCount++;
+          usedIds.add(existing.id);
+          return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null };
+        }
+        added++;
+        while (usedIds.has(`${c.id}-p${nextSlot}`)) nextSlot++;
+        const id = `${c.id}-p${nextSlot}`;
+        usedIds.add(id);
+        nextSlot++;
+        return { id, name, displayName, dojo, danGrade, tag, seed: null };
       });
       onUpdate({ ...c, players: np });
 

@@ -146,7 +146,15 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
           const court = c.courts[pools.indexOf(pool) % c.courts.length];
           const isDone = pool.matches && pool.matches.every(m => m.status === "completed");
           return (
-            <div key={pool.poolName} className={`pool ${isDone ? "pool--done" : ""}`} onClick={() => setSelectedPoolName(pool.poolName)} style={{ cursor: "pointer" }}>
+            <div
+              key={pool.poolName}
+              className={`pool ${isDone ? "pool--done" : ""}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setSelectedPoolName(pool.poolName)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedPoolName(pool.poolName); } }}
+              style={{ cursor: "pointer" }}
+            >
               <div className="pool__head">
                 <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
                   <div className="pool__name">{pool.poolName}</div>

@@ -334,13 +334,14 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password, 
   const scrollRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
 
+  // Recenter on the running match whenever it changes (initial bracket
+  // load, or one match finishing and the next starting). Empty deps would
+  // miss the case where `bracket` is still null on first mount and only
+  // populates via the detail fetch / SSE.
+  const runningMatchId = (bracket?.rounds || []).flatMap(r => r).find(m => m.status === "running")?.id || null;
   useEffectA(() => {
-    // Center on current match
-    const rounds = bracket?.rounds || [];
-    const flat = rounds.flatMap(r => r);
-    const cur = flat.find(m => m.status === "running");
-    if (cur) setAutoScrollId(cur.id + "::" + Date.now());
-  }, []);
+    if (runningMatchId) setAutoScrollId(runningMatchId + "::" + Date.now());
+  }, [runningMatchId]);
 
   if (!bracket || !bracket.rounds) {
     return <div className="empty"><div className="icon">⚙</div><h3>Bracket not generated yet</h3><div>Start the competition to build the bracket.</div></div>;

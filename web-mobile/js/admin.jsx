@@ -10,6 +10,20 @@ const REFRESHABLE_EVENTS = new Set([
   "tournament_updated",
 ]);
 
+// Maximum live-match chips rendered in the topbar status strip before the
+// "+N more" overflow indicator kicks in.
+const LIVE_STRIP_MAX_CHIPS = 6;
+
+// sideA/sideB can be a string (raw backend shape), an object with .name
+// (normaliseMatch output, which substitutes {id:"",name:""} for missing sides),
+// or null. Return the participant's display name, or "" when no real side is
+// present. Used by compMatchStats and AdminTopbar's live-strip filter.
+function sideName(side) {
+  if (!side) return "";
+  if (typeof side === "string") return side;
+  return side.name || "";
+}
+
 // Returns { total, done, live } match counts for a single competition object.
 // Accepts either:
 //   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
@@ -162,6 +176,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // without being torn down every time the tournament object is replaced.
   const tRef = useRefA(t);
   const onUpdateRef = useRefA(onUpdate);
+  // Intentionally no deps array — this effect runs after every render to keep
+  // the refs in sync with the latest props for the SSE handler to read.
   useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; });
 
   const updateCompetition = async (cid, next) => {
@@ -485,15 +501,9 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // Render running matches as chips below the topbar so admins always
   // know what's live, regardless of which screen they're on. Clicking
   // a chip jumps to that competition's score editor via the global
-  // navigator helper set up by AdminApp.
-  // sideA/sideB may be a string (raw backend), an object with .name
-  // (normalised), or an empty {id:"",name:""} placeholder. Extract names
-  // defensively and skip chips where either side has no real name.
-  const sideName = (side) => {
-    if (!side) return "";
-    if (typeof side === "string") return side;
-    return side.name || "";
-  };
+  // navigator helper set up by AdminApp. sideName (hoisted to module
+  // scope) handles the three possible side shapes; chips with no real
+  // name on either side are filtered out.
   const liveMatches = useMemoA(() => {
     if (!tournament || !window.compMatches) return [];
     return (tournament.competitions || [])
@@ -524,7 +534,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         <div className="live-strip" role="status" aria-label={`${liveMatches.length} matches live`}>
           <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
           <div className="live-strip__chips">
-            {liveMatches.slice(0, 6).map(m => {
+            {liveMatches.slice(0, LIVE_STRIP_MAX_CHIPS).map(m => {
               const a = sideName(m.sideA);
               const b = sideName(m.sideB);
               return (
@@ -539,7 +549,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
                 </button>
               );
             })}
-            {liveMatches.length > 6 && <span className="live-strip__more">+{liveMatches.length - 6} more</span>}
+            {liveMatches.length > LIVE_STRIP_MAX_CHIPS && <span className="live-strip__more">+{liveMatches.length - LIVE_STRIP_MAX_CHIPS} more</span>}
           </div>
         </div>
       )}

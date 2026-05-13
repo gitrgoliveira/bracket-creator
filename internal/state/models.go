@@ -52,6 +52,14 @@ const (
 	MatchStatusCompleted MatchStatus = "completed"
 )
 
+// Competition.Format values. Kept as untyped string constants because the
+// Competition.Format field is a plain `string` for backward compatibility
+// with existing YAML/JSON state files.
+const (
+	CompFormatPools    = "pools"
+	CompFormatPlayoffs = "playoffs"
+)
+
 // DecisionDraw is the canonical value for a tied (hikiwake) match. The
 // legacy spelling "hikewake" (missing the 'i') was used historically and is
 // still accepted by IsDraw() for backward compatibility on existing data,

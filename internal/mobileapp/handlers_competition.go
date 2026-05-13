@@ -404,7 +404,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if src.Format != "pools" {
+		if src.Format != state.CompFormatPools {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "source competition must use pools format"})
 			return
 		}

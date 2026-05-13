@@ -17,7 +17,7 @@ func (e *Engine) GenerateSchedule(compID string) error {
 
 	var entries []state.ScheduleEntry
 
-	if comp.Format == "pools" {
+	if comp.Format == state.CompFormatPools {
 		matches, err := e.store.LoadPoolMatches(compID)
 		if err != nil {
 			return err

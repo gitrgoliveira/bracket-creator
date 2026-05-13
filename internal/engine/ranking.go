@@ -136,7 +136,7 @@ func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([
 		}
 
 		var real *helper.Player
-		if srcComp.Format == "pools" {
+		if srcComp.Format == state.CompFormatPools {
 			if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
 				return nil, validationErrorf("reserved slot source %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
 			}

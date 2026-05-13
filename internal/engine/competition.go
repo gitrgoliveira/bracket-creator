@@ -16,7 +16,7 @@ func (e *Engine) MaybeAutoCompletePools(compId string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if comp == nil || comp.Format != "pools" || comp.Status != state.CompStatusPools {
+	if comp == nil || comp.Format != state.CompFormatPools || comp.Status != state.CompStatusPools {
 		return false, nil
 	}
 
@@ -92,7 +92,7 @@ func (e *Engine) StartCompetition(id string) error {
 	}
 
 	// Generate Pools or Bracket
-	if comp.Format == "pools" {
+	if comp.Format == state.CompFormatPools {
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}

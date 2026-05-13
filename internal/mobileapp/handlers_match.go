@@ -11,15 +11,16 @@ import (
 
 // tryAutoCompletePools runs the auto-complete check after a successful score
 // write. The score itself has already been recorded, so we don't fail the
-// request when the auto-complete check errors; instead we log and surface
-// the failure via the X-Auto-Complete-Error response header so that bad
-// disks / store errors aren't visible only in server logs. Broadcasts
-// EventCompetitionCompleted when the transition actually happens.
+// request when the auto-complete check errors; instead we log full details
+// server-side and surface a generic signal via the X-Auto-Complete-Error
+// response header so clients can detect the failure (and refresh) without
+// us leaking filesystem paths or other internal details from raw errors.
+// Broadcasts EventCompetitionCompleted when the transition actually happens.
 func tryAutoCompletePools(c *gin.Context, eng *engine.Engine, hub *Hub, compID string) {
 	autoCompleted, err := eng.MaybeAutoCompletePools(compID)
 	if err != nil {
 		log.Printf("MaybeAutoCompletePools(%s): %v", compID, err)
-		c.Header("X-Auto-Complete-Error", err.Error())
+		c.Header("X-Auto-Complete-Error", "failed")
 		return
 	}
 	if autoCompleted {

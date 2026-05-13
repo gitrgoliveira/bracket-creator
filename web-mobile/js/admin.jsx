@@ -586,6 +586,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
                   className="live-strip__chip"
                   onClick={() => onOpenScore && onOpenScore(m)}
                   title={`${b} – ${a}`}
+                  aria-label={`Open score editor: ${court}, ${b} versus ${a}`}
                 >
                   <span className="live-strip__court">{court}</span>
                   <span className="live-strip__names">{b} – {a}</span>

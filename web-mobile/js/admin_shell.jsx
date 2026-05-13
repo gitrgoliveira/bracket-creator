@@ -233,7 +233,13 @@ function CompCard({ c, onOpen, onStart }) {
   const playerCount = (c.players || []).length;
 
   return (
-    <div className="tcard" onClick={onOpen}>
+    <div
+      className="tcard"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+    >
       <div className="tcard__head">
         <div>
           <div className="tcard__eyebrow">{window.competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>

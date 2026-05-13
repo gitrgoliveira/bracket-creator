@@ -363,6 +363,26 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     onClose();
   };
 
+  // Esc-to-close, matching ScoreEditorModal. The full keyboard-shortcut
+  // surface (M/K/D/T/H, ←/→, Enter) isn't wired here — team scoring is
+  // many sub-matches and would need different bindings — but Esc is
+  // table-stakes UX.
+  const kbRef = React.useRef(null);
+  kbRef.current = { submitting, handleDismiss, onPrev, onNext };
+  useEffectA(() => {
+    const onKeyDown = (ev) => {
+      const s = kbRef.current;
+      if (s.submitting) return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      if (ev.key === "Escape") { ev.preventDefault(); s.handleDismiss(); return; }
+      if (window.isTextEntry(ev.target)) return;
+      if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // left = SHIRO (White), right = AKA (Red)
   const teamSides = [
     { key: "b", name: m.sideB?.name || m.sideB, label: "SHIRO (White)", color: "shiro", iv: ivB, pw: pwB },

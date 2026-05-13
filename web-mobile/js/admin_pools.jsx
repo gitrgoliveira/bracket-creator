@@ -182,12 +182,14 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                             onChange={(e) => overrideRank(pool.poolName, s.player.name, e.target.value)}
                             onClick={(e) => e.stopPropagation()}
                             style={{
-                              width: 32,
+                              width: 40,
+                              height: 36,
+                              padding: "0 4px",
                               border: s.isOverridden ? "1px solid var(--accent)" : "1px solid transparent",
                               background: s.isOverridden ? "var(--accent-soft)" : "transparent",
                               borderRadius: 4,
                               textAlign: "center",
-                              fontSize: 12,
+                              fontSize: 13,
                               fontWeight: s.isOverridden ? "700" : "400"
                             }}
                           />

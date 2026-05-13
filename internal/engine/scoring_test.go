@@ -272,3 +272,73 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
 	})
 }
+
+// Regression test for the bug where scoring a match cleared its court and
+// scheduledAt because the UI payload omits those fields. RecordMatchResult
+// must preserve them when the incoming MatchResult has empty values.
+func TestRecordMatchResult_PreservesCourtAndScheduledAt(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-preserve-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "preserve-test"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Preserve"}))
+
+	t.Run("pool match preserves Court and ScheduledAt", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{
+				ID: "P1-1", SideA: "Alice", SideB: "Bob",
+				Status: state.MatchStatusScheduled,
+				Court:  "A", ScheduledAt: "09:30",
+			},
+		}))
+
+		// Scoring UI sends a patch with no Court / ScheduledAt.
+		patch := &state.MatchResult{
+			Winner:  "Alice",
+			IpponsA: []string{"M"},
+			IpponsB: []string{},
+			Status:  state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, "P1-1", patch))
+
+		// Persisted match keeps the original scheduling fields.
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.Equal(t, "A", stored[0].Court)
+		assert.Equal(t, "09:30", stored[0].ScheduledAt)
+		// Patch is also mutated in place so the broadcast carries the merged value.
+		assert.Equal(t, "A", patch.Court)
+		assert.Equal(t, "09:30", patch.ScheduledAt)
+	})
+
+	t.Run("bracket match preserves Court and ScheduledAt", func(t *testing.T) {
+		bracket := &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{ID: "B1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "10:15"}},
+			},
+		}
+		require.NoError(t, store.SaveBracket(compID, bracket))
+
+		patch := &state.MatchResult{
+			Winner:  "Bob",
+			IpponsB: []string{"K"},
+			Status:  state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, "B1", patch))
+
+		stored, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "B", stored.Rounds[0][0].Court)
+		assert.Equal(t, "10:15", stored.Rounds[0][0].ScheduledAt)
+		// Patch is mutated in place so the SSE broadcast can echo the
+		// scheduling fields the scoring UI never sent.
+		assert.Equal(t, "B", patch.Court)
+		assert.Equal(t, "10:15", patch.ScheduledAt)
+	})
+}

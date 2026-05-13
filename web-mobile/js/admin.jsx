@@ -11,23 +11,36 @@ const REFRESHABLE_EVENTS = new Set([
 ]);
 
 // Returns { total, done, live } match counts for a single competition object.
+// Accepts either:
+//   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
+//   - structured `pools[].matches` from GET /api/viewer/competitions/:id (detail endpoint)
+// The admin-side GET /api/competitions/:id returns only config; use the viewer
+// endpoints when match counts are needed.
 function compMatchStats(c) {
   let total = 0, done = 0, live = 0;
-  if (c.pools) {
-    c.pools.forEach((p) => (p.matches || []).forEach((m) => {
-      if (!m.sideA || !m.sideB) return;
-      total++;
-      if (m.status === "completed") done++;
-      if (m.status === "running") live++;
-    }));
+  // sideA/sideB can be: a string (raw backend shape), an object {id,name}
+  // (normalizeMatch shape, which substitutes {id:"",name:""} for missing
+  // sides), or null. Truthy-checking the side itself is not enough — we have
+  // to look at the actual participant name so byes and unresolved bracket
+  // slots don't get counted toward total/done/live.
+  const hasName = (side) => {
+    if (!side) return false;
+    if (typeof side === "string") return side.length > 0;
+    return !!(side.name && side.name.length > 0);
+  };
+  const count = (m) => {
+    if (!m || !hasName(m.sideA) || !hasName(m.sideB)) return;
+    total++;
+    if (m.status === "completed") done++;
+    if (m.status === "running") live++;
+  };
+  if (Array.isArray(c.poolMatches)) {
+    c.poolMatches.forEach(count);
+  } else if (c.pools) {
+    c.pools.forEach((p) => (p.matches || []).forEach(count));
   }
   if (c.bracket && c.bracket.rounds) {
-    c.bracket.rounds.forEach((r) => (r || []).forEach((m) => {
-      if (!m.sideA || !m.sideB) return;
-      total++;
-      if (m.status === "completed") done++;
-      if (m.status === "running") live++;
-    }));
+    c.bracket.rounds.forEach((r) => (r || []).forEach(count));
   }
   return { total, done, live };
 }
@@ -67,6 +80,7 @@ function normalizeDate(d) {
 }
 
 const pluralize = window.pluralize;
+const mergeMatchPatch = window.mergeMatchPatch;
 
 function patchCompetitionData(prev, event) {
   if (!prev || !event.data) return prev;
@@ -81,7 +95,7 @@ function patchCompetitionData(prev, event) {
   if (next.poolMatches) {
     next.poolMatches = next.poolMatches.map(m => {
       const update = resultMap.get(m.id);
-      if (update) { changed = true; return { ...m, ...update }; }
+      if (update) { changed = true; return mergeMatchPatch(m, update); }
       return m;
     });
   }
@@ -97,7 +111,7 @@ function patchCompetitionData(prev, event) {
           const patch = { ...update };
           if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
           if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-          return { ...m, ...patch };
+          return mergeMatchPatch(m, patch);
         }
         return m;
       })
@@ -273,20 +287,23 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   };
 
   useEffectA(() => {
-    if (view.kind === "competition") {
-      setAdminLoading(true);
-      window.API.fetchCompetitionDetails(view.id)
-        .then(data => {
-          setAdminCompData(data);
-          setAdminLoading(false);
-        })
-        .catch(err => {
-          console.error(err);
-          setAdminLoading(false);
-        });
-    } else {
+    if (view.kind !== "competition") {
       setAdminCompData(null);
+      return;
     }
+    let cancelled = false;
+    // Clear stale data from the previously-viewed competition so the
+    // header/modal don't briefly render with another comp's identity.
+    setAdminCompData(prev => (prev && prev.config && prev.config.id === view.id) ? prev : null);
+    setAdminLoading(true);
+    window.API.fetchCompetitionDetails(view.id)
+      .then(data => {
+        if (!cancelled) { setAdminCompData(data); setAdminLoading(false); }
+      })
+      .catch(err => {
+        if (!cancelled) { console.error(err); setAdminLoading(false); }
+      });
+    return () => { cancelled = true; };
   }, [view.id, view.kind]);
 
   useEffectA(() => {
@@ -406,16 +423,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   if (view.kind === "competition") {
     const c = t.competitions.find((cc) => cc.id === view.id);
     if (!c) return <div className="page"><div className="empty"><h3>Competition not found</h3></div></div>;
-    if (adminLoading && !adminCompData) return <div className="page"><div className="loading">Loading details...</div></div>;
+    // Only use adminCompData when it matches the current view; otherwise it's stale.
+    const detail = adminCompData && adminCompData.config && adminCompData.config.id === view.id ? adminCompData : null;
+    if (adminLoading && !detail) return <div className="page"><div className="loading">Loading details...</div></div>;
 
     return <AdminCompetition
       tournament={t}
-      competition={adminCompData?.config || c}
-      pools={adminCompData?.pools}
-      poolMatches={adminCompData?.poolMatches}
-      standings={adminCompData?.standings}
-      bracket={adminCompData?.bracket}
-      reservedSlots={adminCompData?.reservedSlots || []}
+      competition={detail?.config || c}
+      pools={detail?.pools}
+      poolMatches={detail?.poolMatches}
+      standings={detail?.standings}
+      bracket={detail?.bracket}
+      reservedSlots={detail?.reservedSlots || []}
       section={view.section}
       onSection={(section) => setView({ ...view, section })}
       onBack={() => setView({ kind: "dashboard" })}
@@ -611,9 +630,7 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
 }
 
 function CompCard({ c, onOpen, onStart }) {
-  let liveCount = 0;
-  if (c.pools) c.pools.forEach((p) => (p.matches || []).forEach((m) => m.status === "running" && liveCount++));
-  if (c.bracket && c.bracket.rounds) c.bracket.rounds.forEach((r) => (r || []).forEach((m) => m.status === "running" && liveCount++));
+  const { live: liveCount } = compMatchStats(c);
   const playerCount = (c.players || []).length;
 
   return (
@@ -911,7 +928,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   );
 }
 
-function AdminCompetition({ tournament, competition, pools, _poolMatches, standings, bracket, reservedSlots, section, onSection, onBack, onOpenCompetition, onUpdate, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
+function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, reservedSlots, section, onSection, onBack, onOpenCompetition, onUpdate, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
@@ -1031,7 +1048,7 @@ function AdminCompetition({ tournament, competition, pools, _poolMatches, standi
             </div>
           </div>
           <div>
-            {section === "overview" && <AdminCompOverview c={c} onSection={onSection} />}
+            {section === "overview" && <AdminCompOverview c={c} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} />}
             {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} />}
             {section === "pools" && <AdminPools c={c} pools={pools} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
@@ -1045,9 +1062,14 @@ function AdminCompetition({ tournament, competition, pools, _poolMatches, standi
   );
 }
 
-function AdminCompOverview({ c, onSection }) {
-  const { total, done, live } = compMatchStats(c);
+function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
+  // Prefer the props passed from the detail fetch, but fall back to whatever
+  // is already on `c` when the detail hasn't loaded yet (or errored). Using ??
+  // avoids overwriting non-null fields on `c` with undefined prop values.
+  const statsSource = { ...c, pools: pools ?? c.pools, poolMatches: poolMatches ?? c.poolMatches, bracket: bracket ?? c.bracket };
+  const { total, done, live } = compMatchStats(statsSource);
   const pct = total ? Math.round((done / total) * 100) : 0;
+  const effectiveBracket = bracket ?? c.bracket;
   return (
     <div>
       <div className="stats-strip">
@@ -1067,7 +1089,7 @@ function AdminCompOverview({ c, onSection }) {
           <div className="card__title" style={{ marginBottom: 6 }}>Scores →</div>
           <div className="card__sub">Update or correct match results</div>
         </button>
-        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(c.bracket ? "bracket" : "pools")}>
+        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}>
           <div className="card__title" style={{ marginBottom: 6 }}>Live results →</div>
           <div className="card__sub">Visual bracket / pool standings</div>
         </button>

@@ -63,7 +63,6 @@ function normalizeDate(d) {
 }
 
 const pluralize = window.pluralize;
-
 const mergeMatchPatch = window.mergeMatchPatch;
 
 function patchCompetitionData(prev, event) {

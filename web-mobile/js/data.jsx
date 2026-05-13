@@ -25,6 +25,13 @@ function assignCourt(matchIdx, courts) {
   return courts[matchIdx % courts.length];
 }
 
+function mergeMatchPatch(existing, patch) {
+  const merged = { ...existing, ...patch };
+  if (patch.court === "" || patch.court == null) merged.court = existing.court;
+  if (patch.scheduledAt === "" || patch.scheduledAt == null) merged.scheduledAt = existing.scheduledAt;
+  return merged;
+}
+
 function makePlayer(i, gender, prefix, seed) {
   const first = (gender === "F" ? FIRST_F : FIRST_M);
   const fn = first[i % first.length];
@@ -337,5 +344,6 @@ if (typeof window !== 'undefined') {
   window.standardSeedOrder = standardSeedOrder; window.nextPow2 = nextPow2;
   window.poolWinners = poolWinners;
   window.parseParticipantLines = parseParticipantLines;
+  window.mergeMatchPatch = mergeMatchPatch;
   window.addMinutes = addMinutes;
 }

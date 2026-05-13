@@ -2,7 +2,6 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 const { useState: useS, useEffect: useE } = React;
-
 const mergeMatchPatch = window.mergeMatchPatch;
 
 const patchCompetitionData = (prev, event) => {

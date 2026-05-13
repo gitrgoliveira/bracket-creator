@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -36,7 +37,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 				"competitionId": id,
 				"results":       results,
 			})
-			if autoCompleted, _ := eng.MaybeAutoCompletePools(id); autoCompleted {
+			if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
+				log.Printf("MaybeAutoCompletePools(%s): %v", id, err)
+			} else if autoCompleted {
 				hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
 			}
 		}
@@ -103,7 +106,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 		}
 
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
-		if autoCompleted, _ := eng.MaybeAutoCompletePools(id); autoCompleted {
+		if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
+			log.Printf("MaybeAutoCompletePools(%s): %v", id, err)
+		} else if autoCompleted {
 			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
 		}
 		c.JSON(http.StatusOK, result)
@@ -129,7 +134,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			"matchId":       mid,
 			"result":        result,
 		})
-		if autoCompleted, _ := eng.MaybeAutoCompletePools(id); autoCompleted {
+		if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
+			log.Printf("MaybeAutoCompletePools(%s): %v", id, err)
+		} else if autoCompleted {
 			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
 		}
 

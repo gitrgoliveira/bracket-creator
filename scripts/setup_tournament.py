@@ -341,11 +341,23 @@ def wait_for_status(comp_id, expected, timeout_s=5.0, interval_s=0.2):
 
     Used after scoring all pool matches to assert the backend's auto-completion
     has fired. If this times out, the auto-completion logic has regressed.
+    Fails immediately on 4xx responses (auth/config problems, not transient).
     """
     deadline = time.time() + timeout_s
     last_status = None
     while time.time() < deadline:
-        resp = requests.get(f"{BASE_URL}/api/competitions/{comp_id}", headers=HEADERS)
+        try:
+            resp = requests.get(f"{BASE_URL}/api/competitions/{comp_id}", headers=HEADERS)
+        except requests.exceptions.ConnectionError as e:
+            # Transient — retry until deadline
+            print(f"  [WARN] Connection error polling {comp_id}: {e}")
+            time.sleep(interval_s)
+            continue
+        if 400 <= resp.status_code < 500:
+            raise RuntimeError(
+                f"[FAIL] {comp_id}: unexpected {resp.status_code} while polling status. "
+                f"Check auth/config. Response: {resp.text[:200]}"
+            )
         if resp.status_code == 200:
             last_status = resp.json().get("status")
             if last_status == expected:
@@ -353,7 +365,8 @@ def wait_for_status(comp_id, expected, timeout_s=5.0, interval_s=0.2):
         time.sleep(interval_s)
     raise RuntimeError(
         f"[FAIL] {comp_id}: expected status {expected!r} within {timeout_s}s, "
-        f"last seen {last_status!r}. Backend auto-completion may have regressed."
+        f"last seen {last_status!r} (HTTP {resp.status_code}). "
+        f"Backend auto-completion may have regressed."
     )
 
 

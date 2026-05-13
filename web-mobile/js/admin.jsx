@@ -3,6 +3,13 @@
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
+const REFRESHABLE_EVENTS = new Set([
+  "competition_started",
+  "competition_completed",
+  "match_updated",
+  "tournament_updated",
+]);
+
 // Returns { total, done, live } match counts for a single competition object.
 function compMatchStats(c) {
   let total = 0, done = 0, live = 0;
@@ -137,6 +144,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   }, [setView]);
 
   const t = tournament;
+  // Refs so the SSE subscription can read the latest tournament/onUpdate
+  // without being torn down every time the tournament object is replaced.
+  const tRef = useRefA(t);
+  const onUpdateRef = useRefA(onUpdate);
+  useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; });
 
   const updateCompetition = async (cid, next) => {
     try {
@@ -281,13 +293,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (view.kind === "competition") {
       const unsub = window.API.subscribeToEvents((event) => {
         const jitter = Math.random() * 500;
-        const refreshableEvents = new Set([
-          "competition_started",
-          "competition_completed",
-          "match_updated",
-          "tournament_updated",
-        ]);
-        if (refreshableEvents.has(event.type)) {
+        if (REFRESHABLE_EVENTS.has(event.type)) {
           // tournament_updated carries null data (tournament-wide change) — always
           // relevant.  match_updated / competition_started / competition_completed
           // carry competitionId — skip if they belong to a different competition.
@@ -305,13 +311,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // competition_completed on any comp may unblock a dependent playoff
           // we're currently viewing, so always trigger a tournament-wide refresh.
           if (event.type === "competition_completed") {
-            setTimeout(() => window.API.fetchCompetitions().then(comps => onUpdate({ ...t, competitions: comps })), jitter);
+            setTimeout(() => window.API.fetchCompetitions().then(comps => onUpdateRef.current({ ...tRef.current, competitions: comps })), jitter);
           }
         }
       });
       return unsub;
     }
-  }, [view.id, view.kind, t, onUpdate]);
+  }, [view.id, view.kind]); // t and onUpdate accessed via refs to avoid churn
 
   if (view.kind === "dashboard") {
     return <AdminDashboard
@@ -467,7 +473,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
                 key={m.compId + m.id}
                 className="live-strip__chip"
                 onClick={() => onOpenScore && onOpenScore(m)}
-                title={`${m.sideA.name} vs ${m.sideB.name}`}
+                title={`${m.sideB.name} – ${m.sideA.name}`}
               >
                 <span className="live-strip__court">Shiaijo {m.court}</span>
                 <span className="live-strip__names">{m.sideB.name} – {m.sideA.name}</span>

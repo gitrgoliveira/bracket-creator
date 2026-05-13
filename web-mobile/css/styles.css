@@ -1,6 +1,7 @@
 /* Bracket Creator — clean utilitarian, polished */
 
 :root {
+  --topbar-h: 50px;
   --accent: #1d3557;
   --accent-soft: #e7eaf3;
   --accent-fg: #ffffff;
@@ -87,6 +88,7 @@ a:hover {
   align-items: center;
   gap: 14px;
   padding: 10px 20px;
+  min-height: var(--topbar-h);
   position: sticky;
   top: 0;
   z-index: 30;
@@ -177,7 +179,7 @@ a:hover {
   align-items: center;
   gap: 12px;
   position: sticky;
-  top: 50px;
+  top: var(--topbar-h);
   z-index: 29;
   font-size: 12px;
 }

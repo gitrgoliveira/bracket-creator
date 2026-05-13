@@ -317,6 +317,7 @@ function AuthModal({ onClose, onSuccess }) {
   const [pw, setPw] = useS("");
   const [err, setErr] = useS("");
   const [checking, setChecking] = useS(false);
+  window.useEscapeToClose(onClose);
 
   const submit = async (e) => {
     e.preventDefault();

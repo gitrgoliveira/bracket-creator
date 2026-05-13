@@ -2881,6 +2881,69 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
 
   const canFinish = isDrawToggled || aTotal > 0 || bTotal > 0;
 
+  // Keyboard shortcuts:
+  //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
+  //   m/k/d/t/h        → award point to SHIRO (white, sideB)
+  //   x / X            → toggle hikiwake (draw)
+  //   ←/→              → previous / next match (skipped inside text-entry elements)
+  //   Enter            → finish (or finish + start next when available)
+  //   Esc              → close the modal (always fires, even from buttons/links)
+  // Scoring shortcuts (Enter/M/K/D/T/H/X) are skipped when any interactive
+  // element (input, button, link, …) has focus so native activation still works.
+  const kbRef = React.useRef(null);
+  kbRef.current = { submitting, canFinish, isDrawToggled, onClose, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
+
+  useEffectA(() => {
+    const onKeyDown = (ev) => {
+      const s = kbRef.current;
+      if (s.submitting) return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+
+      // Esc always works regardless of where focus is
+      if (ev.key === "Escape") { ev.preventDefault(); s.onClose(); return; }
+
+      // Navigation blocked only inside text-entry elements (preserves cursor movement)
+      if (!window.isTextEntry(ev.target)) {
+        if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
+        if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
+      }
+
+      // Scoring shortcuts blocked when any interactive element has focus
+      if (window.isInteractiveTarget(ev.target)) return;
+
+      if (ev.key === "Enter" && s.canFinish) {
+        ev.preventDefault();
+        const patch = s.buildPatch("completed");
+        if (s.onSubmitAndNext) s.doSubmit(() => s.onSubmitAndNext(patch));
+        else s.doSubmit(() => s.onSubmit(patch));
+        return;
+      }
+
+      const k = ev.key;
+      const upper = k.toUpperCase();
+      if ("MKDTH".includes(upper) && k.length === 1) {
+        ev.preventDefault();
+        // Pressing a point key exits draw mode first
+        if (s.isDrawToggled) setIsDrawToggled(false);
+        // Shift held → AKA (red); no Shift → SHIRO (white). ev.shiftKey is used
+        // instead of uppercase detection to avoid Caps Lock misrouting.
+        s.addPt(ev.shiftKey ? "a" : "b", upper);
+        return;
+      }
+      if (k === "x" || k === "X") {
+        ev.preventDefault();
+        if (s.isDrawToggled) {
+          setIsDrawToggled(false);
+        } else {
+          setIsDrawToggled(true);
+          setAPts([]); setBPts([]);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []); // listener registered once; reads fresh state via kbRef
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="editor-modal editor-modal--lg" onClick={(e) => e.stopPropagation()}>

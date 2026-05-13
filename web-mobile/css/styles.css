@@ -1823,8 +1823,16 @@ a:hover {
 }
 
 .viewer__head--hero .viewer__admin-pill {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  letter-spacing: 0.04em;
+}
+
+.viewer__head--hero .viewer__admin-pill:hover {
+  background: rgba(255, 255, 255, 0.14);
   color: white;
 }
 
@@ -2239,6 +2247,28 @@ a:hover {
   font-family: var(--font-mono);
   font-size: 12px;
   text-align: center;
+}
+
+/* Small icon-only button used for stacked arrow controls (e.g., seed-row ↑/↓).
+   Sized to meet a comfortable touch target on desktop; bumps to 44px on touch
+   devices so phones/tablets remain usable. */
+.btn--icon-sm {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (pointer: coarse) {
+  .btn--icon-sm {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px 10px;
+  }
 }
 
 .seed-row__input:focus {

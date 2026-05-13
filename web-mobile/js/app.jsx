@@ -2,6 +2,7 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 const { useState: useS, useEffect: useE } = React;
+const mergeMatchPatch = window.mergeMatchPatch;
 
 const patchCompetitionData = (prev, event) => {
   if (!prev || !event.data) return prev;
@@ -16,7 +17,7 @@ const patchCompetitionData = (prev, event) => {
   if (next.poolMatches) {
     next.poolMatches = next.poolMatches.map(m => {
       const update = resultMap.get(m.id);
-      if (update) { changed = true; return { ...m, ...update }; }
+      if (update) { changed = true; return mergeMatchPatch(m, update); }
       return m;
     });
   }
@@ -31,7 +32,7 @@ const patchCompetitionData = (prev, event) => {
           const patch = { ...update };
           if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
           if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-          return { ...m, ...patch };
+          return mergeMatchPatch(m, patch);
         }
         return m;
       })
@@ -316,6 +317,7 @@ function AuthModal({ onClose, onSuccess }) {
   const [pw, setPw] = useS("");
   const [err, setErr] = useS("");
   const [checking, setChecking] = useS(false);
+  window.useEscapeToClose(onClose);
 
   const submit = async (e) => {
     e.preventDefault();

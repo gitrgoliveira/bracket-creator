@@ -56,12 +56,20 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		// Preserve SideA and SideB if missing in update payload
+		// Preserve scheduling and side fields if missing in the update payload.
+		// The scoring UI only sends scoring-related fields; without this guard,
+		// `*r = *result` would zero Court/ScheduledAt/SideA/SideB.
 		if result.SideA == "" {
 			result.SideA = r.SideA
 		}
 		if result.SideB == "" {
 			result.SideB = r.SideB
+		}
+		if result.Court == "" {
+			result.Court = r.Court
+		}
+		if result.ScheduledAt == "" {
+			result.ScheduledAt = r.ScheduledAt
 		}
 		*r = *result
 	})
@@ -279,6 +287,15 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 				bracket.Rounds[rIdx][mIdx].Status = state.MatchStatusCompleted
 				bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
 				bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
+				// Echo the persisted scheduling fields back into the result so the
+				// caller (and SSE broadcast) sees the full, correct match state
+				// rather than the empty Court/ScheduledAt the scoring UI sends.
+				if result.Court == "" {
+					result.Court = m.Court
+				}
+				if result.ScheduledAt == "" {
+					result.ScheduledAt = m.ScheduledAt
+				}
 				found = true
 
 				e.propagateBracketWinner(bracket, rIdx, mIdx)

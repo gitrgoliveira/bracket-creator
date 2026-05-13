@@ -1,16 +1,6 @@
 // Status enum mapping: backend uses "completed"/"running"/"scheduled"
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
-// Merge an SSE match patch onto an existing match object.
-// Preserves court and scheduledAt when the patch omits them (empty/null) so a
-// partial broadcast can never blank scheduling context already on the match.
-function mergeMatchPatch(existing, patch) {
-    const merged = { ...existing, ...patch };
-    if (patch.court === "" || patch.court == null) merged.court = existing.court;
-    if (patch.scheduledAt === "" || patch.scheduledAt == null) merged.scheduledAt = existing.scheduledAt;
-    return merged;
-}
-
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
 
 // Translate UI score patch into backend MatchResult shape.
@@ -466,7 +456,7 @@ const API = {
     }
 };
 
-export { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, mergeMatchPatch, API };
+export { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, API };
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -474,5 +464,4 @@ if (typeof window !== 'undefined') {
     window.normalizeCompetitionDetail = normalizeCompetitionDetail;
     window.buildPlayerMap = buildPlayerMap;
     window.toBackendStatus = toBackendStatus;
-    window.mergeMatchPatch = mergeMatchPatch;
 }

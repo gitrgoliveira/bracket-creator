@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -425,4 +426,29 @@ func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	final := drainHubEvents(t, ch, 100*time.Millisecond)
 	assert.Equal(t, 1, countCompletedEvents(t, final, "qs1"),
 		"final quick-score must emit competition_completed exactly once")
+}
+
+// TestTryAutoCompletePools_SanitizesErrorHeader locks in the contract that
+// when MaybeAutoCompletePools fails, the response carries the generic
+// AutoCompleteErrorValue sentinel — never the raw error string, which can
+// contain filesystem paths or other internal store details.
+func TestTryAutoCompletePools_SanitizesErrorHeader(t *testing.T) {
+	_, _, eng, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// An ID containing "/" trips ValidateCompetitionID inside
+	// LoadCompetition, exercising the error path with a deterministic
+	// non-I/O failure (no need to fault-inject the filesystem).
+	tryAutoCompletePools(c, eng, hub, "../bad")
+
+	got := w.Header().Get(AutoCompleteErrorHeader)
+	assert.Equal(t, AutoCompleteErrorValue, got,
+		"header must be the generic sentinel, not the raw error")
+	assert.NotContains(t, got, "competition ID",
+		"raw validation error text must not leak into the response header")
+	assert.NotContains(t, got, "invalid",
+		"raw validation error text must not leak into the response header")
 }

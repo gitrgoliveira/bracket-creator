@@ -22,6 +22,16 @@ const (
 	EventScheduleUpdated      EventType = "schedule_updated"
 )
 
+// AutoCompleteErrorHeader is set on score/start responses when the
+// post-write MaybeAutoCompletePools check itself errored. The value is a
+// deliberately generic sentinel (AutoCompleteErrorValue) so we don't leak
+// filesystem paths or other internal store details to clients — full error
+// detail is logged server-side.
+const (
+	AutoCompleteErrorHeader = "X-Auto-Complete-Error"
+	AutoCompleteErrorValue  = "failed"
+)
+
 // SSEEvent represents the payload sent to clients
 type SSEEvent struct {
 	Type EventType `json:"type"`

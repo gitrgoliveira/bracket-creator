@@ -579,16 +579,16 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
             {liveMatches.slice(0, LIVE_STRIP_MAX_CHIPS).map(m => {
               const a = sideName(m.sideA);
               const b = sideName(m.sideB);
-              const court = m.court ? `Shiaijo ${m.court}` : "Unassigned";
+              const courtLabel = m.court ? `Shiaijo ${m.court}` : "Unassigned";
+              const courtPhrase = m.court ? `on Shiaijo ${m.court}` : "with no court assigned";
               return (
                 <button
                   key={`${m.compId}:${m.id}`}
                   className="live-strip__chip"
                   onClick={() => onOpenScore && onOpenScore(m)}
-                  title={`${b} – ${a}`}
-                  aria-label={`Open score editor: ${court}, ${b} versus ${a}`}
+                  aria-label={`Open score editor for ${b} versus ${a} ${courtPhrase}`}
                 >
-                  <span className="live-strip__court">{court}</span>
+                  <span className="live-strip__court">{courtLabel}</span>
                   <span className="live-strip__names">{b} – {a}</span>
                 </button>
               );

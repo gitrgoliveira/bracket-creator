@@ -50,9 +50,13 @@ function normalizeDate(d) {
   return d;
 }
 
-window.sideName = sideName;
-window.compMatchStats = compMatchStats;
-window.normalizeDate = normalizeDate;
+// Guard window assignments so this file stays safely importable in
+// non-browser test environments (matches the pattern in data.jsx / ui.jsx).
+if (typeof window !== "undefined") {
+  window.sideName = sideName;
+  window.compMatchStats = compMatchStats;
+  window.normalizeDate = normalizeDate;
+}
 
 // Also exported so the vitest suite under web-mobile/js/__tests__/ can
 // import these directly without going through window globals.

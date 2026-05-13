@@ -336,23 +336,16 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
     try {
       const fd = new FormData();
       files.forEach(f => fd.append("files", f, f.webkitRelativePath || f.name));
-      const res = await fetch("/api/tournament/import", {
-        method: "POST",
-        headers: { "X-Tournament-Password": password },
-        body: fd,
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        setError(body.error || "Import failed");
-      } else {
-        setResults(body.results || []);
-        const hasErrors = (body.results || []).some(r => r.error);
-        if (!hasErrors) {
-          importedTimerRef.current = setTimeout(() => {
-            importedTimerRef.current = null;
-            onImported();
-          }, 1500);
-        }
+      // Use the centralized API wrapper (api.jsx) so auth + error handling
+      // stay consistent with the rest of the admin UI.
+      const body = await window.API.importCompetitions(fd, password);
+      setResults(body.results || []);
+      const hasErrors = (body.results || []).some(r => r.error);
+      if (!hasErrors) {
+        importedTimerRef.current = setTimeout(() => {
+          importedTimerRef.current = null;
+          onImported();
+        }, 1500);
       }
     } catch (e) {
       setError(e.message);

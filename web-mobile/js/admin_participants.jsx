@@ -429,7 +429,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
             rows={14}
             placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Mumeishi" : "Akira Tanaka, Mumeishi"}
           />
-          <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by row order.</div>
+          <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by name match (case-insensitive), so you can reorder rows freely.</div>
           {otherComps.length > 0 && (
             <div style={{ marginTop: 10 }}>
               {!showSlotForm ? (

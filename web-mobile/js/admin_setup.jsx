@@ -22,7 +22,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     if (!/^\d{4}-\d{2}-\d{2}$/.test(norm)) { setError("Invalid date. Please pick a valid day."); return; }
     const year = parseInt(norm.substring(0, 4));
     if (year < 1900 || year > 2100) { setError("Year must be between 1900 and 2100."); return; }
-    if (courts < 1 || courts > 26) { setError("Number of courts must be between 1 and 26."); return; }
+    if (!Number.isInteger(courts) || courts < 1 || courts > 26) { setError("Number of courts must be a whole number between 1 and 26."); return; }
 
     onSave({
       name,

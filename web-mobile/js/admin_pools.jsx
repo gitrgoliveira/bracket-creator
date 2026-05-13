@@ -172,6 +172,7 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                             className="rank-input"
                             value={s.rank || i + 1}
                             onChange={(e) => overrideRank(pool.poolName, s.player.name, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
                             style={{
                               width: 32,
                               border: s.isOverridden ? "1px solid var(--accent)" : "1px solid transparent",
@@ -214,7 +215,7 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsA, m.ipponsB, m.score, m.decision) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={() => onEditScore(c.id, m.id, null, m)}>Score</button>
+                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); onEditScore(c.id, m.id, null, m); }}>Score</button>
                         </div>
                       </div>
                     ))}

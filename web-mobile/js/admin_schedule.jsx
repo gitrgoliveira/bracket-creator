@@ -85,10 +85,13 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
   const autoSchedule = async () => {
     const comp = tournament.competitions.find(c => c.id === autoComp);
     if (!comp) return;
-    const compMatches = allMatches.filter(m => m.compId === autoComp);
+    // Skip matches with no/unknown court — the per-court scheduler assumes
+    // each match lives on one of the configured courts; otherwise we'd
+    // create a phantom bucket and time matches that the user hasn't placed.
+    const compMatches = allMatches.filter(m => m.compId === autoComp && courts.includes(m.court));
     const byCt = {};
     courts.forEach(cc => byCt[cc] = []);
-    compMatches.forEach(m => (byCt[m.court] = byCt[m.court] || []).push(m));
+    compMatches.forEach(m => byCt[m.court].push(m));
 
     setAutoSaving(true);
     try {

@@ -341,7 +341,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     const a = document.createElement("a");
     a.href = url;
     a.download = "participants_template.csv";
+    document.body.appendChild(a);
     a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   const isStarted = c.status !== "setup";

@@ -356,6 +356,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     try { await fn(); } finally { setSubmitting(false); }
   };
 
+  // Match ScoreEditorModal: don't dismiss while a save is in-flight,
+  // otherwise unmounting mid-submit causes a setState after unmount.
+  const handleDismiss = () => {
+    if (submitting) return;
+    onClose();
+  };
+
   // left = SHIRO (White), right = AKA (Red)
   const teamSides = [
     { key: "b", name: m.sideB?.name || m.sideB, label: "SHIRO (White)", color: "shiro", iv: ivB, pw: pwB },
@@ -363,7 +370,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   ];
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={handleDismiss}>
       <div className="editor-modal editor-modal--team" onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
@@ -378,7 +385,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--live" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● LIVE" : "PRE-MATCH"}
             </div>
-            <button className="btn btn--ghost btn--sm" onClick={onClose} style={{ padding: "2px 8px" }}>✕ Close</button>
+            <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>
           </div>
         </div>
 
@@ -500,7 +507,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               {m.status === "scheduled" && (
                 <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>▶ Start</button>
               )}
-              <button className="btn" onClick={onClose} disabled={submitting}>Cancel</button>
+              <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>
               {onSubmitAndNext ? (
                 <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmitAndNext(buildPatch("completed")))} disabled={submitting}>
                   {submitting ? "Saving…" : "Finish + Start Next →"}

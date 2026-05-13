@@ -210,6 +210,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     }, 400);
   };
 
+  // Cancel any pending debounced save on unmount so the timer can't fire
+  // saveNow() (and trigger state updates / API calls) after teardown.
+  useEffectA(() => () => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  }, []);
+
   const update = (k, v) => {
     const next = { ...local, [k]: v };
     setLocal(next);

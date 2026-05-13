@@ -2241,6 +2241,28 @@ a:hover {
   text-align: center;
 }
 
+/* Small icon-only button used for stacked arrow controls (e.g., seed-row ↑/↓).
+   Sized to meet a comfortable touch target on desktop; bumps to 44px on touch
+   devices so phones/tablets remain usable. */
+.btn--icon-sm {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (pointer: coarse) {
+  .btn--icon-sm {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px 10px;
+  }
+}
+
 .seed-row__input:focus {
   outline: none;
   border-color: var(--accent);

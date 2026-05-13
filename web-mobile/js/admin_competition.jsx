@@ -191,14 +191,23 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
 
   const saveNow = (next) => {
     const norm = normalizeDate(next.date);
-    if (norm && !/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+    const dateIsValid = !!norm && /^\d{4}-\d{2}-\d{2}$/.test(norm);
+    const dateChanged = next.date !== c.date;
+
+    // Only block when the user is *changing* the date to an invalid value.
+    // A legacy/imported competition with c.date="" (or some malformed
+    // string) should still allow editing name/courts/poolSize without
+    // forcing a date fix first — fixing the date is a separate edit.
+    if (dateChanged && !dateIsValid) {
       setSaveErr("Invalid date. Please pick a valid day.");
       return;
     }
-    const year = parseInt(norm.substring(0, 4));
-    if (year < 1900 || year > 2100) {
-      setSaveErr("Year must be between 1900 and 2100.");
-      return;
+    if (dateIsValid) {
+      const year = parseInt(norm.substring(0, 4));
+      if (year < 1900 || year > 2100) {
+        setSaveErr("Year must be between 1900 and 2100.");
+        return;
+      }
     }
 
     if (next.name.toLowerCase() !== c.name.toLowerCase()) {
@@ -209,7 +218,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       }
     }
 
-    const finalNext = { ...c, ...next, date: norm };
+    // Normalize on save when valid (auto-cleans DD-MM-YYYY → ISO on any
+    // save where the date round-trips cleanly). Otherwise preserve the
+    // raw existing value so we don't clobber legacy data with `null`.
+    const finalNext = { ...c, ...next, date: dateIsValid ? norm : next.date };
     Promise.resolve(onUpdate(finalNext)).then(() => {
       const now = new Date();
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);

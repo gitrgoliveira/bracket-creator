@@ -110,4 +110,22 @@ describe('normalizeDate', () => {
     expect(normalizeDate("not a date")).toBe("not a date");
     expect(normalizeDate("2026/05/13")).toBe("2026/05/13"); // wrong separator order
   });
+
+  it('rejects semantically invalid ISO dates', () => {
+    expect(normalizeDate("2026-13-32")).toBe(null);
+    expect(normalizeDate("2026-02-31")).toBe(null);
+    expect(normalizeDate("2026-00-15")).toBe(null);
+    expect(normalizeDate("2026-04-31")).toBe(null); // April has 30 days
+  });
+
+  it('rejects semantically invalid DD-MM-YYYY dates', () => {
+    expect(normalizeDate("32-13-2026")).toBe(null);
+    expect(normalizeDate("31-02-2026")).toBe(null);
+    expect(normalizeDate("00-05-2026")).toBe(null);
+  });
+
+  it('accepts Feb 29 in leap years and rejects in non-leap years', () => {
+    expect(normalizeDate("2024-02-29")).toBe("2024-02-29");
+    expect(normalizeDate("2026-02-29")).toBe(null);
+  });
 });

@@ -42,12 +42,28 @@ function compMatchStats(c) {
 
 function normalizeDate(d) {
   if (!d) return d;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
-  const match = d.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-  if (match) {
-    return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  let out;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    out = d;
+  } else {
+    const match = d.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (!match) return d;
+    out = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
   }
-  return d;
+  // Reject semantically invalid dates like "2026-13-32" or "31-02-2026".
+  // JS's Date constructor silently rolls invalid components over (Feb 31 →
+  // Mar 3), so round-trip the parts through UTC and require an exact match.
+  const [y, m, day] = out.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, day));
+  if (
+    isNaN(dt.getTime()) ||
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() + 1 !== m ||
+    dt.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return out;
 }
 
 // Guard window assignments so this file stays safely importable in

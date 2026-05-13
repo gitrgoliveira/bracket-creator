@@ -1,8 +1,77 @@
 // Pools section of a competition: standings tables with rank-override inputs
 // and per-pool drill-down. See web-mobile/admin_split_plan.md.
 
-const { useState: useStateA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 const pluralize = window.pluralize;
+
+// Rank inputs commit on blur / Enter rather than every keystroke. Typing
+// "10" used to fire two API calls (rank=1 then rank=10); the intermediate
+// rank=1 collided with whoever already held rank 1 and produced visible
+// swap-flicker until the second call landed.
+//
+// `focusedRef` suppresses the upstream-sync useEffect while the user is
+// mid-edit — otherwise an SSE-driven standings refresh (another admin
+// completing a match) would clobber the half-typed value. Invalid commits
+// (non-numeric, negative, zero) revert to `initial` so the user doesn't
+// see their garbage typing persist as if accepted.
+//
+// `focusValueRef` snapshots `v` at focus time so we can detect
+// focus-without-edit and avoid committing a stale value if `initial`
+// changed under the user while they were focused (concurrent SSE update).
+function RankInput({ initial, className, onCommit, style }) {
+  const [v, setV] = useStateA(String(initial));
+  const focusedRef = useRefA(false);
+  const focusValueRef = useRefA(String(initial));
+  useEffectA(() => {
+    if (!focusedRef.current) setV(String(initial));
+  }, [initial]);
+  const handleFocus = () => {
+    focusedRef.current = true;
+    focusValueRef.current = v;
+  };
+  const handleBlur = () => {
+    focusedRef.current = false;
+    // User focused but didn't type anything. If `initial` changed under
+    // them while focused (SSE), sync to the latest server value rather
+    // than committing the stale focus-time value.
+    if (v === focusValueRef.current) {
+      if (v !== String(initial)) setV(String(initial));
+      return;
+    }
+    const next = parseInt(v);
+    if (!Number.isFinite(next) || next <= 0) {
+      setV(String(initial));
+      return;
+    }
+    if (String(next) !== String(initial)) onCommit(String(next));
+  };
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setV(String(initial));
+      // Reset the focus snapshot so the subsequent blur is treated as
+      // "no edit" rather than triggering revert-to-initial twice.
+      focusValueRef.current = String(initial);
+      e.currentTarget.blur();
+    }
+  };
+  return (
+    <input
+      type="number"
+      className={className}
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+      onClick={(e) => e.stopPropagation()}
+      style={style}
+    />
+  );
+}
 
 function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
   const resetOverrides = async () => {
@@ -68,11 +137,10 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                 return (
                   <tr key={s.player.name}>
                     <td style={{ width: 60 }}>
-                      <input
-                        type="number"
+                      <RankInput
+                        initial={s.rank || i + 1}
                         className="input"
-                        value={s.rank || i + 1}
-                        onChange={(e) => overrideRank(selectedPool.poolName, s.player.name, e.target.value)}
+                        onCommit={(v) => overrideRank(selectedPool.poolName, s.player.name, v)}
                         style={{
                           width: 44,
                           padding: "4px 8px",
@@ -179,12 +247,10 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                     return (
                       <tr key={s.player.name}>
                         <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-                          <input
-                            type="number"
+                          <RankInput
+                            initial={s.rank || i + 1}
                             className="rank-input"
-                            value={s.rank || i + 1}
-                            onChange={(e) => overrideRank(pool.poolName, s.player.name, e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
+                            onCommit={(v) => overrideRank(pool.poolName, s.player.name, v)}
                             style={{
                               width: 40,
                               height: 36,

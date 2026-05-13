@@ -124,9 +124,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     const existingIds = new Set((tournament.competitions || []).map(cc => cc.id));
     let id = baseSlug || ("c-" + Date.now().toString(36));
     if (existingIds.has(id)) {
-      let n = 2;
-      while (existingIds.has(`${baseSlug}-${n}`)) n++;
-      id = `${baseSlug}-${n}`;
+      if (baseSlug) {
+        let n = 2;
+        while (existingIds.has(`${baseSlug}-${n}`)) n++;
+        id = `${baseSlug}-${n}`;
+      } else {
+        // Timestamp ID already taken (extremely unlikely — same-ms create).
+        // Re-mint with crypto entropy rather than producing a leading-dash
+        // slug. crypto.randomUUID is universal in browsers we target; fall
+        // back to Math.random for ancient environments.
+        const entropy = (typeof crypto !== "undefined" && crypto.randomUUID)
+          ? crypto.randomUUID().slice(0, 8)
+          : Math.floor(Math.random() * 1e9).toString(36);
+        id = `c-${Date.now().toString(36)}-${entropy}`;
+      }
     }
     const c = window.buildCompetition({
       id,

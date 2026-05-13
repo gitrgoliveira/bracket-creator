@@ -338,9 +338,13 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, _e
     return [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(f));
   });
 
-  const order = { in_progress: 0, scheduled: 1, complete: 2, pending: 3 };
+  // Status keys must match backend values; sort live first, then upcoming,
+  // then completed. Anything unrecognized goes to the end.
+  const order = { running: 0, scheduled: 1, completed: 2 };
   filtered.sort((a, b) => {
-    if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
+    const ao = order[a.status] ?? 99;
+    const bo = order[b.status] ?? 99;
+    if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   });
 

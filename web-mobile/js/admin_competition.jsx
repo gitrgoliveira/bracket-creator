@@ -174,7 +174,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   const saveNow = (next) => {
     const norm = normalizeDate(next.date);
     if (norm && !/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
-      setSaveErr("Invalid date format. Use DD-MM-YYYY.");
+      setSaveErr("Invalid date. Please pick a valid day.");
       return;
     }
     const year = parseInt(norm.substring(0, 4));
@@ -248,7 +248,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
         <div className="field">
           <label className="field__label">Date</label>
           <input className="input" type="date" min="2020-01-01" max="2100-12-31" value={local.date} onChange={(e) => update("date", e.target.value)} />
-          <div className="field__hint">Format: DD-MM-YYYY</div>
+          <div className="field__hint">Pick the competition day.</div>
         </div>
         <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>
       </div>

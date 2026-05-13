@@ -29,7 +29,7 @@ function parsePastedRows(text, transform) {
   return out;
 }
 
-function LinedTextarea({ value, onChange, rows, placeholder }) {
+function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) {
   const textareaRef = useRefA(null);
   const numsRef = useRefA(null);
   const lineCount = Math.max(1, (value || '').split('\n').length);
@@ -49,6 +49,8 @@ function LinedTextarea({ value, onChange, rows, placeholder }) {
         className="lined-textarea__area"
         value={value}
         onChange={onChange}
+        onFocus={onFocus}
+        onBlur={onBlur}
         onScroll={syncScroll}
         rows={rows}
         placeholder={placeholder}

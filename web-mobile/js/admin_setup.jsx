@@ -19,7 +19,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const handleSave = () => {
     if (!name.trim()) { setError("Tournament name is required."); return; }
     const norm = normalizeDate(date);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(norm)) { setError("Invalid date format. Use DD-MM-YYYY."); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(norm)) { setError("Invalid date. Please pick a valid day."); return; }
     const year = parseInt(norm.substring(0, 4));
     if (year < 1900 || year > 2100) { setError("Year must be between 1900 and 2100."); return; }
     if (courts < 1 || courts > 26) { setError("Number of courts must be between 1 and 26."); return; }
@@ -49,7 +49,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <div className="field">
               <label className="field__label">Date</label>
               <input className="input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setError(""); }} />
-              <div className="field__hint">Format: DD-MM-YYYY</div>
+              <div className="field__hint">Pick the tournament day.</div>
             </div>
           </div>
           <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
@@ -175,7 +175,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             <div className="field">
               <label className="field__label">Date</label>
               <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-              <div className="field__hint">Format: DD-MM-YYYY. For multi-day tournaments, specify which day this competition takes place.</div>
+              <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">
               <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>

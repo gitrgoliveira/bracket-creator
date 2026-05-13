@@ -15,9 +15,10 @@ const REFRESHABLE_EVENTS = new Set([
 const LIVE_STRIP_MAX_CHIPS = 6;
 
 // sideA/sideB can be a string (raw backend shape), an object with .name
-// (normaliseMatch output, which substitutes {id:"",name:""} for missing sides),
+// (normalizeMatch output, which substitutes {id:"",name:""} for missing sides),
 // or null. Return the participant's display name, or "" when no real side is
-// present. Used by compMatchStats and AdminTopbar's live-strip filter.
+// present. Used by compMatchStats and AdminTopbar's live-strip filter, so the
+// two stay in lockstep about what "has a real side" means.
 function sideName(side) {
   if (!side) return "";
   if (typeof side === "string") return side;
@@ -32,18 +33,11 @@ function sideName(side) {
 // endpoints when match counts are needed.
 function compMatchStats(c) {
   let total = 0, done = 0, live = 0;
-  // sideA/sideB can be: a string (raw backend shape), an object {id,name}
-  // (normalizeMatch shape, which substitutes {id:"",name:""} for missing
-  // sides), or null. Truthy-checking the side itself is not enough — we have
-  // to look at the actual participant name so byes and unresolved bracket
-  // slots don't get counted toward total/done/live.
-  const hasName = (side) => {
-    if (!side) return false;
-    if (typeof side === "string") return side.length > 0;
-    return !!(side.name && side.name.length > 0);
-  };
+  // Truthy-checking the side itself isn't enough — normalizeMatch substitutes
+  // {id:"",name:""} for missing sides, which is truthy. sideName() returns
+  // "" for those, so byes and unresolved bracket slots stay uncounted.
   const count = (m) => {
-    if (!m || !hasName(m.sideA) || !hasName(m.sideB)) return;
+    if (!m || !sideName(m.sideA) || !sideName(m.sideB)) return;
     total++;
     if (m.status === "completed") done++;
     if (m.status === "running") live++;

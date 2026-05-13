@@ -322,3 +322,133 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	}
 	assert.Equal(t, 1, completedCount, "final match must emit competition_completed exactly once")
 }
+
+// drainHubEvents pulls every queued event off the given hub-subscriber
+// channel within d, decoding each into SSEEvent for inspection.
+func drainHubEvents(t *testing.T, ch <-chan string, d time.Duration) []SSEEvent {
+	t.Helper()
+	var events []SSEEvent
+	deadline := time.After(d)
+	for {
+		select {
+		case msg := <-ch:
+			var e SSEEvent
+			require.NoError(t, json.Unmarshal([]byte(msg), &e))
+			events = append(events, e)
+		case <-deadline:
+			return events
+		}
+	}
+}
+
+// countCompletedEvents counts EventCompetitionCompleted events and asserts
+// each carries the expected competitionId.
+func countCompletedEvents(t *testing.T, events []SSEEvent, wantCompID string) int {
+	t.Helper()
+	n := 0
+	for _, e := range events {
+		if e.Type != EventCompetitionCompleted {
+			continue
+		}
+		n++
+		data, isMap := e.Data.(map[string]any)
+		require.True(t, isMap, "competition_completed data must be a map")
+		assert.Equal(t, wantCompID, data["competitionId"])
+	}
+	return n
+}
+
+// TestBulkScoreHandler_CompletionBroadcastContract verifies that bulk-scoring
+// the last remaining pool matches emits EventCompetitionCompleted exactly
+// once (and partial bulk completion does not).
+func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "bulk1", Format: state.CompFormatPools, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants("bulk1", []helper.Player{
+		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
+	}))
+	require.NoError(t, store.SavePoolMatches("bulk1", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2"},
+		{ID: "PoolA-2", SideA: "P1", SideB: "P3"},
+		{ID: "PoolA-3", SideA: "P2", SideB: "P3"},
+	}))
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	bulkScore := func(results []state.MatchResult) {
+		body, _ := json.Marshal(results)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/bulk1/matches/bulk-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+
+	// Partial bulk completion (1 of 3) — no competition_completed
+	bulkScore([]state.MatchResult{
+		{ID: "PoolA-1", Winner: "P1", Status: state.MatchStatusCompleted},
+	})
+	partial := drainHubEvents(t, ch, 30*time.Millisecond)
+	assert.Equal(t, 0, countCompletedEvents(t, partial, "bulk1"),
+		"partial bulk completion must not broadcast competition_completed")
+
+	// Final batch closes out the comp — exactly one competition_completed
+	bulkScore([]state.MatchResult{
+		{ID: "PoolA-2", Winner: "P1", Status: state.MatchStatusCompleted},
+		{ID: "PoolA-3", Winner: "P2", Status: state.MatchStatusCompleted},
+	})
+	final := drainHubEvents(t, ch, 100*time.Millisecond)
+	assert.Equal(t, 1, countCompletedEvents(t, final, "bulk1"),
+		"final bulk-score batch must emit competition_completed exactly once")
+}
+
+// TestQuickScoreHandler_CompletionBroadcastContract verifies that
+// quick-scoring the last remaining pool match emits EventCompetitionCompleted
+// exactly once, and a non-final quick-score does not.
+func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "qs1", Format: state.CompFormatPools, Status: state.CompStatusPools, TeamSize: 3,
+	}))
+	require.NoError(t, store.SavePools("qs1", []helper.Pool{
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}, {Name: "TeamC"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches("qs1", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB"},
+		{ID: "PoolA-2", SideA: "TeamA", SideB: "TeamC"},
+	}))
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	quickScore := func(mid, sideA, sideB string, aWins, bWins, draws int) {
+		body, _ := json.Marshal(map[string]any{
+			"sideA": sideA, "sideB": sideB,
+			"teamAWins": aWins, "teamBWins": bWins, "draws": draws,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/qs1/matches/"+mid+"/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+
+	// First match — no completion
+	quickScore("PoolA-1", "TeamA", "TeamB", 2, 1, 0)
+	partial := drainHubEvents(t, ch, 30*time.Millisecond)
+	assert.Equal(t, 0, countCompletedEvents(t, partial, "qs1"),
+		"partial quick-score must not broadcast competition_completed")
+
+	// Final match — exactly one completion
+	quickScore("PoolA-2", "TeamA", "TeamC", 2, 1, 0)
+	final := drainHubEvents(t, ch, 100*time.Millisecond)
+	assert.Equal(t, 1, countCompletedEvents(t, final, "qs1"),
+		"final quick-score must emit competition_completed exactly once")
+}

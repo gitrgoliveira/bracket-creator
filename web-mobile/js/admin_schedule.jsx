@@ -38,14 +38,23 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
   const courts = tournament.courts;
   const byCourt = {};
   courts.forEach((cc) => byCourt[cc] = []);
-  filtered.forEach((m) => { (byCourt[m.court] = byCourt[m.court] || []).push(m); });
-  Object.values(byCourt).forEach((list) => list.sort((a, b) => {
+  // Matches whose court isn't in the configured list (missing, removed from
+  // config, or stale) go into a separate "Unassigned" bucket so they stay
+  // visible and movable instead of vanishing into an unrendered key.
+  const unassigned = [];
+  filtered.forEach((m) => {
+    if (m.court && byCourt[m.court]) byCourt[m.court].push(m);
+    else unassigned.push(m);
+  });
+  const courtOrder = (a, b) => {
     const order = { running: 0, scheduled: 1, completed: 2 };
     const ao = order[a.status] ?? 99;
     const bo = order[b.status] ?? 99;
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
-  }));
+  };
+  Object.values(byCourt).forEach((list) => list.sort(courtOrder));
+  unassigned.sort(courtOrder);
 
   const matchHasFilter = (m) => window.matchHighlightedBy(m, picked, dojoText);
   const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
@@ -70,11 +79,13 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
     }
   };
 
-  // Auto-schedule: assign sequential times to matches within a competition per court
+  // Auto-schedule: assign sequential times to matches within a competition per court.
+  // Operate on allMatches so UI filters (player/dojo/competition pill) don't
+  // shrink the set being scheduled — otherwise it's easy to time only a subset.
   const autoSchedule = async () => {
     const comp = tournament.competitions.find(c => c.id === autoComp);
     if (!comp) return;
-    const compMatches = filtered.filter(m => m.compId === autoComp);
+    const compMatches = allMatches.filter(m => m.compId === autoComp);
     const byCt = {};
     courts.forEach(cc => byCt[cc] = []);
     compMatches.forEach(m => (byCt[m.court] = byCt[m.court] || []).push(m));
@@ -196,6 +207,28 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
                 </div>
               );
             })}
+            {unassigned.length > 0 && (
+              <div className="tw-court">
+                <div className="tw-court__head">
+                  <div>
+                    <div className="tw-court__title">UNASSIGNED</div>
+                    <div className="tw-court__sub">{unassigned.length} match{unassigned.length === 1 ? "" : "es"}</div>
+                  </div>
+                </div>
+                <div className="tw-court__list">
+                  {unassigned.map((m) => (
+                    <AdminTWMatch
+                      key={`${m.compId}:${m.id}`}
+                      m={m}
+                      highlight={matchHasFilter(m)}
+                      courts={courts}
+                      onMove={(toCourt) => onMoveCourt(m.compId, m.id, toCourt)}
+                      onTimeChange={(newTime) => saveMatchTime(m, newTime)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -474,9 +507,13 @@ function AdminExport({ c, t }) {
     }
   };
 
-  const copyUrl = () => {
-    navigator.clipboard.writeText(url);
-    alert("URL copied to clipboard!");
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("URL copied to clipboard!");
+    } catch (err) {
+      alert("Failed to copy URL: " + (err?.message || err));
+    }
   };
 
   return (

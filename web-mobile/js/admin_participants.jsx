@@ -274,7 +274,6 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
   const apply = () => {
     try {
-      console.log("AdminParticipants: Applying", lines.length, "lines");
       const withZekken = c.withZekkenName;
       const existingMap = new Map((c.players || []).map(p => [p.name, p]));
       const parsed = window.parseParticipantLines(lines, withZekken);
@@ -298,7 +297,6 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         if (existing) updatedCount++; else added++;
         return { id: existing?.id || `${c.id}-p${i + 1}`, name, displayName, dojo, danGrade, tag, seed: existing?.seed || null };
       });
-      console.log("AdminParticipants: Final list", np);
       onUpdate({ ...c, players: np });
 
       const label = c.kind === "team" ? "team" : "participant";

@@ -11,8 +11,18 @@ const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: u
 // endpoints when match counts are needed.
 function compMatchStats(c) {
   let total = 0, done = 0, live = 0;
+  // sideA/sideB can be: a string (raw backend shape), an object {id,name}
+  // (normalizeMatch shape, which substitutes {id:"",name:""} for missing
+  // sides), or null. Truthy-checking the side itself is not enough — we have
+  // to look at the actual participant name so byes and unresolved bracket
+  // slots don't get counted toward total/done/live.
+  const hasName = (side) => {
+    if (!side) return false;
+    if (typeof side === "string") return side.length > 0;
+    return !!(side.name && side.name.length > 0);
+  };
   const count = (m) => {
-    if (!m || !m.sideA || !m.sideB) return;
+    if (!m || !hasName(m.sideA) || !hasName(m.sideB)) return;
     total++;
     if (m.status === "completed") done++;
     if (m.status === "running") live++;

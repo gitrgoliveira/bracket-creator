@@ -318,15 +318,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   useEffectA(() => {
     if (view.kind === "competition") {
-      // Track pending refresh timers + a viewId snapshot so a late-arriving
-      // SSE refresh can't overwrite the current competition with stale data.
+      // `cancelled` is the master gate: cleanup flips it true, and every
+      // async resolution paths through it before calling state setters.
+      // This is what makes navigation-during-in-flight-fetch safe.
+      let cancelled = false;
       const compId = view.id;
       const timers = new Set();
       const schedule = (fn) => {
         const id = setTimeout(() => {
           timers.delete(id);
-          // Re-check the captured compId before applying; if the user has
-          // already navigated away, the new effect run will fetch fresh data.
+          if (cancelled) return;
           fn(compId);
         }, Math.random() * 500);
         timers.add(id);
@@ -340,12 +341,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         const jitter = 500 + Math.random() * 1000;
         pendingTournament = setTimeout(() => {
           pendingTournament = null;
+          if (cancelled) return;
           window.API.fetchCompetitions()
-            .then(comps => onUpdateRef.current({ ...tRef.current, competitions: comps }))
+            .then(comps => {
+              if (cancelled) return;
+              onUpdateRef.current({ ...tRef.current, competitions: comps });
+            })
             .catch(err => console.error("Failed to refresh competitions list", err));
         }, jitter);
       };
       const unsub = window.API.subscribeToEvents((event) => {
+        if (cancelled) return;
         if (REFRESHABLE_EVENTS.has(event.type)) {
           // tournament_updated carries null data (tournament-wide change) — always
           // relevant.  match_updated / competition_started / competition_completed
@@ -361,12 +367,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             // Still trigger full refresh (jittered) to reconcile standings/propagation
             schedule((targetId) => {
               window.API.fetchCompetitionDetails(targetId)
-                .then(data => setAdminCompData(prev => {
-                  // Drop stale data if the user navigated to a different comp
-                  // (or away entirely) while the fetch was in flight.
-                  if (data?.config?.id !== targetId) return prev;
-                  return data;
-                }))
+                .then(data => {
+                  // Cancelled flag is the primary navigation guard. The id
+                  // check is belt-and-braces in case a fetch comes back with
+                  // unexpected data shape.
+                  if (cancelled || data?.config?.id !== targetId) return;
+                  setAdminCompData(data);
+                })
                 .catch(err => console.error("Failed to refresh competition details", err));
             });
           }
@@ -382,6 +389,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         }
       });
       return () => {
+        cancelled = true;
         timers.forEach(clearTimeout);
         timers.clear();
         if (pendingTournament) clearTimeout(pendingTournament);

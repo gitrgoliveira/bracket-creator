@@ -2866,27 +2866,31 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
   //   ←/→              → previous / next match
   //   Enter            → finish (or finish + start next when available)
   //   Esc              → close the modal
-  // Bindings are skipped when the focus is in a text input so typing in the
-  // correction-note field doesn't fire scoring actions.
+  // Skipped when focus is on any interactive element (inputs, buttons, links)
+  // so native keyboard activation keeps working and typing doesn't trigger scoring.
+  const kbRef = React.useRef(null);
+  kbRef.current = { submitting, canFinish, isDrawToggled, onClose, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
+
   useEffectA(() => {
-    const isTypingTarget = (el) => {
+    const isInteractiveTarget = (el) => {
       if (!el) return false;
       const tag = (el.tagName || "").toLowerCase();
-      return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable;
+      return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || el.isContentEditable;
     };
     const onKeyDown = (ev) => {
-      if (submitting) return;
+      const s = kbRef.current;
+      if (s.submitting) return;
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-      if (isTypingTarget(ev.target)) return;
+      if (isInteractiveTarget(ev.target)) return;
 
-      if (ev.key === "Escape") { ev.preventDefault(); onClose(); return; }
-      if (ev.key === "ArrowLeft" && onPrev) { ev.preventDefault(); onPrev(); return; }
-      if (ev.key === "ArrowRight" && onNext) { ev.preventDefault(); onNext(); return; }
-      if (ev.key === "Enter" && canFinish) {
+      if (ev.key === "Escape") { ev.preventDefault(); s.onClose(); return; }
+      if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
+      if (ev.key === "Enter" && s.canFinish) {
         ev.preventDefault();
-        const patch = buildPatch("completed");
-        if (onSubmitAndNext) doSubmit(() => onSubmitAndNext(patch));
-        else doSubmit(() => onSubmit(patch));
+        const patch = s.buildPatch("completed");
+        if (s.onSubmitAndNext) s.doSubmit(() => s.onSubmitAndNext(patch));
+        else s.doSubmit(() => s.onSubmit(patch));
         return;
       }
 
@@ -2894,16 +2898,14 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
       const upper = k.toUpperCase();
       if ("MKDTH".includes(upper) && k.length === 1) {
         ev.preventDefault();
-        // Capital letter (Shift held) → AKA; lowercase → SHIRO. The H button
-        // is awarded to the opponent for a Hansoku, but keyboard 'h' awards
-        // a direct point per the on-screen button semantics.
+        // Capital letter (Shift held) → AKA; lowercase → SHIRO.
         const isUpper = k === upper && k !== upper.toLowerCase();
-        addPt(isUpper ? "a" : "b", upper);
+        s.addPt(isUpper ? "a" : "b", upper);
         return;
       }
       if (k === "x" || k === "X") {
         ev.preventDefault();
-        if (isDrawToggled) {
+        if (s.isDrawToggled) {
           setIsDrawToggled(false);
         } else {
           setIsDrawToggled(true);
@@ -2913,7 +2915,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [submitting, canFinish, isDrawToggled, onClose, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt]);
+  }, []); // listener registered once; reads fresh state via kbRef
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

@@ -1113,12 +1113,13 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
 }
 
 function MatchViewerModal({ match, onClose }) {
-  const { useEffect: useEV } = React;
-  useEV(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => { onCloseRef.current = onClose; });
+  React.useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onCloseRef.current(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []); // listener registered once; reads latest callback via ref
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const aName = match.sideA?.name || "TBD";

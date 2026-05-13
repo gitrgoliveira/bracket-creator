@@ -313,11 +313,13 @@ function App() {
 }
 
 function useEscapeToClose(onClose) {
+  const cbRef = React.useRef(onClose);
+  useE(() => { cbRef.current = onClose; });
   useE(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e) => { if (e.key === "Escape") cbRef.current(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []); // listener registered once; reads latest callback via ref
 }
 
 function AuthModal({ onClose, onSuccess }) {

@@ -177,6 +177,124 @@ describe('API Utils', () => {
           .rejects.toThrow('Failed to move match court');
       });
     });
+
+    // Regression tests for the empty-body bug: three handlers
+    // (override-rank, override-winner, reset-overrides) return `c.Status`
+    // with no body. The JS client used to call `return res.json()` on
+    // success, which per the Fetch spec rejects with SyntaxError on an
+    // empty body — surfacing to the user as alert("Failed: Unexpected
+    // end of JSON input") right after a *successful* save. The fix is
+    // `return true;`, verified here by mocking a response with no .json
+    // method (any call to it would throw, which the test would see).
+    describe('overridePoolRank (empty-body success)', () => {
+      it('resolves to true on 200 with no body', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+        await expect(API.overridePoolRank('c1', 'p1', 'Alice', 2, 'pw'))
+          .resolves.toBe(true);
+      });
+
+      it('does not call res.json() on the success path', async () => {
+        // If a future regression re-introduces `return res.json()`,
+        // this empty-body mock would throw "Unexpected end of JSON
+        // input" and the test would fail.
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+        });
+        await expect(API.overridePoolRank('c1', 'p1', 'Alice', 2, 'pw'))
+          .resolves.toBe(true);
+      });
+
+      it('throws with server error message on 400', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'rank must be a positive integer ≤ 1000' }),
+        });
+        await expect(API.overridePoolRank('c1', 'p1', 'Alice', 2000, 'pw'))
+          .rejects.toThrow('rank must be a positive integer ≤ 1000');
+      });
+
+      it('PUTs JSON body with playerName + rank', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+        await API.overridePoolRank('comp1', 'pool-A', 'Alice', 3, 'secret');
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp1/pools/pool-A/override-rank',
+          expect.objectContaining({
+            method: 'PUT',
+            headers: expect.objectContaining({
+              'Content-Type': 'application/json',
+              'X-Tournament-Password': 'secret',
+            }),
+            body: JSON.stringify({ playerName: 'Alice', rank: 3 }),
+          }),
+        );
+      });
+    });
+
+    describe('overrideBracketWinner (empty-body success)', () => {
+      it('resolves to true on 200 with no body', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+          .resolves.toBe(true);
+      });
+
+      it('does not call res.json() on the success path', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+        });
+        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+          .resolves.toBe(true);
+      });
+
+      it('throws with server error message on failure', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'match not found' }),
+        });
+        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+          .rejects.toThrow('match not found');
+      });
+    });
+
+    describe('resetOverrides (204 No Content)', () => {
+      it('resolves to true on 204 with no body', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+        await expect(API.resetOverrides('c1', 'pw')).resolves.toBe(true);
+      });
+
+      it('does not call res.json() on the success path', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 204,
+          json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+        });
+        await expect(API.resetOverrides('c1', 'pw')).resolves.toBe(true);
+      });
+
+      it('DELETEs the overrides endpoint with auth header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+        await API.resetOverrides('comp1', 'secret');
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp1/overrides',
+          expect.objectContaining({
+            method: 'DELETE',
+            headers: expect.objectContaining({ 'X-Tournament-Password': 'secret' }),
+          }),
+        );
+      });
+
+      it('throws with server error message on failure', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'permission denied' }),
+        });
+        await expect(API.resetOverrides('c1', 'pw'))
+          .rejects.toThrow('permission denied');
+      });
+    });
   });
 });
 

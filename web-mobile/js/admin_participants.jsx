@@ -62,6 +62,45 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
   );
 }
 
+// Build the participants list to save by reconciling existing players
+// against a newly-parsed roster. Returns { np, added, updatedCount }.
+//
+// - Existing players (matched by lowercase name) keep their stable id
+//   and seed.
+// - New players get the next free `${compID}-pN` slot, skipping any id
+//   already in use by an existing player who is still in the parsed
+//   list (two-pass: pre-populate usedIds before minting, so visible row
+//   order can't cause collisions).
+// - IDs of *removed* players (in c.players but not in parsed) are
+//   intentionally not reserved, so their slots can be reused — keeps
+//   the `${compID}-pN` numbering compact.
+//
+// Exported for tests in __tests__/admin_participants.test.jsx.
+function mintParticipantIds(compID, existingPlayers, parsed) {
+  const existingMap = new Map((existingPlayers || []).map(p => [p.name.toLowerCase(), p]));
+  const parsedKeys = new Set(parsed.map(p => p.name.toLowerCase()));
+  const usedIds = new Set();
+  (existingPlayers || []).forEach(p => {
+    if (parsedKeys.has(p.name.toLowerCase())) usedIds.add(p.id);
+  });
+  let nextSlot = 1;
+  let added = 0, updatedCount = 0;
+  const np = parsed.map(({ name, displayName, dojo, danGrade, tag }) => {
+    const existing = existingMap.get(name.toLowerCase());
+    if (existing) {
+      updatedCount++;
+      return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null };
+    }
+    added++;
+    while (usedIds.has(`${compID}-p${nextSlot}`)) nextSlot++;
+    const id = `${compID}-p${nextSlot}`;
+    usedIds.add(id);
+    nextSlot++;
+    return { id, name, displayName, dojo, danGrade, tag, seed: null };
+  });
+  return { np, added, updatedCount };
+}
+
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
   if (m === 0) return n;
@@ -275,10 +314,6 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const apply = () => {
     try {
       const withZekken = c.withZekkenName;
-      // Key by lowercase name so a casing-only edit (e.g. "Alice" → "alice")
-      // preserves the existing player's id and seed — matches the
-      // case-insensitive duplicate-detection check below.
-      const existingMap = new Map((c.players || []).map(p => [p.name.toLowerCase(), p]));
       const parsed = window.parseParticipantLines(lines, withZekken);
 
       // Duplicate detection (case-insensitive)
@@ -294,40 +329,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         return;
       }
 
-      // ID generation: existing players keep their stable id; new players
-      // get the next free `${c.id}-pN` slot. Two-pass approach so the
-      // visible row order can't cause collisions:
-      //   Pass 1: pre-populate `usedIds` with the ids of every existing
-      //           player whose name is still in the parsed list (i.e.
-      //           rows that will be kept). Without this, a new
-      //           participant appearing BEFORE an existing one would
-      //           be assigned the existing one's slot — and then the
-      //           existing player would later return their own id from
-      //           existingMap, producing duplicate ids in `np`.
-      //   Pass 2: iterate parsed, mint new ids by skipping any
-      //           `${c.id}-pN` already in usedIds.
-      // IDs of *removed* players are intentionally not reserved, so
-      // their slots can be reused for new participants.
-      let added = 0, updatedCount = 0;
-      const parsedKeys = new Set(parsed.map(p => p.name.toLowerCase()));
-      const usedIds = new Set();
-      (c.players || []).forEach(p => {
-        if (parsedKeys.has(p.name.toLowerCase())) usedIds.add(p.id);
-      });
-      let nextSlot = 1;
-      const np = parsed.map(({ name, displayName, dojo, danGrade, tag }) => {
-        const existing = existingMap.get(name.toLowerCase());
-        if (existing) {
-          updatedCount++;
-          return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null };
-        }
-        added++;
-        while (usedIds.has(`${c.id}-p${nextSlot}`)) nextSlot++;
-        const id = `${c.id}-p${nextSlot}`;
-        usedIds.add(id);
-        nextSlot++;
-        return { id, name, displayName, dojo, danGrade, tag, seed: null };
-      });
+      const { np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed);
       onUpdate({ ...c, players: np });
 
       const label = c.kind === "team" ? "team" : "participant";
@@ -647,3 +649,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 }
 
 window.AdminParticipants = AdminParticipants;
+
+// ES export for the vitest suite — pure helpers only. Components remain
+// behind the window.* global pattern to match the rest of admin_*.jsx.
+export { mintParticipantIds };

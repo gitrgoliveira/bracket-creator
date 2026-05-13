@@ -275,7 +275,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const apply = () => {
     try {
       const withZekken = c.withZekkenName;
-      const existingMap = new Map((c.players || []).map(p => [p.name, p]));
+      // Key by lowercase name so a casing-only edit (e.g. "Alice" → "alice")
+      // preserves the existing player's id and seed — matches the
+      // case-insensitive duplicate-detection check below.
+      const existingMap = new Map((c.players || []).map(p => [p.name.toLowerCase(), p]));
       const parsed = window.parseParticipantLines(lines, withZekken);
 
       // Duplicate detection (case-insensitive)
@@ -300,7 +303,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       const usedIds = new Set();
       let nextSlot = 1;
       const np = parsed.map(({ name, displayName, dojo, danGrade, tag }) => {
-        const existing = existingMap.get(name);
+        const existing = existingMap.get(name.toLowerCase());
         if (existing) {
           updatedCount++;
           usedIds.add(existing.id);

@@ -495,12 +495,16 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, _e
 }
 
 
-function AdminExport({ c, t }) {
+function AdminExport({ c, t, password }) {
   const url = `${window.location.origin}/viewer.html?id=${t.id}#comp-${c.id}`;
 
   const downloadXlsx = async () => {
     try {
-      const resp = await fetch(`/api/competitions/${c.id}/export`);
+      // /api/* is behind AuthMiddleware; without the password header
+      // this returns 401 and the download silently fails.
+      const resp = await fetch(`/api/competitions/${c.id}/export`, {
+        headers: password ? { "X-Tournament-Password": password } : {},
+      });
       if (!resp.ok) throw new Error(await resp.text());
       const blob = await resp.blob();
       const dlUrl = window.URL.createObjectURL(blob);

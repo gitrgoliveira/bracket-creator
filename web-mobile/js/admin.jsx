@@ -2870,6 +2870,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled;
   const handleDismiss = () => {
+    if (submitting) return; // don't close while save is in-flight
     if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
     onClose();
   };

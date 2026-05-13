@@ -118,8 +118,12 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
     // each one previously triggered a full tournament+competitions fetch.
     let pending = null;
     let fetching = false;
+    // Track events that arrive during a pending timer or in-flight fetch
+    // so they don't silently get dropped — kick off one more refresh in
+    // the finally block when set.
+    let needsRefresh = false;
     const scheduleRefresh = () => {
-      if (pending || fetching) return;
+      if (pending || fetching) { needsRefresh = true; return; }
       const jitter = 500 + Math.random() * 1000; // 500-1500ms window
       pending = setTimeout(() => {
         pending = null;
@@ -133,7 +137,13 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
         ]).then(([tourney, competitions]) => {
           onUpdate({ ...tourney, competitions });
         }).catch(err => console.error("Dashboard refresh failed", err))
-          .finally(() => { fetching = false; });
+          .finally(() => {
+            fetching = false;
+            if (needsRefresh) {
+              needsRefresh = false;
+              scheduleRefresh();
+            }
+          });
       }, jitter);
     };
     const unsub = window.API.subscribeToEvents((event) => {

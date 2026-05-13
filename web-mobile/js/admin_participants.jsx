@@ -546,32 +546,42 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
             </div>
           ) : (
             <div className="seed-list">
+              {/* When a tag filter is active, reorder controls would operate on */}
+              {/* full-list indices but rows are filtered — so they'd swap with hidden */}
+              {/* neighbours. Disable reordering until the filter is cleared. */}
+              {tagFilter && (
+                <div className="field__hint" style={{ padding: "0 16px 8px" }}>
+                  Reordering disabled while filtered by tag. Clear the filter to drag rows or use the arrows.
+                </div>
+              )}
               {visiblePlayers.map((p) => {
                 const i = players.indexOf(p);
+                const reorderDisabled = !!tagFilter;
                 return (
                   <div
                     key={p.id}
                     className={`seed-row ${p.seed ? "has-seed" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
-                    draggable
+                    draggable={!reorderDisabled}
                     onDragStart={() => { dragIdxRef.current = i; }}
-                    onDragOver={(e) => { e.preventDefault(); setDragOverIdx(i); }}
+                    onDragOver={(e) => { if (reorderDisabled) return; e.preventDefault(); setDragOverIdx(i); }}
                     onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
                     onDrop={() => {
+                      if (reorderDisabled) return;
                       moveSeedRow(dragIdxRef.current, i);
                       dragIdxRef.current = null;
                       setDragOverIdx(null);
                     }}
-                    style={{ cursor: "grab" }}
+                    style={{ cursor: reorderDisabled ? "default" : "grab" }}
                   >
-                    <span className="seed-row__handle" title="Drag to reorder">⠿</span>
+                    <span className="seed-row__handle" title={reorderDisabled ? "Clear the tag filter to reorder" : "Drag to reorder"}>⠿</span>
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div style={{ flex: 1 }}>
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                       <div className="seed-row__dojo">{p.dojo}</div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0} aria-label="Move up">↑</button>
-                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1} aria-label="Move down">↓</button>
+                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
+                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
                     </div>
                      <window.StableInput
                         className="seed-row__input"

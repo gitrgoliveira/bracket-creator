@@ -347,7 +347,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   );
 }
 
-function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password, showToast }) {
+function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast }) {
   const [selected, setSelected] = useStateA(null);
   const scrollRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
@@ -379,15 +379,19 @@ function AdminBracket({ c, t, bracket, onUpdate, onMoveCourt, tweaks, password, 
       score: { type: "ippon", winnerPts: 1, loserPts: 0, ippons: [ipponLetter || "M"], fouls: { a: 0, b: 0 } },
     };
 
+    // Don't call onUpdate(c) on success — AdminApp's onUpdate is the
+    // competition-config PUT, which would overwrite server state with
+    // the (now-stale) c prop. SSE + patchCompetitionData in AdminApp
+    // already refreshes the bracket after a recordScore.
     window.API.recordScore(c.id, m.id, result, password, m)
-      .then(() => onUpdate(c))
       .catch(err => showToast(err.message, "error"));
   };
 
   const overrideWinner = (winnerName) => {
     if (!selected) return;
+    // Same reason as recordWinner: rely on SSE to refresh, don't
+    // route the success path through the config-PUT callback.
     window.API.overrideBracketWinner(c.id, selected.matchId, winnerName, password)
-      .then(() => onUpdate(c))
       .catch(err => showToast(err.message, "error"));
   };
   const selectedMatch = selected ? bracket.rounds[selected.ri][selected.mi] : null;
@@ -552,8 +556,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} />}
             {section === "pools" && <AdminPools c={c} pools={pools} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
-            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onUpdate={onUpdate} onMoveCourt={onMoveCourt} tweaks={tweaks} password={password} showToast={showToast} />}
-            {section === "scores" && <AdminScoreEditor c={c} t={t} onEditScore={onEditScore} onMoveCourt={onMoveCourt} restrictToCompId={c.id} embedded />}
+            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onMoveCourt={onMoveCourt} tweaks={tweaks} password={password} showToast={showToast} />}
+            {section === "scores" && <AdminScoreEditor c={c} t={t} onEditScore={onEditScore} onMoveCourt={onMoveCourt} restrictToCompId={c.id} />}
             {section === "export" && <AdminExport c={c} t={t} password={password} />}
           </div>
         </div>

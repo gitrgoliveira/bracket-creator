@@ -381,10 +381,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       tournament={t}
       onBack={() => setView({ kind: "dashboard" })}
       onMoveCourt={moveMatchCourt}
-      onEditScore={editMatchScore}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
-      tweaks={tweaks}
       password={password}
     />;
   }
@@ -397,7 +395,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onMoveCourt={moveMatchCourt}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
-      tweaks={tweaks}
     />;
   }
 

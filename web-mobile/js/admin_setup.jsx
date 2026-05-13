@@ -115,8 +115,19 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       return;
     }
 
-    const slug = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').substring(0, 50);
-    const id = slug || "c-" + Date.now().toString(36);
+    // Two distinct names can normalize to the same slug (e.g. "Men's" vs
+    // "Mens" both → "mens"). The name-uniqueness check above is case-
+    // insensitive on the *name*, so it won't catch slug collisions —
+    // guard explicitly against existing ids and append a numeric suffix
+    // (or fall back to a timestamp) so create never 409s server-side.
+    const baseSlug = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').substring(0, 50);
+    const existingIds = new Set((tournament.competitions || []).map(cc => cc.id));
+    let id = baseSlug || ("c-" + Date.now().toString(36));
+    if (existingIds.has(id)) {
+      let n = 2;
+      while (existingIds.has(`${baseSlug}-${n}`)) n++;
+      id = `${baseSlug}-${n}`;
+    }
     const c = window.buildCompetition({
       id,
       name: finalName,

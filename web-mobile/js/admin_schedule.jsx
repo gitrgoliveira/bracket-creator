@@ -18,7 +18,7 @@ function timeToMinutes(t) {
   return h * 60 + m;
 }
 
-function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLogout, onViewerMode, _tweaks, password }) {
+function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewerMode, password }) {
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
   const [compFilter, setCompFilter] = useStateA("all");
@@ -321,7 +321,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
 AdminTWMatch.displayName = "AdminTWMatch";
 
 // ---------- Score editor ----------
-function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, _tweaks }) {
+function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode }) {
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
@@ -356,7 +356,7 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
   );
 }
 
-function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, _embedded }) {
+function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) {
   const [filter, setFilter] = useStateA("");
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
   const [statusFilter, setStatusFilter] = useStateA("all");

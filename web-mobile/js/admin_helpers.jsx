@@ -53,3 +53,7 @@ function normalizeDate(d) {
 window.sideName = sideName;
 window.compMatchStats = compMatchStats;
 window.normalizeDate = normalizeDate;
+
+// Also exported so the vitest suite under web-mobile/js/__tests__/ can
+// import these directly without going through window globals.
+export { sideName, compMatchStats, normalizeDate };

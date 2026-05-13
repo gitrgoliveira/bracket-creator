@@ -2875,11 +2875,9 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
     try { await fn(); } finally { setSubmitting(false); }
   };
 
-  // Both spellings are intentional: `score.type` uses the correct "hikiwake"
-  // while the `decision` protocol string is the long-standing "hikewake"
-  // (without the i) — see api.jsx and scoring.go. Don't "fix" without a repo-
-  // wide migration.
-  const initialIsDrawToggled = m.score?.type === "hikiwake" || m.decision === "hikewake";
+  // isHikiwake accepts both the canonical "hikiwake" and legacy "hikewake"
+  // for backward compatibility with state files written before normalization.
+  const initialIsDrawToggled = window.isHikiwake(m.score?.type) || window.isHikiwake(m.decision);
   const [isDrawToggled, setIsDrawToggled] = useStateA(initialIsDrawToggled);
 
   // Arranged as [left, right] — left is always SHIRO (White), right is always AKA (Red)
@@ -3133,7 +3131,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         hansokuA: s.aFouls,
         hansokuB: s.bFouls,
         winner: w ? (typeof w === "object" ? w.name : w) : "",
-        decision: t.winner === null ? "hikewake" : "",
+        decision: t.winner === null ? "hikiwake" : "",
       };
     });
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;

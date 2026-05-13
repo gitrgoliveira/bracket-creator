@@ -812,3 +812,11 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, loaded)
 }
+
+func TestIsDraw(t *testing.T) {
+	assert.True(t, IsDraw("hikiwake"), "canonical spelling")
+	assert.True(t, IsDraw("hikewake"), "legacy spelling preserved for backward compat")
+	assert.False(t, IsDraw(""))
+	assert.False(t, IsDraw("ippon"))
+	assert.False(t, IsDraw("HIKIWAKE"), "case-sensitive — wire format is lowercase")
+}

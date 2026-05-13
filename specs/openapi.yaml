@@ -1263,10 +1263,13 @@ components:
           description: >
             Decision code for the match outcome. Valid values:
             `""` — normal victory (winner field determines the result);
-            `"hikewake"` — draw/tie, recorded when the operator enters 'X' in the vs column
+            `"hikiwake"` — draw/tie, recorded when the operator enters 'X' in the vs column
             or when both sides finish with equal scores.
             Note: encho (extended time) is a play mechanism, not a decision value — a match
-            that goes to encho still resolves as a normal victory or hikewake.
+            that goes to encho still resolves as a normal victory or hikiwake.
+            Backward compatibility: the legacy misspelling `"hikewake"` (missing the 'i')
+            is still accepted on read for data persisted by older versions. All new writes
+            use `"hikiwake"`.
             For individual sub-matches within team matches see `SubMatchResult.decision`.
         status:
           type: string
@@ -1308,7 +1311,8 @@ components:
           type: string
           description: >
             Decision code for this individual sub-match. Same values as `MatchResult.decision`:
-            `""` (normal victory) or `"hikewake"` (draw/tie).
+            `""` (normal victory) or `"hikiwake"` (draw/tie). The legacy spelling
+            `"hikewake"` is still accepted on read.
 
     BracketMatch:
       type: object

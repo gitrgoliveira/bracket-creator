@@ -336,18 +336,25 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // live-strip stays current without firing one fetchCompetitions() per
       // match update.
       let pendingTournament = null;
+      let tournamentFetching = false;
       const scheduleTournamentRefresh = () => {
-        if (pendingTournament) return;
+        if (pendingTournament || tournamentFetching) return;
         const jitter = 500 + Math.random() * 1000;
         pendingTournament = setTimeout(() => {
           pendingTournament = null;
           if (cancelled) return;
+          // tournamentFetching keeps the coalescing gate closed until the
+          // fetch settles, so an event arriving during the in-flight window
+          // can't kick off a second concurrent fetch that might resolve
+          // out-of-order and clobber fresher data.
+          tournamentFetching = true;
           window.API.fetchCompetitions()
             .then(comps => {
               if (cancelled) return;
               onUpdateRef.current({ ...tRef.current, competitions: comps });
             })
-            .catch(err => console.error("Failed to refresh competitions list", err));
+            .catch(err => console.error("Failed to refresh competitions list", err))
+            .finally(() => { tournamentFetching = false; });
         }, jitter);
       };
       const unsub = window.API.subscribeToEvents((event) => {
@@ -593,17 +600,23 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
     // event the SSE stream can fire dozens of match_updated per minute, and
     // each one previously triggered a full tournament+competitions fetch.
     let pending = null;
+    let fetching = false;
     const scheduleRefresh = () => {
-      if (pending) return;
+      if (pending || fetching) return;
       const jitter = 500 + Math.random() * 1000; // 500-1500ms window
       pending = setTimeout(() => {
         pending = null;
+        // Keep the gate closed for the duration of the fetch so a second
+        // burst can't fire a concurrent request that might resolve
+        // out-of-order and clobber fresher data.
+        fetching = true;
         Promise.all([
           window.API.fetchTournament(),
           window.API.fetchCompetitions()
         ]).then(([tourney, competitions]) => {
           onUpdate({ ...tourney, competitions });
-        }).catch(err => console.error("Dashboard refresh failed", err));
+        }).catch(err => console.error("Dashboard refresh failed", err))
+          .finally(() => { fetching = false; });
       }, jitter);
     };
     const unsub = window.API.subscribeToEvents((event) => {

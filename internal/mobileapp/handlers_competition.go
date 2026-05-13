@@ -427,7 +427,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		playoff := state.Competition{
 			Name:           src.Name + " - Playoffs",
-			Format:         "playoffs",
+			Format:         state.CompFormatPlayoffs,
 			Courts:         src.Courts,
 			WithZekkenName: src.WithZekkenName,
 			NumberPrefix:   src.NumberPrefix,

@@ -182,13 +182,16 @@ function App() {
         const jitter = Math.random() * 500;
         if (event.type === "tournament_updated") {
             if (!authPromptRef.current) setTimeout(load, jitter);
-        } else if (event.type === "competition_started" || event.type === "match_updated") {
+        } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
             if (viewerCompId === event.data.competitionId) {
-                // Apply partial update immediately
+                // Apply partial update immediately (match_updated only —
+                // competition_completed has no per-match payload)
                 if (event.type === "match_updated") {
                     setSelectedCompData(prev => patchCompetitionData(prev, event));
                 }
-                // Refresh current competition (jittered)
+                // Refresh current competition (jittered) — the backend has
+                // already persisted the new status before broadcasting, so
+                // this fetch deterministically picks up the transition.
                 setTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData), jitter);
             }
             // Also refresh tournament list for status updates

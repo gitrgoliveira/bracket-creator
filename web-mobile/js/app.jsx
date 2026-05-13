@@ -3,6 +3,13 @@
 
 const { useState: useS, useEffect: useE } = React;
 
+const mergeMatchPatch = (existing, patch) => {
+  const merged = { ...existing, ...patch };
+  if (patch.court === "" || patch.court == null) merged.court = existing.court;
+  if (patch.scheduledAt === "" || patch.scheduledAt == null) merged.scheduledAt = existing.scheduledAt;
+  return merged;
+};
+
 const patchCompetitionData = (prev, event) => {
   if (!prev || !event.data) return prev;
   const { result, results } = event.data;
@@ -16,7 +23,7 @@ const patchCompetitionData = (prev, event) => {
   if (next.poolMatches) {
     next.poolMatches = next.poolMatches.map(m => {
       const update = resultMap.get(m.id);
-      if (update) { changed = true; return { ...m, ...update }; }
+      if (update) { changed = true; return mergeMatchPatch(m, update); }
       return m;
     });
   }
@@ -31,7 +38,7 @@ const patchCompetitionData = (prev, event) => {
           const patch = { ...update };
           if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
           if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-          return { ...m, ...patch };
+          return mergeMatchPatch(m, patch);
         }
         return m;
       })

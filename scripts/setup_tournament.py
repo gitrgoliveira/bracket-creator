@@ -348,10 +348,17 @@ def wait_for_status(comp_id, expected, timeout_s=5.0, interval_s=0.2):
     resp = None  # guard against UnboundLocalError if every attempt raises ConnectionError
     while time.time() < deadline:
         try:
-            resp = requests.get(f"{BASE_URL}/api/competitions/{comp_id}", headers=HEADERS)
-        except requests.exceptions.ConnectionError as e:
+            # Bound the per-call wait to interval_s so a hung server can't
+            # block past `timeout_s`. The loop's own deadline still bounds
+            # total wait time.
+            resp = requests.get(
+                f"{BASE_URL}/api/competitions/{comp_id}",
+                headers=HEADERS,
+                timeout=interval_s,
+            )
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
             # Transient — retry until deadline
-            print(f"  [WARN] Connection error polling {comp_id}: {e}")
+            print(f"  [WARN] Connection/timeout error polling {comp_id}: {e}")
             time.sleep(interval_s)
             continue
         if 400 <= resp.status_code < 500:

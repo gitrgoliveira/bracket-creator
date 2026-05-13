@@ -470,7 +470,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           <div className="live-strip__chips">
             {liveMatches.slice(0, 6).map(m => (
               <button
-                key={m.compId + m.id}
+                key={`${m.compId}:${m.id}`}
                 className="live-strip__chip"
                 onClick={() => onOpenScore && onOpenScore(m)}
                 title={`${m.sideB.name} – ${m.sideA.name}`}
@@ -2581,7 +2581,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
                       <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "20px 8px", textAlign: "center" }}>No matches assigned to this shiaijo</div>
                     ) : list.map((m) => (
                       <AdminTWMatch
-                        key={m.compId + m.id}
+                        key={`${m.compId}:${m.id}`}
                         m={m}
                         highlight={matchHasFilter(m)}
                         courts={courts}
@@ -2776,7 +2776,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, _e
           const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
           const isCorrection = m.status === "completed" && m.score?.corrected;
           return (
-            <div key={m.compId + m.id} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
+            <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
@@ -2812,7 +2812,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, _e
       </div>
 
       {openMatch && (() => {
-        const openIdx = filtered.findIndex(m => m.compId + m.id === openMatch.compId + openMatch.id);
+        const openIdx = filtered.findIndex(m => `${m.compId}:${m.id}` === `${openMatch.compId}:${openMatch.id}`);
         const prevMatch = openIdx > 0 ? filtered[openIdx - 1] : null;
         const nextMatch = openIdx < filtered.length - 1 ? filtered[openIdx + 1] : null;
         return (

@@ -283,10 +283,14 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 		}
 	}
 
+	// Omit sideA/sideB from the patch so the engine preserves the stored
+	// participants. Hardcoding "P1"/"P2" for every match would mutate
+	// PoolA-2 (which has P1 vs P3) and mask side-preservation bugs.
 	scoreMatch := func(mid, winner string) {
 		body, _ := json.Marshal(state.MatchResult{
-			ID: mid, SideA: "P1", SideB: "P2",
-			Winner: winner, Status: state.MatchStatusCompleted,
+			ID:     mid,
+			Winner: winner,
+			Status: state.MatchStatusCompleted,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/pools1/matches/"+mid+"/score", bytes.NewBuffer(body))

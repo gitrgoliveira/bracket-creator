@@ -23,19 +23,21 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			Error   string `json:"error"`
 		}
 		var errs []scoreError
-		succeeded := 0
+		// Only successfully-recorded results go into the SSE broadcast so
+		// clients never patch with values the engine rejected.
+		var successful []state.MatchResult
 		for i := range results {
 			if err := eng.RecordMatchResult(id, results[i].ID, &results[i]); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 			} else {
-				succeeded++
+				successful = append(successful, results[i])
 			}
 		}
 
-		if succeeded > 0 {
+		if len(successful) > 0 {
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
-				"results":       results,
+				"results":       successful,
 			})
 			if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
 				log.Printf("MaybeAutoCompletePools(%s): %v", id, err)
@@ -43,7 +45,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 				hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"succeeded": succeeded, "errors": errs})
+		c.JSON(http.StatusOK, gin.H{"succeeded": len(successful), "errors": errs})
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/quick-score", func(c *gin.Context) {

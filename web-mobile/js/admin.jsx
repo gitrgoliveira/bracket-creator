@@ -323,12 +323,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
               setAdminCompData(prev => patchCompetitionData(prev, event));
             }
             // Still trigger full refresh (jittered) to reconcile standings/propagation
-            setTimeout(() => window.API.fetchCompetitionDetails(view.id).then(setAdminCompData), jitter);
+            setTimeout(() => window.API.fetchCompetitionDetails(view.id)
+              .then(setAdminCompData)
+              .catch(err => console.error("Failed to refresh competition details", err)), jitter);
           }
           // competition_completed on any comp may unblock a dependent playoff
           // we're currently viewing, so always trigger a tournament-wide refresh.
           if (event.type === "competition_completed") {
-            setTimeout(() => window.API.fetchCompetitions().then(comps => onUpdateRef.current({ ...tRef.current, competitions: comps })), jitter);
+            setTimeout(() => window.API.fetchCompetitions()
+              .then(comps => onUpdateRef.current({ ...tRef.current, competitions: comps }))
+              .catch(err => console.error("Failed to refresh competitions after completion", err)), jitter);
           }
         }
       });

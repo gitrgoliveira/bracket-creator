@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -302,6 +303,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
+
+		// A pools competition that generated zero matches (e.g. single
+		// participant) has nothing to score, so trip the auto-complete check
+		// at start time. The non-zero case will trip via score handlers.
+		if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
+			log.Printf("MaybeAutoCompletePools(%s) after start: %v", id, err)
+		} else if autoCompleted {
+			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
+		}
+
 		c.JSON(http.StatusOK, comp)
 	})
 

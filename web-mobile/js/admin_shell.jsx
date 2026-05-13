@@ -238,7 +238,10 @@ function CompCard({ c, onOpen, onStart }) {
       role="button"
       tabIndex={0}
       onClick={onOpen}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+      // Only fire when focus is on the card itself, not on a nested
+      // <button> inside .tcard__actions — otherwise Enter on
+      // "Start Competition" would also trigger onOpen.
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(); } }}
     >
       <div className="tcard__head">
         <div>

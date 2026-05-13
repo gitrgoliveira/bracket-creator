@@ -152,7 +152,10 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
               role="button"
               tabIndex={0}
               onClick={() => setSelectedPoolName(pool.poolName)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedPoolName(pool.poolName); } }}
+              // Only fire when the card itself has focus, not a nested
+              // rank input or per-match Score button — those handle their
+              // own activation.
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setSelectedPoolName(pool.poolName); } }}
               style={{ cursor: "pointer" }}
             >
               <div className="pool__head">

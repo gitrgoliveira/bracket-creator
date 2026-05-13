@@ -3,6 +3,11 @@ const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
 
+// Canonical draw value is "hikiwake"; "hikewake" (missing 'i') is the legacy
+// spelling and is still accepted on read for backward compatibility. All new
+// writes use "hikiwake". See specs/openapi.yaml for details.
+function isHikiwake(v) { return v === "hikiwake" || v === "hikewake"; }
+
 // Translate UI score patch into backend MatchResult shape.
 // UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }
 // Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
@@ -24,7 +29,7 @@ function toBackendMatchResult(patch, match) {
         ipponsB,
         hansokuA: fouls.a || 0,
         hansokuB: fouls.b || 0,
-        decision: score.type === "hikiwake" || score.type === "hikewake" ? "hikewake" : "",
+        decision: isHikiwake(score.type) ? "hikiwake" : "",
         status: toBackendStatus(patch.status || "scheduled"),
     };
     if (patch.subResults) {
@@ -72,7 +77,7 @@ function normalizeMatch(m, playerMap) {
     if (!norm.score && (norm.ipponsA?.length || norm.ipponsB?.length) && norm.status === "completed") {
         const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
         norm.score = {
-            type: norm.decision === "hikewake" ? "hikiwake" : "ippon",
+            type: isHikiwake(norm.decision) ? "hikiwake" : "ippon",
             winnerPts: aWin ? (norm.ipponsA?.length || 0) : (norm.ipponsB?.length || 0),
             loserPts: aWin ? (norm.ipponsB?.length || 0) : (norm.ipponsA?.length || 0),
             ippons: aWin ? norm.ipponsA : norm.ipponsB,
@@ -456,7 +461,7 @@ const API = {
     }
 };
 
-export { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, API };
+export { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, isHikiwake, API };
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -464,4 +469,5 @@ if (typeof window !== 'undefined') {
     window.normalizeCompetitionDetail = normalizeCompetitionDetail;
     window.buildPlayerMap = buildPlayerMap;
     window.toBackendStatus = toBackendStatus;
+    window.isHikiwake = isHikiwake;
 }

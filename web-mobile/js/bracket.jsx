@@ -4,6 +4,10 @@
 
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
+// Local hikiwake check — bracket.jsx is tested in isolation, so we don't rely
+// on window.isHikiwake here. Accepts both spellings; see specs/openapi.yaml.
+function isHikiwakeBC(v) { return v === "hikiwake" || v === "hikewake"; }
+
 function roundLabel(roundIdx, total) {
   const fromEnd = total - 1 - roundIdx;
   if (fromEnd === 0) return "Final";
@@ -26,7 +30,7 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision) {
   if (score?.type === "hantei") return "H";
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
-  const isDraw = decision === "hikewake" || score?.type === "hikiwake";
+  const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
   if (isDraw) {
     // No-score draw → X; with scores → △
     return (!aStr && !bStr) ? "X" : "△";

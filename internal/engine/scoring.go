@@ -166,7 +166,7 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 			} else if m.Winner == m.SideB {
 				sB.Wins++
 				sA.Losses++
-			} else if m.Decision == "hikewake" || m.Winner == "" {
+			} else if state.IsDraw(m.Decision) || m.Winner == "" {
 				sA.Draws++
 				sB.Draws++
 			}

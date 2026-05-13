@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, API } from '../api.jsx';
+import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, API } from '../api.jsx';
 
 describe('API Utils', () => {
   describe('toBackendMatchResult', () => {
@@ -24,7 +24,28 @@ describe('API Utils', () => {
       const match = { sideA: 'A', sideB: 'B' };
       const patch = { status: 'complete', score: { type: 'hikiwake' } };
       const result = toBackendMatchResult(patch, match);
-      expect(result.decision).toBe('hikewake');
+      expect(result.decision).toBe('hikiwake');
+    });
+
+    it('should still treat legacy hikewake score.type as a draw on write', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const patch = { status: 'complete', score: { type: 'hikewake' } };
+      const result = toBackendMatchResult(patch, match);
+      expect(result.decision).toBe('hikiwake'); // normalises to canonical
+    });
+  });
+
+  describe('isHikiwake', () => {
+    it('accepts canonical and legacy spellings', () => {
+      expect(isHikiwake('hikiwake')).toBe(true);
+      expect(isHikiwake('hikewake')).toBe(true);
+    });
+
+    it('rejects other values', () => {
+      expect(isHikiwake('')).toBe(false);
+      expect(isHikiwake('ippon')).toBe(false);
+      expect(isHikiwake(null)).toBe(false);
+      expect(isHikiwake(undefined)).toBe(false);
     });
   });
 

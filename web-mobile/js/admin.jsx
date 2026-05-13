@@ -2849,7 +2849,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
     try { await fn(); } finally { setSubmitting(false); }
   };
 
-  const [isDrawToggled, setIsDrawToggled] = useStateA(m.score?.type === "hikiwake" || m.decision === "hikewake");
+  const [isDrawToggled, setIsDrawToggled] = useStateA(window.isHikiwake(m.score?.type) || window.isHikiwake(m.decision));
 
   // Arranged as [left, right] — left is always SHIRO (White), right is always AKA (Red)
   const sides = [
@@ -3029,7 +3029,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         hansokuA: s.aFouls,
         hansokuB: s.bFouls,
         winner: w ? (typeof w === "object" ? w.name : w) : "",
-        decision: t.winner === null ? "hikewake" : "",
+        decision: t.winner === null ? "hikiwake" : "",
       };
     });
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;

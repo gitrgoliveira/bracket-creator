@@ -368,7 +368,15 @@ def wait_for_status(comp_id, expected, timeout_s=5.0, interval_s=0.2):
                 f"Check auth/config. Response: {resp.text[:200]}"
             )
         if resp.status_code == 200:
-            last_status = resp.json().get("status")
+            try:
+                body = resp.json()
+            except ValueError as e:
+                # 200 with non-JSON body (HTML error page from a proxy, etc.) —
+                # treat as a transient poll failure rather than crashing.
+                print(f"  [WARN] Non-JSON 200 response polling {comp_id}: {e}. Body: {resp.text[:200]}")
+                time.sleep(interval_s)
+                continue
+            last_status = body.get("status") if isinstance(body, dict) else None
             if last_status == expected:
                 return last_status
         time.sleep(interval_s)

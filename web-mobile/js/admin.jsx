@@ -308,35 +308,60 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   useEffectA(() => {
     if (view.kind === "competition") {
+      // Track pending refresh timers + a viewId snapshot so a late-arriving
+      // SSE refresh can't overwrite the current competition with stale data.
+      const compId = view.id;
+      const timers = new Set();
+      const schedule = (fn) => {
+        const id = setTimeout(() => {
+          timers.delete(id);
+          // Re-check the captured compId before applying; if the user has
+          // already navigated away, the new effect run will fetch fresh data.
+          fn(compId);
+        }, Math.random() * 500);
+        timers.add(id);
+      };
       const unsub = window.API.subscribeToEvents((event) => {
-        const jitter = Math.random() * 500;
         if (REFRESHABLE_EVENTS.has(event.type)) {
           // tournament_updated carries null data (tournament-wide change) — always
           // relevant.  match_updated / competition_started / competition_completed
           // carry competitionId — skip if they belong to a different competition.
           const relevant = event.type === "tournament_updated"
             || !event.data?.competitionId
-            || event.data.competitionId === view.id;
+            || event.data.competitionId === compId;
           if (relevant) {
             // Apply partial update immediately for responsive UI
             if (event.type === "match_updated") {
               setAdminCompData(prev => patchCompetitionData(prev, event));
             }
             // Still trigger full refresh (jittered) to reconcile standings/propagation
-            setTimeout(() => window.API.fetchCompetitionDetails(view.id)
-              .then(setAdminCompData)
-              .catch(err => console.error("Failed to refresh competition details", err)), jitter);
+            schedule((targetId) => {
+              window.API.fetchCompetitionDetails(targetId)
+                .then(data => setAdminCompData(prev => {
+                  // Drop stale data if the user navigated to a different comp
+                  // (or away entirely) while the fetch was in flight.
+                  if (data?.config?.id !== targetId) return prev;
+                  return data;
+                }))
+                .catch(err => console.error("Failed to refresh competition details", err));
+            });
           }
           // competition_completed on any comp may unblock a dependent playoff
           // we're currently viewing, so always trigger a tournament-wide refresh.
           if (event.type === "competition_completed") {
-            setTimeout(() => window.API.fetchCompetitions()
-              .then(comps => onUpdateRef.current({ ...tRef.current, competitions: comps }))
-              .catch(err => console.error("Failed to refresh competitions after completion", err)), jitter);
+            schedule(() => {
+              window.API.fetchCompetitions()
+                .then(comps => onUpdateRef.current({ ...tRef.current, competitions: comps }))
+                .catch(err => console.error("Failed to refresh competitions after completion", err));
+            });
           }
         }
       });
-      return unsub;
+      return () => {
+        timers.forEach(clearTimeout);
+        timers.clear();
+        unsub();
+      };
     }
   }, [view.id, view.kind]); // t and onUpdate accessed via refs to avoid churn
 

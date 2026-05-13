@@ -23,7 +23,10 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
   useEffectA(() => {
     setAPoints(match.score?.type === "ippon" && match.winner?.id === match.sideA?.id ? match.score.ippons || [] : []);
     setBPoints(match.score?.type === "ippon" && match.winner?.id === match.sideB?.id ? match.score.ippons || [] : []);
-  }, [match.id]);
+    // Include score/winner/status in deps so an SSE update for the same
+    // match (e.g. an off-panel correction) doesn't leave the scoreboard
+    // view showing stale points.
+  }, [match.id, match.status, match.winner?.id, match.score?.type, match.score?.ippons?.join(",")]);
   const a = match.sideA, b = match.sideB;
   const isComplete = match.status === "completed";
   return (
@@ -97,14 +100,29 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
           </div>
         </div>
       )}
-      {mode === "scoreboard" && (
-        <div className="live-panel__actions">
-          <button className="btn btn--primary btn--full" disabled={aPoints.length === 0 && bPoints.length === 0} onClick={() => {
-            const aWins = aPoints.length > bPoints.length;
-            onRecord(aWins ? "a" : "b", "ippon", aWins ? aPoints[0] : bPoints[0]);
-          }}>Submit result</button>
-        </div>
-      )}
+      {mode === "scoreboard" && (() => {
+        // Submit is only valid when one side strictly leads. Tied counts
+        // (e.g. 1–1) would otherwise silently get attributed to SHIRO via
+        // `aWins ? "a" : "b"`. For draws, use the full editor's hikiwake toggle.
+        const aWins = aPoints.length > bPoints.length;
+        const bWins = bPoints.length > aPoints.length;
+        const hasWinner = aWins || bWins;
+        const isTied = !hasWinner && (aPoints.length > 0 || bPoints.length > 0);
+        return (
+          <div className="live-panel__actions">
+            <button
+              className="btn btn--primary btn--full"
+              disabled={!hasWinner}
+              onClick={() => onRecord(aWins ? "a" : "b", "ippon", aWins ? aPoints[0] : bPoints[0])}
+            >Submit result</button>
+            {isTied && (
+              <div className="field__hint" style={{ textAlign: "center", marginTop: 6 }}>
+                Tied — open the full score editor to record a draw (hikiwake).
+              </div>
+            )}
+          </div>
+        );
+      })()}
       {isComplete && (
         <div style={{ marginTop: 12, padding: 10, background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8, fontSize: 12.5, color: "#065f46" }}>
           ✓ Recorded — {match.winner?.name} advances

@@ -101,7 +101,8 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, _onEditScore, onLo
     try {
       // Assign times: each court runs in parallel from autoStart, matches spaced by matchDuration
       for (const [_ct, list] of Object.entries(byCt)) {
-        let cursor = timeToMinutes(autoStart) || 540;
+        // ?? not || so "00:00" (0 minutes — midnight) doesn't fall through to 09:00.
+        let cursor = timeToMinutes(autoStart) ?? 540;
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
           await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", cursor), password);
           cursor += safeMatchDuration;

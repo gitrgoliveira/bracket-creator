@@ -9,6 +9,24 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// tryAutoCompletePools runs the auto-complete check after a successful score
+// write. The score itself has already been recorded, so we don't fail the
+// request when the auto-complete check errors; instead we log and surface
+// the failure via the X-Auto-Complete-Error response header so that bad
+// disks / store errors aren't visible only in server logs. Broadcasts
+// EventCompetitionCompleted when the transition actually happens.
+func tryAutoCompletePools(c *gin.Context, eng *engine.Engine, hub *Hub, compID string) {
+	autoCompleted, err := eng.MaybeAutoCompletePools(compID)
+	if err != nil {
+		log.Printf("MaybeAutoCompletePools(%s): %v", compID, err)
+		c.Header("X-Auto-Complete-Error", err.Error())
+		return
+	}
+	if autoCompleted {
+		hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": compID})
+	}
+}
+
 func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
 		id := c.Param("id")
@@ -39,11 +57,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 				"competitionId": id,
 				"results":       successful,
 			})
-			if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
-				log.Printf("MaybeAutoCompletePools(%s): %v", id, err)
-			} else if autoCompleted {
-				hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
-			}
+			tryAutoCompletePools(c, eng, hub, id)
 		}
 		c.JSON(http.StatusOK, gin.H{"succeeded": len(successful), "errors": errs})
 	})
@@ -108,11 +122,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 		}
 
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
-		if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
-			log.Printf("MaybeAutoCompletePools(%s): %v", id, err)
-		} else if autoCompleted {
-			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
-		}
+		tryAutoCompletePools(c, eng, hub, id)
 		c.JSON(http.StatusOK, result)
 	})
 
@@ -136,11 +146,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			"matchId":       mid,
 			"result":        result,
 		})
-		if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
-			log.Printf("MaybeAutoCompletePools(%s): %v", id, err)
-		} else if autoCompleted {
-			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
-		}
+		tryAutoCompletePools(c, eng, hub, id)
 
 		c.JSON(http.StatusOK, result)
 	})

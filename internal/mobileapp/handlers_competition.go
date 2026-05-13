@@ -307,8 +307,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// A pools competition that generated zero matches (e.g. single
 		// participant) has nothing to score, so trip the auto-complete check
 		// at start time. The non-zero case will trip via score handlers.
+		// Errors are surfaced via response header so disk/store failures
+		// aren't only visible in server logs.
 		if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
 			log.Printf("MaybeAutoCompletePools(%s) after start: %v", id, err)
+			c.Header("X-Auto-Complete-Error", err.Error())
 		} else if autoCompleted {
 			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
 			// Reflect the auto-complete in the response body so the caller doesn't

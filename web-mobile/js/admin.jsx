@@ -337,7 +337,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // match update.
       let pendingTournament = null;
       let tournamentFetching = false;
-      const scheduleTournamentRefresh = () => {
+      // Tracks whether any event in the coalesced burst needs the tournament
+      // config refetched (name/date/venue/courts). Match-level events only
+      // need the competitions list; tournament_updated needs both.
+      let pendingNeedsTournamentFetch = false;
+      const scheduleTournamentRefresh = (needsTournament) => {
+        if (needsTournament) pendingNeedsTournamentFetch = true;
         if (pendingTournament || tournamentFetching) return;
         const jitter = 500 + Math.random() * 1000;
         pendingTournament = setTimeout(() => {
@@ -348,12 +353,19 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // can't kick off a second concurrent fetch that might resolve
           // out-of-order and clobber fresher data.
           tournamentFetching = true;
-          window.API.fetchCompetitions()
-            .then(comps => {
+          const fetchTournament = pendingNeedsTournamentFetch;
+          pendingNeedsTournamentFetch = false;
+          const work = fetchTournament
+            ? Promise.all([window.API.fetchTournament(), window.API.fetchCompetitions()])
+                .then(([tourney, comps]) => ({ tourney, comps }))
+            : window.API.fetchCompetitions().then(comps => ({ tourney: null, comps }));
+          work
+            .then(({ tourney, comps }) => {
               if (cancelled) return;
-              onUpdateRef.current({ ...tRef.current, competitions: comps });
+              const base = tourney || tRef.current;
+              onUpdateRef.current({ ...base, competitions: comps });
             })
-            .catch(err => console.error("Failed to refresh competitions list", err))
+            .catch(err => console.error("Failed to refresh tournament/competitions", err))
             .finally(() => { tournamentFetching = false; });
         }, jitter);
       };
@@ -387,11 +399,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // Any of these may change the topbar live-strip (matches becoming
           // live/done in *other* competitions, a comp starting, a dependent
           // playoff unblocking, …). Coalesced so a burst is one fetch.
+          // tournament_updated also needs the tournament config itself.
           if (event.type === "match_updated"
               || event.type === "competition_started"
-              || event.type === "competition_completed"
-              || event.type === "tournament_updated") {
-            scheduleTournamentRefresh();
+              || event.type === "competition_completed") {
+            scheduleTournamentRefresh(false);
+          } else if (event.type === "tournament_updated") {
+            scheduleTournamentRefresh(true);
           }
         }
       });
@@ -541,7 +555,11 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   };
 
   return (
-    <>
+    // Wrap topbar + live-strip in a single sticky container so they scroll
+    // together. This lets the topbar size naturally (min-height instead of a
+    // fixed height) — robust to font scaling / browser zoom — while still
+    // keeping the live-strip visually anchored beneath it.
+    <div className="topbar-stack">
       <div className="topbar">
         <div className="topbar__brand">
           <div className="topbar__logo">BC</div>
@@ -578,7 +596,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 

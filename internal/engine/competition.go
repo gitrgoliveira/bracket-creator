@@ -11,8 +11,8 @@ import (
 //
 // Returns true if the transition was performed. Callers should broadcast
 // EventCompetitionCompleted when true.
-func (e *Engine) MaybeAutoCompletePools(compId string) (bool, error) {
-	comp, err := e.store.LoadCompetition(compId)
+func (e *Engine) MaybeAutoCompletePools(compID string) (bool, error) {
+	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return false, err
 	}
@@ -20,7 +20,7 @@ func (e *Engine) MaybeAutoCompletePools(compId string) (bool, error) {
 		return false, nil
 	}
 
-	matches, err := e.store.LoadPoolMatches(compId)
+	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
 		return false, err
 	}

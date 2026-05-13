@@ -548,12 +548,13 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
       {liveMatches.length > 0 && (
-        <div className="live-strip" role="region" aria-label={`${liveMatches.length} matches live`}>
+        <div className="live-strip" role="region" aria-label={`${pluralize(liveMatches.length, "match", "matches")} live`}>
           <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
           <div className="live-strip__chips">
             {liveMatches.slice(0, LIVE_STRIP_MAX_CHIPS).map(m => {
               const a = sideName(m.sideA);
               const b = sideName(m.sideB);
+              const court = m.court ? `Shiaijo ${m.court}` : "Unassigned";
               return (
                 <button
                   key={`${m.compId}:${m.id}`}
@@ -561,7 +562,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
                   onClick={() => onOpenScore && onOpenScore(m)}
                   title={`${b} – ${a}`}
                 >
-                  <span className="live-strip__court">Shiaijo {m.court}</span>
+                  <span className="live-strip__court">{court}</span>
                   <span className="live-strip__names">{b} – {a}</span>
                 </button>
               );

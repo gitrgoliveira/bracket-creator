@@ -1616,9 +1616,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                       <div className="seed-row__dojo">{p.dojo}</div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <button className="btn btn--sm" style={{ padding: "1px 6px", fontSize: 11 }} onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0}>↑</button>
-                      <button className="btn btn--sm" style={{ padding: "1px 6px", fontSize: 11 }} onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1}>↓</button>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0} aria-label="Move up">↑</button>
+                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1} aria-label="Move down">↓</button>
                     </div>
                      <window.StableInput
                         className="seed-row__input"
@@ -2137,45 +2137,47 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
         <button className={mode === "scoreboard" ? "is-active" : ""} onClick={() => setMode("scoreboard")}>Scoreboard</button>
       </div>
       {mode === "tap" && (<>
+        {/* Layout convention: SHIRO (White, sideB) on the LEFT, AKA (Red, sideA) on the RIGHT. */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
-            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", color: "var(--red)" }}>AKA (RED)</div>
-            <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{a.name}</div>
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{a.dojo}</div>
-          </button>
           <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === b.id ? "var(--accent)" : "var(--line)", background: match.winner?.id === b.id ? "var(--accent)" : "var(--surface)", color: match.winner?.id === b.id ? "white" : "inherit" }} onClick={() => onRecord("b", "ippon")}>
             <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em" }}>SHIRO (WHITE)</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{b.name}</div>
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{b.dojo}</div>
+          </button>
+          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
+            {/* Label tinted red when unselected (button is on white), inherits white when selected (button background is red) */}
+            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", color: match.winner?.id === a.id ? "inherit" : "var(--red)" }}>AKA (RED)</div>
+            <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{a.name}</div>
+            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{a.dojo}</div>
           </button>
         </div>
         <div className="field__hint" style={{ textAlign: "center" }}>Tap the winner. Use Match card or Scoreboard for detail.</div>
       </>)}
       {mode === "card" && (
         <div className="score-card">
-          <div className="score-side score-side--red">
-            <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div><div className="score-side__dojo">{a.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("a", "hantei")}>Hantei</button></div>
-          </div>
-          <div className="score-vs">VS</div>
           <div className="score-side score-side--white">
             <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div><div className="score-side__dojo">{b.dojo}</div></div>
             <div className="score-side__buttons"><button className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("b", "hantei")}>Hantei</button></div>
+          </div>
+          <div className="score-vs">VS</div>
+          <div className="score-side score-side--red">
+            <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div><div className="score-side__dojo">{a.dojo}</div></div>
+            <div className="score-side__buttons"><button className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("a", "hantei")}>Hantei</button></div>
           </div>
         </div>
       )}
       {mode === "scoreboard" && (
         <div className="score-card">
-          <div className="score-side score-side--red">
-            <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div></div>
-            <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--aka ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</div>
-            <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
-          </div>
-          <div className="score-vs">VS</div>
           <div className="score-side score-side--white">
             <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div></div>
             <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--shiro ${bPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{bPoints[i] || "·"}</span>))}</div>
             <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setBPoints([])}>↺</button></div>
+          </div>
+          <div className="score-vs">VS</div>
+          <div className="score-side score-side--red">
+            <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div></div>
+            <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--aka ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</div>
+            <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
           </div>
         </div>
       )}
@@ -2895,11 +2897,13 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
   const initialAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const initialBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
 
+  // Use ?? not || so an explicit 0 isn't treated as "unset"
+  const initialAFouls = m.hansokuA ?? m.score?.fouls?.a ?? 0;
+  const initialBFouls = m.hansokuB ?? m.score?.fouls?.b ?? 0;
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
-  const [aFouls, setAFouls] = useStateA(m.hansokuA || m.score?.fouls?.a || 0);
-  const [bFouls, setBFouls] = useStateA(m.hansokuB || m.score?.fouls?.b || 0);
-  const [note, setNote] = useStateA("");
+  const [aFouls, setAFouls] = useStateA(initialAFouls);
+  const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [submitting, setSubmitting] = useStateA(false);
 
   // Hansoku → ippon awarded to opponent on every 2nd foul
@@ -2924,19 +2928,19 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
       status: "running", winner: null,
       ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"),
       hansokuA: aFouls, hansokuB: bFouls,
-      score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete, note },
+      score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
     };
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete } };
     // ippon
     const aLetters = aPts.filter(x => x !== "•");
     const bLetters = bPts.filter(x => x !== "•");
     const aFinal = [...aLetters, ...Array(aHansokuPts).fill("H")].slice(0, 2);
     const bFinal = [...bLetters, ...Array(bHansokuPts).fill("H")].slice(0, 2);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, note } };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete } };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete, note } };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete } };
   };
 
   const doSubmit = async (fn) => {
@@ -2944,7 +2948,12 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
     try { await fn(); } finally { setSubmitting(false); }
   };
 
-  const [isDrawToggled, setIsDrawToggled] = useStateA(m.score?.type === "hikiwake" || m.decision === "hikewake");
+  // Both spellings are intentional: `score.type` uses the correct "hikiwake"
+  // while the `decision` protocol string is the long-standing "hikewake"
+  // (without the i) — see api.jsx and scoring.go. Don't "fix" without a repo-
+  // wide migration.
+  const initialIsDrawToggled = m.score?.type === "hikiwake" || m.decision === "hikewake";
+  const [isDrawToggled, setIsDrawToggled] = useStateA(initialIsDrawToggled);
 
   // Arranged as [left, right] — left is always SHIRO (White), right is always AKA (Red)
   const sides = [
@@ -2954,17 +2963,29 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
 
   const canFinish = isDrawToggled || aTotal > 0 || bTotal > 0;
 
+  const isDirty =
+    !window.arraysEqual(aPts, initialAPts) ||
+    !window.arraysEqual(bPts, initialBPts) ||
+    aFouls !== initialAFouls ||
+    bFouls !== initialBFouls ||
+    isDrawToggled !== initialIsDrawToggled;
+  const handleDismiss = () => {
+    if (submitting) return; // don't close while save is in-flight
+    if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
+    onClose();
+  };
+
   // Keyboard shortcuts:
   //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
   //   m/k/d/t/h        → award point to SHIRO (white, sideB)
   //   x / X            → toggle hikiwake (draw)
   //   ←/→              → previous / next match (skipped inside text-entry elements)
   //   Enter            → finish (or finish + start next when available)
-  //   Esc              → close the modal (always fires, even from buttons/links)
+  //   Esc              → close the modal (respects dirty-state confirm)
   // Scoring shortcuts (Enter/M/K/D/T/H/X) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, canFinish, isDrawToggled, onClose, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
+  kbRef.current = { submitting, canFinish, isDrawToggled, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -2972,8 +2993,8 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
       if (s.submitting) return;
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
 
-      // Esc always works regardless of where focus is
-      if (ev.key === "Escape") { ev.preventDefault(); s.onClose(); return; }
+      // Esc routes through handleDismiss so the dirty-state confirm still fires
+      if (ev.key === "Escape") { ev.preventDefault(); s.handleDismiss(); return; }
 
       // Navigation blocked only inside text-entry elements (preserves cursor movement)
       if (!window.isTextEntry(ev.target)) {
@@ -3018,7 +3039,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
   }, []); // listener registered once; reads fresh state via kbRef
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={handleDismiss}>
       <div className="editor-modal editor-modal--lg" onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
@@ -3033,7 +3054,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
             <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--live" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● LIVE" : "PRE-MATCH"}
             </div>
-            <button className="btn btn--ghost btn--sm" onClick={onClose} style={{ padding: "2px 8px" }}>✕ Close</button>
+            <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>
           </div>
         </div>
 
@@ -3062,11 +3083,17 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
                     {idx === 0 && (
                       <div className="sb-center">
                         {isDrawToggled ? (
-                          <button className="sb-draw-toggle sb-draw-toggle--active" onClick={() => { setIsDrawToggled(false); }} title="Cancel draw">X</button>
-                        ) : aTotal === 0 && bTotal === 0 ? (
-                          <button className="sb-draw-toggle" onClick={() => { setIsDrawToggled(true); setAPts([]); setBPts([]); }} title="Mark as draw (hikiwake)">vs</button>
+                          <button className="sb-draw-toggle sb-draw-toggle--active" onClick={() => { setIsDrawToggled(false); }} title="Cancel draw" aria-label="Cancel draw (hikiwake)">X</button>
                         ) : (
-                          <div className="sb-vs">{`${bTotal}–${aTotal}`}</div>
+                          <>
+                            {(aTotal > 0 || bTotal > 0) && <div className="sb-vs">{`${bTotal}–${aTotal}`}</div>}
+                            <button
+                              className="sb-draw-toggle"
+                              onClick={() => { setIsDrawToggled(true); setAPts([]); setBPts([]); }}
+                              title="Mark as draw (hikiwake)"
+                              aria-label="Mark as draw (hikiwake)"
+                            >{aTotal === 0 && bTotal === 0 ? "vs" : "X"}</button>
+                          </>
                         )}
                       </div>
                     )}
@@ -3089,13 +3116,6 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
               </div>
           </div>
 
-          {isComplete && (
-            <div className="field">
-              <label className="field__label">Correction note (optional)</label>
-              <input className="input" placeholder="e.g. Reviewed video, ippon awarded to White" value={note} onChange={(e) => setNote(e.target.value)} />
-              <div className="field__hint">Recorded as audit trail. Subsequent rounds will be re-propagated automatically.</div>
-            </div>
-          )}
         </div>
 
         {/* Sticky navigation + action footer */}
@@ -3111,7 +3131,7 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
                   ▶ Start Match
                 </button>
               )}
-              <button className="btn" onClick={onClose} disabled={submitting}>Cancel</button>
+              <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>
               {onSubmitAndNext ? (
                 <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmitAndNext(buildPatch("completed")))} disabled={submitting || !canFinish}>
                   {submitting ? "Saving…" : "Finish + Start Next →"}
@@ -3139,7 +3159,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const m = match;
   const isComplete = m.status === "completed";
   const positions = TEAM_POSITIONS.slice(0, teamSize);
-  const [note, setNote] = useStateA("");
   const [submitting, setSubmitting] = useStateA(false);
 
   const existingSub = m.subResults || [];
@@ -3196,7 +3215,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       status: targetStatus === "running" ? "running" : "completed",
       ipponsA: [],
       ipponsB: [],
-      score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete, note },
+      score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete },
       subResults,
     };
   };
@@ -3339,12 +3358,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             ))}
           </div>
 
-          {isComplete && (
-            <div className="field">
-              <label className="field__label">Correction note (optional)</label>
-              <input className="input" placeholder="e.g. Reviewed video" value={note} onChange={(e) => setNote(e.target.value)} />
-            </div>
-          )}
         </div>
 
         <div className="editor-modal__foot editor-modal__foot--nav">

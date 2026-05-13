@@ -1898,8 +1898,16 @@ a:hover {
 }
 
 .viewer__head--hero .viewer__admin-pill {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  letter-spacing: 0.04em;
+}
+
+.viewer__head--hero .viewer__admin-pill:hover {
+  background: rgba(255, 255, 255, 0.14);
   color: white;
 }
 

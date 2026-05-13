@@ -1113,6 +1113,7 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
 }
 
 function MatchViewerModal({ match, onClose }) {
+  window.useEscapeToClose(onClose);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const aName = match.sideA?.name || "TBD";

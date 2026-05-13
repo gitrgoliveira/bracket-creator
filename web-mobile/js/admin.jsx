@@ -4,8 +4,11 @@
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Returns { total, done, live } match counts for a single competition object.
-// Accepts either the structured `pools[].matches` shape (from /competitions/:id)
-// or the flat `poolMatches` shape (from /viewer/competitions list endpoint).
+// Accepts either:
+//   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
+//   - structured `pools[].matches` from GET /api/viewer/competitions/:id (detail endpoint)
+// The admin-side GET /api/competitions/:id returns only config; use the viewer
+// endpoints when match counts are needed.
 function compMatchStats(c) {
   let total = 0, done = 0, live = 0;
   const count = (m) => {
@@ -61,14 +64,7 @@ function normalizeDate(d) {
 
 const pluralize = window.pluralize;
 
-// mergeMatchPatch applies a server-side patch onto an existing match, ignoring
-// empty scheduling fields so a partial broadcast can't blank court/scheduledAt.
-function mergeMatchPatch(existing, patch) {
-  const merged = { ...existing, ...patch };
-  if (patch.court === "" || patch.court == null) merged.court = existing.court;
-  if (patch.scheduledAt === "" || patch.scheduledAt == null) merged.scheduledAt = existing.scheduledAt;
-  return merged;
-}
+const mergeMatchPatch = window.mergeMatchPatch;
 
 function patchCompetitionData(prev, event) {
   if (!prev || !event.data) return prev;

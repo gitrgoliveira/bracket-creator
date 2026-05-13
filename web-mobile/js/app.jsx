@@ -3,12 +3,7 @@
 
 const { useState: useS, useEffect: useE } = React;
 
-const mergeMatchPatch = (existing, patch) => {
-  const merged = { ...existing, ...patch };
-  if (patch.court === "" || patch.court == null) merged.court = existing.court;
-  if (patch.scheduledAt === "" || patch.scheduledAt == null) merged.scheduledAt = existing.scheduledAt;
-  return merged;
-};
+const mergeMatchPatch = window.mergeMatchPatch;
 
 const patchCompetitionData = (prev, event) => {
   if (!prev || !event.data) return prev;

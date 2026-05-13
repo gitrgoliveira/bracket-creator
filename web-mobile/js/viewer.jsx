@@ -1113,6 +1113,12 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
 }
 
 function MatchViewerModal({ match, onClose }) {
+  const { useEffect: useEV } = React;
+  useEV(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const aName = match.sideA?.name || "TBD";

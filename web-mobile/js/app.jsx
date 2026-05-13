@@ -312,10 +312,19 @@ function App() {
   );
 }
 
+function useEscapeToClose(onClose) {
+  useE(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+}
+
 function AuthModal({ onClose, onSuccess }) {
   const [pw, setPw] = useS("");
   const [err, setErr] = useS("");
   const [checking, setChecking] = useS(false);
+  useEscapeToClose(onClose);
 
   const submit = async (e) => {
     e.preventDefault();

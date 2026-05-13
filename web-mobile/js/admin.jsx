@@ -2859,6 +2859,62 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
 
   const canFinish = isDrawToggled || aTotal > 0 || bTotal > 0;
 
+  // Keyboard shortcuts:
+  //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
+  //   m/k/d/t/h        → award point to SHIRO (white, sideB)
+  //   x                → toggle hikiwake (draw)
+  //   ←/→              → previous / next match
+  //   Enter            → finish (or finish + start next when available)
+  //   Esc              → close the modal
+  // Bindings are skipped when the focus is in a text input so typing in the
+  // correction-note field doesn't fire scoring actions.
+  useEffectA(() => {
+    const isTypingTarget = (el) => {
+      if (!el) return false;
+      const tag = (el.tagName || "").toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable;
+    };
+    const onKeyDown = (ev) => {
+      if (submitting) return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      if (isTypingTarget(ev.target)) return;
+
+      if (ev.key === "Escape") { ev.preventDefault(); onClose(); return; }
+      if (ev.key === "ArrowLeft" && onPrev) { ev.preventDefault(); onPrev(); return; }
+      if (ev.key === "ArrowRight" && onNext) { ev.preventDefault(); onNext(); return; }
+      if (ev.key === "Enter" && canFinish) {
+        ev.preventDefault();
+        const patch = buildPatch("completed");
+        if (onSubmitAndNext) doSubmit(() => onSubmitAndNext(patch));
+        else doSubmit(() => onSubmit(patch));
+        return;
+      }
+
+      const k = ev.key;
+      const upper = k.toUpperCase();
+      if ("MKDTH".includes(upper) && k.length === 1) {
+        ev.preventDefault();
+        // Capital letter (Shift held) → AKA; lowercase → SHIRO. The H button
+        // is awarded to the opponent for a Hansoku, but keyboard 'h' awards
+        // a direct point per the on-screen button semantics.
+        const isUpper = k === upper && k !== upper.toLowerCase();
+        addPt(isUpper ? "a" : "b", upper);
+        return;
+      }
+      if (k === "x" || k === "X") {
+        ev.preventDefault();
+        if (isDrawToggled) {
+          setIsDrawToggled(false);
+        } else {
+          setIsDrawToggled(true);
+          setAPts([]); setBPts([]);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [submitting, canFinish, isDrawToggled, onClose, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt]);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="editor-modal editor-modal--lg" onClick={(e) => e.stopPropagation()}>

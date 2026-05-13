@@ -129,6 +129,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const [adminCompData, setAdminCompData] = useStateA(null);
   const [adminLoading, setAdminLoading] = useStateA(false);
 
+  // Expose a navigation helper used by AdminTopbar's live-strip chips,
+  // avoiding prop-drilling through every screen. Set once per mount.
+  useEffectA(() => {
+    window.__adminNavigateToScore = (compId) => setView({ kind: "competition", id: compId, section: "scores" });
+    return () => { delete window.__adminNavigateToScore; };
+  }, [setView]);
+
   const t = tournament;
 
   const updateCompetition = async (cid, next) => {
@@ -274,10 +281,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (view.kind === "competition") {
       const unsub = window.API.subscribeToEvents((event) => {
         const jitter = Math.random() * 500;
-        if (event.type === "competition_started" || event.type === "match_updated" || event.type === "tournament_updated") {
+        const refreshableEvents = new Set([
+          "competition_started",
+          "competition_completed",
+          "match_updated",
+          "tournament_updated",
+        ]);
+        if (refreshableEvents.has(event.type)) {
           // tournament_updated carries null data (tournament-wide change) — always
-          // relevant.  match_updated / competition_started carry competitionId —
-          // skip if they belong to a different competition.
+          // relevant.  match_updated / competition_started / competition_completed
+          // carry competitionId — skip if they belong to a different competition.
           const relevant = event.type === "tournament_updated"
             || !event.data?.competitionId
             || event.data.competitionId === view.id;
@@ -289,11 +302,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             // Still trigger full refresh (jittered) to reconcile standings/propagation
             setTimeout(() => window.API.fetchCompetitionDetails(view.id).then(setAdminCompData), jitter);
           }
+          // competition_completed on any comp may unblock a dependent playoff
+          // we're currently viewing, so always trigger a tournament-wide refresh.
+          if (event.type === "competition_completed") {
+            setTimeout(() => window.API.fetchCompetitions().then(comps => onUpdate({ ...t, competitions: comps })), jitter);
+          }
         }
       });
       return unsub;
     }
-  }, [view.id, view.kind]);
+  }, [view.id, view.kind, t, onUpdate]);
 
   if (view.kind === "dashboard") {
     return <AdminDashboard
@@ -410,19 +428,56 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 }
 
 function AdminTopbar({ onLogout, onViewerMode, tournament }) {
+  // Render running matches as chips below the topbar so admins always
+  // know what's live, regardless of which screen they're on. Clicking
+  // a chip jumps to that competition's score editor via the global
+  // navigator helper set up by AdminApp.
+  const liveMatches = useMemoA(() => {
+    if (!tournament || !window.compMatches) return [];
+    return (tournament.competitions || [])
+      .flatMap(cc => window.compMatches(cc))
+      .filter(m => m.status === "running" && m.sideA && m.sideB);
+  }, [tournament]);
+  const onOpenScore = (m) => {
+    if (typeof window.__adminNavigateToScore === "function") {
+      window.__adminNavigateToScore(m.compId);
+    }
+  };
+
   return (
-    <div className="topbar">
-      <div className="topbar__brand">
-        <div className="topbar__logo">BC</div>
-        <div>
-          <div className="topbar__title">{tournament?.name || "Bracket Creator"}</div>
-          <div className="topbar__sub">Admin console</div>
+    <>
+      <div className="topbar">
+        <div className="topbar__brand">
+          <div className="topbar__logo">BC</div>
+          <div>
+            <div className="topbar__title">{tournament?.name || "Bracket Creator"}</div>
+            <div className="topbar__sub">Admin console</div>
+          </div>
         </div>
+        <div className="topbar__spacer"></div>
+        <button className="viewer-toggle" onClick={onViewerMode}>👁 Public viewer</button>
+        <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
-      <div className="topbar__spacer"></div>
-      <button className="viewer-toggle" onClick={onViewerMode}>👁 Public viewer</button>
-      <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
-    </div>
+      {liveMatches.length > 0 && (
+        <div className="live-strip" role="status" aria-label={`${liveMatches.length} matches live`}>
+          <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
+          <div className="live-strip__chips">
+            {liveMatches.slice(0, 6).map(m => (
+              <button
+                key={m.compId + m.id}
+                className="live-strip__chip"
+                onClick={() => onOpenScore && onOpenScore(m)}
+                title={`${m.sideA.name} vs ${m.sideB.name}`}
+              >
+                <span className="live-strip__court">Shiaijo {m.court}</span>
+                <span className="live-strip__names">{m.sideB.name} – {m.sideA.name}</span>
+              </button>
+            ))}
+            {liveMatches.length > 6 && <span className="live-strip__more">+{liveMatches.length - 6} more</span>}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -442,8 +497,9 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
   useEffectA(() => {
     const unsub = window.API.subscribeToEvents((event) => {
       const jitter = Math.random() * 500;
-      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_deleted") {
-        // Refresh everything on the dashboard
+      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted" || event.type === "match_updated") {
+        // Refresh everything on the dashboard so live-match counts and
+        // status badges stay current as competitions progress.
         setTimeout(() => {
           Promise.all([
             window.API.fetchTournament(),
@@ -907,6 +963,7 @@ function AdminCompetition({ tournament, competition, pools, _poolMatches, standi
         ].filter(Boolean)} />
         <div className="page-head">
           <div>
+            <div className="page-head__eyebrow">{t.name} ›</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{c.name}</h1>
               <StatusBadge status={c.status} />

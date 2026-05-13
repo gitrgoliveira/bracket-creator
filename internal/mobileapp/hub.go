@@ -15,10 +15,11 @@ import (
 type EventType string
 
 const (
-	EventMatchUpdated       EventType = "match_updated"
-	EventCompetitionStarted EventType = "competition_started"
-	EventTournamentUpdated  EventType = "tournament_updated"
-	EventScheduleUpdated    EventType = "schedule_updated"
+	EventMatchUpdated         EventType = "match_updated"
+	EventCompetitionStarted   EventType = "competition_started"
+	EventCompetitionCompleted EventType = "competition_completed"
+	EventTournamentUpdated    EventType = "tournament_updated"
+	EventScheduleUpdated      EventType = "schedule_updated"
 )
 
 // SSEEvent represents the payload sent to clients

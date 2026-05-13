@@ -212,3 +212,63 @@ func TestScoreSummary_Team(t *testing.T) {
 	assert.Equal(t, "TeamB", teamB.Player.Name)
 	assert.Equal(t, "W:0 L:1 D:0 | IV:1 IL:2 IT:0 | PW:0 PL:0", teamB.ScoreSummary)
 }
+
+func TestMaybeAutoCompletePools(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-autocomplete-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "auto-complete"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Auto", Format: "pools", Status: state.CompStatusPools,
+	}))
+
+	t.Run("no transition while a pool match is still scheduled", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
+			{ID: "P1-2", Status: state.MatchStatusScheduled, SideA: "Alice", SideB: "Charlie"},
+		}))
+		done, err := eng.MaybeAutoCompletePools(compID)
+		require.NoError(t, err)
+		assert.False(t, done)
+		comp, _ := store.LoadCompetition(compID)
+		assert.Equal(t, state.CompStatusPools, comp.Status)
+	})
+
+	t.Run("transitions to complete when all pool matches are completed", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
+			{ID: "P1-2", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Charlie"},
+		}))
+		done, err := eng.MaybeAutoCompletePools(compID)
+		require.NoError(t, err)
+		assert.True(t, done)
+		comp, _ := store.LoadCompetition(compID)
+		assert.Equal(t, state.CompStatusComplete, comp.Status)
+	})
+
+	t.Run("is a no-op once already complete (idempotent)", func(t *testing.T) {
+		done, err := eng.MaybeAutoCompletePools(compID)
+		require.NoError(t, err)
+		assert.False(t, done)
+	})
+
+	t.Run("ignored for playoffs-format competitions", func(t *testing.T) {
+		koID := "auto-complete-ko"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: koID, Name: "KO", Format: "playoffs", Status: state.CompStatusPlayoffs,
+		}))
+		require.NoError(t, store.SavePoolMatches(koID, []state.MatchResult{
+			{ID: "M1", Status: state.MatchStatusCompleted, Winner: "X", SideA: "X", SideB: "Y"},
+		}))
+		done, err := eng.MaybeAutoCompletePools(koID)
+		require.NoError(t, err)
+		assert.False(t, done)
+		comp, _ := store.LoadCompetition(koID)
+		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
+	})
+}

@@ -36,6 +36,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 				"competitionId": id,
 				"results":       results,
 			})
+			if autoCompleted, _ := eng.MaybeAutoCompletePools(id); autoCompleted {
+				hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"succeeded": succeeded, "errors": errs})
 	})
@@ -100,6 +103,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 		}
 
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+		if autoCompleted, _ := eng.MaybeAutoCompletePools(id); autoCompleted {
+			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
+		}
 		c.JSON(http.StatusOK, result)
 	})
 
@@ -123,6 +129,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			"matchId":       mid,
 			"result":        result,
 		})
+		if autoCompleted, _ := eng.MaybeAutoCompletePools(id); autoCompleted {
+			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
+		}
 
 		c.JSON(http.StatusOK, result)
 	})

@@ -336,6 +336,27 @@ def create_linked_playoff(pool_comp_id, cat):
     playoff_id = resp.json()['id']
     return playoff_id
 
+def wait_for_status(comp_id, expected, timeout_s=5.0, interval_s=0.2):
+    """Poll the competition until its status matches `expected` or timeout.
+
+    Used after scoring all pool matches to assert the backend's auto-completion
+    has fired. If this times out, the auto-completion logic has regressed.
+    """
+    deadline = time.time() + timeout_s
+    last_status = None
+    while time.time() < deadline:
+        resp = requests.get(f"{BASE_URL}/api/competitions/{comp_id}", headers=HEADERS)
+        if resp.status_code == 200:
+            last_status = resp.json().get("status")
+            if last_status == expected:
+                return last_status
+        time.sleep(interval_s)
+    raise RuntimeError(
+        f"[FAIL] {comp_id}: expected status {expected!r} within {timeout_s}s, "
+        f"last seen {last_status!r}. Backend auto-completion may have regressed."
+    )
+
+
 def main():
     wait_for_server()
     setup_tournament()
@@ -343,23 +364,17 @@ def main():
     for cat in CATEGORIES:
         # 1. Setup Pools
         pool_comp_id = run_competition_setup(cat)
-        
+
         # 2. Setup Linked Playoff
         playoff_id = create_linked_playoff(pool_comp_id, cat)
-        
 
-        # 3. Run Pools
+        # 3. Run Pools — backend auto-transitions status to "completed" when
+        #    the last pool match is recorded, so the explicit PUT we used to
+        #    issue here is intentionally absent. Poll to confirm.
         score_all_matches(pool_comp_id)
-        
-        # 3.5 Mark pools as completed
-        resp = requests.get(f"{BASE_URL}/api/competitions/{pool_comp_id}", headers=HEADERS)
-        if resp.status_code == 200:
-            comp_data = resp.json()
-            comp_data["status"] = "completed"
-            requests.put(f"{BASE_URL}/api/competitions/{pool_comp_id}", json=comp_data, headers=HEADERS).raise_for_status()
-            print(f"Marked {pool_comp_id} as completed.")
+        wait_for_status(pool_comp_id, "completed")
+        print(f"[OK] {pool_comp_id} auto-transitioned to 'completed'.")
 
-        
         # 4. Start and Run Playoffs (Promotion happens automatically!)
         try:
             requests.post(f"{BASE_URL}/api/competitions/{playoff_id}/start", headers=HEADERS).raise_for_status()

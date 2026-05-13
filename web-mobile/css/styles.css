@@ -168,6 +168,69 @@ a:hover {
   border-color: var(--ink-4);
 }
 
+/* ---------- Live status strip (under topbar) ---------- */
+.live-strip {
+  background: var(--red-soft);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: sticky;
+  top: 50px;
+  z-index: 29;
+  font-size: 12px;
+}
+
+.live-strip__lbl {
+  font-weight: 700;
+  color: var(--red);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-strip__chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.live-strip__chip {
+  background: var(--surface);
+  border: 1px solid var(--red);
+  border-radius: 999px;
+  padding: 3px 10px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.live-strip__chip:hover {
+  background: var(--red);
+  color: white;
+}
+
+.live-strip__court {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.live-strip__names {
+  font-size: 12px;
+}
+
+.live-strip__more {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
 /* ---------- Page container ---------- */
 .page {
   padding: 24px 32px;
@@ -178,6 +241,15 @@ a:hover {
 
 .page--wide {
   max-width: none;
+}
+
+.page-head__eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 
 .page-head {

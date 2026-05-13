@@ -4,6 +4,42 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// MaybeAutoCompletePools transitions a pools-format competition from
+// CompStatusPools to CompStatusComplete when every pool match has been
+// recorded as completed. It is a no-op for any other format or status,
+// or when at least one pool match is still scheduled/running.
+//
+// Returns true if the transition was performed. Callers should broadcast
+// EventCompetitionCompleted when true.
+func (e *Engine) MaybeAutoCompletePools(compId string) (bool, error) {
+	comp, err := e.store.LoadCompetition(compId)
+	if err != nil {
+		return false, err
+	}
+	if comp == nil || comp.Format != "pools" || comp.Status != state.CompStatusPools {
+		return false, nil
+	}
+
+	matches, err := e.store.LoadPoolMatches(compId)
+	if err != nil {
+		return false, err
+	}
+	if len(matches) == 0 {
+		return false, nil
+	}
+	for _, m := range matches {
+		if m.Status != state.MatchStatusCompleted {
+			return false, nil
+		}
+	}
+
+	comp.Status = state.CompStatusComplete
+	if err := e.store.SaveCompetition(comp); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (e *Engine) StartCompetition(id string) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {

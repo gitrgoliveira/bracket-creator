@@ -2872,20 +2872,35 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
   kbRef.current = { submitting, canFinish, isDrawToggled, onClose, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
 
   useEffectA(() => {
+    // text-entry: blocks navigation keys (← →) to avoid clobbering cursor movement
+    const isTextEntry = (el) => {
+      if (!el) return false;
+      const tag = (el.tagName || "").toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select" || !!el.isContentEditable;
+    };
+    // interactive: blocks scoring shortcuts (Enter/M/K/D/T/H/X) when focus is on controls
     const isInteractiveTarget = (el) => {
       if (!el) return false;
       const tag = (el.tagName || "").toLowerCase();
-      return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || el.isContentEditable;
+      return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
     };
     const onKeyDown = (ev) => {
       const s = kbRef.current;
       if (s.submitting) return;
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+
+      // Esc always works regardless of where focus is
+      if (ev.key === "Escape") { ev.preventDefault(); s.onClose(); return; }
+
+      // Navigation blocked only inside text-entry elements (preserves cursor movement)
+      if (!isTextEntry(ev.target)) {
+        if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
+        if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
+      }
+
+      // Scoring shortcuts blocked when any interactive element has focus
       if (isInteractiveTarget(ev.target)) return;
 
-      if (ev.key === "Escape") { ev.preventDefault(); s.onClose(); return; }
-      if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
-      if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
       if (ev.key === "Enter" && s.canFinish) {
         ev.preventDefault();
         const patch = s.buildPatch("completed");
@@ -2898,6 +2913,8 @@ function ScoreEditorModal({ match, tournament, onClose, onSubmit, onSubmitAndNex
       const upper = k.toUpperCase();
       if ("MKDTH".includes(upper) && k.length === 1) {
         ev.preventDefault();
+        // Pressing a point key exits draw mode first
+        if (s.isDrawToggled) setIsDrawToggled(false);
         // Capital letter (Shift held) → AKA; lowercase → SHIRO.
         const isUpper = k === upper && k !== upper.toLowerCase();
         s.addPt(isUpper ? "a" : "b", upper);

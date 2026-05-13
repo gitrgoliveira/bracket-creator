@@ -99,7 +99,20 @@ function pluralize(count, singular, plural) {
   return count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize };
+// Hook: register an Escape key listener that always calls the latest onClose
+// without re-registering on every render (listener registered once, ref kept fresh).
+function useEscapeToClose(onClose) {
+  const { useRef, useEffect } = React;
+  const cbRef = useRef(onClose);
+  useEffect(() => { cbRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") cbRef.current(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -107,5 +120,6 @@ if (typeof window !== "undefined") {
   window.Toast = Toast;
   window.StableInput = StableInput;
   window.pluralize = pluralize;
+  window.useEscapeToClose = useEscapeToClose;
 }
 

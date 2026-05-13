@@ -224,7 +224,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 
 	compID := "auto-complete"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Auto", Format: "pools", Status: state.CompStatusPools,
+		ID: compID, Name: "Auto", Format: state.CompFormatPools, Status: state.CompStatusPools,
 	}))
 
 	t.Run("no transition while a pool match is still scheduled", func(t *testing.T) {
@@ -260,7 +260,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 	t.Run("ignored for playoffs-format competitions", func(t *testing.T) {
 		koID := "auto-complete-ko"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: koID, Name: "KO", Format: "playoffs", Status: state.CompStatusPlayoffs,
+			ID: koID, Name: "KO", Format: state.CompFormatPlayoffs, Status: state.CompStatusPlayoffs,
 		}))
 		require.NoError(t, store.SavePoolMatches(koID, []state.MatchResult{
 			{ID: "M1", Status: state.MatchStatusCompleted, Winner: "X", SideA: "X", SideB: "Y"},
@@ -277,7 +277,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		// Without this branch the competition would be stuck in `pools` forever.
 		emptyID := "auto-complete-empty"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: emptyID, Name: "Empty", Format: "pools", Status: state.CompStatusPools,
+			ID: emptyID, Name: "Empty", Format: state.CompFormatPools, Status: state.CompStatusPools,
 		}))
 		require.NoError(t, store.SavePoolMatches(emptyID, []state.MatchResult{}))
 		done, err := eng.MaybeAutoCompletePools(emptyID)

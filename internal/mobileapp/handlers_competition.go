@@ -311,6 +311,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			log.Printf("MaybeAutoCompletePools(%s) after start: %v", id, err)
 		} else if autoCompleted {
 			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
+			// Reflect the auto-complete in the response body so the caller doesn't
+			// see a stale "pools" status. The persisted file is already updated.
+			comp.Status = state.CompStatusComplete
 		}
 
 		c.JSON(http.StatusOK, comp)

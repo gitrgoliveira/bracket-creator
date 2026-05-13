@@ -253,7 +253,7 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 
 	comp := state.Competition{
 		ID:     "pools1",
-		Format: "pools",
+		Format: state.CompFormatPools,
 		Status: state.CompStatusPools,
 	}
 	require.NoError(t, store.SaveCompetition(&comp))

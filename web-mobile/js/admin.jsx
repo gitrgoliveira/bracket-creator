@@ -337,6 +337,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         }, Math.random() * 500);
         timers.add(id);
       };
+      // Coalesce tournament-wide refreshes across all events so the topbar's
+      // live-strip stays current without firing one fetchCompetitions() per
+      // match update.
+      let pendingTournament = null;
+      const scheduleTournamentRefresh = () => {
+        if (pendingTournament) return;
+        const jitter = 500 + Math.random() * 1000;
+        pendingTournament = setTimeout(() => {
+          pendingTournament = null;
+          window.API.fetchCompetitions()
+            .then(comps => onUpdateRef.current({ ...tRef.current, competitions: comps }))
+            .catch(err => console.error("Failed to refresh competitions list", err));
+        }, jitter);
+      };
       const unsub = window.API.subscribeToEvents((event) => {
         if (REFRESHABLE_EVENTS.has(event.type)) {
           // tournament_updated carries null data (tournament-wide change) — always
@@ -362,20 +376,21 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
                 .catch(err => console.error("Failed to refresh competition details", err));
             });
           }
-          // competition_completed on any comp may unblock a dependent playoff
-          // we're currently viewing, so always trigger a tournament-wide refresh.
-          if (event.type === "competition_completed") {
-            schedule(() => {
-              window.API.fetchCompetitions()
-                .then(comps => onUpdateRef.current({ ...tRef.current, competitions: comps }))
-                .catch(err => console.error("Failed to refresh competitions after completion", err));
-            });
+          // Any of these may change the topbar live-strip (matches becoming
+          // live/done in *other* competitions, a comp starting, a dependent
+          // playoff unblocking, …). Coalesced so a burst is one fetch.
+          if (event.type === "match_updated"
+              || event.type === "competition_started"
+              || event.type === "competition_completed"
+              || event.type === "tournament_updated") {
+            scheduleTournamentRefresh();
           }
         }
       });
       return () => {
         timers.forEach(clearTimeout);
         timers.clear();
+        if (pendingTournament) clearTimeout(pendingTournament);
         unsub();
       };
     }
@@ -531,7 +546,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
       {liveMatches.length > 0 && (
-        <div className="live-strip" role="status" aria-label={`${liveMatches.length} matches live`}>
+        <div className="live-strip" role="region" aria-label={`${liveMatches.length} matches live`}>
           <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
           <div className="live-strip__chips">
             {liveMatches.slice(0, LIVE_STRIP_MAX_CHIPS).map(m => {

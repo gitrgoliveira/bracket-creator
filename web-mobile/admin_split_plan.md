@@ -128,4 +128,4 @@ No existing tests import from `admin.jsx`. The split is test-neutral. **Opportun
 
 ### Deferred follow-up
 
-- **`pluralize` shadowing in tests** — [admin_ui_fixes.test.jsx:5](web-mobile/js/__tests__/admin_ui_fixes.test.jsx:5) re-implements `pluralize` locally rather than importing it from `ui.jsx`. Out of scope for this split; track as a small cleanup PR afterwards.
+- **`pluralize` shadowing in tests** — was [admin_ui_fixes.test.jsx:5](web-mobile/js/__tests__/admin_ui_fixes.test.jsx:5) re-implementing `pluralize` locally rather than importing it from `ui.jsx`. **Resolved** in a follow-up commit (`05b37b0`) — the test now imports the canonical `pluralize` from `ui.jsx`.

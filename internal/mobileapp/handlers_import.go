@@ -169,8 +169,25 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		comp.PoolSizeMode = "max"
 	}
 
-	if err := store.SaveCompetition(comp); err != nil {
+	// Cross-file guard symmetry with handlers_competition.go POST + PUT:
+	// the uniqueness check + save run under WithCompetitionRenameLock
+	// so two concurrent imports (or an import racing against a POST)
+	// can't both land competitions with the same Name. Per-row error
+	// lands in res.Error rather than aborting the batch — matches the
+	// existing missing-id / invalid-id / save-error patterns.
+	if err := store.WithCompetitionRenameLock(func() error {
+		if uniqueErr := checkUniqueCompName(store, comp.Name, comp.ID); uniqueErr != nil {
+			res.Error = uniqueErr.Error()
+			return nil
+		}
+		return store.SaveCompetition(comp)
+	}); err != nil {
 		res.Error = "save competition: " + err.Error()
+		return res
+	}
+	// If the uniqueness check failed, res.Error was set inside the
+	// closure — abort the row before participants/seeds save below.
+	if res.Error != "" {
 		return res
 	}
 

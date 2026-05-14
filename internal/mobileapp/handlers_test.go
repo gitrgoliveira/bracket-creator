@@ -581,6 +581,59 @@ func TestCompetitionHandlers_ConcurrentPOSTSameName(t *testing.T) {
 	}
 }
 
+// TestCreatePlayoff_RejectsNameCollision pins the cross-file guard
+// symmetry fix for POST /competitions/:id/playoffs. Pre-fix, the
+// playoff path computed `name = src.Name + " - Playoffs"`,
+// slugified to an ID, and called SaveCompetitionChanged directly —
+// no uniqueness check. If an admin manually created a competition
+// whose name matched the derived playoff name (e.g. a comp named
+// "Cup - Playoffs" exists, then create a playoff from a comp named
+// "Cup"), SaveCompetitionChanged would silently overwrite the
+// existing comp's config — data loss.
+//
+// Now the playoff save runs under WithCompetitionRenameLock with a
+// checkUniqueCompName — same symmetry as POST + PUT /competitions.
+// Collision → 400 with "already exists" error; the existing
+// competition is untouched.
+func TestCreatePlayoff_RejectsNameCollision(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Source competition that, when used to create a playoff, would
+	// produce name "Source - Playoffs".
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "source",
+		Name:   "Source",
+		Format: state.CompFormatPools,
+		Status: state.CompStatusPools,
+	}))
+	// Pre-existing competition with the same name the playoff would
+	// derive. Pre-fix, SaveCompetitionChanged would have overwritten
+	// this config.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           "manually-created",
+		Name:         "Source - Playoffs",
+		NumberPrefix: "PRESERVED",
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/source/playoffs", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"POST /playoffs should reject when derived name collides with existing comp")
+	assert.Contains(t, w.Body.String(), "already exists",
+		"error message should explain the collision")
+
+	// Verify the manually-created comp's config is untouched (the
+	// pre-fix bug would have replaced it with the default playoff
+	// config, losing the NumberPrefix).
+	preserved, err := store.LoadCompetition("manually-created")
+	require.NoError(t, err)
+	require.NotNil(t, preserved)
+	assert.Equal(t, "PRESERVED", preserved.NumberPrefix,
+		"existing comp's config must be untouched on playoff-name collision")
+}
+
 func TestCompetitionHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

@@ -615,7 +615,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		playoff.ID = slugifyID(playoff.Name)
 
-		if _, err := store.SaveCompetitionChanged(&playoff); err != nil {
+		// Cross-file guard symmetry with POST + PUT /competitions:
+		// uniqueness-check + save under WithCompetitionRenameLock.
+		// Without this, if an admin manually created a competition
+		// whose name matches the derived playoff name first ("<src> -
+		// Playoffs"), SaveCompetitionChanged would silently overwrite
+		// that existing comp's config. The slugifyID(playoff.Name)
+		// pre-collision check ALSO needs to be inside the lock,
+		// because two concurrent /playoffs requests on sources that
+		// happen to slug to the same ID would race the same write.
+		var nameErr error
+		err = store.WithCompetitionRenameLock(func() error {
+			if nameErr = checkUniqueCompName(store, playoff.Name, ""); nameErr != nil {
+				return nil
+			}
+			_, saveErr := store.SaveCompetitionChanged(&playoff)
+			return saveErr
+		})
+		if nameErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+			return
+		}
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

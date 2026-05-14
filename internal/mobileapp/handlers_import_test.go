@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -330,6 +331,55 @@ competitions:
 		// Confirm the competition was not persisted.
 		stored, _ := store.LoadCompetition("blank-name-import")
 		assert.Nil(t, stored, "blank-name-import should not have been persisted")
+	})
+
+	// Cross-file guard symmetry with handlers_competition.go POST + PUT.
+	// The import handler now wraps SaveCompetition in
+	// WithCompetitionRenameLock + checkUniqueCompName so a manifest
+	// row whose name collides with an existing competition lands the
+	// uniqueness error in result.Error (per-row, doesn't abort batch)
+	// rather than silently creating a duplicate.
+	t.Run("Duplicate Name Across Import And Existing Comp Rejected", func(t *testing.T) {
+		// Pre-existing competition.
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:   "existing-cup",
+			Name: "Cup Name",
+		}))
+
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "duplicate-cup"
+    name: "Cup Name"
+    kind: "individual"
+    format: "pools"
+    courts: ["A"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Contains(t, resp.Results[0].Error, "already exists",
+			"duplicate name should land in ImportResult.Error (not silent duplicate)")
+
+		// Confirm the duplicate-id comp was NOT persisted (the
+		// existing one is untouched).
+		stored, _ := store.LoadCompetition("duplicate-cup")
+		assert.Nil(t, stored, "duplicate-cup should not have been persisted")
+		existing, _ := store.LoadCompetition("existing-cup")
+		require.NotNil(t, existing, "existing-cup must still exist")
+		assert.Equal(t, "Cup Name", existing.Name, "existing comp's name must be untouched")
 	})
 }
 

@@ -384,14 +384,29 @@ function CreateTournament({ onCreated }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!name || !pass) {
+    // Trim before the empty-check so whitespace-only ("   ") doesn't
+    // pass the truthy gate. The backend POST /tournament now trims too
+    // (handlers_tournament.go), but trimming here avoids the
+    // "  My Tournament  " round-trip producing a canonical name that
+    // diverges from what the user just typed.
+    const trimmedName = name.trim();
+    const trimmedVenue = venue.trim();
+    if (!trimmedName || !pass) {
       alert("Name and Password are required.");
+      return;
+    }
+    // Match the admin-side handleSave guard from admin_setup.jsx.
+    // Browser number inputs accept fractional values unless explicitly
+    // guarded; backend ValidateCourts rejects > 26 but a non-integer
+    // would slip through Array.from({length:2.5}) → 2 silently.
+    if (!Number.isInteger(courts) || courts < 1 || courts > 26) {
+      alert("Number of courts must be a whole number between 1 and 26.");
       return;
     }
     setSaving(true);
     try {
       const config = {
-        name, date, venue,
+        name: trimmedName, date, venue: trimmedVenue,
         password: pass,
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
       };
@@ -404,6 +419,12 @@ function CreateTournament({ onCreated }) {
     }
   };
 
+  // Same render-NaN-as-"" pattern as admin_setup.jsx so clearing the
+  // courts input doesn't trigger React's "Received NaN for the value
+  // attribute" warning. decideNumericUpdate lives in admin_helpers.jsx,
+  // which loads before app.js per index.html.
+  const decideNumericUpdate = window.decideNumericUpdate;
+
   return (
     <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
       <div className="card card--pad-lg">
@@ -415,12 +436,26 @@ function CreateTournament({ onCreated }) {
             <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. London Cup 2026" required />
           </div>
           <div className="row">
-            <div className="field"><label className="field__label">Date</label><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></div>
+            <div className="field"><label className="field__label">Date</label>
+              {/* Picker bounds mirror admin_setup.jsx + admin_competition.jsx. */}
+              {/* validateAndNormalizeDate enforces MIN_YEAR–MAX_YEAR; without */}
+              {/* these bounds the user could pick 1850 and only learn on submit. */}
+              <input className="input" type="date" min={`${window.MIN_YEAR}-01-01`} max={`${window.MAX_YEAR}-12-31`} value={date} onChange={(e) => setDate(e.target.value)} required />
+            </div>
             <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
           </div>
           <div className="field">
             <label className="field__label">Number of Shiaijo (courts)</label>
-            <input className="input" type="number" min="1" max="26" value={courts} onChange={(e) => setCourts(+e.target.value)} required />
+            <input
+              className="input"
+              type="number"
+              min="1"
+              max="26"
+              step="1"
+              value={Number.isFinite(courts) ? courts : ""}
+              onChange={(e) => setCourts(decideNumericUpdate(e.target.value, 1).value)}
+              required
+            />
             <div className="field__hint">Enter a number (1-26). Courts will be automatically labeled A, B, C, etc.</div>
           </div>
           <div className="field">

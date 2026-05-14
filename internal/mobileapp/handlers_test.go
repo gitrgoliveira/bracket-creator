@@ -88,6 +88,23 @@ func TestTournamentHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
+	// PUT /api/tournament trims Name and Venue. Sibling of the
+	// comp.Name trim in handlers_competition.go — the CreateTournament
+	// UI uses `if (!name || !pass)` which is truthy for "   ", so
+	// untrimmed input would round-trip and persist.
+	tour.Name = "  Padded Tournament  "
+	tour.Venue = "  Crystal Palace  "
+	tour.Password = "secret"
+	body, _ = json.Marshal(tour)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	t3, _ := store.LoadTournament()
+	assert.Equal(t, "Padded Tournament", t3.Name)
+	assert.Equal(t, "Crystal Palace", t3.Venue)
+
 	// GET /api/tournament (not found)
 	os.Remove(filepath.Join(tempDir, "tournament.md"))
 	w = httptest.NewRecorder()
@@ -111,6 +128,21 @@ func TestTournamentHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	os.RemoveAll(filepath.Join(tempDir, "tournament.md"))
+
+	// POST /api/tournament also trims. CreateTournament in app.jsx
+	// hits this endpoint on first-time setup, where the empty-check
+	// `if (!name || !pass)` is truthy for whitespace, so without the
+	// trim "  My Tournament  " would persist with the spaces.
+	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Password: "secret"}
+	body, _ = json.Marshal(postTour)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+	t4, _ := store.LoadTournament()
+	assert.Equal(t, "Posted Tournament", t4.Name)
+	assert.Equal(t, "Some Venue", t4.Venue)
 }
 
 func TestCompetitionHandlers(t *testing.T) {

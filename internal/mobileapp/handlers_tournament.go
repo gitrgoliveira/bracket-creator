@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -27,6 +28,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// Trim Name and Venue so padded input from older clients (or
+		// hand-crafted API calls) doesn't persist with surrounding
+		// whitespace. Mirrors handlers_competition.go's TrimSpace
+		// pattern on comp.Name + comp.NumberPrefix.
+		t.Name = strings.TrimSpace(t.Name)
+		t.Venue = strings.TrimSpace(t.Venue)
 
 		changed, err := store.SaveTournamentChanged(&t)
 		if err != nil {
@@ -45,6 +52,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// See PUT handler above. The CreateTournament UI in app.jsx
+		// uses `if (!name || !pass)` which is truthy for whitespace,
+		// so an untrimmed name on the wire would round-trip.
+		t.Name = strings.TrimSpace(t.Name)
+		t.Venue = strings.TrimSpace(t.Venue)
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

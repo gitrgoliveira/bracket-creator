@@ -250,4 +250,42 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "already exists")
 	})
+
+	// Deep-review finding: handlers trim comp.Name but not comp.NumberPrefix.
+	// The frontend SETTINGS edit path doesn't trim the prefix before sending,
+	// so "  A  " would persist and produce participant numbers like "  A1".
+	// Fix is one TrimSpace line per handler; these tests pin the contract on
+	// both POST (create) and PUT (update) paths so a future refactor can't
+	// silently drop one half.
+	t.Run("NumberPrefix Trimmed On Create", func(t *testing.T) {
+		comp := state.Competition{ID: "prefix-create", Name: "Prefix Create", NumberPrefix: "  A  "}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusCreated, w.Code)
+		stored, err := store.LoadCompetition("prefix-create")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "A", stored.NumberPrefix, "NumberPrefix should be trimmed on POST")
+	})
+
+	t.Run("NumberPrefix Trimmed On Update", func(t *testing.T) {
+		// Seed with a clean prefix, then update via PUT with padded value.
+		seed := state.Competition{ID: "prefix-update", Name: "Prefix Update", NumberPrefix: "B"}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		update := state.Competition{ID: "prefix-update", Name: "Prefix Update", NumberPrefix: "  C  "}
+		body, _ := json.Marshal(update)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/prefix-update", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		stored, err := store.LoadCompetition("prefix-update")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "C", stored.NumberPrefix, "NumberPrefix should be trimmed on PUT")
+	})
 }

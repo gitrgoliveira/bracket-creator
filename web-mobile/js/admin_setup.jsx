@@ -5,6 +5,8 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
+const MIN_YEAR = window.MIN_YEAR;
+const MAX_YEAR = window.MAX_YEAR;
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -75,7 +77,11 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <div className="field"><label className="field__label">Name</label><input className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} /></div>
             <div className="field">
               <label className="field__label">Date</label>
-              <input className="input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setError(""); }} />
+              {/* Picker bounds mirror admin_competition.jsx:348 and the */}
+              {/* MIN_YEAR/MAX_YEAR range that validateAndNormalizeDate */}
+              {/* enforces at handleSave — keeps the picker from offering */}
+              {/* years the validator will then reject on submit. */}
+              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={date} onChange={(e) => { setDate(e.target.value); setError(""); }} />
               <div className="field__hint">Pick the tournament day.</div>
             </div>
           </div>
@@ -231,7 +237,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <div className="row">
             <div className="field">
               <label className="field__label">Date</label>
-              <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              {/* Picker bounds match validateAndNormalizeDate at create() — */}
+              {/* see the equivalent comment on AdminEditTournament's date */}
+              {/* field above and admin_competition.jsx:348. */}
+              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={date} onChange={(e) => setDate(e.target.value)} />
               <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">

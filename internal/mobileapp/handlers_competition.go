@@ -111,6 +111,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		comp.Name = strings.TrimSpace(comp.Name)
+		// Trim NumberPrefix too so untrimmed input from the SETTINGS edit
+		// path can't land as "  A" / participants becoming "  A1" / etc.
+		// Mirrors the comp.Name trim above (and the frontend trim in
+		// admin_competition.jsx saveNow + admin_setup.jsx create).
+		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
 		if err := checkUniqueCompName(store, comp.Name, ""); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -156,6 +161,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		comp.ID = id // ensure ID matches URL
 		comp.Name = strings.TrimSpace(comp.Name)
+		// See POST handler comment — same trim is needed here so the
+		// SETTINGS edit path can't persist whitespace-padded prefixes.
+		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
 
 		if err := checkUniqueCompName(store, comp.Name, id); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

@@ -257,7 +257,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // Normalize on save when valid (auto-cleans DD-MM-YYYY → ISO on any
     // save where the date round-trips cleanly). Otherwise preserve the
     // raw existing value so we don't clobber legacy data with `null`.
-    const finalNext = { ...c, ...next, name: trimmedName, date: dateIsValid ? norm : next.date };
+    //
+    // Trim numberPrefix here too — the input does substring(0, 3) per
+    // keystroke but doesn't trim, so typing "  A" stores "  A" in local
+    // state and (without this) lands "  A" on the server. The CREATE
+    // flow (admin_setup.jsx:178) already trims at create time; this
+    // mirrors that for the SETTINGS edit flow so participant numbers
+    // generated from the prefix can't end up like "  A1" / "  A2".
+    // Cross-file guard symmetry: same shape as the comp.Name trim above.
+    const trimmedPrefix = (next.numberPrefix || "").trim();
+    const finalNext = { ...c, ...next, name: trimmedName, numberPrefix: trimmedPrefix, date: dateIsValid ? norm : next.date };
     Promise.resolve(onUpdate(finalNext)).then(() => {
       const now = new Date();
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);

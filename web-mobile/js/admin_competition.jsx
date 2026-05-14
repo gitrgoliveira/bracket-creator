@@ -365,8 +365,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);
       setSaveErr(null);
     }).catch((e) => {
+      // updateCompetition already surfaced the error via showToast;
+      // mirror it inline next to the input so the user sees the cause
+      // next to the field they were editing without a duplicate toast.
       setSaveErr(e?.message || "Save failed");
-      showToast(e?.message || "Save failed", "error");
     });
   };
 
@@ -672,7 +674,12 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       // updated is a CompetitionDetail (config, pools, bracket…); extract the flat config for the list
       const flatComp = updated.config || updated;
       const comps = (t.competitions || []).map(cc => cc.id === c.id ? { ...cc, ...flatComp } : cc);
-      onUpdate({ ...t, competitions: comps });
+      // onUpdate now routes through updateCompetition which re-throws on
+      // failure. Silence the rejection here — the toast was already
+      // fired by updateCompetition's catch — so the "Started" toast
+      // emitted below stays accurate on the happy path and we don't
+      // produce an unhandled-promise warning on PUT failure.
+      Promise.resolve(onUpdate({ ...t, competitions: comps })).catch(() => {});
       showToast(`${c.name} started`);
       onSection("scores");
     } catch (e) {

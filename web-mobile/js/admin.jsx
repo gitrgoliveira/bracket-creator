@@ -87,6 +87,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // teardown); refresh them only when the underlying props change.
   useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
 
+  // Re-throws after surfacing the error toast so callers can branch on
+  // success vs failure. Pre-fix the catch swallowed the rejection, so
+  // every caller that chained .then / .catch (or expected to await this)
+  // saw a resolved Promise even when the underlying PUT failed —
+  // producing UX like "Saved!" + "Save failed" toasts in quick
+  // succession (AdminParticipants.apply) or a "Last saved 13:45:22"
+  // stamp on a failed save (AdminSettings.saveNow).
   const updateCompetition = async (cid, next) => {
     try {
       const updated = await window.API.updateCompetition(cid, next, password);
@@ -99,6 +106,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       }
     } catch (e) {
       showToast(e.message, "error");
+      throw e;
     }
   };
 

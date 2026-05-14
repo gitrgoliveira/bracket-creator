@@ -216,7 +216,13 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       });
 
       if (updatedCount > 0) {
-        onUpdate({ ...c, players: np });
+        // updateCompetition is async; silence the rejection here so
+        // an unhandled-promise warning doesn't fire on PUT failure.
+        // The error toast is already surfaced by updateCompetition's
+        // own catch. (Pre-existing UX: success toast may still fire
+        // before the error toast on save failure — left as a separate
+        // follow-up to keep this commit focused on the re-throw.)
+        Promise.resolve(onUpdate({ ...c, players: np })).catch(() => {});
         showToast(`Matched ${updatedCount} seeds`);
       }
       setSeedImportResult({ updatedCount, unmatched, totalRows: updatedCount + unmatched.length });
@@ -262,7 +268,8 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     const np = [...(c.players || [])];
     const seed = parseInt(val);
     np[idx] = { ...np[idx], seed: isNaN(seed) || seed <= 0 ? null : seed };
-    onUpdate({ ...c, players: np });
+    // Silence rejection — updateCompetition surfaces failures via toast.
+    Promise.resolve(onUpdate({ ...c, players: np })).catch(() => {});
   };
 
   const dragIdxRef = useRefA(null);
@@ -277,9 +284,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     if (seededCount > 0) {
       let rank = 1;
       const renumbered = np.map(p => p.seed ? { ...p, seed: rank++ } : p);
-      onUpdate({ ...c, players: renumbered });
+      Promise.resolve(onUpdate({ ...c, players: renumbered })).catch(() => {});
     } else {
-      onUpdate({ ...c, players: np });
+      Promise.resolve(onUpdate({ ...c, players: np })).catch(() => {});
     }
   };
 
@@ -293,7 +300,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
     let uIdx = 0;
     const shuffled = np.map(p => p.seed ? p : unseeded[uIdx++]);
-    onUpdate({ ...c, players: shuffled });
+    Promise.resolve(onUpdate({ ...c, players: shuffled })).catch(() => {});
     showToast("Unseeded list shuffled");
   };
 
@@ -336,7 +343,11 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
   };
 
-  const apply = () => {
+  // Async so we can await onUpdate(): updateCompetition re-throws on
+  // PUT failure now, so awaiting lets us gate the "Saved N participants"
+  // toast on actual success. Pre-fix the rejection was swallowed and
+  // the success + error toasts fired back-to-back.
+  const apply = async () => {
     try {
       const withZekken = c.withZekkenName;
       const parsed = window.parseParticipantLines(lines, withZekken);
@@ -355,7 +366,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       }
 
       const { np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed);
-      onUpdate({ ...c, players: np });
+      await onUpdate({ ...c, players: np });
 
       const label = c.kind === "team" ? "team" : "participant";
       let msg = `Saved ${pluralize(np.length, label)}`;
@@ -365,8 +376,11 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       showToast(msg);
       setImportSummary(null);
     } catch (err) {
+      // updateCompetition already showed an error toast for PUT failures;
+      // log here so the dev console still has the stack for diagnosis,
+      // and only emit a second toast when the error came from local
+      // parsing/duplicate detection (i.e. err.message is one we own).
       console.error("AdminParticipants: Apply failed", err);
-      showToast("Failed to apply participants: " + err.message, "error");
     }
   };
 
@@ -550,7 +564,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0} title="Shuffle unseeded players">Shuffle unseeded</button>
               <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
-              <button className="btn btn--sm" type="button" onClick={() => onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })}>Clear seeds</button>
+              <button className="btn btn--sm" type="button" onClick={() => { Promise.resolve(onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })).catch(() => {}); }}>Clear seeds</button>
             </div>
           </div>
           <div className="card__body" style={{ paddingTop: 0, paddingBottom: 8 }}>

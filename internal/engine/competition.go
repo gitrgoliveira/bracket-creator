@@ -151,7 +151,11 @@ func (e *Engine) StartCompetition(id string) error {
 	loadedWithZekken := comp.WithZekkenName
 	loadedCourts := append([]string(nil), comp.Courts...)
 	loadedTeamSize := comp.TeamSize
-	loadedPoolWinners := comp.PoolWinners
+	// Note: PoolWinners is intentionally NOT snapshotted. The
+	// validation block below excludes it because it doesn't drive
+	// pool/bracket generation — admin's concurrent change is
+	// preserved by leaving current.PoolWinners alone. Same applies
+	// to Mirror (export-only), Name, Date, Venue (all UI-only).
 
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo
@@ -275,15 +279,18 @@ func (e *Engine) StartCompetition(id string) error {
 		if current.TeamSize == loadedTeamSize {
 			current.TeamSize = comp.TeamSize
 		}
-		// loadedPoolWinners isn't referenced — PoolWinners doesn't
-		// affect generation and admin's concurrent change is preserved
-		// by leaving current.PoolWinners alone. The variable is
-		// captured for symmetry with the rest of the snapshot pattern
-		// and to document that we considered (and excluded) this field
-		// from the validation surface.
-		_ = loadedPoolWinners
-
 		current.Status = comp.Status
+		// HasParticipantIDs is auto-managed (saveCompetitionWithPlayers
+		// sets it to true when Players is non-empty) and not exposed in
+		// the admin UI as an editable field. The unconditional copy
+		// from comp.HasParticipantIDs (the value we read at outer Load
+		// AND used for the LoadParticipantsOpt HasIDs hint above) keeps
+		// the persisted metadata consistent with how we parsed
+		// participants. A concurrent admin change to this field (via a
+		// hand-crafted PUT) would be reverted — that's the safer
+		// behavior here since otherwise the saved metadata would
+		// disagree with the parsed-with-IDs participant list we just
+		// re-saved.
 		current.HasParticipantIDs = comp.HasParticipantIDs
 		return current, nil
 	})

@@ -103,6 +103,38 @@ function isValidISODate(date) {
   return validateAndNormalizeDate(date).error === null;
 }
 
+// Pure decision logic for "user edited a <input type='number'> bound to a
+// debounce-saved field" (e.g. AdminSettings.teamSize/poolSize/poolWinners).
+//
+// The naïve `onChange={e => update(k, +e.target.value)}` has two failure
+// modes from one JS coercion:
+//   - `+""` → 0   (cleared input collapses to a displayed "0" instead of
+//                  staying empty; backend then receives 0 and likely rejects)
+//   - `+"abc"` → NaN  (React warns "Received NaN for the value attribute")
+//
+// Returns:
+//   { value, shouldSave }
+//
+// - `value` is what to store in local state. For empty input we return NaN
+//   so the render side can do `value={Number.isFinite(v) ? v : ""}` and
+//   keep the cleared display empty (matches the matchDuration pattern at
+//   admin_schedule.jsx).
+// - `shouldSave` is true only when the parsed value is a positive integer
+//   ≥ min. Callers should skip saveLater on false AND cancel any pending
+//   save (otherwise an earlier in-flight debounced save with the old good
+//   value would land on the server while the user sees an empty input,
+//   producing a state mismatch that only resolves on next SSE refresh).
+//
+// Exported for vitest at __tests__/admin_helpers.test.jsx.
+function decideNumericUpdate(raw, min = 1) {
+  if (raw === "" || raw == null) return { value: NaN, shouldSave: false };
+  const parsed = +raw;
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < min) {
+    return { value: parsed, shouldSave: false };
+  }
+  return { value: parsed, shouldSave: true };
+}
+
 function normalizeDate(d) {
   if (!d) return d;
   let out;
@@ -138,6 +170,7 @@ if (typeof window !== "undefined") {
   window.normalizeDate = normalizeDate;
   window.isValidISODate = isValidISODate;
   window.validateAndNormalizeDate = validateAndNormalizeDate;
+  window.decideNumericUpdate = decideNumericUpdate;
   window.DATE_ERR_INVALID_FORMAT = DATE_ERR_INVALID_FORMAT;
   window.DATE_ERR_YEAR_RANGE = DATE_ERR_YEAR_RANGE;
   window.MIN_YEAR = MIN_YEAR;
@@ -154,6 +187,7 @@ export {
   normalizeDate,
   isValidISODate,
   validateAndNormalizeDate,
+  decideNumericUpdate,
   DATE_ERR_INVALID_FORMAT,
   DATE_ERR_YEAR_RANGE,
   MIN_YEAR,

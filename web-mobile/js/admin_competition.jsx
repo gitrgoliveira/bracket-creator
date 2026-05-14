@@ -8,6 +8,7 @@ const compMatchStats = window.compMatchStats;
 const hasBothSides = window.hasBothSides;
 const normalizeDate = window.normalizeDate;
 const isValidISODate = window.isValidISODate;
+const decideNumericUpdate = window.decideNumericUpdate;
 // Use the canonical error strings + numeric bounds (admin_helpers.jsx)
 // so saveNow's inline asymmetric validation stays in lockstep with
 // validateAndNormalizeDate's messages and predicate, and so the
@@ -296,6 +297,26 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     saveNow(next);
   };
 
+  // Number-input variant of `update`. Stores NaN in local state for empty
+  // input so the render side can keep the display empty (see
+  // decideNumericUpdate's contract). Skips saveLater when the parsed value
+  // isn't a positive integer ≥ min — and cancels any pending debounced save
+  // so the backend doesn't receive a stale good value while the user sees
+  // an empty/invalid input. Without the cancel, a saveLater from an earlier
+  // keystroke ("12") would still fire after the user cleared the input,
+  // leaving server state mismatched with what's on screen until SSE refresh.
+  const updateNumber = (k, raw, min = 1) => {
+    const { value, shouldSave } = decideNumericUpdate(raw, min);
+    const next = { ...local, [k]: value };
+    setLocal(next);
+    if (shouldSave) {
+      saveLater(next);
+    } else if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  };
+
   const toggleCourt = (cc) => {
     const nextCourts = local.courts.includes(cc) ? local.courts.filter((x) => x !== cc) : [...local.courts, cc].sort();
     if (nextCourts.length) updateNow("courts", nextCourts);
@@ -335,7 +356,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
           {/* Cap is MAX_TEAM_SIZE (admin_helpers.jsx). TEAM_POSITIONS in */}
           {/* admin_scoring_modal.jsx is built from the same constant, so */}
           {/* this input can't allow a value the scoring UI doesn't render. */}
-          <input className="input" type="number" min="1" max={MAX_TEAM_SIZE} value={local.teamSize} onChange={(e) => update("teamSize", +e.target.value)} />
+          {/* Render NaN as "" so clearing the input stays empty instead of */}
+          {/* collapsing to "0"; updateNumber gates the debounced save so a */}
+          {/* cleared/invalid value never lands on the backend as 0. */}
+          <input
+            className="input"
+            type="number"
+            min="1"
+            max={MAX_TEAM_SIZE}
+            value={Number.isFinite(local.teamSize) ? local.teamSize : ""}
+            onChange={(e) => updateNumber("teamSize", e.target.value, 1)}
+          />
         </div>
       )}
       <div className="field">
@@ -357,8 +388,23 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
             </div>
           </div>
           <div className="row">
-            <div className="field"><label className="field__label">Players per pool</label><input className="input" type="number" min="3" value={local.poolSize} onChange={(e) => update("poolSize", +e.target.value)} /></div>
-            <div className="field"><label className="field__label">Winners per pool</label><input className="input" type="number" min="1" value={local.poolWinners} onChange={(e) => update("poolWinners", +e.target.value)} /></div>
+            {/* Same NaN-as-"" + gated-save pattern as Team size above. */}
+            {/* min=3 for poolSize matches the backend's pool-size lower */}
+            {/* bound (3 players minimum to run a round-robin). */}
+            <div className="field"><label className="field__label">Players per pool</label><input
+              className="input"
+              type="number"
+              min="3"
+              value={Number.isFinite(local.poolSize) ? local.poolSize : ""}
+              onChange={(e) => updateNumber("poolSize", e.target.value, 3)}
+            /></div>
+            <div className="field"><label className="field__label">Winners per pool</label><input
+              className="input"
+              type="number"
+              min="1"
+              value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
+              onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
+            /></div>
           </div>
         </>
       )}

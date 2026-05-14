@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -354,6 +354,103 @@ describe('numeric bounds constants', () => {
     const cases = ["2026-05-13", "13-05-2026", "2026-13-32", "1899-01-01", "", null];
     cases.forEach((c) => {
       expect(isValidISODate(c)).toBe(validateAndNormalizeDate(c).error === null);
+    });
+  });
+});
+
+describe('decideNumericUpdate', () => {
+  // Deep-review I5 finding: AdminSettings.teamSize/poolSize/poolWinners
+  // each used `onChange={e => update(k, +e.target.value)}`. Clearing the
+  // input → `+""` → 0 → debounced saveLater fires saveNow → sends `0` to
+  // the backend, which rejects. The user sees the input collapse to "0"
+  // then a "Save failed" toast 400ms later.
+  //
+  // Same shape as the matchDuration fix in round 7 (admin_schedule.jsx),
+  // but in a different file. The grep recipe at deep-review/SKILL.md I5
+  // surfaces every `+e.target.value` so the parallel sites stop falling
+  // through this gap.
+
+  describe('empty / nullish input → NaN, do not save', () => {
+    it('empty string returns NaN + shouldSave=false', () => {
+      expect(decideNumericUpdate("", 1)).toEqual({ value: NaN, shouldSave: false });
+    });
+
+    it('null returns NaN + shouldSave=false', () => {
+      expect(decideNumericUpdate(null, 1)).toEqual({ value: NaN, shouldSave: false });
+    });
+
+    it('undefined returns NaN + shouldSave=false', () => {
+      expect(decideNumericUpdate(undefined, 1)).toEqual({ value: NaN, shouldSave: false });
+    });
+  });
+
+  describe('valid positive integer ≥ min → save', () => {
+    it('"5" with min=1 → {value:5, shouldSave:true}', () => {
+      expect(decideNumericUpdate("5", 1)).toEqual({ value: 5, shouldSave: true });
+    });
+
+    it('"3" with min=3 (at boundary) → save', () => {
+      expect(decideNumericUpdate("3", 3)).toEqual({ value: 3, shouldSave: true });
+    });
+
+    it('"100" with min=1 → save', () => {
+      expect(decideNumericUpdate("100", 1)).toEqual({ value: 100, shouldSave: true });
+    });
+
+    it('default min is 1 when not provided', () => {
+      expect(decideNumericUpdate("5")).toEqual({ value: 5, shouldSave: true });
+      expect(decideNumericUpdate("0")).toEqual({ value: 0, shouldSave: false });
+    });
+  });
+
+  describe('below min → keep value but do not save', () => {
+    it('"0" with min=1 → no save (the original bug — backend rejected 0)', () => {
+      expect(decideNumericUpdate("0", 1)).toEqual({ value: 0, shouldSave: false });
+    });
+
+    it('"2" with min=3 → no save (just below pool-size minimum)', () => {
+      expect(decideNumericUpdate("2", 3)).toEqual({ value: 2, shouldSave: false });
+    });
+
+    it('"-5" with min=1 → no save', () => {
+      expect(decideNumericUpdate("-5", 1)).toEqual({ value: -5, shouldSave: false });
+    });
+  });
+
+  describe('non-integer → keep value but do not save', () => {
+    it('"1.5" with min=1 → no save (browser number inputs accept fractions)', () => {
+      expect(decideNumericUpdate("1.5", 1)).toEqual({ value: 1.5, shouldSave: false });
+    });
+
+    it('"3.14" with min=3 → no save', () => {
+      expect(decideNumericUpdate("3.14", 3)).toEqual({ value: 3.14, shouldSave: false });
+    });
+  });
+
+  describe('non-numeric → keep value but do not save', () => {
+    it('"abc" → {value:NaN, shouldSave:false}', () => {
+      const result = decideNumericUpdate("abc", 1);
+      expect(Number.isNaN(result.value)).toBe(true);
+      expect(result.shouldSave).toBe(false);
+    });
+
+    it('"5abc" → {value:NaN, shouldSave:false}', () => {
+      // `+"5abc"` is NaN, not 5 — JS coercion doesn't substring-parse.
+      const result = decideNumericUpdate("5abc", 1);
+      expect(Number.isNaN(result.value)).toBe(true);
+      expect(result.shouldSave).toBe(false);
+    });
+  });
+
+  describe('Infinity / -Infinity → keep but do not save', () => {
+    // Number-typed inputs can't normally produce these, but the helper
+    // shouldn't allow them through if a caller passes weird values.
+    it('"Infinity" → no save', () => {
+      expect(decideNumericUpdate("Infinity", 1)).toEqual({ value: Infinity, shouldSave: false });
+    });
+
+    it('"-Infinity" → no save', () => {
+      expect(decideNumericUpdate("-Infinity", 1)).toEqual({ value: -Infinity, shouldSave: false });
     });
   });
 });

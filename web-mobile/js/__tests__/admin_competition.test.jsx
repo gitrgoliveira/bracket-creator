@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildLiveIpponResult } from '../admin_competition.jsx';
+import { buildLiveIpponResult, loadScoreboardPoints } from '../admin_competition.jsx';
 
 // Copilot finding on PR #103: LiveMatchPanel's scoreboard mode supports
 // 2-ippon wins (and 2-1 with loser points), but the old recordWinner
@@ -157,6 +157,134 @@ describe('buildLiveIpponResult', () => {
     it('winner field is the correct side object', () => {
       expect(buildLiveIpponResult("a", SIDE_A, SIDE_B).winner).toBe(SIDE_A);
       expect(buildLiveIpponResult("b", SIDE_A, SIDE_B).winner).toBe(SIDE_B);
+    });
+  });
+});
+
+describe('loadScoreboardPoints', () => {
+  // Companion bug to the 2-ippon truncation Copilot found. The previous
+  // LiveMatchPanel useEffect loaded aPoints/bPoints from
+  // `match.score.ippons` (winner-only) gated by `winner.id === sideX.id`,
+  // which silently dropped the LOSER's letters on every render. Once
+  // buildLiveIpponResult started writing 2-1 wins correctly (loser's
+  // single ippon preserved), the loader's truncation surfaced — a 2-1
+  // win came back as 2-0 and re-submission re-truncated it.
+  //
+  // Fix reads from `match.ipponsA` / `match.ipponsB` directly. Tests pin
+  // every adversarial case so a future refactor can't silently
+  // re-introduce the asymmetry.
+
+  describe('defensive empties', () => {
+    it('null match → { aPoints: [], bPoints: [] }', () => {
+      expect(loadScoreboardPoints(null)).toEqual({ aPoints: [], bPoints: [] });
+    });
+
+    it('undefined match → { aPoints: [], bPoints: [] }', () => {
+      expect(loadScoreboardPoints(undefined)).toEqual({ aPoints: [], bPoints: [] });
+    });
+
+    it('match with no ipponsA/ipponsB → empty arrays', () => {
+      expect(loadScoreboardPoints({ id: "m1" })).toEqual({ aPoints: [], bPoints: [] });
+    });
+
+    it('match with empty ipponsA/ipponsB arrays → empty arrays', () => {
+      expect(loadScoreboardPoints({ ipponsA: [], ipponsB: [] })).toEqual({ aPoints: [], bPoints: [] });
+    });
+  });
+
+  describe('ippon-mode reads (the read side of buildLiveIpponResult writes)', () => {
+    it('1-0 side A win round-trip: aPoints=["M"], bPoints=[]', () => {
+      // buildLiveIpponResult("a", A, B, ["M"], []) wrote ipponsA=["M"], ipponsB=[].
+      // loadScoreboardPoints should read it back identically.
+      const r = loadScoreboardPoints({
+        ipponsA: ["M"],
+        ipponsB: [],
+        score: { type: "ippon" },
+        winner: { id: "a1" },
+        sideA: { id: "a1" },
+      });
+      expect(r).toEqual({ aPoints: ["M"], bPoints: [] });
+    });
+
+    it('2-0 side A win round-trip: aPoints=["M","K"], bPoints=[]', () => {
+      const r = loadScoreboardPoints({
+        ipponsA: ["M", "K"],
+        ipponsB: [],
+        score: { type: "ippon" },
+      });
+      expect(r).toEqual({ aPoints: ["M", "K"], bPoints: [] });
+    });
+
+    it('2-1 side A win round-trip: aPoints=["M","K"], bPoints=["D"] — the bug case', () => {
+      // Pre-fix: loader returned aPoints=["M","K"] (from score.ippons,
+      // which was the winner's letters) and bPoints=[] (winner.id !==
+      // sideB.id). So a 2-1 win came back as 2-0 in the UI even though
+      // the backend persisted 2-1 correctly. Re-submission would then
+      // re-write 2-0 and drop the loser's letter on the server too.
+      const r = loadScoreboardPoints({
+        ipponsA: ["M", "K"],
+        ipponsB: ["D"],
+        score: { type: "ippon" },
+      });
+      expect(r).toEqual({ aPoints: ["M", "K"], bPoints: ["D"] });
+    });
+
+    it('2-1 side B win round-trip: symmetric', () => {
+      const r = loadScoreboardPoints({
+        ipponsA: ["M"],
+        ipponsB: ["K", "T"],
+        score: { type: "ippon" },
+      });
+      expect(r).toEqual({ aPoints: ["M"], bPoints: ["K", "T"] });
+    });
+  });
+
+  describe('hikiwake mode (post-fix: loads tied state too)', () => {
+    it('1-1 hikiwake: aPoints=["M"], bPoints=["K"]', () => {
+      // Pre-fix the gate `score.type === "ippon"` meant hikiwake matches
+      // loaded empty arrays. Post-fix the loader is permissive: it shows
+      // the saved tied state so the operator can adjust. Submit stays
+      // disabled until one side strictly leads, so there's no accidental
+      // hikiwake-converted-to-ippon risk.
+      const r = loadScoreboardPoints({
+        ipponsA: ["M"],
+        ipponsB: ["K"],
+        score: { type: "hikiwake" },
+      });
+      expect(r).toEqual({ aPoints: ["M"], bPoints: ["K"] });
+    });
+
+    it('0-0 hikiwake: still empty', () => {
+      const r = loadScoreboardPoints({
+        ipponsA: [],
+        ipponsB: [],
+        score: { type: "hikiwake" },
+      });
+      expect(r).toEqual({ aPoints: [], bPoints: [] });
+    });
+  });
+
+  describe('placeholder filtering', () => {
+    it('filters out "•" empty-slot placeholders (matches scoring modal pattern)', () => {
+      // The full editor uses "•" to mark empty slots in its 2-element
+      // ippon arrays. Live panel never writes "•" but data may round-trip
+      // through the full editor — filtering defensively keeps the
+      // scoreboard display clean.
+      const r = loadScoreboardPoints({
+        ipponsA: ["M", "•"],
+        ipponsB: ["•", "K"],
+        score: { type: "ippon" },
+      });
+      expect(r).toEqual({ aPoints: ["M"], bPoints: ["K"] });
+    });
+
+    it('filters out falsy entries (undefined, empty string)', () => {
+      const r = loadScoreboardPoints({
+        ipponsA: ["M", "", undefined],
+        ipponsB: [null, "K"],
+        score: { type: "ippon" },
+      });
+      expect(r).toEqual({ aPoints: ["M"], bPoints: ["K"] });
     });
   });
 });

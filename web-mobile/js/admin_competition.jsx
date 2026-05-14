@@ -81,17 +81,51 @@ function buildLiveIpponResult(winnerSide, sideA, sideB, winnerIppons, loserIppon
   };
 }
 
+// Pure loader for LiveMatchPanel's scoreboard-mode aPoints/bPoints from
+// a (possibly completed) match. Reads each side's letters DIRECTLY from
+// match.ipponsA / match.ipponsB rather than from score.ippons (which is
+// only the winner's letters, by buildPatch / normalizeMatch convention).
+//
+// Bug fix companion to buildLiveIpponResult: the previous loader gated
+// on `winner.id === sideX.id` and pulled from `score.ippons`, which
+// returned only the winner's letters. That was fine when the writer
+// always recorded loser=[]; once buildLiveIpponResult started writing
+// 2-1 wins correctly (loser's single ippon preserved), the loader's
+// truncation surfaced — a 2-1 win came back as 2-0 on re-render and
+// re-submission silently dropped the loser's letter.
+//
+// admin_scoring_modal.jsx's initialAPts at line 30-31 already used the
+// `m.ipponsA?.filter(...)` pattern; this helper aligns the live panel
+// with the same shape.
+//
+// "•" placeholders are filtered (the full editor uses "•" as an empty
+// slot marker; live panel doesn't write those but the data round-trips
+// through the same backend fields so filtering is defensive).
+//
+// Exported for vitest at __tests__/admin_competition.test.jsx.
+function loadScoreboardPoints(match) {
+  if (!match) return { aPoints: [], bPoints: [] };
+  return {
+    aPoints: (match.ipponsA || []).filter(x => x && x !== "•"),
+    bPoints: (match.ipponsB || []).filter(x => x && x !== "•"),
+  };
+}
+
 const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecord, onOverride }) => {
   const [mode, setMode] = useStateA("tap");
   const [aPoints, setAPoints] = useStateA([]);
   const [bPoints, setBPoints] = useStateA([]);
   useEffectA(() => {
-    setAPoints(match.score?.type === "ippon" && match.winner?.id === match.sideA?.id ? match.score.ippons || [] : []);
-    setBPoints(match.score?.type === "ippon" && match.winner?.id === match.sideB?.id ? match.score.ippons || [] : []);
-    // Include score/winner/status in deps so an SSE update for the same
-    // match (e.g. an off-panel correction) doesn't leave the scoreboard
-    // view showing stale points.
-  }, [match.id, match.status, match.winner?.id, match.score?.type, match.score?.ippons?.join(",")]);
+    // Load both sides' letters from the canonical match.ipponsA /
+    // match.ipponsB fields so the read shape matches what
+    // buildLiveIpponResult writes — see loadScoreboardPoints above.
+    const { aPoints: a, bPoints: b } = loadScoreboardPoints(match);
+    setAPoints(a);
+    setBPoints(b);
+    // Include status + both sides' ippons in deps so an SSE update for
+    // the same match (e.g. an off-panel correction) doesn't leave the
+    // scoreboard view showing stale points.
+  }, [match.id, match.status, match.ipponsA?.join(","), match.ipponsB?.join(",")]);
   const a = match.sideA, b = match.sideB;
   const isComplete = match.status === "completed";
   return (
@@ -754,4 +788,4 @@ window.AdminCompetition = AdminCompetition;
 
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { buildLiveIpponResult };
+export { buildLiveIpponResult, loadScoreboardPoints };

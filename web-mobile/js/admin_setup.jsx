@@ -422,6 +422,12 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const [preview, setPreview] = useStateA(null);
   const [loading, setLoading] = useStateA(false);
   const [results, setResults] = useStateA(null);
+  // doImport's setResults/setError/setLoading and onImported timer fire
+  // post-await. The page can unmount via onBack() while the upload is in
+  // flight — gate via mountedRef in addition to the existing timer
+  // cleanup below.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
   // Tracks the success-confirmation timer so we can cancel it if the page
   // unmounts before onImported fires (avoids stray navigation after teardown).
   const importedTimerRef = useRefA(null);
@@ -469,6 +475,12 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       // Use the centralized API wrapper (api.jsx) so auth + error handling
       // stay consistent with the rest of the admin UI.
       const body = await window.API.importCompetitions(fd, password);
+      // mountedRef gates the post-await setStates so a navigate-back
+      // during the upload doesn't fire setResults / setTimeout on a
+      // torn-down component. importedTimerRef has its own unmount
+      // cleanup, but only if it was set — so don't even schedule it
+      // post-unmount.
+      if (!mountedRef.current) return;
       setResults(body.results || []);
       const hasErrors = (body.results || []).some(r => r.error);
       if (!hasErrors) {
@@ -478,9 +490,9 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
         }, 1500);
       }
     } catch (e) {
-      setError(e.message);
+      if (mountedRef.current) setError(e.message);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 

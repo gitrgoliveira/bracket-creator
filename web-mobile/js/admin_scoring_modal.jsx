@@ -1,7 +1,7 @@
 // Score-entry modals used by the schedule and competition pages. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Reusable foul counter: independent +/- buttons per side with clear labeling
 function FoulCounter({ label, fouls, setFouls, color, hansokuPts }) {
@@ -38,6 +38,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const [aFouls, setAFouls] = useStateA(initialAFouls);
   const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [submitting, setSubmitting] = useStateA(false);
+  // doSubmit's setSubmitting(false) in finally fires post-await; if the
+  // parent unmounts the modal during the in-flight save (e.g.
+  // AdminScoreEditor unmounts), gate the setState. handleDismiss
+  // already no-ops UI dismissal while submitting=true, so this covers
+  // only external/parent-driven unmount.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Hansoku → ippon awarded to opponent on every 2nd foul
   const aHansokuPts = Math.floor(bFouls / 2);
@@ -78,7 +85,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 
   const doSubmit = async (fn) => {
     setSubmitting(true);
-    try { await fn(); } finally { setSubmitting(false); }
+    try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
   };
 
   // isHikiwake accepts both the canonical "hikiwake" and legacy "hikewake"
@@ -295,6 +302,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const isComplete = m.status === "completed";
   const positions = TEAM_POSITIONS.slice(0, teamSize);
   const [submitting, setSubmitting] = useStateA(false);
+  // Same teardown-race guard as ScoreEditorModal — covers external/
+  // parent-driven unmount during in-flight save.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
 
   const existingSub = m.subResults || [];
   const initSubs = positions.map((_, idx) => {
@@ -372,7 +383,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 
   const doSubmit = async (fn) => {
     setSubmitting(true);
-    try { await fn(); } finally { setSubmitting(false); }
+    try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
   };
 
   // Mirrors ScoreEditorModal.isDirty: structural compare of current subs

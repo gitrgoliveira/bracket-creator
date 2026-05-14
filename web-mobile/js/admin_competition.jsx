@@ -293,6 +293,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   const [deleting, setDeleting] = useStateA(false);
   const [local, setLocal] = useStateA({ ...c });
   const debounceRef = useRefA(null);
+  // AdminSettings unmounts when the user navigates to a different section
+  // via onSection() (AdminCompetition rerenders with a different child).
+  // saveNow's .then/.catch and the delete handler's finally fire on
+  // own state — gate via mountedRef. Same teardown-race shape as
+  // admin_participants.jsx apply().
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
 
   useEffectA(() => {
     setLocal(prev => {
@@ -361,10 +368,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     const trimmedPrefix = (next.numberPrefix || "").trim();
     const finalNext = { ...c, ...next, name: trimmedName, numberPrefix: trimmedPrefix, date: dateIsValid ? norm : next.date };
     Promise.resolve(onUpdate(finalNext)).then(() => {
+      if (!mountedRef.current) return;
       const now = new Date();
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);
       setSaveErr(null);
     }).catch((e) => {
+      if (!mountedRef.current) return;
       // updateCompetition already surfaced the error via showToast;
       // mirror it inline next to the input so the user sees the cause
       // next to the field they were editing without a duplicate toast.
@@ -534,13 +543,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
             setDeleting(true);
             try {
               const ok = await window.API.deleteCompetition(local.id, password);
+              // onBack() unmounts AdminSettings via the parent's view
+              // switch; setDeleting(false) in finally would then fire on
+              // a torn-down component. Gate via mountedRef.
               if (ok) onBack();
-              else showToast("Failed to delete competition.", "error");
+              else if (mountedRef.current) showToast("Failed to delete competition.", "error");
             } catch (e) {
               console.error("Delete competition failed:", e);
-              showToast(e.message, "error");
+              if (mountedRef.current) showToast(e.message, "error");
             } finally {
-              setDeleting(false);
+              if (mountedRef.current) setDeleting(false);
             }
           }
         }}>
@@ -655,6 +667,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
+  // start() awaits a multi-second backend call (pool generation + bracket
+  // build). If the user clicks Back during that window AdminCompetition
+  // unmounts and setStarting(false) in finally targets a dead component.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Use the shared isValidISODate (admin_helpers.jsx) which delegates to
   // normalizeDate for semantic validity — rejects "2026-13-32" / Feb 31 /
@@ -680,13 +697,17 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       // emitted below stays accurate on the happy path and we don't
       // produce an unhandled-promise warning on PUT failure.
       Promise.resolve(onUpdate({ ...t, competitions: comps })).catch(() => {});
+      // Gate the post-await own setState (onSection drives the parent's
+      // view) and parent-routed showToast — if we unmounted during the
+      // multi-second start, both target dead state.
+      if (!mountedRef.current) return;
       showToast(`${c.name} started`);
       onSection("scores");
     } catch (e) {
       console.error("Start competition failed:", e);
-      showToast(e.message, "error");
+      if (mountedRef.current) showToast(e.message, "error");
     } finally {
-      setStarting(false);
+      if (mountedRef.current) setStarting(false);
     }
   };
 

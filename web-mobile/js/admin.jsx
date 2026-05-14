@@ -86,6 +86,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // Refs are read by the SSE subscription (which has narrower deps to avoid
   // teardown); refresh them only when the underlying props change.
   useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
+  // AdminApp unmounts on logout / viewer-mode switch. Several async
+  // handlers below (updateCompetition's fetchCompetitionDetails,
+  // startAllCompetitions, createPlayoff) setAdminCompData / setAdminLoading
+  // / setView post-await. Narrow window but real — gate via mountedRef.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Re-throws after surfacing the error toast so callers can branch on
   // success vs failure. Pre-fix the catch swallowed the rejection, so
@@ -102,7 +108,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onUpdate({ ...t, competitions: comps });
       if (view.kind === "competition" && view.id === cid) {
         const details = await window.API.fetchCompetitionDetails(cid);
-        setAdminCompData(details);
+        if (mountedRef.current) setAdminCompData(details);
       }
     } catch (e) {
       showToast(e.message, "error");
@@ -162,6 +168,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     });
 
     const comps = await window.API.fetchCompetitions();
+    if (!mountedRef.current) return;
     onUpdate({ ...t, competitions: comps });
     setAdminLoading(false);
 
@@ -176,11 +183,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       const created = await window.API.createPlayoff(sourceId, password);
       const comps = await window.API.fetchCompetitions();
+      if (!mountedRef.current) return;
       onUpdate({ ...t, competitions: comps });
       setView({ kind: "competition", id: created.id, section: "participants" });
       showToast(`Playoff "${created.name}" created`);
     } catch (e) {
-      showToast(e.message, "error");
+      if (mountedRef.current) showToast(e.message, "error");
     }
   };
 

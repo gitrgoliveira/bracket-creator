@@ -331,6 +331,11 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     setSlotLoading(true);
     try {
       await window.API.addReservedSlot(c.id, slotSrcComp, slotRank, password);
+      // mountedRef declared above gates post-await own setStates so a
+      // navigate-away during the PUT can't setState on a torn-down
+      // component. showToast is safe (lifted to AdminApp). alert is a
+      // browser API, safe regardless.
+      if (!mountedRef.current) return;
       setShowSlotForm(false);
       setSlotSrcComp("");
       setSlotRank(1);
@@ -338,7 +343,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     } catch (e) {
       alert("Failed to add reserved slot: " + e.message);
     } finally {
-      setSlotLoading(false);
+      // Skip when unmounted — setSlotLoading on a dead component is a
+      // teardown signal even if React 18 silently no-ops.
+      if (mountedRef.current) setSlotLoading(false);
     }
   };
 
@@ -408,6 +415,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const pasteFromExcel = async () => {
     try {
       const clipboardText = await navigator.clipboard.readText();
+      // Same teardown-race guard as apply() / addSlot — gate the
+      // post-await setText so a navigate-away during clipboard read
+      // doesn't fire setState on a dead component.
+      if (!mountedRef.current) return;
       // Normalise tabs to commas, strip leading row numbers (e.g. "1, Name, Dojo")
       setText(parsePastedRows(clipboardText, (s) => s.replace(/\t/g, ", ").replace(/^\d+,\s*/, "")).join("\n"));
     } catch (err) {

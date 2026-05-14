@@ -229,9 +229,18 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         }
       });
 
-      // Always render the summary panel (matched + unmatched rows) so
-      // the admin sees suggestions even when nothing was auto-matched.
-      // The PUT only fires when there's something to save.
+      // Always render the summary panel with the parsed counts (matched
+      // + unmatched rows) so the admin sees what the file produced even
+      // when the save fails. The PUT only fires when there's something
+      // to save; the success toast only fires on successful save.
+      //
+      // Pre-fix-of-fix: the catch branch set updatedCount=0 in the
+      // summary, which hid the parsed-match count from the admin after
+      // a PUT failure (they saw "0 matched, K unmatched" even though
+      // parse found N matches). Fix: surface the parsed N regardless
+      // of save outcome; the success toast (and updateCompetition's
+      // error toast) are what communicate save status.
+      let saveError = null;
       if (updatedCount > 0) {
         try {
           await onUpdate({ ...c, players: np });
@@ -240,13 +249,12 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
           // dev-console diagnosis but don't emit a second toast or a
           // misleading "Matched N seeds" success message.
           console.error("AdminParticipants: seed import PUT failed", err);
-          if (mountedRef.current) {
-            setSeedImportResult({ updatedCount: 0, unmatched, totalRows: unmatched.length });
-          }
-          return;
+          saveError = err;
         }
         if (!mountedRef.current) return;
-        showToast(`Matched ${updatedCount} seeds`);
+        if (!saveError) {
+          showToast(`Matched ${updatedCount} seeds`);
+        }
       }
       if (mountedRef.current) {
         setSeedImportResult({ updatedCount, unmatched, totalRows: updatedCount + unmatched.length });

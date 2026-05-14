@@ -127,6 +127,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
+
+		// Reject whitespace-only Name. The admin_setup.jsx Create form
+		// validates this client-side (deriveCompetitionName + the
+		// empty-name check), but hand-crafted POSTs with an explicit
+		// `id` bypass the slugifyID empty-name fallback below — so
+		// without this guard, an explicit-ID request with Name="   "
+		// lands as Name="" on disk and renders a blank competition
+		// card. Cross-file guard symmetry with handlers_tournament.go
+		// (which rejects empty Name on PUT and POST).
+		if comp.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
+			return
+		}
+
 		if err := checkUniqueCompName(store, comp.Name, ""); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -191,6 +205,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
+
+		// Reject whitespace-only Name (see POST handler above). The
+		// admin SETTINGS edit path (AdminSettings.saveNow in
+		// admin_competition.jsx) does not currently empty-check the
+		// name client-side, so this guard is the only thing standing
+		// between a user clearing the field and hitting save and a
+		// blank-name competition landing on disk.
+		if comp.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
+			return
+		}
 
 		if err := checkUniqueCompName(store, comp.Name, id); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

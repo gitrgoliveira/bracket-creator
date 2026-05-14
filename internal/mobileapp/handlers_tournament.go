@@ -38,13 +38,16 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
 
-		// Reject whitespace-only names. The current CreateTournament UI
-		// validates trimmed name client-side before submit, but older
-		// cached clients (and direct API callers) can still send
-		// "   "; without this guard, the trim above silently persists
-		// Name == "". AuthMiddleware treats empty Name+Password as
-		// "uninitialized", so an empty-name save effectively locks
-		// every subsequent request out.
+		// Reject whitespace-only names. The current EditTournament UI
+		// (admin_setup.jsx) validates trimmed name client-side before
+		// submit, but older cached clients (and direct API callers)
+		// can still send "   "; without this guard, the trim above
+		// silently persists Name == "" — admin UI then shows a blank
+		// tournament title and the persisted record fails the
+		// documented "tournament has a name" invariant.
+		// Cross-file guard symmetry with the POST handler below and
+		// (after this commit) the competition write paths in
+		// handlers_competition.go + handlers_import.go.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
 			return
@@ -77,9 +80,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Date = strings.TrimSpace(t.Date)
 
 		// Same empty-after-trim guard as the PUT handler. POST is the
-		// first-time-setup entry point — letting Name == "" land here
-		// is even worse than on PUT (AuthMiddleware then refuses all
-		// future requests because the tournament looks "uninitialized").
+		// first-time-setup entry point; if both Name == "" and
+		// Password == "" land here, AuthMiddleware's password check
+		// vacuously passes for any client (empty header == empty
+		// stored password), exposing /api/* unauthenticated. The PUT
+		// handler's guard above and this one together ensure that
+		// failure mode can't be reached via the normal write paths.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
 			return

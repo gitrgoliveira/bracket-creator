@@ -273,7 +273,10 @@ func TestCompetitionHandlers(t *testing.T) {
 	// POST /api/competitions (save error)
 	os.RemoveAll(filepath.Join(tempDir, "competitions"))
 	os.WriteFile(filepath.Join(tempDir, "competitions"), []byte("not a dir"), 0644)
-	comp = state.Competition{ID: "fail"}
+	// Name must be non-empty post-trim — the handler now rejects
+	// empty-after-trim Name with a 400 before reaching the save path,
+	// which would mask this 500-from-save-error test.
+	comp = state.Competition{ID: "fail", Name: "Save Error Comp"}
 	body, _ = json.Marshal(comp)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))

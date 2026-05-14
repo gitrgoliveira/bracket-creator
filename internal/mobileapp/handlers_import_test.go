@@ -218,6 +218,7 @@ competitions:
 		manifestPart.Write([]byte(`
 competitions:
   - id: "comp-bad-part"
+    name: "Bad Participants"
     participants: "bad.csv"
 `))
 		playersPart, _ := writer.CreateFormFile("files", "bad.csv")
@@ -289,6 +290,46 @@ competitions:
 		require.Len(t, resp.Results, 1)
 		assert.Equal(t, "Padded Cup", resp.Results[0].Name,
 			"ImportResult.Name should reflect the trimmed value to match the persisted record")
+	})
+
+	// Cross-file guard symmetry with handlers_competition.go (POST + PUT)
+	// and handlers_tournament.go. A manifest entry with whitespace-only
+	// name trims to "" — without an explicit guard, that would persist
+	// as Competition.Name = "" and render a blank card in the admin UI.
+	// The error is surfaced per-row in ImportResult.Error rather than
+	// HTTP-failing the whole batch (matches existing behavior for missing
+	// IDs / invalid IDs / save errors).
+	t.Run("Whitespace-Only Name Rejected", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "blank-name-import"
+    name: "   "
+    kind: "individual"
+    format: "pools"
+    courts: ["A"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Equal(t, "competition name is required", resp.Results[0].Error,
+			"whitespace-only Name should land in ImportResult.Error, not on disk")
+
+		// Confirm the competition was not persisted.
+		stored, _ := store.LoadCompetition("blank-name-import")
+		assert.Nil(t, stored, "blank-name-import should not have been persisted")
 	})
 }
 

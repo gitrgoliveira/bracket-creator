@@ -344,6 +344,50 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, "2026-06-15", stored.Date, "Date should be trimmed on PUT")
 	})
 
+	// Cross-file guard symmetry with handlers_tournament.go: whitespace-only
+	// Name must be rejected on both POST and PUT after trim. Without this,
+	// a hand-crafted POST with `{id: "foo", name: "   "}` lands as
+	// Name="" on disk (slugifyID is bypassed when ID is explicit, and
+	// checkUniqueCompName("", ...) passes when no other empty-named
+	// competition exists) — admin UI then shows a blank competition card.
+	t.Run("Whitespace-Only Name Rejected On Create", func(t *testing.T) {
+		comp := state.Competition{ID: "blank-name", Name: "   "}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"POST /competitions with whitespace-only Name must return 400")
+		assert.Contains(t, w.Body.String(), "competition name is required",
+			"rejection should explain the empty-name reason")
+		// Confirm it didn't land on disk.
+		stored, _ := store.LoadCompetition("blank-name")
+		assert.Nil(t, stored, "blank-name competition should not have been persisted")
+	})
+
+	t.Run("Whitespace-Only Name Rejected On Update", func(t *testing.T) {
+		seed := state.Competition{ID: "blank-name-update", Name: "Original"}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		update := state.Competition{ID: "blank-name-update", Name: "   "}
+		body, _ := json.Marshal(update)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/blank-name-update", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"PUT /competitions/:id with whitespace-only Name must return 400")
+		assert.Contains(t, w.Body.String(), "competition name is required",
+			"rejection should explain the empty-name reason")
+		// Confirm the persisted name is unchanged.
+		stored, err := store.LoadCompetition("blank-name-update")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "Original", stored.Name,
+			"PUT must not clobber Name when validation fails")
+	})
+
 	// Path-traversal guard. ValidateCompetitionID was only called at 2 of
 	// the 14 :id handler sites pre-fix; the requireValidCompID helper now
 	// gates every site. A compID like "../../../etc/passwd" would

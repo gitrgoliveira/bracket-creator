@@ -124,6 +124,15 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		res.Error = err.Error()
 		return res
 	}
+	// Cross-file guard symmetry with handlers_competition.go (POST + PUT)
+	// and handlers_tournament.go. A manifest with `name: "   "` would
+	// otherwise persist as Competition.Name = "" and render a blank
+	// card in the admin UI. Per-competition result.Error so the rest
+	// of the import batch isn't aborted by one malformed manifest row.
+	if trimmedName == "" {
+		res.Error = "competition name is required"
+		return res
+	}
 
 	// Trim string fields so a YAML manifest with `name: "  Cup  "` or
 	// `number_prefix: "  A  "` doesn't persist the padded values.

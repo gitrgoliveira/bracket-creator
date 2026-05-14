@@ -1,7 +1,7 @@
 // Main App — single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-const { useState: useS, useEffect: useE } = React;
+const { useState: useS, useEffect: useE, useRef: useR } = React;
 const mergeMatchPatch = window.mergeMatchPatch;
 
 const patchCompetitionData = (prev, event) => {
@@ -321,6 +321,13 @@ function AuthModal({ onClose, onSuccess }) {
   const [err, setErr] = useS("");
   const [checking, setChecking] = useS(false);
   window.useEscapeToClose(onClose);
+  // AuthModal can be dismissed by backdrop click / Escape during the
+  // in-flight fetch (the input/submit are disabled while checking but
+  // the dismissal paths aren't). Without this guard the post-await
+  // setErr / setChecking would fire on a torn-down modal. Same shape
+  // as the admin-side mountedRef pattern.
+  const mountedRef = useR(true);
+  useE(() => () => { mountedRef.current = false; }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -331,18 +338,20 @@ function AuthModal({ onClose, onSuccess }) {
       const res = await fetch('/api/tournament', {
         headers: { 'X-Tournament-Password': pw }
       });
+      if (!mountedRef.current) return;
       if (res.ok) {
         onSuccess(pw);
       } else if (res.status === 401) {
         setErr("Invalid password. Please try again.");
       } else {
         const body = await res.json().catch(() => ({}));
+        if (!mountedRef.current) return;
         setErr(body.error || "Authentication failed. Please try again.");
       }
     } catch {
-      setErr("Could not reach server. Please try again.");
+      if (mountedRef.current) setErr("Could not reach server. Please try again.");
     } finally {
-      setChecking(false);
+      if (mountedRef.current) setChecking(false);
     }
   };
   return (
@@ -381,6 +390,13 @@ function CreateTournament({ onCreated }) {
   const [courts, setCourts] = useS(2);
   const [pass, setPass] = useS("");
   const [saving, setSaving] = useS(false);
+  // submit's catch sets setSaving(false) post-await; on success the
+  // parent calls onCreated which unmounts CreateTournament. The catch
+  // branch only fires on error, so the unmount race is narrow but real
+  // (parent navigates away on a different signal during the in-flight
+  // fetch). Gate via mountedRef for symmetry with the admin sweep.
+  const mountedRef = useR(true);
+  useE(() => () => { mountedRef.current = false; }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -411,11 +427,12 @@ function CreateTournament({ onCreated }) {
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
       };
       const t = await window.API.createTournament(config);
+      if (!mountedRef.current) return;
       // Wait for backend to broadcast or just pass it up
       onCreated(t, pass);
     } catch (err) {
       alert(err.message);
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   };
 

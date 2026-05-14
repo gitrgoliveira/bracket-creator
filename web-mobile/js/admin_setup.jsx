@@ -3,7 +3,7 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
-const normalizeDate = window.normalizeDate;
+const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -18,10 +18,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
 
   const handleSave = () => {
     if (!name.trim()) { setError("Tournament name is required."); return; }
-    const norm = normalizeDate(date);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(norm)) { setError("Invalid date. Please pick a valid day."); return; }
-    const year = parseInt(norm.substring(0, 4));
-    if (year < 1900 || year > 2100) { setError("Year must be between 1900 and 2100."); return; }
+    const { norm, error: dateError } = validateAndNormalizeDate(date);
+    if (dateError) { setError(dateError); return; }
     if (!Number.isInteger(courts) || courts < 1 || courts > 26) { setError("Number of courts must be a whole number between 1 and 26."); return; }
 
     onSave({
@@ -104,14 +102,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       return;
     }
 
-    const normDate = normalizeDate(date);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normDate)) {
-      setError("Invalid date. Please pick a valid day.");
-      return;
-    }
-    const year = parseInt(normDate.substring(0, 4));
-    if (year < 1900 || year > 2100) {
-      setError("Year must be between 1900 and 2100.");
+    const { norm: normDate, error: dateError } = validateAndNormalizeDate(date);
+    if (dateError) {
+      setError(dateError);
       return;
     }
 

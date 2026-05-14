@@ -49,20 +49,37 @@ function compMatchStats(c) {
   return { total, done, live };
 }
 
-// Boolean predicate: is `date` a valid ISO-format day in the supported
-// year range (1900–2100)? Combines normalizeDate's semantic check (rejects
-// rolled-over dates like "2026-13-32" / "2026-02-29" non-leap) with the
-// year range we accept across the admin UI.
+// Combined date validation + normalization. Returns:
+//   - { norm: "YYYY-MM-DD", error: null }  on success
+//   - { norm: null, error: "<message>" }   on failure
 //
-// Used by AdminCompetition's "Start competition" button gate; the AdminSettings
-// and AdminCreateCompetition / AdminEditTournament save-paths run the same
-// predicate inline (they need granular error messages so they stay inline,
-// but the truth condition is identical — keep them in lockstep).
-function isValidISODate(date) {
+// Canonical predicate for date inputs across the admin UI. Save paths
+// (AdminEditTournament.handleSave, AdminCreateCompetition.create) use the
+// `error` for user-facing messaging AND `norm` for the value to save.
+// Pure boolean callers use `isValidISODate` below.
+//
+// AdminSettings.saveNow has an intentional asymmetry (shape-invalid +
+// unchanged → allow save, preserving legacy data; year-invalid → always
+// block) so it doesn't use this helper directly — see comment there.
+function validateAndNormalizeDate(date) {
   const norm = normalizeDate(date);
-  if (!norm || !/^\d{4}-\d{2}-\d{2}$/.test(norm)) return false;
+  if (!norm || !/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+    return { norm: null, error: "Invalid date. Please pick a valid day." };
+  }
   const year = parseInt(norm.substring(0, 4));
-  return year >= 1900 && year <= 2100;
+  if (year < 1900 || year > 2100) {
+    return { norm: null, error: "Year must be between 1900 and 2100." };
+  }
+  return { norm, error: null };
+}
+
+// Boolean predicate: is `date` a valid ISO-format day in the supported
+// year range (1900–2100)? Used by AdminCompetition's "Start competition"
+// button gate — anywhere a boolean result is enough. For save flows that
+// need both the boolean AND the normalized value, use
+// validateAndNormalizeDate above.
+function isValidISODate(date) {
+  return validateAndNormalizeDate(date).error === null;
 }
 
 function normalizeDate(d) {
@@ -99,8 +116,9 @@ if (typeof window !== "undefined") {
   window.compMatchStats = compMatchStats;
   window.normalizeDate = normalizeDate;
   window.isValidISODate = isValidISODate;
+  window.validateAndNormalizeDate = validateAndNormalizeDate;
 }
 
 // Also exported so the vitest suite under web-mobile/js/__tests__/ can
 // import these directly without going through window globals.
-export { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate };
+export { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate };

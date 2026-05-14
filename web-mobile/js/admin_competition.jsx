@@ -192,14 +192,24 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName]);
 
   const saveNow = (next) => {
+    // Date validation here is intentionally NOT routed through
+    // validateAndNormalizeDate (admin_helpers.jsx) because saveNow has a
+    // unique asymmetry that the shared helper can't express cleanly:
+    //   - shape-invalid + dateChanged   → block (operator changed to junk)
+    //   - shape-invalid + !dateChanged  → ALLOW (preserve legacy/imported
+    //                                     bad data so other fields can be
+    //                                     edited without first fixing the
+    //                                     date)
+    //   - shape-valid + year-out-of-range (regardless of dateChanged)
+    //                                  → block (a well-formed date with
+    //                                     impossible year is a typo, not
+    //                                     legacy data)
+    // The other two date-validation sites (admin_setup.jsx handleSave +
+    // create) don't have this asymmetry and delegate to the shared helper.
     const norm = normalizeDate(next.date);
     const dateIsValid = !!norm && /^\d{4}-\d{2}-\d{2}$/.test(norm);
     const dateChanged = next.date !== c.date;
 
-    // Only block when the user is *changing* the date to an invalid value.
-    // A legacy/imported competition with c.date="" (or some malformed
-    // string) should still allow editing name/courts/poolSize without
-    // forcing a date fix first — fixing the date is a separate edit.
     if (dateChanged && !dateIsValid) {
       setSaveErr("Invalid date. Please pick a valid day.");
       return;

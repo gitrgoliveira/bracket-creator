@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -241,5 +241,76 @@ describe('isValidISODate', () => {
     expect(typeof isValidISODate("2026-05-13")).toBe("boolean");
     expect(typeof isValidISODate("")).toBe("boolean");
     expect(typeof isValidISODate(null)).toBe("boolean");
+  });
+});
+
+describe('validateAndNormalizeDate', () => {
+  // Combined predicate + normalizer used by save flows that need both
+  // the user-facing error message AND the normalized date value to save.
+  // Two consumers: AdminEditTournament.handleSave, AdminCreateCompetition.create.
+
+  it('returns {norm, error: null} for a valid date', () => {
+    expect(validateAndNormalizeDate("2026-05-13")).toEqual({
+      norm: "2026-05-13",
+      error: null,
+    });
+  });
+
+  it('normalizes DD-MM-YYYY input to ISO', () => {
+    expect(validateAndNormalizeDate("13-05-2026")).toEqual({
+      norm: "2026-05-13",
+      error: null,
+    });
+  });
+
+  it('returns the "Invalid date" message for semantically invalid input', () => {
+    expect(validateAndNormalizeDate("2026-13-32")).toEqual({
+      norm: null,
+      error: "Invalid date. Please pick a valid day.",
+    });
+    expect(validateAndNormalizeDate("2026-02-29")).toEqual({
+      norm: null,
+      error: "Invalid date. Please pick a valid day.",
+    });
+  });
+
+  it('returns the "Invalid date" message for empty / falsy input', () => {
+    expect(validateAndNormalizeDate("").error).toBe("Invalid date. Please pick a valid day.");
+    expect(validateAndNormalizeDate(null).error).toBe("Invalid date. Please pick a valid day.");
+    expect(validateAndNormalizeDate(undefined).error).toBe("Invalid date. Please pick a valid day.");
+  });
+
+  it('returns the "Year must be..." message for out-of-range years', () => {
+    expect(validateAndNormalizeDate("1899-12-31")).toEqual({
+      norm: null,
+      error: "Year must be between 1900 and 2100.",
+    });
+    expect(validateAndNormalizeDate("2101-01-01")).toEqual({
+      norm: null,
+      error: "Year must be between 1900 and 2100.",
+    });
+  });
+
+  it('accepts year boundary values 1900 and 2100', () => {
+    expect(validateAndNormalizeDate("1900-01-01").error).toBe(null);
+    expect(validateAndNormalizeDate("2100-12-31").error).toBe(null);
+  });
+
+  it('error messages match the inline messages saveNow uses (lockstep)', () => {
+    // saveNow in admin_competition.jsx hardcodes these two strings as part
+    // of its intentional asymmetric logic. If you change the messages
+    // here, change them there too — the user-facing text should stay
+    // consistent across the four date-validation sites.
+    expect(validateAndNormalizeDate("not a date").error).toBe("Invalid date. Please pick a valid day.");
+    expect(validateAndNormalizeDate("1850-01-01").error).toBe("Year must be between 1900 and 2100.");
+  });
+
+  it('isValidISODate is a thin wrapper that returns error === null', () => {
+    // Verify the two helpers stay in lockstep — isValidISODate is now
+    // implemented as `validateAndNormalizeDate(d).error === null`.
+    const cases = ["2026-05-13", "13-05-2026", "2026-13-32", "1899-01-01", "", null];
+    cases.forEach((c) => {
+      expect(isValidISODate(c)).toBe(validateAndNormalizeDate(c).error === null);
+    });
   });
 });

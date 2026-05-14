@@ -119,22 +119,29 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 
+	// Trim string fields so a YAML manifest with `name: "  Cup  "` or
+	// `number_prefix: "  A  "` doesn't persist the padded values.
+	// The POST/PUT handlers in handlers_competition.go trim
+	// comp.Name + comp.NumberPrefix; importCompetition bypasses those
+	// handlers (writes via store.SaveCompetitionChanged directly), so
+	// it needs its own trim. Cross-file guard symmetry —
+	// three sibling write paths, all three trim.
 	comp := &state.Competition{
 		ID:             entry.ID,
-		Name:           entry.Name,
-		Kind:           entry.Kind,
-		Format:         entry.Format,
+		Name:           strings.TrimSpace(entry.Name),
+		Kind:           strings.TrimSpace(entry.Kind),
+		Format:         strings.TrimSpace(entry.Format),
 		Courts:         entry.Courts,
 		PoolSize:       entry.PoolSize,
-		PoolSizeMode:   entry.PoolSizeMode,
+		PoolSizeMode:   strings.TrimSpace(entry.PoolSizeMode),
 		PoolWinners:    entry.PoolWinners,
 		RoundRobin:     entry.RoundRobin,
-		NumberPrefix:   entry.NumberPrefix,
+		NumberPrefix:   strings.TrimSpace(entry.NumberPrefix),
 		WithZekkenName: entry.WithZekkenName,
 		TeamSize:       entry.TeamSize,
 		Mirror:         entry.Mirror,
-		StartTime:      entry.StartTime,
-		Date:           entry.Date,
+		StartTime:      strings.TrimSpace(entry.StartTime),
+		Date:           strings.TrimSpace(entry.Date),
 		Status:         state.CompStatusSetup,
 	}
 	if len(comp.Courts) == 0 {

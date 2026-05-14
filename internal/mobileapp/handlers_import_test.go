@@ -14,7 +14,7 @@ import (
 )
 
 func TestRegisterImportHandlers(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
+	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
 	t.Run("Import Successful", func(t *testing.T) {
@@ -233,6 +233,47 @@ competitions:
 		var resp map[string][]ImportResult
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp["results"][0].Error, "parse participants")
+	})
+
+	// Padded YAML string fields persisted unchanged before this fix —
+	// the import handler bypasses the POST/PUT trim in
+	// handlers_competition.go and writes via SaveCompetitionChanged
+	// directly. Pin the contract so all three write paths stay aligned.
+	t.Run("Import Trims Padded String Fields", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "comp-trim"
+    name: "  Padded Cup  "
+    kind: "  individual  "
+    format: "  pools  "
+    number_prefix: "  A  "
+    start_time: "  09:00  "
+    date: "  2026-05-12  "
+    courts: ["A"]
+    participants: "trim.csv"
+`))
+		playersPart, _ := writer.CreateFormFile("files", "trim.csv")
+		playersPart.Write([]byte("Player 1,Dojo A"))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		stored, err := store.LoadCompetition("comp-trim")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "Padded Cup", stored.Name, "Name should be trimmed")
+		assert.Equal(t, "individual", stored.Kind, "Kind should be trimmed")
+		assert.Equal(t, "pools", stored.Format, "Format should be trimmed")
+		assert.Equal(t, "A", stored.NumberPrefix, "NumberPrefix should be trimmed")
+		assert.Equal(t, "09:00", stored.StartTime, "StartTime should be trimmed")
+		assert.Equal(t, "2026-05-12", stored.Date, "Date should be trimmed")
 	})
 }
 

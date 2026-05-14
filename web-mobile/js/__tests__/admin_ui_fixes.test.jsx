@@ -1,10 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { arraysEqual } from '../data.jsx';
-
-// We re-implement pluralize here to verify the logic we added to admin.jsx
-function pluralize(count, singular, plural) {
-  return count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`;
-}
+import { pluralize } from '../ui.jsx';
 
 describe('WebUI Fixes - pluralize', () => {
   it('should pluralize correctly', () => {

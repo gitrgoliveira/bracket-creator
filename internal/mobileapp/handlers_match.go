@@ -31,7 +31,10 @@ func tryAutoCompletePools(c *gin.Context, eng *engine.Engine, hub *Hub, compID s
 
 func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		var results []state.MatchResult
 		if err := c.ShouldBindJSON(&results); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -65,7 +68,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/quick-score", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		mid := c.Param("mid")
 		var req struct {
 			SideA     string `json:"sideA"`
@@ -129,7 +135,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		mid := c.Param("mid")
 		var result state.MatchResult
 		if err := c.ShouldBindJSON(&result); err != nil {
@@ -154,7 +163,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/court", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		mid := c.Param("mid")
 
 		var req struct {
@@ -180,7 +192,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/override-winner", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		mid := c.Param("mid")
 		var req struct {
 			WinnerName string `json:"winnerName"`
@@ -213,7 +228,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		mid := c.Param("mid")
 		var req struct {
 			ScheduledAt string `json:"scheduledAt"`

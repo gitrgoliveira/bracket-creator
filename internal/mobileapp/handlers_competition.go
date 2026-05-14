@@ -139,7 +139,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.GET("/competitions/:id", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -153,7 +156,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.PUT("/competitions/:id", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		var comp state.Competition
 		if err := c.ShouldBindJSON(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -182,9 +188,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.DELETE("/competitions/:id", func(c *gin.Context) {
-		id := c.Param("id")
-		if err := state.ValidateCompetitionID(id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		id, ok := requireValidCompID(c)
+		if !ok {
 			return
 		}
 		// If the config loads cleanly, gate on status. If it doesn't load
@@ -207,9 +212,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/invalidate", func(c *gin.Context) {
-		id := c.Param("id")
-		if err := state.ValidateCompetitionID(id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		id, ok := requireValidCompID(c)
+		if !ok {
 			return
 		}
 		comp, err := store.LoadCompetition(id)
@@ -235,7 +239,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.GET("/competitions/:id/reserved-slots", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		slots, err := store.LoadReservedSlots(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -245,7 +252,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/reserved-slots", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		var req struct {
 			SourceCompID string `json:"sourceCompID"`
 			SourceRank   int    `json:"sourceRank"`
@@ -273,7 +283,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.DELETE("/competitions/:id/reserved-slots/:slotID", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		slotID := c.Param("slotID")
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {
@@ -289,7 +302,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/start", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		if err := eng.StartCompetition(id); err != nil {
 			var notFound *engine.NotFoundError
 			var validation *engine.ValidationError
@@ -331,7 +347,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/complete", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -355,7 +374,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.GET("/competitions/:id/export", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -369,7 +391,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.PUT("/competitions/:id/pools/:poolId/override-rank", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		poolId := c.Param("poolId")
 		var req struct {
 			PlayerName string `json:"playerName"`
@@ -407,7 +432,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.PUT("/competitions/:id/schedule", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		var entries []state.ScheduleEntry
 		if err := c.ShouldBindJSON(&entries); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -426,7 +454,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/playoffs", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		src, err := store.LoadCompetition(id)
 		if err != nil || src == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "source competition not found"})
@@ -480,7 +511,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.DELETE("/competitions/:id/overrides", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		changed, err := store.ResetOverridesChanged(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

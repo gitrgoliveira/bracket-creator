@@ -7,6 +7,26 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// requireValidCompID extracts the `:id` URL parameter and validates it
+// via state.ValidateCompetitionID (rejects empty, > 64 chars, or
+// non-[a-zA-Z0-9_-]). On invalid input, writes a 400 response and
+// returns ("", false); the caller should `return` immediately.
+//
+// Every handler that reads `c.Param("id")` and passes it to
+// store.compPath(id, ...) must use this helper. compPath does
+// filepath.Clean(filepath.Join(folder, "competitions", id, ...)) — an
+// id like "../../../etc/passwd" would cleanly escape the data dir.
+// Gated by AuthMiddleware (X-Tournament-Password), so requires admin
+// compromise — but defense-in-depth.
+func requireValidCompID(c *gin.Context) (string, bool) {
+	id := c.Param("id")
+	if err := state.ValidateCompetitionID(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return "", false
+	}
+	return id, true
+}
+
 func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		t, err := store.LoadTournament()

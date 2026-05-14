@@ -68,6 +68,13 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     if (!composing.current && value !== local) setLocal(value);
   }, [value]);
 
+  // Cancel the 200ms debounce on unmount so the timer can't fire
+  // onChange(val) (which is the parent's setState) after teardown.
+  // Pre-existing in this component before the PR but fits the same
+  // teardown-race theme as the admin-side mountedRef sweep — fixing
+  // here while the file is open for the NaN-display changes.
+  React.useEffect(() => () => clearTimeout(timer.current), []);
+
   const handleChange = (e) => {
     const raw = e.target.value;
     // For number inputs: empty string → NaN, so a cleared input doesn't

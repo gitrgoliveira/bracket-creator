@@ -290,6 +290,60 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, "C", stored.NumberPrefix, "NumberPrefix should be trimmed on PUT")
 	})
 
+	// Cross-file guard symmetry with handlers_import.go. The import path
+	// already trims Kind / Format / PoolSizeMode / StartTime / Date. The
+	// admin UI's POST/PUT path now trims them too (defense against
+	// hand-crafted API requests sending padded values that would slip
+	// past dropdowns / time / date pickers). Pin the contract on both
+	// endpoints — drop one TrimSpace and a downstream switch on the
+	// non-canonical value silently falls through.
+	t.Run("All String Fields Trimmed On Create", func(t *testing.T) {
+		comp := state.Competition{
+			ID: "trim-fields-create", Name: "Trim Fields Create",
+			Kind: "  individual  ", Format: "  pools  ",
+			PoolSizeMode: "  min  ", StartTime: "  09:00  ", Date: "  2026-05-12  ",
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusCreated, w.Code)
+		stored, err := store.LoadCompetition("trim-fields-create")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "individual", stored.Kind, "Kind should be trimmed on POST")
+		assert.Equal(t, "pools", stored.Format, "Format should be trimmed on POST")
+		assert.Equal(t, "min", stored.PoolSizeMode, "PoolSizeMode should be trimmed on POST")
+		assert.Equal(t, "09:00", stored.StartTime, "StartTime should be trimmed on POST")
+		assert.Equal(t, "2026-05-12", stored.Date, "Date should be trimmed on POST")
+	})
+
+	t.Run("All String Fields Trimmed On Update", func(t *testing.T) {
+		seed := state.Competition{ID: "trim-fields-update", Name: "Trim Fields Update", Kind: "individual", Format: "pools"}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		update := state.Competition{
+			ID: "trim-fields-update", Name: "Trim Fields Update",
+			Kind: "  team  ", Format: "  playoffs  ",
+			PoolSizeMode: "  exact  ", StartTime: "  10:30  ", Date: "  2026-06-15  ",
+		}
+		body, _ := json.Marshal(update)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/trim-fields-update", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		stored, err := store.LoadCompetition("trim-fields-update")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "team", stored.Kind, "Kind should be trimmed on PUT")
+		assert.Equal(t, "playoffs", stored.Format, "Format should be trimmed on PUT")
+		assert.Equal(t, "exact", stored.PoolSizeMode, "PoolSizeMode should be trimmed on PUT")
+		assert.Equal(t, "10:30", stored.StartTime, "StartTime should be trimmed on PUT")
+		assert.Equal(t, "2026-06-15", stored.Date, "Date should be trimmed on PUT")
+	})
+
 	// Path-traversal guard. ValidateCompetitionID was only called at 2 of
 	// the 14 :id handler sites pre-fix; the requireValidCompID helper now
 	// gates every site. A compID like "../../../etc/passwd" would

@@ -116,6 +116,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Mirrors the comp.Name trim above (and the frontend trim in
 		// admin_competition.jsx saveNow + admin_setup.jsx create).
 		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
+		// Trim the remaining string fields too. Cross-file guard symmetry
+		// with handlers_import.go (which trims all 7 string fields). The
+		// admin UI sends these via dropdowns / time / date inputs that
+		// don't pad, but a hand-crafted POST could send "  individual  "
+		// as Kind — downstream switch statements would silently fall
+		// through to "unknown kind" semantics.
+		comp.Kind = strings.TrimSpace(comp.Kind)
+		comp.Format = strings.TrimSpace(comp.Format)
+		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
+		comp.StartTime = strings.TrimSpace(comp.StartTime)
+		comp.Date = strings.TrimSpace(comp.Date)
 		if err := checkUniqueCompName(store, comp.Name, ""); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -170,6 +181,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// See POST handler comment — same trim is needed here so the
 		// SETTINGS edit path can't persist whitespace-padded prefixes.
 		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
+		// Cross-file guard symmetry with handlers_import.go and the POST
+		// handler above. The admin UI uses dropdowns for Kind/Format/
+		// PoolSizeMode and date/time pickers for StartTime/Date — none
+		// of which produce padded values — but defense-in-depth against
+		// hand-crafted PUT requests.
+		comp.Kind = strings.TrimSpace(comp.Kind)
+		comp.Format = strings.TrimSpace(comp.Format)
+		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
+		comp.StartTime = strings.TrimSpace(comp.StartTime)
+		comp.Date = strings.TrimSpace(comp.Date)
 
 		if err := checkUniqueCompName(store, comp.Name, id); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

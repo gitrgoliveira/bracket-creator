@@ -88,12 +88,15 @@ func TestTournamentHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	// PUT /api/tournament trims Name and Venue. Sibling of the
+	// PUT /api/tournament trims string fields. Sibling of the
 	// comp.Name trim in handlers_competition.go — the CreateTournament
-	// UI uses `if (!name || !pass)` which is truthy for "   ", so
-	// untrimmed input would round-trip and persist.
+	// UI now trims client-side, but older clients and direct API
+	// callers could still send padded values. Date is included for
+	// cross-file guard symmetry with the competition/import paths
+	// which trim their own Date field.
 	tour.Name = "  Padded Tournament  "
 	tour.Venue = "  Crystal Palace  "
+	tour.Date = "  2026-05-12  "
 	tour.Password = "secret"
 	body, _ = json.Marshal(tour)
 	w = httptest.NewRecorder()
@@ -104,6 +107,7 @@ func TestTournamentHandlers(t *testing.T) {
 	t3, _ := store.LoadTournament()
 	assert.Equal(t, "Padded Tournament", t3.Name)
 	assert.Equal(t, "Crystal Palace", t3.Venue)
+	assert.Equal(t, "2026-05-12", t3.Date, "Date should be trimmed on PUT")
 
 	// GET /api/tournament (not found)
 	os.Remove(filepath.Join(tempDir, "tournament.md"))
@@ -133,7 +137,7 @@ func TestTournamentHandlers(t *testing.T) {
 	// hits this endpoint on first-time setup, where the empty-check
 	// `if (!name || !pass)` is truthy for whitespace, so without the
 	// trim "  My Tournament  " would persist with the spaces.
-	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Password: "secret"}
+	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Date: "  2026-07-20  ", Password: "secret"}
 	body, _ = json.Marshal(postTour)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament", bytes.NewBuffer(body))
@@ -143,6 +147,7 @@ func TestTournamentHandlers(t *testing.T) {
 	t4, _ := store.LoadTournament()
 	assert.Equal(t, "Posted Tournament", t4.Name)
 	assert.Equal(t, "Some Venue", t4.Venue)
+	assert.Equal(t, "2026-07-20", t4.Date, "Date should be trimmed on POST")
 }
 
 func TestCompetitionHandlers(t *testing.T) {

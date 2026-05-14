@@ -28,12 +28,15 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		// Trim Name and Venue so padded input from older clients (or
+		// Trim string fields so padded input from older clients (or
 		// hand-crafted API calls) doesn't persist with surrounding
-		// whitespace. Mirrors handlers_competition.go's TrimSpace
-		// pattern on comp.Name + comp.NumberPrefix.
+		// whitespace. Date is included for cross-file guard symmetry
+		// with handlers_import.go (which trims competition.Date) and
+		// handlers_competition.go (which now trims the same competition
+		// string fields uniformly).
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
+		t.Date = strings.TrimSpace(t.Date)
 
 		changed, err := store.SaveTournamentChanged(&t)
 		if err != nil {
@@ -59,6 +62,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// the defense layer so persisted records are always canonical.
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
+		t.Date = strings.TrimSpace(t.Date)
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -4,6 +4,7 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
+const decideNumericUpdate = window.decideNumericUpdate;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
@@ -31,6 +32,34 @@ function deriveCompetitionName(rawName, kind, gender) {
   if (gender === "F") return "Women's Individual";
   if (gender === "M") return "Men's Individual";
   return "Individual";
+}
+
+// Pure submit-time validation for AdminCreateCompetition's pool-format
+// fields. Returns { ok, error } so the caller (create) can route the
+// error string through setError without duplicating the per-field
+// thresholds.
+//
+// Why this exists: with the decideNumericUpdate switch, the inputs now
+// store NaN when cleared (so the display stays empty instead of
+// collapsing to "0"). Without a submit-time guard, NaN would land at
+// buildEmptyCompetition's `poolSize || 3` fallback (NaN is falsy →
+// defaults to 3) — silently using a different value than the user
+// thought they entered. Negative/zero/non-integer values are even
+// worse: `2.5 || 3` evaluates to `2.5` (truthy) and slips through.
+//
+// playoffs-only competitions don't use pool settings, so the guard
+// short-circuits — let the user save without filling those in.
+//
+// Exported for vitest at __tests__/admin_setup.test.jsx.
+function validatePoolSettings(format, poolSize, winners) {
+  if (format !== "pools") return { ok: true, error: null };
+  if (!Number.isInteger(poolSize) || poolSize < 3) {
+    return { ok: false, error: "Players per pool must be a whole number ≥ 3." };
+  }
+  if (!Number.isInteger(winners) || winners < 1) {
+    return { ok: false, error: "Winners per pool must be a whole number ≥ 1." };
+  }
+  return { ok: true, error: null };
 }
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode }) {
@@ -88,7 +117,21 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
           <div className="field">
             <label className="field__label">Number of Shiaijo (courts)</label>
-            <input className="input" type="number" min="1" max="26" value={courts} onChange={(e) => { setCourts(+e.target.value); setError(""); }} />
+            {/* decideNumericUpdate stores NaN for an empty input; render */}
+            {/* NaN as "" so React doesn't warn ("Received NaN for the value */}
+            {/* attribute") and the cleared input stays visually empty. */}
+            {/* handleSave's Number.isInteger(courts) && courts >= 1 && */}
+            {/* courts <= 26 guard catches NaN, so the explicit Save click */}
+            {/* can't push an invalid value to onSave. */}
+            <input
+              className="input"
+              type="number"
+              min="1"
+              max="26"
+              step="1"
+              value={Number.isFinite(courts) ? courts : ""}
+              onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
+            />
             <div className="field__hint">Enter a number (1-26). Courts will be automatically labeled A, B, C, etc.</div>
           </div>
           <div className="field">
@@ -142,6 +185,16 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     const { norm: normDate, error: dateError } = validateAndNormalizeDate(date);
     if (dateError) {
       setError(dateError);
+      return;
+    }
+
+    // Pool-format guards. Pure helper above; this just routes the error
+    // string through setError. See validatePoolSettings comment for the
+    // failure modes (NaN, fractional, negative — all sneak past the
+    // `value || 3` fallback in buildEmptyCompetition).
+    const poolResult = validatePoolSettings(format, poolSize, winners);
+    if (!poolResult.ok) {
+      setError(poolResult.error);
       return;
     }
 
@@ -299,8 +352,28 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 </div>
               </div>
               <div className="row">
-                <div className="field"><label className="field__label">Players per pool</label><input className="input" type="number" min="3" value={poolSize} onChange={(e) => setPoolSize(+e.target.value)} /></div>
-                <div className="field"><label className="field__label">Winners per pool</label><input className="input" type="number" min="1" value={winners} onChange={(e) => setWinners(+e.target.value)} /></div>
+                {/* Same NaN-as-"" + decideNumericUpdate pattern as the courts */}
+                {/* field above and admin_competition.jsx AdminSettings. */}
+                {/* poolSize min=3 matches the backend's round-robin lower */}
+                {/* bound; winners min=1 matches the backend's playoff entry */}
+                {/* requirement. Submit-time guard at create() rejects */}
+                {/* NaN/<min before passing to buildCompetition. */}
+                <div className="field"><label className="field__label">Players per pool</label><input
+                  className="input"
+                  type="number"
+                  min="3"
+                  step="1"
+                  value={Number.isFinite(poolSize) ? poolSize : ""}
+                  onChange={(e) => setPoolSize(decideNumericUpdate(e.target.value, 3).value)}
+                /></div>
+                <div className="field"><label className="field__label">Winners per pool</label><input
+                  className="input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={Number.isFinite(winners) ? winners : ""}
+                  onChange={(e) => setWinners(decideNumericUpdate(e.target.value, 1).value)}
+                /></div>
               </div>
             </>
           )}
@@ -497,4 +570,4 @@ window.AdminImportPage = AdminImportPage;
 
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { deriveCompetitionName };
+export { deriveCompetitionName, validatePoolSettings };

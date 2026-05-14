@@ -4,6 +4,7 @@
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
+const decideNumericUpdate = window.decideNumericUpdate;
 
 // Returns true when line (at index idx in the source array) looks like a CSV
 // header that should be skipped.  Checks the first line only.
@@ -303,8 +304,15 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
   const otherComps = (tournament?.competitions || []).filter(cc => cc.id !== c.id);
 
+  // Number.isInteger + >= 1 catches NaN (cleared input) AND fractional
+  // values that the browser number-input lets through despite step="1".
+  // The bare `slotRank < 1` guard the function used to have was vacuous
+  // for NaN (NaN < 1 is false), so Add stayed enabled and addReservedSlot
+  // was called with NaN — the backend rejected with an unhelpful 400.
+  const slotRankValid = Number.isInteger(slotRank) && slotRank >= 1;
+
   const addSlot = async () => {
-    if (!slotSrcComp || slotRank < 1) return;
+    if (!slotSrcComp || !slotRankValid) return;
     setSlotLoading(true);
     try {
       await window.API.addReservedSlot(c.id, slotSrcComp, slotRank, password);
@@ -478,10 +486,23 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     </div>
                     <div style={{ flex: 1 }}>
                       <div className="field__label">Rank</div>
-                      <input className="field__input" type="number" min={1} value={slotRank} onChange={e => setSlotRank(+e.target.value)} />
+                      {/* Render NaN as "" so clearing the input stays empty */}
+                      {/* instead of triggering React's "Received NaN for the */}
+                      {/* value attribute" warning. decideNumericUpdate keeps */}
+                      {/* state at NaN when input is empty/non-integer, so the */}
+                      {/* slotRankValid guard above keeps Add disabled until the */}
+                      {/* user re-enters a positive integer. */}
+                      <input
+                        className="field__input"
+                        type="number"
+                        min={1}
+                        step="1"
+                        value={Number.isFinite(slotRank) ? slotRank : ""}
+                        onChange={e => setSlotRank(decideNumericUpdate(e.target.value, 1).value)}
+                      />
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn--sm btn--primary" onClick={addSlot} disabled={!slotSrcComp || slotRank < 1 || slotLoading}>Add</button>
+                      <button className="btn btn--sm btn--primary" onClick={addSlot} disabled={!slotSrcComp || !slotRankValid || slotLoading}>Add</button>
                       <button className="btn btn--sm" onClick={() => setShowSlotForm(false)}>Cancel</button>
                     </div>
                   </div>

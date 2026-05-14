@@ -11,7 +11,10 @@ import (
 
 func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
@@ -27,7 +30,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 	})
 
 	r.POST("/competitions/:id/participants", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
@@ -69,7 +75,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 	})
 
 	r.GET("/competitions/:id/seeds", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		seeds, err := store.LoadSeeds(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -79,7 +88,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 	})
 
 	r.PUT("/competitions/:id/seeds", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		var assignments []domain.SeedAssignment
 		if err := c.ShouldBindJSON(&assignments); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

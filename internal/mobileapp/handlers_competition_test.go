@@ -317,6 +317,16 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}
 		_ = badIDs // documentation
 		// Representative endpoints from the affected handler set.
+		// Include the participants/seeds routes from
+		// handlers_participants.go: GET/PUT /seeds previously reached
+		// store.LoadSeeds / SaveSeeds directly without internal
+		// ValidateCompetitionID, so a traversal id would have hit the
+		// filesystem (admin-auth gated, but defense-in-depth).
+		// The override-rank route mounts at
+		// /competitions/:id/pools/:poolId/override-rank; the test path
+		// must include /pools/main/ or gin returns 404 before the
+		// handler runs (vacuously satisfying NotEqual 200 without
+		// exercising requireValidCompID).
 		routes := []struct {
 			method string
 			path   string
@@ -326,8 +336,12 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			{"GET", "/api/competitions/%s/reserved-slots"},
 			{"POST", "/api/competitions/%s/start"},
 			{"GET", "/api/competitions/%s/export"},
-			{"PUT", "/api/competitions/%s/override-rank"},
+			{"PUT", "/api/competitions/%s/pools/main/override-rank"},
 			{"DELETE", "/api/competitions/%s/overrides"},
+			{"GET", "/api/competitions/%s/participants"},
+			{"POST", "/api/competitions/%s/participants"},
+			{"GET", "/api/competitions/%s/seeds"},
+			{"PUT", "/api/competitions/%s/seeds"},
 		}
 		for _, badID := range nonEmpty {
 			for _, route := range routes {

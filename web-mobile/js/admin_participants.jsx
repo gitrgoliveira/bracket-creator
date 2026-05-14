@@ -152,6 +152,14 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const [dragOver, setDragOver] = useStateA(false);
   const fileRef = useRefA(null);
   const seedFileRef = useRefA(null);
+  // apply() is async (awaits onUpdate which now re-throws on PUT failure).
+  // If the user navigates away (or AdminCompetition unmounts AdminParticipants)
+  // while the PUT is in flight, the post-await setImportSummary(null) would
+  // setState on a torn-down component. Track mount state via ref and
+  // gate post-await setState behind it. Pre-fix this was silent under
+  // React 18 but still a real teardown-race signal.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
   const textFocusRef = useRefA(false);
 
   const generateText = (playersList) => (playersList || []).map((p) => {
@@ -367,6 +375,12 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
       const { np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed);
       await onUpdate({ ...c, players: np });
+
+      // Bail if we unmounted during the in-flight PUT — see mountedRef
+      // declaration above. showToast is safe (lifted to AdminApp, still
+      // mounted on logout-free navigation), but setImportSummary targets
+      // this component's local state.
+      if (!mountedRef.current) return;
 
       const label = c.kind === "team" ? "team" : "participant";
       let msg = `Saved ${pluralize(np.length, label)}`;

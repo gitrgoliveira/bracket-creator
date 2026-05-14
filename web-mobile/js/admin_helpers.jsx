@@ -49,6 +49,13 @@ function compMatchStats(c) {
   return { total, done, live };
 }
 
+// Canonical date error messages. Referenced by validateAndNormalizeDate
+// AND by AdminSettings.saveNow's inline asymmetric validation, so the
+// user-facing UX stays consistent across all four date-validation sites
+// regardless of where the error is generated. Exported on window + ES.
+const DATE_ERR_INVALID_FORMAT = "Invalid date. Please pick a valid day.";
+const DATE_ERR_YEAR_RANGE = "Year must be between 1900 and 2100.";
+
 // Combined date validation + normalization. Returns:
 //   - { norm: "YYYY-MM-DD", error: null }  on success
 //   - { norm: null, error: "<message>" }   on failure
@@ -61,14 +68,15 @@ function compMatchStats(c) {
 // AdminSettings.saveNow has an intentional asymmetry (shape-invalid +
 // unchanged → allow save, preserving legacy data; year-invalid → always
 // block) so it doesn't use this helper directly — see comment there.
+// It does use DATE_ERR_* constants above so error UX stays in lockstep.
 function validateAndNormalizeDate(date) {
   const norm = normalizeDate(date);
   if (!norm || !/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
-    return { norm: null, error: "Invalid date. Please pick a valid day." };
+    return { norm: null, error: DATE_ERR_INVALID_FORMAT };
   }
   const year = parseInt(norm.substring(0, 4));
   if (year < 1900 || year > 2100) {
-    return { norm: null, error: "Year must be between 1900 and 2100." };
+    return { norm: null, error: DATE_ERR_YEAR_RANGE };
   }
   return { norm, error: null };
 }
@@ -117,8 +125,19 @@ if (typeof window !== "undefined") {
   window.normalizeDate = normalizeDate;
   window.isValidISODate = isValidISODate;
   window.validateAndNormalizeDate = validateAndNormalizeDate;
+  window.DATE_ERR_INVALID_FORMAT = DATE_ERR_INVALID_FORMAT;
+  window.DATE_ERR_YEAR_RANGE = DATE_ERR_YEAR_RANGE;
 }
 
 // Also exported so the vitest suite under web-mobile/js/__tests__/ can
 // import these directly without going through window globals.
-export { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate };
+export {
+  sideName,
+  hasBothSides,
+  compMatchStats,
+  normalizeDate,
+  isValidISODate,
+  validateAndNormalizeDate,
+  DATE_ERR_INVALID_FORMAT,
+  DATE_ERR_YEAR_RANGE,
+};

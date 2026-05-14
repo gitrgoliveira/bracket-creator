@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -296,13 +296,20 @@ describe('validateAndNormalizeDate', () => {
     expect(validateAndNormalizeDate("2100-12-31").error).toBe(null);
   });
 
-  it('error messages match the inline messages saveNow uses (lockstep)', () => {
-    // saveNow in admin_competition.jsx hardcodes these two strings as part
-    // of its intentional asymmetric logic. If you change the messages
-    // here, change them there too — the user-facing text should stay
-    // consistent across the four date-validation sites.
-    expect(validateAndNormalizeDate("not a date").error).toBe("Invalid date. Please pick a valid day.");
-    expect(validateAndNormalizeDate("1850-01-01").error).toBe("Year must be between 1900 and 2100.");
+  it('returns the canonical DATE_ERR_* constants (lockstep with saveNow)', () => {
+    // saveNow in admin_competition.jsx imports the same constants from
+    // window.DATE_ERR_*, so this assertion mechanically guarantees that
+    // the four date-validation sites can't drift on error messages.
+    expect(validateAndNormalizeDate("not a date").error).toBe(DATE_ERR_INVALID_FORMAT);
+    expect(validateAndNormalizeDate("1850-01-01").error).toBe(DATE_ERR_YEAR_RANGE);
+  });
+
+  it('DATE_ERR_* constants have the expected user-facing strings', () => {
+    // Pin the user-visible text so an accidental string change is
+    // caught by tests (the test failure tells whoever changes it to
+    // also update any screenshot fixtures, docs, etc.).
+    expect(DATE_ERR_INVALID_FORMAT).toBe("Invalid date. Please pick a valid day.");
+    expect(DATE_ERR_YEAR_RANGE).toBe("Year must be between 1900 and 2100.");
   });
 
   it('isValidISODate is a thin wrapper that returns error === null', () => {

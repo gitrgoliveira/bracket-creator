@@ -8,6 +8,11 @@ const compMatchStats = window.compMatchStats;
 const hasBothSides = window.hasBothSides;
 const normalizeDate = window.normalizeDate;
 const isValidISODate = window.isValidISODate;
+// Use the canonical error strings (admin_helpers.jsx) so saveNow's inline
+// asymmetric validation stays in lockstep with validateAndNormalizeDate's
+// messages without depending on string-literal equality.
+const DATE_ERR_INVALID_FORMAT = window.DATE_ERR_INVALID_FORMAT;
+const DATE_ERR_YEAR_RANGE = window.DATE_ERR_YEAR_RANGE;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const AdminTopbar = window.AdminTopbar;
@@ -211,13 +216,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     const dateChanged = next.date !== c.date;
 
     if (dateChanged && !dateIsValid) {
-      setSaveErr("Invalid date. Please pick a valid day.");
+      setSaveErr(DATE_ERR_INVALID_FORMAT);
       return;
     }
     if (dateIsValid) {
       const year = parseInt(norm.substring(0, 4));
       if (year < 1900 || year > 2100) {
-        setSaveErr("Year must be between 1900 and 2100.");
+        setSaveErr(DATE_ERR_YEAR_RANGE);
         return;
       }
     }

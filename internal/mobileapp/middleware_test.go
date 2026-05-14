@@ -133,6 +133,58 @@ func TestAuthMiddleware_WithTournament_EmptyPassword(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// Defense-in-depth for the F4 sentinel-into-auth-field scenario.
+// AuthMiddleware's `password != t.Password` comparison would otherwise
+// be satisfied vacuously when both sides are "" — an unauthenticated
+// client sending no `X-Tournament-Password` header would match an
+// empty stored password and reach c.Next(). The POST and PUT handlers
+// in handlers_tournament.go now reject writes that would land an
+// empty Password, but a legacy install from before that fix (or any
+// out-of-band write) could still have empty-Password tournament data
+// on disk. The middleware must fail closed in that case rather than
+// rely on handler-level guards that may not have existed when the
+// data was written.
+//
+// Two cases to pin:
+// - empty header against empty stored Password → 403 (NOT c.Next())
+// - non-empty header against empty stored Password → 403 (NOT c.Next())
+//
+// The "New Tournament" + empty Password literal still goes through
+// the uninitialized branch (above) and allows POST/PUT to
+// /api/tournament. That's covered by
+// TestAuthMiddleware_NoTournament_AllowsCreateTournament.
+func TestAuthMiddleware_LegacyEmptyStoredPassword_NoBypass(t *testing.T) {
+	store, r := setupMiddlewareTest(t)
+
+	// Simulate legacy on-disk state: real-named tournament with empty
+	// Password. Created via direct store call, bypassing the
+	// handler-level guards (which would now reject this).
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Legacy Tournament",
+		Password: "",
+	}))
+
+	t.Run("empty header is rejected (no vacuous pass)", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/competitions", nil)
+		// no X-Tournament-Password header set (or set to "")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"empty header + empty stored password must NOT pass auth")
+		assert.Contains(t, w.Body.String(), "misconfigured",
+			"error should signal misconfiguration, not invalid request")
+	})
+
+	t.Run("non-empty header is also rejected (fail closed)", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/competitions", nil)
+		req.Header.Set("X-Tournament-Password", "anything")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"any header + empty stored password must fail closed")
+	})
+}
+
 func TestAuthMiddleware_LoadError(t *testing.T) {
 	store, r := setupMiddlewareTest(t)
 

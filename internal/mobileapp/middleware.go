@@ -54,6 +54,28 @@ func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 			return
 		}
 
+		// Defense-in-depth for the F4 sentinel-into-auth-field scenario.
+		// The password comparison below (`password != t.Password`) is
+		// satisfied vacuously when both sides are "" — an unauthenticated
+		// client sending no `X-Tournament-Password` header (or an empty
+		// one) would match an empty stored password, exposing every
+		// /api/* endpoint anonymously. The POST + PUT handlers in
+		// handlers_tournament.go now block writes that would land an
+		// empty Password, but a tournament file created by pre-fix code
+		// (or any out-of-band write bypassing the handlers) could still
+		// land an empty Password on disk. The uninitialized branch above
+		// only covers the literal "New Tournament" + empty case — a
+		// real-named tournament with empty Password is a misconfiguration,
+		// and refusing to authorize is the safer fail-closed choice.
+		// The 403 message tells the operator to fix the password rather
+		// than the misleading 401 ("invalid tournament password" — which
+		// would imply the request is wrong, not the server state).
+		if t.Password == "" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "tournament misconfigured: password is not set"})
+			c.Abort()
+			return
+		}
+
 		password := c.GetHeader("X-Tournament-Password")
 		if password != t.Password {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})

@@ -241,9 +241,15 @@ func TestTournamentHandlers(t *testing.T) {
 	}
 
 	// PUT /api/tournament when the stored tournament ALSO has an empty
-	// Password (legacy state from a pre-fix install) must reject —
-	// otherwise the preserve-stored path would leave the password
-	// empty and the vacuous-pass scenario would persist.
+	// Password (legacy state from a pre-fix install) must reject at
+	// the handler — defense-in-depth for the case where AuthMiddleware
+	// is bypassed (this test setupTestRouter intentionally does NOT
+	// install AuthMiddleware; in production it does, and the middleware
+	// also fails closed on empty-stored-password as of the
+	// TestAuthMiddleware_LegacyEmptyStoredPassword_NoBypass commit).
+	// Two-layer defense: middleware blocks any request reaching the
+	// handler with empty stored password; handler rejects the save
+	// anyway in case some future test or codepath bypasses middleware.
 	{
 		// Force a legacy state: save directly via store, bypassing the
 		// new POST guard.

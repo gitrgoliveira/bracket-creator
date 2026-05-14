@@ -308,7 +308,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
         <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
         <div className="field">
           <label className="field__label">Date</label>
-          <input className="input" type="date" min="2020-01-01" max="2100-12-31" value={local.date} onChange={(e) => update("date", e.target.value)} />
+          {/* Picker bounds match the validation range (MIN_YEAR/MAX_YEAR */}
+          {/* in admin_helpers.jsx) so a typed date can't pass validation */}
+          {/* but be unreachable via the picker — and vice versa. */}
+          <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={local.date} onChange={(e) => update("date", e.target.value)} />
           <div className="field__hint">Pick the competition day.</div>
         </div>
         <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>

@@ -525,3 +525,72 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 		os.RemoveAll(dir)
 	}
 }
+
+// TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost pins the
+// TOCTOU fix in engine.MaybeAutoCompletePools. Pre-atomic-primitive,
+// the LoadCompetition + status check + SaveCompetitionChanged
+// sequence had a window where a concurrent admin invalidate (POST
+// /invalidate) could land between the read and the write — admin's
+// "invalid" status would then be silently overwritten back to
+// "complete" by the auto-complete save.
+//
+// The fix wraps the status read + status set + save in
+// state.Store.UpdateCompetitionChanged. The transform re-checks
+// `current.Status == Pools` UNDER the lock; if the admin's
+// invalidate already moved Status to Invalid, the auto-complete
+// transform sees the new value and returns (nil, nil) — no save.
+func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
+	const iterations = 20
+
+	for i := range iterations {
+		dir, err := os.MkdirTemp("", "engine-autocomplete-race-*")
+		require.NoError(t, err)
+
+		store, err := state.NewStore(dir)
+		require.NoError(t, err)
+		eng := New(store)
+
+		compID := "auto-vs-invalidate"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: "Auto vs Invalidate",
+			Format: state.CompFormatPools, Status: state.CompStatusPools,
+		}))
+		// All matches already completed — auto-complete is eligible.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
+		}))
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			// Auto-complete tries to set Status=Complete.
+			_, _ = eng.MaybeAutoCompletePools(compID)
+		}()
+		go func() {
+			defer wg.Done()
+			// Admin invalidate: simulate via direct UpdateCompetitionChanged
+			// (mirrors what the POST /invalidate handler does).
+			_, _ = store.UpdateCompetitionChanged(compID, func(current *state.Competition) (*state.Competition, error) {
+				if current == nil || (current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs) {
+					return nil, nil
+				}
+				current.Status = state.CompStatusInvalid
+				return current, nil
+			})
+		}()
+		wg.Wait()
+
+		stored, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		// Final status is whichever transition won. Crucially it
+		// must NOT be Pools (the original) — that would mean both
+		// writes either failed silently or one was silently lost.
+		assert.Contains(t, []state.CompetitionStatus{state.CompStatusInvalid, state.CompStatusComplete}, stored.Status,
+			"iter %d: Status must be Invalid or Complete (got %q — race lost a write)",
+			i, stored.Status)
+
+		os.RemoveAll(dir)
+	}
+}

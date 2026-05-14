@@ -216,6 +216,25 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Uniqueness check before the atomic save. Note: this leaves
+		// a narrow TOCTOU window — two concurrent PUTs renaming
+		// different competitions to the same new name can both pass
+		// the check (each sees the other still has its old name)
+		// and both save. The check is not folded into
+		// UpdateCompetitionChanged's transform because that would
+		// deadlock: UpdateCompetitionChanged holds the write lock
+		// on OUR comp's mutex; checkUniqueCompName reads OTHER
+		// comps via LoadCompetition, which acquires their per-comp
+		// read locks. Two concurrent renames would each hold their
+		// own write lock and try to read-lock the other — classic
+		// AB-BA deadlock.
+		//
+		// Closing this race requires a higher-level rename
+		// serializer (e.g. a global rename mutex) — out of scope
+		// for this round and tracked in
+		// project_pr103_followups.md as a known narrow window.
+		// The save itself IS atomic via SaveCompetitionChanged's
+		// per-comp lock, so the only race is the uniqueness check.
 		if err := checkUniqueCompName(store, comp.Name, id); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -261,26 +280,46 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		comp, err := store.LoadCompetition(id)
+
+		// Atomic Load + Status check + Save. Pre-fix, the
+		// LoadCompetition + saveCompetitionWithPlayers sequence had
+		// a TOCTOU window: a concurrent
+		// MaybeAutoCompletePools (triggered by a score-save from the
+		// last pool match) could move Status to "complete" between
+		// our read and write — admin's "invalidate" would then
+		// silently revert to "complete".
+		var compOut *state.Competition
+		var statusErr error
+		var notFoundFlag bool
+		changed, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			if current == nil {
+				notFoundFlag = true
+				return nil, nil
+			}
+			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
+				statusErr = fmt.Errorf("only in-progress competitions can be invalidated (current status: %q)", current.Status)
+				return nil, nil
+			}
+			current.Status = state.CompStatusInvalid
+			compOut = current
+			return current, nil
+		})
+		if notFoundFlag {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if statusErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": statusErr.Error()})
+			return
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		if comp.Status != state.CompStatusPools && comp.Status != state.CompStatusPlayoffs {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("only in-progress competitions can be invalidated (current status: %q)", comp.Status)})
-			return
-		}
-		comp.Status = state.CompStatusInvalid
-		if _, err := saveCompetitionWithPlayers(comp, store); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.JSON(http.StatusOK, comp)
+		c.JSON(http.StatusOK, compOut)
 	})
 
 	r.GET("/competitions/:id/reserved-slots", func(c *gin.Context) {
@@ -396,26 +435,46 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		comp, err := store.LoadCompetition(id)
+
+		// Atomic Load + Status check + Save. Pre-fix, the
+		// LoadCompetition + saveCompetitionWithPlayers sequence had
+		// a TOCTOU window where a concurrent invalidate (or a score-
+		// save's MaybeAutoCompletePools) could move Status between
+		// our read and write — losing one of the two mutations.
+		var compOut *state.Competition
+		var statusErr error
+		var notFoundFlag bool
+		changed, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			if current == nil {
+				notFoundFlag = true
+				return nil, nil
+			}
+			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
+				statusErr = fmt.Errorf("competition cannot be completed from status %q", current.Status)
+				return nil, nil
+			}
+			current.Status = state.CompStatusComplete
+			compOut = current
+			return current, nil
+		})
+		if notFoundFlag {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if statusErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": statusErr.Error()})
+			return
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
+		// Only broadcast on an actual content change (same idempotency
+		// semantics as the prior saveCompetitionWithPlayers call).
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		if comp.Status != state.CompStatusPools && comp.Status != state.CompStatusPlayoffs {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("competition cannot be completed from status %q", comp.Status)})
-			return
-		}
-		comp.Status = state.CompStatusComplete
-		if _, err := saveCompetitionWithPlayers(comp, store); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.JSON(http.StatusOK, comp)
+		c.JSON(http.StatusOK, compOut)
 	})
 
 	r.GET("/competitions/:id/export", func(c *gin.Context) {

@@ -357,6 +357,86 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 	}
 }
 
+// TestCompetitionHandlers_ConcurrentInvalidateVsComplete pins the
+// TOCTOU fix for the competition-status admin actions. Pre-atomic-
+// primitive, POST /invalidate and POST /complete each did
+// LoadCompetition + saveCompetitionWithPlayers sequentially with no
+// shared lock between Load and Save. Two concurrent admin actions
+// (or admin-vs-auto-complete) could race so the later save clobbered
+// the earlier mutation with stale Status.
+//
+// Now both handlers run through state.Store.UpdateCompetitionChanged,
+// which holds the per-competition lock across load + status check +
+// save. The status check happens INSIDE the lock so whichever
+// transition lands first sets the floor; the second sees the moved
+// status and 400s with "cannot be completed/invalidated from status X".
+//
+// 20 iterations to exercise the scheduler. Assertion: regardless of
+// arrival order, the final stored Status is one of {invalid, complete} —
+// never the original "pools". One of the two requests succeeds
+// (200), the other is 400-rejected (precondition no longer holds).
+func TestCompetitionHandlers_ConcurrentInvalidateVsComplete(t *testing.T) {
+	const iterations = 20
+
+	for i := range iterations {
+		r, store, _, _, tempDir := setupTestRouter(t)
+
+		compID := "concurrent-status"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:     compID,
+			Name:   "Concurrent Status",
+			Status: state.CompStatusPools,
+		}))
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var codeInvalidate, codeComplete int
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/invalidate", nil)
+			r.ServeHTTP(w, req)
+			codeInvalidate = w.Code
+		}()
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
+			r.ServeHTTP(w, req)
+			codeComplete = w.Code
+		}()
+		wg.Wait()
+
+		// Exactly one should succeed (200), the other should reject
+		// with 400 (precondition Status=="pools" no longer holds
+		// after the first commit). Note: which of the two wins is
+		// undefined — they're racing.
+		successes := 0
+		if codeInvalidate == http.StatusOK {
+			successes++
+		}
+		if codeComplete == http.StatusOK {
+			successes++
+		}
+		assert.Equal(t, 1, successes,
+			"iter %d: exactly one of invalidate/complete should succeed (got invalidate=%d, complete=%d)",
+			i, codeInvalidate, codeComplete)
+
+		// Final stored Status must reflect whichever request won —
+		// never the original "pools" (that would mean BOTH writes
+		// lost their mutation, which is the pre-fix bug we're
+		// proving is closed).
+		stored, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Contains(t, []state.CompetitionStatus{state.CompStatusInvalid, state.CompStatusComplete}, stored.Status,
+			"iter %d: Status must be Invalid or Complete (got %q — neither write landed?)",
+			i, stored.Status)
+
+		os.RemoveAll(tempDir)
+	}
+}
+
 func TestCompetitionHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

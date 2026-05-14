@@ -76,8 +76,19 @@ function RankInput({ initial, className, onCommit, style }) {
     });
     focusedRef.current = false;
     if (cancelRef.current) cancelRef.current = false;
-    if (result.action === "commit") onCommit(result.value);
-    else if (result.action === "sync" || result.action === "revert") setV(result.value);
+    if (result.action === "commit") {
+      // Mirror the normalized value into local state so the input
+      // immediately reflects what's being saved. Without this, typing
+      // "5abc" then blurring would commit rank=5 to the server but
+      // leave the input displaying "5abc" until the SSE-driven prop
+      // refresh re-runs the upstream-sync useEffect — a confusing
+      // few-hundred-ms window where the visible value doesn't match
+      // what was sent.
+      setV(result.value);
+      onCommit(result.value);
+    } else if (result.action === "sync" || result.action === "revert") {
+      setV(result.value);
+    }
     // "noop" → nothing.
   };
   const handleKeyDown = (e) => {

@@ -150,7 +150,25 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
             </div>
             <div className="field">
               <label className="field__label">Minutes per match</label>
-              <input className="input" type="number" min="1" max="60" value={matchDuration} onChange={e => setMatchDuration(+e.target.value)} style={{ width: 80 }} />
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max="60"
+                /* Clearing a number input gives e.target.value === "", and
+                   passing value={0} or value={NaN} to React produces either
+                   a visible "0" (jarring) or a "Received NaN for the value"
+                   warning. Round-trip NaN ↔ empty-string at the value
+                   attribute boundary so the cleared display stays empty
+                   while safeMatchDuration's Number.isFinite check (above)
+                   keeps providing the 3-minute fallback for scheduling. */
+                value={Number.isFinite(matchDuration) ? matchDuration : ""}
+                onChange={e => {
+                  const raw = e.target.value;
+                  setMatchDuration(raw === "" ? NaN : +raw);
+                }}
+                style={{ width: 80 }}
+              />
             </div>
             <button className="btn btn--primary" onClick={autoSchedule} disabled={autoSaving} style={{ alignSelf: "flex-end" }}>
               {autoSaving ? "Scheduling…" : "Auto-schedule competition"}

@@ -128,4 +128,49 @@ describe('decideRankCommit', () => {
         .toEqual({ action: "noop" });
     });
   });
+
+  describe('RankInput consumer contract: commit value mirrors to local state', () => {
+    // Copilot round-7 finding: when decideRankCommit returns {action:"commit",
+    // value: "5"} for typed "5abc", RankInput.handleBlur must call BOTH
+    // setV(result.value) AND onCommit(result.value). The earlier version only
+    // called onCommit, leaving the input displaying "5abc" until the
+    // SSE-driven prop refresh hit useEffectA — a confusing few-hundred-ms
+    // window where the visible value didn't match what was sent.
+    //
+    // The handleBlur dispatch lives in admin_pools.jsx:70-91 and can't be
+    // unit-tested in isolation without DOM rendering (vitest setup mocks
+    // React with stubs; tracked as follow-up #4/#7). These assertions pin
+    // the contract that handleBlur depends on: result.value is what should
+    // be mirrored into local state on commit.
+
+    it('commit result.value is the normalized form (whitespace trimmed)', () => {
+      const r = decideRankCommit({ v: "  5  ", initial: 2, focusValue: "2", cancelled: false });
+      expect(r).toEqual({ action: "commit", value: "5" });
+      // Consumer contract: setV("5") so the input shows "5" not "  5  ".
+    });
+
+    it('commit result.value is the normalized form (trailing junk stripped)', () => {
+      const r = decideRankCommit({ v: "5abc", initial: 2, focusValue: "2", cancelled: false });
+      expect(r).toEqual({ action: "commit", value: "5" });
+      // Consumer contract: setV("5") so the input shows "5" not "5abc".
+    });
+
+    it('commit result.value is the normalized form (fraction truncated)', () => {
+      const r = decideRankCommit({ v: "5.9", initial: 2, focusValue: "2", cancelled: false });
+      expect(r).toEqual({ action: "commit", value: "5" });
+      // Consumer contract: setV("5") so the input shows "5" not "5.9".
+    });
+
+    it('commit result.value differs from the raw v for the normalization shapes above', () => {
+      // Sanity: if these match, the consumer's setV(result.value) is a no-op
+      // (whatever was typed is already canonical) and the bug doesn't manifest.
+      // For "5abc" / "  5  " / "5.9" the raw v differs from result.value —
+      // these are exactly the inputs where the consumer-side bug surfaces.
+      for (const v of ["  5  ", "5abc", "5.9"]) {
+        const r = decideRankCommit({ v, initial: 2, focusValue: "2", cancelled: false });
+        expect(r.action).toBe("commit");
+        expect(r.value).not.toBe(v);
+      }
+    });
+  });
 });

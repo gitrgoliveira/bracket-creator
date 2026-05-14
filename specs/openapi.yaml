@@ -10,7 +10,7 @@ info:
 
     The Mobile/Admin API routes under `/api/` (excluding `/api/viewer/`) require the
     `X-Tournament-Password` header for authentication.
-  version: 2.0.0
+  version: 2.1.0
 
 servers:
   - url: http://localhost:8080
@@ -203,7 +203,19 @@ paths:
       summary: Server-Sent Events stream
       description: |
         Subscribe to real-time tournament updates via SSE.
-        Event types: `match_updated`, `competition_started`, `tournament_updated`, `schedule_updated`.
+
+        Event types (canonical set defined in `internal/mobileapp/hub.go`):
+        - `match_updated` — a match's score/court/scheduledAt changed.
+          `data: { competitionId, matchId, ... }`.
+        - `competition_started` — a competition transitioned out of `setup`.
+          `data: { competitionId }`.
+        - `competition_completed` — a competition transitioned to `completed`
+          (either via POST /complete or via the auto-complete check after the
+          last pool match scored). `data: { competitionId }`.
+        - `tournament_updated` — tournament-level config change (a competition
+          was created/updated/deleted, reserved slots changed, participants
+          updated, etc.). `data: null` — clients should refresh full state.
+        - `schedule_updated` — a competition's schedule was saved.
       responses:
         '200':
           description: SSE stream of tournament events.
@@ -232,10 +244,16 @@ paths:
     post:
       tags: [tournament]
       summary: Create tournament configuration
-      description: >
+      description: |
         Creates a new tournament. Allowed without the `X-Tournament-Password` header when no
         tournament has been configured yet (bootstrap). Once a tournament with a password exists,
         auth is required.
+
+        Validation: `name` is trimmed and must be non-empty after trim (`tournament name is
+        required`). `password` must be non-empty (`tournament password is required`) — empty
+        Password on disk would let AuthMiddleware's `password != t.Password` check vacuously
+        pass for any client sending an empty header. `venue` and `date` are also trimmed but
+        may be empty.
       requestBody:
         required: true
         content:
@@ -249,12 +267,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Tournament'
+        '400':
+          $ref: '#/components/responses/BadRequest'
     put:
       tags: [tournament]
       summary: Update tournament configuration
-      description: >
+      description: |
         Updates tournament config. Also allowed without auth during bootstrap (same condition
         as POST — when no tournament with a password exists yet).
+
+        Validation matches POST for `name` (rejected if empty after trim).
+
+        **Password preserve semantics**: when the request body omits `password` or sends an
+        empty string, the server preserves the currently-stored password. This matches the
+        admin UI's `password: pass || undefined` pattern ("leave blank to keep current").
+        If after the preserve step the password is STILL empty (legacy on-disk state from
+        before this rule was enforced), the request is rejected with 400
+        (`tournament password is required`) to force the admin to set a password rather than
+        silently allow the empty-stored-password vacuous-pass scenario.
       security:
         - TournamentPassword: []
       requestBody:
@@ -270,6 +300,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Tournament'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /api/tournament/import:
     post:
@@ -296,7 +328,12 @@ paths:
                 format: binary
       responses:
         '200':
-          description: Import result.
+          description: |
+            Import result. Each manifest entry produces one result row;
+            partial success is allowed (one row's `error` doesn't abort
+            the others). `name` is the trimmed value (matches what's
+            saved to disk; the manifest's raw padded value is normalized
+            before save and before this response is constructed).
           content:
             application/json:
               schema:
@@ -308,10 +345,20 @@ paths:
                       type: object
                       properties:
                         id: {type: string}
-                        name: {type: string}
+                        name:
+                          type: string
+                          description: Trimmed competition name as persisted.
                         participantCount: {type: integer}
                         seedCount: {type: integer}
-                        error: {type: string}
+                        error:
+                          type: string
+                          description: |
+                            Per-row error if the import couldn't proceed.
+                            Common values: `missing id`, `competition name is required`,
+                            `competition ID contains invalid characters ...`,
+                            `failed to save competition: ...`,
+                            `failed to parse participants: ...`. Empty when the row
+                            imported successfully.
 
   # ── Competitions (Admin, requires auth) ────────────────────────────────────
 
@@ -334,9 +381,20 @@ paths:
     post:
       tags: [competitions]
       summary: Create competition
-      description: >
+      description: |
         Creates a new competition. The `id` field is optional — when omitted the server
         derives a URL-friendly slug from `name` (lowercase, spaces to hyphens, max 64 chars).
+
+        Validation (returns 400 with explanatory message):
+        - `name` is trimmed and must be non-empty (`competition name is required`).
+        - `name` must be unique (case-insensitive) across competitions
+          (`competition name "X" already exists`).
+        - When `id` is omitted AND `name` slugs to empty (no alphanumerics)
+          → 400 (`competition ID is required (could not derive one from name)`).
+        - Provided `id` must match the path-parameter pattern (see CompetitionId).
+
+        String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
+        `format`, `poolSizeMode`, `startTime`, `date`.
       security:
         - TournamentPassword: []
       requestBody:
@@ -375,6 +433,16 @@ paths:
     put:
       tags: [competitions]
       summary: Update competition
+      description: |
+        Replaces the competition record (body-replace semantics). The server
+        trims string fields (`name`, `numberPrefix`, `kind`, `format`,
+        `poolSizeMode`, `startTime`, `date`) and rejects the request with
+        400 if `name` is empty after trim or if it collides
+        (case-insensitive) with another competition's name. Status field
+        is server-managed — see Competition.status for transition
+        endpoints; sending `status` here is accepted but bypasses the
+        invariants the dedicated /start, /complete, /invalidate endpoints
+        enforce.
       security:
         - TournamentPassword: []
       requestBody:
@@ -390,6 +458,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Competition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
     delete:
       tags: [competitions]
       summary: Delete competition
@@ -1021,7 +1095,21 @@ components:
       type: apiKey
       in: header
       name: X-Tournament-Password
-      description: Tournament admin password. Required for all `/api/` routes except `/api/viewer/` and `/api/events`.
+      description: |
+        Tournament admin password. Required for all `/api/` routes except
+        `/api/viewer/`, `/api/events`, and the bootstrap PUT/POST
+        `/api/tournament` while no tournament has been configured yet.
+
+        Header value must exactly equal the stored tournament password
+        (exact-string match; no trimming applied to either side).
+
+        Defense-in-depth: if the stored tournament password is somehow
+        empty (e.g. legacy file from before the POST guard was added),
+        AuthMiddleware returns 403 (`tournament misconfigured: password
+        is not set`) for ALL requests rather than letting the
+        `header != stored` check vacuously pass for empty header. This
+        forces the operator to fix the misconfiguration via the
+        bootstrap PUT /tournament path.
 
   parameters:
     CompetitionId:
@@ -1030,7 +1118,18 @@ components:
       required: true
       schema:
         type: string
-      description: Competition slug/ID (e.g. "mens-individual").
+        pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$'
+        maxLength: 64
+      description: |
+        Competition slug/ID (e.g. "mens-individual"). Must start with an
+        alphanumeric character, contain only alphanumerics / hyphens /
+        underscores, and be at most 64 chars. Validated server-side via
+        `requireValidCompID`; invalid IDs return 400
+        (`competition ID contains invalid characters` / `competition ID too long` /
+        `competition ID cannot be empty`). The validation is a path-traversal
+        defense: without it, an `id` like `../../../etc/passwd` would resolve
+        through `filepath.Clean(filepath.Join(...))` and escape the data
+        directory.
     MatchId:
       in: path
       name: mid
@@ -1093,19 +1192,35 @@ components:
       properties:
         name:
           type: string
+          description: Tournament name. Trimmed server-side; rejected with 400 if empty after trim.
         date:
           type: string
-          description: Event date (DD-MM-YYYY).
+          description: >
+            Event date in ISO 8601 format (YYYY-MM-DD) — the format the
+            HTML `<input type="date">` produces. Legacy DD-MM-YYYY values
+            on disk are accepted on read but normalized to YYYY-MM-DD on
+            save. Trimmed server-side.
         venue:
           type: string
+          description: Venue name. Trimmed server-side.
         courts:
           type: array
           items:
             type: string
-          description: Court labels (e.g. ["A", "B"]).
+          description: Court labels (e.g. ["A", "B"]). Each label is a single character; 26-court cap (A–Z).
         password:
           type: string
-          description: Admin password. Omitted from viewer responses.
+          description: >
+            Admin password. Required (non-empty) on POST /tournament — an
+            empty Password on disk would let AuthMiddleware's
+            `password != t.Password` check vacuously pass for any client
+            sending an empty `X-Tournament-Password` header.
+
+            On PUT /tournament: omitting the field or sending an empty
+            string preserves the currently-stored password ("leave blank
+            to keep current"). Sending a non-empty string updates it.
+
+            Omitted from viewer responses (`/api/viewer/tournament`).
 
     Competition:
       type: object
@@ -1113,10 +1228,18 @@ components:
         id:
           type: string
           description: >
-            Unique competition identifier (alphanumeric, hyphens, underscores; max 64 chars).
+            Unique competition identifier. Must start with an alphanumeric
+            character, contain only alphanumerics / hyphens / underscores,
+            and be at most 64 chars (same rule as the `:id` path parameter
+            — see CompetitionId).
             Optional on POST — the server derives a slug from `name` when omitted.
         name:
           type: string
+          description: >
+            Competition name. Trimmed server-side and rejected with 400
+            (`competition name is required`) if empty after trim.
+            Uniqueness check (case-insensitive) on POST/PUT — duplicate
+            names return 400 (`competition name "X" already exists`).
         kind:
           type: string
           description: "individual or team"
@@ -1143,8 +1266,13 @@ components:
             type: string
         startTime:
           type: string
+          description: First-match start time (HH:MM). Trimmed server-side.
         date:
           type: string
+          description: >
+            Competition date. Same format as Tournament.date (ISO 8601
+            YYYY-MM-DD; legacy DD-MM-YYYY accepted on read).
+            Trimmed server-side.
         status:
           type: string
           description: >

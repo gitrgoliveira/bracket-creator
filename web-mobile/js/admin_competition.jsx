@@ -361,7 +361,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // Trim numberPrefix here too — the input does substring(0, 3) per
     // keystroke but doesn't trim, so typing "  A" stores "  A" in local
     // state and (without this) lands "  A" on the server. The CREATE
-    // flow (admin_setup.jsx:178) already trims at create time; this
+    // flow (AdminCreateCompetition.create's deriveCompetitionName +
+    // trim chain in admin_setup.jsx) already trims at create time; this
     // mirrors that for the SETTINGS edit flow so participant numbers
     // generated from the prefix can't end up like "  A1" / "  A2".
     // Cross-file guard symmetry: same shape as the comp.Name trim above.
@@ -689,8 +690,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       await window.API.startCompetition(c.id, password);
       // Don't attempt a local-state refresh here. Pre-fix this called
       // onUpdate({ ...t, competitions: comps }), but onUpdate at this
-      // level is wired (admin.jsx:443) to (next) => updateCompetition(c.id, next),
-      // which fires PUT /api/competitions/:id with `next` as the body.
+      // level is wired (in AdminApp's render — see the AdminCompetition
+      // <Component onUpdate={...}> binding) to
+      // (next) => updateCompetition(c.id, next), which fires
+      // PUT /api/competitions/:id with `next` as the body.
       // Passing a tournament-shaped object would have Gin binding it as
       // state.Competition and silently overwriting the just-started
       // competition's Name/Date/etc. with tournament-level values.

@@ -105,6 +105,16 @@ func (s *Store) GetFolder() string {
 // lock, and the per-comp locks are acquired one at a time in fn.
 // No AB-BA deadlock is possible because s.compRenameMu serializes the
 // outer operation.
+//
+// IMPORTANT: s.compRenameMu is a sync.Mutex (non-recursive). fn MUST
+// NOT recursively call WithCompetitionRenameLock — that would deadlock
+// on the second acquire. Same advisory as the Update*Changed family:
+// transforms / closures running under a store mutex should perform
+// only the load + check + save work for the resource they're locking,
+// not invoke other lock-acquiring Store methods for the SAME lock.
+// Calls into methods that acquire OTHER locks (per-comp via
+// SaveCompetitionChanged / LoadCompetition for different IDs) are
+// fine — those locks are independent.
 func (s *Store) WithCompetitionRenameLock(fn func() error) error {
 	s.compRenameMu.Lock()
 	defer s.compRenameMu.Unlock()

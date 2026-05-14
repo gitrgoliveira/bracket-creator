@@ -5,11 +5,28 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// validateDateDMY validates that `date` is either empty or a syntactically
+// AND semantically valid day in DD-MM-YYYY format. Uses Go's time-parsing
+// reference layout `02-01-2006` which catches both shape errors and
+// out-of-range days (Feb 31, 32-01-2026, etc.). Shared helper used by
+// tournament + competition + import write paths to keep the canonical
+// format invariant in one place.
+func validateDateDMY(date string) error {
+	if date == "" {
+		return nil
+	}
+	if _, err := time.Parse("02-01-2006", date); err != nil {
+		return fmt.Errorf("date must be DD-MM-YYYY")
+	}
+	return nil
+}
 
 // validateCourtLabels checks that each entry in courts is a non-empty
 // single character (the spec-documented format — see Tournament.courts
@@ -92,27 +109,36 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		// Trim string fields so padded input from older clients (or
-		// hand-crafted API calls) doesn't persist with surrounding
-		// whitespace. Date is included for cross-file guard symmetry
-		// with handlers_import.go (which trims competition.Date) and
-		// handlers_competition.go (which now trims the same competition
-		// string fields uniformly). Password is NOT trimmed — the user
-		// may intentionally use leading/trailing whitespace, and the
-		// auth header check is exact-string match.
+		// Trim string fields so padded input from direct API callers
+		// doesn't persist with surrounding whitespace. Date is included
+		// for cross-file guard symmetry with handlers_import.go (which
+		// trims competition.Date) and handlers_competition.go (which
+		// trims the same competition string fields uniformly). Password
+		// is NOT trimmed — the user may intentionally use leading/
+		// trailing whitespace, and the auth header check is exact-string
+		// match.
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
 
+		// Reject non-empty Date that doesn't match the canonical DD-MM-YYYY
+		// shape (or semantically invalid days like Feb 31). The frontend
+		// converts the HTML date picker's ISO output to DMY before sending;
+		// direct API callers must send DMY directly. See validateDateDMY.
+		if err := validateDateDMY(t.Date); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Reject whitespace-only names. The current EditTournament UI
 		// (admin_setup.jsx) validates trimmed name client-side before
-		// submit, but older cached clients (and direct API callers)
-		// can still send "   "; without this guard, the trim above
-		// silently persists Name == "" — admin UI then shows a blank
-		// tournament title and the persisted record fails the
-		// documented "tournament has a name" invariant.
+		// submit; this is defense-in-depth against direct API callers
+		// (curl etc.). Without this guard, the trim above silently
+		// persists Name == "" — admin UI then shows a blank tournament
+		// title and the persisted record fails the documented "tournament
+		// has a name" invariant.
 		// Cross-file guard symmetry with the POST handler below and
-		// (after this commit) the competition write paths in
+		// the competition write paths in
 		// handlers_competition.go + handlers_import.go.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
@@ -149,12 +175,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				desired.Password = current.Password
 			}
 			// Defense-in-depth: if after the preserve step the password
-			// is STILL empty (legacy state from a pre-fix install, or a
-			// fresh PUT against a never-initialized tournament), reject.
-			// An empty stored Password is the exact precondition for the
-			// AuthMiddleware vacuous-pass scenario described above
-			// (and now also blocked at the middleware itself — see
-			// middleware.go).
+			// is STILL empty (a fresh PUT against a never-initialized
+			// tournament, or an operator who manually edited
+			// tournament.md), reject. An empty stored Password is the
+			// exact precondition for the AuthMiddleware vacuous-pass
+			// scenario described above (also blocked at the middleware
+			// itself — see middleware.go).
 			if desired.Password == "" {
 				return errPasswordRequired
 			}
@@ -181,10 +207,10 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 		// See PUT handler above. The current CreateTournament UI in
-		// app.jsx trims client-side before submit, but older clients
-		// (cached builds with the pre-trim form) and direct API callers
-		// can still send padded values — keep the server-side trim as
-		// the defense layer so persisted records are always canonical.
+		// app.jsx trims client-side before submit; this is defense-in-depth
+		// against direct API callers (curl etc.) sending padded values —
+		// the server-side trim is the canonical defense layer so persisted
+		// records are always canonical.
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
@@ -192,6 +218,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// Same empty-after-trim guard as the PUT handler.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
+
+		// Same DD-MM-YYYY guard as the PUT handler.
+		if err := validateDateDMY(t.Date); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 

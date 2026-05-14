@@ -10,7 +10,7 @@ type ScheduleEntry struct {
 	MatchType   string `json:"matchType"` // pool | bracket | break
 	MatchRef    string `json:"matchRef"`  // ID of the match (empty for breaks)
 	Court       string `json:"court"`
-	Date        string `json:"date"`        // DD-MM-YYYY — for multi-day tournaments
+	Date        string `json:"date"`        // DD-MM-YYYY (matches Tournament.Date / Competition.Date canonical) — reserved for future multi-day tournament use
 	ScheduledAt string `json:"scheduledAt"` // HH:MM
 	Status      string `json:"status"`
 	IsBreak     bool   `json:"isBreak,omitempty"`

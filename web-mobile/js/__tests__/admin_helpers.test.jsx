@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -188,35 +188,39 @@ describe('compMatchStats', () => {
 });
 
 describe('normalizeDate', () => {
+  // Canonical output is DD-MM-YYYY. ISO YYYY-MM-DD is accepted as input
+  // (boundary convenience for HTML `<input type="date">`) and converted.
+  // See admin_helpers.jsx for rationale.
+
   it('returns falsy input unchanged', () => {
     expect(normalizeDate(null)).toBe(null);
     expect(normalizeDate(undefined)).toBe(undefined);
     expect(normalizeDate("")).toBe("");
   });
 
-  it('passes through ISO-format dates', () => {
-    expect(normalizeDate("2026-05-13")).toBe("2026-05-13");
+  it('passes through canonical DD-MM-YYYY dates', () => {
+    expect(normalizeDate("13-05-2026")).toBe("13-05-2026");
   });
 
-  it('converts DD-MM-YYYY to ISO', () => {
-    expect(normalizeDate("13-05-2026")).toBe("2026-05-13");
+  it('converts ISO YYYY-MM-DD to DD-MM-YYYY (boundary convenience)', () => {
+    expect(normalizeDate("2026-05-13")).toBe("13-05-2026");
   });
 
-  it('converts DD/MM/YYYY to ISO', () => {
-    expect(normalizeDate("13/05/2026")).toBe("2026-05-13");
+  it('converts DD/MM/YYYY to DD-MM-YYYY', () => {
+    expect(normalizeDate("13/05/2026")).toBe("13-05-2026");
   });
 
   it('zero-pads single-digit days and months', () => {
-    expect(normalizeDate("3-5-2026")).toBe("2026-05-03");
-    expect(normalizeDate("3/5/2026")).toBe("2026-05-03");
+    expect(normalizeDate("3-5-2026")).toBe("03-05-2026");
+    expect(normalizeDate("3/5/2026")).toBe("03-05-2026");
   });
 
-  it('returns unrecognized strings unchanged (caller validates)', () => {
-    expect(normalizeDate("not a date")).toBe("not a date");
-    expect(normalizeDate("2026/05/13")).toBe("2026/05/13"); // wrong separator order
+  it('rejects unrecognized strings (returns null)', () => {
+    expect(normalizeDate("not a date")).toBe(null);
+    expect(normalizeDate("2026/05/13")).toBe(null); // wrong separator order
   });
 
-  it('rejects semantically invalid ISO dates', () => {
+  it('rejects semantically invalid ISO dates (post-conversion)', () => {
     expect(normalizeDate("2026-13-32")).toBe(null);
     expect(normalizeDate("2026-02-31")).toBe(null);
     expect(normalizeDate("2026-00-15")).toBe(null);
@@ -230,65 +234,83 @@ describe('normalizeDate', () => {
   });
 
   it('accepts Feb 29 in leap years and rejects in non-leap years', () => {
-    expect(normalizeDate("2024-02-29")).toBe("2024-02-29");
-    expect(normalizeDate("2026-02-29")).toBe(null);
+    expect(normalizeDate("29-02-2024")).toBe("29-02-2024");
+    expect(normalizeDate("2024-02-29")).toBe("29-02-2024"); // ISO → DMY
+    expect(normalizeDate("29-02-2026")).toBe(null);
   });
 });
 
-describe('isValidISODate', () => {
-  // This is the predicate used by AdminCompetition's "Start competition"
-  // button gate. The Copilot finding: pre-fix, this function only did a
-  // shape regex + year range check, so semantically-invalid dates like
-  // "2026-13-32" (which normalizeDate correctly rejects) still enabled
-  // the button, letting the operator start a competition with a date
-  // that AdminSettings.saveNow would refuse to save.
+describe('dmyToIso / isoToDmy', () => {
+  // Boundary converters for HTML `<input type="date">`, which uses ISO
+  // YYYY-MM-DD natively. Everywhere else in the app uses DMY.
+  it('dmyToIso converts canonical DD-MM-YYYY to ISO', () => {
+    expect(dmyToIso("13-05-2026")).toBe("2026-05-13");
+  });
+  it('dmyToIso returns "" for invalid input', () => {
+    expect(dmyToIso("")).toBe("");
+    expect(dmyToIso(null)).toBe("");
+    expect(dmyToIso("2026-05-13")).toBe(""); // ISO not accepted by this direction
+    expect(dmyToIso("13/05/2026")).toBe("");
+  });
+  it('isoToDmy converts ISO YYYY-MM-DD to canonical DD-MM-YYYY', () => {
+    expect(isoToDmy("2026-05-13")).toBe("13-05-2026");
+  });
+  it('isoToDmy returns "" for invalid input', () => {
+    expect(isoToDmy("")).toBe("");
+    expect(isoToDmy(null)).toBe("");
+    expect(isoToDmy("13-05-2026")).toBe(""); // DMY not accepted by this direction
+  });
+});
 
-  it('accepts a valid ISO date in range', () => {
-    expect(isValidISODate("2026-05-13")).toBe(true);
-    expect(isValidISODate("1900-01-01")).toBe(true); // year boundary
-    expect(isValidISODate("2100-12-31")).toBe(true); // year boundary
+describe('isValidDate', () => {
+  // Predicate used by AdminCompetition's "Start competition" button gate.
+  // Canonical input is DD-MM-YYYY; ISO accepted as boundary convenience.
+
+  it('accepts a valid DD-MM-YYYY date in range', () => {
+    expect(isValidDate("13-05-2026")).toBe(true);
+    expect(isValidDate("01-01-1900")).toBe(true); // year boundary
+    expect(isValidDate("31-12-2100")).toBe(true); // year boundary
   });
 
-  it('accepts DD-MM-YYYY input that normalizeDate canonicalizes', () => {
-    expect(isValidISODate("13-05-2026")).toBe(true);
-    expect(isValidISODate("13/05/2026")).toBe(true);
+  it('accepts ISO YYYY-MM-DD input that normalizeDate canonicalizes', () => {
+    expect(isValidDate("2026-05-13")).toBe(true);
+    expect(isValidDate("13/05/2026")).toBe(true);
   });
 
-  it('rejects semantically invalid dates (Copilot finding)', () => {
-    // These all have valid shape but represent impossible days.
-    expect(isValidISODate("2026-13-32")).toBe(false);
-    expect(isValidISODate("2026-02-31")).toBe(false);
-    expect(isValidISODate("2026-00-15")).toBe(false);
-    expect(isValidISODate("2026-04-31")).toBe(false); // April has 30 days
-    expect(isValidISODate("2026-02-29")).toBe(false); // non-leap
+  it('rejects semantically invalid dates', () => {
+    expect(isValidDate("32-13-2026")).toBe(false);
+    expect(isValidDate("31-02-2026")).toBe(false);
+    expect(isValidDate("00-05-2026")).toBe(false);
+    expect(isValidDate("31-04-2026")).toBe(false); // April has 30 days
+    expect(isValidDate("29-02-2026")).toBe(false); // non-leap
   });
 
   it('accepts Feb 29 in a leap year', () => {
-    expect(isValidISODate("2024-02-29")).toBe(true);
+    expect(isValidDate("29-02-2024")).toBe(true);
   });
 
   it('rejects years outside [1900, 2100]', () => {
-    expect(isValidISODate("1899-12-31")).toBe(false);
-    expect(isValidISODate("2101-01-01")).toBe(false);
-    expect(isValidISODate("0001-01-01")).toBe(false);
+    expect(isValidDate("31-12-1899")).toBe(false);
+    expect(isValidDate("01-01-2101")).toBe(false);
+    expect(isValidDate("01-01-0001")).toBe(false);
   });
 
   it('rejects falsy / empty / undefined input', () => {
-    expect(isValidISODate("")).toBe(false);
-    expect(isValidISODate(null)).toBe(false);
-    expect(isValidISODate(undefined)).toBe(false);
+    expect(isValidDate("")).toBe(false);
+    expect(isValidDate(null)).toBe(false);
+    expect(isValidDate(undefined)).toBe(false);
   });
 
   it('rejects unrecognized strings', () => {
-    expect(isValidISODate("not a date")).toBe(false);
-    expect(isValidISODate("2026/05/13")).toBe(false); // wrong separator order
-    expect(isValidISODate("13.05.2026")).toBe(false);
+    expect(isValidDate("not a date")).toBe(false);
+    expect(isValidDate("2026/05/13")).toBe(false); // wrong separator order
+    expect(isValidDate("13.05.2026")).toBe(false);
   });
 
-  it('returns a real boolean (for use in disabled={!isValidISODate(...)} props)', () => {
-    expect(typeof isValidISODate("2026-05-13")).toBe("boolean");
-    expect(typeof isValidISODate("")).toBe("boolean");
-    expect(typeof isValidISODate(null)).toBe("boolean");
+  it('returns a real boolean (for use in disabled={!isValidDate(...)} props)', () => {
+    expect(typeof isValidDate("13-05-2026")).toBe("boolean");
+    expect(typeof isValidDate("")).toBe("boolean");
+    expect(typeof isValidDate(null)).toBe("boolean");
   });
 });
 
@@ -297,26 +319,26 @@ describe('validateAndNormalizeDate', () => {
   // the user-facing error message AND the normalized date value to save.
   // Two consumers: AdminEditTournament.handleSave, AdminCreateCompetition.create.
 
-  it('returns {norm, error: null} for a valid date', () => {
-    expect(validateAndNormalizeDate("2026-05-13")).toEqual({
-      norm: "2026-05-13",
+  it('returns {norm, error: null} for a valid DD-MM-YYYY date', () => {
+    expect(validateAndNormalizeDate("13-05-2026")).toEqual({
+      norm: "13-05-2026",
       error: null,
     });
   });
 
-  it('normalizes DD-MM-YYYY input to ISO', () => {
-    expect(validateAndNormalizeDate("13-05-2026")).toEqual({
-      norm: "2026-05-13",
+  it('normalizes ISO YYYY-MM-DD input to canonical DD-MM-YYYY', () => {
+    expect(validateAndNormalizeDate("2026-05-13")).toEqual({
+      norm: "13-05-2026",
       error: null,
     });
   });
 
   it('returns the "Invalid date" message for semantically invalid input', () => {
-    expect(validateAndNormalizeDate("2026-13-32")).toEqual({
+    expect(validateAndNormalizeDate("32-13-2026")).toEqual({
       norm: null,
       error: "Invalid date. Please pick a valid day.",
     });
-    expect(validateAndNormalizeDate("2026-02-29")).toEqual({
+    expect(validateAndNormalizeDate("29-02-2026")).toEqual({
       norm: null,
       error: "Invalid date. Please pick a valid day.",
     });
@@ -329,27 +351,27 @@ describe('validateAndNormalizeDate', () => {
   });
 
   it('returns the "Year must be..." message for out-of-range years', () => {
-    expect(validateAndNormalizeDate("1899-12-31")).toEqual({
+    expect(validateAndNormalizeDate("31-12-1899")).toEqual({
       norm: null,
       error: "Year must be between 1900 and 2100.",
     });
-    expect(validateAndNormalizeDate("2101-01-01")).toEqual({
+    expect(validateAndNormalizeDate("01-01-2101")).toEqual({
       norm: null,
       error: "Year must be between 1900 and 2100.",
     });
   });
 
   it('accepts year boundary values 1900 and 2100', () => {
-    expect(validateAndNormalizeDate("1900-01-01").error).toBe(null);
-    expect(validateAndNormalizeDate("2100-12-31").error).toBe(null);
+    expect(validateAndNormalizeDate("01-01-1900").error).toBe(null);
+    expect(validateAndNormalizeDate("31-12-2100").error).toBe(null);
   });
 
   it('returns the canonical DATE_ERR_* constants (lockstep with saveNow)', () => {
-    // saveNow in admin_competition.jsx imports the same constants from
-    // window.DATE_ERR_*, so this assertion mechanically guarantees that
-    // the four date-validation sites can't drift on error messages.
+    // saveNow in admin_competition.jsx delegates to validateAndNormalizeDate
+    // for the canonical error string. This mechanically guarantees the
+    // four date-validation sites can't drift on error messages.
     expect(validateAndNormalizeDate("not a date").error).toBe(DATE_ERR_INVALID_FORMAT);
-    expect(validateAndNormalizeDate("1850-01-01").error).toBe(DATE_ERR_YEAR_RANGE);
+    expect(validateAndNormalizeDate("01-01-1850").error).toBe(DATE_ERR_YEAR_RANGE);
   });
 
   it('DATE_ERR_* constants have the expected user-facing strings', () => {
@@ -396,12 +418,12 @@ describe('numeric bounds constants', () => {
     expect(validateAndNormalizeDate(`${MAX_YEAR + 1}-01-01`).error).toBe(DATE_ERR_YEAR_RANGE);
   });
 
-  it('isValidISODate is a thin wrapper that returns error === null', () => {
-    // Verify the two helpers stay in lockstep — isValidISODate is now
+  it('isValidDate is a thin wrapper that returns error === null', () => {
+    // Verify the two helpers stay in lockstep — isValidDate is now
     // implemented as `validateAndNormalizeDate(d).error === null`.
-    const cases = ["2026-05-13", "13-05-2026", "2026-13-32", "1899-01-01", "", null];
+    const cases = ["13-05-2026", "2026-05-13", "32-13-2026", "31-12-1899", "", null];
     cases.forEach((c) => {
-      expect(isValidISODate(c)).toBe(validateAndNormalizeDate(c).error === null);
+      expect(isValidDate(c)).toBe(validateAndNormalizeDate(c).error === null);
     });
   });
 });

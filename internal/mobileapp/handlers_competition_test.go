@@ -51,15 +51,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
 
-		// 2. Success: pending status (new fix)
-		comp2 := state.Competition{ID: "delete-pending", Status: "pending"}
-		store.SaveCompetition(&comp2)
-		w = httptest.NewRecorder()
-		req, _ = http.NewRequest("DELETE", "/api/competitions/delete-pending", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNoContent, w.Code)
-
-		// 3. Reject: pools status (in progress) — must be invalidated first.
+		// 2. Reject: pools status (in progress) — must be invalidated first.
 		comp3 := state.Competition{ID: "delete-started", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp3)
 		w = httptest.NewRecorder()
@@ -301,7 +293,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		comp := state.Competition{
 			ID: "trim-fields-create", Name: "Trim Fields Create",
 			Kind: "  individual  ", Format: "  pools  ",
-			PoolSizeMode: "  min  ", StartTime: "  09:00  ", Date: "  2026-05-12  ",
+			PoolSizeMode: "  min  ", StartTime: "  09:00  ", Date: "  12-05-2026  ",
 		}
 		body, _ := json.Marshal(comp)
 		w := httptest.NewRecorder()
@@ -316,7 +308,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, "pools", stored.Format, "Format should be trimmed on POST")
 		assert.Equal(t, "min", stored.PoolSizeMode, "PoolSizeMode should be trimmed on POST")
 		assert.Equal(t, "09:00", stored.StartTime, "StartTime should be trimmed on POST")
-		assert.Equal(t, "2026-05-12", stored.Date, "Date should be trimmed on POST")
+		assert.Equal(t, "12-05-2026", stored.Date, "Date should be trimmed on POST")
 	})
 
 	t.Run("All String Fields Trimmed On Update", func(t *testing.T) {
@@ -326,7 +318,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		update := state.Competition{
 			ID: "trim-fields-update", Name: "Trim Fields Update",
 			Kind: "  team  ", Format: "  playoffs  ",
-			PoolSizeMode: "  exact  ", StartTime: "  10:30  ", Date: "  2026-06-15  ",
+			PoolSizeMode: "  exact  ", StartTime: "  10:30  ", Date: "  15-06-2026  ",
 		}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
@@ -341,7 +333,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, "playoffs", stored.Format, "Format should be trimmed on PUT")
 		assert.Equal(t, "exact", stored.PoolSizeMode, "PoolSizeMode should be trimmed on PUT")
 		assert.Equal(t, "10:30", stored.StartTime, "StartTime should be trimmed on PUT")
-		assert.Equal(t, "2026-06-15", stored.Date, "Date should be trimmed on PUT")
+		assert.Equal(t, "15-06-2026", stored.Date, "Date should be trimmed on PUT")
 	})
 
 	// Cross-file guard symmetry with handlers_tournament.go: whitespace-only
@@ -386,6 +378,50 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		require.NotNil(t, stored)
 		assert.Equal(t, "Original", stored.Name,
 			"PUT must not clobber Name when validation fails")
+	})
+
+	// Date must be in DD-MM-YYYY canonical format (frontend converts the
+	// HTML date picker's ISO output before sending; direct API callers
+	// must send DMY). Reject ISO YYYY-MM-DD shape and semantically
+	// invalid days (Feb 31 etc.) on both POST and PUT.
+	t.Run("Non-DMY Date Rejected On Create And Update", func(t *testing.T) {
+		// Seed an existing comp for the PUT case.
+		seed := state.Competition{ID: "date-fmt-test", Name: "Date Fmt Test", Date: "01-01-2026"}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		badDates := []string{
+			"2026-05-12", // ISO shape — not accepted
+			"31-02-2026", // Feb 31 semantically invalid
+			"32-01-2026", // day 32 invalid
+			"12-13-2026", // month 13 invalid
+			"not a date",
+		}
+		for _, badDate := range badDates {
+			// POST
+			post := state.Competition{ID: "date-post-" + badDate[0:2], Name: "Date Post " + badDate[0:2], Date: badDate}
+			body, _ := json.Marshal(post)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"POST /competitions with Date=%q must return 400", badDate)
+			assert.Contains(t, w.Body.String(), "date must be DD-MM-YYYY")
+
+			// PUT — body Date is bad; comp must still exist with the seeded date.
+			put := state.Competition{ID: "date-fmt-test", Name: "Date Fmt Test", Date: badDate}
+			body, _ = json.Marshal(put)
+			w = httptest.NewRecorder()
+			req, _ = http.NewRequest("PUT", "/api/competitions/date-fmt-test", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"PUT /competitions/date-fmt-test with Date=%q must return 400", badDate)
+		}
+		// Confirm seed wasn't clobbered.
+		stored, _ := store.LoadCompetition("date-fmt-test")
+		require.NotNil(t, stored)
+		assert.Equal(t, "01-01-2026", stored.Date, "seed date untouched by failed PUTs")
 	})
 
 	// Copilot round-4 finding on PR #104: POST /competitions with a

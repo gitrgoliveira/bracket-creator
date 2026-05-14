@@ -5,6 +5,8 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
+const dmyToIso = window.dmyToIso;
+const isoToDmy = window.isoToDmy;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
@@ -111,7 +113,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               {/* that validateAndNormalizeDate enforces at handleSave — */}
               {/* keeps the picker from offering years the validator */}
               {/* will then reject on submit. */}
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={date} onChange={(e) => { setDate(e.target.value); setError(""); }} />
+              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
               <div className="field__hint">Pick the tournament day.</div>
             </div>
           </div>
@@ -308,7 +310,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               {/* see the equivalent comment on AdminEditTournament's date */}
               {/* field above and AdminSettings's date input in */}
               {/* admin_competition.jsx. */}
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={date} onChange={(e) => setDate(e.target.value)} />
+              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
               <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">

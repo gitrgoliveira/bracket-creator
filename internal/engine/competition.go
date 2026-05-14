@@ -126,7 +126,7 @@ func (e *Engine) StartCompetition(id string) error {
 	// Best-effort early validation outside the lock — fast-fails the
 	// obviously-not-startable case (admin clicks start twice). The
 	// authoritative re-check is inside the atomic commit below.
-	if comp.Status != state.CompStatusSetup && comp.Status != "" && comp.Status != state.CompStatusPending {
+	if comp.Status != state.CompStatusSetup && comp.Status != "" {
 		return validationErrorf("competition %s already started", id)
 	}
 
@@ -249,7 +249,7 @@ func (e *Engine) StartCompetition(id string) error {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found (deleted during start)", id)
 		}
-		if current.Status != state.CompStatusSetup && current.Status != "" && current.Status != state.CompStatusPending {
+		if current.Status != state.CompStatusSetup && current.Status != "" {
 			return nil, validationErrorf("competition %s started concurrently by another writer", id)
 		}
 		// Generation-relevant fields must match the SNAPSHOT we

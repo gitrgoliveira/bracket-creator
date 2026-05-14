@@ -463,7 +463,7 @@ function CreateTournament({ onCreated }) {
               {/* Picker bounds mirror admin_setup.jsx + admin_competition.jsx. */}
               {/* validateAndNormalizeDate enforces MIN_YEAR–MAX_YEAR; without */}
               {/* these bounds the user could pick 1850 and only learn on submit. */}
-              <input className="input" type="date" min={`${window.MIN_YEAR}-01-01`} max={`${window.MAX_YEAR}-12-31`} value={date} onChange={(e) => setDate(e.target.value)} required />
+              <input className="input" type="date" min={`${window.MIN_YEAR}-01-01`} max={`${window.MAX_YEAR}-12-31`} value={window.dmyToIso(date)} onChange={(e) => setDate(window.isoToDmy(e.target.value))} required />
             </div>
             <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
           </div>

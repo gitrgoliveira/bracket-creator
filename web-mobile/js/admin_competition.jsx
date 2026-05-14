@@ -6,16 +6,13 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const compMatchStats = window.compMatchStats;
 const hasBothSides = window.hasBothSides;
-const normalizeDate = window.normalizeDate;
-const isValidISODate = window.isValidISODate;
+const dmyToIso = window.dmyToIso;
+const isoToDmy = window.isoToDmy;
+const isValidDate = window.isValidDate;
+const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
-// Use the canonical error strings + numeric bounds (admin_helpers.jsx)
-// so saveNow's inline asymmetric validation stays in lockstep with
-// validateAndNormalizeDate's messages and predicate, and so the
-// team-size input cap stays in lockstep with TEAM_POSITIONS in the
-// scoring modal.
-const DATE_ERR_INVALID_FORMAT = window.DATE_ERR_INVALID_FORMAT;
-const DATE_ERR_YEAR_RANGE = window.DATE_ERR_YEAR_RANGE;
+// Canonical numeric bounds (admin_helpers.jsx) so the team-size input cap
+// stays in lockstep with TEAM_POSITIONS in the scoring modal.
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
@@ -317,34 +314,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind]);
 
   const saveNow = (next) => {
-    // Date validation here is intentionally NOT routed through
-    // validateAndNormalizeDate (admin_helpers.jsx) because saveNow has a
-    // unique asymmetry that the shared helper can't express cleanly:
-    //   - shape-invalid + dateChanged   → block (operator changed to junk)
-    //   - shape-invalid + !dateChanged  → ALLOW (preserve legacy/imported
-    //                                     bad data so other fields can be
-    //                                     edited without first fixing the
-    //                                     date)
-    //   - shape-valid + year-out-of-range (regardless of dateChanged)
-    //                                  → block (a well-formed date with
-    //                                     impossible year is a typo, not
-    //                                     legacy data)
-    // The other two date-validation sites (admin_setup.jsx handleSave +
-    // create) don't have this asymmetry and delegate to the shared helper.
-    const norm = normalizeDate(next.date);
-    const dateIsValid = !!norm && /^\d{4}-\d{2}-\d{2}$/.test(norm);
-    const dateChanged = next.date !== c.date;
-
-    if (dateChanged && !dateIsValid) {
-      setSaveErr(DATE_ERR_INVALID_FORMAT);
+    // Use the shared validator (admin_helpers.jsx). Returns the
+    // canonical DD-MM-YYYY form on success, or an error message on
+    // failure (bad shape, semantic-invalid day, year out of range).
+    const { norm: dateNorm, error: dateError } = validateAndNormalizeDate(next.date);
+    if (dateError) {
+      setSaveErr(dateError);
       return;
-    }
-    if (dateIsValid) {
-      const year = parseInt(norm.substring(0, 4));
-      if (year < MIN_YEAR || year > MAX_YEAR) {
-        setSaveErr(DATE_ERR_YEAR_RANGE);
-        return;
-      }
     }
 
     // Trim before comparing AND before sending. The backend trims
@@ -374,20 +350,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       }
     }
 
-    // Normalize on save when valid (auto-cleans DD-MM-YYYY → ISO on any
-    // save where the date round-trips cleanly). Otherwise preserve the
-    // raw existing value so we don't clobber legacy data with `null`.
-    //
-    // Trim numberPrefix here too — the input does substring(0, 3) per
-    // keystroke but doesn't trim, so typing "  A" stores "  A" in local
-    // state and (without this) lands "  A" on the server. The CREATE
-    // flow (AdminCreateCompetition.create's deriveCompetitionName +
-    // trim chain in admin_setup.jsx) already trims at create time; this
+    // Trim numberPrefix — the input does substring(0, 3) per keystroke
+    // but doesn't trim, so typing "  A" stores "  A" in local state and
+    // (without this) lands "  A" on the server. The CREATE flow
+    // (AdminCreateCompetition.create's deriveCompetitionName + trim
+    // chain in admin_setup.jsx) already trims at create time; this
     // mirrors that for the SETTINGS edit flow so participant numbers
     // generated from the prefix can't end up like "  A1" / "  A2".
     // Cross-file guard symmetry: same shape as the comp.Name trim above.
     const trimmedPrefix = (next.numberPrefix || "").trim();
-    const finalNext = { ...c, ...next, name: trimmedName, numberPrefix: trimmedPrefix, date: dateIsValid ? norm : next.date };
+    const finalNext = { ...c, ...next, name: trimmedName, numberPrefix: trimmedPrefix, date: dateNorm };
     Promise.resolve(onUpdate(finalNext)).then(() => {
       if (!mountedRef.current) return;
       const now = new Date();
@@ -476,10 +448,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
         <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
         <div className="field">
           <label className="field__label">Date</label>
-          {/* Picker bounds match the validation range (MIN_YEAR/MAX_YEAR */}
-          {/* in admin_helpers.jsx) so a typed date can't pass validation */}
-          {/* but be unreachable via the picker — and vice versa. */}
-          <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={local.date} onChange={(e) => update("date", e.target.value)} />
+          {/* HTML <input type="date"> uses ISO YYYY-MM-DD; convert at the */}
+          {/* boundary so local state (and the saved payload) stays in the */}
+          {/* canonical DD-MM-YYYY format. Picker bounds match MIN_YEAR/ */}
+          {/* MAX_YEAR (admin_helpers.jsx) so a typed date can't pass */}
+          {/* validation but be unreachable via the picker. */}
+          <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(local.date)} onChange={(e) => update("date", isoToDmy(e.target.value))} />
           <div className="field__hint">Pick the competition day.</div>
         </div>
         <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>
@@ -556,7 +530,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       </div>
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)" }}>
         <button className="btn btn--danger btn--ghost" disabled={deleting} onClick={async () => {
-          const started = local.status && local.status !== "setup" && local.status !== "pending";
+          const started = local.status && local.status !== "setup";
           const msg = started
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
             : `Are you sure you want to delete "${local.name}"? This action cannot be undone.`;
@@ -694,13 +668,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
-  // Use the shared isValidISODate (admin_helpers.jsx) which delegates to
-  // normalizeDate for semantic validity — rejects "2026-13-32" / Feb 31 /
+  // Use the shared isValidDate (admin_helpers.jsx) which delegates to
+  // normalizeDate for semantic validity — rejects "32-13-2026" / Feb 31 /
   // Feb 29 in non-leap years. Without this, the Start button would enable
   // for shape-valid-but-impossible dates that AdminSettings.saveNow's
   // stricter check would reject — letting the operator start a competition
   // with a date that can't be saved back.
-  const isDateValid = isValidISODate;
+  const isDateValid = isValidDate;
 
   const start = async () => {
     showToast(`Starting ${c.name}…`);

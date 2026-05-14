@@ -60,25 +60,25 @@ func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 		// client sending no `X-Tournament-Password` header (or an empty
 		// one) would match an empty stored password, exposing every
 		// /api/* endpoint anonymously. The POST + PUT handlers in
-		// handlers_tournament.go now block writes that would land an
-		// empty Password, but a tournament file created by pre-fix code
-		// (or any out-of-band write bypassing the handlers) could still
-		// land an empty Password on disk. The uninitialized branch above
-		// only covers the literal "New Tournament" + empty case — a
-		// real-named tournament with empty Password is a misconfiguration,
-		// and refusing to authorize is the safer fail-closed choice.
-		// The 403 message tells the operator to fix the password rather
-		// than the misleading 401 ("invalid tournament password" — which
-		// would imply the request is wrong, not the server state).
+		// handlers_tournament.go block writes that would land an empty
+		// Password through the API, but an operator who manually edits
+		// tournament.md (or any out-of-band write bypassing the handlers)
+		// could still land an empty Password on disk. The uninitialized
+		// branch above only covers the literal "New Tournament" + empty
+		// case — a real-named tournament with empty Password is a
+		// misconfiguration, and refusing to authorize is the safer
+		// fail-closed choice. The 403 message tells the operator to fix
+		// the password rather than the misleading 401 ("invalid
+		// tournament password" — which would imply the request is wrong,
+		// not the server state).
 		//
 		// Recovery: since this branch returns 403 BEFORE the password
 		// check OR the uninitialized-bootstrap branch can run, there's
 		// no API path to fix the password (the bootstrap exception only
-		// matches the literal "New Tournament" default name, not a
-		// real-named legacy record). Operator must repair the file
-		// out-of-band: stop the server, edit tournament.md to either
-		// delete it (forces fresh bootstrap) or add a non-empty
-		// `password:` field, then restart. Documented in
+		// matches the literal "New Tournament" default name). Operator
+		// must repair the file out-of-band: stop the server, edit
+		// tournament.md to either delete it (forces fresh bootstrap) or
+		// add a non-empty `password:` field, then restart. Documented in
 		// specs/openapi.yaml under the security scheme description.
 		if t.Password == "" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "tournament misconfigured: password is not set"})

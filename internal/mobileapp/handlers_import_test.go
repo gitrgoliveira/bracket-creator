@@ -254,7 +254,7 @@ competitions:
     pool_size_mode: "  min  "
     number_prefix: "  A  "
     start_time: "  09:00  "
-    date: "  2026-05-12  "
+    date: "  12-05-2026  "
     courts: ["A"]
     participants: "trim.csv"
 `))
@@ -277,7 +277,7 @@ competitions:
 		assert.Equal(t, "min", stored.PoolSizeMode, "PoolSizeMode should be trimmed")
 		assert.Equal(t, "A", stored.NumberPrefix, "NumberPrefix should be trimmed")
 		assert.Equal(t, "09:00", stored.StartTime, "StartTime should be trimmed")
-		assert.Equal(t, "2026-05-12", stored.Date, "Date should be trimmed")
+		assert.Equal(t, "12-05-2026", stored.Date, "Date should be trimmed")
 
 		// The API response (ImportResult) must also reflect the trimmed
 		// Name, not the raw manifest value. Pre-fix: res.Name = entry.Name
@@ -427,6 +427,43 @@ competitions:
 		require.NotNil(t, existing, "id-collide must still exist")
 		assert.Equal(t, "Original Name", existing.Name,
 			"existing comp's name must be untouched by the colliding-ID import")
+	})
+
+	// Date must be DD-MM-YYYY. Non-canonical formats (e.g. ISO YYYY-MM-DD)
+	// land a per-row error rather than persisting the bad date — matches
+	// the POST/PUT 400 contract in handlers_competition.go.
+	t.Run("Non-DMY Date Rejected Per Row", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "iso-date-import"
+    name: "ISO Date Import"
+    kind: "individual"
+    format: "pools"
+    date: "2026-05-12"
+    courts: ["A"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Contains(t, resp.Results[0].Error, "date must be DD-MM-YYYY",
+			"ISO-format date should land in ImportResult.Error (not persist)")
+
+		// Confirm the bad-date comp was NOT persisted.
+		stored, _ := store.LoadCompetition("iso-date-import")
+		assert.Nil(t, stored, "iso-date-import must not have been persisted")
 	})
 }
 

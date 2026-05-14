@@ -100,7 +100,7 @@ func TestTournamentHandlers(t *testing.T) {
 	// which trim their own Date field.
 	tour.Name = "  Padded Tournament  "
 	tour.Venue = "  Crystal Palace  "
-	tour.Date = "  2026-05-12  "
+	tour.Date = "  12-05-2026  "
 	tour.Password = "secret"
 	body, _ = json.Marshal(tour)
 	w = httptest.NewRecorder()
@@ -111,7 +111,7 @@ func TestTournamentHandlers(t *testing.T) {
 	t3, _ := store.LoadTournament()
 	assert.Equal(t, "Padded Tournament", t3.Name)
 	assert.Equal(t, "Crystal Palace", t3.Venue)
-	assert.Equal(t, "2026-05-12", t3.Date, "Date should be trimmed on PUT")
+	assert.Equal(t, "12-05-2026", t3.Date, "Date should be trimmed on PUT")
 
 	// GET /api/tournament (not found)
 	os.Remove(filepath.Join(tempDir, "tournament.md"))
@@ -142,7 +142,7 @@ func TestTournamentHandlers(t *testing.T) {
 	// regression test covers older cached clients and direct API callers
 	// that can still send padded values — the server-side trim is the
 	// canonical defense layer so persisted records are always trimmed.
-	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Date: "  2026-07-20  ", Password: "secret", Courts: []string{"A"}}
+	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Date: "  20-07-2026  ", Password: "secret", Courts: []string{"A"}}
 	body, _ = json.Marshal(postTour)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament", bytes.NewBuffer(body))
@@ -152,7 +152,7 @@ func TestTournamentHandlers(t *testing.T) {
 	t4, _ := store.LoadTournament()
 	assert.Equal(t, "Posted Tournament", t4.Name)
 	assert.Equal(t, "Some Venue", t4.Venue)
-	assert.Equal(t, "2026-07-20", t4.Date, "Date should be trimmed on POST")
+	assert.Equal(t, "20-07-2026", t4.Date, "Date should be trimmed on POST")
 
 	// Whitespace-only name must be rejected after trim. Persisting an
 	// empty Name produces a blank tournament title in the admin UI and
@@ -171,6 +171,30 @@ func TestTournamentHandlers(t *testing.T) {
 			"%s /api/tournament with whitespace-only Name must return 400", method)
 		assert.Contains(t, w.Body.String(), "tournament name is required",
 			"%s /api/tournament rejection should explain the empty-name reason", method)
+	}
+
+	// Date must be DD-MM-YYYY (canonical format). Reject ISO YYYY-MM-DD
+	// shape and semantically-invalid days (Feb 31). The frontend converts
+	// ISO→DMY at the input boundary; direct API callers must send DMY.
+	for _, method := range []string{"PUT", "POST"} {
+		for _, badDate := range []string{
+			"2026-05-12", // ISO shape — not accepted
+			"31-02-2026", // Feb 31 semantically invalid
+			"32-01-2026", // day 32 invalid
+			"12-13-2026", // month 13 invalid
+			"not a date",
+		} {
+			bad := state.Tournament{Name: "Some Name", Venue: "Venue", Date: badDate, Password: "secret", Courts: []string{"A"}}
+			body, _ = json.Marshal(bad)
+			w = httptest.NewRecorder()
+			req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"%s /api/tournament with Date=%q must return 400", method, badDate)
+			assert.Contains(t, w.Body.String(), "date must be DD-MM-YYYY",
+				"%s /api/tournament rejection should explain the date format requirement", method)
+		}
 	}
 
 	// POST /api/tournament must reject empty Password. AuthMiddleware

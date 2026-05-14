@@ -88,8 +88,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
   };
 
-  // isHikiwake accepts both the canonical "hikiwake" and legacy "hikewake"
-  // for backward compatibility with state files written before normalization.
+  // Draw detection: check both the score.type (when present) and the
+  // top-level decision string. Either being "hikiwake" means draw.
   const initialIsDrawToggled = window.isHikiwake(m.score?.type) || window.isHikiwake(m.decision);
   const [isDrawToggled, setIsDrawToggled] = useStateA(initialIsDrawToggled);
 

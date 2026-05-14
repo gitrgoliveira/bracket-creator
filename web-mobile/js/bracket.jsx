@@ -5,8 +5,8 @@
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
 // Local hikiwake check — bracket.jsx is tested in isolation, so we don't rely
-// on window.isHikiwake here. Accepts both spellings; see specs/openapi.yaml.
-function isHikiwakeBC(v) { return v === "hikiwake" || v === "hikewake"; }
+// on window.isHikiwake here. See specs/openapi.yaml.
+function isHikiwakeBC(v) { return v === "hikiwake"; }
 
 function roundLabel(roundIdx, total) {
   const fromEnd = total - 1 - roundIdx;

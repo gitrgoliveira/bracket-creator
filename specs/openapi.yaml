@@ -1205,12 +1205,11 @@ components:
         date:
           type: string
           description: >
-            Event date in ISO 8601 format (YYYY-MM-DD) — the format the
-            HTML `<input type="date">` produces. Legacy DD-MM-YYYY values
-            on disk are accepted on read. The web frontend normalizes
-            DD-MM-YYYY → YYYY-MM-DD before sending; direct API clients
-            should already send the ISO form. Trimmed server-side; no
-            backend normalization beyond the trim.
+            Event date in DD-MM-YYYY format. Trimmed server-side; rejected
+            with 400 if non-empty and not a syntactically valid day in
+            that format (Feb 31 etc. → 400). The web frontend converts
+            the HTML `<input type="date">` ISO output to DMY at the input
+            boundary; direct API clients send DMY directly.
         venue:
           type: string
           description: Venue name. Trimmed server-side.
@@ -1281,22 +1280,19 @@ components:
         date:
           type: string
           description: >
-            Competition date. Same format as Tournament.date (ISO 8601
-            YYYY-MM-DD; legacy DD-MM-YYYY accepted on read). The web
-            frontend normalizes DD-MM-YYYY → YYYY-MM-DD before sending;
-            direct API clients should already send the ISO form.
-            Trimmed server-side; no backend normalization beyond the trim.
+            Competition date in DD-MM-YYYY format. Same shape as
+            `Tournament.date`. Trimmed server-side; rejected with 400 if
+            non-empty and not a syntactically valid day in that format
+            (Feb 31 etc. → 400).
         status:
           type: string
           description: >
             Lifecycle state. Set by the server — do not supply on create/update.
-            `setup` → not yet started; `pending` → equivalent to `setup` for
-            start-eligibility (legacy state, still accepted by
-            `POST /api/competitions/{id}/start`); `pools` → pools phase active;
+            `setup` → not yet started; `pools` → pools phase active;
             `playoffs` → knockout phase active; `completed` → finished;
             `invalid` → operator-declared invalid, prerequisite for deleting
             an already-started competition.
-          enum: [setup, pending, pools, playoffs, completed, invalid, ""]
+          enum: [setup, pools, playoffs, completed, invalid, ""]
         mirror:
           type: boolean
         withZekkenName:
@@ -1408,9 +1404,6 @@ components:
             or when both sides finish with equal scores.
             Note: encho (extended time) is a play mechanism, not a decision value — a match
             that goes to encho still resolves as a normal victory or hikiwake.
-            Backward compatibility: the legacy misspelling `"hikewake"` (missing the 'i')
-            is still accepted on read for data persisted by older versions. All new writes
-            use `"hikiwake"`.
             For individual sub-matches within team matches see `SubMatchResult.decision`.
         status:
           type: string
@@ -1452,8 +1445,7 @@ components:
           type: string
           description: >
             Decision code for this individual sub-match. Same values as `MatchResult.decision`:
-            `""` (normal victory) or `"hikiwake"` (draw/tie). The legacy spelling
-            `"hikewake"` is still accepted on read.
+            `""` (normal victory) or `"hikiwake"` (draw/tie).
 
     BracketMatch:
       type: object

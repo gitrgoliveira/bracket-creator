@@ -141,6 +141,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Reject non-canonical Date format. See validateDateDMY in
+		// handlers_tournament.go for the canonical-format rationale.
+		if err := validateDateDMY(comp.Date); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Cross-file guard symmetry with POST/PUT /tournament: same
 		// label + cap check via validateCompetitionCourts (looser than
 		// the tournament version — empty courts is allowed because the
@@ -273,11 +280,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Reject whitespace-only Name (see POST handler above). The
 		// admin SETTINGS edit path (AdminSettings.saveNow in
-		// admin_competition.jsx) now empty-checks the name client-side
+		// admin_competition.jsx) empty-checks the name client-side
 		// first — but keep this defense-in-depth so direct API callers
-		// and older cached clients can't land a blank-name PUT.
+		// can't land a blank-name PUT.
 		if comp.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
+			return
+		}
+
+		// Reject non-canonical Date format.
+		if err := validateDateDMY(comp.Date); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 

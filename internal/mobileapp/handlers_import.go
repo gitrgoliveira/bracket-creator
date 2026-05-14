@@ -162,6 +162,15 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	if len(comp.Courts) == 0 {
 		comp.Courts = []string{"A"}
 	}
+
+	// Reject non-canonical Date format (see validateDateDMY in
+	// handlers_tournament.go). Per-row res.Error to match the existing
+	// missing-id / invalid-id / save-error patterns — doesn't HTTP-fail
+	// the batch.
+	if err := validateDateDMY(comp.Date); err != nil {
+		res.Error = err.Error()
+		return res
+	}
 	if comp.PoolSize == 0 {
 		comp.PoolSize = 4
 	}

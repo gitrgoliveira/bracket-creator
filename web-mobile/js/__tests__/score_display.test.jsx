@@ -48,8 +48,6 @@ describe('formatIpponsScore', () => {
 
     it('returns X for a no-score draw', () => {
       expect(formatIpponsScore([], [], { type: 'hikiwake' }, null)).toBe('X');
-      // Legacy spelling still accepted on read for backward compat
-      expect(formatIpponsScore([], [], null, 'hikewake')).toBe('X');
       expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
     });
 

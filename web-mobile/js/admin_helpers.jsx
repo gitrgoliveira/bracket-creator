@@ -87,38 +87,37 @@ const DATE_ERR_INVALID_FORMAT = "Invalid date. Please pick a valid day.";
 const DATE_ERR_YEAR_RANGE = `Year must be between ${MIN_YEAR} and ${MAX_YEAR}.`;
 
 // Combined date validation + normalization. Returns:
-//   - { norm: "YYYY-MM-DD", error: null }  on success
+//   - { norm: "DD-MM-YYYY", error: null }  on success
 //   - { norm: null, error: "<message>" }   on failure
 //
 // Canonical predicate for date inputs across the admin UI. Save paths
-// (AdminEditTournament.handleSave, AdminCreateCompetition.create) use the
-// `error` for user-facing messaging AND `norm` for the value to save.
-// Pure boolean callers use `isValidISODate` below.
-//
-// AdminSettings.saveNow has an intentional asymmetry (shape-invalid +
-// unchanged → allow save, preserving legacy data; year-invalid → always
-// block) so it doesn't use this helper directly — see comment there.
-// It does use DATE_ERR_* constants above so error UX stays in lockstep.
+// (AdminEditTournament.handleSave, AdminCreateCompetition.create,
+// AdminSettings.saveNow) use the `error` for user-facing messaging AND
+// `norm` for the value to save. Pure boolean callers use `isValidDate`
+// below.
 function validateAndNormalizeDate(date) {
   const norm = normalizeDate(date);
-  if (!norm || !/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+  if (!norm || !/^\d{2}-\d{2}-\d{4}$/.test(norm)) {
     return { norm: null, error: DATE_ERR_INVALID_FORMAT };
   }
-  const year = parseInt(norm.substring(0, 4));
+  const year = parseInt(norm.substring(6, 10));
   if (year < MIN_YEAR || year > MAX_YEAR) {
     return { norm: null, error: DATE_ERR_YEAR_RANGE };
   }
   return { norm, error: null };
 }
 
-// Boolean predicate: is `date` a valid ISO-format day in the supported
+// Boolean predicate: is `date` a valid DD-MM-YYYY day in the supported
 // year range (1900–2100)? Used by AdminCompetition's "Start competition"
 // button gate — anywhere a boolean result is enough. For save flows that
 // need both the boolean AND the normalized value, use
 // validateAndNormalizeDate above.
-function isValidISODate(date) {
+function isValidDate(date) {
   return validateAndNormalizeDate(date).error === null;
 }
+// Backward-compat alias for any consumer still using the old name during
+// this PR's transition. Drop in a follow-up.
+const isValidISODate = isValidDate;
 
 // Pure decision logic for "user edited a <input type='number'> bound to a
 // debounce-saved field" (e.g. AdminSettings.teamSize/poolSize/poolWinners).
@@ -152,20 +151,30 @@ function decideNumericUpdate(raw, min = 1) {
   return { value: parsed, shouldSave: true };
 }
 
+// Normalize a date string to the canonical DD-MM-YYYY format. Accepts
+// DD-MM-YYYY (no-op normalization) and ISO YYYY-MM-DD (converted to DMY,
+// for paths still handing over the HTML `<input type="date">` raw value).
+// Returns null for malformed shape or semantically invalid days (Feb 31 etc.).
 function normalizeDate(d) {
   if (!d) return d;
-  let out;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-    out = d;
+  let day, m, y;
+  if (/^\d{2}-\d{2}-\d{4}$/.test(d)) {
+    [day, m, y] = d.split('-').map(Number);
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    [y, m, day] = d.split('-').map(Number);
   } else {
+    // Match the older permissive parser shape (D-M-YYYY, D/M/YYYY) for
+    // user-pasted text via admin import. Canonical output is still
+    // zero-padded DD-MM-YYYY.
     const match = d.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-    if (!match) return d;
-    out = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+    if (!match) return null;
+    day = Number(match[1]);
+    m = Number(match[2]);
+    y = Number(match[3]);
   }
-  // Reject semantically invalid dates like "2026-13-32" or "31-02-2026".
+  // Reject semantically invalid dates like "32-13-2026" or "31-02-2026".
   // JS's Date constructor silently rolls invalid components over (Feb 31 →
   // Mar 3), so round-trip the parts through UTC and require an exact match.
-  const [y, m, day] = out.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, day));
   if (
     isNaN(dt.getTime()) ||
@@ -175,7 +184,20 @@ function normalizeDate(d) {
   ) {
     return null;
   }
-  return out;
+  return `${String(day).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`;
+}
+
+// HTML <input type="date"> uses ISO YYYY-MM-DD for value/min/max attributes.
+// These converters bridge the input boundary; everywhere else uses DMY.
+function dmyToIso(dmy) {
+  if (!dmy || !/^\d{2}-\d{2}-\d{4}$/.test(dmy)) return "";
+  const [dd, mm, yyyy] = dmy.split('-');
+  return `${yyyy}-${mm}-${dd}`;
+}
+function isoToDmy(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+  const [yyyy, mm, dd] = iso.split('-');
+  return `${dd}-${mm}-${yyyy}`;
 }
 
 // Guard window assignments so this file stays safely importable in
@@ -185,7 +207,10 @@ if (typeof window !== "undefined") {
   window.hasBothSides = hasBothSides;
   window.compMatchStats = compMatchStats;
   window.normalizeDate = normalizeDate;
-  window.isValidISODate = isValidISODate;
+  window.dmyToIso = dmyToIso;
+  window.isoToDmy = isoToDmy;
+  window.isValidDate = isValidDate;
+  window.isValidISODate = isValidISODate; // back-compat alias
   window.validateAndNormalizeDate = validateAndNormalizeDate;
   window.decideNumericUpdate = decideNumericUpdate;
   window.DATE_ERR_INVALID_FORMAT = DATE_ERR_INVALID_FORMAT;
@@ -202,7 +227,10 @@ export {
   hasBothSides,
   compMatchStats,
   normalizeDate,
-  isValidISODate,
+  dmyToIso,
+  isoToDmy,
+  isValidDate,
+  isValidISODate, // back-compat alias
   validateAndNormalizeDate,
   decideNumericUpdate,
   DATE_ERR_INVALID_FORMAT,

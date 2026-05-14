@@ -72,6 +72,31 @@ describe('hasBothSides', () => {
     expect(hasBothSides({ sideA: "Alice", sideB: "" })).toBe(false);
   });
 
+  // Copilot review finding on PR #104: hasBothSides previously only
+  // checked for non-empty side names, which let bracket placeholder
+  // strings like "Winner of r2-m0" slip through as "real participants".
+  // Unresolved future-round bracket matches then showed up in the
+  // viewer's upcoming-matches list. The fix excludes any "Winner of "
+  // prefix explicitly.
+  it('returns false when either side is an unresolved "Winner of" bracket placeholder', () => {
+    expect(hasBothSides({ sideA: "Alice", sideB: "Winner of r0-m1" })).toBe(false);
+    expect(hasBothSides({ sideA: "Winner of r1-m0", sideB: "Bob" })).toBe(false);
+    expect(hasBothSides({ sideA: "Winner of r0-m0", sideB: "Winner of r0-m1" })).toBe(false);
+  });
+
+  it('returns false when "Winner of" placeholders are inside normalizeMatch side objects', () => {
+    // normalizeMatch wraps raw side strings into {id, name} objects.
+    // The "Winner of" prefix could still be in the name field.
+    expect(hasBothSides({ sideA: { id: "", name: "Winner of r1-m0" }, sideB: real("b", "Bob") })).toBe(false);
+    expect(hasBothSides({ sideA: real("a", "Alice"), sideB: { id: "", name: "Winner of r0-m0" } })).toBe(false);
+  });
+
+  it('returns true for resolved bracket matches (no "Winner of" prefix)', () => {
+    // After the source match resolves, the bracket entry's side updates
+    // to the actual winner's name. hasBothSides should accept those.
+    expect(hasBothSides({ sideA: "Alice", sideB: "Charlie" })).toBe(true);
+  });
+
   it('returns a real boolean (not a truthy/falsy value) for use in JSX guards', () => {
     // Important for `{hasBothSides(m) ? <Component /> : null}` rendering —
     // returning a non-boolean truthy value (e.g. a string) would render

@@ -1107,9 +1107,17 @@ components:
         empty (e.g. legacy file from before the POST guard was added),
         AuthMiddleware returns 403 (`tournament misconfigured: password
         is not set`) for ALL requests rather than letting the
-        `header != stored` check vacuously pass for empty header. This
-        forces the operator to fix the misconfiguration via the
-        bootstrap PUT /tournament path.
+        `header != stored` check vacuously pass for empty header.
+
+        Recovery from this state requires **out-of-band repair**: the
+        bootstrap PUT/POST `/api/tournament` exception only applies
+        when the loaded record is `nil` or matches the literal
+        `Name == "New Tournament" && Password == ""` default — a
+        real-named legacy record with empty Password is locked out by
+        the 403 fail-closed branch. Operator must stop the server,
+        edit `tournament.md` to either delete it (forces fresh
+        bootstrap) or set a non-empty `password:` field in the YAML
+        front-matter, then restart.
 
   parameters:
     CompetitionId:

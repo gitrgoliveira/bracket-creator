@@ -159,14 +159,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// passed checkUniqueCompName (each seeing the other still had
 		// its old name) and both landed. See state.Store
 		// WithCompetitionRenameLock for full rationale.
-		var nameErr error
+		//
+		// Also checks ID uniqueness: pre-fix, a POST with an existing
+		// `id` but different `name` passed checkUniqueCompName (the
+		// name was unique) and then SaveCompetitionChanged silently
+		// overwrote the existing competition. POST is documented as
+		// CREATE, so an existing ID is a 409 / 400 case.
+		var nameErr, idErr error
 		err := store.WithCompetitionRenameLock(func() error {
+			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
+				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
+				return nil
+			}
 			if nameErr = checkUniqueCompName(store, comp.Name, ""); nameErr != nil {
 				return nil
 			}
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
 			return saveErr
 		})
+		if idErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
+			return
+		}
 		if nameErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
 			return
@@ -207,7 +221,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		comp.ID = id // ensure ID matches URL
+		// Reject mismatched body.ID rather than silently overriding it.
+		// Pre-fix, a caller doing `PUT /api/competitions/comp-a` with
+		// `{"id":"comp-b",...}` would have its body.ID silently ignored
+		// (the line below set comp.ID = id from the URL). That accepted
+		// malformed input as valid; the safer contract is to surface
+		// the mismatch.
+		if comp.ID != "" && comp.ID != id {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("competition ID mismatch: URL %q vs body %q", id, comp.ID)})
+			return
+		}
+		comp.ID = id // ensure ID matches URL (also for empty-body case)
 		comp.Name = strings.TrimSpace(comp.Name)
 		// See POST handler comment — same trim is needed here so the
 		// SETTINGS edit path can't persist whitespace-padded prefixes.
@@ -616,22 +640,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		playoff.ID = slugifyID(playoff.Name)
 
 		// Cross-file guard symmetry with POST + PUT /competitions:
-		// uniqueness-check + save under WithCompetitionRenameLock.
-		// Without this, if an admin manually created a competition
-		// whose name matches the derived playoff name first ("<src> -
-		// Playoffs"), SaveCompetitionChanged would silently overwrite
-		// that existing comp's config. The slugifyID(playoff.Name)
-		// pre-collision check ALSO needs to be inside the lock,
-		// because two concurrent /playoffs requests on sources that
-		// happen to slug to the same ID would race the same write.
-		var nameErr error
+		// uniqueness-check + save under WithCompetitionRenameLock,
+		// AND an ID-existence check (a manually-created competition
+		// could have the same slug but a different name —
+		// checkUniqueCompName would pass, then SaveCompetitionChanged
+		// would silently overwrite the existing config). Both checks
+		// run inside the lock to avoid TOCTOU.
+		var nameErr, idErr error
 		err = store.WithCompetitionRenameLock(func() error {
+			if existing, _ := store.LoadCompetition(playoff.ID); existing != nil {
+				idErr = fmt.Errorf("derived playoff ID %q already exists (rename the conflicting competition or its source)", playoff.ID)
+				return nil
+			}
 			if nameErr = checkUniqueCompName(store, playoff.Name, ""); nameErr != nil {
 				return nil
 			}
 			_, saveErr := store.SaveCompetitionChanged(&playoff)
 			return saveErr
 		})
+		if idErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
+			return
+		}
 		if nameErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
 			return

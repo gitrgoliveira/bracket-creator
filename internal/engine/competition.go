@@ -4,6 +4,22 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// courtsEqual returns true when two court-label slices are
+// element-wise equal (used by StartCompetition's mid-pipeline
+// settings-drift check). nil and empty slices are treated as
+// equivalent — both mean "no courts" from the config's POV.
+func courtsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // MaybeAutoCompletePools transitions a pools-format competition from
 // CompStatusPools to CompStatusComplete when every pool match has been
 // recorded as completed. It is a no-op for any other format or status,
@@ -23,22 +39,18 @@ import (
 // duplicate broadcasts for the "two concurrent auto-completes" case,
 // it offered no protection against admin-action interference.
 func (e *Engine) MaybeAutoCompletePools(compID string) (bool, error) {
-	// Load pool matches OUTSIDE the lock: we only need a consistent
-	// snapshot of completedness for the early-skip decision. The
-	// authoritative check is re-done inside the transform under the
-	// per-comp lock (against the same matches file). Concurrent
-	// match writes are already serialized via the per-comp lock on
-	// the pool-matches.csv path; we trust the snapshot's "all
-	// completed" verdict by the time we acquire the comp lock.
+	// Optional fast-path outside the lock — avoids taking the
+	// per-comp write lock for the common "still in progress" case.
+	// The authoritative re-check happens inside the transform; we
+	// only use this snapshot to skip when it's already obviously
+	// false.
 	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
 		return false, err
 	}
-	allCompleted := true
 	for _, m := range matches {
 		if m.Status != state.MatchStatusCompleted {
-			allCompleted = false
-			break
+			return false, nil
 		}
 	}
 
@@ -49,8 +61,25 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (bool, error) {
 		if comp == nil || comp.Format != state.CompFormatPools || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
-		if !allCompleted {
-			return nil, nil
+		// Re-check pool-matches completion under the lock, NOT against
+		// the outer-snapshot `matches`. The outer snapshot was taken
+		// before we acquired the per-comp write lock, so a concurrent
+		// score-save could have:
+		//   - reverted a completed match back to scheduled (admin fix)
+		//   - inserted a new scheduled match (rare but possible if
+		//     the pool gen ran between our outer Load and this point)
+		// In either case we'd otherwise mark the competition complete
+		// based on stale data. LoadPoolMatchesLocked is the lock-free
+		// read primitive — we already hold the per-comp lock, so the
+		// disk state is stable under us.
+		freshMatches, ferr := e.store.LoadPoolMatchesLocked(compID)
+		if ferr != nil {
+			return nil, ferr
+		}
+		for _, m := range freshMatches {
+			if m.Status != state.MatchStatusCompleted {
+				return nil, nil
+			}
 		}
 		comp.Status = state.CompStatusComplete
 		return comp, nil
@@ -154,16 +183,42 @@ func (e *Engine) StartCompetition(id string) error {
 	// re-validates Status under the per-comp lock — if a concurrent
 	// StartCompetition won the race and already moved Status to
 	// Pools/Playoffs, we abort here with a validation error rather
-	// than clobbering their result with ours. Note: our generated
-	// pools.csv may have already overwritten theirs (see pipeline
-	// limitations in the function comment); this fix is narrow to
-	// the comp-config Status race.
+	// than clobbering their result with ours.
+	//
+	// The transform ALSO re-validates the generation-relevant fields
+	// (Format, PoolSize, PoolWinners, PoolSizeMode, Courts, Kind,
+	// TeamSize, WithZekkenName). If a concurrent settings save
+	// changed any of those between our outer Load (the basis for the
+	// pools/playoffs files we just generated) and this atomic commit,
+	// the generated artifacts no longer match the new config — e.g.
+	// a Format change from "pools" to "playoffs" would leave
+	// pools.csv on disk while Status committed to "playoffs". Better
+	// to abort with a 409-style conflict than to commit inconsistent
+	// state.
+	//
+	// Note: our generated pools.csv / bracket.json have already been
+	// written by this point (see pipeline limitations in the function
+	// comment) — aborting here leaves them as orphaned artifacts that
+	// the next successful start overwrites. Pre-existing partial-
+	// atomicity issue; the fix here only guarantees comp-config
+	// consistency.
 	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found (deleted during start)", id)
 		}
 		if current.Status != state.CompStatusSetup && current.Status != "" && current.Status != state.CompStatusPending {
 			return nil, validationErrorf("competition %s started concurrently by another writer", id)
+		}
+		// Generation-relevant fields must match the snapshot we
+		// generated from. courtsEqual handles the slice comparison.
+		if current.Format != comp.Format ||
+			current.PoolSize != comp.PoolSize ||
+			current.PoolWinners != comp.PoolWinners ||
+			current.PoolSizeMode != comp.PoolSizeMode ||
+			current.Kind != comp.Kind ||
+			current.WithZekkenName != comp.WithZekkenName ||
+			!courtsEqual(current.Courts, comp.Courts) {
+			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolWinners/PoolSizeMode/Kind/WithZekkenName/Courts); regenerate by retrying", id)
 		}
 		// Copy our pipeline's modifications onto the freshly-read
 		// `current`. This preserves any unrelated fields that may

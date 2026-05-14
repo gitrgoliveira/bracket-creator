@@ -70,6 +70,16 @@ func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 		// The 403 message tells the operator to fix the password rather
 		// than the misleading 401 ("invalid tournament password" — which
 		// would imply the request is wrong, not the server state).
+		//
+		// Recovery: since this branch returns 403 BEFORE the password
+		// check OR the uninitialized-bootstrap branch can run, there's
+		// no API path to fix the password (the bootstrap exception only
+		// matches the literal "New Tournament" default name, not a
+		// real-named legacy record). Operator must repair the file
+		// out-of-band: stop the server, edit tournament.md to either
+		// delete it (forces fresh bootstrap) or add a non-empty
+		// `password:` field, then restart. Documented in
+		// specs/openapi.yaml under the security scheme description.
 		if t.Password == "" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "tournament misconfigured: password is not set"})
 			c.Abort()

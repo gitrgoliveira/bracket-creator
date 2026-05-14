@@ -53,8 +53,11 @@ func TestTournamentHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// Create initial tournament (no longer auto-created by store init)
-	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Initial Tournament", Password: ""}))
+	// Create initial tournament (no longer auto-created by store init).
+	// Courts is required by the POST/PUT validateCourts guard (1..26
+	// single-character labels); the test PUTs below reuse this `tour`
+	// so we need it populated to satisfy the new contract.
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Initial Tournament", Password: "", Courts: []string{"A"}}))
 
 	// GET /api/tournament
 	w := httptest.NewRecorder()
@@ -139,7 +142,7 @@ func TestTournamentHandlers(t *testing.T) {
 	// regression test covers older cached clients and direct API callers
 	// that can still send padded values — the server-side trim is the
 	// canonical defense layer so persisted records are always trimmed.
-	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Date: "  2026-07-20  ", Password: "secret"}
+	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Date: "  2026-07-20  ", Password: "secret", Courts: []string{"A"}}
 	body, _ = json.Marshal(postTour)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament", bytes.NewBuffer(body))
@@ -180,7 +183,11 @@ func TestTournamentHandlers(t *testing.T) {
 	// drops it surfaces immediately.
 	{
 		os.Remove(filepath.Join(tempDir, "tournament.md"))
-		emptyPass := state.Tournament{Name: "No Password", Password: ""}
+		// Courts populated so the Password check (not Courts validation)
+		// is the rejection reason — handler validates Name → Courts →
+		// Password in order, and we're specifically pinning the
+		// Password guard here.
+		emptyPass := state.Tournament{Name: "No Password", Password: "", Courts: []string{"A"}}
 		body, _ := json.Marshal(emptyPass)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/tournament", bytes.NewBuffer(body))
@@ -207,7 +214,7 @@ func TestTournamentHandlers(t *testing.T) {
 		require.NoError(t, store.SaveTournament(&seed))
 
 		// PUT with empty Password — should preserve "kept-secret".
-		update := state.Tournament{Name: "Preserve Test", Venue: "New Venue", Password: ""}
+		update := state.Tournament{Name: "Preserve Test", Venue: "New Venue", Password: "", Courts: []string{"A"}}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
@@ -229,7 +236,7 @@ func TestTournamentHandlers(t *testing.T) {
 		seed := state.Tournament{Name: "Change Test", Password: "old-secret", Courts: []string{"A"}}
 		require.NoError(t, store.SaveTournament(&seed))
 
-		update := state.Tournament{Name: "Change Test", Password: "new-secret"}
+		update := state.Tournament{Name: "Change Test", Password: "new-secret", Courts: []string{"A"}}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
@@ -257,7 +264,7 @@ func TestTournamentHandlers(t *testing.T) {
 		legacy := state.Tournament{Name: "Legacy", Password: "", Courts: []string{"A"}}
 		require.NoError(t, store.SaveTournament(&legacy))
 
-		update := state.Tournament{Name: "Legacy", Venue: "Update", Password: ""}
+		update := state.Tournament{Name: "Legacy", Venue: "Update", Password: "", Courts: []string{"A"}}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
@@ -303,11 +310,11 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 
 		// PUT A: preserve-password intent (omits password by sending "")
 		bodyA, _ := json.Marshal(state.Tournament{
-			Name: "Concurrent Test", Venue: "Hall A", Password: "",
+			Name: "Concurrent Test", Venue: "Hall A", Password: "", Courts: []string{"A"},
 		})
 		// PUT B: change-password intent
 		bodyB, _ := json.Marshal(state.Tournament{
-			Name: "Concurrent Test", Venue: "Hall B", Password: newPass,
+			Name: "Concurrent Test", Venue: "Hall B", Password: newPass, Courts: []string{"A"},
 		})
 
 		var wg sync.WaitGroup
@@ -634,6 +641,155 @@ func TestCreatePlayoff_RejectsNameCollision(t *testing.T) {
 		"existing comp's config must be untouched on playoff-name collision")
 }
 
+// TestPUTCompetition_RejectsBodyIDMismatch pins the Copilot #1 fix:
+// PUT /api/competitions/comp-a with body `{id: "comp-b"}` previously
+// silently overrode body.ID = "comp-a" (the URL value) and saved the
+// record at path comp-a. That accepted malformed input as valid; the
+// tightened contract returns 400 to surface the mismatch.
+func TestPUTCompetition_RejectsBodyIDMismatch(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "comp-a", Name: "Comp A"}))
+
+	body, _ := json.Marshal(state.Competition{ID: "comp-b", Name: "Comp A"}) // body ID disagrees with URL
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/comp-a", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"PUT with body.ID != URL.id must return 400")
+	assert.Contains(t, w.Body.String(), "competition ID mismatch",
+		"error message should explain the mismatch")
+
+	// Verify both possible "victim" paths were untouched.
+	a, _ := store.LoadCompetition("comp-a")
+	b, _ := store.LoadCompetition("comp-b")
+	require.NotNil(t, a)
+	assert.Equal(t, "Comp A", a.Name, "comp-a must keep its name")
+	assert.Nil(t, b, "comp-b must NOT have been created from the body")
+}
+
+// TestPOSTCompetition_RejectsExistingID pins the Copilot #2 fix:
+// POST /api/competitions with an `id` that already exists previously
+// passed name-uniqueness (the names differed) and then
+// SaveCompetitionChanged overwrote the existing competition's config.
+// POST is documented as CREATE; pre-existing ID is now 400.
+func TestPOSTCompetition_RejectsExistingID(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "existing", Name: "Existing", NumberPrefix: "PRESERVED",
+	}))
+
+	body, _ := json.Marshal(state.Competition{ID: "existing", Name: "Different Name"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"POST with existing ID must return 400")
+	assert.Contains(t, w.Body.String(), "already exists")
+
+	// Verify the pre-existing competition's config is untouched.
+	stored, _ := store.LoadCompetition("existing")
+	require.NotNil(t, stored)
+	assert.Equal(t, "Existing", stored.Name, "existing name must be preserved")
+	assert.Equal(t, "PRESERVED", stored.NumberPrefix, "existing config must be preserved")
+}
+
+// TestPlayoff_RejectsDerivedIDCollision pins the Copilot #3 fix: the
+// playoff endpoint derived `name = src.Name + " - Playoffs"` and
+// `id = slugifyID(name)` and called SaveCompetitionChanged directly.
+// If a competition existed with the same slug ID but a different
+// name, the playoff save silently overwrote it. Now both ID and name
+// uniqueness are checked inside the rename lock.
+func TestPlayoff_RejectsDerivedIDCollision(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Source comp; derived playoff ID will be "source-playoffs".
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "source",
+		Name:   "Source",
+		Format: state.CompFormatPools,
+		Status: state.CompStatusPools,
+	}))
+
+	// Pre-existing comp with the SAME slug as the derived playoff ID
+	// but a DIFFERENT name. checkUniqueCompName would have passed
+	// (names differ), then SaveCompetitionChanged would have
+	// overwritten this with the new playoff config — data loss.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           "source-playoffs",
+		Name:         "Unrelated Cup",
+		NumberPrefix: "PRESERVED",
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/source/playoffs", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"POST /playoffs must reject when derived ID collides with existing comp")
+	assert.Contains(t, w.Body.String(), "already exists")
+
+	// Existing comp untouched.
+	stored, _ := store.LoadCompetition("source-playoffs")
+	require.NotNil(t, stored)
+	assert.Equal(t, "Unrelated Cup", stored.Name)
+	assert.Equal(t, "PRESERVED", stored.NumberPrefix)
+}
+
+// TestPOSTTournament_ValidatesCourts pins Copilot #8: POST and PUT
+// /api/tournament now call validateCourts (1..26 single-char labels)
+// matching the spec. Direct API callers can no longer persist >26
+// courts or multi-character labels.
+func TestPOSTTournament_ValidatesCourts(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cases := []struct {
+		name        string
+		courts      []string
+		wantErrText string
+	}{
+		// JSON-encoded responses escape `<` and `>` as `<`/`>`,
+		// so the assertion strings test for the unique unescaped tokens.
+		{"empty courts", []string{}, "courts must be"},
+		{"27 courts (over A-Z cap)", func() []string {
+			c := make([]string, 27)
+			for i := range c {
+				c[i] = string(rune('A' + i%26))
+			}
+			return c
+		}(), "courts must be"},
+		{"multi-char label", []string{"AA", "B"}, "must be a single character"},
+		{"empty label", []string{"A", ""}, "cannot be empty"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			os.Remove(filepath.Join(tempDir, "tournament.md"))
+			body, _ := json.Marshal(state.Tournament{
+				Name:     "Cup",
+				Password: "secret",
+				Courts:   tc.courts,
+			})
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/tournament", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"POST /tournament with invalid courts must return 400")
+			assert.Contains(t, w.Body.String(), tc.wantErrText)
+			// Not persisted.
+			stored, _ := store.LoadTournament()
+			assert.Nil(t, stored, "invalid courts must not land on disk")
+		})
+	}
+}
+
 func TestCompetitionHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -760,6 +916,11 @@ func TestCompetitionHandlers(t *testing.T) {
 	os.Remove(filepath.Join(tempDir, "competitions"))
 	os.Mkdir(filepath.Join(tempDir, "competitions"), 0755)
 	// PUT /api/competitions/:id (update existing)
+	// Reset comp.ID to "c1" to match the URL — the prior reuse of the
+	// `comp` variable left ID="fail" from the save-error block above,
+	// and the PUT handler now rejects body.ID/URL.id mismatches
+	// (defense-in-depth from Copilot review #1).
+	comp.ID = "c1"
 	comp.Name = "Updated c1"
 	body, _ = json.Marshal(comp)
 	w = httptest.NewRecorder()

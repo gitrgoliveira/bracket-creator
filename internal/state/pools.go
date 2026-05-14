@@ -187,6 +187,34 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 	return s.copyMatchResults(data.([]MatchResult)), nil
 }
 
+// LoadPoolMatchesLocked loads pool matches WITHOUT acquiring the
+// per-competition lock. Caller MUST already hold the write lock for
+// this competition — typically from inside a transform passed to
+// UpdatePoolMatchByID, UpdateBracket, or UpdateCompetitionChanged.
+// Bypasses the cache deliberately: the cache mtime can lag a
+// concurrent writer that the caller may be in the middle of making,
+// and we want the most-recent on-disk state.
+//
+// Motivating use case: MaybeAutoCompletePools (engine/competition.go)
+// re-checks "are all matches completed?" INSIDE its
+// UpdateCompetitionChanged transform to close a TOCTOU window where
+// the outer LoadPoolMatches snapshot can go stale. The transform
+// holds the per-comp write lock, so the standard LoadPoolMatches
+// would deadlock (sync.RWMutex non-recursive); this helper provides
+// the lock-free read for that context.
+func (s *Store) LoadPoolMatchesLocked(compID string) ([]MatchResult, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
+	path := s.compPath(compID, "pool-matches.csv")
+	parsed, err := parsePoolMatchesFile(path)
+	if err != nil {
+		return nil, err
+	}
+	results, _ := parsed.([]MatchResult)
+	return s.copyMatchResults(results), nil
+}
+
 func parsePoolMatchesFile(path string) (any, error) {
 	// #nosec G304
 	f, err := os.Open(path)

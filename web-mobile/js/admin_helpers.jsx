@@ -13,12 +13,28 @@ function sideName(side) {
 }
 
 // True when a match has both sides resolved to a real participant (not a
-// bye, not a TBD bracket placeholder). The naïve `m.sideA && m.sideB` test
-// is almost always wrong post-normalizeMatch — that function substitutes
-// {id:"",name:""} for missing sides, which is truthy. Use this helper in
-// filter predicates / rendering guards instead.
+// bye, not a TBD bracket placeholder, not an unresolved "Winner of rX-mY"
+// reference). The naïve `m.sideA && m.sideB` test is almost always wrong
+// post-normalizeMatch — that function substitutes {id:"",name:""} for
+// missing sides, which is truthy. Use this helper in filter predicates
+// / rendering guards instead.
+//
+// Bracket-side caveat: future-round matches carry placeholder side
+// names like `"Winner of r0-m1"` until the source match resolves. Those
+// are non-empty strings — sideName() returns them as-is — so the
+// underlying `sideName(...)` check ALONE isn't enough. We explicitly
+// reject the "Winner of " prefix here so viewer/admin filters don't
+// surface unresolved bracket cells as playable "upcoming" matches.
+// (See web-mobile/js/viewer.jsx for the consumer; the prefix is set
+// by the bracket-generation engine — search the codebase for
+// `"Winner of "` to find the producer.)
 function hasBothSides(m) {
-  return !!(m && sideName(m.sideA) && sideName(m.sideB));
+  if (!m) return false;
+  const a = sideName(m.sideA);
+  const b = sideName(m.sideB);
+  if (!a || !b) return false;
+  if (a.startsWith("Winner of ") || b.startsWith("Winner of ")) return false;
+  return true;
 }
 
 // Returns { total, done, live } match counts for a single competition object.

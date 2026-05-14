@@ -2,12 +2,41 @@ package mobileapp
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// validateCourts checks that t.Courts has between 1 and helper.MaxCourts
+// (26, the A–Z labelling cap) entries AND that each label is a single
+// non-empty character. The spec at specs/openapi.yaml documents both
+// invariants; this is the server-side enforcement so direct API
+// callers can't bypass the admin UI's per-form checks (admin_setup.jsx
+// AdminEditTournament caps at 26 client-side, but a hand-crafted POST
+// /tournament with 50 courts or multi-character labels was previously
+// persisted as-is).
+func validateCourts(courts []string) error {
+	if err := helper.ValidateCourts(len(courts)); err != nil {
+		return err
+	}
+	for i, label := range courts {
+		if label == "" {
+			return fmt.Errorf("courts[%d]: court label cannot be empty", i)
+		}
+		// Spec: single-character labels. The bracket-generator's
+		// CourtLabel helper produces "A"..."Z" exactly. Multi-character
+		// labels (e.g. "AA") would break downstream Excel layout and
+		// the viewer's "shiaijo" abbreviation.
+		if len([]rune(label)) != 1 {
+			return fmt.Errorf("courts[%d]: court label %q must be a single character", i, label)
+		}
+	}
+	return nil
+}
 
 // errPasswordRequired is the sentinel the PUT /tournament transform
 // returns when the desired Password is empty AND the stored Password
@@ -61,6 +90,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// handlers_competition.go + handlers_import.go.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
+
+		if err := validateCourts(t.Courts); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -132,6 +166,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// Same empty-after-trim guard as the PUT handler.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
+
+		if err := validateCourts(t.Courts); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 

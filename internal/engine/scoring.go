@@ -446,43 +446,45 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 	return e.patchScheduleCourt(compId, matchId, newCourt)
 }
 
+// OverrideBracketWinner atomically loads the bracket, locates the
+// target match, sets the winner + IsOverridden + Status, propagates
+// the winner to subsequent rounds, and saves. Same UpdateBracket
+// primitive as recordBracketMatchResult and withBracketMatch — the
+// entire find + mutate + propagate + save sequence runs under the
+// per-competition lock, so a concurrent bracket score / court / time
+// update (also under the same lock via the atomic primitives) can't
+// land between our load and save and have its mutation clobbered.
+//
+// Pre-fix, this used the legacy LoadBracket + Save pattern that the
+// rest of the scoring path was migrated off in commit 0b86c73 — same
+// TOCTOU as the bug fix that motivated UpdateBracket in the first
+// place.
 func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string) error {
-	bracket, err := e.store.LoadBracket(compId)
+	err := e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
+		if bracket == nil {
+			return notFoundErrorf("bracket not found for competition %s", compId)
+		}
+		for rIdx := range bracket.Rounds {
+			for mIdx := range bracket.Rounds[rIdx] {
+				m := &bracket.Rounds[rIdx][mIdx]
+				if m.ID == matchId {
+					m.Winner = winnerName
+					m.IsOverridden = true
+					m.Status = state.MatchStatusCompleted
+					e.propagateBracketWinner(bracket, rIdx, mIdx)
+					return nil
+				}
+			}
+		}
+		return notFoundErrorf("bracket match %s not found", matchId)
+	})
 	if err != nil {
 		return err
 	}
 
-	found := false
-	for rIdx := 0; rIdx < len(bracket.Rounds); rIdx++ {
-		for mIdx := 0; mIdx < len(bracket.Rounds[rIdx]); mIdx++ {
-			m := &bracket.Rounds[rIdx][mIdx]
-			if m.ID == matchId {
-				m.Winner = winnerName
-				m.IsOverridden = true
-				m.Status = state.MatchStatusCompleted
-				found = true
-
-				e.propagateBracketWinner(bracket, rIdx, mIdx)
-				break
-			}
-		}
-		if found {
-			break
-		}
-	}
-
-	if !found {
-		return notFoundErrorf("bracket match %s not found", matchId)
-	}
-
-	// Save bracket first: it is the display source of truth. If this fails,
-	// neither record changes and the UI stays consistent.
-	if err := e.store.SaveBracket(compId, bracket); err != nil {
-		return err
-	}
-
 	// Record the override for auditing. A failure here leaves the bracket
-	// display correct; log but don't surface as an error.
+	// display correct (it was already saved atomically above); log but
+	// don't surface as an error.
 	if err := e.store.SaveWinnerOverride(compId, matchId, winnerName); err != nil {
 		fmt.Printf("warning: failed to persist winner override audit record for %s: %v\n", matchId, err)
 	}

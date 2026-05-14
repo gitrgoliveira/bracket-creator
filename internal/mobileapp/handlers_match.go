@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -188,8 +189,21 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// Trim whitespace from the winner name. Downstream comparisons
+		// (m.Winner == m.SideA / m.SideB in engine/scoring.go and
+		// engine/ranking.go) are exact-string equality, so a padded
+		// "  Foo  " won't match the canonical "Foo" from the roster —
+		// bracket math silently breaks. The JS prompt site at
+		// admin_competition.jsx now trims client-side, but a
+		// hand-crafted API call could still hit this. Mirrors the
+		// override-rank handler's TrimSpace pattern.
+		winnerName := strings.TrimSpace(req.WinnerName)
+		if winnerName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "winnerName is required"})
+			return
+		}
 
-		if err := eng.OverrideBracketWinner(id, mid, req.WinnerName); err != nil {
+		if err := eng.OverrideBracketWinner(id, mid, winnerName); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

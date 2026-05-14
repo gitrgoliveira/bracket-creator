@@ -52,9 +52,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		// See PUT handler above. The CreateTournament UI in app.jsx
-		// uses `if (!name || !pass)` which is truthy for whitespace,
-		// so an untrimmed name on the wire would round-trip.
+		// See PUT handler above. The current CreateTournament UI in
+		// app.jsx trims client-side before submit, but older clients
+		// (cached builds with the pre-trim form) and direct API callers
+		// can still send padded values — keep the server-side trim as
+		// the defense layer so persisted records are always canonical.
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 

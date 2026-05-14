@@ -299,34 +299,43 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// so testing every route is redundant.
 	t.Run("Path Traversal IDs Rejected", func(t *testing.T) {
 		// Per ValidateCompetitionID: empty, > 64 chars, or non-[a-zA-Z0-9_-]
-		// is rejected. The traversal payload contains "/" and ".".
-		badIDs := []string{
+		// is rejected. Two classes of bad IDs:
+		//
+		//   1. Multi-segment / path-traversal payloads (contain "/" or
+		//      URL-encoded "/"). These may match no route at the gin
+		//      level — handy as a smoke test that NOTHING returns 200,
+		//      but they don't prove requireValidCompID itself ran.
+		//
+		//   2. Single-segment IDs containing characters outside
+		//      [A-Za-z0-9_-] (".", " ", "%2e"). These DO reach the
+		//      handler, so the helper is the only thing standing
+		//      between them and a 200 — perfect for asserting 400.
+		//
+		// Mix both: traversal payloads sweep for "no 200 ever";
+		// single-segment payloads assert the precise 400 from the helper.
+		traversalIDs := []string{
 			"../../../etc/passwd",
 			"..%2F..%2Fetc%2Fpasswd",
 			"foo/bar",
-			"foo bar",
-			"",
 		}
-		// Gin treats a literal empty :id as 404 (route doesn't match), so
-		// only enumerate the payloads that actually reach the handler.
-		nonEmpty := []string{
-			"../../../etc/passwd",
-			"..%2F..%2Fetc%2Fpasswd",
-			"foo/bar",
-			"foo bar",
+		// Single-segment IDs that reach the handler. Gin treats these
+		// as one :id value; ValidateCompetitionID rejects each on the
+		// invalid-character rule.
+		singleSegmentIDs := []string{
+			"foo bar",   // space
+			"foo.bar",   // period
+			"foo%2ebar", // URL-encoded period, gin decodes before match
+			"foo+bar",   // plus
+			"foo@bar",   // at-sign
 		}
-		_ = badIDs // documentation
-		// Representative endpoints from the affected handler set.
-		// Include the participants/seeds routes from
-		// handlers_participants.go: GET/PUT /seeds previously reached
-		// store.LoadSeeds / SaveSeeds directly without internal
-		// ValidateCompetitionID, so a traversal id would have hit the
-		// filesystem (admin-auth gated, but defense-in-depth).
+		// Representative endpoints across the affected handler set —
+		// competition, participants/seeds, AND at least one match route
+		// (handlers_match.go also uses requireValidCompID; without a
+		// match-route case here, a regression there would slip past).
 		// The override-rank route mounts at
 		// /competitions/:id/pools/:poolId/override-rank; the test path
 		// must include /pools/main/ or gin returns 404 before the
-		// handler runs (vacuously satisfying NotEqual 200 without
-		// exercising requireValidCompID).
+		// handler runs.
 		routes := []struct {
 			method string
 			path   string
@@ -342,8 +351,16 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			{"POST", "/api/competitions/%s/participants"},
 			{"GET", "/api/competitions/%s/seeds"},
 			{"PUT", "/api/competitions/%s/seeds"},
+			// Match endpoints from handlers_match.go. Without a match
+			// route in this set, a regression that drops requireValidCompID
+			// from match.go would still ship green.
+			{"POST", "/api/competitions/%s/matches/bulk-score"},
+			{"PUT", "/api/competitions/%s/matches/m1/score"},
+			{"PUT", "/api/competitions/%s/matches/m1/court"},
 		}
-		for _, badID := range nonEmpty {
+		// Sweep 1: traversal payloads must NEVER return 200, regardless
+		// of whether they reach the handler or 404 at the router.
+		for _, badID := range traversalIDs {
 			for _, route := range routes {
 				w := httptest.NewRecorder()
 				req, _ := http.NewRequest(route.method, fmt.Sprintf(route.path, badID), nil)
@@ -352,14 +369,27 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 					req.Header.Set("Content-Type", "application/json")
 				}
 				r.ServeHTTP(w, req)
-				// gin URL-decodes path params, so a path-traversal payload
-				// may match the route OR 404 at the router level. Either
-				// way, the data dir must not be escaped: assert the response
-				// is NOT 200 and the body doesn't contain anything that
-				// would indicate filesystem access (e.g. a competition
-				// payload).
 				assert.NotEqual(t, http.StatusOK, w.Code,
 					"%s %s with id=%q must not return 200", route.method, route.path, badID)
+			}
+		}
+		// Sweep 2: single-segment payloads reach the handler. The helper
+		// must produce a 400. A 404 here would mean either the route
+		// shape is wrong (router miss) OR the handler skipped
+		// requireValidCompID and downstream code 404'd on the bad id —
+		// both regressions.
+		for _, badID := range singleSegmentIDs {
+			for _, route := range routes {
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequest(route.method, fmt.Sprintf(route.path, badID), nil)
+				if route.method == "PUT" || route.method == "POST" {
+					req.Body = nil
+					req.Header.Set("Content-Type", "application/json")
+				}
+				r.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusBadRequest, w.Code,
+					"%s %s with id=%q must return 400 from requireValidCompID, got %d",
+					route.method, route.path, badID, w.Code)
 			}
 		}
 	})

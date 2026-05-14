@@ -686,20 +686,20 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 
     setStarting(true);
     try {
-      const updated = await window.API.startCompetition(c.id, password);
-      // Directly update the local state without calling updateCompetition (PUT)
-      // updated is a CompetitionDetail (config, pools, bracket…); extract the flat config for the list
-      const flatComp = updated.config || updated;
-      const comps = (t.competitions || []).map(cc => cc.id === c.id ? { ...cc, ...flatComp } : cc);
-      // onUpdate now routes through updateCompetition which re-throws on
-      // failure. Silence the rejection here — the toast was already
-      // fired by updateCompetition's catch — so the "Started" toast
-      // emitted below stays accurate on the happy path and we don't
-      // produce an unhandled-promise warning on PUT failure.
-      Promise.resolve(onUpdate({ ...t, competitions: comps })).catch(() => {});
-      // Gate the post-await own setState (onSection drives the parent's
-      // view) and parent-routed showToast — if we unmounted during the
-      // multi-second start, both target dead state.
+      await window.API.startCompetition(c.id, password);
+      // Don't attempt a local-state refresh here. Pre-fix this called
+      // onUpdate({ ...t, competitions: comps }), but onUpdate at this
+      // level is wired (admin.jsx:443) to (next) => updateCompetition(c.id, next),
+      // which fires PUT /api/competitions/:id with `next` as the body.
+      // Passing a tournament-shaped object would have Gin binding it as
+      // state.Competition and silently overwriting the just-started
+      // competition's Name/Date/etc. with tournament-level values.
+      //
+      // The backend already broadcast `competition_started` and
+      // `tournament_updated` SSE events; AdminApp's REFRESHABLE_EVENTS
+      // handler refetches both the tournament and competitions list,
+      // so local state catches up within an SSE roundtrip. Trade a
+      // tiny perceived latency for not corrupting the record.
       if (!mountedRef.current) return;
       showToast(`${c.name} started`);
       onSection("scores");

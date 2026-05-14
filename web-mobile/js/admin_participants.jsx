@@ -362,7 +362,13 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   // PUT failure now, so awaiting lets us gate the "Saved N participants"
   // toast on actual success. Pre-fix the rejection was swallowed and
   // the success + error toasts fired back-to-back.
+  //
+  // Split into two try blocks so local errors (parse / mint) get a
+  // user-visible toast, while PUT failures only log here — the latter
+  // are already toasted by updateCompetition's catch, so a second
+  // toast would double up.
   const apply = async () => {
+    let np, added, updatedCount;
     try {
       const withZekken = c.withZekkenName;
       const parsed = window.parseParticipantLines(lines, withZekken);
@@ -380,7 +386,17 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         return;
       }
 
-      const { np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed);
+      ({ np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed));
+    } catch (err) {
+      // Local errors: parseParticipantLines throws on malformed input
+      // (bad column counts, etc.), mintParticipantIds can throw on
+      // unexpected shape. Surface so the user knows what went wrong.
+      console.error("AdminParticipants: parse failed", err);
+      showToast("Failed to parse participants: " + err.message, "error");
+      return;
+    }
+
+    try {
       await onUpdate({ ...c, players: np });
 
       // Bail if we unmounted during the in-flight PUT — see mountedRef
@@ -397,11 +413,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       showToast(msg);
       setImportSummary(null);
     } catch (err) {
-      // updateCompetition already showed an error toast for PUT failures;
-      // log here so the dev console still has the stack for diagnosis,
-      // and only emit a second toast when the error came from local
-      // parsing/duplicate detection (i.e. err.message is one we own).
-      console.error("AdminParticipants: Apply failed", err);
+      // PUT failure path. updateCompetition already showed an error
+      // toast for the user; log here so the dev console has the stack
+      // for diagnosis but don't emit a second toast.
+      console.error("AdminParticipants: PUT failed", err);
     }
   };
 

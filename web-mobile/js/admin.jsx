@@ -101,18 +101,27 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // succession (AdminParticipants.apply) or a "Last saved 13:45:22"
   // stamp on a failed save (AdminSettings.saveNow).
   const updateCompetition = async (cid, next) => {
+    let updated;
     try {
-      const updated = await window.API.updateCompetition(cid, next, password);
-      // Merge PUT response locally; SSE will reconcile cross-client.
-      const comps = (t.competitions || []).map(c => c.id === cid ? { ...c, ...updated } : c);
-      onUpdate({ ...t, competitions: comps });
-      if (view.kind === "competition" && view.id === cid) {
-        const details = await window.API.fetchCompetitionDetails(cid);
-        if (mountedRef.current) setAdminCompData(details);
-      }
+      updated = await window.API.updateCompetition(cid, next, password);
     } catch (e) {
       showToast(e.message, "error");
       throw e;
+    }
+    // Merge PUT response locally; SSE will reconcile cross-client.
+    const comps = (t.competitions || []).map(c => c.id === cid ? { ...c, ...updated } : c);
+    onUpdate({ ...t, competitions: comps });
+    // Best-effort detail refresh. Isolated from the rethrow above —
+    // a transient failure fetching details after a successful save
+    // should not make callers (AdminSettings.saveNow, AdminParticipants.apply)
+    // treat the save as failed. Log and move on; SSE will catch up.
+    if (view.kind === "competition" && view.id === cid) {
+      try {
+        const details = await window.API.fetchCompetitionDetails(cid);
+        if (mountedRef.current) setAdminCompData(details);
+      } catch (e) {
+        console.error("Failed to refresh competition details after save:", e);
+      }
     }
   };
 

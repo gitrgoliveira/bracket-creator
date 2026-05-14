@@ -39,5 +39,58 @@ describe('UI Components', () => {
       const input = StableInput({ value: 10, onChange: vi.fn(), type: 'number' });
       expect(input.props.type).toBe('number');
     });
+
+    // The next four assertions pin the NaN-display contract added when
+    // we changed `+e.target.value` (collapses "" to 0) to NaN-on-clear.
+    // Without these tests, a regression that drops the displayValue
+    // mapping would silently reintroduce React's "Received NaN for the
+    // value attribute" warning, OR collapse the cleared input back to
+    // "0".
+    it('renders NaN local state as empty string for type="number"', () => {
+      const input = StableInput({ value: NaN, onChange: vi.fn(), type: 'number' });
+      expect(input.props.value).toBe('');
+    });
+
+    it('renders Infinity local state as empty string for type="number"', () => {
+      const input = StableInput({ value: Infinity, onChange: vi.fn(), type: 'number' });
+      expect(input.props.value).toBe('');
+    });
+
+    it('renders finite number local state as-is for type="number"', () => {
+      const input = StableInput({ value: 42, onChange: vi.fn(), type: 'number' });
+      expect(input.props.value).toBe(42);
+    });
+
+    it('parses cleared "" to NaN on change for type="number"', () => {
+      // Pin the "cleared input does not collapse to 0" contract.
+      // Pre-fix: `+""` → 0 → onChange called with 0; the visible field
+      // would suddenly show "0" after the user emptied it. Now: empty
+      // string → NaN → parent guards via Number.isFinite / Number.isInteger.
+      vi.useFakeTimers();
+      try {
+        const onChange = vi.fn();
+        const input = StableInput({ value: 5, onChange, type: 'number' });
+        input.props.onChange({ target: { value: '' } });
+        // The 200ms debounce fires the onChange callback.
+        vi.runAllTimers();
+        expect(onChange).toHaveBeenCalledTimes(1);
+        expect(Number.isNaN(onChange.mock.calls[0][0])).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('parses non-empty numeric strings normally for type="number"', () => {
+      vi.useFakeTimers();
+      try {
+        const onChange = vi.fn();
+        const input = StableInput({ value: 0, onChange, type: 'number' });
+        input.props.onChange({ target: { value: '7' } });
+        vi.runAllTimers();
+        expect(onChange).toHaveBeenCalledWith(7);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

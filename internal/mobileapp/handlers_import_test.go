@@ -249,6 +249,7 @@ competitions:
     name: "  Padded Cup  "
     kind: "  individual  "
     format: "  pools  "
+    pool_size_mode: "  min  "
     number_prefix: "  A  "
     start_time: "  09:00  "
     date: "  2026-05-12  "
@@ -271,6 +272,7 @@ competitions:
 		assert.Equal(t, "Padded Cup", stored.Name, "Name should be trimmed")
 		assert.Equal(t, "individual", stored.Kind, "Kind should be trimmed")
 		assert.Equal(t, "pools", stored.Format, "Format should be trimmed")
+		assert.Equal(t, "min", stored.PoolSizeMode, "PoolSizeMode should be trimmed")
 		assert.Equal(t, "A", stored.NumberPrefix, "NumberPrefix should be trimmed")
 		assert.Equal(t, "09:00", stored.StartTime, "StartTime should be trimmed")
 		assert.Equal(t, "2026-05-12", stored.Date, "Date should be trimmed")

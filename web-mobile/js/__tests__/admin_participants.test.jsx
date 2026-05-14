@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mintParticipantIds } from '../admin_participants.jsx';
+import { mintParticipantIds, findSeedMatchIndex } from '../admin_participants.jsx';
 
 // Helper: parsed rows arrive from parseParticipantLines as
 // { name, displayName, dojo, danGrade, tag } objects. Test rows omit the
@@ -175,5 +175,60 @@ describe('mintParticipantIds', () => {
         seed: null,
       });
     });
+  });
+});
+
+describe('findSeedMatchIndex', () => {
+  // Deep-review round 13 finding: the old substring-fallback
+  //   (p.name.includes(name) || name.includes(p.name))
+  // silently mismatched "Bob" → "Bob Smith" (or vice versa) when both
+  // existed in the roster, depending on array order. The fix is to
+  // require an exact (case-insensitive) match against name or
+  // displayName; non-matches fall through to the Levenshtein
+  // suggestion UI for explicit admin confirmation.
+
+  const players = [
+    { name: 'Bob Smith', displayName: null },
+    { name: 'Bob', displayName: null },
+    { name: 'Alice', displayName: 'Aliciñha' },
+  ];
+
+  it('exact-name match (case-insensitive) returns the right index', () => {
+    expect(findSeedMatchIndex(players, 'Bob')).toBe(1);
+    expect(findSeedMatchIndex(players, 'bob')).toBe(1);
+    expect(findSeedMatchIndex(players, 'BOB')).toBe(1);
+  });
+
+  it('exact-displayName match returns the right index', () => {
+    expect(findSeedMatchIndex(players, 'Aliciñha')).toBe(2);
+    expect(findSeedMatchIndex(players, 'aliciñha')).toBe(2);
+  });
+
+  it('"Bob" does NOT silently match "Bob Smith" when both exist', () => {
+    // Old behavior: would land on "Bob Smith" by array order (first
+    // entry whose name includes "bob"). Fix returns the canonical
+    // "Bob" index.
+    expect(findSeedMatchIndex(players, 'Bob')).toBe(1);
+  });
+
+  it('"Bob Smith" does NOT match "Bob" via reverse substring', () => {
+    expect(findSeedMatchIndex(players, 'Bob Smith')).toBe(0);
+  });
+
+  it('returns -1 for partial / fuzzy matches (handed to Levenshtein UI)', () => {
+    expect(findSeedMatchIndex(players, 'Bo')).toBe(-1);
+    expect(findSeedMatchIndex(players, 'Bobby')).toBe(-1);
+    expect(findSeedMatchIndex(players, 'Smith')).toBe(-1);
+  });
+
+  it('returns -1 for empty / whitespace candidates without matching anything', () => {
+    expect(findSeedMatchIndex(players, '')).toBe(-1);
+    // A whitespace-only candidate stays unmatched because no participant
+    // has a whitespace name in the canonical roster.
+    expect(findSeedMatchIndex(players, '   ')).toBe(-1);
+  });
+
+  it('handles empty roster without throwing', () => {
+    expect(findSeedMatchIndex([], 'Alice')).toBe(-1);
   });
 });

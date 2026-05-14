@@ -375,10 +375,20 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     try { await fn(); } finally { setSubmitting(false); }
   };
 
-  // Match ScoreEditorModal: don't dismiss while a save is in-flight,
-  // otherwise unmounting mid-submit causes a setState after unmount.
+  // Mirrors ScoreEditorModal.isDirty: structural compare of current subs
+  // to the initial snapshot. Used by handleDismiss below to prompt before
+  // discarding multi-sub-match edits. Team scoring typically has 3–9 sub
+  // entries; the JSON serialize approach is fine for that size and keeps
+  // the comparison robust against array identity drift from setSubs.
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubs);
+
+  // Match ScoreEditorModal's dismiss contract: never close mid-submit
+  // (setState-after-unmount), AND confirm-then-discard when the user has
+  // unsaved sub-match edits. The earlier version only checked submitting,
+  // so an accidental backdrop/Esc silently lost up to 9 sub-match scores.
   const handleDismiss = () => {
     if (submitting) return;
+    if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
     onClose();
   };
 

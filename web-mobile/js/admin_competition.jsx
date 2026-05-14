@@ -142,7 +142,13 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
       )}
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
         <button className="btn btn--sm btn--full" onClick={() => {
-          const name = prompt("Enter the name of the winner to override:", match.winner?.name || match.sideA?.name);
+          // prompt() returns "   " for whitespace-only input — which is
+          // truthy under `if (name)` and would persist a whitespace key
+          // as `m.Winner` on the backend (and then mismatch the canonical
+          // SideA / SideB names downstream). Trim defensively and only
+          // override when there's a real value to record.
+          const raw = prompt("Enter the name of the winner to override:", match.winner?.name || match.sideA?.name);
+          const name = raw?.trim();
           if (name) onOverride(name);
         }}>Force winner (manual override)</button>
       </div>
@@ -408,9 +414,24 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
     return <div className="empty"><div className="icon">⚙</div><h3>Bracket not generated yet</h3><div>Start the competition to build the bracket.</div></div>;
   }
   const select = (m, ri, mi) => setSelected({ matchId: m.id, ri, mi });
+  // Look up the selected match by ID rather than [ri][mi] index. The
+  // index can go stale if an SSE-driven bracket rebuild (playoff
+  // regeneration, source-comp promotion) reorders entries between the
+  // user's click and the next render/action; the ID is the only stable
+  // handle we set in `selected`. Returns null when the match has been
+  // removed entirely from the bracket.
+  const findSelectedMatch = () => {
+    if (!selected || !bracket?.rounds) return null;
+    for (const round of bracket.rounds) {
+      for (const m of (round || [])) {
+        if (m && m.id === selected.matchId) return m;
+      }
+    }
+    return null;
+  };
   const recordWinner = (winnerSide, _mode = "ippon", ipponLetter = null) => {
-    if (!selected) return;
-    const m = bracket.rounds[selected.ri][selected.mi];
+    const m = findSelectedMatch();
+    if (!m) return;
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     if (!winner) return;
 
@@ -437,7 +458,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
     window.API.overrideBracketWinner(c.id, selected.matchId, winnerName, password)
       .catch(err => showToast(err.message, "error"));
   };
-  const selectedMatch = selected ? bracket.rounds[selected.ri][selected.mi] : null;
+  const selectedMatch = findSelectedMatch();
   return (
     <div className="row" style={{ gridTemplateColumns: "1fr 360px", alignItems: "start" }}>
       <div>

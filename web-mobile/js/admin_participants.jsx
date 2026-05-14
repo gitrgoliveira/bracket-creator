@@ -19,6 +19,26 @@ function looksLikeHeader(line, idx) {
   return matched.length >= 2;
 }
 
+// Find the participant whose canonical `name` or `displayName` exactly
+// matches `candidate` (case-insensitive). Returns the index in `players`,
+// or -1 if no exact match exists.
+//
+// Older versions also accepted *substring* matches in either direction
+// ("Bob".includes("bob") OR "bob".includes("bob smith")), which silently
+// produced wrong matches when one participant's name was a prefix of
+// another (e.g. roster has both "Bob" and "Bob Smith" → CSV row "Bob, 3"
+// matched "Bob Smith" by array order, leaving "Bob" unseeded). The
+// substring path is intentionally removed: when an exact match isn't
+// found, the caller surfaces the row via the unmatched-with-suggestion
+// UI so the admin can confirm the right participant explicitly.
+function findSeedMatchIndex(players, candidate) {
+  const lower = candidate.toLowerCase();
+  return players.findIndex(p =>
+    p.name.toLowerCase() === lower ||
+    (p.displayName && p.displayName.toLowerCase() === lower)
+  );
+}
+
 function parsePastedRows(text, transform) {
   const out = [];
   text.split(/\r?\n/).forEach((line, i) => {
@@ -171,19 +191,16 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
           const seed = parseInt(seedStr);
 
           if (name && !isNaN(seed) && seed > 0) {
-            const nameLower = name.toLowerCase();
-            const pIdx = np.findIndex(p =>
-              p.name.toLowerCase() === nameLower ||
-              (p.displayName && p.displayName.toLowerCase() === nameLower) ||
-              p.name.toLowerCase().includes(nameLower) ||
-              nameLower.includes(p.name.toLowerCase())
-            );
+            const pIdx = findSeedMatchIndex(np, name);
 
             if (pIdx >= 0) {
               np[pIdx] = { ...np[pIdx], seed };
               updatedCount++;
             } else {
-              // Find closest name suggestion
+              // Find closest name suggestion via Levenshtein distance —
+              // surfaced in the unmatched-rows UI so the admin can pick
+              // the right participant explicitly.
+              const nameLower = name.toLowerCase();
               let best = null, bestDist = Infinity;
               allNames.forEach(({ name: n, display: d }) => {
                 const d1 = levenshtein(nameLower, n.toLowerCase());
@@ -652,4 +669,4 @@ window.AdminParticipants = AdminParticipants;
 
 // ES export for the vitest suite — pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
-export { mintParticipantIds };
+export { mintParticipantIds, findSeedMatchIndex };

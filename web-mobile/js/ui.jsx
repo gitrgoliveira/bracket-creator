@@ -49,6 +49,14 @@ function Toast({ message, type, onClose }) {
 // StableInput solves the character duplication issue by using a local state
 // that only syncs with the parent onBlur or after a debounce, while still
 // being "controlled" by receiving props.
+//
+// For type="number", a cleared input lands as NaN in local state (NOT 0
+// as `+""` would produce) so the parent's onChange receives NaN
+// explicitly. The render layer maps NaN-or-non-finite values back to ""
+// at the value prop so React doesn't warn about "Received NaN for the
+// value attribute" and the cleared input stays visually empty. Mirrors
+// the decideNumericUpdate pattern used by the AdminSettings team/pool
+// inputs at admin_competition.jsx.
 function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
   const [local, setLocal] = React.useState(value);
   const timer = React.useRef(null);
@@ -61,9 +69,13 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
   }, [value]);
 
   const handleChange = (e) => {
-    const val = type === 'number' ? +e.target.value : e.target.value;
+    const raw = e.target.value;
+    // For number inputs: empty string → NaN, so a cleared input doesn't
+    // collapse to 0 via `+""`. Non-empty strings still parse via unary +
+    // (so "2.5" stays 2.5, "abc" becomes NaN — same as before for those).
+    const val = type === 'number' ? (raw === "" ? NaN : +raw) : raw;
     setLocal(val);
-    
+
     // Immediate local update, debounced parent update to avoid race conditions
     // during typing if the parent re-renders the whole tree.
     clearTimeout(timer.current);
@@ -83,13 +95,19 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     if (props.onFocus) props.onFocus(e);
   };
 
+  // Render NaN / non-finite numeric local state as "" so React doesn't
+  // warn ("Received NaN for the value attribute") and the input stays
+  // visually empty after the user clears it. Non-number types pass
+  // through unchanged.
+  const displayValue = type === 'number' && !Number.isFinite(local) ? "" : local;
+
   return (
-    <input 
-      {...props} 
-      type={type} 
-      value={local} 
-      onChange={handleChange} 
-      onBlur={handleBlur} 
+    <input
+      {...props}
+      type={type}
+      value={displayValue}
+      onChange={handleChange}
+      onBlur={handleBlur}
       onFocus={handleFocus}
     />
   );

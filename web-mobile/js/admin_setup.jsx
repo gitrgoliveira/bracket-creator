@@ -198,6 +198,19 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       return;
     }
 
+    // Team-size guard. StableInput's NaN-on-clear fix means teamSize can
+    // now legitimately be NaN — buildEmptyCompetition would silently
+    // fall back to 5 via `teamSize || 5`, so the user's cleared input
+    // produces a different stored value than they see. Reject early
+    // when kind=team. (Individual competitions don't expose this field;
+    // teamSize=0 is the canonical value there.)
+    if (kind === "team") {
+      if (!Number.isInteger(teamSize) || teamSize < 1 || teamSize > MAX_TEAM_SIZE) {
+        setError(`Team size must be a whole number between 1 and ${MAX_TEAM_SIZE}.`);
+        return;
+      }
+    }
+
     // Two distinct names can normalize to the same slug (e.g. "Men's" vs
     // "Mens" both → "mens"). The name-uniqueness check above is case-
     // insensitive on the *name*, so it won't catch slug collisions —

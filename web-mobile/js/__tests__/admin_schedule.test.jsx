@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { timeEdited, timeToMinutes } from '../admin_schedule.jsx';
+import { timeEdited, timeToMinutes, clampMatchDuration } from '../admin_schedule.jsx';
 
 describe('timeEdited', () => {
   // Copilot round-9 finding: AdminTWMatch.submitTime() used
@@ -74,5 +74,96 @@ describe('timeToMinutes', () => {
     expect(timeToMinutes(undefined)).toBe(null);
     expect(timeToMinutes("abc")).toBe(null);
     expect(timeToMinutes("09:xx")).toBe(null);
+  });
+});
+
+describe('clampMatchDuration', () => {
+  // Copilot post-I5 finding: safeMatchDuration at admin_schedule.jsx:83
+  // used `Number.isFinite(x) && x >= 1` but no Number.isInteger guard.
+  // A user typing "2.5" passed through to:
+  //   - addMinutes("00:00", 2.5) → total = 0 + 2.5 = 2.5; mm = 2.5 % 60 = 2.5
+  //     → "00:2.5" — invalid HH:MM string the backend would persist as
+  //     scheduledAt with weird downstream display
+  //   - durationEstimate: diff % 60 with diff=32.5 → "0h 32.5m"
+  //
+  // clampMatchDuration adds Number.isInteger to the guard. Tests pin
+  // every adversarial-input case so a future "simplify this" refactor
+  // can't drop a guard silently.
+
+  describe('valid positive integers pass through', () => {
+    it('1 (lower boundary) → 1', () => {
+      expect(clampMatchDuration(1)).toBe(1);
+    });
+
+    it('3 (default) → 3', () => {
+      expect(clampMatchDuration(3)).toBe(3);
+    });
+
+    it('60 (max for the form input) → 60', () => {
+      expect(clampMatchDuration(60)).toBe(60);
+    });
+
+    it('large valid value → passes through (no max enforcement)', () => {
+      // clampMatchDuration doesn't enforce the form's max=60 — that's the
+      // form's job. The helper's contract is "non-finite/fractional/<1 → fallback."
+      expect(clampMatchDuration(120)).toBe(120);
+    });
+  });
+
+  describe('fractional values fall back to default', () => {
+    it('2.5 → 3 (the Copilot finding)', () => {
+      expect(clampMatchDuration(2.5)).toBe(3);
+    });
+
+    it('1.5 → 3', () => {
+      expect(clampMatchDuration(1.5)).toBe(3);
+    });
+
+    it('0.99 → 3 (also < 1, but Number.isInteger catches it first)', () => {
+      expect(clampMatchDuration(0.99)).toBe(3);
+    });
+  });
+
+  describe('non-finite / nullish fall back to default', () => {
+    it('NaN → 3 (cleared input case)', () => {
+      expect(clampMatchDuration(NaN)).toBe(3);
+    });
+
+    it('undefined → 3', () => {
+      expect(clampMatchDuration(undefined)).toBe(3);
+    });
+
+    it('null → 3', () => {
+      expect(clampMatchDuration(null)).toBe(3);
+    });
+
+    it('Infinity → 3', () => {
+      expect(clampMatchDuration(Infinity)).toBe(3);
+    });
+
+    it('-Infinity → 3', () => {
+      expect(clampMatchDuration(-Infinity)).toBe(3);
+    });
+  });
+
+  describe('zero / negative fall back to default', () => {
+    it('0 → 3 (zero match duration is meaningless)', () => {
+      expect(clampMatchDuration(0)).toBe(3);
+    });
+
+    it('-1 → 3', () => {
+      expect(clampMatchDuration(-1)).toBe(3);
+    });
+
+    it('-5 → 3', () => {
+      expect(clampMatchDuration(-5)).toBe(3);
+    });
+  });
+
+  describe('custom fallback', () => {
+    it('honors the fallback parameter', () => {
+      expect(clampMatchDuration(NaN, 5)).toBe(5);
+      expect(clampMatchDuration(2.5, 10)).toBe(10);
+    });
   });
 });

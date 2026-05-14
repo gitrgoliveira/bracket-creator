@@ -35,6 +35,25 @@ function timeEdited(oldScheduledAt, newVal) {
   return (oldScheduledAt || "") !== newVal;
 }
 
+// Coerces the matchDuration form value to a safe integer minutes count
+// for arithmetic in durationEstimate (rendered as "HH h MM m") and the
+// auto-schedule loop (`cursor += safeMatchDuration` + addMinutes).
+//
+// Rejects:
+//   - NaN / undefined / null            (cleared input → stored as NaN)
+//   - Infinity / -Infinity              (impossible via UI but defensive)
+//   - non-integers like 2.5             (Copilot found: addMinutes would
+//                                        produce "00:2.5" — invalid HH:MM —
+//                                        and durationEstimate "0h 32.5m")
+//   - values < 1                        (zero or negative makes no sense)
+//
+// Falls back to 3 minutes — the same default the matchDuration state
+// uses, so the UX is "if your typed value is invalid, we schedule as if
+// you'd left the field at 3 (the placeholder default)."
+function clampMatchDuration(raw, fallback = 3) {
+  return Number.isFinite(raw) && Number.isInteger(raw) && raw >= 1 ? raw : fallback;
+}
+
 function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewerMode, password }) {
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
@@ -76,11 +95,12 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   const matchHasFilter = (m) => window.matchHighlightedBy(m, picked, dojoText);
   const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
 
-  // Duration estimation: earliest start to latest finish across all matches
-  // matchDuration is bound to a <input type="number"> whose value can become
-  // NaN if cleared. Coerce to a sane fallback before any arithmetic so the
-  // duration estimate and auto-schedule loop don't propagate NaN.
-  const safeMatchDuration = Number.isFinite(matchDuration) && matchDuration >= 1 ? matchDuration : 3;
+  // Duration estimation: earliest start to latest finish across all matches.
+  // clampMatchDuration coerces NaN / fractional / sub-1 values to the
+  // 3-minute default before any arithmetic — see helper for the full
+  // rationale (Copilot found that addMinutes("00:00", 2.5) → "00:2.5",
+  // which then persists as an invalid scheduledAt string).
+  const safeMatchDuration = clampMatchDuration(matchDuration);
   const scheduledWithTimes = allMatches.filter(m => m.scheduledAt);
   const firstTime = scheduledWithTimes.length > 0 ? scheduledWithTimes.reduce((mn, m) => !mn || m.scheduledAt < mn ? m.scheduledAt : mn, null) : null;
   const lastTime = scheduledWithTimes.length > 0 ? scheduledWithTimes.reduce((mx, m) => !mx || m.scheduledAt > mx ? m.scheduledAt : mx, null) : null;
@@ -167,13 +187,18 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
                 type="number"
                 min="1"
                 max="60"
+                step="1"
                 /* Clearing a number input gives e.target.value === "", and
                    passing value={0} or value={NaN} to React produces either
                    a visible "0" (jarring) or a "Received NaN for the value"
                    warning. Round-trip NaN ↔ empty-string at the value
                    attribute boundary so the cleared display stays empty
                    while safeMatchDuration's Number.isFinite check (above)
-                   keeps providing the 3-minute fallback for scheduling. */
+                   keeps providing the 3-minute fallback for scheduling.
+                   step="1" makes the browser's up/down arrows step in
+                   whole minutes — typing fractions like "2.5" is still
+                   physically possible, so safeMatchDuration also guards
+                   Number.isInteger. Belt-and-braces. */
                 value={Number.isFinite(matchDuration) ? matchDuration : ""}
                 onChange={e => {
                   const raw = e.target.value;
@@ -591,4 +616,4 @@ window.AdminExport = AdminExport;
 
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { timeEdited, timeToMinutes };
+export { timeEdited, timeToMinutes, clampMatchDuration };

@@ -300,21 +300,21 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   // Number-input variant of `update`. Stores NaN in local state for empty
   // input so the render side can keep the display empty (see
   // decideNumericUpdate's contract). Skips saveLater when the parsed value
-  // isn't a positive integer ≥ min — and cancels any pending debounced save
-  // so the backend doesn't receive a stale good value while the user sees
-  // an empty/invalid input. Without the cancel, a saveLater from an earlier
-  // keystroke ("12") would still fire after the user cleared the input,
-  // leaving server state mismatched with what's on screen until SSE refresh.
+  // isn't a positive integer ≥ min — without touching any pending save.
+  //
+  // Deliberately does NOT cancel debounceRef. The single debounceRef holds
+  // at most one pending save covering ALL fields; if we cancelled it here,
+  // a concurrent edit to a non-numeric field (e.g. user typing in `name`
+  // before clearing `teamSize`) would silently lose its save. The pending
+  // save's captured snapshot already holds the user's last good numeric
+  // value, so letting it fire is the safest fallback — the cleared display
+  // resolves on the next user action or SSE refresh once debounceRef
+  // becomes null after the save completes.
   const updateNumber = (k, raw, min = 1) => {
     const { value, shouldSave } = decideNumericUpdate(raw, min);
     const next = { ...local, [k]: value };
     setLocal(next);
-    if (shouldSave) {
-      saveLater(next);
-    } else if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
+    if (shouldSave) saveLater(next);
   };
 
   const toggleCourt = (cc) => {

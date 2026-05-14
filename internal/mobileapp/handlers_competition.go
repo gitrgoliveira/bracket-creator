@@ -208,10 +208,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Reject whitespace-only Name (see POST handler above). The
 		// admin SETTINGS edit path (AdminSettings.saveNow in
-		// admin_competition.jsx) does not currently empty-check the
-		// name client-side, so this guard is the only thing standing
-		// between a user clearing the field and hitting save and a
-		// blank-name competition landing on disk.
+		// admin_competition.jsx) now empty-checks the name client-side
+		// first — but keep this defense-in-depth so direct API callers
+		// and older cached clients can't land a blank-name PUT.
 		if comp.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
 			return

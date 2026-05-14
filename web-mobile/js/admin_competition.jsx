@@ -346,6 +346,18 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // same effective name. Send the trimmed value so the value the user
     // sees in the input matches what the server stores.
     const trimmedName = (next.name || "").trim();
+    // Cross-file guard symmetry with the tournament edit/create paths
+    // (admin_setup.jsx AdminEditTournament:80, app.jsx CreateTournament:410)
+    // and with handlers_competition.go PUT (which now returns 400 on
+    // empty-after-trim Name). Without this client-side guard, every
+    // saveLater-debounced keystroke that lands on an empty Name fires a
+    // wasted PUT roundtrip and only surfaces the error in the inline
+    // .catch handler 400ms later. Keep the failure inline + immediate
+    // like the date validation above.
+    if (!trimmedName) {
+      setSaveErr("Competition name is required.");
+      return;
+    }
     if (trimmedName.toLowerCase() !== c.name.toLowerCase()) {
       const exists = (tournament.competitions || []).some(cc => cc.id !== c.id && cc.name.toLowerCase() === trimmedName.toLowerCase());
       if (exists) {

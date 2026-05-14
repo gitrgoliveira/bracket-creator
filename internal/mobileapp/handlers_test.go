@@ -150,12 +150,12 @@ func TestTournamentHandlers(t *testing.T) {
 	assert.Equal(t, "Some Venue", t4.Venue)
 	assert.Equal(t, "2026-07-20", t4.Date, "Date should be trimmed on POST")
 
-	// Whitespace-only name must be rejected after trim. AuthMiddleware
-	// treats Name=="" as "tournament not configured yet" (the
-	// `t.Name == "New Tournament" && t.Password == ""` branch fails
-	// open the first time it sees an empty/blank state), so persisting
-	// an empty name effectively locks every subsequent request out.
-	// The PUT handler explicitly rejects empty-after-trim; mirror on POST.
+	// Whitespace-only name must be rejected after trim. Persisting an
+	// empty Name produces a blank tournament title in the admin UI and
+	// violates the documented "tournament has a name" invariant. The
+	// frontend CreateTournament/AdminEditTournament forms both
+	// pre-validate, but this regression covers older cached clients and
+	// direct API callers.
 	for _, method := range []string{"PUT", "POST"} {
 		blank := state.Tournament{Name: "   ", Venue: "Anywhere", Password: "secret"}
 		body, _ = json.Marshal(blank)
@@ -167,6 +167,98 @@ func TestTournamentHandlers(t *testing.T) {
 			"%s /api/tournament with whitespace-only Name must return 400", method)
 		assert.Contains(t, w.Body.String(), "tournament name is required",
 			"%s /api/tournament rejection should explain the empty-name reason", method)
+	}
+
+	// POST /api/tournament must reject empty Password. AuthMiddleware
+	// allows POST /api/tournament unauthenticated when the tournament
+	// is uninitialized (bootstrap path). If Password == "" lands on
+	// disk, AuthMiddleware's later `password != t.Password` check
+	// vacuously passes for any request with an empty
+	// X-Tournament-Password header — exposing every /api/* endpoint
+	// unauthenticated. Pin the guard here so a future refactor that
+	// drops it surfaces immediately.
+	{
+		os.Remove(filepath.Join(tempDir, "tournament.md"))
+		emptyPass := state.Tournament{Name: "No Password", Password: ""}
+		body, _ := json.Marshal(emptyPass)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"POST /api/tournament with empty Password must return 400")
+		assert.Contains(t, w.Body.String(), "tournament password is required",
+			"rejection should explain the empty-password reason")
+		// Confirm it didn't land on disk.
+		stored, _ := store.LoadTournament()
+		assert.Nil(t, stored, "empty-password tournament should not be persisted")
+	}
+
+	// PUT /api/tournament must PRESERVE the stored Password when the
+	// incoming body sends "" (the frontend AdminEditTournament uses
+	// `password: pass || undefined` to mean "keep current"). Without
+	// this preserve step, a routine name-edit save would silently
+	// clobber the stored password with "" and expose the same
+	// AuthMiddleware vacuous-pass scenario as the POST guard above.
+	{
+		// Seed a tournament with a real password.
+		seed := state.Tournament{Name: "Preserve Test", Password: "kept-secret", Courts: []string{"A"}}
+		require.NoError(t, store.SaveTournament(&seed))
+
+		// PUT with empty Password — should preserve "kept-secret".
+		update := state.Tournament{Name: "Preserve Test", Venue: "New Venue", Password: ""}
+		body, _ := json.Marshal(update)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code,
+			"PUT with empty Password should succeed (preserve-stored semantics)")
+		stored, err := store.LoadTournament()
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "kept-secret", stored.Password,
+			"PUT with empty Password must preserve the stored password, not clobber to empty")
+		assert.Equal(t, "New Venue", stored.Venue, "other fields should still update")
+	}
+
+	// PUT /api/tournament with a new non-empty Password should update
+	// the stored password (legitimate password-change flow).
+	{
+		seed := state.Tournament{Name: "Change Test", Password: "old-secret", Courts: []string{"A"}}
+		require.NoError(t, store.SaveTournament(&seed))
+
+		update := state.Tournament{Name: "Change Test", Password: "new-secret"}
+		body, _ := json.Marshal(update)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		stored, _ := store.LoadTournament()
+		assert.Equal(t, "new-secret", stored.Password,
+			"PUT with non-empty Password should update the stored password")
+	}
+
+	// PUT /api/tournament when the stored tournament ALSO has an empty
+	// Password (legacy state from a pre-fix install) must reject —
+	// otherwise the preserve-stored path would leave the password
+	// empty and the vacuous-pass scenario would persist.
+	{
+		// Force a legacy state: save directly via store, bypassing the
+		// new POST guard.
+		legacy := state.Tournament{Name: "Legacy", Password: "", Courts: []string{"A"}}
+		require.NoError(t, store.SaveTournament(&legacy))
+
+		update := state.Tournament{Name: "Legacy", Venue: "Update", Password: ""}
+		body, _ := json.Marshal(update)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"PUT with empty Password against legacy empty-password tournament must reject")
+		assert.Contains(t, w.Body.String(), "tournament password is required")
 	}
 }
 

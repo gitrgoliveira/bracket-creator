@@ -33,7 +33,9 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// whitespace. Date is included for cross-file guard symmetry
 		// with handlers_import.go (which trims competition.Date) and
 		// handlers_competition.go (which now trims the same competition
-		// string fields uniformly).
+		// string fields uniformly). Password is NOT trimmed — the user
+		// may intentionally use leading/trailing whitespace, and the
+		// auth header check is exact-string match.
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
@@ -50,6 +52,31 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// handlers_competition.go + handlers_import.go.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
+
+		// Preserve the stored Password when the incoming body omits it
+		// or sends "". The frontend AdminEditTournament uses
+		// `password: pass || undefined` (admin_setup.jsx:89) so an
+		// admin who edits the name/venue without changing the password
+		// sends a JSON body with the password field omitted — Go's
+		// ShouldBindJSON then leaves t.Password == "". Without this
+		// preserve step, that save would clobber the stored password
+		// with "", and AuthMiddleware's `password != t.Password` check
+		// would then vacuously pass for an empty `X-Tournament-Password`
+		// header — exposing every /api/* endpoint unauthenticated.
+		if t.Password == "" {
+			if existing, err := store.LoadTournament(); err == nil && existing != nil {
+				t.Password = existing.Password
+			}
+		}
+		// Defense-in-depth: if after the preserve step the password is
+		// STILL empty (legacy state from a pre-fix install, or a fresh
+		// PUT against a never-initialized tournament), reject. An
+		// empty stored Password is the exact precondition for the
+		// AuthMiddleware vacuous-pass scenario described above.
+		if t.Password == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})
 			return
 		}
 
@@ -79,15 +106,26 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
 
-		// Same empty-after-trim guard as the PUT handler. POST is the
-		// first-time-setup entry point; if both Name == "" and
-		// Password == "" land here, AuthMiddleware's password check
-		// vacuously passes for any client (empty header == empty
-		// stored password), exposing /api/* unauthenticated. The PUT
-		// handler's guard above and this one together ensure that
-		// failure mode can't be reached via the normal write paths.
+		// Same empty-after-trim guard as the PUT handler.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
+
+		// Reject empty Password on POST (initial setup). AuthMiddleware
+		// allows POST /api/tournament unauthenticated when the
+		// tournament is uninitialized — this is the bootstrap entry
+		// point. If Password == "" lands on disk, AuthMiddleware's
+		// `password != t.Password` check vacuously passes for any
+		// request with an empty `X-Tournament-Password` header (empty
+		// == empty), exposing every /api/* endpoint unauthenticated.
+		// The PUT handler's preserve-stored-on-empty guard above
+		// can't reach this state on update — but POST is how that
+		// state would land in the first place, so block it here.
+		// Note: Password is NOT trimmed (passwords may intentionally
+		// contain whitespace; auth check is exact-string match).
+		if t.Password == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})
 			return
 		}
 

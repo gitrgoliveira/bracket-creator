@@ -7,6 +7,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 const compMatchStats = window.compMatchStats;
 const hasBothSides = window.hasBothSides;
 const normalizeDate = window.normalizeDate;
+const isValidISODate = window.isValidISODate;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const AdminTopbar = window.AdminTopbar;
@@ -456,12 +457,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
 
-  const isDateValid = (date) => {
-    if (!date) return false;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-    const year = parseInt(date.substring(0, 4));
-    return year >= 1900 && year <= 2100;
-  };
+  // Use the shared isValidISODate (admin_helpers.jsx) which delegates to
+  // normalizeDate for semantic validity — rejects "2026-13-32" / Feb 31 /
+  // Feb 29 in non-leap years. Without this, the Start button would enable
+  // for shape-valid-but-impossible dates that AdminSettings.saveNow's
+  // stricter check would reject — letting the operator start a competition
+  // with a date that can't be saved back.
+  const isDateValid = isValidISODate;
 
   const start = async () => {
     showToast(`Starting ${c.name}…`);

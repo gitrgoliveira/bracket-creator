@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -184,5 +184,62 @@ describe('normalizeDate', () => {
   it('accepts Feb 29 in leap years and rejects in non-leap years', () => {
     expect(normalizeDate("2024-02-29")).toBe("2024-02-29");
     expect(normalizeDate("2026-02-29")).toBe(null);
+  });
+});
+
+describe('isValidISODate', () => {
+  // This is the predicate used by AdminCompetition's "Start competition"
+  // button gate. The Copilot finding: pre-fix, this function only did a
+  // shape regex + year range check, so semantically-invalid dates like
+  // "2026-13-32" (which normalizeDate correctly rejects) still enabled
+  // the button, letting the operator start a competition with a date
+  // that AdminSettings.saveNow would refuse to save.
+
+  it('accepts a valid ISO date in range', () => {
+    expect(isValidISODate("2026-05-13")).toBe(true);
+    expect(isValidISODate("1900-01-01")).toBe(true); // year boundary
+    expect(isValidISODate("2100-12-31")).toBe(true); // year boundary
+  });
+
+  it('accepts DD-MM-YYYY input that normalizeDate canonicalizes', () => {
+    expect(isValidISODate("13-05-2026")).toBe(true);
+    expect(isValidISODate("13/05/2026")).toBe(true);
+  });
+
+  it('rejects semantically invalid dates (Copilot finding)', () => {
+    // These all have valid shape but represent impossible days.
+    expect(isValidISODate("2026-13-32")).toBe(false);
+    expect(isValidISODate("2026-02-31")).toBe(false);
+    expect(isValidISODate("2026-00-15")).toBe(false);
+    expect(isValidISODate("2026-04-31")).toBe(false); // April has 30 days
+    expect(isValidISODate("2026-02-29")).toBe(false); // non-leap
+  });
+
+  it('accepts Feb 29 in a leap year', () => {
+    expect(isValidISODate("2024-02-29")).toBe(true);
+  });
+
+  it('rejects years outside [1900, 2100]', () => {
+    expect(isValidISODate("1899-12-31")).toBe(false);
+    expect(isValidISODate("2101-01-01")).toBe(false);
+    expect(isValidISODate("0001-01-01")).toBe(false);
+  });
+
+  it('rejects falsy / empty / undefined input', () => {
+    expect(isValidISODate("")).toBe(false);
+    expect(isValidISODate(null)).toBe(false);
+    expect(isValidISODate(undefined)).toBe(false);
+  });
+
+  it('rejects unrecognized strings', () => {
+    expect(isValidISODate("not a date")).toBe(false);
+    expect(isValidISODate("2026/05/13")).toBe(false); // wrong separator order
+    expect(isValidISODate("13.05.2026")).toBe(false);
+  });
+
+  it('returns a real boolean (for use in disabled={!isValidISODate(...)} props)', () => {
+    expect(typeof isValidISODate("2026-05-13")).toBe("boolean");
+    expect(typeof isValidISODate("")).toBe("boolean");
+    expect(typeof isValidISODate(null)).toBe("boolean");
   });
 });

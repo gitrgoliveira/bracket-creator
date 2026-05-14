@@ -356,8 +356,9 @@ paths:
                             Per-row error if the import couldn't proceed.
                             Common values: `missing id`, `competition name is required`,
                             `competition ID contains invalid characters ...`,
-                            `failed to save competition: ...`,
-                            `failed to parse participants: ...`. Empty when the row
+                            `competition ID "..." already exists`,
+                            `save competition: ...`,
+                            `parse participants: ...`. Empty when the row
                             imported successfully.
 
   # ── Competitions (Admin, requires auth) ────────────────────────────────────
@@ -1206,8 +1207,10 @@ components:
           description: >
             Event date in ISO 8601 format (YYYY-MM-DD) — the format the
             HTML `<input type="date">` produces. Legacy DD-MM-YYYY values
-            on disk are accepted on read but normalized to YYYY-MM-DD on
-            save. Trimmed server-side.
+            on disk are accepted on read. The web frontend normalizes
+            DD-MM-YYYY → YYYY-MM-DD before sending; direct API clients
+            should already send the ISO form. Trimmed server-side; no
+            backend normalization beyond the trim.
         venue:
           type: string
           description: Venue name. Trimmed server-side.
@@ -1279,8 +1282,10 @@ components:
           type: string
           description: >
             Competition date. Same format as Tournament.date (ISO 8601
-            YYYY-MM-DD; legacy DD-MM-YYYY accepted on read).
-            Trimmed server-side.
+            YYYY-MM-DD; legacy DD-MM-YYYY accepted on read). The web
+            frontend normalizes DD-MM-YYYY → YYYY-MM-DD before sending;
+            direct API clients should already send the ISO form.
+            Trimmed server-side; no backend normalization beyond the trim.
         status:
           type: string
           description: >

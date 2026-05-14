@@ -381,6 +381,53 @@ competitions:
 		require.NotNil(t, existing, "existing-cup must still exist")
 		assert.Equal(t, "Cup Name", existing.Name, "existing comp's name must be untouched")
 	})
+
+	// Copilot round-4 finding on PR #104: the import path checked name
+	// uniqueness but NOT ID uniqueness, so a manifest entry with an
+	// existing comp.ID but a different comp.Name would silently
+	// overwrite the existing competition (its name was unique, but
+	// SaveCompetition writes by ID). Mirrors the ID-collision guard
+	// already in POST /competitions and CreatePlayoff.
+	t.Run("Duplicate ID Across Import And Existing Comp Rejected", func(t *testing.T) {
+		// Pre-existing competition with a known name.
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:   "id-collide",
+			Name: "Original Name",
+		}))
+
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "id-collide"
+    name: "Different Name"
+    kind: "individual"
+    format: "pools"
+    courts: ["A"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Contains(t, resp.Results[0].Error, "already exists",
+			"duplicate ID should land in ImportResult.Error (not silent overwrite)")
+
+		// Confirm the original competition's Name was NOT clobbered.
+		existing, _ := store.LoadCompetition("id-collide")
+		require.NotNil(t, existing, "id-collide must still exist")
+		assert.Equal(t, "Original Name", existing.Name,
+			"existing comp's name must be untouched by the colliding-ID import")
+	})
 }
 
 func TestParseSeedsBytes(t *testing.T) {

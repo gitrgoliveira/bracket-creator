@@ -718,11 +718,12 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       // state.Competition and silently overwriting the just-started
       // competition's Name/Date/etc. with tournament-level values.
       //
-      // The backend already broadcast `competition_started` and
-      // `tournament_updated` SSE events; AdminApp's REFRESHABLE_EVENTS
-      // handler refetches both the tournament and competitions list,
-      // so local state catches up within an SSE roundtrip. Trade a
-      // tiny perceived latency for not corrupting the record.
+      // The backend broadcasts `competition_started` (and optionally
+      // `competition_completed` when the zero-match auto-complete
+      // path fires); both are in AdminApp's REFRESHABLE_EVENTS set, so
+      // the SSE handler refetches the tournament + competitions list
+      // and local state catches up within a roundtrip. Trade a tiny
+      // perceived latency for not corrupting the record.
       if (!mountedRef.current) return;
       showToast(`${c.name} started`);
       onSection("scores");

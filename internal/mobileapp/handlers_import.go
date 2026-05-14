@@ -176,6 +176,17 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// lands in res.Error rather than aborting the batch — matches the
 	// existing missing-id / invalid-id / save-error patterns.
 	if err := store.WithCompetitionRenameLock(func() error {
+		// ID-collision check (cross-file guard symmetry with the POST
+		// /competitions handler and CreatePlayoff path). Without this,
+		// a manifest row with an existing comp.ID but a different
+		// comp.Name passes the name-uniqueness check (its name IS
+		// unique) and then SaveCompetition silently overwrites the
+		// existing record. POST is documented as CREATE, so an
+		// existing ID is a 400-ish conflict.
+		if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
+			res.Error = fmt.Sprintf("competition ID %q already exists", comp.ID)
+			return nil
+		}
 		if uniqueErr := checkUniqueCompName(store, comp.Name, comp.ID); uniqueErr != nil {
 			res.Error = uniqueErr.Error()
 			return nil

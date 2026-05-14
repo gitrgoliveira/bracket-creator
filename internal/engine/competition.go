@@ -184,6 +184,19 @@ func (e *Engine) StartCompetition(id string) error {
 		return err
 	}
 
+	// Snapshot whether ANY reserved slots existed. The trailing
+	// SaveParticipants call below is conditional on this: if no slots
+	// existed, resolveReservedSlots is a no-op and the players slice
+	// matches disk byte-for-byte — re-saving it is wasted I/O AND a
+	// participant-race risk (a concurrent admin participants upload
+	// between our outer Load and the trailing SaveParticipants would
+	// be clobbered by our stale snapshot). When slots DID exist, the
+	// save is required to persist resolved IDs/names; the small race
+	// window for that case is a documented pipeline limitation (see
+	// function-level comment).
+	slots, _ := e.store.LoadReservedSlots(id)
+	hadReservedSlots := len(slots) > 0
+
 	// Resolve any cross-competition reserved slots before generation.
 	players, err = e.resolveReservedSlots(id, players)
 	if err != nil {
@@ -213,15 +226,18 @@ func (e *Engine) StartCompetition(id string) error {
 	// than clobbering their result with ours.
 	//
 	// The transform ALSO re-validates the generation-relevant fields
-	// (Format, PoolSize, PoolWinners, PoolSizeMode, Courts, Kind,
-	// TeamSize, WithZekkenName). If a concurrent settings save
-	// changed any of those between our outer Load (the basis for the
-	// pools/playoffs files we just generated) and this atomic commit,
-	// the generated artifacts no longer match the new config — e.g.
-	// a Format change from "pools" to "playoffs" would leave
+	// (Format, PoolSize, PoolSizeMode, NumberPrefix, StartTime,
+	// RoundRobin, Kind, WithZekkenName, Courts — the exact set
+	// listed in the validation block below). If a concurrent settings
+	// save changed any of those between our outer Load (the basis
+	// for the pools/playoffs files we just generated) and this atomic
+	// commit, the generated artifacts no longer match the new config
+	// — e.g. a Format change from "pools" to "playoffs" would leave
 	// pools.csv on disk while Status committed to "playoffs". Better
 	// to abort with a 409-style conflict than to commit inconsistent
-	// state.
+	// state. Note: TeamSize and PoolWinners are deliberately NOT in
+	// this set — see the inline comment on the validation block for
+	// the rationale.
 	//
 	// Note: our generated pools.csv / bracket.json have already been
 	// written by this point (see pipeline limitations in the function
@@ -298,8 +314,13 @@ func (e *Engine) StartCompetition(id string) error {
 		return err
 	}
 
-	if err := e.store.SaveParticipants(id, players); err != nil {
-		return err
+	// See `hadReservedSlots` snapshot above. Skip the save when the
+	// pipeline didn't mutate the roster (no reserved-slot resolution),
+	// otherwise persist the resolved IDs/names.
+	if hadReservedSlots {
+		if err := e.store.SaveParticipants(id, players); err != nil {
+			return err
+		}
 	}
 
 	return e.GenerateSchedule(id)

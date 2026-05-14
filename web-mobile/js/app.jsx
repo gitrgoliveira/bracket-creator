@@ -413,13 +413,14 @@ function CreateTournament({ onCreated }) {
     }
     // Match the admin-side handleSave guard from admin_setup.jsx.
     // Browser number inputs accept fractional values unless explicitly
-    // guarded; Array.from({length:2.5}) silently truncates to 2. The
-    // POST /tournament handler does NOT call helper.ValidateCourts on
-    // the submitted courts slice (only the CLI / engine path does), so
-    // this client-side guard is the only check against fractional /
-    // out-of-range courts from this form. Hand-crafted /api/tournament
-    // requests can still bypass it — separate hardening would be a
-    // server-side ValidateCourts call in handlers_tournament.go.
+    // guarded; Array.from({length:2.5}) silently truncates to 2. This
+    // client-side guard provides immediate feedback before submit.
+    // The POST /tournament handler now calls validateCourts (which
+    // wraps helper.ValidateCourts + per-label single-character check),
+    // so a hand-crafted request bypassing this guard is still rejected
+    // server-side with a 400 — the two checks are defensive duplicates
+    // for the same invariant rather than the client-side being the
+    // sole defense.
     if (!Number.isInteger(courts) || courts < 1 || courts > 26) {
       alert("Number of courts must be a whole number between 1 and 26.");
       return;

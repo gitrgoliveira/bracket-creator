@@ -163,6 +163,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 		}
+		// Validate the derived OR caller-supplied ID upfront with a 400.
+		// Without this, a non-empty but invalid ID (e.g. "../../etc/passwd"
+		// or "foo bar") would skip the derive block, then LoadCompetition
+		// would silently drop the validation error (`_, _ :=`), and the
+		// SaveCompetitionChanged inside saveCompetitionWithPlayers would
+		// surface "invalid competition ID" as a 500 — masking malformed
+		// input as a server failure. The middleware.requireValidCompID
+		// helper does the equivalent check for routes that take :id in
+		// the URL; this is the body-supplied-id sibling.
+		if err := state.ValidateCompetitionID(comp.ID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		// Atomic uniqueness-check + save under the global
 		// competition-rename mutex. Closes the AB-BA window where two

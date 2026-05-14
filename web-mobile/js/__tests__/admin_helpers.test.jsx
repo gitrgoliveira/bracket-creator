@@ -97,6 +97,29 @@ describe('hasBothSides', () => {
     expect(hasBothSides({ sideA: "Alice", sideB: "Charlie" })).toBe(true);
   });
 
+  // Copilot round-4 finding on PR #104: the prefix-match `startsWith("Winner of ")`
+  // was too broad — it rejected real participants whose names happened to
+  // start with "Winner of " (e.g. "Winner of the 2025 Cup"). The placeholder
+  // pattern emitted by the bracket generator is the exact shape
+  // `Winner of r<digits>-m<digits>`; only that should be rejected.
+  it('accepts legitimate participants whose names start with "Winner of "', () => {
+    expect(hasBothSides({ sideA: "Winner of the 2025 Cup", sideB: "Alice" })).toBe(true);
+    expect(hasBothSides({ sideA: "Alice", sideB: "Winner of the 2025 Cup" })).toBe(true);
+    // "Winner of " without the rX-mY suffix is a real name, not a placeholder.
+    expect(hasBothSides({ sideA: "Winner of Tournament", sideB: "Bob" })).toBe(true);
+    // Mixed case or extra whitespace shouldn't match the strict placeholder shape.
+    expect(hasBothSides({ sideA: "winner of r0-m1", sideB: "Bob" })).toBe(true);
+  });
+
+  it('still rejects the exact placeholder shape Winner of r<n>-m<n>', () => {
+    // Pin the regex against representative bracket-generator outputs.
+    // internal/engine/bracket.go emits "Winner of r%d-m%d" — round and
+    // match indices are zero-based non-negative integers.
+    expect(hasBothSides({ sideA: "Winner of r0-m0", sideB: "Alice" })).toBe(false);
+    expect(hasBothSides({ sideA: "Winner of r10-m255", sideB: "Alice" })).toBe(false);
+    expect(hasBothSides({ sideA: "Winner of r1-m1", sideB: "Winner of r1-m2" })).toBe(false);
+  });
+
   it('returns a real boolean (not a truthy/falsy value) for use in JSX guards', () => {
     // Important for `{hasBothSides(m) ? <Component /> : null}` rendering —
     // returning a non-boolean truthy value (e.g. a string) would render

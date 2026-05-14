@@ -381,6 +381,10 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 	for i := range iterations {
 		dir, err := os.MkdirTemp("", "engine-concurrent-*")
 		require.NoError(t, err)
+		// Register cleanup immediately so a `require.*` failure later
+		// in the iteration doesn't leak the directory. Was previously
+		// only removed at the end of the loop body.
+		t.Cleanup(func() { os.RemoveAll(dir) })
 
 		store, err := state.NewStore(dir)
 		require.NoError(t, err)
@@ -446,8 +450,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 		assert.Equal(t, state.MatchStatusCompleted, p1.Status, "iter %d: Pool-1 must be completed", i)
 		assert.Equal(t, "Dave", p2.Winner, "iter %d: Pool-2 winner must be Dave (Operator B's score)", i)
 		assert.Equal(t, state.MatchStatusCompleted, p2.Status, "iter %d: Pool-2 must be completed", i)
-
-		os.RemoveAll(dir)
+		// Cleanup registered via t.Cleanup at iteration start.
 	}
 }
 
@@ -460,6 +463,7 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 	for i := range iterations {
 		dir, err := os.MkdirTemp("", "engine-concurrent-bracket-*")
 		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(dir) })
 
 		store, err := state.NewStore(dir)
 		require.NoError(t, err)
@@ -521,8 +525,7 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 		assert.Equal(t, state.MatchStatusCompleted, qf1.Status, "iter %d: QF1 must be completed", i)
 		assert.Equal(t, "Dave", qf2.Winner, "iter %d: QF2 winner must be Dave", i)
 		assert.Equal(t, state.MatchStatusCompleted, qf2.Status, "iter %d: QF2 must be completed", i)
-
-		os.RemoveAll(dir)
+		// Cleanup registered via t.Cleanup at iteration start.
 	}
 }
 
@@ -545,6 +548,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 	for i := range iterations {
 		dir, err := os.MkdirTemp("", "engine-autocomplete-race-*")
 		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(dir) })
 
 		store, err := state.NewStore(dir)
 		require.NoError(t, err)
@@ -560,37 +564,84 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
 		}))
 
+		// Capture each operation's "did I actually commit a change?"
+		// return value. The race contract is:
+		//   - At most ONE goroutine can report changed=true. If both
+		//     reported true, the second one's transform either ran
+		//     against the first's already-committed Status (auto-complete
+		//     sees Status=Invalid → returns (nil, nil) → changed=false),
+		//     or the invalidate sees Status=Complete → returns (nil, nil)
+		//     → changed=false. Both reporting changed=true means a save
+		//     was silently lost.
+		//   - The final disk Status MUST match the winner's commit:
+		//       autoCompleted=true  → stored.Status == Complete
+		//       invalidated=true    → stored.Status == Invalid
+		//     Pre-fix this assertion would accept Complete even when
+		//     invalidate landed first — exactly the regression Copilot
+		//     flagged. Linking final status to the winner's return value
+		//     forces the test to fail if auto-complete overwrites a
+		//     committed invalidate.
+		var autoCompleted, invalidated bool
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			// Auto-complete tries to set Status=Complete.
-			_, _ = eng.MaybeAutoCompletePools(compID)
+			c, err := eng.MaybeAutoCompletePools(compID)
+			assert.NoError(t, err, "iter %d: MaybeAutoCompletePools error", i)
+			autoCompleted = c
 		}()
 		go func() {
 			defer wg.Done()
 			// Admin invalidate: simulate via direct UpdateCompetitionChanged
 			// (mirrors what the POST /invalidate handler does).
-			_, _ = store.UpdateCompetitionChanged(compID, func(current *state.Competition) (*state.Competition, error) {
+			c, err := store.UpdateCompetitionChanged(compID, func(current *state.Competition) (*state.Competition, error) {
 				if current == nil || (current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs) {
 					return nil, nil
 				}
 				current.Status = state.CompStatusInvalid
 				return current, nil
 			})
+			assert.NoError(t, err, "iter %d: invalidate error", i)
+			invalidated = c
 		}()
 		wg.Wait()
 
 		stored, err := store.LoadCompetition(compID)
 		require.NoError(t, err)
 		require.NotNil(t, stored)
-		// Final status is whichever transition won. Crucially it
-		// must NOT be Pools (the original) — that would mean both
-		// writes either failed silently or one was silently lost.
-		assert.Contains(t, []state.CompetitionStatus{state.CompStatusInvalid, state.CompStatusComplete}, stored.Status,
-			"iter %d: Status must be Invalid or Complete (got %q — race lost a write)",
-			i, stored.Status)
 
-		os.RemoveAll(dir)
+		// Contract 1: at most one goroutine committed. Both committing
+		// means a save was lost (the racing transform should have
+		// returned (nil, nil) after observing the other's update).
+		assert.False(t, autoCompleted && invalidated,
+			"iter %d: both operations reported changed=true — one must have observed the other's update and returned (nil, nil)",
+			i)
+
+		// Contract 2: final status matches the winner. This is what
+		// Copilot's review caught: previously the test accepted Complete
+		// even when invalidate had won, so an auto-complete-clobbers-
+		// invalidate regression would silently slip through.
+		switch {
+		case autoCompleted && !invalidated:
+			assert.Equal(t, state.CompStatusComplete, stored.Status,
+				"iter %d: auto-complete reported changed=true so final status must be Complete", i)
+		case invalidated && !autoCompleted:
+			assert.Equal(t, state.CompStatusInvalid, stored.Status,
+				"iter %d: invalidate reported changed=true so final status must be Invalid", i)
+		case !autoCompleted && !invalidated:
+			// Both transforms returned (nil, nil). Status should still
+			// be Pools (neither side committed). This is a rare but
+			// legal outcome if both transforms read Pools, both decided
+			// to write, but both saw the other's commit before their
+			// own SaveCompetitionChanged content-equality check.
+			// Actually with the changed=bool contract, this case means
+			// nobody committed at all — which can't happen here
+			// because at least one must succeed (the matches ARE
+			// completed and the comp IS in Pools). Treat as test bug
+			// rather than a tolerated case.
+			t.Fatalf("iter %d: neither operation committed — pre-condition broken (status stayed %q)",
+				i, stored.Status)
+		}
+		// Cleanup registered via t.Cleanup at iteration start.
 	}
 }

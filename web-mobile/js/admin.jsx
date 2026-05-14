@@ -207,10 +207,22 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       }
     });
 
-    const comps = await window.API.fetchCompetitions();
-    if (!mountedRef.current) return;
-    onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
-    setAdminLoading(false);
+    // Wrap the refresh in try/finally so a fetchCompetitions() reject
+    // doesn't leave setAdminLoading=true latched on (the loading spinner
+    // would stay visible indefinitely until the next view change). The
+    // mountedRef gate is preserved — if the user navigated away during
+    // the start, we still skip setState but always clear the loading
+    // flag via finally to avoid stale-state-on-remount surprises.
+    try {
+      const comps = await window.API.fetchCompetitions();
+      if (!mountedRef.current) return;
+      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+    } catch (e) {
+      console.error("startAllCompetitions: post-start refresh failed", e);
+      if (mountedRef.current) showToast("Failed to refresh after start. Try reloading.", "error");
+    } finally {
+      if (mountedRef.current) setAdminLoading(false);
+    }
 
     if (fail > 0) {
       showToast(`Started ${success} competitions, but ${fail} failed.`, "error");

@@ -388,6 +388,43 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			"PUT must not clobber Name when validation fails")
 	})
 
+	// Copilot round-4 finding on PR #104: POST /competitions with a
+	// non-empty but invalid `id` (e.g. "../../etc/passwd", "foo bar",
+	// "foo.bar") skipped the derive-from-name block, hit
+	// LoadCompetition which silently dropped the validation error,
+	// then SaveCompetitionChanged returned "invalid competition ID"
+	// mapped to a 500. The fix validates `id` upfront with a 400
+	// (same shape as requireValidCompID does for routes with :id
+	// in the URL).
+	t.Run("POST Rejects Invalid Body ID With 400", func(t *testing.T) {
+		// Single-segment payloads that gin will deliver verbatim to the
+		// handler (vs traversal payloads which the router may reject).
+		// Same set as the Path_Traversal_IDs_Rejected single-segment
+		// list — every one violates ValidateCompetitionID's char rule.
+		invalidIDs := []string{
+			"foo bar",
+			"foo.bar",
+			"foo+bar",
+			"foo@bar",
+			"_leading-underscore",
+			"-leading-dash",
+		}
+		for _, badID := range invalidIDs {
+			comp := state.Competition{ID: badID, Name: "Invalid ID Test"}
+			body, _ := json.Marshal(comp)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"POST with id=%q must return 400 (got %d: %s)", badID, w.Code, w.Body.String())
+			// Confirm no half-baked record landed on disk under the
+			// invalid ID (the validation must fail before SaveCompetition).
+			stored, _ := store.LoadCompetition(badID)
+			assert.Nil(t, stored, "POST with id=%q must not persist", badID)
+		}
+	})
+
 	// Path-traversal guard. ValidateCompetitionID was only called at 2 of
 	// the 14 :id handler sites pre-fix; the requireValidCompID helper now
 	// gates every site. A compID like "../../../etc/passwd" would

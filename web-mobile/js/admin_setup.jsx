@@ -396,7 +396,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {kind === "team" && (
             <div className="field">
               <label className="field__label">Team size</label>
-              <window.StableInput className="input" type="number" min="1" max={MAX_TEAM_SIZE} value={teamSize} onChange={(val) => setTeamSize(val)} />
+              {/* Non-debounced input — uses onChange directly, not StableInput. */}
+              {/* StableInput debounces 200ms; if the user clears the field and */}
+              {/* immediately clicks "Create", the parent teamSize would still */}
+              {/* hold the previous good value and the guard at create() would */}
+              {/* let the stale value through. Direct onChange + decideNumericUpdate */}
+              {/* keeps parent state synchronous with what the user sees. */}
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max={MAX_TEAM_SIZE}
+                value={Number.isFinite(teamSize) ? teamSize : ""}
+                onChange={(e) => setTeamSize(decideNumericUpdate(e.target.value, 1).value)}
+              />
               <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
             </div>
           )}

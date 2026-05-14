@@ -22,18 +22,19 @@ function sideName(side) {
 // Bracket-side caveat: future-round matches carry placeholder side
 // names like `"Winner of r0-m1"` until the source match resolves. Those
 // are non-empty strings — sideName() returns them as-is — so the
-// underlying `sideName(...)` check ALONE isn't enough. We explicitly
-// reject the "Winner of " prefix here so viewer/admin filters don't
-// surface unresolved bracket cells as playable "upcoming" matches.
-// (See web-mobile/js/viewer.jsx for the consumer; the prefix is set
-// by the bracket-generation engine — search the codebase for
-// `"Winner of "` to find the producer.)
+// underlying `sideName(...)` check ALONE isn't enough. We reject the
+// EXACT placeholder shape `Winner of r<n>-m<n>` (the literal format
+// emitted by internal/engine/bracket.go at lines 65 and 73), NOT every
+// name that happens to start with "Winner of " — a legitimate
+// participant named "Winner of the 2025 Cup" should still pass.
+// (See web-mobile/js/viewer.jsx for the consumer.)
+const BRACKET_PLACEHOLDER_RE = /^Winner of r\d+-m\d+$/;
 function hasBothSides(m) {
   if (!m) return false;
   const a = sideName(m.sideA);
   const b = sideName(m.sideB);
   if (!a || !b) return false;
-  if (a.startsWith("Winner of ") || b.startsWith("Winner of ")) return false;
+  if (BRACKET_PLACEHOLDER_RE.test(a) || BRACKET_PLACEHOLDER_RE.test(b)) return false;
   return true;
 }
 

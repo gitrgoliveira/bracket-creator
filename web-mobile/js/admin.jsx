@@ -23,6 +23,29 @@ const AdminImportPage = window.AdminImportPage;
 const AdminSchedulePage = window.AdminSchedulePage;
 const AdminScoreEditorPage = window.AdminScoreEditorPage;
 
+// Pure helper for the "merge an updated competition into the latest
+// tournament state" pattern used by AdminApp's async handlers. Takes
+// the freshest tournament (from a ref, not the closure-captured prop)
+// plus a competitions-array mutator, and returns the new tournament
+// to pass to onUpdate.
+//
+// Bug shape this fixes: AdminApp's handlers (updateCompetition,
+// moveMatchCourt, editMatchScore, addCompetition, startCompetition,
+// createPlayoff, startAllCompetitions, the import onImported callback)
+// all do `await window.API.X(...)` then
+// `onUpdate({ ...t, competitions: comps })`. The closure-captured `t`
+// is the tournament at handler-definition time — if SSE fires during
+// the in-flight await and updates the tournament (another comp's
+// match completes, a comp starts, etc.), the post-await onUpdate
+// clobbers the SSE update with stale state. The tRef / onUpdateRef
+// pair (declared in AdminApp at the top of the function and kept
+// fresh via useEffect) exists for exactly this purpose, but the
+// handlers weren't using it. Extracted as a pure helper so the merge
+// logic can be unit-tested in isolation of React state.
+function mergeCompetitionsIntoTournament(currentT, mutator) {
+  return { ...currentT, competitions: mutator(currentT.competitions || []) };
+}
+
 function patchCompetitionData(prev, event) {
   if (!prev || !event.data) return prev;
   const { result, results } = event.data;
@@ -108,9 +131,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       showToast(e.message, "error");
       throw e;
     }
-    // Merge PUT response locally; SSE will reconcile cross-client.
-    const comps = (t.competitions || []).map(c => c.id === cid ? { ...c, ...updated } : c);
-    onUpdate({ ...t, competitions: comps });
+    // Merge PUT response into the LATEST tournament state. tRef.current
+    // (not the closure-captured `t`) — see mergeCompetitionsIntoTournament
+    // at the top of this file for why: SSE may have updated `t` during
+    // the await above, and using the closure-captured `t` would clobber
+    // those updates with stale state. Same reasoning applies to
+    // onUpdateRef.current vs the closure-captured onUpdate.
+    onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+      comps => comps.map(c => c.id === cid ? { ...c, ...updated } : c)));
     // Best-effort detail refresh. Isolated from the rethrow above —
     // a transient failure fetching details after a successful save
     // should not make callers (AdminSettings.saveNow, AdminParticipants.apply)
@@ -129,7 +157,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       await window.API.moveMatchCourt(compId, matchId, newCourt, password);
       const comps = await window.API.fetchCompetitions();
-      onUpdate({ ...t, competitions: comps });
+      // tRef/onUpdateRef instead of closure-captured t/onUpdate — see
+      // mergeCompetitionsIntoTournament docstring for the stale-closure
+      // bug shape this avoids.
+      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
     } catch (e) {
       showToast(e.message, "error");
     }
@@ -139,7 +170,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       await window.API.recordScore(compId, matchId, result, password, match);
       const comps = await window.API.fetchCompetitions();
-      onUpdate({ ...t, competitions: comps });
+      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
     } catch (e) {
       showToast(e.message, "error");
       throw e;
@@ -150,7 +181,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       const created = await window.API.createCompetition(c, password);
       const comps = await window.API.fetchCompetitions();
-      onUpdate({ ...t, competitions: comps });
+      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
       return created;
     } catch (e) {
       showToast(e.message, "error");
@@ -178,7 +209,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
     const comps = await window.API.fetchCompetitions();
     if (!mountedRef.current) return;
-    onUpdate({ ...t, competitions: comps });
+    onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
     setAdminLoading(false);
 
     if (fail > 0) {
@@ -193,7 +224,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const created = await window.API.createPlayoff(sourceId, password);
       const comps = await window.API.fetchCompetitions();
       if (!mountedRef.current) return;
-      onUpdate({ ...t, competitions: comps });
+      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
       setView({ kind: "competition", id: created.id, section: "participants" });
       showToast(`Playoff "${created.name}" created`);
     } catch (e) {
@@ -208,7 +239,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       await window.API.startCompetition(cid, password);
       const comps = await window.API.fetchCompetitions();
-      onUpdate({ ...t, competitions: comps });
+      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
       showToast(`${c.name} started`);
     } catch (e) {
       showToast(e.message, "error");
@@ -429,7 +460,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onBack={() => setView({ kind: "dashboard" })}
       onImported={async () => {
         const comps = await window.API.fetchCompetitions();
-        onUpdate({ ...t, competitions: comps });
+        // tRef/onUpdateRef so SSE updates during the in-flight import
+        // are preserved — see mergeCompetitionsIntoTournament docstring.
+        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
         setView({ kind: "dashboard" });
       }}
       onLogout={onLogout}
@@ -471,3 +504,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 }
 
 window.AdminApp = AdminApp;
+window.mergeCompetitionsIntoTournament = mergeCompetitionsIntoTournament;
+
+export { mergeCompetitionsIntoTournament };

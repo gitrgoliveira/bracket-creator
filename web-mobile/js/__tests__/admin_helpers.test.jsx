@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, compMatchStats, normalizeDate } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -23,6 +23,63 @@ describe('sideName', () => {
 
   it('returns "" when side has no name property', () => {
     expect(sideName({ id: "p1" })).toBe("");
+  });
+});
+
+describe('hasBothSides', () => {
+  const real = (id, name) => ({ id, name });
+  const placeholder = { id: "", name: "" }; // normalizeMatch's substitution
+
+  it('returns true when both sides have real names', () => {
+    expect(hasBothSides({ sideA: real("a", "Alice"), sideB: real("b", "Bob") })).toBe(true);
+  });
+
+  it('returns true for raw string sides (pre-normalizeMatch backend shape)', () => {
+    expect(hasBothSides({ sideA: "Alice", sideB: "Bob" })).toBe(true);
+  });
+
+  it('returns false when sideA is a normalizeMatch placeholder', () => {
+    // The bug Copilot caught: m.sideA && m.sideB used to be `true` here
+    // because placeholder is a truthy object. hasBothSides correctly
+    // detects the empty name.
+    expect(hasBothSides({ sideA: placeholder, sideB: real("b", "Bob") })).toBe(false);
+  });
+
+  it('returns false when sideB is a normalizeMatch placeholder', () => {
+    expect(hasBothSides({ sideA: real("a", "Alice"), sideB: placeholder })).toBe(false);
+  });
+
+  it('returns false when both sides are placeholders', () => {
+    expect(hasBothSides({ sideA: placeholder, sideB: placeholder })).toBe(false);
+  });
+
+  it('returns false when sideA is null/undefined', () => {
+    expect(hasBothSides({ sideA: null, sideB: real("b", "Bob") })).toBe(false);
+    expect(hasBothSides({ sideA: undefined, sideB: real("b", "Bob") })).toBe(false);
+  });
+
+  it('returns false when sideB is missing entirely (bracket bye)', () => {
+    expect(hasBothSides({ sideA: real("a", "Alice") })).toBe(false);
+  });
+
+  it('returns false when the match itself is null/undefined', () => {
+    expect(hasBothSides(null)).toBe(false);
+    expect(hasBothSides(undefined)).toBe(false);
+  });
+
+  it('returns false for empty string sides (raw backend bye)', () => {
+    expect(hasBothSides({ sideA: "", sideB: "Bob" })).toBe(false);
+    expect(hasBothSides({ sideA: "Alice", sideB: "" })).toBe(false);
+  });
+
+  it('returns a real boolean (not a truthy/falsy value) for use in JSX guards', () => {
+    // Important for `{hasBothSides(m) ? <Component /> : null}` rendering —
+    // returning a non-boolean truthy value (e.g. a string) would render
+    // it as a text node in JSX.
+    const t = hasBothSides({ sideA: real("a", "Alice"), sideB: real("b", "Bob") });
+    expect(typeof t).toBe("boolean");
+    const f = hasBothSides({ sideA: placeholder, sideB: real("b", "Bob") });
+    expect(typeof f).toBe("boolean");
   });
 });
 

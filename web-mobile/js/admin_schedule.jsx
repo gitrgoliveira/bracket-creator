@@ -8,6 +8,11 @@ const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
 const CourtPicker = window.CourtPicker;
 const ScoreEditorModal = window.ScoreEditorModal;
+// `hasBothSides` rejects matches with bye/TBD placeholder sides — see
+// admin_helpers.jsx. Required because normalizeMatch substitutes
+// {id:"",name:""} for missing sides, making the naive `m.sideA && m.sideB`
+// check always pass.
+const hasBothSides = window.hasBothSides;
 
 // ---------- Tournament-wide schedule (admin) ----------
 // Estimate minutes from HH:MM string; returns null if invalid
@@ -29,7 +34,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   const [autoSaving, setAutoSaving] = useStateA(false);
 
   const allMatches = useMemoA(
-    () => window.tournamentMatches(tournament).filter((m) => m.sideA && m.sideB),
+    () => window.tournamentMatches(tournament).filter(hasBothSides),
     [tournament]
   );
 
@@ -364,7 +369,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
 
   const tournament = t || (c ? { competitions: [c] } : { competitions: [] });
   const allMatches = useMemoA(
-    () => tournament.competitions.flatMap((cc) => window.compMatches(cc)).filter((m) => m.sideA && m.sideB),
+    () => tournament.competitions.flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
     [tournament]
   );
 

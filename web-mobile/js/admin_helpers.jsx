@@ -12,6 +12,15 @@ function sideName(side) {
   return side.name || "";
 }
 
+// True when a match has both sides resolved to a real participant (not a
+// bye, not a TBD bracket placeholder). The naïve `m.sideA && m.sideB` test
+// is almost always wrong post-normalizeMatch — that function substitutes
+// {id:"",name:""} for missing sides, which is truthy. Use this helper in
+// filter predicates / rendering guards instead.
+function hasBothSides(m) {
+  return !!(m && sideName(m.sideA) && sideName(m.sideB));
+}
+
 // Returns { total, done, live } match counts for a single competition object.
 // Accepts either:
 //   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
@@ -70,10 +79,11 @@ function normalizeDate(d) {
 // non-browser test environments (matches the pattern in data.jsx / ui.jsx).
 if (typeof window !== "undefined") {
   window.sideName = sideName;
+  window.hasBothSides = hasBothSides;
   window.compMatchStats = compMatchStats;
   window.normalizeDate = normalizeDate;
 }
 
 // Also exported so the vitest suite under web-mobile/js/__tests__/ can
 // import these directly without going through window globals.
-export { sideName, compMatchStats, normalizeDate };
+export { sideName, hasBothSides, compMatchStats, normalizeDate };

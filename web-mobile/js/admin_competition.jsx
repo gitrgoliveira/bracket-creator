@@ -5,6 +5,7 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const compMatchStats = window.compMatchStats;
+const hasBothSides = window.hasBothSides;
 const normalizeDate = window.normalizeDate;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
@@ -431,7 +432,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
         </div>
       </div>
       <div>
-        {selectedMatch && selectedMatch.sideA && selectedMatch.sideB ? (
+        {hasBothSides(selectedMatch) ? (
           <LiveMatchPanel
             match={selectedMatch}
             compId={c.id}

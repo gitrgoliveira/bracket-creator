@@ -238,10 +238,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       }
     }
 
-    if (next.name.toLowerCase() !== c.name.toLowerCase()) {
-      const exists = (tournament.competitions || []).some(cc => cc.id !== c.id && cc.name.toLowerCase() === next.name.toLowerCase());
+    // Trim before comparing AND before sending. The backend trims
+    // `comp.Name` on save, so without normalizing here the JS-side
+    // uniqueness check would compare "  Men's Cup  " against the
+    // canonical "Men's Cup" and miss — landing two competitions with the
+    // same effective name. Send the trimmed value so the value the user
+    // sees in the input matches what the server stores.
+    const trimmedName = (next.name || "").trim();
+    if (trimmedName.toLowerCase() !== c.name.toLowerCase()) {
+      const exists = (tournament.competitions || []).some(cc => cc.id !== c.id && cc.name.toLowerCase() === trimmedName.toLowerCase());
       if (exists) {
-        setSaveErr(`Competition name "${next.name}" is already in use.`);
+        setSaveErr(`Competition name "${trimmedName}" is already in use.`);
         return;
       }
     }
@@ -249,7 +256,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // Normalize on save when valid (auto-cleans DD-MM-YYYY → ISO on any
     // save where the date round-trips cleanly). Otherwise preserve the
     // raw existing value so we don't clobber legacy data with `null`.
-    const finalNext = { ...c, ...next, date: dateIsValid ? norm : next.date };
+    const finalNext = { ...c, ...next, name: trimmedName, date: dateIsValid ? norm : next.date };
     Promise.resolve(onUpdate(finalNext)).then(() => {
       const now = new Date();
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);

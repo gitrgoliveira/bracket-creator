@@ -9,6 +9,28 @@ const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
 
+// Returns the final competition name, trimming the raw user input before
+// the empty-check so a whitespace-only string ("   ") falls through to the
+// kind/gender-based default instead of being treated as a valid name.
+//
+// The bug shape without this trim: `name || default` where name=" " is
+// truthy → creates a comp with name=" " → backend trims `comp.Name` on
+// save → canonical stored name is empty. The uniqueness check on the JS
+// side would also compare untrimmed values against the canonical
+// (already-trimmed) names on `tournament.competitions`, so a user typing
+// "  Men's Cup  " when "Men's Cup" exists would miss the dedupe.
+//
+// Defaults match the labels users see in the dashboard's "team event" and
+// "individual event" pickers.
+function deriveCompetitionName(rawName, kind, gender) {
+  const trimmed = (rawName || "").trim();
+  if (trimmed) return trimmed;
+  if (kind === "team") return gender === "F" ? "Women's Teams" : "Men's Teams";
+  if (gender === "F") return "Women's Individual";
+  if (gender === "M") return "Men's Individual";
+  return "Individual";
+}
+
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode }) {
   const [name, setName] = useStateA(tournament.name);
   const [venue, setVenue] = useStateA(tournament.venue);
@@ -18,14 +40,20 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [error, setError] = useStateA("");
 
   const handleSave = () => {
-    if (!name.trim()) { setError("Tournament name is required."); return; }
+    // Trim early and send the trimmed value. The empty-name check below
+    // already used `name.trim()`, but the onSave payload was passing the
+    // raw `name` — so " Tournament " on the wire would round-trip to the
+    // backend's trim and produce a canonical "Tournament" that diverges
+    // from what the user sees in the input until next refresh.
+    const trimmedName = name.trim();
+    if (!trimmedName) { setError("Tournament name is required."); return; }
     const { norm, error: dateError } = validateAndNormalizeDate(date);
     if (dateError) { setError(dateError); return; }
     if (!Number.isInteger(courts) || courts < 1 || courts > 26) { setError("Number of courts must be a whole number between 1 and 26."); return; }
 
     onSave({
-      name,
-      venue,
+      name: trimmedName,
+      venue: venue.trim(),
       date: norm,
       password: pass || undefined,
       courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
@@ -93,9 +121,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
 
   const create = () => {
-    const finalName = name || (kind === "team"
-      ? (gender === "F" ? "Women's Teams" : "Men's Teams")
-      : (gender === "F" ? "Women's Individual" : gender === "M" ? "Men's Individual" : "Individual"));
+    // deriveCompetitionName trims the raw input first so whitespace-only
+    // never bypasses the default-fallback (truthy strings of spaces would
+    // create a backend-trimmed empty name). See the helper at the top of
+    // this file for the full rationale + tests.
+    const finalName = deriveCompetitionName(name, kind, gender);
 
     const exists = (tournament.competitions || []).some(cc => cc.name.toLowerCase() === finalName.toLowerCase());
     if (exists) {
@@ -455,3 +485,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
 window.AdminEditTournament = AdminEditTournament;
 window.AdminCreateCompetition = AdminCreateCompetition;
 window.AdminImportPage = AdminImportPage;
+
+// ES export for the vitest suite — pure helpers only. Components stay
+// behind the window.* pattern to match the rest of admin_*.jsx.
+export { deriveCompetitionName };

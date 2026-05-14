@@ -153,6 +153,17 @@ func (s *Store) SaveTournament(t *Tournament) error {
 // must handle both cases. If transform returns a non-nil error, no
 // write happens and the error is returned to the caller as-is
 // (callers can use errors.Is to discriminate validation vs. I/O).
+//
+// IMPORTANT: transform runs while this method holds both s.mu and
+// s.tournamentMu (non-recursive locks). It MUST NOT call back into
+// any Store method that acquires either lock — that includes
+// LoadTournament, SaveTournament, SaveTournamentChanged, and a
+// recursive UpdateTournamentChanged. Deadlock would result. The
+// transform should only mutate `desired` (possibly by copying fields
+// from `current`) and return; for any cross-resource coordination
+// (e.g. updating a competition during a tournament update), perform
+// the load BEFORE calling this method and pass the resulting data
+// in via a closure over local variables.
 func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(current *Tournament, desired *Tournament) error) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

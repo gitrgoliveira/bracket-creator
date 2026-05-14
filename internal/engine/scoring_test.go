@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -356,4 +357,171 @@ func TestRecordMatchResult_PreservesCourtAndScheduledAt(t *testing.T) {
 		assert.Equal(t, "B", patch.Court)
 		assert.Equal(t, "10:15", patch.ScheduledAt)
 	})
+}
+
+// TestRecordMatchResult_ConcurrentScoresNotLost pins the TOCTOU fix for
+// the live-scoring path. Pre-atomic-primitive, withPoolMatch did
+// LoadPoolMatches → mutate target match → SavePoolMatches sequentially
+// with no lock held between Load and Save. Two operators scoring
+// DIFFERENT matches on DIFFERENT courts could each load the full pool-
+// matches slice into a separate copy, mutate their target, and save —
+// the later save would overwrite the earlier save's mutation with stale
+// data for the OTHER match. One operator's score: silently lost.
+//
+// Now that withPoolMatch delegates to state.Store.UpdatePoolMatchByID,
+// the entire load + find + mutate + save sequence runs under the
+// per-competition lock. Both mutations land regardless of arrival
+// order or how the goroutines interleave.
+//
+// Runs many iterations to exercise the scheduler. With the fix, every
+// iteration must end with both M1 and M2 marked completed.
+func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
+	const iterations = 20
+
+	for i := range iterations {
+		dir, err := os.MkdirTemp("", "engine-concurrent-*")
+		require.NoError(t, err)
+
+		store, err := state.NewStore(dir)
+		require.NoError(t, err)
+		eng := New(store)
+
+		compID := "concurrent-test"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Concurrent"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "Pool-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+			{ID: "Pool-2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B"},
+		}))
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		// Operator on Court A scores Pool-1: Alice wins.
+		go func() {
+			defer wg.Done()
+			res := &state.MatchResult{
+				Winner:  "Alice",
+				IpponsA: []string{"M"},
+				Status:  state.MatchStatusCompleted,
+			}
+			err := eng.RecordMatchResult(compID, "Pool-1", res)
+			assert.NoError(t, err, "iter %d: Pool-1 score should succeed", i)
+		}()
+
+		// Operator on Court B scores Pool-2: Dave wins.
+		go func() {
+			defer wg.Done()
+			res := &state.MatchResult{
+				Winner:  "Dave",
+				IpponsB: []string{"K"},
+				Status:  state.MatchStatusCompleted,
+			}
+			err := eng.RecordMatchResult(compID, "Pool-2", res)
+			assert.NoError(t, err, "iter %d: Pool-2 score should succeed", i)
+		}()
+		wg.Wait()
+
+		// Both mutations must have landed on disk regardless of which
+		// goroutine acquired the per-competition lock first. Pre-fix:
+		// one of the two saves would silently lose its mutation because
+		// it read pool-matches.csv before the OTHER goroutine wrote
+		// it, then saved a slice with the other match in its original
+		// (scheduled, no-winner) state.
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 2, "iter %d: both pool matches must still exist", i)
+
+		var p1, p2 *state.MatchResult
+		for idx := range stored {
+			switch stored[idx].ID {
+			case "Pool-1":
+				p1 = &stored[idx]
+			case "Pool-2":
+				p2 = &stored[idx]
+			}
+		}
+		require.NotNil(t, p1, "iter %d: Pool-1 must exist on disk", i)
+		require.NotNil(t, p2, "iter %d: Pool-2 must exist on disk", i)
+		assert.Equal(t, "Alice", p1.Winner, "iter %d: Pool-1 winner must be Alice (Operator A's score)", i)
+		assert.Equal(t, state.MatchStatusCompleted, p1.Status, "iter %d: Pool-1 must be completed", i)
+		assert.Equal(t, "Dave", p2.Winner, "iter %d: Pool-2 winner must be Dave (Operator B's score)", i)
+		assert.Equal(t, state.MatchStatusCompleted, p2.Status, "iter %d: Pool-2 must be completed", i)
+
+		os.RemoveAll(dir)
+	}
+}
+
+// Same shape as the pool-match concurrent test, but for the bracket
+// path. Two operators scoring different elimination-round matches in
+// the same competition: both winners must land.
+func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
+	const iterations = 20
+
+	for i := range iterations {
+		dir, err := os.MkdirTemp("", "engine-concurrent-bracket-*")
+		require.NoError(t, err)
+
+		store, err := state.NewStore(dir)
+		require.NoError(t, err)
+		eng := New(store)
+
+		compID := "concurrent-bracket"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Concurrent Bracket"}))
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{ID: "QF1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+					{ID: "QF2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B"},
+				},
+			},
+		}))
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			res := &state.MatchResult{
+				Winner:  "Alice",
+				IpponsA: []string{"M"},
+				Status:  state.MatchStatusCompleted,
+			}
+			err := eng.RecordMatchResult(compID, "QF1", res)
+			assert.NoError(t, err, "iter %d: QF1 score should succeed", i)
+		}()
+		go func() {
+			defer wg.Done()
+			res := &state.MatchResult{
+				Winner:  "Dave",
+				IpponsB: []string{"K"},
+				Status:  state.MatchStatusCompleted,
+			}
+			err := eng.RecordMatchResult(compID, "QF2", res)
+			assert.NoError(t, err, "iter %d: QF2 score should succeed", i)
+		}()
+		wg.Wait()
+
+		stored, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.Len(t, stored.Rounds, 1)
+		require.Len(t, stored.Rounds[0], 2)
+
+		var qf1, qf2 *state.BracketMatch
+		for idx := range stored.Rounds[0] {
+			switch stored.Rounds[0][idx].ID {
+			case "QF1":
+				qf1 = &stored.Rounds[0][idx]
+			case "QF2":
+				qf2 = &stored.Rounds[0][idx]
+			}
+		}
+		require.NotNil(t, qf1, "iter %d: QF1 must exist", i)
+		require.NotNil(t, qf2, "iter %d: QF2 must exist", i)
+		assert.Equal(t, "Alice", qf1.Winner, "iter %d: QF1 winner must be Alice", i)
+		assert.Equal(t, state.MatchStatusCompleted, qf1.Status, "iter %d: QF1 must be completed", i)
+		assert.Equal(t, "Dave", qf2.Winner, "iter %d: QF2 winner must be Dave", i)
+		assert.Equal(t, state.MatchStatusCompleted, qf2.Status, "iter %d: QF2 must be completed", i)
+
+		os.RemoveAll(dir)
+	}
 }

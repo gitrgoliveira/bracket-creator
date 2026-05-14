@@ -252,6 +252,14 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	return s.savePoolMatchesLocked(compID, results)
+}
+
+// savePoolMatchesLocked persists results to disk and refreshes the cache.
+// Caller MUST hold the per-competition lock (s.getCompLock(compID)).
+// Used by both SavePoolMatches (which takes the lock) and
+// UpdatePoolMatchByID (which holds the lock across load + mutate + save).
+func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult) error {
 	path := s.compPath(compID, "pool-matches.csv")
 	// #nosec G304
 	f, err := os.Create(path)
@@ -312,4 +320,52 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	cache.mu.Unlock()
 
 	return nil
+}
+
+// UpdatePoolMatchByID atomically loads the pool-matches CSV for compID,
+// finds the match with matchID, calls mutate on it, and persists the
+// updated slice. Returns (found, err): found is false when no match
+// has that ID, allowing callers to fall through (e.g. to the bracket
+// store for elimination-round matches).
+//
+// The entire load + find + mutate + save sequence runs under the
+// per-competition lock so concurrent calls — even for different
+// match IDs in the same competition — serialize correctly without
+// losing each other's mutations.
+//
+// Without this primitive, the equivalent engine helper
+// (engine.withPoolMatch) had a TOCTOU window: two operators scoring
+// different matches on different courts could each LoadPoolMatches
+// into separate copies, mutate their target match, and SavePoolMatches
+// in sequence — the later save would overwrite the earlier save's
+// mutation with stale data for the OTHER match. One operator's score
+// would be silently lost during a live tournament.
+func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return false, err
+	}
+
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Load directly from disk under the lock. We deliberately bypass
+	// the loadCached path here because the per-comp lock is what
+	// coordinates with the save below; using the cache would risk
+	// reading a stale snapshot if another writer released the lock
+	// between cache populate and our acquire.
+	path := s.compPath(compID, "pool-matches.csv")
+	parsed, err := parsePoolMatchesFile(path)
+	if err != nil {
+		return false, err
+	}
+	results, _ := parsed.([]MatchResult)
+
+	for i := range results {
+		if results[i].ID == matchID {
+			mutate(&results[i])
+			return true, s.savePoolMatchesLocked(compID, results)
+		}
+	}
+	return false, nil
 }

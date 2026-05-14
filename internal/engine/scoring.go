@@ -14,43 +14,56 @@ import (
 // match with the given ID exists in the respective data store.
 var errMatchNotFound = errors.New("match not found")
 
-// withPoolMatch loads pool matches, calls mutate on the one matching matchId,
-// and saves the updated slice.  Returns errMatchNotFound (unwrapped) when the
-// ID is not present so callers can fall through to the bracket store.
+// withPoolMatch atomically loads pool matches, calls mutate on the one
+// matching matchId, and saves the updated slice. Returns errMatchNotFound
+// (unwrapped) when the ID is not present so callers can fall through to
+// the bracket store.
+//
+// Delegates to state.Store.UpdatePoolMatchByID so the entire
+// load + find + mutate + save sequence runs under the per-competition
+// lock. Pre-atomic-primitive, two operators scoring different matches
+// on different courts could each LoadPoolMatches into separate copies,
+// mutate their target match, and SavePoolMatches in sequence — the
+// later save would overwrite the earlier save's mutation with stale
+// data for the OTHER match. One operator's score would be silently
+// lost during a live tournament.
 func (e *Engine) withPoolMatch(compId, matchId string, mutate func(*state.MatchResult)) error {
-	results, err := e.store.LoadPoolMatches(compId)
+	found, err := e.store.UpdatePoolMatchByID(compId, matchId, mutate)
 	if err != nil {
 		return err
 	}
-	for i := range results {
-		if results[i].ID == matchId {
-			mutate(&results[i])
-			return e.store.SavePoolMatches(compId, results)
-		}
+	if !found {
+		return errMatchNotFound
 	}
-	return errMatchNotFound
+	return nil
 }
 
-// withBracketMatch loads the bracket, calls mutate on the match matching
-// matchId, and saves the updated bracket.  Returns errMatchNotFound when not
-// present.
+// withBracketMatch atomically loads the bracket, calls mutate on the
+// match matching matchId, and saves the updated bracket. Returns
+// errMatchNotFound when not present (so RecordMatchResult callers
+// fall through cleanly when neither pool-match nor bracket-match
+// has that ID).
+//
+// Same TOCTOU-closure rationale as withPoolMatch: delegates to
+// state.Store.UpdateBracket which holds the per-competition lock
+// across load + mutate + save. Returning errMatchNotFound from the
+// mutate closure is how we signal "don't save the unchanged bracket
+// back" — see UpdateBracket's docstring.
 func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.BracketMatch)) error {
-	bracket, err := e.store.LoadBracket(compId)
-	if err != nil {
-		return err
-	}
-	if bracket == nil {
-		return notFoundErrorf("bracket not found for competition %s", compId)
-	}
-	for rIdx := range bracket.Rounds {
-		for mIdx := range bracket.Rounds[rIdx] {
-			if bracket.Rounds[rIdx][mIdx].ID == matchId {
-				mutate(&bracket.Rounds[rIdx][mIdx])
-				return e.store.SaveBracket(compId, bracket)
+	return e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
+		if bracket == nil {
+			return errMatchNotFound
+		}
+		for rIdx := range bracket.Rounds {
+			for mIdx := range bracket.Rounds[rIdx] {
+				if bracket.Rounds[rIdx][mIdx].ID == matchId {
+					mutate(&bracket.Rounds[rIdx][mIdx])
+					return nil
+				}
 			}
 		}
-	}
-	return errMatchNotFound
+		return errMatchNotFound
+	})
 }
 
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
@@ -270,48 +283,57 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 	return allStandings, nil
 }
 
+// recordBracketMatchResult is the main bracket-side scoring path. It
+// runs the entire mutation (find target match, set winner/status/
+// scores, propagate winner to subsequent rounds) under the per-
+// competition lock via state.Store.UpdateBracket so two operators
+// scoring different elimination-round matches in the same competition
+// can't lose each other's mutations through TOCTOU.
+//
+// Pre-atomic-primitive, LoadBracket + mutate + SaveBracket ran
+// without a shared lock between Load and Save; the propagateBracketWinner
+// step amplified the risk because it mutates ADJACENT bracket cells
+// (the next-round match), so a concurrent save with a stale view
+// could clobber another operator's propagation too.
 func (e *Engine) recordBracketMatchResult(compId string, matchId string, result *state.MatchResult) error {
-	bracket, err := e.store.LoadBracket(compId)
-	if err != nil {
-		return err
-	}
-	if bracket == nil {
-		return notFoundErrorf("bracket not found for competition %s", compId)
-	}
+	return e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
+		if bracket == nil {
+			return notFoundErrorf("bracket not found for competition %s", compId)
+		}
 
-	found := false
-	for rIdx, round := range bracket.Rounds {
-		for mIdx, m := range round {
-			if m.ID == matchId {
-				bracket.Rounds[rIdx][mIdx].Winner = result.Winner
-				bracket.Rounds[rIdx][mIdx].Status = state.MatchStatusCompleted
-				bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
-				bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
-				// Echo the persisted scheduling fields back into the result so the
-				// caller (and SSE broadcast) sees the full, correct match state
-				// rather than the empty Court/ScheduledAt the scoring UI sends.
-				if result.Court == "" {
-					result.Court = m.Court
-				}
-				if result.ScheduledAt == "" {
-					result.ScheduledAt = m.ScheduledAt
-				}
-				found = true
+		found := false
+		for rIdx, round := range bracket.Rounds {
+			for mIdx, m := range round {
+				if m.ID == matchId {
+					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
+					bracket.Rounds[rIdx][mIdx].Status = state.MatchStatusCompleted
+					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
+					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
+					// Echo the persisted scheduling fields back into the result so the
+					// caller (and SSE broadcast) sees the full, correct match state
+					// rather than the empty Court/ScheduledAt the scoring UI sends.
+					if result.Court == "" {
+						result.Court = m.Court
+					}
+					if result.ScheduledAt == "" {
+						result.ScheduledAt = m.ScheduledAt
+					}
+					found = true
 
-				e.propagateBracketWinner(bracket, rIdx, mIdx)
+					e.propagateBracketWinner(bracket, rIdx, mIdx)
+					break
+				}
+			}
+			if found {
 				break
 			}
 		}
-		if found {
-			break
+
+		if !found {
+			return notFoundErrorf("bracket match %s not found", matchId)
 		}
-	}
-
-	if !found {
-		return notFoundErrorf("bracket match %s not found", matchId)
-	}
-
-	return e.store.SaveBracket(compId, bracket)
+		return nil
+	})
 }
 
 func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) {

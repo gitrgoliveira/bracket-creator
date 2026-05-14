@@ -29,6 +29,50 @@ const AdminPools = window.AdminPools;
 const AdminScoreEditor = window.AdminScoreEditor;
 const AdminExport = window.AdminExport;
 
+// Pure result-builder for AdminBracket.recordWinner. Captures the schema
+// for a completed-ippon result so it's unit-testable and can't drift
+// from the canonical shape that admin_scoring_modal.jsx's buildPatch
+// produces (which the backend persists via /recordScore).
+//
+// Inputs:
+//   winnerSide:    "a" | "b"
+//   sideA, sideB:  match.sideA / match.sideB (each {id, name, ...})
+//   winnerIppons:  array of letter codes ("M","K","D","T","H") the
+//                  winning side scored. Empty/missing → ["M"] (the
+//                  legacy tap-mode contract: a single ippon, "M").
+//   loserIppons:   array of letter codes the losing side scored.
+//                  Empty by default; tap/card modes don't expose
+//                  loser points.
+//
+// Output: the result object POST'd to /recordScore.
+//
+// Copilot finding (PR #103): the scoreboard mode supports 2-ippon wins
+// but the previous recordWinner only ever recorded a 1-ippon result
+// (winnerPts=1, single-letter ippons array). A 2-ippon match was
+// silently truncated to 1 ippon. Fix lifts winnerPts/ipponsA/ipponsB
+// from the full array; loserIppons is now first-class too so a 2–1
+// win records the loser's ippon instead of dropping it.
+//
+// Exported for vitest at __tests__/admin_competition.test.jsx.
+function buildLiveIpponResult(winnerSide, sideA, sideB, winnerIppons, loserIppons) {
+  const winner = winnerSide === "a" ? sideA : sideB;
+  const winnerLetters = (winnerIppons && winnerIppons.length > 0) ? winnerIppons : ["M"];
+  const loserLetters = loserIppons || [];
+  return {
+    winner,
+    status: "completed",
+    ipponsA: winnerSide === "a" ? winnerLetters : loserLetters,
+    ipponsB: winnerSide === "b" ? winnerLetters : loserLetters,
+    score: {
+      type: "ippon",
+      winnerPts: winnerLetters.length,
+      loserPts: loserLetters.length,
+      ippons: winnerLetters,
+      fouls: { a: 0, b: 0 },
+    },
+  };
+}
+
 const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecord, onOverride }) => {
   const [mode, setMode] = useStateA("tap");
   const [aPoints, setAPoints] = useStateA([]);
@@ -89,12 +133,12 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
         <div className="score-card">
           <div className="score-side score-side--white">
             <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div><div className="score-side__dojo">{b.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("b", "hantei")}>Hantei</button></div>
+            <div className="score-side__buttons"><button className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", ["M"])}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("b", "hantei")}>Hantei</button></div>
           </div>
           <div className="score-vs">VS</div>
           <div className="score-side score-side--red">
             <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div><div className="score-side__dojo">{a.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", "M")}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("a", "hantei")}>Hantei</button></div>
+            <div className="score-side__buttons"><button className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", ["M"])}>Win (Ippon)</button><button className="btn btn--sm" onClick={() => onRecord("a", "hantei")}>Hantei</button></div>
           </div>
         </div>
       )}
@@ -121,12 +165,19 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
         const bWins = bPoints.length > aPoints.length;
         const hasWinner = aWins || bWins;
         const isTied = !hasWinner && (aPoints.length > 0 || bPoints.length > 0);
+        // Submit the FULL points arrays — pre-fix, only aPoints[0]/bPoints[0]
+        // (a single letter) was passed and recordWinner hardcoded winnerPts=1,
+        // so a 2-ippon win was silently truncated to 1 ippon. recordWinner now
+        // builds winnerPts / ipponsA / ipponsB from the array lengths via
+        // buildLiveIpponResult.
+        const winnerArr = aWins ? aPoints : bPoints;
+        const loserArr = aWins ? bPoints : aPoints;
         return (
           <div className="live-panel__actions">
             <button
               className="btn btn--primary btn--full"
               disabled={!hasWinner}
-              onClick={() => onRecord(aWins ? "a" : "b", "ippon", aWins ? aPoints[0] : bPoints[0])}
+              onClick={() => onRecord(aWins ? "a" : "b", "ippon", winnerArr, loserArr)}
             >Submit result</button>
             {isTied && (
               <div className="field__hint" style={{ textAlign: "center", marginTop: 6 }}>
@@ -491,19 +542,17 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
     }
     return null;
   };
-  const recordWinner = (winnerSide, _mode = "ippon", ipponLetter = null) => {
+  // winnerIppons/loserIppons are arrays of letter codes. Tap mode (no
+  // detail) and card mode (single explicit letter) pass a single-element
+  // array; scoreboard mode passes the full points it accumulated for
+  // each side. See buildLiveIpponResult above for the schema rationale.
+  const recordWinner = (winnerSide, _mode = "ippon", winnerIppons = ["M"], loserIppons = []) => {
     const m = findSelectedMatch();
     if (!m) return;
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     if (!winner) return;
 
-    const result = {
-      winner: winner,
-      status: "completed",
-      ipponsA: winnerSide === "a" ? [ipponLetter || "M"] : [],
-      ipponsB: winnerSide === "b" ? [ipponLetter || "M"] : [],
-      score: { type: "ippon", winnerPts: 1, loserPts: 0, ippons: [ipponLetter || "M"], fouls: { a: 0, b: 0 } },
-    };
+    const result = buildLiveIpponResult(winnerSide, m.sideA, m.sideB, winnerIppons, loserIppons);
 
     // Don't call onUpdate(c) on success — AdminApp's onUpdate is the
     // competition-config PUT, which would overwrite server state with
@@ -694,3 +743,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 }
 
 window.AdminCompetition = AdminCompetition;
+
+// ES export for the vitest suite — pure helpers only. Components stay
+// behind the window.* pattern to match the rest of admin_*.jsx.
+export { buildLiveIpponResult };

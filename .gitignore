@@ -58,3 +58,7 @@ specs/*
 tournament-data*
 browser-test*
 bracket-creator-webapp*
+.claude/skills
+.github/agents
+.github/prompts
+.gemini*

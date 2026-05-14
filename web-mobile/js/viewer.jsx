@@ -8,7 +8,14 @@ const formatDate = window.formatDate;
 // Replaces the local `m.sideA && m.sideB` shorthand that treated the
 // `{id:"",name:""}` placeholder from normalizeMatch as a real side —
 // see admin_helpers.jsx for the full bug shape and rationale.
-const hasBothSides = window.hasBothSides;
+//
+// Wrapped as a lazy callable rather than `const x = window.hasBothSides`
+// because index.html loads viewer.js BEFORE admin_helpers.js (viewer
+// is reachable pre-auth; admin helpers load later). At module-eval
+// time, window.hasBothSides is undefined; by the time any React render
+// runs, admin_helpers.js has executed and set the global, so deferring
+// the lookup to call time is safe.
+const hasBothSides = (m) => window.hasBothSides(m);
 
 function competitionKindLabel(c) {
   // c may be a kind string for backward-compat or a competition obj

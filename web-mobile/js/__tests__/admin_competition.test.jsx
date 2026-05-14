@@ -288,3 +288,61 @@ describe('loadScoreboardPoints', () => {
     });
   });
 });
+
+// ── H3 regression: AdminSettings useEffect deps completeness ──
+//
+// AdminSettings syncs server-pushed changes into local state via a
+// useEffect whose deps list every c.* field rendered in the JSX (via
+// `local.*`). A missing dep means an SSE update to that field won't
+// propagate — the user sees stale data AND the next save of any other
+// field clobbers the server value (saveNow spreads { ...c, ...next }).
+//
+// This structural test reads the source file and verifies the deps array
+// contains every c.* field that the JSX accesses through `local.*`.
+// It replaces a rendering test (which would need @testing-library/react,
+// not available in the current vitest stub-React setup).
+//
+// If you add a new `local.foo` reference in AdminSettings' JSX, add
+// `c.foo` to the useEffect deps AND add "foo" to EXPECTED_DEPS below.
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
+  // Fields rendered via `local.*` in AdminSettings' JSX or consumed by
+  // saveNow's `{ ...c, ...next }` spread. Each must appear as `c.<field>`
+  // in the useEffect deps array so SSE-driven changes propagate.
+  const EXPECTED_DEPS = [
+    'id', 'name', 'date', 'startTime',
+    'poolSize', 'poolWinners', 'poolSizeMode',
+    'courts', 'roundRobin', 'withZekkenName',
+    'teamSize', 'numberPrefix',
+    'format', 'kind',
+  ];
+
+  it('useEffect deps include every field rendered via local.*', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'admin_competition.jsx'),
+      'utf8'
+    );
+
+    // Find the sync-to-local useEffect. It's the one whose body contains
+    // `{ ...prev, ...c }` — the distinctive merge shape. Extract the deps
+    // array from the closing `}, [c.id, c.name, ...])`  line.
+    const depsMatch = src.match(
+      /\{ \.\.\.prev, \.\.\.c \}[\s\S]*?\}, \[([^\]]+)\]\)/
+    );
+    expect(depsMatch).not.toBeNull();
+
+    const depsLine = depsMatch[1];
+    for (const field of EXPECTED_DEPS) {
+      const pattern = `c.${field}`;
+      expect(
+        depsLine.includes(pattern),
+        `expected deps to include ${pattern} — if you added local.${field} to the JSX, add c.${field} to the useEffect deps`
+      ).toBe(true);
+    }
+  });
+});

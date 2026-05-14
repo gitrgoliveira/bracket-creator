@@ -301,12 +301,20 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
+  // Sync server-driven changes into local state (SSE → AdminApp → c prop).
+  // IMPORTANT: deps MUST include EVERY c.* field that appears in the JSX
+  // below (via `local.*`) or that saveNow spreads into the PUT payload
+  // via `{ ...c, ...next }`. A missing dep means an SSE-pushed change to
+  // that field won't propagate into `local`; the user sees stale data AND
+  // the next save of any other field clobbers the server value with the
+  // stale local. The debounceRef gate skips the sync while a user edit
+  // is in-flight so the debounced save doesn't race with the SSE update.
   useEffectA(() => {
     setLocal(prev => {
       if (debounceRef.current) return prev;
       return { ...prev, ...c };
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind]);
 
   const saveNow = (next) => {
     // Date validation here is intentionally NOT routed through

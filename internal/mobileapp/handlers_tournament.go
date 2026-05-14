@@ -1,12 +1,21 @@
 package mobileapp
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// errPasswordRequired is the sentinel the PUT /tournament transform
+// returns when the desired Password is empty AND the stored Password
+// is also empty (or no record exists yet). It propagates back through
+// UpdateTournamentChanged unchanged so the handler can map it to a
+// 400 response. Using a typed sentinel rather than an inline error
+// keeps the handler's errors.Is check stable across refactors.
+var errPasswordRequired = errors.New("tournament password is required")
 
 func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
 	r.GET("/tournament", func(c *gin.Context) {
@@ -60,27 +69,41 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// `password: pass || undefined` (admin_setup.jsx:89) so an
 		// admin who edits the name/venue without changing the password
 		// sends a JSON body with the password field omitted — Go's
-		// ShouldBindJSON then leaves t.Password == "". Without this
+		// ShouldBindJSON then leaves t.Password == "". Without the
 		// preserve step, that save would clobber the stored password
 		// with "", and AuthMiddleware's `password != t.Password` check
 		// would then vacuously pass for an empty `X-Tournament-Password`
 		// header — exposing every /api/* endpoint unauthenticated.
-		if t.Password == "" {
-			if existing, err := store.LoadTournament(); err == nil && existing != nil {
-				t.Password = existing.Password
+		//
+		// The load + preserve + save sequence runs under the store's
+		// write lock via UpdateTournamentChanged. The earlier
+		// implementation (separate LoadTournament + SaveTournamentChanged
+		// calls) had a TOCTOU window: two concurrent PUTs, one with
+		// empty Password (intent: keep) and one with a new password
+		// (intent: change), could race so that the empty-password PUT's
+		// late save overwrote the change-password PUT's earlier save —
+		// silently losing the password change. The atomic primitive
+		// closes that window.
+		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
+			if desired.Password == "" && current != nil {
+				desired.Password = current.Password
 			}
-		}
-		// Defense-in-depth: if after the preserve step the password is
-		// STILL empty (legacy state from a pre-fix install, or a fresh
-		// PUT against a never-initialized tournament), reject. An
-		// empty stored Password is the exact precondition for the
-		// AuthMiddleware vacuous-pass scenario described above.
-		if t.Password == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})
+			// Defense-in-depth: if after the preserve step the password
+			// is STILL empty (legacy state from a pre-fix install, or a
+			// fresh PUT against a never-initialized tournament), reject.
+			// An empty stored Password is the exact precondition for the
+			// AuthMiddleware vacuous-pass scenario described above
+			// (and now also blocked at the middleware itself — see
+			// middleware.go).
+			if desired.Password == "" {
+				return errPasswordRequired
+			}
+			return nil
+		})
+		if errors.Is(err, errPasswordRequired) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errPasswordRequired.Error()})
 			return
 		}
-
-		changed, err := store.SaveTournamentChanged(&t)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

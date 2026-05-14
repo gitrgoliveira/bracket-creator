@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -265,6 +266,94 @@ func TestTournamentHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code,
 			"PUT with empty Password against legacy empty-password tournament must reject")
 		assert.Contains(t, w.Body.String(), "tournament password is required")
+	}
+}
+
+// TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost pins the
+// TOCTOU fix in store.UpdateTournamentChanged. Pre-atomic-primitive,
+// the PUT handler called LoadTournament + SaveTournamentChanged
+// sequentially with no shared lock — two concurrent PUTs (one
+// preserving the password by sending "", one changing the password)
+// could race so the empty-password PUT's late save overwrote the
+// change-password PUT's earlier save, silently losing the password
+// change. With the atomic store primitive, the entire
+// load + preserve + save sequence runs under the store's write lock,
+// so the password-change intent always wins regardless of arrival
+// order.
+//
+// The test runs many iterations because a single-pass race window is
+// narrow even pre-fix (just the I/O time between LoadTournament
+// returning and SaveTournamentChanged starting). With the fix, every
+// iteration deterministically lands with Password == "new-secret-N"
+// (B's intent) regardless of scheduling.
+func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
+	const iterations = 20
+
+	for i := range iterations {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		initialPass := "initial-secret"
+		newPass := "new-secret"
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name:     "Concurrent Test",
+			Password: initialPass,
+			Courts:   []string{"A"},
+		}))
+
+		// PUT A: preserve-password intent (omits password by sending "")
+		bodyA, _ := json.Marshal(state.Tournament{
+			Name: "Concurrent Test", Venue: "Hall A", Password: "",
+		})
+		// PUT B: change-password intent
+		bodyB, _ := json.Marshal(state.Tournament{
+			Name: "Concurrent Test", Venue: "Hall B", Password: newPass,
+		})
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		// Run A and B in parallel. Even with the store-level lock,
+		// they could interleave at any granularity outside the
+		// critical section; the test is that B's password change is
+		// NEVER lost regardless of which interleaving wins.
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyA))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, "PUT A (preserve) should succeed; iter %d", i)
+		}()
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyB))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, "PUT B (change) should succeed; iter %d", i)
+		}()
+		wg.Wait()
+
+		// Both PUTs are done. The password-change intent (B) must win
+		// regardless of arrival order:
+		//   - If B's transaction won the lock first: stored = newPass,
+		//     then A's transaction loads current.Password = newPass,
+		//     preserves it, saves newPass + Hall A. Final: newPass + Hall A.
+		//   - If A's transaction won the lock first: stored = initialPass
+		//     + Hall A (preserved). Then B's transaction: current.Password
+		//     = initialPass, but desired.Password = newPass (no preserve
+		//     needed). Saves newPass + Hall B. Final: newPass + Hall B.
+		// Either way, Password == newPass. The Venue can be either Hall A
+		// or Hall B — the test doesn't constrain that (standard
+		// last-write-wins for fields both PUTs explicitly set).
+		stored, err := store.LoadTournament()
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, newPass, stored.Password,
+			"iter %d: B's password-change intent must NEVER be lost — "+
+				"got %q, expected %q. (Pre-fix: A's late save with preserved "+
+				"initial password could clobber B's saved new password.)",
+			i, stored.Password, newPass)
 	}
 }
 

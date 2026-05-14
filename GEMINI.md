@@ -1,5 +1,10 @@
 # GEMINI.md
 
+## Governance
+
+Before implementing features or making architectural decisions, read the project constitution:
+**`.specify/memory/constitution.md`** — defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with.
+
 ## Project Overview
 
 `bracket-creator` is a specialized CLI and Web application designed to generate tournament brackets for Kendo competitions. It supports both straight knockout (Playoffs) and round-robin (Pools) formats, accommodating both individual and team matches.

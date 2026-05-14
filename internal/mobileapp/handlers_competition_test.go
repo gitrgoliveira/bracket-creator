@@ -135,6 +135,59 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
+	t.Run("Override Rank Trims Whitespace From Player Name", func(t *testing.T) {
+		// Padded names must be stored under the trimmed key so subsequent
+		// lookups (which use the canonical participant name) match.
+		comp := state.Competition{ID: "rank-trim-comp"}
+		store.SaveCompetition(&comp)
+
+		reqBody, _ := json.Marshal(map[string]any{
+			"playerName": "  Player Trim  ",
+			"rank":       7,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rank-trim-comp/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		// Read the persisted override back; key must be the trimmed name.
+		overrides, err := store.LoadOverrides("rank-trim-comp")
+		require.NoError(t, err)
+		require.NotNil(t, overrides)
+		_, hasTrimmed := overrides.PoolRanks["pool-1"]["Player Trim"]
+		assert.True(t, hasTrimmed, "rank override should be keyed under trimmed name")
+		_, hasPadded := overrides.PoolRanks["pool-1"]["  Player Trim  "]
+		assert.False(t, hasPadded, "rank override should not be keyed under padded name")
+	})
+
+	t.Run("Override Rank Rejects Invalid Input", func(t *testing.T) {
+		comp := state.Competition{ID: "rank-bad-comp"}
+		store.SaveCompetition(&comp)
+
+		cases := []struct {
+			name string
+			body map[string]any
+		}{
+			{"empty player name", map[string]any{"playerName": "", "rank": 1}},
+			{"whitespace-only player name", map[string]any{"playerName": "   ", "rank": 1}},
+			{"tab-only player name", map[string]any{"playerName": "\t\t", "rank": 1}},
+			{"zero rank", map[string]any{"playerName": "Player 1", "rank": 0}},
+			{"negative rank", map[string]any{"playerName": "Player 1", "rank": -3}},
+			{"absurdly large rank", map[string]any{"playerName": "Player 1", "rank": 99999}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				reqBody, _ := json.Marshal(tc.body)
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequest("PUT", "/api/competitions/rank-bad-comp/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+				req.Header.Set("Content-Type", "application/json")
+				r.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusBadRequest, w.Code)
+			})
+		}
+	})
+
 	t.Run("Save Schedule", func(t *testing.T) {
 		comp := state.Competition{ID: "sched-comp"}
 		store.SaveCompetition(&comp)
@@ -196,5 +249,43 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "already exists")
+	})
+
+	// Deep-review finding: handlers trim comp.Name but not comp.NumberPrefix.
+	// The frontend SETTINGS edit path doesn't trim the prefix before sending,
+	// so "  A  " would persist and produce participant numbers like "  A1".
+	// Fix is one TrimSpace line per handler; these tests pin the contract on
+	// both POST (create) and PUT (update) paths so a future refactor can't
+	// silently drop one half.
+	t.Run("NumberPrefix Trimmed On Create", func(t *testing.T) {
+		comp := state.Competition{ID: "prefix-create", Name: "Prefix Create", NumberPrefix: "  A  "}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusCreated, w.Code)
+		stored, err := store.LoadCompetition("prefix-create")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "A", stored.NumberPrefix, "NumberPrefix should be trimmed on POST")
+	})
+
+	t.Run("NumberPrefix Trimmed On Update", func(t *testing.T) {
+		// Seed with a clean prefix, then update via PUT with padded value.
+		seed := state.Competition{ID: "prefix-update", Name: "Prefix Update", NumberPrefix: "B"}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		update := state.Competition{ID: "prefix-update", Name: "Prefix Update", NumberPrefix: "  C  "}
+		body, _ := json.Marshal(update)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/prefix-update", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		stored, err := store.LoadCompetition("prefix-update")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "C", stored.NumberPrefix, "NumberPrefix should be trimmed on PUT")
 	})
 }

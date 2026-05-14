@@ -111,6 +111,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		comp.Name = strings.TrimSpace(comp.Name)
+		// Trim NumberPrefix too so untrimmed input from the SETTINGS edit
+		// path can't land as "  A" / participants becoming "  A1" / etc.
+		// Mirrors the comp.Name trim above (and the frontend trim in
+		// admin_competition.jsx saveNow + admin_setup.jsx create).
+		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
 		if err := checkUniqueCompName(store, comp.Name, ""); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -156,6 +161,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		comp.ID = id // ensure ID matches URL
 		comp.Name = strings.TrimSpace(comp.Name)
+		// See POST handler comment — same trim is needed here so the
+		// SETTINGS edit path can't persist whitespace-padded prefixes.
+		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
 
 		if err := checkUniqueCompName(store, comp.Name, id); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -371,8 +379,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// Defense-in-depth: the JS client already guards isNaN/<=0, but a stale
+		// or hand-crafted request could persist garbage rank values. Reject
+		// non-positive ranks (and anything implausibly large — no real pool
+		// has 1000+ participants). Trim whitespace from the player name so
+		// "   " doesn't slip through the empty check and so padded names
+		// don't create keys that miss later lookups.
+		playerName := strings.TrimSpace(req.PlayerName)
+		if playerName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "playerName is required"})
+			return
+		}
+		if req.Rank <= 0 || req.Rank > 1000 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer ≤ 1000"})
+			return
+		}
 
-		changed, err := store.SaveRankOverrideChanged(id, poolId, req.PlayerName, req.Rank)
+		changed, err := store.SaveRankOverrideChanged(id, poolId, playerName, req.Rank)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

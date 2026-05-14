@@ -11,7 +11,7 @@
   --ink: #1a1d24;
   --ink-2: #3a414e;
   --ink-3: #6b7280;
-  --ink-4: #9aa1ac;
+  --ink-4: #6c7480; /* 4.7:1 on white — was #9aa1ac (2.8:1) */
   --line: #e4e6eb;
   --line-2: #eef0f4;
   --bg: #f7f8fa;

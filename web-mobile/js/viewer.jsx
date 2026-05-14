@@ -16,6 +16,11 @@ const formatDate = window.formatDate;
 // runs, admin_helpers.js has executed and set the global, so deferring
 // the lookup to call time is safe.
 const hasBothSides = (m) => window.hasBothSides(m);
+// Lazy callable for the same load-order reason as hasBothSides above.
+// Canonical date format is DD-MM-YYYY, which doesn't lex-sort
+// chronologically — use compareDmy as the sort comparator everywhere
+// dates are ordered.
+const compareDmy = (a, b) => window.compareDmy(a, b);
 
 function competitionKindLabel(c) {
   const base = c.kind === "team" ? "Teams" : "Individual";
@@ -77,7 +82,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     });
     return map;
   }, [comps, t.date]);
-  const dates = Object.keys(compsByDate).sort();
+  const dates = Object.keys(compsByDate).sort(compareDmy);
 
   const [courtFilter, setCourtFilter] = useState("all");
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -925,7 +930,7 @@ function ScheduleViewer({ tournament, tweaks }) {
     const days = new Set();
     (tournament.competitions || []).forEach((c) => { if (c.date) days.add(c.date); });
     allMatches.forEach((m) => { if (m.date) days.add(m.date); });
-    const sorted = Array.from(days).sort();
+    const sorted = Array.from(days).sort(compareDmy);
     return sorted.length > 0 ? sorted : [""];
   }, [tournament, allMatches]);
 

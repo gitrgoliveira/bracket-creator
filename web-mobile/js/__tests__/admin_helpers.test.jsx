@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -259,6 +259,64 @@ describe('dmyToIso / isoToDmy', () => {
     expect(isoToDmy("")).toBe("");
     expect(isoToDmy(null)).toBe("");
     expect(isoToDmy("13-05-2026")).toBe(""); // DMY not accepted by this direction
+  });
+});
+
+describe('compareDmy', () => {
+  // Deep-review finding: JS's default `.sort()` does lex compare on
+  // strings. That happens to match chronological order for ISO
+  // YYYY-MM-DD (the format we used before the cleanup) but NOT for the
+  // canonical DMY DD-MM-YYYY: "01-06-2026" (June 1) sorts before
+  // "12-05-2026" (May 12) lexically. This caused the multi-day viewer
+  // tab strip and the home-page day grouping to show months
+  // out-of-order whenever competitions crossed a month boundary.
+
+  it('orders DMY dates chronologically (cross-month)', () => {
+    // The bug case: May 12 comes before June 1 chronologically; lex
+    // compare gets it wrong. compareDmy must get it right.
+    const sorted = ["01-06-2026", "12-05-2026"].sort(compareDmy);
+    expect(sorted).toEqual(["12-05-2026", "01-06-2026"]);
+  });
+
+  it('orders DMY dates chronologically (cross-year)', () => {
+    const sorted = ["01-01-2027", "31-12-2026"].sort(compareDmy);
+    expect(sorted).toEqual(["31-12-2026", "01-01-2027"]);
+  });
+
+  it('orders DMY dates chronologically (same year, mixed months)', () => {
+    const sorted = ["15-03-2026", "01-01-2026", "31-12-2026", "15-07-2026"].sort(compareDmy);
+    expect(sorted).toEqual([
+      "01-01-2026", "15-03-2026", "15-07-2026", "31-12-2026",
+    ]);
+  });
+
+  it('puts empty strings first (lexically smallest)', () => {
+    const sorted = ["12-05-2026", "", "01-06-2026"].sort(compareDmy);
+    expect(sorted).toEqual(["", "12-05-2026", "01-06-2026"]);
+  });
+
+  it('falls back to string compare for non-DMY values', () => {
+    // Defensive: a stray non-DMY string (shouldn't happen post-validation
+    // but we don't want compareDmy to throw on it) sorts by raw value.
+    const sorted = ["zzz", "12-05-2026", "aaa"].sort(compareDmy);
+    // The two non-DMY entries fall through toKey unchanged; the DMY
+    // entry maps to "2026-05-12". Lex order: "12-05-2026"→"2026-05-12",
+    // "aaa", "zzz" → ["2026-05-12", "aaa", "zzz"]. Map back: the DMY
+    // entry stays as the input "12-05-2026".
+    expect(sorted[0]).toBe("12-05-2026");
+    expect(sorted[1]).toBe("aaa");
+    expect(sorted[2]).toBe("zzz");
+  });
+
+  it('is a stable comparator (returns 0 for equal inputs)', () => {
+    expect(compareDmy("12-05-2026", "12-05-2026")).toBe(0);
+    expect(compareDmy("", "")).toBe(0);
+  });
+
+  it('returns negative/positive/zero per the comparator contract', () => {
+    expect(compareDmy("12-05-2026", "01-06-2026") < 0).toBe(true);  // earlier
+    expect(compareDmy("01-06-2026", "12-05-2026") > 0).toBe(true);  // later
+    expect(compareDmy("12-05-2026", "12-05-2026")).toBe(0);          // equal
   });
 });
 

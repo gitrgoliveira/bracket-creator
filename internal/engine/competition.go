@@ -130,6 +130,29 @@ func (e *Engine) StartCompetition(id string) error {
 		return validationErrorf("competition %s already started", id)
 	}
 
+	// Snapshot the loaded config BEFORE the pipeline mutates anything.
+	// The atomic-commit transform below compares `current` (freshly
+	// reloaded under the lock) to THESE snapshots, not to the
+	// post-pipeline `comp`. Why: the pipeline applies an auto-default
+	// to comp.TeamSize (0 → 5 for team competitions) below. Comparing
+	// current.TeamSize to comp.TeamSize would falsely report "admin
+	// changed TeamSize during start" whenever the default was applied.
+	// Comparing current.TeamSize to the SNAPSHOT (loaded value before
+	// the default) correctly distinguishes "admin's concurrent change"
+	// from "our pipeline's default". Same shape for any future field
+	// the pipeline mutates pre-commit.
+	loadedFormat := comp.Format
+	loadedPoolSize := comp.PoolSize
+	loadedPoolSizeMode := comp.PoolSizeMode
+	loadedNumberPrefix := comp.NumberPrefix
+	loadedStartTime := comp.StartTime
+	loadedRoundRobin := comp.RoundRobin
+	loadedKind := comp.Kind
+	loadedWithZekken := comp.WithZekkenName
+	loadedCourts := append([]string(nil), comp.Courts...)
+	loadedTeamSize := comp.TeamSize
+	loadedPoolWinners := comp.PoolWinners
+
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo
 	}
@@ -209,21 +232,43 @@ func (e *Engine) StartCompetition(id string) error {
 		if current.Status != state.CompStatusSetup && current.Status != "" && current.Status != state.CompStatusPending {
 			return nil, validationErrorf("competition %s started concurrently by another writer", id)
 		}
-		// Generation-relevant fields must match the snapshot we
-		// generated from. courtsEqual handles the slice comparison.
-		if current.Format != comp.Format ||
-			current.PoolSize != comp.PoolSize ||
-			current.PoolWinners != comp.PoolWinners ||
-			current.PoolSizeMode != comp.PoolSizeMode ||
-			current.Kind != comp.Kind ||
-			current.WithZekkenName != comp.WithZekkenName ||
-			!courtsEqual(current.Courts, comp.Courts) {
-			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolWinners/PoolSizeMode/Kind/WithZekkenName/Courts); regenerate by retrying", id)
+		// Generation-relevant fields must match the SNAPSHOT we
+		// generated from (loaded* values captured before the pipeline
+		// mutated comp.TeamSize). The full list mirrors what
+		// generatePools / generatePlayoffs actually read:
+		//   - Format (decides which generator)
+		//   - PoolSize, PoolSizeMode, RoundRobin (pools structure)
+		//   - NumberPrefix (player numbering in both generators)
+		//   - StartTime (initial ScheduledAt for generated matches)
+		//   - Courts (court labels assigned to generated matches)
+		//   - Kind / WithZekkenName (participants loading)
+		// TeamSize is also checked here using the SNAPSHOT loadedTeamSize
+		// (NOT the pipeline-mutated comp.TeamSize) so the auto-default
+		// (0 → 5 for team comps) isn't falsely flagged as drift.
+		// PoolWinners is included even though generation doesn't read
+		// it directly — settings drift in this field also signals the
+		// admin was editing during start, which is the broader concern
+		// this guard surfaces.
+		if current.Format != loadedFormat ||
+			current.PoolSize != loadedPoolSize ||
+			current.PoolWinners != loadedPoolWinners ||
+			current.PoolSizeMode != loadedPoolSizeMode ||
+			current.NumberPrefix != loadedNumberPrefix ||
+			current.StartTime != loadedStartTime ||
+			current.RoundRobin != loadedRoundRobin ||
+			current.Kind != loadedKind ||
+			current.WithZekkenName != loadedWithZekken ||
+			current.TeamSize != loadedTeamSize ||
+			!courtsEqual(current.Courts, loadedCourts) {
+			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolWinners/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/TeamSize/Courts); regenerate by retrying", id)
 		}
 		// Copy our pipeline's modifications onto the freshly-read
 		// `current`. This preserves any unrelated fields that may
 		// have been changed by other writers (Name, Date, Venue,
 		// etc.) between our outer Load and this atomic commit.
+		// Note: TeamSize is set from comp.TeamSize (which may carry
+		// the auto-default we applied above) since the validation
+		// already confirmed admin didn't concurrently change it.
 		current.TeamSize = comp.TeamSize
 		current.Status = comp.Status
 		current.HasParticipantIDs = comp.HasParticipantIDs

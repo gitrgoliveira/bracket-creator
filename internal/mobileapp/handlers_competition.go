@@ -141,6 +141,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Cross-file guard symmetry with POST/PUT /tournament: same
+		// label + cap check via validateCompetitionCourts (looser than
+		// the tournament version — empty courts is allowed because the
+		// engine applies a 1-court default and the import handler has
+		// the same fallback). Defense against direct API callers
+		// sending multi-character labels.
+		if err := validateCompetitionCourts(comp.Courts); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+			return
+		}
+
 		// Derive ID from name BEFORE acquiring the rename lock — the ID
 		// derivation has no concurrency concern (pure function of Name)
 		// and an empty derived ID should fast-fail without holding the
@@ -254,6 +265,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// and older cached clients can't land a blank-name PUT.
 		if comp.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
+			return
+		}
+
+		// Cross-file guard symmetry with POST handler + POST/PUT /tournament:
+		// validateCompetitionCourts label + cap check (empty allowed
+		// because the engine applies a 1-court default for competitions).
+		if err := validateCompetitionCourts(comp.Courts); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 			return
 		}
 

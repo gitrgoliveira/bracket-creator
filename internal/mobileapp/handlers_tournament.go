@@ -11,17 +11,18 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// validateCourts checks that t.Courts has between 1 and helper.MaxCourts
-// (26, the A–Z labelling cap) entries AND that each label is a single
-// non-empty character. The spec at specs/openapi.yaml documents both
-// invariants; this is the server-side enforcement so direct API
-// callers can't bypass the admin UI's per-form checks (admin_setup.jsx
-// AdminEditTournament caps at 26 client-side, but a hand-crafted POST
-// /tournament with 50 courts or multi-character labels was previously
-// persisted as-is).
-func validateCourts(courts []string) error {
-	if err := helper.ValidateCourts(len(courts)); err != nil {
-		return err
+// validateCourtLabels checks that each entry in courts is a non-empty
+// single character (the spec-documented format — see Tournament.courts
+// in specs/openapi.yaml). Used as a shared check for both tournament
+// and competition courts. Caller decides whether empty courts is
+// acceptable: validateCourts rejects empty (tournament must have at
+// least one court to run anything); validateCompetitionCourts accepts
+// empty (the engine applies a 1-court default for competitions whose
+// Courts list is empty, allowing tournament-wide courts to be the
+// implicit default).
+func validateCourtLabels(courts []string) error {
+	if len(courts) > helper.MaxCourts {
+		return fmt.Errorf("courts must be <= %d (Shiaijo are labelled A–Z), got %d", helper.MaxCourts, len(courts))
 	}
 	for i, label := range courts {
 		if label == "" {
@@ -36,6 +37,31 @@ func validateCourts(courts []string) error {
 		}
 	}
 	return nil
+}
+
+// validateCourts is the strict tournament-level check: between 1 and
+// helper.MaxCourts (26, the A–Z labelling cap) entries, each a single
+// non-empty character. Direct API callers can't bypass the admin UI's
+// per-form checks (admin_setup.jsx AdminEditTournament caps at 26
+// client-side, but a hand-crafted POST /tournament with 50 courts or
+// multi-character labels was previously persisted as-is).
+func validateCourts(courts []string) error {
+	if err := helper.ValidateCourts(len(courts)); err != nil {
+		return err
+	}
+	return validateCourtLabels(courts)
+}
+
+// validateCompetitionCourts is the looser competition-level check:
+// 0..helper.MaxCourts entries, each (when present) a single non-empty
+// character. Empty is allowed because the engine defaults a
+// competition with no Courts to 1 court — this matches the existing
+// import handler's `if len(comp.Courts) == 0 { comp.Courts = []string{"A"} }`
+// fallback semantics and the engine generators' `if numCourts == 0 { numCourts = 1 }`
+// behavior. The label and cap invariants from validateCourtLabels
+// still apply when courts are explicitly provided.
+func validateCompetitionCourts(courts []string) error {
+	return validateCourtLabels(courts)
 }
 
 // errPasswordRequired is the sentinel the PUT /tournament transform

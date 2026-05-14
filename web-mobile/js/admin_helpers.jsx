@@ -115,9 +115,6 @@ function validateAndNormalizeDate(date) {
 function isValidDate(date) {
   return validateAndNormalizeDate(date).error === null;
 }
-// Backward-compat alias for any consumer still using the old name during
-// this PR's transition. Drop in a follow-up.
-const isValidISODate = isValidDate;
 
 // Pure decision logic for "user edited a <input type='number'> bound to a
 // debounce-saved field" (e.g. AdminSettings.teamSize/poolSize/poolWinners).
@@ -210,7 +207,6 @@ if (typeof window !== "undefined") {
   window.dmyToIso = dmyToIso;
   window.isoToDmy = isoToDmy;
   window.isValidDate = isValidDate;
-  window.isValidISODate = isValidISODate; // back-compat alias
   window.validateAndNormalizeDate = validateAndNormalizeDate;
   window.decideNumericUpdate = decideNumericUpdate;
   window.DATE_ERR_INVALID_FORMAT = DATE_ERR_INVALID_FORMAT;
@@ -230,7 +226,6 @@ export {
   dmyToIso,
   isoToDmy,
   isValidDate,
-  isValidISODate, // back-compat alias
   validateAndNormalizeDate,
   decideNumericUpdate,
   DATE_ERR_INVALID_FORMAT,

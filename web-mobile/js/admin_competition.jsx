@@ -36,7 +36,7 @@ const AdminExport = window.AdminExport;
 //   sideA, sideB:  match.sideA / match.sideB (each {id, name, ...})
 //   winnerIppons:  array of letter codes ("M","K","D","T","H") the
 //                  winning side scored. Empty/missing → ["M"] (the
-//                  legacy tap-mode contract: a single ippon, "M").
+//                  tap-mode default: a single unspecified ippon).
 //   loserIppons:   array of letter codes the losing side scored.
 //                  Empty by default; tap/card modes don't expose
 //                  loser points.

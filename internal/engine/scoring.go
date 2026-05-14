@@ -455,10 +455,8 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 // update (also under the same lock via the atomic primitives) can't
 // land between our load and save and have its mutation clobbered.
 //
-// Pre-fix, this used the legacy LoadBracket + Save pattern that the
-// rest of the scoring path was migrated off in commit 0b86c73 — same
-// TOCTOU as the bug fix that motivated UpdateBracket in the first
-// place.
+// Uses the same UpdateBracket atomic primitive as the rest of the
+// scoring path to avoid the LoadBracket + mutate + Save TOCTOU window.
 func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string) error {
 	err := e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		if bracket == nil {

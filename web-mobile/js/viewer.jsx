@@ -18,8 +18,6 @@ const formatDate = window.formatDate;
 const hasBothSides = (m) => window.hasBothSides(m);
 
 function competitionKindLabel(c) {
-  // c may be a kind string for backward-compat or a competition obj
-  if (typeof c === "string") return c === "team" ? "Teams" : "Individual";
   const base = c.kind === "team" ? "Teams" : "Individual";
   if (c.gender === "M") return `${base} · Men`;
   if (c.gender === "F") return `${base} · Women`;

@@ -281,10 +281,11 @@ paths:
         **Password preserve semantics**: when the request body omits `password` or sends an
         empty string, the server preserves the currently-stored password. This matches the
         admin UI's `password: pass || undefined` pattern ("leave blank to keep current").
-        If after the preserve step the password is STILL empty (legacy on-disk state from
-        before this rule was enforced), the request is rejected with 400
-        (`tournament password is required`) to force the admin to set a password rather than
-        silently allow the empty-stored-password vacuous-pass scenario.
+        If after the preserve step the password is STILL empty (operator manually edited
+        `tournament.md`, or a fresh PUT against a never-initialized tournament), the
+        request is rejected with 400 (`tournament password is required`) to force the
+        admin to set a password rather than silently allow the empty-stored-password
+        vacuous-pass scenario.
       security:
         - TournamentPassword: []
       requestBody:
@@ -1105,20 +1106,21 @@ components:
         (exact-string match; no trimming applied to either side).
 
         Defense-in-depth: if the stored tournament password is somehow
-        empty (e.g. legacy file from before the POST guard was added),
-        AuthMiddleware returns 403 (`tournament misconfigured: password
-        is not set`) for ALL requests rather than letting the
-        `header != stored` check vacuously pass for empty header.
+        empty (e.g. operator manually edited `tournament.md` to land
+        an empty `password:` field), AuthMiddleware returns 403
+        (`tournament misconfigured: password is not set`) for ALL
+        requests rather than letting the `header != stored` check
+        vacuously pass for empty header.
 
         Recovery from this state requires **out-of-band repair**: the
         bootstrap PUT/POST `/api/tournament` exception only applies
         when the loaded record is `nil` or matches the literal
         `Name == "New Tournament" && Password == ""` default — a
-        real-named legacy record with empty Password is locked out by
-        the 403 fail-closed branch. Operator must stop the server,
-        edit `tournament.md` to either delete it (forces fresh
-        bootstrap) or set a non-empty `password:` field in the YAML
-        front-matter, then restart.
+        real-named record with empty Password is locked out by the 403
+        fail-closed branch. Operator must stop the server, edit
+        `tournament.md` to either delete it (forces fresh bootstrap)
+        or set a non-empty `password:` field in the YAML front-matter,
+        then restart.
 
   parameters:
     CompetitionId:

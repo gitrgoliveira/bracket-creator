@@ -521,9 +521,15 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
       </div>
 
       {openMatch && (() => {
-        const openIdx = filtered.findIndex(m => `${m.compId}:${m.id}` === `${openMatch.compId}:${openMatch.id}`);
-        const prevMatch = openIdx > 0 ? filtered[openIdx - 1] : null;
-        const nextMatch = openIdx < filtered.length - 1 ? filtered[openIdx + 1] : null;
+        // Chained nav (Prev/Next/Finish+Start Next/←/→) must stay on the same
+        // shiaijo. Operators run matches per-court; jumping courts mid-flow
+        // skips the wrong matches. Unassigned matches scope to other
+        // unassigned matches so the behaviour is consistent.
+        const openCourt = openMatch.court || "";
+        const sameCourt = filtered.filter(m => (m.court || "") === openCourt);
+        const openIdx = sameCourt.findIndex(m => `${m.compId}:${m.id}` === `${openMatch.compId}:${openMatch.id}`);
+        const prevMatch = openIdx > 0 ? sameCourt[openIdx - 1] : null;
+        const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
         return (
           <ScoreEditorModal
             key={openMatch.compId + '-' + openMatch.id}

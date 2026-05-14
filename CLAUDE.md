@@ -123,8 +123,14 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 - Web UI changes (`web/index.html`) should be validated in a running browser, not just by reading diffs — use `make run`
 - Mobile app frontend changes (`web-mobile/`) require rebuilding the binary to take effect — the files are embedded at `go build` time via `//go:embed web-mobile/*` in `main.go`. Run `make run-mobile` which rebuilds automatically, or run `make go/build` then restart.
 - Duplicate participant names in the CSV are rejected up front by `helper.CheckDuplicateEntries`; the web handler surfaces these to the user
+- Chained match navigation in the admin score editor (Prev/Next buttons, Finish + Start Next, ←/→ keys) must stay on the current match's shiaijo — operators run matches per-court, so hopping courts mid-flow breaks the workflow. See `AdminScoreEditor` in `web-mobile/js/admin_schedule.jsx`: filter to `(m.court || "") === (openMatch.court || "")` so empty/undefined courts share one "unassigned" bucket.
 
 
 # Validation
 
 All changes must be validated with `make go/test` and inspection of the generated example files from `make examples`. Pay attention to page breaks and seeding. You can change the code of `scratch/inspect.go` or generate your own.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->

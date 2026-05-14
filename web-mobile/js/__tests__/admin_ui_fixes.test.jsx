@@ -172,3 +172,105 @@ describe('ScoreEditorModal dirty-state and dismiss guard', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+// --- Chained-nav court scoping ---
+// Mirrors the prev/next computation in AdminScoreEditor (see
+// admin_schedule.jsx near `const sameCourt = filtered.filter(...)`). Chained
+// nav (Prev/Next/Finish + Start Next/←/→) must stay on the current match's
+// shiaijo so operators don't hop courts mid-flow.
+function pickChainedMatches(filtered, openMatch) {
+  const openCourt = openMatch.court || "";
+  const sameCourt = filtered.filter(m => (m.court || "") === openCourt);
+  const key = m => `${m.compId}:${m.id}`;
+  const openIdx = sameCourt.findIndex(m => key(m) === key(openMatch));
+  const prev = openIdx > 0 ? sameCourt[openIdx - 1] : null;
+  const next = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+  return { prev, next };
+}
+
+describe('AdminScoreEditor chained-nav court scoping', () => {
+  const make = (id, court) => ({ compId: 'c', id, court });
+
+  it('picks the next match on the same court, skipping a different court in between', () => {
+    const filtered = [make('m1', 'A'), make('m2', 'B'), make('m3', 'A')];
+    const { prev, next } = pickChainedMatches(filtered, filtered[0]);
+    expect(prev).toBeNull();
+    expect(next?.id).toBe('m3');
+  });
+
+  it('picks the previous match on the same court', () => {
+    const filtered = [make('m1', 'A'), make('m2', 'B'), make('m3', 'A')];
+    const { prev, next } = pickChainedMatches(filtered, filtered[2]);
+    expect(prev?.id).toBe('m1');
+    expect(next).toBeNull();
+  });
+
+  it('does not surface a different-court match as prev or next', () => {
+    const filtered = [make('m1', 'A'), make('m2', 'B'), make('m3', 'A')];
+    const { prev, next } = pickChainedMatches(filtered, filtered[1]);
+    // Only B match in the list — nothing to chain to.
+    expect(prev).toBeNull();
+    expect(next).toBeNull();
+  });
+
+  it('scopes unassigned matches to other unassigned matches', () => {
+    const filtered = [make('u1', ''), make('a1', 'A'), make('u2', '')];
+    const { prev, next } = pickChainedMatches(filtered, filtered[0]);
+    expect(next?.id).toBe('u2');
+    expect(prev).toBeNull();
+  });
+
+  it('treats missing court (undefined) as the same as empty string', () => {
+    const filtered = [{ compId: 'c', id: 'x1' }, { compId: 'c', id: 'x2', court: '' }];
+    const { next } = pickChainedMatches(filtered, filtered[0]);
+    expect(next?.id).toBe('x2');
+  });
+});
+
+// --- Score-edit status sort ---
+// Mirrors the sort in AdminScoreEditor (see admin.jsx near `STATUS_ORDER`).
+// Status keys must match the API's MatchStatus values: running, scheduled,
+// completed, pending. An earlier version used `in_progress`/`complete` which
+// silently fell through to the scheduledAt tiebreaker for live and finished
+// matches.
+function sortScoreEdit(matches) {
+  const STATUS_ORDER = { running: 0, scheduled: 1, completed: 2, pending: 3 };
+  return [...matches].sort((a, b) => {
+    const ao = STATUS_ORDER[a.status] ?? 99;
+    const bo = STATUS_ORDER[b.status] ?? 99;
+    if (ao !== bo) return ao - bo;
+    return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
+  });
+}
+
+describe('AdminScoreEditor status sort', () => {
+  it('orders running first, then scheduled, then completed, then pending', () => {
+    const input = [
+      { id: 'p', status: 'pending', scheduledAt: '09:00' },
+      { id: 'c', status: 'completed', scheduledAt: '09:00' },
+      { id: 's', status: 'scheduled', scheduledAt: '09:00' },
+      { id: 'r', status: 'running', scheduledAt: '09:00' },
+    ];
+    expect(sortScoreEdit(input).map(m => m.id)).toEqual(['r', 's', 'c', 'p']);
+  });
+
+  it('breaks ties within a status bucket by scheduledAt', () => {
+    const input = [
+      { id: 's2', status: 'scheduled', scheduledAt: '10:00' },
+      { id: 's1', status: 'scheduled', scheduledAt: '09:00' },
+      { id: 'r2', status: 'running', scheduledAt: '11:00' },
+      { id: 'r1', status: 'running', scheduledAt: '09:30' },
+    ];
+    expect(sortScoreEdit(input).map(m => m.id)).toEqual(['r1', 'r2', 's1', 's2']);
+  });
+
+  it('puts unknown statuses last (regression: in_progress / complete fell through silently)', () => {
+    const input = [
+      { id: 'legacy', status: 'in_progress', scheduledAt: '09:00' },
+      { id: 'real', status: 'running', scheduledAt: '10:00' },
+    ];
+    // Real `running` must come before the unrecognised `in_progress` even
+    // though `in_progress` has an earlier scheduledAt.
+    expect(sortScoreEdit(input).map(m => m.id)).toEqual(['real', 'legacy']);
+  });
+});

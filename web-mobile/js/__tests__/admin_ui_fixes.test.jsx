@@ -228,23 +228,24 @@ describe('AdminScoreEditor chained-nav court scoping', () => {
 });
 
 // --- Score-edit status sort ---
-// Mirrors the sort in AdminScoreEditor (see admin.jsx near `STATUS_ORDER`).
-// Status keys must match the API's MatchStatus values: running, scheduled,
-// completed, pending. An earlier version used `in_progress`/`complete` which
-// silently fell through to the scheduledAt tiebreaker for live and finished
-// matches.
+// Mirrors the sort in AdminScoreEditor (see admin_schedule.jsx near
+// `const order`). Status keys must match the API's MatchStatus values:
+// running, scheduled, completed. Anything else (including `pending`,
+// `in_progress`, `complete`) gets `?? 99` and sorts last — same as prod.
+// An earlier version used `in_progress`/`complete` which silently fell
+// through to the scheduledAt tiebreaker for live and finished matches.
 function sortScoreEdit(matches) {
-  const STATUS_ORDER = { running: 0, scheduled: 1, completed: 2, pending: 3 };
+  const order = { running: 0, scheduled: 1, completed: 2 };
   return [...matches].sort((a, b) => {
-    const ao = STATUS_ORDER[a.status] ?? 99;
-    const bo = STATUS_ORDER[b.status] ?? 99;
+    const ao = order[a.status] ?? 99;
+    const bo = order[b.status] ?? 99;
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   });
 }
 
 describe('AdminScoreEditor status sort', () => {
-  it('orders running first, then scheduled, then completed, then pending', () => {
+  it('orders running first, then scheduled, then completed, then unrecognised statuses last', () => {
     const input = [
       { id: 'p', status: 'pending', scheduledAt: '09:00' },
       { id: 'c', status: 'completed', scheduledAt: '09:00' },

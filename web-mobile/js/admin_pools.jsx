@@ -4,6 +4,40 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 const pluralize = window.pluralize;
 
+// Pure decision logic for what RankInput.handleBlur should do, given the
+// state of its refs and props at blur time. Returned as a tagged action so
+// callers (handleBlur) just dispatch — no React state lives in here.
+//
+// Cases (in priority order):
+//   1. `cancelled` (Esc was pressed) → noop. The Esc handler already
+//      queued setV(String(initial)) for the visual revert.
+//   2. User focused but never typed (v === focusValue): if `initial`
+//      changed under them while focused (SSE update), sync to it;
+//      otherwise noop. This is the focus-without-edit TOCTOU guard:
+//      committing the stale focus-time value here would clobber a
+//      concurrent server update.
+//   3. Invalid input (not finite, ≤ 0, > 1000) → revert visually to
+//      String(initial) so the user doesn't see garbage persist as if
+//      accepted. 1000 mirrors the server-side cap.
+//   4. Valid edit different from initial → commit String(parsed).
+//      Same value as initial (e.g. typed "02" when initial is 2,
+//      or no-op retype) → noop.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function decideRankCommit({ v, initial, focusValue, cancelled }) {
+  if (cancelled) return { action: "noop" };
+  if (v === focusValue) {
+    if (v !== String(initial)) return { action: "sync", value: String(initial) };
+    return { action: "noop" };
+  }
+  const next = parseInt(v);
+  if (!Number.isFinite(next) || next <= 0 || next > 1000) {
+    return { action: "revert", value: String(initial) };
+  }
+  if (String(next) !== String(initial)) return { action: "commit", value: String(next) };
+  return { action: "noop" };
+}
+
 // Rank inputs commit on blur / Enter rather than every keystroke. Typing
 // "10" used to fire two API calls (rank=1 then rank=10); the intermediate
 // rank=1 collided with whoever already held rank 1 and produced visible
@@ -11,23 +45,20 @@ const pluralize = window.pluralize;
 //
 // `focusedRef` suppresses the upstream-sync useEffect while the user is
 // mid-edit — otherwise an SSE-driven standings refresh (another admin
-// completing a match) would clobber the half-typed value. Invalid commits
-// (non-numeric, negative, zero) revert to `initial` so the user doesn't
-// see their garbage typing persist as if accepted.
+// completing a match) would clobber the half-typed value.
 //
 // `focusValueRef` snapshots `v` at focus time so we can detect
 // focus-without-edit and avoid committing a stale value if `initial`
-// changed under the user while they were focused (concurrent SSE update).
+// changed under the user while they were focused.
+//
+// `cancelRef` lets the Esc handler signal handleBlur to skip the commit.
+// Without it, the React-async-state hazard would let Esc actually commit
+// the typed value: setV(String(initial)) is queued, but blur() fires
+// handleBlur synchronously with the stale typed `v` still in the closure.
 function RankInput({ initial, className, onCommit, style }) {
   const [v, setV] = useStateA(String(initial));
   const focusedRef = useRefA(false);
   const focusValueRef = useRefA(String(initial));
-  // Esc handler sets this, blur handler checks and clears. Avoids a
-  // React-async-state hazard: setV(String(initial)) from the Esc path
-  // is queued, but e.currentTarget.blur() fires handleBlur synchronously,
-  // so handleBlur's closure still sees the stale (typed) v. Without this
-  // ref, Esc would proceed past the "no-edit" early-return and commit
-  // the typed value — the opposite of cancel.
   const cancelRef = useRefA(false);
   useEffectA(() => {
     if (!focusedRef.current) setV(String(initial));
@@ -37,24 +68,17 @@ function RankInput({ initial, className, onCommit, style }) {
     focusValueRef.current = v;
   };
   const handleBlur = () => {
+    const result = decideRankCommit({
+      v,
+      initial,
+      focusValue: focusValueRef.current,
+      cancelled: cancelRef.current,
+    });
     focusedRef.current = false;
-    if (cancelRef.current) {
-      cancelRef.current = false;
-      return; // Esc was pressed — don't commit.
-    }
-    // User focused but didn't type anything. If `initial` changed under
-    // them while focused (SSE), sync to the latest server value rather
-    // than committing the stale focus-time value.
-    if (v === focusValueRef.current) {
-      if (v !== String(initial)) setV(String(initial));
-      return;
-    }
-    const next = parseInt(v);
-    if (!Number.isFinite(next) || next <= 0 || next > 1000) {
-      setV(String(initial));
-      return;
-    }
-    if (String(next) !== String(initial)) onCommit(String(next));
+    if (cancelRef.current) cancelRef.current = false;
+    if (result.action === "commit") onCommit(result.value);
+    else if (result.action === "sync" || result.action === "revert") setV(result.value);
+    // "noop" → nothing.
   };
   const handleKeyDown = (e) => {
     if (e.key === "Enter") {
@@ -324,3 +348,7 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
 }
 
 window.AdminPools = AdminPools;
+
+// ES export for the vitest suite — pure helper only. The component
+// stays behind window.* to match the rest of admin_*.jsx.
+export { decideRankCommit };

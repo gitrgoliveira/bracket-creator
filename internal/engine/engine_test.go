@@ -1824,6 +1824,48 @@ func TestStartCompetition_AutoDefaultsTeamSize(t *testing.T) {
 	assert.Equal(t, state.CompStatusPools, stored.Status)
 }
 
+// TestStartCompetition_PreservesExplicitTeamSize pins the "TeamSize
+// already set explicitly survives start" path — exercises the merge
+// branch where current.TeamSize == loadedTeamSize but != 0, so the
+// pipeline's auto-default isn't applied. Pre-fix, the transform
+// unconditionally assigned `current.TeamSize = comp.TeamSize` —
+// correct for this case (loaded==comp==7) but wrong for the
+// concurrent-admin-change case (loaded=0, comp=5, current=9 would
+// clobber to 5 instead of preserving admin's 9).
+//
+// The concurrent-change direction requires engine hooks to simulate
+// deterministically; pinning the explicit-TeamSize-no-default path
+// at least catches the case where the entire merge block was
+// removed by a regression.
+func TestStartCompetition_PreservesExplicitTeamSize(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-preserve-test"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Team Preserve Test",
+		Kind:         "team",
+		Format:       "pools",
+		PoolSize:     2,
+		PoolSizeMode: "min",
+		PoolWinners:  1,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       state.CompStatusSetup,
+		TeamSize:     7,
+	}))
+	saveTestParticipants(t, store, compID, []string{"Team A", "Team B", "Team C", "Team D"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	stored, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 7, stored.TeamSize,
+		"explicit TeamSize=7 must survive start (no auto-default applied)")
+}
+
 // TestStartCompetition_PreservesNumberPrefix pins the NumberPrefix /
 // StartTime / RoundRobin additions to the StartCompetition transform's
 // field-mismatch validation. With these fields in the validation list,

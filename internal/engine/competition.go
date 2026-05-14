@@ -234,42 +234,55 @@ func (e *Engine) StartCompetition(id string) error {
 		}
 		// Generation-relevant fields must match the SNAPSHOT we
 		// generated from (loaded* values captured before the pipeline
-		// mutated comp.TeamSize). The full list mirrors what
-		// generatePools / generatePlayoffs actually read:
+		// mutated anything). The list is EXACTLY what
+		// generatePools / generatePlayoffs read:
 		//   - Format (decides which generator)
 		//   - PoolSize, PoolSizeMode, RoundRobin (pools structure)
 		//   - NumberPrefix (player numbering in both generators)
 		//   - StartTime (initial ScheduledAt for generated matches)
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)
-		// TeamSize is also checked here using the SNAPSHOT loadedTeamSize
-		// (NOT the pipeline-mutated comp.TeamSize) so the auto-default
-		// (0 → 5 for team comps) isn't falsely flagged as drift.
-		// PoolWinners is included even though generation doesn't read
-		// it directly — settings drift in this field also signals the
-		// admin was editing during start, which is the broader concern
-		// this guard surfaces.
+		// Other config fields (TeamSize, PoolWinners, Name, Date, Venue,
+		// NumberPrefix-for-export, Mirror) are NOT validated — they
+		// don't drive generation, so admin's concurrent change to them
+		// doesn't invalidate the pools.csv / bracket.json we just wrote.
+		// Their values are preserved by leaving `current.X` alone in
+		// the transform (except TeamSize, see below).
 		if current.Format != loadedFormat ||
 			current.PoolSize != loadedPoolSize ||
-			current.PoolWinners != loadedPoolWinners ||
 			current.PoolSizeMode != loadedPoolSizeMode ||
 			current.NumberPrefix != loadedNumberPrefix ||
 			current.StartTime != loadedStartTime ||
 			current.RoundRobin != loadedRoundRobin ||
 			current.Kind != loadedKind ||
 			current.WithZekkenName != loadedWithZekken ||
-			current.TeamSize != loadedTeamSize ||
 			!courtsEqual(current.Courts, loadedCourts) {
-			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolWinners/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/TeamSize/Courts); regenerate by retrying", id)
+			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/Courts); regenerate by retrying", id)
 		}
-		// Copy our pipeline's modifications onto the freshly-read
-		// `current`. This preserves any unrelated fields that may
-		// have been changed by other writers (Name, Date, Venue,
-		// etc.) between our outer Load and this atomic commit.
-		// Note: TeamSize is set from comp.TeamSize (which may carry
-		// the auto-default we applied above) since the validation
-		// already confirmed admin didn't concurrently change it.
-		current.TeamSize = comp.TeamSize
+		// TeamSize handling: not in the drift validation above
+		// because it doesn't drive generation. If admin DIDN'T
+		// concurrently change it (current == loaded), apply our
+		// pipeline's value — which may be the loaded value unchanged
+		// OR the auto-default 5 for team comps that started with 0.
+		// If admin DID concurrently change it (current != loaded),
+		// preserve their change — leaving current.TeamSize alone.
+		// Pre-fix this line was `current.TeamSize = comp.TeamSize`
+		// unconditionally, which clobbered admin's concurrent change
+		// AND the validation list (including TeamSize) rejected the
+		// race instead of merging. Both were wrong: the right answer
+		// is to merge admin's concurrent change with our pipeline's
+		// default in the no-drift direction only.
+		if current.TeamSize == loadedTeamSize {
+			current.TeamSize = comp.TeamSize
+		}
+		// loadedPoolWinners isn't referenced — PoolWinners doesn't
+		// affect generation and admin's concurrent change is preserved
+		// by leaving current.PoolWinners alone. The variable is
+		// captured for symmetry with the rest of the snapshot pattern
+		// and to document that we considered (and excluded) this field
+		// from the validation surface.
+		_ = loadedPoolWinners
+
 		current.Status = comp.Status
 		current.HasParticipantIDs = comp.HasParticipantIDs
 		return current, nil

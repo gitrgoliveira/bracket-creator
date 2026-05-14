@@ -141,11 +141,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if err := checkUniqueCompName(store, comp.Name, ""); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
+		// Derive ID from name BEFORE acquiring the rename lock — the ID
+		// derivation has no concurrency concern (pure function of Name)
+		// and an empty derived ID should fast-fail without holding the
+		// global mutex.
 		if comp.ID == "" {
 			comp.ID = slugifyID(comp.Name)
 			if comp.ID == "" {
@@ -154,7 +153,25 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 		}
 
-		if _, err := saveCompetitionWithPlayers(&comp, store); err != nil {
+		// Atomic uniqueness-check + save under the global
+		// competition-rename mutex. Closes the AB-BA window where two
+		// concurrent POSTs (or PUT renames) to the same new name both
+		// passed checkUniqueCompName (each seeing the other still had
+		// its old name) and both landed. See state.Store
+		// WithCompetitionRenameLock for full rationale.
+		var nameErr error
+		err := store.WithCompetitionRenameLock(func() error {
+			if nameErr = checkUniqueCompName(store, comp.Name, ""); nameErr != nil {
+				return nil
+			}
+			_, saveErr := saveCompetitionWithPlayers(&comp, store)
+			return saveErr
+		})
+		if nameErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+			return
+		}
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -216,31 +233,32 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Uniqueness check before the atomic save. Note: this leaves
-		// a narrow TOCTOU window — two concurrent PUTs renaming
-		// different competitions to the same new name can both pass
-		// the check (each sees the other still has its old name)
-		// and both save. The check is not folded into
-		// UpdateCompetitionChanged's transform because that would
-		// deadlock: UpdateCompetitionChanged holds the write lock
-		// on OUR comp's mutex; checkUniqueCompName reads OTHER
-		// comps via LoadCompetition, which acquires their per-comp
-		// read locks. Two concurrent renames would each hold their
-		// own write lock and try to read-lock the other — classic
-		// AB-BA deadlock.
+		// Atomic uniqueness-check + save under the global
+		// competition-rename mutex. Closes the AB-BA window where
+		// two concurrent PUTs renaming different competitions to the
+		// same new name both passed checkUniqueCompName (each seeing
+		// the other still had its old name) and both landed.
 		//
-		// Closing this race requires a higher-level rename
-		// serializer (e.g. a global rename mutex) — out of scope
-		// for this round and tracked in
-		// project_pr103_followups.md as a known narrow window.
-		// The save itself IS atomic via SaveCompetitionChanged's
-		// per-comp lock, so the only race is the uniqueness check.
-		if err := checkUniqueCompName(store, comp.Name, id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		// An earlier attempt folded the uniqueness check into
+		// UpdateCompetitionChanged's per-comp lock transform —
+		// deadlocked AB-BA because each goroutine held its own
+		// comp's per-comp write lock and tried to read-lock the
+		// other to do the check. The dedicated rename mutex (a
+		// different mutex from any per-comp lock) sidesteps that.
+		var nameErr error
+		var changed bool
+		err := store.WithCompetitionRenameLock(func() error {
+			if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
+				return nil
+			}
+			var saveErr error
+			changed, saveErr = saveCompetitionWithPlayers(&comp, store)
+			return saveErr
+		})
+		if nameErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
 			return
 		}
-
-		changed, err := saveCompetitionWithPlayers(&comp, store)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

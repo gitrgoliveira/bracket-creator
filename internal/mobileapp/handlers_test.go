@@ -437,6 +437,150 @@ func TestCompetitionHandlers_ConcurrentInvalidateVsComplete(t *testing.T) {
 	}
 }
 
+// TestCompetitionHandlers_ConcurrentPUTUniqueNameRace pins the
+// rename-uniqueness atomicity fix. Pre-fix, two concurrent PUTs
+// renaming different competitions to the same new name each loaded
+// the OTHER comp to do the uniqueness check, saw it still had its
+// old name, passed the check, and both landed — leaving two
+// competitions on disk with the same Name.
+//
+// An earlier attempt folded the check into UpdateCompetitionChanged's
+// per-comp lock transform — deadlocked AB-BA (each goroutine holds
+// its own comp's write lock and tries to read-lock the other to
+// check uniqueness). The fix is a separate global mutex
+// (state.Store.WithCompetitionRenameLock) that serializes only the
+// check+save window across all competitions; per-comp locks remain
+// fine-grained for everything else.
+//
+// 20 iterations of two concurrent renames. Assertion: exactly one
+// succeeds (200), the other rejects with 400. On disk, exactly one
+// comp has the new name; the other keeps its original.
+func TestCompetitionHandlers_ConcurrentPUTUniqueNameRace(t *testing.T) {
+	const iterations = 20
+
+	for i := range iterations {
+		r, store, _, _, tempDir := setupTestRouter(t)
+
+		// Two existing competitions, both will try to rename to "Cup".
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "comp-a", Name: "Comp A"}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "comp-b", Name: "Comp B"}))
+
+		renameA, _ := json.Marshal(state.Competition{ID: "comp-a", Name: "Cup"})
+		renameB, _ := json.Marshal(state.Competition{ID: "comp-b", Name: "Cup"})
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var codeA, codeB int
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/comp-a", bytes.NewBuffer(renameA))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			codeA = w.Code
+		}()
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/comp-b", bytes.NewBuffer(renameB))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			codeB = w.Code
+		}()
+		wg.Wait()
+
+		// Exactly one rename should succeed. Pre-fix: both could
+		// pass the check and both land with Name="Cup".
+		successes := 0
+		if codeA == http.StatusOK {
+			successes++
+		}
+		if codeB == http.StatusOK {
+			successes++
+		}
+		assert.Equal(t, 1, successes,
+			"iter %d: exactly one rename should succeed (got A=%d, B=%d)", i, codeA, codeB)
+
+		// On disk: exactly one comp is named "Cup"; the other keeps
+		// its original name.
+		a, _ := store.LoadCompetition("comp-a")
+		b, _ := store.LoadCompetition("comp-b")
+		require.NotNil(t, a, "iter %d: comp-a must still exist", i)
+		require.NotNil(t, b, "iter %d: comp-b must still exist", i)
+		cupCount := 0
+		if a.Name == "Cup" {
+			cupCount++
+		}
+		if b.Name == "Cup" {
+			cupCount++
+		}
+		assert.Equal(t, 1, cupCount,
+			"iter %d: exactly one comp should be named 'Cup' (got A=%q, B=%q)", i, a.Name, b.Name)
+
+		os.RemoveAll(tempDir)
+	}
+}
+
+// TestCompetitionHandlers_ConcurrentPOSTSameName pins the same
+// uniqueness guard for the create path: two concurrent POSTs creating
+// new competitions with the same name (different IDs) must not both
+// succeed.
+func TestCompetitionHandlers_ConcurrentPOSTSameName(t *testing.T) {
+	const iterations = 20
+
+	for i := range iterations {
+		r, store, _, _, tempDir := setupTestRouter(t)
+
+		bodyA, _ := json.Marshal(state.Competition{ID: "new-a", Name: "Cup"})
+		bodyB, _ := json.Marshal(state.Competition{ID: "new-b", Name: "Cup"})
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var codeA, codeB int
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(bodyA))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			codeA = w.Code
+		}()
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(bodyB))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			codeB = w.Code
+		}()
+		wg.Wait()
+
+		successes := 0
+		if codeA == http.StatusCreated {
+			successes++
+		}
+		if codeB == http.StatusCreated {
+			successes++
+		}
+		assert.Equal(t, 1, successes,
+			"iter %d: exactly one POST should succeed (got A=%d, B=%d)", i, codeA, codeB)
+
+		// On disk: exactly one comp named "Cup".
+		ids, _ := store.ListCompetitions()
+		cupCount := 0
+		for _, id := range ids {
+			c, _ := store.LoadCompetition(id)
+			if c != nil && c.Name == "Cup" {
+				cupCount++
+			}
+		}
+		assert.Equal(t, 1, cupCount,
+			"iter %d: exactly one comp should be named 'Cup' (found %d)", i, cupCount)
+
+		os.RemoveAll(tempDir)
+	}
+}
+
 func TestCompetitionHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

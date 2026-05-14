@@ -297,29 +297,58 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     return { gaps, hasGaps: gaps.length > 0 };
   }, [players]);
 
-  const updateSeed = (idx, val) => {
+  // Extracted from inline onClick so we can await + log instead of
+  // silencing the rejection. Same pattern as updateSeed below: success
+  // toast omitted because clearing all seeds is visible in the UI
+  // (rows re-render without rank), but errors must surface (via
+  // updateCompetition's catch in admin.jsx).
+  const clearAllSeeds = async () => {
+    try {
+      await onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) });
+    } catch (err) {
+      console.error("AdminParticipants: clearAllSeeds PUT failed", err);
+    }
+  };
+
+  // Async so we can await onUpdate(): updateCompetition re-throws on
+  // PUT failure (admin.jsx) and surfaces the error via showToast.
+  // The pre-async fire-and-forget form silenced the rejection here
+  // with `.catch(() => {})` — asymmetric with the other now-awaited
+  // mutation flows in this component (apply(), handleSeedFile,
+  // shuffleUnseeded). No success toast needed: rank changes are
+  // implicit-feedback (the input commits visually), so we just need
+  // to NOT swallow errors silently.
+  const updateSeed = async (idx, val) => {
     const np = [...(c.players || [])];
     const seed = parseInt(val);
     np[idx] = { ...np[idx], seed: isNaN(seed) || seed <= 0 ? null : seed };
-    // Silence rejection — updateCompetition surfaces failures via toast.
-    Promise.resolve(onUpdate({ ...c, players: np })).catch(() => {});
+    try {
+      await onUpdate({ ...c, players: np });
+    } catch (err) {
+      console.error("AdminParticipants: updateSeed PUT failed", err);
+      // updateCompetition already toasted the error.
+    }
   };
 
   const dragIdxRef = useRefA(null);
   const [dragOverIdx, setDragOverIdx] = useStateA(null);
-  const moveSeedRow = (fromIdx, toIdx) => {
+  // Same async + await + log pattern as updateSeed. The drop completes
+  // visually before the PUT; await is for error surfacing, not for
+  // gating the UI.
+  const moveSeedRow = async (fromIdx, toIdx) => {
     if (fromIdx === toIdx) return;
     const np = [...(c.players || [])];
     const [moved] = np.splice(fromIdx, 1);
     np.splice(toIdx, 0, moved);
     // Re-assign seeds by new position order (only for currently-seeded players)
     const seededCount = np.filter(p => p.seed).length;
-    if (seededCount > 0) {
-      let rank = 1;
-      const renumbered = np.map(p => p.seed ? { ...p, seed: rank++ } : p);
-      Promise.resolve(onUpdate({ ...c, players: renumbered })).catch(() => {});
-    } else {
-      Promise.resolve(onUpdate({ ...c, players: np })).catch(() => {});
+    const payloadPlayers = seededCount > 0
+      ? (() => { let rank = 1; return np.map(p => p.seed ? { ...p, seed: rank++ } : p); })()
+      : np;
+    try {
+      await onUpdate({ ...c, players: payloadPlayers });
+    } catch (err) {
+      console.error("AdminParticipants: moveSeedRow PUT failed", err);
     }
   };
 
@@ -640,7 +669,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0} title="Shuffle unseeded players">Shuffle unseeded</button>
               <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
-              <button className="btn btn--sm" type="button" onClick={() => { Promise.resolve(onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })).catch(() => {}); }}>Clear seeds</button>
+              <button className="btn btn--sm" type="button" onClick={clearAllSeeds}>Clear seeds</button>
             </div>
           </div>
           <div className="card__body" style={{ paddingTop: 0, paddingBottom: 8 }}>

@@ -17,6 +17,17 @@ type Store struct {
 	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
 	compMu sync.Map
 
+	// compRenameMu serializes "uniqueness-check + save" sequences across
+	// all competitions. Required because per-comp locks alone can't fix
+	// the cross-comp AB-BA race: two concurrent renames of different
+	// competitions to the same new name each acquire their own comp's
+	// write lock, then need to read OTHER comps to do the uniqueness
+	// check — which would deadlock pairwise. This coarser mutex covers
+	// only the check+save window, not all comp writes, so per-comp
+	// operations (score saves, schedule edits, override-rank, etc.)
+	// remain concurrent across competitions.
+	compRenameMu sync.Mutex
+
 	// cache for tournament configuration to avoid redundant disk I/O.
 	tournamentMu sync.RWMutex
 	cachedTourn  *Tournament
@@ -72,6 +83,32 @@ func (s *Store) getCompLock(id string) *sync.RWMutex {
 
 func (s *Store) GetFolder() string {
 	return s.folder
+}
+
+// WithCompetitionRenameLock runs fn while holding the store's
+// rename-coordination mutex (s.compRenameMu). Use it to wrap a
+// competition uniqueness-check + save sequence so two concurrent
+// renames of DIFFERENT competitions to the SAME new name can't both
+// pass the check (each seeing the other still has its old name) and
+// both land — leaving two competitions with the same effective Name.
+//
+// The mutex is finer-grained than s.mu (which covers all store state)
+// and coarser than getCompLock(id) (which covers a single competition).
+// It only serializes "name-uniqueness" operations against each other;
+// per-competition score saves, schedule edits, override-rank, etc.
+// remain fully concurrent across competitions.
+//
+// Lock ordering note: fn typically calls LoadCompetition on OTHER
+// competitions (via checkUniqueCompName) and SaveCompetitionChanged on
+// THIS competition. Both of those take per-comp locks internally —
+// safe because s.compRenameMu is a different mutex from any per-comp
+// lock, and the per-comp locks are acquired one at a time in fn.
+// No AB-BA deadlock is possible because s.compRenameMu serializes the
+// outer operation.
+func (s *Store) WithCompetitionRenameLock(fn func() error) error {
+	s.compRenameMu.Lock()
+	defer s.compRenameMu.Unlock()
+	return fn()
 }
 
 func (s *Store) getFileCache(compID, filename string) *fileCache {

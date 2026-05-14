@@ -23,6 +23,18 @@ function timeToMinutes(t) {
   return h * 60 + m;
 }
 
+// True when the user's time edit (newVal, a "HH:MM" string from the
+// time input) is a real change relative to the stored scheduledAt
+// (which is null for untimed matches, "HH:MM" string otherwise). The
+// AdminTWMatch.useState initializer normalizes scheduledAt-or-null to
+// "" for the input's value attribute, so a naive `newVal !==
+// oldScheduledAt` check would treat the no-op open-and-blur case ("" vs
+// null) as a change and fire an unnecessary PUT + SSE broadcast.
+// Normalize both sides the same way the initializer does.
+function timeEdited(oldScheduledAt, newVal) {
+  return (oldScheduledAt || "") !== newVal;
+}
+
 function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewerMode, password }) {
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
@@ -275,7 +287,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
   const submitTime = (e) => {
     e.preventDefault();
     setEditingTime(false);
-    if (onTimeChange && timeVal !== m.scheduledAt) onTimeChange(timeVal);
+    if (onTimeChange && timeEdited(m.scheduledAt, timeVal)) onTimeChange(timeVal);
   };
   return (
     <div
@@ -576,3 +588,7 @@ window.AdminSchedulePage = AdminSchedulePage;
 window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
+
+// ES export for the vitest suite — pure helpers only. Components stay
+// behind the window.* pattern to match the rest of admin_*.jsx.
+export { timeEdited, timeToMinutes };

@@ -135,6 +135,32 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
+	t.Run("Override Rank Trims Whitespace From Player Name", func(t *testing.T) {
+		// Padded names must be stored under the trimmed key so subsequent
+		// lookups (which use the canonical participant name) match.
+		comp := state.Competition{ID: "rank-trim-comp"}
+		store.SaveCompetition(&comp)
+
+		reqBody, _ := json.Marshal(map[string]any{
+			"playerName": "  Player Trim  ",
+			"rank":       7,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rank-trim-comp/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		// Read the persisted override back; key must be the trimmed name.
+		overrides, err := store.LoadOverrides("rank-trim-comp")
+		require.NoError(t, err)
+		require.NotNil(t, overrides)
+		_, hasTrimmed := overrides.PoolRanks["pool-1"]["Player Trim"]
+		assert.True(t, hasTrimmed, "rank override should be keyed under trimmed name")
+		_, hasPadded := overrides.PoolRanks["pool-1"]["  Player Trim  "]
+		assert.False(t, hasPadded, "rank override should not be keyed under padded name")
+	})
+
 	t.Run("Override Rank Rejects Invalid Input", func(t *testing.T) {
 		comp := state.Competition{ID: "rank-bad-comp"}
 		store.SaveCompetition(&comp)
@@ -144,6 +170,8 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			body map[string]any
 		}{
 			{"empty player name", map[string]any{"playerName": "", "rank": 1}},
+			{"whitespace-only player name", map[string]any{"playerName": "   ", "rank": 1}},
+			{"tab-only player name", map[string]any{"playerName": "\t\t", "rank": 1}},
 			{"zero rank", map[string]any{"playerName": "Player 1", "rank": 0}},
 			{"negative rank", map[string]any{"playerName": "Player 1", "rank": -3}},
 			{"absurdly large rank", map[string]any{"playerName": "Player 1", "rank": 99999}},

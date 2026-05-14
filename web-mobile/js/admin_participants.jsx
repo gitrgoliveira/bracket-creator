@@ -9,14 +9,14 @@ const pluralize = window.pluralize;
 // header that should be skipped.  Checks the first line only.
 function looksLikeHeader(line, idx) {
   if (idx !== 0) return false;
-  // More robust header detection: contains multiple keywords commonly found in headers
+  // Header heuristic: the first line is treated as a header if it contains 2+
+  // of the common roster-column keywords below. Two-keyword threshold avoids
+  // false-positives on a single-column "name" header line that may overlap
+  // a real participant whose name contains one of these words.
   const keywords = ['name', 'zekken', 'dojo', 'club', 'team', 'grade', 'dan', 'rank'];
   const lower = line.toLowerCase();
   const matched = keywords.filter(k => lower.includes(k));
-  // If it contains at least 2 keywords, it's likely a header.
-  // Or if it matches a very specific pattern like "Name, Dojo".
-  if (matched.length >= 2) return true;
-  return false;
+  return matched.length >= 2;
 }
 
 function parsePastedRows(text, transform) {

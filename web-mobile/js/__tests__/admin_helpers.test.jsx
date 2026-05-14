@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -307,9 +307,45 @@ describe('validateAndNormalizeDate', () => {
   it('DATE_ERR_* constants have the expected user-facing strings', () => {
     // Pin the user-visible text so an accidental string change is
     // caught by tests (the test failure tells whoever changes it to
-    // also update any screenshot fixtures, docs, etc.).
+    // also update any screenshot fixtures, docs, etc.). DATE_ERR_YEAR_RANGE
+    // is a template literal built from MIN_YEAR/MAX_YEAR — if you bump
+    // those, also update this pin.
     expect(DATE_ERR_INVALID_FORMAT).toBe("Invalid date. Please pick a valid day.");
     expect(DATE_ERR_YEAR_RANGE).toBe("Year must be between 1900 and 2100.");
+  });
+
+  it('DATE_ERR_YEAR_RANGE is derived from MIN_YEAR/MAX_YEAR', () => {
+    // Mechanically guarantees the user-facing text stays consistent
+    // with the predicate bounds. A future change to MIN_YEAR or
+    // MAX_YEAR auto-updates the error message.
+    expect(DATE_ERR_YEAR_RANGE).toContain(String(MIN_YEAR));
+    expect(DATE_ERR_YEAR_RANGE).toContain(String(MAX_YEAR));
+  });
+});
+
+describe('numeric bounds constants', () => {
+  it('MIN_YEAR and MAX_YEAR have the expected values (pin)', () => {
+    // Pin the current bounds. If anyone tightens to (2000, 2050) or
+    // loosens further, this test fails and tells them to also update
+    // docs / screenshot fixtures / saveNow's still-inline usage.
+    expect(MIN_YEAR).toBe(1900);
+    expect(MAX_YEAR).toBe(2100);
+  });
+
+  it('MAX_TEAM_SIZE matches kendo team-position conventions', () => {
+    // Pin the current cap. admin_scoring_modal.jsx builds
+    // TEAM_POSITIONS from this; if you bump it, also extend the
+    // scoring UI / docs / screenshot fixtures.
+    expect(MAX_TEAM_SIZE).toBe(9);
+  });
+
+  it('validateAndNormalizeDate predicate matches MIN_YEAR/MAX_YEAR bounds', () => {
+    // The boundary cases must be in lockstep with the constants
+    // (off-by-one regression guard).
+    expect(validateAndNormalizeDate(`${MIN_YEAR}-01-01`).error).toBe(null);
+    expect(validateAndNormalizeDate(`${MAX_YEAR}-12-31`).error).toBe(null);
+    expect(validateAndNormalizeDate(`${MIN_YEAR - 1}-12-31`).error).toBe(DATE_ERR_YEAR_RANGE);
+    expect(validateAndNormalizeDate(`${MAX_YEAR + 1}-01-01`).error).toBe(DATE_ERR_YEAR_RANGE);
   });
 
   it('isValidISODate is a thin wrapper that returns error === null', () => {

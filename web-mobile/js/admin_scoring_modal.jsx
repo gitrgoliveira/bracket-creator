@@ -284,7 +284,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   );
 }
 
-const TEAM_POSITIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+// Built from MAX_TEAM_SIZE (admin_helpers.jsx) so the scoring UI's
+// position count stays in lockstep with the team-size input caps in
+// admin_competition.jsx and admin_setup.jsx. Bumping MAX_TEAM_SIZE
+// flows automatically to all three sites.
+const TEAM_POSITIONS = Array.from({ length: window.MAX_TEAM_SIZE }, (_, i) => String(i + 1));
 
 function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext }) {
   const m = match;

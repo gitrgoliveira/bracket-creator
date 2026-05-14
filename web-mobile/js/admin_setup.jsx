@@ -4,6 +4,7 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
+const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -268,7 +269,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {kind === "team" && (
             <div className="field">
               <label className="field__label">Team size</label>
-              <window.StableInput className="input" type="number" min="1" max="9" value={teamSize} onChange={(val) => setTeamSize(val)} />
+              <window.StableInput className="input" type="number" min="1" max={MAX_TEAM_SIZE} value={teamSize} onChange={(val) => setTeamSize(val)} />
               <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
             </div>
           )}

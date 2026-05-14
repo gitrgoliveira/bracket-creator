@@ -8,11 +8,16 @@ const compMatchStats = window.compMatchStats;
 const hasBothSides = window.hasBothSides;
 const normalizeDate = window.normalizeDate;
 const isValidISODate = window.isValidISODate;
-// Use the canonical error strings (admin_helpers.jsx) so saveNow's inline
-// asymmetric validation stays in lockstep with validateAndNormalizeDate's
-// messages without depending on string-literal equality.
+// Use the canonical error strings + numeric bounds (admin_helpers.jsx)
+// so saveNow's inline asymmetric validation stays in lockstep with
+// validateAndNormalizeDate's messages and predicate, and so the
+// team-size input cap stays in lockstep with TEAM_POSITIONS in the
+// scoring modal.
 const DATE_ERR_INVALID_FORMAT = window.DATE_ERR_INVALID_FORMAT;
 const DATE_ERR_YEAR_RANGE = window.DATE_ERR_YEAR_RANGE;
+const MIN_YEAR = window.MIN_YEAR;
+const MAX_YEAR = window.MAX_YEAR;
+const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const AdminTopbar = window.AdminTopbar;
@@ -221,7 +226,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     }
     if (dateIsValid) {
       const year = parseInt(norm.substring(0, 4));
-      if (year < 1900 || year > 2100) {
+      if (year < MIN_YEAR || year > MAX_YEAR) {
         setSaveErr(DATE_ERR_YEAR_RANGE);
         return;
       }
@@ -311,10 +316,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       {local.kind === "team" && (
         <div className="field">
           <label className="field__label">Team size</label>
-          {/* TeamScoreEditorModal renders positions 1–9 (TEAM_POSITIONS); */}
-          {/* cap here matches AdminCreateCompetition (max="9") so the */}
-          {/* scoring UI and backend stay in sync. */}
-          <input className="input" type="number" min="1" max="9" value={local.teamSize} onChange={(e) => update("teamSize", +e.target.value)} />
+          {/* Cap is MAX_TEAM_SIZE (admin_helpers.jsx). TEAM_POSITIONS in */}
+          {/* admin_scoring_modal.jsx is built from the same constant, so */}
+          {/* this input can't allow a value the scoring UI doesn't render. */}
+          <input className="input" type="number" min="1" max={MAX_TEAM_SIZE} value={local.teamSize} onChange={(e) => update("teamSize", +e.target.value)} />
         </div>
       )}
       <div className="field">

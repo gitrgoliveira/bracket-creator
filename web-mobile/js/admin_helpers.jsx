@@ -49,12 +49,25 @@ function compMatchStats(c) {
   return { total, done, live };
 }
 
+// Canonical numeric bounds. The year range is shared by every date
+// validator (admin_helpers.jsx validateAndNormalizeDate, admin_competition.jsx
+// saveNow inline). MAX_TEAM_SIZE is the canonical team-size cap; the
+// scoring modal's TEAM_POSITIONS array is built from it (see
+// admin_scoring_modal.jsx), and the team-size inputs in admin_competition
+// + admin_setup use it as their HTML `max` attribute. Bumping any of these
+// here flows to every consumer mechanically.
+const MIN_YEAR = 1900;
+const MAX_YEAR = 2100;
+const MAX_TEAM_SIZE = 9;
+
 // Canonical date error messages. Referenced by validateAndNormalizeDate
 // AND by AdminSettings.saveNow's inline asymmetric validation, so the
 // user-facing UX stays consistent across all four date-validation sites
 // regardless of where the error is generated. Exported on window + ES.
+// The year-range message is a template so changing MIN_YEAR/MAX_YEAR
+// above auto-updates the user-facing text.
 const DATE_ERR_INVALID_FORMAT = "Invalid date. Please pick a valid day.";
-const DATE_ERR_YEAR_RANGE = "Year must be between 1900 and 2100.";
+const DATE_ERR_YEAR_RANGE = `Year must be between ${MIN_YEAR} and ${MAX_YEAR}.`;
 
 // Combined date validation + normalization. Returns:
 //   - { norm: "YYYY-MM-DD", error: null }  on success
@@ -75,7 +88,7 @@ function validateAndNormalizeDate(date) {
     return { norm: null, error: DATE_ERR_INVALID_FORMAT };
   }
   const year = parseInt(norm.substring(0, 4));
-  if (year < 1900 || year > 2100) {
+  if (year < MIN_YEAR || year > MAX_YEAR) {
     return { norm: null, error: DATE_ERR_YEAR_RANGE };
   }
   return { norm, error: null };
@@ -127,6 +140,9 @@ if (typeof window !== "undefined") {
   window.validateAndNormalizeDate = validateAndNormalizeDate;
   window.DATE_ERR_INVALID_FORMAT = DATE_ERR_INVALID_FORMAT;
   window.DATE_ERR_YEAR_RANGE = DATE_ERR_YEAR_RANGE;
+  window.MIN_YEAR = MIN_YEAR;
+  window.MAX_YEAR = MAX_YEAR;
+  window.MAX_TEAM_SIZE = MAX_TEAM_SIZE;
 }
 
 // Also exported so the vitest suite under web-mobile/js/__tests__/ can
@@ -140,4 +156,7 @@ export {
   validateAndNormalizeDate,
   DATE_ERR_INVALID_FORMAT,
   DATE_ERR_YEAR_RANGE,
+  MIN_YEAR,
+  MAX_YEAR,
+  MAX_TEAM_SIZE,
 };

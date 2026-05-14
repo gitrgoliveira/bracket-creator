@@ -180,7 +180,13 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const handleSeedFile = (file) => {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
+    // reader.onload is an async closure so we can await onUpdate before
+    // showing the "Matched N seeds" success toast. Pre-fix: the PUT was
+    // fire-and-forget (Promise.resolve(...).catch(()=>{})) and the
+    // success toast fired immediately — on PUT failure the user saw
+    // "Matched N seeds" followed (~1s later) by an error toast, which
+    // misleads about whether the persisted state was actually updated.
+    reader.onload = async (e) => {
       const raw = e.target.result;
       const np = [...(c.players || [])];
       let updatedCount = 0;
@@ -223,17 +229,28 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         }
       });
 
+      // Always render the summary panel (matched + unmatched rows) so
+      // the admin sees suggestions even when nothing was auto-matched.
+      // The PUT only fires when there's something to save.
       if (updatedCount > 0) {
-        // updateCompetition is async; silence the rejection here so
-        // an unhandled-promise warning doesn't fire on PUT failure.
-        // The error toast is already surfaced by updateCompetition's
-        // own catch. (Pre-existing UX: success toast may still fire
-        // before the error toast on save failure — left as a separate
-        // follow-up to keep this commit focused on the re-throw.)
-        Promise.resolve(onUpdate({ ...c, players: np })).catch(() => {});
+        try {
+          await onUpdate({ ...c, players: np });
+        } catch (err) {
+          // updateCompetition already surfaced an error toast. Log for
+          // dev-console diagnosis but don't emit a second toast or a
+          // misleading "Matched N seeds" success message.
+          console.error("AdminParticipants: seed import PUT failed", err);
+          if (mountedRef.current) {
+            setSeedImportResult({ updatedCount: 0, unmatched, totalRows: unmatched.length });
+          }
+          return;
+        }
+        if (!mountedRef.current) return;
         showToast(`Matched ${updatedCount} seeds`);
       }
-      setSeedImportResult({ updatedCount, unmatched, totalRows: updatedCount + unmatched.length });
+      if (mountedRef.current) {
+        setSeedImportResult({ updatedCount, unmatched, totalRows: updatedCount + unmatched.length });
+      }
     };
     reader.readAsText(file);
   };
@@ -298,7 +315,11 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
   };
 
-  const shuffleUnseeded = () => {
+  // Async so the "Unseeded list shuffled" success toast is gated on the
+  // PUT actually succeeding. Pre-fix: fire-and-forget + immediate toast
+  // → on PUT failure the admin saw "shuffled" while the persisted order
+  // was unchanged (only the error toast hinted at the discrepancy).
+  const shuffleUnseeded = async () => {
     const np = [...(c.players || [])];
     const unseeded = np.filter(p => !p.seed);
     if (unseeded.length < 2) return;
@@ -308,8 +329,15 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
     let uIdx = 0;
     const shuffled = np.map(p => p.seed ? p : unseeded[uIdx++]);
-    Promise.resolve(onUpdate({ ...c, players: shuffled })).catch(() => {});
-    showToast("Unseeded list shuffled");
+    try {
+      await onUpdate({ ...c, players: shuffled });
+    } catch (err) {
+      console.error("AdminParticipants: shuffleUnseeded PUT failed", err);
+      // updateCompetition already toasted the error; don't double-toast
+      // or emit a misleading success message.
+      return;
+    }
+    if (mountedRef.current) showToast("Unseeded list shuffled");
   };
 
   const [showSlotForm, setShowSlotForm] = useStateA(false);

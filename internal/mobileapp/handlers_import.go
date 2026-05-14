@@ -108,7 +108,13 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
 }
 
 func importCompetition(store *state.Store, entry ImportManifestComp, files map[string][]byte) ImportResult {
-	res := ImportResult{ID: entry.ID, Name: entry.Name}
+	// Pre-trim Name so the ImportResult returned to the client matches
+	// the canonical record we save. Pre-fix: res.Name = entry.Name kept
+	// any leading/trailing whitespace from the manifest, so the import
+	// API reported "  Cup  " while the persisted record was "Cup" —
+	// admin UI then showed two different names for the same competition.
+	trimmedName := strings.TrimSpace(entry.Name)
+	res := ImportResult{ID: entry.ID, Name: trimmedName}
 
 	if entry.ID == "" {
 		res.Error = "missing id"
@@ -128,7 +134,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// three sibling write paths, all three trim.
 	comp := &state.Competition{
 		ID:             entry.ID,
-		Name:           strings.TrimSpace(entry.Name),
+		Name:           trimmedName,
 		Kind:           strings.TrimSpace(entry.Kind),
 		Format:         strings.TrimSpace(entry.Format),
 		Courts:         entry.Courts,

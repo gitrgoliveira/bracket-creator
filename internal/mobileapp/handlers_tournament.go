@@ -38,6 +38,18 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
 
+		// Reject whitespace-only names. The current CreateTournament UI
+		// validates trimmed name client-side before submit, but older
+		// cached clients (and direct API callers) can still send
+		// "   "; without this guard, the trim above silently persists
+		// Name == "". AuthMiddleware treats empty Name+Password as
+		// "uninitialized", so an empty-name save effectively locks
+		// every subsequent request out.
+		if t.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
+
 		changed, err := store.SaveTournamentChanged(&t)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -63,6 +75,15 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
+
+		// Same empty-after-trim guard as the PUT handler. POST is the
+		// first-time-setup entry point — letting Name == "" land here
+		// is even worse than on PUT (AuthMiddleware then refuses all
+		// future requests because the tournament looks "uninitialized").
+		if t.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

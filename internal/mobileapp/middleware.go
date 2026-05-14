@@ -8,9 +8,16 @@ import (
 )
 
 // requireValidCompID extracts the `:id` URL parameter and validates it
-// via state.ValidateCompetitionID (rejects empty, > 64 chars, or
-// non-[a-zA-Z0-9_-]). On invalid input, writes a 400 response and
-// returns ("", false); the caller should `return` immediately.
+// via state.ValidateCompetitionID. Rejects:
+//   - empty
+//   - > 64 chars
+//   - any character outside [a-zA-Z0-9_-]
+//   - a leading non-alphanumeric character (so "_foo", "-foo" are
+//     rejected even though "_" and "-" are allowed elsewhere in the
+//     string — the regex is ^[a-zA-Z0-9][a-zA-Z0-9_-]*$)
+//
+// On invalid input, writes a 400 response and returns ("", false); the
+// caller should `return` immediately.
 //
 // Every handler that reads `c.Param("id")` and passes it to
 // store.compPath(id, ...) must use this helper. compPath does

@@ -352,8 +352,11 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// (GET / PUT / DELETE / nested) — the helper centralises the logic,
 	// so testing every route is redundant.
 	t.Run("Path Traversal IDs Rejected", func(t *testing.T) {
-		// Per ValidateCompetitionID: empty, > 64 chars, or non-[a-zA-Z0-9_-]
-		// is rejected. Two classes of bad IDs:
+		// Per ValidateCompetitionID (regex ^[a-zA-Z0-9][a-zA-Z0-9_-]*$):
+		// empty, > 64 chars, any character outside [a-zA-Z0-9_-], or a
+		// non-alphanumeric leading character is rejected (so "_foo" and
+		// "-foo" are invalid even though "_" / "-" are allowed elsewhere).
+		// Two classes of bad IDs:
 		//
 		//   1. Multi-segment / path-traversal payloads (contain "/" or
 		//      URL-encoded "/"). These may match no route at the gin
@@ -432,6 +435,18 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// shape is wrong (router miss) OR the handler skipped
 		// requireValidCompID and downstream code 404'd on the bad id —
 		// both regressions.
+		//
+		// Asserting only the status code is vacuous for PUT/POST routes
+		// that bind JSON after the ID check: dropping requireValidCompID
+		// from such a handler would still return 400 (from ShouldBindJSON
+		// on the empty body). To prove the helper itself ran, also
+		// require the response body to mention "competition ID" — the
+		// substring is unique to ValidateCompetitionID's error message
+		// ("competition ID contains invalid characters (allowed: ...)").
+		// ShouldBindJSON's empty-body error looks like
+		// "invalid request" / "EOF" / "unexpected end of JSON input",
+		// none of which contain that substring, so a regression that
+		// drops the helper would fail this assertion.
 		for _, badID := range singleSegmentIDs {
 			for _, route := range routes {
 				w := httptest.NewRecorder()
@@ -444,6 +459,9 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 				assert.Equal(t, http.StatusBadRequest, w.Code,
 					"%s %s with id=%q must return 400 from requireValidCompID, got %d",
 					route.method, route.path, badID, w.Code)
+				assert.Contains(t, w.Body.String(), "competition ID",
+					"%s %s with id=%q must return ValidateCompetitionID's error message, got %q",
+					route.method, route.path, badID, w.Body.String())
 			}
 		}
 	})

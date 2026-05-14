@@ -40,7 +40,7 @@ describe('UI Components', () => {
       expect(input.props.type).toBe('number');
     });
 
-    // The next four assertions pin the NaN-display contract added when
+    // The following assertions pin the NaN-display contract added when
     // we changed `+e.target.value` (collapses "" to 0) to NaN-on-clear.
     // Without these tests, a regression that drops the displayValue
     // mapping would silently reintroduce React's "Received NaN for the

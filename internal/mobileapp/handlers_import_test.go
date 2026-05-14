@@ -276,6 +276,19 @@ competitions:
 		assert.Equal(t, "A", stored.NumberPrefix, "NumberPrefix should be trimmed")
 		assert.Equal(t, "09:00", stored.StartTime, "StartTime should be trimmed")
 		assert.Equal(t, "2026-05-12", stored.Date, "Date should be trimmed")
+
+		// The API response (ImportResult) must also reflect the trimmed
+		// Name, not the raw manifest value. Pre-fix: res.Name = entry.Name
+		// passed the padded "  Padded Cup  " back to the client while the
+		// stored record was "Padded Cup" — admin UI then showed two
+		// different names for the same competition.
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Equal(t, "Padded Cup", resp.Results[0].Name,
+			"ImportResult.Name should reflect the trimmed value to match the persisted record")
 	})
 }
 

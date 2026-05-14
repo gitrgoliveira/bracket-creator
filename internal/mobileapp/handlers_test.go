@@ -133,10 +133,11 @@ func TestTournamentHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	os.RemoveAll(filepath.Join(tempDir, "tournament.md"))
 
-	// POST /api/tournament also trims. CreateTournament in app.jsx
-	// hits this endpoint on first-time setup, where the empty-check
-	// `if (!name || !pass)` is truthy for whitespace, so without the
-	// trim "  My Tournament  " would persist with the spaces.
+	// POST /api/tournament also trims. CreateTournament in app.jsx now
+	// validates the trimmed name client-side before submit, but this
+	// regression test covers older cached clients and direct API callers
+	// that can still send padded values — the server-side trim is the
+	// canonical defense layer so persisted records are always trimmed.
 	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Date: "  2026-07-20  ", Password: "secret"}
 	body, _ = json.Marshal(postTour)
 	w = httptest.NewRecorder()
@@ -148,6 +149,25 @@ func TestTournamentHandlers(t *testing.T) {
 	assert.Equal(t, "Posted Tournament", t4.Name)
 	assert.Equal(t, "Some Venue", t4.Venue)
 	assert.Equal(t, "2026-07-20", t4.Date, "Date should be trimmed on POST")
+
+	// Whitespace-only name must be rejected after trim. AuthMiddleware
+	// treats Name=="" as "tournament not configured yet" (the
+	// `t.Name == "New Tournament" && t.Password == ""` branch fails
+	// open the first time it sees an empty/blank state), so persisting
+	// an empty name effectively locks every subsequent request out.
+	// The PUT handler explicitly rejects empty-after-trim; mirror on POST.
+	for _, method := range []string{"PUT", "POST"} {
+		blank := state.Tournament{Name: "   ", Venue: "Anywhere", Password: "secret"}
+		body, _ = json.Marshal(blank)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"%s /api/tournament with whitespace-only Name must return 400", method)
+		assert.Contains(t, w.Body.String(), "tournament name is required",
+			"%s /api/tournament rejection should explain the empty-name reason", method)
+	}
 }
 
 func TestCompetitionHandlers(t *testing.T) {

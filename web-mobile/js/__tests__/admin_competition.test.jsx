@@ -6,6 +6,14 @@ import { buildLiveIpponResult } from '../admin_competition.jsx';
 // only ever recorded a 1-ippon result (winnerPts=1, single-letter
 // array). The fix lifts the result-building logic into the pure
 // buildLiveIpponResult helper and consumes the full points arrays.
+//
+// Kendo win conditions covered:
+//   - 2 ippons (sansoo)             — automatic win
+//   - 1 ippon at time-up            — winner if opponent has 0
+//   - 1 ippon vs 1 with one ahead   — same shape (2-1, 3-2 not allowed)
+// Draws (0-0, 1-1, 2-2) go through the full editor's hikiwake toggle,
+// not this helper — scoreboard submit is disabled in those states.
+//
 // Tests below pin every adversarial-input case so a future refactor
 // can't silently re-introduce the truncation.
 
@@ -58,6 +66,31 @@ describe('buildLiveIpponResult', () => {
     it('null winnerIppons → falls back to ["M"]', () => {
       const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, null);
       expect(r.ipponsA).toEqual(["M"]);
+    });
+
+    // Scoreboard-mode 1-0 (time-up) win: the user entered one letter for
+    // the winner and zero for the loser, then time ran out and they hit
+    // Submit. Both arrays are passed explicitly (unlike the tap/card
+    // cases which pass undefined for the loser side). The previous tests
+    // cover this implicitly via the empty-loserIppons default; this case
+    // pins it explicitly so a future refactor that changes the default
+    // doesn't silently break the most common scoreboard flow.
+    it('side A scoreboard 1-0 (time-up): explicit empty loser array', () => {
+      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M"], []);
+      expect(r.winner).toBe(SIDE_A);
+      expect(r.ipponsA).toEqual(["M"]);
+      expect(r.ipponsB).toEqual([]);
+      expect(r.score.winnerPts).toBe(1);
+      expect(r.score.loserPts).toBe(0);
+    });
+
+    it('side B scoreboard 1-0 (time-up): symmetric to side A', () => {
+      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B, ["D"], []);
+      expect(r.winner).toBe(SIDE_B);
+      expect(r.ipponsA).toEqual([]);
+      expect(r.ipponsB).toEqual(["D"]);
+      expect(r.score.winnerPts).toBe(1);
+      expect(r.score.loserPts).toBe(0);
     });
   });
 

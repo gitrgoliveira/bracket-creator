@@ -53,6 +53,14 @@ const AdminExport = window.AdminExport;
 // from the full array; loserIppons is now first-class too so a 2–1
 // win records the loser's ippon instead of dropping it.
 //
+// Kendo win conditions this helper covers (one side strictly leads):
+//   - 2 ippons (sansoo) → automatic win
+//   - 1 ippon at time-up → valid win when opponent has 0
+//   - 2-1 at time-up → valid win when opponent has 1
+// Tied counts (0-0, 1-1, 2-2) are not wins; the scoreboard's Submit
+// button is disabled in those states and the operator routes the
+// match through the full editor's hikiwake toggle instead.
+//
 // Exported for vitest at __tests__/admin_competition.test.jsx.
 function buildLiveIpponResult(winnerSide, sideA, sideB, winnerIppons, loserIppons) {
   const winner = winnerSide === "a" ? sideA : sideB;

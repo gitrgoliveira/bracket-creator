@@ -375,6 +375,38 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					notFoundFlag = true
 					return nil, nil
 				}
+				// Roster-only PUT: when the body carries a Players field
+				// (present, possibly empty), treat the request as
+				// participants-only and DON'T touch settings. The
+				// AdminParticipants flow sends `{ ...c, players: np }`
+				// where `c` is a (potentially stale) frontend snapshot
+				// of the competition; copying every settings field from
+				// that snapshot onto a fresh `current` would revert any
+				// concurrent settings change that landed after the
+				// participants page loaded its `c` snapshot (e.g. an
+				// admin in another tab adjusts poolSize / courts /
+				// startTime). The trailing SaveParticipants block runs
+				// regardless via the post-transform gate
+				// `if comp.Players != nil`.
+				//
+				// Settings updates use AdminSettings which OMITS the
+				// players field (decodes to nil in Go) and takes the
+				// settings-merge branch below. With this branch split,
+				// settings-PUT and roster-PUT no longer step on each
+				// other's writes.
+				if comp.Players != nil {
+					if len(comp.Players) > 0 {
+						// Mirror the saveCompetitionWithPlayers contract:
+						// participants.csv is written with UUID-prefixed
+						// rows when the roster is populated, so the
+						// metadata flag must match for HasIDs-hinted
+						// loads to parse correctly.
+						current.HasParticipantIDs = true
+					}
+					return current, nil
+				}
+
+				// Settings-only PUT (Players field absent in body).
 				// Existence first, uniqueness second. Pre-fix order ran
 				// checkUniqueCompName BEFORE the transform, so a PUT to
 				// a missing :id whose body Name happened to collide with
@@ -394,8 +426,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// the body. Status is managed via dedicated endpoints
 				// (start/complete/invalidate). Players is persisted
 				// separately to participants.csv (see post-transform
-				// block below). HasParticipantIDs is auto-managed (set
-				// to true below when participants are saved).
+				// block below). HasParticipantIDs is auto-managed —
+				// only set to true in the roster-only branch above when
+				// participants are being saved.
 				current.Name = comp.Name
 				current.Date = comp.Date
 				current.StartTime = comp.StartTime
@@ -410,20 +443,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.Format = comp.Format
 				current.Kind = comp.Kind
 				current.Mirror = comp.Mirror
-				// When the body carries a populated Players list, the
-				// participants save below will write a UUID-prefixed
-				// participants.csv — flip HasParticipantIDs to match so
-				// a later viewer load that passes HasIDs hint=true
-				// parses correctly (see handlers_viewer.go:46).
-				//
-				// Use len > 0 here (not just != nil) because an explicit
-				// empty Players=[] payload from AdminParticipants clears
-				// the roster (handled by the post-transform save block,
-				// which is gated on != nil). An empty roster has no UUID
-				// rows to mark, so HasParticipantIDs stays as-is.
-				if len(comp.Players) > 0 {
-					current.HasParticipantIDs = true
-				}
 				return current, nil
 			})
 			return updateErr

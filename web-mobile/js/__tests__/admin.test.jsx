@@ -98,3 +98,75 @@ describe('mergeCompetitionsIntoTournament', () => {
     expect(result.competitions.find(c => c.id === 'c2')).toBeDefined();
   });
 });
+
+// Copilot finding (PR #104 round-9-followup): create flows
+// (addCompetition / createPlayoff) used `refreshCompsBestEffort` which
+// just logged + toasted on refresh failure. The caller then navigated
+// to `view.kind="competition", id: created.id`, but local
+// `t.competitions` still didn't contain `created` — so AdminApp's
+// `t.competitions.find(cc => cc.id === view.id)` returned undefined,
+// rendering "Competition not found" until the next SSE/manual refresh
+// landed.
+//
+// Fix: a `refreshCompsAfterCreate(created, ...)` helper that ALSO
+// merges the created record into local state when refresh fails.
+// The mutator pattern is:
+//   comps => comps.some(c => c.id === created.id) ? comps : [...comps, created]
+// It's idempotent (no duplicates if `created` is already in `comps`,
+// e.g. via an SSE update that landed during the in-flight create).
+//
+// Pinning the mutator's behaviour here as a pure test — the full
+// addCompetition / createPlayoff handlers need DOM rendering to test
+// (vitest setup mocks React with stubs; see follow-up #4/#7).
+describe('refreshCompsAfterCreate merge mutator', () => {
+  // Replicate the inline mutator pattern. Keep in sync with admin.jsx's
+  // refreshCompsAfterCreate.
+  const appendIfMissing = (created) => (comps) =>
+    comps.some(c => c.id === created.id) ? comps : [...comps, created];
+
+  it('appends the created record when local state does not have it', () => {
+    const t = { id: 't1', competitions: [{ id: 'c1', name: 'A' }] };
+    const created = { id: 'c2', name: 'B' };
+    const result = mergeCompetitionsIntoTournament(t, appendIfMissing(created));
+    expect(result.competitions).toEqual([
+      { id: 'c1', name: 'A' },
+      { id: 'c2', name: 'B' },
+    ]);
+  });
+
+  it('is idempotent — no duplicate when local state already has the record', () => {
+    // SSE could have landed during the in-flight create, populating
+    // `created.id` into `t.competitions` before refresh failed. The
+    // merge must not duplicate.
+    const t = { id: 't1', competitions: [
+      { id: 'c1', name: 'A' },
+      { id: 'c2', name: 'B (already present)' },
+    ]};
+    const created = { id: 'c2', name: 'B (newly created)' };
+    const result = mergeCompetitionsIntoTournament(t, appendIfMissing(created));
+    expect(result.competitions).toHaveLength(2);
+    // The existing entry is kept (potentially newer SSE-driven value);
+    // we don't overwrite it with the create response.
+    expect(result.competitions.find(c => c.id === 'c2').name)
+      .toBe('B (already present)');
+  });
+
+  it('appends to an empty competitions array', () => {
+    // First competition in a fresh tournament — the most common
+    // create-then-navigate case.
+    const t = { id: 't1', competitions: [] };
+    const created = { id: 'c1', name: 'First' };
+    const result = mergeCompetitionsIntoTournament(t, appendIfMissing(created));
+    expect(result.competitions).toEqual([{ id: 'c1', name: 'First' }]);
+  });
+
+  it('appends even when competitions is undefined (fresh tournament)', () => {
+    // mergeCompetitionsIntoTournament's `|| []` fallback combined with
+    // the appendIfMissing pattern means a fresh tournament shape
+    // (no competitions field) still works.
+    const t = { id: 't1' };
+    const created = { id: 'c1', name: 'First' };
+    const result = mergeCompetitionsIntoTournament(t, appendIfMissing(created));
+    expect(result.competitions).toEqual([{ id: 'c1', name: 'First' }]);
+  });
+});

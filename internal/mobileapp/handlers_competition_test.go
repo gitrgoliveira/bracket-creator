@@ -696,4 +696,82 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, after, 2, "PUT with omitted Players must NOT clear the roster")
 	})
+
+	// Copilot finding (PR #104 round-9-followup): the PUT handler
+	// unconditionally copied every settings field from the request body
+	// onto the freshly loaded `current`. The AdminParticipants page
+	// sends `{ ...c, players: np }` — where `c` is a possibly stale
+	// frontend snapshot — so a roster save would silently revert any
+	// concurrent settings change (poolSize, courts, startTime, etc.)
+	// that landed on the server after the page loaded its `c` snapshot.
+	//
+	// Fix: when the body carries the `players` field (present, possibly
+	// empty), treat the PUT as roster-only and skip the settings copy.
+	// Settings updates use AdminSettings which OMITS `players` and
+	// takes the settings-merge branch.
+	t.Run("PUT With Players Does NOT Overwrite Concurrent Settings", func(t *testing.T) {
+		const cid = "roster-save-preserve-settings"
+		// Seed the disk record with the server-side "current" settings
+		// (post-concurrent-change). The roster-save body carries STALE
+		// versions of these — they must NOT land on disk.
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:           cid,
+			Name:         "Server Current Name",
+			PoolSize:     5,
+			PoolWinners:  3,
+			Courts:       []string{"A", "B"},
+			NumberPrefix: "SERVER",
+			StartTime:    "10:30",
+		}))
+
+		// Simulate AdminParticipants's `{ ...c, players: np }` body
+		// where `c` has STALE settings (pre-concurrent-change values).
+		// Pre-fix, the transform would copy these stale values onto
+		// `current`, reverting the server's newer ones.
+		body, _ := json.Marshal(map[string]any{
+			"id":           cid,
+			"name":         "Stale Name From Snapshot",
+			"poolSize":     2,
+			"poolWinners":  1,
+			"courts":       []string{"X"},
+			"numberPrefix": "STALE",
+			"startTime":    "08:00",
+			"date":         "01-01-2026",
+			"players": []map[string]any{
+				{"Name": "New Player", "Dojo": "New Dojo"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code,
+			"roster-only PUT must succeed: %s", w.Body.String())
+
+		// Verify settings on disk match the SERVER's pre-PUT state,
+		// NOT the stale body. The body's settings must have been ignored.
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "Server Current Name", stored.Name,
+			"server's Name must be preserved when body carries stale snapshot")
+		assert.Equal(t, 5, stored.PoolSize,
+			"server's PoolSize must be preserved")
+		assert.Equal(t, 3, stored.PoolWinners,
+			"server's PoolWinners must be preserved")
+		assert.Equal(t, []string{"A", "B"}, stored.Courts,
+			"server's Courts must be preserved")
+		assert.Equal(t, "SERVER", stored.NumberPrefix,
+			"server's NumberPrefix must be preserved")
+		assert.Equal(t, "10:30", stored.StartTime,
+			"server's StartTime must be preserved")
+
+		// And the roster save DID happen.
+		parts, err := store.LoadParticipants(cid, false)
+		require.NoError(t, err)
+		assert.Len(t, parts, 1, "roster body must have landed")
+		assert.Equal(t, "New Player", parts[0].Name)
+		// HasParticipantIDs flipped to true (populated roster path).
+		assert.True(t, stored.HasParticipantIDs)
+	})
 }

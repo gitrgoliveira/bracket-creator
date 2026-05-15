@@ -138,6 +138,29 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
   };
 
+  // Specialised variant for CREATE flows (addCompetition / createPlayoff).
+  // On refresh failure, merge the just-created record into local state so
+  // the caller's immediate navigation to `view.kind="competition", id:
+  // created.id` finds the comp in `t.competitions`. Pre-fix, the caller
+  // would render the "Competition not found" branch until the next
+  // refresh succeeded — confusing for the user who just clicked "Create".
+  // Skips the merge if a (possibly newer) record with the same ID
+  // already exists locally; otherwise appends.
+  const refreshCompsAfterCreate = async (created, actionLabel) => {
+    try {
+      const comps = await window.API.fetchCompetitions();
+      if (!mountedRef.current) return;
+      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+    } catch (e) {
+      console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
+      if (mountedRef.current) {
+        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+          comps => comps.some(c => c.id === created.id) ? comps : [...comps, created]));
+        showToast(`${actionLabel} succeeded; refresh failed — reload to see latest`, "error");
+      }
+    }
+  };
+
   // Re-throws after surfacing the error toast so callers can branch on
   // success vs failure. Pre-fix the catch swallowed the rejection, so
   // every caller that chained .then / .catch (or expected to await this)
@@ -209,7 +232,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       showToast(e.message, "error");
       throw e;
     }
-    await refreshCompsBestEffort("Create");
+    // Use the create-flow refresh: on refresh failure, merge `created`
+    // into local state so the caller's immediate navigation to the new
+    // comp's view doesn't render "Competition not found" — pre-fix the
+    // generic refreshCompsBestEffort left local state stale, breaking
+    // the post-create navigation.
+    await refreshCompsAfterCreate(created, "Create");
     return created;
   };
 
@@ -263,7 +291,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       if (mountedRef.current) showToast(e.message, "error");
       return;
     }
-    await refreshCompsBestEffort("Playoff create");
+    // See addCompetition: refresh-failure merges `created` into local
+    // state so setView's navigation to the new playoff's ID finds it in
+    // t.competitions. Pre-fix, refresh failure left the caller's
+    // setView({kind:"competition", id: created.id, ...}) navigating to
+    // a comp that AdminApp's `t.competitions.find(cc => cc.id === view.id)`
+    // can't locate, producing the "Competition not found" empty state
+    // until the next refresh.
+    await refreshCompsAfterCreate(created, "Playoff create");
     if (!mountedRef.current) return;
     setView({ kind: "competition", id: created.id, section: "participants" });
     showToast(`Playoff "${created.name}" created`);

@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -711,6 +712,54 @@ func TestStore_Seeds_NotExists(t *testing.T) {
 	loaded, err := store.LoadSeeds("nonexistent")
 	require.NoError(t, err)
 	assert.Empty(t, loaded)
+}
+
+// LoadSeeds and SaveSeeds now use the per-competition lock (not the
+// store-wide s.mu) so they serialize against the StartCompetition
+// transform held by UpdateCompetitionChanged. Pin two contracts:
+//
+//  1. The validateCompetitionID precondition fires on bogus IDs before
+//     any disk I/O — proves the new per-comp locking path runs the
+//     same validation the other per-comp Load/Save methods do (and
+//     guards against the path-traversal class).
+//  2. Concurrent SaveSeeds on DIFFERENT comps don't block each other.
+//     Previously s.mu.Lock made every seed save store-wide-serial; the
+//     per-comp switch is a scalability improvement on top of the race fix.
+func TestStore_Seeds_PerCompLocking(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// (1) Bogus comp ID — must surface as a validation error, same as
+	// LoadParticipants / LoadPools / etc.
+	_, err = store.LoadSeeds("../escape")
+	assert.Error(t, err, "LoadSeeds must validate the comp ID")
+	err = store.SaveSeeds("../escape", []domain.SeedAssignment{{Name: "A", SeedRank: 1}})
+	assert.Error(t, err, "SaveSeeds must validate the comp ID")
+
+	// (2) Concurrent SaveSeeds on different comps must both land.
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "alpha"}))
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "beta"}))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_ = store.SaveSeeds("alpha", []domain.SeedAssignment{{Name: "A", SeedRank: 1}})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = store.SaveSeeds("beta", []domain.SeedAssignment{{Name: "B", SeedRank: 1}})
+	}()
+	wg.Wait()
+
+	a, _ := store.LoadSeeds("alpha")
+	b, _ := store.LoadSeeds("beta")
+	assert.Len(t, a, 1)
+	assert.Len(t, b, 1)
 }
 
 func TestStore_ResetOverrides(t *testing.T) {

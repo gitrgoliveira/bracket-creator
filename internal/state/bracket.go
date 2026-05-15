@@ -56,7 +56,7 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 // saveBracketLocked persists the bracket to disk and refreshes the
 // cache. Caller MUST hold the per-competition lock
 // (s.getCompLock(compID)). Used by both SaveBracket (which takes the
-// lock) and UpdateBracketMatchByID (which holds the lock across
+// lock) and UpdateBracket (which holds the lock across
 // load + mutate + save).
 func (s *Store) saveBracketLocked(compID string, b *Bracket) error {
 	path := s.compPath(compID, "bracket.json")

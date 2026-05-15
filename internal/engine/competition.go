@@ -302,9 +302,20 @@ func (e *Engine) StartCompetition(id string) error {
 		// (no deadlock against the per-comp lock UpdateCompetitionChanged
 		// holds).
 		//
-		// TOCTOU caveat: a write that lands AFTER this check but BEFORE
-		// the trailing SaveParticipants (resolvedSlots path) still
-		// races with our pipeline. That window remains because
+		// Serialization vs concurrent writers: both SaveParticipants and
+		// SaveSeeds now acquire the per-comp write lock that
+		// UpdateCompetitionChanged holds, so a concurrent write of
+		// either file BLOCKS until the transform commits. That closes
+		// the race between mtime-check and status-commit (previously
+		// SaveSeeds took the store-wide s.mu — a different mutex from
+		// the per-comp lock — leaving a microsecond window where a seed
+		// save could land between our check and our commit, persisting
+		// status=Pools alongside seeds.csv content the engine never
+		// read). See seeds.go for the locking-strategy rationale.
+		//
+		// Remaining caveat: a write that lands AFTER this check but
+		// BEFORE the trailing SaveParticipants (resolvedSlots path)
+		// still races with our pipeline. That window remains because
 		// SaveParticipants takes the same per-comp lock that the
 		// transform holds, so it can't be folded inside. The mtime
 		// check shrinks the window from "outer Load → trailing save"

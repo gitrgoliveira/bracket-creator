@@ -397,14 +397,17 @@ func (e *Engine) StartCompetition(id string) error {
 			return current, nil
 		}); fierr != nil {
 			// Log only — the file save succeeded (which is the
-			// load-bearing write). A stale flag at this point means
-			// LoadParticipantsOpt's auto-detect runs on next load and
-			// still parses the file correctly via the first-line
-			// heuristic. Aborting the start here after a successful
-			// save would leave the operator in a worse state
-			// (status committed in the transform above, but the
-			// caller would see an error and likely retry, hitting
-			// "already started").
+			// load-bearing write). A stale `false` flag at this point
+			// is safe because EVERY reader site uses the conditional
+			// hint pattern (only pass &true when comp.HasParticipantIDs;
+			// otherwise nil → LoadParticipantsOpt auto-detects from the
+			// first line's UUID prefix). Sites: handlers_viewer.go list
+			// (line ~45) and detail (line ~101), and StartCompetition
+			// itself (line ~183). Aborting the start here after a
+			// successful save would commit Status (transform above
+			// already ran) but surface a 500 to the operator — they'd
+			// retry and hit "already started," leaving the competition
+			// in a confusing half-started state.
 			fmt.Printf("Warning: failed to flip HasParticipantIDs after SaveParticipants: %v\n", fierr)
 		}
 	}

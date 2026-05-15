@@ -273,8 +273,14 @@ paths:
       tags: [tournament]
       summary: Update tournament configuration
       description: |
-        Updates tournament config. Also allowed without auth during bootstrap (same condition
-        as POST — when no tournament with a password exists yet).
+        Updates tournament config. Also allowed without auth during bootstrap (same
+        condition as POST): `AuthMiddleware` skips the password check only when
+        `tournament.md` is missing OR when the on-disk record is the literal default
+        placeholder (`Name == "New Tournament" && Password == ""`). A real-named
+        record with an empty password is FAIL-CLOSED — rejected with 403
+        (`tournament misconfigured: password is not set`) BEFORE this handler runs;
+        operator must repair `tournament.md` out-of-band to recover. See
+        `internal/mobileapp/middleware.go` AuthMiddleware for the exact branches.
 
         Validation matches POST for `name` (rejected if empty after trim).
 

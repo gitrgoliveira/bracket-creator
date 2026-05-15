@@ -524,11 +524,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					current.HasParticipantIDs = true
 					return current, nil
 				}); fierr != nil {
-					// Log only — the file save succeeded, which is the
-					// load-bearing write. A stale flag means autodetect
-					// runs on next load (still resilient via the heuristic
-					// on the first line), so this is a softer failure
-					// than aborting the whole PUT after a successful save.
+					// Log only — the file save succeeded (load-bearing
+					// write). A stale `false` flag is safe because every
+					// reader (handlers_viewer.go list + detail,
+					// engine StartCompetition) uses the conditional hint
+					// pattern: pass &true only when HasParticipantIDs is
+					// true; otherwise pass nil and let
+					// LoadParticipantsOpt auto-detect from the first
+					// line's UUID prefix. Aborting the PUT here after a
+					// successful save would mislead the caller into
+					// thinking the roster save failed.
 					fmt.Printf("Warning: failed to flip HasParticipantIDs after SaveParticipants: %v\n", fierr)
 				}
 			}

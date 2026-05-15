@@ -428,8 +428,8 @@ function CreateTournament({ onCreated }) {
     // server-side with a 400 — the two checks are defensive duplicates
     // for the same invariant rather than the client-side being the
     // sole defense.
-    if (!Number.isInteger(courts) || courts < 1 || courts > 26) {
-      alert("Number of courts must be a whole number between 1 and 26.");
+    if (!Number.isInteger(courts) || courts < 1 || courts > window.MAX_COURTS) {
+      alert(`Number of courts must be a whole number between 1 and ${window.MAX_COURTS}.`);
       return;
     }
     setSaving(true);
@@ -480,13 +480,13 @@ function CreateTournament({ onCreated }) {
               className="input"
               type="number"
               min="1"
-              max="26"
+              max={window.MAX_COURTS}
               step="1"
               value={Number.isFinite(courts) ? courts : ""}
               onChange={(e) => setCourts(decideNumericUpdate(e.target.value, 1).value)}
               required
             />
-            <div className="field__hint">Enter a number (1-26). Courts will be automatically labeled A, B, C, etc.</div>
+            <div className="field__hint">{`Enter a number (1-${window.MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
           <div className="field">
             <label className="field__label">Admin Password</label>

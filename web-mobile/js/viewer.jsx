@@ -90,7 +90,12 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
   const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status !== "setup").map(c => c.id)), [t.competitions]);
-  const live = allMatches.filter((m) => m.status === "running" && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
+  // Apply hasBothSides here too — pre-fix, a bracket match marked
+  // `running` while one side was still an unresolved "Winner of rX-mY"
+  // placeholder would appear in the public LIVE NOW strip, even though
+  // the upcoming list / cards / detail view all reject placeholder
+  // sides. Mirrors the upNext filter below.
+  const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
   let upNext = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
   if (courtFilter === "all") upNext = upNext.slice(0, 3);
 

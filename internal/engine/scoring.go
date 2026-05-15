@@ -306,7 +306,20 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 			for mIdx, m := range round {
 				if m.ID == matchId {
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
-					bracket.Rounds[rIdx][mIdx].Status = state.MatchStatusCompleted
+					// Preserve incoming Status — pre-fix this was
+					// unconditionally set to Completed, so the scoring
+					// modal's "Start" tap (which sends
+					// `{status: "running"}`) immediately persisted the
+					// bracket match as completed with no winner. Mirrors
+					// the pool match path (recordMatchResult above) which
+					// copies the full result. Default to Completed when
+					// status is empty (backward-compat with older
+					// scoring payloads that didn't include the field).
+					status := result.Status
+					if status == "" {
+						status = state.MatchStatusCompleted
+					}
+					bracket.Rounds[rIdx][mIdx].Status = status
 					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
 					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
 					// Echo the persisted scheduling fields back into the result so the
@@ -320,7 +333,14 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					}
 					found = true
 
-					e.propagateBracketWinner(bracket, rIdx, mIdx)
+					// Only propagate the winner when the match is
+					// actually completed. A "running" update is for
+					// live-status display only — the next round's
+					// SideA/SideB shouldn't be filled until the match
+					// has a final result.
+					if status == state.MatchStatusCompleted {
+						e.propagateBracketWinner(bracket, rIdx, mIdx)
+					}
 					break
 				}
 			}

@@ -962,3 +962,82 @@ func TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure(t *testing.T) {
 	assert.False(t, stored.HasParticipantIDs,
 		"HasParticipantIDs must NOT flip to true when SaveParticipants fails")
 }
+
+// TestPublicViewerCompetitionDetail_InvalidIDReturns400 pins the
+// Copilot round-13 finding (#7): the public viewer GET
+// /competitions/:id used to call store.LoadCompetition(id) directly
+// without requireValidCompID, so invalid IDs surfaced as 500 instead
+// of the documented 400. Aligning to 400 matches the OpenAPI spec
+// (CompetitionId parameter description) and the path-traversal
+// defense rationale.
+func TestPublicViewerCompetitionDetail_InvalidIDReturns400(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Traversal-shaped ID via a literal slash inside the path component
+	// is normalised by the router into a different route, so use an
+	// invalid character that ValidateCompetitionID would reject (a
+	// space). Pre-fix: 500. Post-fix: 400.
+	// URL is the public viewer route — no auth required, no admin
+	// password header.
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/bad%20id", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"invalid :id on public viewer detail route should 400 (was 500 pre-fix): %s", w.Body.String())
+}
+
+// TestRecordBracketMatchResult_PreservesRunningStatus pins the
+// Copilot round-13 finding (#6): recordBracketMatchResult used to
+// unconditionally set the bracket match status to Completed, so the
+// scoring modal's "Start match" tap (which sends
+// `{status: "running"}`) immediately persisted the match as completed
+// with no winner. Now the status from the result is preserved (with
+// Completed as the backward-compat default for empty), and
+// propagateBracketWinner only fires when the match is actually
+// completed.
+func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "bracket-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     cid,
+		Name:   "Bracket",
+		Format: state.CompFormatPlayoffs,
+		Status: state.CompStatusPlayoffs,
+	}))
+	// Seed a single bracket match.
+	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:     "r1-m0",
+					SideA:  "Alice",
+					SideB:  "Bob",
+					Status: state.MatchStatusScheduled,
+				},
+			},
+		},
+	}))
+
+	// "Start" payload — admin tapping Start on the scoring modal.
+	body := []byte(`{"id":"r1-m0","sideA":"Alice","sideB":"Bob","status":"running"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/matches/r1-m0/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	// Re-load bracket and verify the match is RUNNING, not COMPLETED.
+	br, err := store.LoadBracket(cid)
+	require.NoError(t, err)
+	require.NotNil(t, br)
+	require.Len(t, br.Rounds, 1)
+	require.Len(t, br.Rounds[0], 1)
+	m := br.Rounds[0][0]
+	assert.Equal(t, state.MatchStatusRunning, m.Status,
+		"bracket match must reflect the incoming `running` status, not be forced to completed")
+	assert.Equal(t, "", m.Winner,
+		"running match must have no winner — pre-fix the force-completed path also propagated empty winner upstream")
+}

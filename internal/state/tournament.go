@@ -147,12 +147,16 @@ func (s *Store) SaveTournament(t *Tournament) error {
 // change-Password PUT's earlier save. With this method, the load +
 // transform + save sequence is serialized under the store's lock.
 //
-// `current` may be nil if no tournament has been persisted yet (or
-// if the existing file is corrupt and the parse fell back to the
-// default record — same as LoadTournament's contract). transform
-// must handle both cases. If transform returns a non-nil error, no
-// write happens and the error is returned to the caller as-is
-// (callers can use errors.Is to discriminate validation vs. I/O).
+// `current` is nil ONLY when the tournament.md file does not exist
+// yet (first-ever save). When the file exists but parses cleanly,
+// `current` holds the parsed record. When the file exists but the
+// front matter is corrupt, the load below falls back to a default
+// Tournament record (matching LoadTournament's behavior) and that
+// default is passed to `transform` — `current` is still non-nil in
+// that case. transform must handle both cases. If transform returns
+// a non-nil error, no write happens and the error is returned to
+// the caller as-is (callers can use errors.Is to discriminate
+// validation vs. I/O).
 //
 // IMPORTANT: transform runs while this method holds both s.mu and
 // s.tournamentMu (non-recursive locks). It MUST NOT call back into

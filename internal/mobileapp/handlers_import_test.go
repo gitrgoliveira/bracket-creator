@@ -616,6 +616,71 @@ competitions:
 		stored, _ := store.LoadCompetition("iso-date-import")
 		assert.Nil(t, stored, "iso-date-import must not have been persisted")
 	})
+
+	// Cross-file guard symmetry: POST /competitions and PUT /competitions/:id
+	// call validateCompetitionCourts to reject empty / multi-character /
+	// >26-court manifests. Pre-fix, the import path bypassed this check —
+	// so a manifest row could persist court labels that no other write
+	// path would accept. Two failure modes to cover: multi-character label
+	// (court="AA"), and >26 courts.
+	t.Run("Invalid Courts Rejected Per Row", func(t *testing.T) {
+		// Multi-character court label
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "bad-court-label"
+    name: "Bad Court Label"
+    kind: "individual"
+    format: "pools"
+    courts: ["AA"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Contains(t, resp.Results[0].Error, "courts",
+			"multi-character court label should be rejected by validateCompetitionCourts")
+		stored, _ := store.LoadCompetition("bad-court-label")
+		assert.Nil(t, stored, "bad-court-label must not have been persisted")
+
+		// Too many courts (>26)
+		body2 := &bytes.Buffer{}
+		writer2 := multipart.NewWriter(body2)
+		manifestPart2, _ := writer2.CreateFormFile("files", "manifest.yaml")
+		manifestPart2.Write([]byte(`
+competitions:
+  - id: "too-many-courts"
+    name: "Too Many Courts"
+    kind: "individual"
+    format: "pools"
+    courts: ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","AA"]
+`))
+		writer2.Close()
+		w2 := httptest.NewRecorder()
+		req2, _ := http.NewRequest("POST", "/api/tournament/import", body2)
+		req2.Header.Set("Content-Type", writer2.FormDataContentType())
+		r.ServeHTTP(w2, req2)
+		assert.Equal(t, http.StatusOK, w2.Code)
+		var resp2 struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+		require.Len(t, resp2.Results, 1)
+		assert.Contains(t, resp2.Results[0].Error, "courts",
+			">26 courts should be rejected by validateCompetitionCourts")
+		stored2, _ := store.LoadCompetition("too-many-courts")
+		assert.Nil(t, stored2, "too-many-courts must not have been persisted")
+	})
 }
 
 func TestParseSeedsBytes(t *testing.T) {

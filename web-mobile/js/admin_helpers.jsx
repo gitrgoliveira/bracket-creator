@@ -137,10 +137,14 @@ function isValidDate(date) {
 //   keep the cleared display empty (matches the matchDuration pattern at
 //   admin_schedule.jsx).
 // - `shouldSave` is true only when the parsed value is a positive integer
-//   ≥ min. Callers should skip saveLater on false AND cancel any pending
-//   save (otherwise an earlier in-flight debounced save with the old good
-//   value would land on the server while the user sees an empty input,
-//   producing a state mismatch that only resolves on next SSE refresh).
+//   ≥ min. Callers MUST still issue a saveLater on false — the debounceRef
+//   is single-slot and covers all fields, so an earlier scheduled save
+//   captured the OLD valid value for THIS field and will commit it over
+//   the wire if not replaced. Use saveLater(next-with-NaN) so the
+//   commit-side safeInt fallback resolves the field to the on-disk
+//   c.<field>, while cross-field edits in `next` (e.g. Name typed
+//   concurrently) still propagate. `shouldSave` is therefore informational
+//   only — callers no longer branch on it.
 //
 // Exported for vitest at __tests__/admin_helpers.test.jsx.
 function decideNumericUpdate(raw, min = 1) {

@@ -482,7 +482,7 @@ paths:
       summary: Delete competition
       description: |
         Idempotent — returns 204 even when the competition does not exist.
-        Allowed in any non-in-progress state (`setup`, `pending`, `completed`,
+        Allowed in any non-in-progress state (`setup`, `completed`,
         `invalid`, or unset). In-progress competitions (`pools`/`playoffs`)
         must first be invalidated via `POST /api/competitions/{id}/invalidate`.
       security:

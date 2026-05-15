@@ -156,6 +156,21 @@ func (e *Engine) StartCompetition(id string) error {
 	// pool/bracket generation — admin's concurrent change is
 	// preserved by leaving current.PoolWinners alone. Same applies
 	// to Mirror (export-only), Name, Date, Venue (all UI-only).
+	//
+	// Roster/seed mtimes. Settings drift is detected via the field-by-
+	// field snapshot above; participants and seeds live in separate
+	// files and have no per-field snapshot, so use the file mtime as a
+	// fingerprint. A concurrent AdminParticipants PUT between our outer
+	// Load and the atomic commit below changes participants.csv mtime
+	// — if we don't detect it, our generated pools.csv / bracket.json
+	// reflect a stale roster while participants.csv on disk has the new
+	// one. The transform below aborts the start with a validation error
+	// when either file's mtime changed; the operator retries against
+	// the fresh roster. FileMtime returns 0 if the file does not exist,
+	// which is a valid "no participants yet" state — we snapshot the
+	// same 0 and the comparison still works.
+	loadedParticipantsMtime := e.store.FileMtime(id, "participants.csv")
+	loadedSeedsMtime := e.store.FileMtime(id, "seeds.csv")
 
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo
@@ -262,11 +277,11 @@ func (e *Engine) StartCompetition(id string) error {
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)
 		// Other config fields (TeamSize, PoolWinners, Name, Date, Venue,
-		// NumberPrefix-for-export, Mirror) are NOT validated — they
-		// don't drive generation, so admin's concurrent change to them
-		// doesn't invalidate the pools.csv / bracket.json we just wrote.
-		// Their values are preserved by leaving `current.X` alone in
-		// the transform (except TeamSize, see below).
+		// Mirror) are NOT validated — they don't drive generation, so
+		// admin's concurrent change to them doesn't invalidate the
+		// pools.csv / bracket.json we just wrote. Their values are
+		// preserved by leaving `current.X` alone in the transform
+		// (except TeamSize, see below).
 		if current.Format != loadedFormat ||
 			current.PoolSize != loadedPoolSize ||
 			current.PoolSizeMode != loadedPoolSizeMode ||
@@ -277,6 +292,27 @@ func (e *Engine) StartCompetition(id string) error {
 			current.WithZekkenName != loadedWithZekken ||
 			!courtsEqual(current.Courts, loadedCourts) {
 			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/Courts); regenerate by retrying", id)
+		}
+		// Participants / seeds drift: detected via file mtime captured
+		// at outer Load. A concurrent AdminParticipants PUT between our
+		// outer Load and this point would change the file mtime; without
+		// this check our generated pools/bracket reflect the stale roster
+		// while participants.csv on disk has the new one. Stat is
+		// lock-free, so calling FileMtime inside the transform is safe
+		// (no deadlock against the per-comp lock UpdateCompetitionChanged
+		// holds).
+		//
+		// TOCTOU caveat: a write that lands AFTER this check but BEFORE
+		// the trailing SaveParticipants (resolvedSlots path) still
+		// races with our pipeline. That window remains because
+		// SaveParticipants takes the same per-comp lock that the
+		// transform holds, so it can't be folded inside. The mtime
+		// check shrinks the window from "outer Load → trailing save"
+		// to "transform commit → trailing save," which is acceptable
+		// in practice (microseconds of CPU + filesystem latency).
+		if e.store.FileMtime(id, "participants.csv") != loadedParticipantsMtime ||
+			e.store.FileMtime(id, "seeds.csv") != loadedSeedsMtime {
+			return nil, validationErrorf("competition %s participants or seeds changed during start; retry", id)
 		}
 		// TeamSize handling: not in the drift validation above
 		// because it doesn't drive generation. If admin DIDN'T
@@ -297,27 +333,36 @@ func (e *Engine) StartCompetition(id string) error {
 		current.Status = comp.Status
 		// HasParticipantIDs is auto-managed (saveCompetitionWithPlayers
 		// sets it to true when Players is non-empty) and not exposed in
-		// the admin UI as an editable field. The unconditional copy
-		// from comp.HasParticipantIDs (the value we read at outer Load
-		// AND used for the LoadParticipantsOpt HasIDs hint above) keeps
-		// the persisted metadata consistent with how we parsed
-		// participants. A concurrent admin change to this field (via a
-		// hand-crafted PUT) would be reverted — that's the safer
-		// behavior here since otherwise the saved metadata would
-		// disagree with the parsed-with-IDs participant list we just
-		// re-saved.
-		current.HasParticipantIDs = comp.HasParticipantIDs
-		// When resolveReservedSlots mutated the roster, the trailing
-		// SaveParticipants below will rewrite participants.csv with
-		// UUID-prefixed rows regardless of the prior on-disk format.
-		// The list-view endpoint (handlers_viewer.go:46) passes
-		// HasIDs: &hasIDs where hasIDs comes from this flag — so a
-		// competition that started with HasParticipantIDs=false (e.g.
-		// import path with a manual non-UUID roster) would have its
-		// new UUID file misparsed: the UUID becomes part of the "Name".
-		// Set the flag now so the persisted metadata matches the file
-		// we're about to save.
+		// the admin UI as an editable field. Pre-fix this was an
+		// UNCONDITIONAL restore from the outer-Load snapshot
+		// (current.HasParticipantIDs = comp.HasParticipantIDs), which
+		// reverted any concurrent PUT that flipped the flag to true
+		// (e.g. AdminParticipants persisting a UUID roster in parallel
+		// with this start). Combined with the no-reserved-slot branch
+		// NOT rewriting participants.csv, the result was a UUID file
+		// on disk paired with a HasParticipantIDs=false metadata flag
+		// — and the list-view's HasIDs hint would then misparse the
+		// UUID as part of each player's Name.
+		//
+		// The participants/seeds drift check above already aborts the
+		// start when participants.csv mtime changed, so a concurrent
+		// PUT is rejected before we reach this point. Defense in depth:
+		// preserve the fresh `current.HasParticipantIDs` (loaded inside
+		// the transform) by NOT overwriting it from the snapshot. The
+		// resolvedSlots branch below still upgrades to true when our
+		// pipeline rewrites the roster with UUIDs — that path is the
+		// only legitimate reason to flip the flag here.
 		if resolvedSlots {
+			// resolveReservedSlots produced a mutated roster that the
+			// trailing SaveParticipants below will write with UUID-
+			// prefixed rows regardless of the prior on-disk format. The
+			// list-view endpoint (handlers_viewer.go:46) passes
+			// HasIDs: &hasIDs where hasIDs comes from this flag — so a
+			// competition that started with HasParticipantIDs=false (e.g.
+			// import path with a manual non-UUID roster) would have its
+			// new UUID file misparsed if we left the flag at false. Set
+			// it now so the persisted metadata matches the file we're
+			// about to save.
 			current.HasParticipantIDs = true
 		}
 		return current, nil

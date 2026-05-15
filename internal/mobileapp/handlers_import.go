@@ -163,6 +163,21 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		comp.Courts = []string{"A"}
 	}
 
+	// Cross-file guard symmetry with the POST /competitions and
+	// PUT /competitions/:id handlers, which call validateCompetitionCourts
+	// to reject empty / multi-character / >26-court manifests. Pre-fix the
+	// import path bypassed this check and could land a Competition with
+	// court labels that no other write path would accept — e.g. a manifest
+	// row with 30 courts or court="AA" would persist via SaveCompetition
+	// here while the same value via the REST API would 400. Apply the
+	// same validator AFTER the empty-courts fallback above so the explicit
+	// default "A" passes trivially. Per-row res.Error to match the other
+	// validation patterns.
+	if err := validateCompetitionCourts(comp.Courts); err != nil {
+		res.Error = "courts: " + err.Error()
+		return res
+	}
+
 	// Reject non-canonical Date format (see validateDateDMY in
 	// handlers_tournament.go). Per-row res.Error to match the existing
 	// missing-id / invalid-id / save-error patterns — doesn't HTTP-fail

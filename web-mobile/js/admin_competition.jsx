@@ -470,22 +470,29 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
 
   // Number-input variant of `update`. Stores NaN in local state for empty
   // input so the render side can keep the display empty (see
-  // decideNumericUpdate's contract). Skips saveLater when the parsed value
-  // isn't a positive integer ≥ min — without touching any pending save.
+  // decideNumericUpdate's contract).
   //
-  // Deliberately does NOT cancel debounceRef. The single debounceRef holds
-  // at most one pending save covering ALL fields; if we cancelled it here,
-  // a concurrent edit to a non-numeric field (e.g. user typing in `name`
-  // before clearing `teamSize`) would silently lose its save. The pending
-  // save's captured snapshot already holds the user's last good numeric
-  // value, so letting it fire is the safest fallback — the cleared display
-  // resolves on the next user action or SSE refresh once debounceRef
-  // becomes null after the save completes.
+  // Always schedules a saveLater with the CURRENT next snapshot, even when
+  // the parsed value is invalid (NaN / fractional / below min). Pre-fix
+  // path skipped saveLater on invalid input, but the single debounceRef
+  // covers ALL fields — so a previously-scheduled save with a CAPTURED
+  // snapshot still held the OLD valid value for the field the user just
+  // cleared. When that timer fired, it committed the cleared value's
+  // predecessor over the wire, reverting the user's clear visually on
+  // the next SSE / PUT-response merge.
+  //
+  // Replacing the pending save with the current snapshot keeps the
+  // debounceRef in sync with the visible state. safeInt in saveNow's
+  // finalNext allowlist then bridges the gap: an invalid value (NaN /
+  // 1.5 / -1) round-trips to the on-disk c.<field> value, so the PUT
+  // is a no-op for that field but cross-field saves (e.g. Name typed
+  // concurrently) still land. The cleared display resolves to the
+  // saved value on the next SSE / PUT-response merge.
   const updateNumber = (k, raw, min = 1) => {
-    const { value, shouldSave } = decideNumericUpdate(raw, min);
+    const { value } = decideNumericUpdate(raw, min);
     const next = { ...local, [k]: value };
     setLocal(next);
-    if (shouldSave) saveLater(next);
+    saveLater(next);
   };
 
   const toggleCourt = (cc) => {

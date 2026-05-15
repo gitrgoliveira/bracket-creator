@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -774,4 +775,190 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// HasParticipantIDs flipped to true (populated roster path).
 		assert.True(t, stored.HasParticipantIDs)
 	})
+}
+
+// TestPUTCompetition_RosterPUTBypassesSettingsValidation pins the
+// Copilot round-12 finding (#4): settings-specific validators
+// (validateDateDMY, validateCompetitionCourts, empty-name check) used
+// to run BEFORE the transform's branch decision, so a roster-only PUT
+// from AdminParticipants (`{ ...c, players: np }` spread) carrying a
+// stale settings field would fail with "date must be DD-MM-YYYY" even
+// though the field was about to be ignored by the transform. Now those
+// validators only run when comp.Players == nil (settings-only PUT).
+func TestPUTCompetition_RosterPUTBypassesSettingsValidation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed a competition with a NON-DMY date (simulating legacy state
+	// from before the canonical-format cleanup landed). Direct
+	// SaveCompetition bypasses the handler's validation so we can plant
+	// the legacy shape.
+	cid := "legacy-date-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:   cid,
+		Name: "Legacy",
+		Date: "2026-05-12", // ISO format, would fail validateDateDMY
+	}))
+
+	// Roster-only PUT — AdminParticipants spreads `{ ...c, players: np }`
+	// where c.date is the on-disk legacy ISO date.
+	body, _ := json.Marshal(state.Competition{
+		ID:   cid,
+		Name: "Legacy",
+		Date: "2026-05-12", // stale ISO from c.date
+		Players: []helper.Player{
+			{ID: "p1-uuid", Name: "P1", Dojo: "D1"},
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code,
+		"roster-only PUT must succeed even with non-DMY date in body: %s", w.Body.String())
+
+	// Verify the roster landed and the legacy date is preserved on disk
+	// (the PUT didn't touch the settings field — that's the whole point).
+	parts, _ := store.LoadParticipants(cid, false)
+	assert.Len(t, parts, 1, "roster must have landed")
+	stored, _ := store.LoadCompetition(cid)
+	assert.Equal(t, "2026-05-12", stored.Date, "legacy date untouched by roster PUT")
+}
+
+// TestPUTCompetition_SettingsOnlyResponseIncludesPlayers pins the
+// Copilot round-12 finding (#5): settings-only PUTs used to return
+// `players: null` in the response because LoadCompetition doesn't
+// populate Players from participants.csv. admin.jsx's
+// `{ ...c, ...updated }` merge then pushed null into local state,
+// crashing render paths that read `c.players.length`. The handler now
+// loads the on-disk roster for the response when comp.Players == nil.
+func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "with-roster"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                cid,
+		Name:              "With Roster",
+		Date:              "12-05-2026",
+		HasParticipantIDs: true,
+	}))
+	// Use real UUID v4 IDs so the auto-detect / hinted loader recognises
+	// the format and Names parse correctly on LoadParticipants.
+	require.NoError(t, store.SaveParticipants(cid, []helper.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo X"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Y"},
+	}))
+
+	// Settings-only PUT — body OMITS players. Just renaming.
+	body := []byte(`{"id":"with-roster","name":"With Roster Renamed","date":"12-05-2026"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	// Parse the response — the Players field must be a non-null array
+	// reflecting the on-disk roster.
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Players, "Players must NOT be null in settings-only PUT response")
+	assert.Len(t, resp.Players, 2, "Players must contain the on-disk roster")
+	assert.Equal(t, "Alice", resp.Players[0].Name)
+	assert.Equal(t, "Bob", resp.Players[1].Name)
+
+	// Also verify the response body's JSON literally has a players array,
+	// not the string "null" — Go's nil slice serializes to "null", which
+	// is the bug shape we're guarding against.
+	assert.NotContains(t, w.Body.String(), `"players":null`,
+		"response must not ship `players: null` — clients merge this into local state")
+}
+
+// TestPlayoff_ResponseIncludesPlayers pins the Copilot round-12
+// finding (#6) server-side: POST /playoffs used to ship `players: null`
+// in the create response (Go nil slice → JSON null). admin.jsx's
+// refreshCompsAfterCreate fallback appends the response directly into
+// local state, and render paths that read `c.players.length` crash.
+// The handler now loads the placeholder roster for the response.
+func TestPlayoff_ResponseIncludesPlayers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Source pools competition with 2 participants → 1 pool → 2 winners
+	// → 2 reserved-slot placeholders on the playoff.
+	src := state.Competition{
+		ID:          "src",
+		Name:        "Source",
+		Format:      state.CompFormatPools,
+		Status:      state.CompStatusPools,
+		PoolSize:    3,
+		PoolWinners: 2,
+	}
+	require.NoError(t, store.SaveCompetition(&src))
+	require.NoError(t, store.SaveParticipants("src", []helper.Player{
+		{ID: "p1", Name: "P1", Dojo: "D1"},
+		{ID: "p2", Name: "P2", Dojo: "D2"},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/src/playoffs", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, "response: %s", w.Body.String())
+
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Players, "Players must NOT be null in POST /playoffs response")
+	assert.NotContains(t, w.Body.String(), `"players":null`,
+		"response must not ship `players: null` — client appends this into local state")
+	// The actual content is reserved-slot placeholders; we just care
+	// that the field isn't null.
+	assert.GreaterOrEqual(t, len(resp.Players), 1,
+		"placeholder participants must be present in the response")
+}
+
+// TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure pins the
+// Copilot round-12 finding (#1): the transform used to flip
+// HasParticipantIDs=true BEFORE the post-transform SaveParticipants
+// call. If SaveParticipants then failed (disk full, EISDIR, etc.) the
+// config carried HasParticipantIDs=true while participants.csv
+// retained the OLD non-UUID format — the HasIDs-hinted loader would
+// then misparse the file. The flag flip is now deferred to AFTER
+// SaveParticipants succeeds.
+func TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "save-fails-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Save Fails", HasParticipantIDs: false,
+	}))
+
+	// Plant a directory where participants.csv should be — the
+	// SaveParticipants -> WriteFile call will fail with EISDIR.
+	plantedDir := filepath.Join(tempDir, "competitions", cid, "participants.csv")
+	require.NoError(t, os.MkdirAll(plantedDir, 0o700))
+
+	body, _ := json.Marshal(state.Competition{
+		ID:   cid,
+		Name: "Save Fails",
+		Players: []helper.Player{
+			{ID: "p1-uuid", Name: "P1", Dojo: "D1"},
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code,
+		"save failure must surface as 500 (got %s): %s", w.Code, w.Body.String())
+
+	// HasParticipantIDs must NOT have been flipped to true — the file
+	// save failed, so the metadata flag stays in sync with the still-
+	// missing file.
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.False(t, stored.HasParticipantIDs,
+		"HasParticipantIDs must NOT flip to true when SaveParticipants fails")
 }

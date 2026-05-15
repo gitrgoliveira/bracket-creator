@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"fmt"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -363,19 +365,14 @@ func (e *Engine) StartCompetition(id string) error {
 		// resolvedSlots branch below still upgrades to true when our
 		// pipeline rewrites the roster with UUIDs — that path is the
 		// only legitimate reason to flip the flag here.
-		if resolvedSlots {
-			// resolveReservedSlots produced a mutated roster that the
-			// trailing SaveParticipants below will write with UUID-
-			// prefixed rows regardless of the prior on-disk format. The
-			// list-view endpoint (handlers_viewer.go:46) passes
-			// HasIDs: &hasIDs where hasIDs comes from this flag — so a
-			// competition that started with HasParticipantIDs=false (e.g.
-			// import path with a manual non-UUID roster) would have its
-			// new UUID file misparsed if we left the flag at false. Set
-			// it now so the persisted metadata matches the file we're
-			// about to save.
-			current.HasParticipantIDs = true
-		}
+		// HasParticipantIDs flip for the resolvedSlots path is DEFERRED
+		// to AFTER SaveParticipants below — pre-fix, this transform
+		// flipped the flag to true, but if the trailing SaveParticipants
+		// then failed (disk full, EISDIR, etc.), the config carried
+		// HasParticipantIDs=true while participants.csv retained the
+		// OLD non-UUID format. On next load, the HasIDs-hinted parser
+		// would misparse the file (UUID extraction on non-UUID rows).
+		// Deferral ensures the (flag, file) pair stays consistent.
 		return current, nil
 	})
 	if err != nil {
@@ -388,6 +385,27 @@ func (e *Engine) StartCompetition(id string) error {
 	if resolvedSlots {
 		if err := e.store.SaveParticipants(id, players); err != nil {
 			return err
+		}
+		// Deferred HasParticipantIDs flip — runs ONLY after the
+		// participants file lands successfully with UUID-prefixed rows.
+		// See the transform above for the bug-shape comment.
+		if _, fierr := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			if current == nil {
+				return nil, nil
+			}
+			current.HasParticipantIDs = true
+			return current, nil
+		}); fierr != nil {
+			// Log only — the file save succeeded (which is the
+			// load-bearing write). A stale flag at this point means
+			// LoadParticipantsOpt's auto-detect runs on next load and
+			// still parses the file correctly via the first-line
+			// heuristic. Aborting the start here after a successful
+			// save would leave the operator in a worse state
+			// (status committed in the transform above, but the
+			// caller would see an error and likely retry, hitting
+			// "already started").
+			fmt.Printf("Warning: failed to flip HasParticipantIDs after SaveParticipants: %v\n", fierr)
 		}
 	}
 

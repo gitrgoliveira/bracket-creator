@@ -79,10 +79,13 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket) error {
 }
 
 // UpdateBracket atomically loads the bracket for compID, calls mutate
-// with the loaded bracket (which may be nil if no bracket file exists
-// yet), and — if mutate returns nil — persists the bracket. The entire
-// load + mutate + save sequence runs under the per-competition lock so
-// concurrent calls serialize correctly.
+// with the loaded bracket (always non-nil — parseBracketFile returns an
+// empty `&Bracket{Rounds: [][]BracketMatch{}}` when no file exists yet,
+// so callers can rely on a non-nil receiver and an empty Rounds slice
+// as the "no bracket yet" sentinel), and — if mutate returns nil —
+// persists the bracket. The entire load + mutate + save sequence runs
+// under the per-competition lock so concurrent calls serialize
+// correctly.
 //
 // mutate may modify the bracket arbitrarily (e.g. update one match AND
 // propagate the winner to the next round) — this is the more general
@@ -125,10 +128,8 @@ func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error 
 		return err
 	}
 
-	if bracket == nil {
-		// mutate didn't error but there's no bracket to save (file
-		// didn't exist and mutate didn't create one). Nothing to do.
-		return nil
-	}
+	// bracket is always non-nil here — parseBracketFile returns an empty
+	// `&Bracket{...}` on missing file (never nil). The nil-check would be
+	// dead code; trust the contract from parseBracketFile.
 	return s.saveBracketLocked(compID, bracket)
 }

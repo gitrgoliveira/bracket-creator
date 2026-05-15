@@ -164,6 +164,15 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // refresh succeeded — confusing for the user who just clicked "Create".
   // Skips the merge if a (possibly newer) record with the same ID
   // already exists locally; otherwise appends.
+  //
+  // Defensive normalization: the create-response from the Go server can
+  // ship `players: null` (Go nil slice → JSON null) when the handler
+  // didn't populate Players before sending. Render paths read
+  // `c.players.length`, which crashes on null. Server-side fixes
+  // (handlers_competition.go) populate Players for the response, but
+  // client-side defense ensures the fallback works even against an
+  // older server that still ships null. See normalizeCreatedRecord at
+  // the bottom of this file for the pure helper.
   const refreshCompsAfterCreate = async (created, actionLabel) => {
     try {
       const comps = await window.API.fetchCompetitions();
@@ -172,8 +181,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
       if (mountedRef.current) {
+        const normalized = normalizeCreatedRecord(created);
         onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
-          comps => comps.some(c => c.id === created.id) ? comps : [...comps, created]));
+          comps => comps.some(c => c.id === normalized.id) ? comps : [...comps, normalized]));
         showToast(`${actionLabel} succeeded; refresh failed — reload to see latest`, "error");
       }
     }
@@ -600,8 +610,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   }
 }
 
+// Pure helper for the "refresh-failure fallback merges raw server
+// response" guard. The Go server can ship `players: null` (Go nil
+// slice → JSON null) on CREATE-shape responses; if that lands in
+// local state, render paths reading `c.players.length` crash.
+// Defense-in-depth alongside the server-side fix.
+function normalizeCreatedRecord(created) {
+  return { ...created, players: created.players ?? [] };
+}
+
 window.AdminApp = AdminApp;
 window.mergeCompetitionsIntoTournament = mergeCompetitionsIntoTournament;
 window.mergeTournamentPatch = mergeTournamentPatch;
+window.normalizeCreatedRecord = normalizeCreatedRecord;
 
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord };

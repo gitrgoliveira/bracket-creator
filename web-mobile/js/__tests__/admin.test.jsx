@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeCompetitionsIntoTournament, mergeTournamentPatch } from '../admin.jsx';
+import { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord } from '../admin.jsx';
 
 // /deep-review finding on UI side: AdminApp's async handlers
 // (updateCompetition, moveMatchCourt, editMatchScore, addCompetition,
@@ -265,5 +265,63 @@ describe('mergeTournamentPatch', () => {
     const t = { id: 't1', name: 'A' };
     const result = mergeTournamentPatch(t, {}, 'X');
     expect(result).not.toBe(t);
+  });
+});
+
+// /deep-review round-12 finding (Copilot #6): the create-response from
+// the Go server (POST /competitions, POST /playoffs) shipped
+// `players: null` because the Go `Players` slice was nil (the handler
+// constructed the response struct without populating Players from
+// disk). refreshCompsAfterCreate's refresh-failure fallback appended
+// the raw response into local state, and downstream render paths
+// reading `c.players.length` crashed on null.
+//
+// Server-side fix populates Players for the response; client-side
+// fix (normalizeCreatedRecord) is defense-in-depth so an older server
+// still in production doesn't break the UI.
+describe('normalizeCreatedRecord', () => {
+  it('replaces null players with an empty array', () => {
+    const created = { id: 'c1', name: 'New', players: null };
+    const result = normalizeCreatedRecord(created);
+    expect(result.players).toEqual([]);
+  });
+
+  it('replaces undefined players with an empty array', () => {
+    // Server with `omitempty` on Players field would omit it entirely.
+    const created = { id: 'c1', name: 'New' };
+    const result = normalizeCreatedRecord(created);
+    expect(result.players).toEqual([]);
+  });
+
+  it('preserves a non-empty players array', () => {
+    const created = { id: 'c1', name: 'New', players: [{ id: 'p1', name: 'P1' }] };
+    const result = normalizeCreatedRecord(created);
+    expect(result.players).toEqual([{ id: 'p1', name: 'P1' }]);
+  });
+
+  it('preserves an explicit empty players array', () => {
+    // The "cleared roster" shape — distinct from null/undefined.
+    const created = { id: 'c1', name: 'New', players: [] };
+    const result = normalizeCreatedRecord(created);
+    expect(result.players).toEqual([]);
+  });
+
+  it('preserves all other fields', () => {
+    const created = {
+      id: 'c1', name: 'New', date: '12-05-2026',
+      status: 'setup', courts: ['A', 'B'], players: null,
+    };
+    const result = normalizeCreatedRecord(created);
+    expect(result.id).toBe('c1');
+    expect(result.name).toBe('New');
+    expect(result.date).toBe('12-05-2026');
+    expect(result.status).toBe('setup');
+    expect(result.courts).toEqual(['A', 'B']);
+  });
+
+  it('produces a new object reference', () => {
+    const created = { id: 'c1', players: null };
+    const result = normalizeCreatedRecord(created);
+    expect(result).not.toBe(created);
   });
 });

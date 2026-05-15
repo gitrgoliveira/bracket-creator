@@ -302,28 +302,43 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
 
-		// Reject whitespace-only Name (see POST handler above). The
-		// admin SETTINGS edit path (AdminSettings.saveNow in
-		// admin_competition.jsx) empty-checks the name client-side
-		// first — but keep this defense-in-depth so direct API callers
-		// can't land a blank-name PUT.
-		if comp.Name == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
-			return
-		}
+		// Settings-specific validations — gate on comp.Players == nil
+		// (settings-only PUT). Roster-only PUTs (comp.Players != nil)
+		// carry a stale-snapshot of settings fields from the frontend
+		// (AdminParticipants spreads `{ ...c, players: np }` over a
+		// possibly outdated `c`), and those fields are IGNORED downstream
+		// of the transform branch decision. Pre-fix, an on-disk
+		// legacy/stale settings value (e.g. a pre-DMY-canonical Date
+		// like `2026-05-12`) made the roster save fail with
+		// "date must be DD-MM-YYYY" even though the date wasn't being
+		// edited — the validators ran before the branch decision and
+		// rejected on a field the request was about to ignore. Moving
+		// these behind `comp.Players == nil` keeps the defense-in-depth
+		// against bad settings PUTs and unblocks roster saves on legacy
+		// state.
+		if comp.Players == nil {
+			// Reject whitespace-only Name (see POST handler above). The
+			// admin SETTINGS edit path (AdminSettings.saveNow in
+			// admin_competition.jsx) empty-checks the name client-side
+			// first — defense-in-depth for direct API callers.
+			if comp.Name == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
+				return
+			}
 
-		// Reject non-canonical Date format.
-		if err := validateDateDMY(comp.Date); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
+			// Reject non-canonical Date format.
+			if err := validateDateDMY(comp.Date); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 
-		// Cross-file guard symmetry with POST handler + POST/PUT /tournament:
-		// validateCompetitionCourts label + cap check (empty allowed
-		// because the engine applies a 1-court default for competitions).
-		if err := validateCompetitionCourts(comp.Courts); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
-			return
+			// Cross-file guard symmetry with POST handler + POST/PUT /tournament:
+			// validateCompetitionCourts label + cap check (empty allowed
+			// because the engine applies a 1-court default for competitions).
+			if err := validateCompetitionCourts(comp.Courts); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+				return
+			}
 		}
 
 		// Atomic uniqueness-check + 404-on-missing + settings-only merge
@@ -395,14 +410,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// settings-PUT and roster-PUT no longer step on each
 				// other's writes.
 				if comp.Players != nil {
-					if len(comp.Players) > 0 {
-						// Mirror the saveCompetitionWithPlayers contract:
-						// participants.csv is written with UUID-prefixed
-						// rows when the roster is populated, so the
-						// metadata flag must match for HasIDs-hinted
-						// loads to parse correctly.
-						current.HasParticipantIDs = true
-					}
+					// Roster-only PUT — do NOT flip HasParticipantIDs
+					// here. Pre-fix, the transform committed the flag
+					// (HasParticipantIDs=true) BEFORE the post-transform
+					// SaveParticipants call. If that save failed (disk
+					// full, EISDIR, etc.) the config on disk would carry
+					// HasParticipantIDs=true while participants.csv
+					// retained the OLD non-UUID format — and the
+					// list-view's HasIDs hint would then misparse the
+					// file (trying to extract UUID prefix from each
+					// non-UUID row). Defer the flag flip to the
+					// post-transform block AFTER SaveParticipants
+					// succeeds; see the participants/seeds save block
+					// below for the deferred flip.
 					return current, nil
 				}
 
@@ -489,6 +509,29 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if err := store.SaveSeeds(id, assignments); err != nil {
 				fmt.Printf("Warning: failed to save seeds: %v\n", err)
 			}
+			// Deferred HasParticipantIDs flip — runs ONLY after the
+			// participants file lands successfully. See the roster-only
+			// branch in the transform above for the pre-fix bug shape
+			// (flag committed before save → mismatch on disk when save
+			// failed). A second transform here is cheap (metadata-only)
+			// and runs under the per-comp lock, so subsequent loads see
+			// a consistent (flag, file) pair.
+			if len(comp.Players) > 0 {
+				if _, fierr := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+					if current == nil {
+						return nil, nil
+					}
+					current.HasParticipantIDs = true
+					return current, nil
+				}); fierr != nil {
+					// Log only — the file save succeeded, which is the
+					// load-bearing write. A stale flag means autodetect
+					// runs on next load (still resilient via the heuristic
+					// on the first line), so this is a softer failure
+					// than aborting the whole PUT after a successful save.
+					fmt.Printf("Warning: failed to flip HasParticipantIDs after SaveParticipants: %v\n", fierr)
+				}
+			}
 			participantsChanged = true
 		}
 		if changed || participantsChanged {
@@ -496,21 +539,33 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		// Re-load to return the actual on-disk state (with non-settings
 		// fields preserved from current) rather than the partial body.
-		// Preserve Players from the body in the response — LoadCompetition
-		// doesn't repopulate Players from participants.csv, and
-		// admin.jsx's updateCompetition merges the response onto local
-		// state via `{ ...c, ...updated }`, so a missing Players field
-		// would null out the local roster after a participants save.
+		// LoadCompetition doesn't repopulate Players from participants.csv,
+		// so we ALWAYS need to populate Players on the response — otherwise
+		// admin.jsx's updateCompetition merges `{ ...c, ...updated }` with
+		// `updated.players: null` (Go nil slice → JSON null), wiping the
+		// frontend's local roster and crashing render paths that read
+		// `c.players.length`.
 		updated, _ := store.LoadCompetition(id)
 		if updated == nil {
 			c.JSON(http.StatusOK, comp)
 			return
 		}
-		// Preserve Players from the body whenever it was PRESENT (non-nil),
-		// even if empty — AdminParticipants's clear-roster path sends [] and
-		// expects the response to reflect the cleared roster.
 		if comp.Players != nil {
+			// Roster-PUT: reflect what we just saved. AdminParticipants's
+			// clear-roster path sends [] and expects the response to
+			// reflect the cleared roster — preserve that shape.
 			updated.Players = comp.Players
+		} else {
+			// Settings-only PUT — load the on-disk roster for the
+			// response so the merge doesn't push null into local state.
+			// Falling back to an empty slice on load failure is safer
+			// than nil (which JSON-encodes as null).
+			if players, lerr := store.LoadParticipants(id, updated.WithZekkenName); lerr == nil {
+				updated.Players = players
+			} else {
+				fmt.Printf("Warning: failed to load participants for settings-PUT response: %v\n", lerr)
+				updated.Players = []helper.Player{}
+			}
 		}
 		c.JSON(http.StatusOK, updated)
 	})
@@ -945,6 +1000,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 		}
 
+		// Populate Players on the response from disk (the playoff has
+		// reserved-slot placeholders persisted by AddReservedSlot above,
+		// but `playoff` is the pre-save struct with Players: nil → JSON
+		// null. The frontend's refreshCompsAfterCreate fallback merges
+		// this record into local state, and a null Players field crashes
+		// render paths reading `c.players.length`. Mirror the PUT
+		// settings-PUT response fix.
+		if players, lerr := store.LoadParticipants(playoff.ID, playoff.WithZekkenName); lerr == nil {
+			playoff.Players = players
+		} else {
+			fmt.Printf("Warning: failed to load participants for POST /playoffs response: %v\n", lerr)
+			playoff.Players = []helper.Player{}
+		}
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusCreated, playoff)
 	})

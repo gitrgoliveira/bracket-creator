@@ -116,6 +116,13 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	t.Run("Override Rank", func(t *testing.T) {
 		comp := state.Competition{ID: "rank-comp"}
 		store.SaveCompetition(&comp)
+		// Seed a pool so the new pool-size validation can find pool-1
+		// (rank within a pool is bounded by len(pool.Players)).
+		require.NoError(t, store.SavePools("rank-comp", []helper.Pool{
+			{PoolName: "pool-1", Players: []helper.Player{
+				{Name: "Player 1"}, {Name: "Player 2"}, {Name: "Player 3"},
+			}},
+		}))
 
 		reqBody, _ := json.Marshal(map[string]any{
 			"playerName": "Player 1",
@@ -133,6 +140,14 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// lookups (which use the canonical participant name) match.
 		comp := state.Competition{ID: "rank-trim-comp"}
 		store.SaveCompetition(&comp)
+		// Seed a pool with at least 7 players (rank=7 below).
+		players := make([]helper.Player, 8)
+		for i := range players {
+			players[i] = helper.Player{Name: fmt.Sprintf("Player %d", i+1)}
+		}
+		require.NoError(t, store.SavePools("rank-trim-comp", []helper.Pool{
+			{PoolName: "pool-1", Players: players},
+		}))
 
 		reqBody, _ := json.Marshal(map[string]any{
 			"playerName": "  Player Trim  ",
@@ -157,6 +172,15 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	t.Run("Override Rank Rejects Invalid Input", func(t *testing.T) {
 		comp := state.Competition{ID: "rank-bad-comp"}
 		store.SaveCompetition(&comp)
+		// Seed a pool so cases that pass the rank cap checks reach the
+		// pool-size validation (rank=99999 fails earlier at the absolute
+		// MaxRankOverride cap; rank=4-against-3-player-pool fails the
+		// pool-size check).
+		require.NoError(t, store.SavePools("rank-bad-comp", []helper.Pool{
+			{PoolName: "pool-1", Players: []helper.Player{
+				{Name: "Player 1"}, {Name: "Player 2"}, {Name: "Player 3"},
+			}},
+		}))
 
 		cases := []struct {
 			name string
@@ -167,7 +191,8 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			{"tab-only player name", map[string]any{"playerName": "\t\t", "rank": 1}},
 			{"zero rank", map[string]any{"playerName": "Player 1", "rank": 0}},
 			{"negative rank", map[string]any{"playerName": "Player 1", "rank": -3}},
-			{"absurdly large rank", map[string]any{"playerName": "Player 1", "rank": 99999}},
+			{"absurdly large rank (over MaxRankOverride)", map[string]any{"playerName": "Player 1", "rank": 99999}},
+			{"rank exceeds pool size", map[string]any{"playerName": "Player 1", "rank": 4}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -179,6 +204,28 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 				assert.Equal(t, http.StatusBadRequest, w.Code)
 			})
 		}
+	})
+
+	t.Run("Override Rank Rejects Unknown Pool With 404", func(t *testing.T) {
+		// Pool-size validation requires looking up the pool by name.
+		// A bogus :poolId (no matching Pool.PoolName) returns 404.
+		// The JS frontend only offers existing pools; this is a
+		// defense-in-depth check against hand-crafted API callers.
+		comp := state.Competition{ID: "rank-unknown-pool"}
+		store.SaveCompetition(&comp)
+		require.NoError(t, store.SavePools("rank-unknown-pool", []helper.Pool{
+			{PoolName: "pool-a", Players: []helper.Player{{Name: "P1"}}},
+		}))
+
+		reqBody, _ := json.Marshal(map[string]any{"playerName": "P1", "rank": 1})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rank-unknown-pool/pools/pool-z/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code,
+			"override-rank against an unknown pool name must 404")
+		assert.Contains(t, w.Body.String(), "pool",
+			"error message should identify the missing pool")
 	})
 
 	t.Run("Save Schedule", func(t *testing.T) {

@@ -77,9 +77,19 @@ function compMatchStats(c) {
 // admin_scoring_modal.jsx), and the team-size inputs in admin_competition
 // + admin_setup use it as their HTML `max` attribute. Bumping any of these
 // here flows to every consumer mechanically.
+//
+// MAX_COURTS mirrors helper.MaxCourts (internal/helper/constants.go) —
+// anchored to the A–Z labelling cap. MAX_RANK mirrors helper.MaxRankOverride
+// (same Go file) — overflow guard for the override-rank handler; the real
+// semantic constraint is pool size, enforced server-side. Keep both
+// constants in lockstep with the Go-side declarations; they sit next to
+// each other in this file and the Go file for visibility at both edit
+// points.
 const MIN_YEAR = 1900;
 const MAX_YEAR = 2100;
 const MAX_TEAM_SIZE = 9;
+const MAX_COURTS = 26;
+const MAX_RANK = 1000;
 
 // Canonical date error messages. Referenced by validateAndNormalizeDate
 // AND by AdminSettings.saveNow's inline asymmetric validation, so the
@@ -252,6 +262,8 @@ if (typeof window !== "undefined") {
   window.MIN_YEAR = MIN_YEAR;
   window.MAX_YEAR = MAX_YEAR;
   window.MAX_TEAM_SIZE = MAX_TEAM_SIZE;
+  window.MAX_COURTS = MAX_COURTS;
+  window.MAX_RANK = MAX_RANK;
 }
 
 // Also exported so the vitest suite under web-mobile/js/__tests__/ can
@@ -272,4 +284,6 @@ export {
   MIN_YEAR,
   MAX_YEAR,
   MAX_TEAM_SIZE,
+  MAX_COURTS,
+  MAX_RANK,
 };

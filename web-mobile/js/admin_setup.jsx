@@ -10,6 +10,9 @@ const isoToDmy = window.isoToDmy;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
+// Canonical courts cap (admin_helpers.jsx) — mirrors helper.MaxCourts
+// on the Go side. Anchored to the A–Z labelling used on Shiaijo headers.
+const MAX_COURTS = window.MAX_COURTS;
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -82,7 +85,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     if (!trimmedName) { setError("Tournament name is required."); return; }
     const { norm, error: dateError } = validateAndNormalizeDate(date);
     if (dateError) { setError(dateError); return; }
-    if (!Number.isInteger(courts) || courts < 1 || courts > 26) { setError("Number of courts must be a whole number between 1 and 26."); return; }
+    if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
 
     onSave({
       name: trimmedName,
@@ -124,13 +127,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             {/* NaN as "" so React doesn't warn ("Received NaN for the value */}
             {/* attribute") and the cleared input stays visually empty. */}
             {/* handleSave's Number.isInteger(courts) && courts >= 1 && */}
-            {/* courts <= 26 guard catches NaN, so the explicit Save click */}
-            {/* can't push an invalid value to onSave. */}
+            {/* courts <= MAX_COURTS guard catches NaN, so the explicit Save */}
+            {/* click can't push an invalid value to onSave. MAX_COURTS */}
+            {/* mirrors helper.MaxCourts (admin_helpers.jsx). */}
             <input
               className="input"
               type="number"
               min="1"
-              max="26"
+              max={MAX_COURTS}
               step="1"
               value={Number.isFinite(courts) ? courts : ""}
               onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}

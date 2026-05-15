@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -477,6 +477,25 @@ describe('numeric bounds constants', () => {
     // TEAM_POSITIONS from this; if you bump it, also extend the
     // scoring UI / docs / screenshot fixtures.
     expect(MAX_TEAM_SIZE).toBe(9);
+  });
+
+  it('MAX_COURTS matches A–Z labelling cap (lockstep with helper.MaxCourts)', () => {
+    // Pin the courts cap. Anchored to the single-letter A..Z labelling
+    // used on Shiaijo headers in the Excel output and in
+    // CourtPicker / admin_setup.jsx's courts input. The Go side
+    // declares the same value at internal/helper/constants.go as
+    // `MaxCourts`. Bumping past 26 here without bumping there (or
+    // vice versa) would let the UI offer values the backend rejects.
+    expect(MAX_COURTS).toBe(26);
+  });
+
+  it('MAX_RANK matches helper.MaxRankOverride (Go-side overflow cap)', () => {
+    // Pin the rank-override absolute cap. The override-rank handler
+    // ALSO validates against the actual pool size (real semantic
+    // constraint); this constant is the defense-in-depth overflow
+    // guard. Mirrors helper.MaxRankOverride in
+    // internal/helper/constants.go — keep both in lockstep.
+    expect(MAX_RANK).toBe(1000);
   });
 
   it('validateAndNormalizeDate predicate matches MIN_YEAR/MAX_YEAR bounds', () => {

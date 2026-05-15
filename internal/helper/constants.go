@@ -50,7 +50,24 @@ const (
 // It comes from the single-letter A–Z labelling used on Shiaijo headers
 // throughout the workbook; values above this are rejected up front by
 // ValidateCourts so we never silently truncate a user-requested layout.
+//
+// Mirrored client-side as `MAX_COURTS` in web-mobile/js/admin_helpers.jsx —
+// keep the two in lockstep. The JS side is anchored by a comment back here
+// so changes are visible at both edit points.
 const MaxCourts = 26
+
+// MaxRankOverride is the absolute upper bound for a manual rank override
+// submitted via PUT /api/competitions/:id/pools/:poolId/override-rank.
+// The override-rank handler ALSO validates against the actual pool size
+// (the real semantic constraint — rank within a pool must be in [1..N]
+// where N is the number of players in that pool). This cap is a
+// defense-in-depth overflow guard for the rare case where pools have
+// not been generated yet or LoadPools returns stale/unexpected data.
+//
+// Mirrored client-side as `MAX_RANK` in web-mobile/js/admin_helpers.jsx —
+// keep the two in lockstep. 1000 is arbitrary; no real pool has 1000+
+// participants.
+const MaxRankOverride = 1000
 
 // CourtsColumnsPerCourt is the number of Excel columns allocated to each
 // court (Shiaijo) on the Pool Matches and Elimination Matches sheets.

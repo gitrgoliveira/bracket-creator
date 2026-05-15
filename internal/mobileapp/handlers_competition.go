@@ -755,8 +755,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		// Defense-in-depth: the JS client already guards isNaN/<=0, but a stale
 		// or hand-crafted request could persist garbage rank values. Reject
-		// non-positive ranks (and anything implausibly large — no real pool
-		// has 1000+ participants). Trim whitespace from the player name so
+		// non-positive ranks here. Trim whitespace from the player name so
 		// "   " doesn't slip through the empty check and so padded names
 		// don't create keys that miss later lookups.
 		playerName := strings.TrimSpace(req.PlayerName)
@@ -764,8 +763,45 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": "playerName is required"})
 			return
 		}
-		if req.Rank <= 0 || req.Rank > 1000 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer ≤ 1000"})
+		if req.Rank <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer"})
+			return
+		}
+		// Absolute overflow guard — defense-in-depth against weird
+		// stale-pool or LoadPools-error edge cases. The real semantic
+		// validation against the pool's actual size happens below.
+		if req.Rank > helper.MaxRankOverride {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank must be a positive integer ≤ %d", helper.MaxRankOverride)})
+			return
+		}
+		// Pool-size validation: rank within a pool is bounded by the
+		// number of players in that pool. Load the comp's pools and
+		// look up the target pool by name (the URL :poolId matches
+		// Pool.PoolName). Pre-fix, the only check was an absolute 1000
+		// cap which let a stale/hand-crafted request store
+		// rank=500 against a 4-player pool — meaningless override
+		// values were silently accepted. Cost: one LoadPools per
+		// override request. Rank overrides are rare admin actions, so
+		// the extra read is negligible.
+		pools, err := store.LoadPools(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load pools: " + err.Error()})
+			return
+		}
+		var targetPool *helper.Pool
+		for i := range pools {
+			if pools[i].PoolName == poolId {
+				targetPool = &pools[i]
+				break
+			}
+		}
+		if targetPool == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("pool %q not found in competition %q", poolId, id)})
+			return
+		}
+		poolSize := len(targetPool.Players)
+		if req.Rank > poolSize {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank %d exceeds pool size %d", req.Rank, poolSize)})
 			return
 		}
 

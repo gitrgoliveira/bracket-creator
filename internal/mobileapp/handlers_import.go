@@ -203,14 +203,33 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		parsedPlayers = players
 	}
 
+	// Seeds parse: mirror the participants block's error-handling pattern.
+	// Pre-fix this swallowed THREE shapes silently:
+	//   (1) entry.Seeds named a file that wasn't in the upload — user
+	//       got SeedCount=0 with no error and assumed the import worked.
+	//   (2) parseSeedsBytes returned err != nil — currently unreachable
+	//       (parseSeedsBytes never produces a non-nil err) but the dead
+	//       branch documented "errors are OK to ignore" which would
+	//       silently regress the moment parseSeedsBytes started surfacing
+	//       parse failures.
+	//   (3) The file was present but parsed to zero assignments — kept
+	//       as a soft no-op (legitimate "header-only" / "no seeds yet"
+	//       intent; symmetric with empty participants file → 0 players).
+	// Only (1) and (2) become hard errors here; (3) stays soft.
 	var parsedSeeds []domain.SeedAssignment
 	if entry.Seeds != "" {
 		data := findFile(files, entry.Seeds)
-		if data != nil {
-			assignments, err := parseSeedsBytes(data)
-			if err == nil && len(assignments) > 0 {
-				parsedSeeds = assignments
-			}
+		if data == nil {
+			res.Error = fmt.Sprintf("seeds file %q not found in upload", entry.Seeds)
+			return res
+		}
+		assignments, err := parseSeedsBytes(data)
+		if err != nil {
+			res.Error = "parse seeds: " + err.Error()
+			return res
+		}
+		if len(assignments) > 0 {
+			parsedSeeds = assignments
 		}
 	}
 
@@ -267,9 +286,18 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		res.ParticipantCount = len(parsedPlayers)
 	}
 
-	// Save seeds — already parsed pre-save.
+	// Save seeds — already parsed pre-save. Surface SaveSeeds I/O errors
+	// to res.Error rather than swallowing them: pre-fix `_ = SaveSeeds(...)`
+	// followed by `res.SeedCount = N` would claim N seeds imported even
+	// when disk write failed (permission denied, no space, etc.), so the
+	// admin UI showed a green "import successful" while seeds.csv was
+	// empty / missing. Mirror the SaveParticipants pattern above —
+	// errors abort the row with a clear message.
 	if len(parsedSeeds) > 0 {
-		_ = store.SaveSeeds(entry.ID, parsedSeeds)
+		if err := store.SaveSeeds(entry.ID, parsedSeeds); err != nil {
+			res.Error = "save seeds: " + err.Error()
+			return res
+		}
 		res.SeedCount = len(parsedSeeds)
 	}
 

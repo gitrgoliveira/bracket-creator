@@ -237,6 +237,93 @@ competitions:
 		assert.Contains(t, resp["results"][0].Error, "parse participants")
 	})
 
+	// Pre-fix, the seeds block silently swallowed three shapes:
+	// (1) missing seeds file, (2) parseSeedsBytes returning err != nil
+	// (currently unreachable but dead branch), and (3) empty parse.
+	// Only (3) is now soft — the other two surface as per-row res.Error,
+	// matching the participants block's pattern. The user no longer sees
+	// SeedCount=0 with no error message when they named a file that
+	// wasn't in the upload.
+	t.Run("Import Error - Missing Seeds File", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "comp-missing-seeds"
+    name: "Missing Seeds"
+    participants: "players-only.csv"
+    seeds: "absent-seeds.csv"
+`))
+		playersPart, _ := writer.CreateFormFile("files", "players-only.csv")
+		playersPart.Write([]byte("Player 1,Dojo A\nPlayer 2,Dojo B"))
+		// NOTE: no seeds file added to the multipart — the manifest names
+		// "absent-seeds.csv" but it never lands in the upload. Pre-fix
+		// this returned res.SeedCount=0 with no error; post-fix it must
+		// surface "not found in upload" so the user knows the import
+		// partially failed.
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string][]ImportResult
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		require.Len(t, resp["results"], 1)
+		assert.Contains(t, resp["results"][0].Error, "seeds file",
+			"missing seeds file must surface a clear per-row error")
+		assert.Contains(t, resp["results"][0].Error, "not found in upload",
+			"error must indicate the missing-file failure mode")
+		// Critical retry-safety check: the parse step happens BEFORE the
+		// rename-lock save, so a missing-seeds failure must leave the
+		// disk clean (no config.md, no participants.csv). The user can
+		// fix the manifest and retry without hitting the ID-collision
+		// guard.
+		stored, _ := store.LoadCompetition("comp-missing-seeds")
+		assert.Nil(t, stored, "missing-seeds failure must not leave a half-written competition on disk")
+	})
+
+	// Empty seeds parse (header-only file, all rows malformed) is the
+	// soft path — no error, SeedCount=0. Symmetric with how the
+	// participants block treats an empty roster file. Pin so a future
+	// refactor that hardens empty-parse to an error doesn't silently
+	// break legitimate "no seeds yet" imports.
+	t.Run("Import Soft - Empty Seeds File", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "comp-empty-seeds"
+    name: "Empty Seeds"
+    participants: "players-empty-seeds.csv"
+    seeds: "empty-seeds.csv"
+`))
+		playersPart, _ := writer.CreateFormFile("files", "players-empty-seeds.csv")
+		playersPart.Write([]byte("Player 1,Dojo A"))
+		// Header-only seeds file: parseSeedsBytes returns an empty slice.
+		seedsPart, _ := writer.CreateFormFile("files", "empty-seeds.csv")
+		seedsPart.Write([]byte("Rank,Name\n"))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string][]ImportResult
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		require.Len(t, resp["results"], 1)
+		assert.Empty(t, resp["results"][0].Error, "header-only seeds file must NOT error")
+		assert.Equal(t, 0, resp["results"][0].SeedCount)
+		assert.Equal(t, 1, resp["results"][0].ParticipantCount,
+			"participants should still save when seeds file is empty")
+	})
+
 	// Padded YAML string fields persisted unchanged before this fix —
 	// the import handler bypasses the POST/PUT trim in
 	// handlers_competition.go and writes via SaveCompetitionChanged

@@ -434,28 +434,41 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       tags: [competitions]
-      summary: Update competition
+      summary: Update competition (settings OR roster, mutually exclusive)
       description: |
-        Settings-only update. The server applies these fields from the
-        body onto the on-disk record: `name`, `date`, `startTime`,
-        `poolSize`, `poolWinners`, `poolSizeMode`, `courts`,
-        `roundRobin`, `withZekkenName`, `teamSize`, `numberPrefix`,
-        `format`, `kind`, `mirror`. String fields are trimmed
-        server-side. The request is rejected with 400 if `name` is
-        empty after trim, if `name` collides (case-insensitive) with
-        another competition's name, or if `date` is non-empty and not
-        in canonical `DD-MM-YYYY` format. Returns 404 when the
-        competition does not exist (this endpoint never creates).
+        Behaviour depends on whether the request body carries the
+        `players` field:
+
+        **Settings-update (body OMITS `players`):**
+        The server applies these fields from the body onto the
+        on-disk record: `name`, `date`, `startTime`, `poolSize`,
+        `poolWinners`, `poolSizeMode`, `courts`, `roundRobin`,
+        `withZekkenName`, `teamSize`, `numberPrefix`, `format`,
+        `kind`, `mirror`. String fields are trimmed server-side.
+        Rejected with 400 if `name` is empty after trim, if `name`
+        collides (case-insensitive) with another competition's name,
+        or if `date` is non-empty and not in canonical `DD-MM-YYYY`
+        format.
+
+        **Roster-save (body INCLUDES `players`, even an empty array):**
+        The server writes `participants.csv` (and clears or extracts
+        `seeds.csv` from each player's `seed` field) and IGNORES all
+        settings fields in the body. This is how the admin
+        participants page saves the roster — its body shape is
+        `{ ...c, players: np }` where `c` is a possibly-stale
+        frontend snapshot of the competition. Treating settings
+        fields as authoritative in this case would silently revert
+        any concurrent settings change. To update settings AND the
+        roster in one logical operation, issue two PUTs (settings
+        first, then roster). Players with `seed: 0` produce no seed
+        entry; sending `players: []` clears the roster.
+
+        Returns 404 when the competition does not exist (this endpoint
+        never creates).
 
         Server-managed fields — `status`, `hasParticipantIDs` — are
         IGNORED in the body. Use the dedicated transition endpoints
         (`/start`, `/complete`, `/invalidate`) to change status.
-
-        When the body carries `players`, the server ALSO writes the
-        participants.csv and seeds.csv files for the competition (this
-        is how the admin participants page saves the roster via the
-        same PUT). Seeds are extracted from each player's `seed`
-        field; players with `seed: 0` produce no seed entry.
       security:
         - TournamentPassword: []
       requestBody:

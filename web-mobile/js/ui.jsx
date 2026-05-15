@@ -20,7 +20,11 @@ function StatusBadge({ status, showLiveDot }) {
 function formatDate(d) {
   if (!d) return "Date TBA";
   let iso = d;
-  // If it's DD-MM-YYYY or DD/MM/YYYY, convert to DD-MM-YYYY for the Date constructor
+  // Accept the canonical DD-MM-YYYY form (and the lax DD/MM/YYYY variant)
+  // and convert to ISO YYYY-MM-DD, which is what the Date constructor
+  // parses unambiguously. Any other shape is passed through unchanged so
+  // the Date constructor's NaN check below converts unrecognized inputs
+  // to the "Date TBA" fallback.
   const match = d.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (match) {
     iso = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;

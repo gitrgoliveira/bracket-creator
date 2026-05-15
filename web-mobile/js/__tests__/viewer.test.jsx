@@ -4,7 +4,13 @@ import { formatDate } from '../ui.jsx';
 
 describe('Viewer Utils', () => {
   describe('formatDate', () => {
-    it('should format date string correctly', () => {
+    it('should format canonical DD-MM-YYYY correctly', () => {
+      // DD-MM-YYYY is the canonical storage format that the viewer reads
+      // directly from the API. Pinning this exercises the post-DMY-flip
+      // path that prod callers actually use.
+      expect(formatDate('12-05-2026')).toBe('12 May 2026');
+    });
+    it('should also accept ISO YYYY-MM-DD format', () => {
       expect(formatDate('2026-05-12')).toBe('12 May 2026');
     });
     it('should return default for missing date', () => {

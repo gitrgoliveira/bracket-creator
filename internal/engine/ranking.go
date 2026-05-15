@@ -123,9 +123,18 @@ func (e *Engine) GetPoolRanking(compID string, rank int) (*helper.Player, error)
 // SaveParticipants on real changes only — re-saving an unmutated snapshot
 // would clobber a concurrent participants upload.
 func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([]helper.Player, bool, error) {
+	// LoadReservedSlots returns ([]ReservedSlot{}, nil) for the "file does
+	// not exist" case (see parseReservedSlotsFile). Any other error from
+	// LoadReservedSlots is a genuine I/O / parse failure (corrupt JSON,
+	// permission, etc.). Previously this swallowed the error and returned
+	// (players, false, nil), making the caller think "no slots, no save
+	// needed" — but a corrupt slots file would silently proceed to generate
+	// pools / bracket with the placeholder "Reserved: rank N" entries left
+	// in `players`, since the resolution step was skipped. Propagate the
+	// error so StartCompetition aborts before generating broken artifacts.
 	slots, err := e.store.LoadReservedSlots(compID)
 	if err != nil {
-		return players, false, nil
+		return nil, false, fmt.Errorf("cannot load reserved slots for %q: %w", compID, err)
 	}
 	if len(slots) == 0 {
 		return players, false, nil

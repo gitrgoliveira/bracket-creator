@@ -17,11 +17,23 @@ describe('UI Components', () => {
   });
 
   describe('formatDate', () => {
-    it('should format dates correctly', () => {
+    it('should format canonical DD-MM-YYYY dates correctly', () => {
+      // DD-MM-YYYY is the canonical storage / API format end-to-end
+      // (see admin_helpers.jsx normalizeDate). This is the only shape
+      // production callers should pass formatDate.
+      expect(formatDate('12-05-2026')).toBe('12 May 2026');
+    });
+    it('should also accept ISO YYYY-MM-DD as transition convenience', () => {
+      // ISO is what HTML <input type="date"> produces natively; the
+      // frontend converts at the input boundary via isoToDmy, but
+      // formatDate is tolerant so any direct ISO consumer still works.
       expect(formatDate('2026-05-12')).toBe('12 May 2026');
     });
     it('should handle empty date', () => {
       expect(formatDate('')).toBe('Date TBA');
+    });
+    it('should fall back to "Date TBA" for unrecognized shapes', () => {
+      expect(formatDate('not-a-date')).toBe('Date TBA');
     });
   });
 

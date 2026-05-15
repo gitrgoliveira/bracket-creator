@@ -246,19 +246,31 @@ describe('dmyToIso / isoToDmy', () => {
   it('dmyToIso converts canonical DD-MM-YYYY to ISO', () => {
     expect(dmyToIso("13-05-2026")).toBe("2026-05-13");
   });
+  it('dmyToIso passes ISO YYYY-MM-DD through unchanged', () => {
+    // Defense-in-depth for code paths that still hand ISO values (e.g.
+    // a competition record loaded from a pre-canonicalization save still
+    // has an ISO date in state until the next save round-trips it). Pre-fix
+    // dmyToIso returned "" for ISO input, which blanked the date picker
+    // in the admin UI until the user manually picked a date again.
+    expect(dmyToIso("2026-05-13")).toBe("2026-05-13");
+  });
   it('dmyToIso returns "" for invalid input', () => {
     expect(dmyToIso("")).toBe("");
     expect(dmyToIso(null)).toBe("");
-    expect(dmyToIso("2026-05-13")).toBe(""); // ISO not accepted by this direction
     expect(dmyToIso("13/05/2026")).toBe("");
+    expect(dmyToIso("garbage")).toBe("");
   });
   it('isoToDmy converts ISO YYYY-MM-DD to canonical DD-MM-YYYY', () => {
     expect(isoToDmy("2026-05-13")).toBe("13-05-2026");
   });
+  it('isoToDmy passes DMY DD-MM-YYYY through unchanged', () => {
+    // Symmetric defense-in-depth for the reverse direction.
+    expect(isoToDmy("13-05-2026")).toBe("13-05-2026");
+  });
   it('isoToDmy returns "" for invalid input', () => {
     expect(isoToDmy("")).toBe("");
     expect(isoToDmy(null)).toBe("");
-    expect(isoToDmy("13-05-2026")).toBe(""); // DMY not accepted by this direction
+    expect(isoToDmy("garbage")).toBe("");
   });
 });
 

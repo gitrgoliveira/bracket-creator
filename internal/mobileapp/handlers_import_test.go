@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -322,6 +323,69 @@ competitions:
 		assert.Equal(t, 0, resp["results"][0].SeedCount)
 		assert.Equal(t, 1, resp["results"][0].ParticipantCount,
 			"participants should still save when seeds file is empty")
+	})
+
+	// Rollback contract: when SaveCompetition succeeds but a downstream
+	// per-row save (SaveParticipants or SaveSeeds) fails on I/O, the
+	// half-written competition MUST be rolled off disk. Pre-fix, the
+	// row error was surfaced but the config.md stayed — and the
+	// ID-collision guard on retry then rejected the same manifest with
+	// "competition ID %q already exists", so the operator couldn't
+	// recover without manual file deletion.
+	//
+	// To induce a SaveSeeds I/O failure deterministically, pre-create
+	// a DIRECTORY at the future seeds.csv path. `os.WriteFile` to a
+	// path that exists as a directory returns "is a directory" (EISDIR)
+	// reliably across platforms. SaveCompetition (config.md) and
+	// SaveParticipants (participants.csv) still succeed because their
+	// target paths are clear; only SaveSeeds collides.
+	t.Run("Import Rollback On SaveSeeds I/O Failure", func(t *testing.T) {
+		const cid = "comp-rollback-seeds"
+		// Plant a directory where SaveSeeds wants to write a file.
+		// Creates both the parent comp directory AND the leaf
+		// "seeds.csv" as a directory inside.
+		seedsObstacle := filepath.Join(tempDir, "competitions", cid, "seeds.csv")
+		require.NoError(t, os.MkdirAll(seedsObstacle, 0o700))
+
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "` + cid + `"
+    name: "Rollback Test"
+    participants: "rollback-players.csv"
+    seeds: "rollback-seeds.csv"
+`))
+		playersPart, _ := writer.CreateFormFile("files", "rollback-players.csv")
+		playersPart.Write([]byte("Player 1,Dojo A\nPlayer 2,Dojo B"))
+		seedsPart, _ := writer.CreateFormFile("files", "rollback-seeds.csv")
+		seedsPart.Write([]byte("Rank,Name\n1,Player 1\n"))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string][]ImportResult
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		require.Len(t, resp["results"], 1)
+		assert.Contains(t, resp["results"][0].Error, "save seeds:",
+			"SaveSeeds I/O failure must surface a per-row error")
+
+		// Rollback assertion: the entire comp directory must be gone,
+		// so a retry of the same manifest (after the operator removes
+		// the obstacle) passes the ID-collision guard.
+		stored, _ := store.LoadCompetition(cid)
+		assert.Nil(t, stored, "rollback must remove config.md so retry passes the ID-collision guard")
+
+		// Defense-in-depth: the planted directory should also be gone
+		// (DeleteCompetition does RemoveAll on the comp dir).
+		_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid))
+		assert.True(t, os.IsNotExist(statErr),
+			"rollback must remove the entire comp directory, got stat err=%v", statErr)
 	})
 
 	// Padded YAML string fields persisted unchanged before this fix —

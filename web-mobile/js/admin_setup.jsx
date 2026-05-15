@@ -503,7 +503,20 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       if (!hasErrors) {
         importedTimerRef.current = setTimeout(() => {
           importedTimerRef.current = null;
-          onImported();
+          // onImported is async (admin.jsx wires it to fetchCompetitions
+          // + navigate). Wrap in Promise.resolve so a refresh rejection
+          // doesn't surface as an unhandled promise rejection and leave
+          // the UI stuck on the import page. Surface as a non-fatal
+          // toast — the server-side import already completed; the user
+          // can reload to recover.
+          Promise.resolve()
+            .then(() => onImported())
+            .catch((e) => {
+              console.warn("post-import refresh failed:", e);
+              if (mountedRef.current) {
+                setError("Import succeeded; refresh failed — please reload the page. " + (e?.message || ""));
+              }
+            });
         }, 1500);
       }
     } catch (e) {

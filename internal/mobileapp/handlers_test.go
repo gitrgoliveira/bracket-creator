@@ -968,6 +968,23 @@ func TestCompetitionHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code, "PUT must 404 on missing competition")
 	assert.Contains(t, w.Body.String(), "not found")
+
+	// PUT /api/competitions/:id (missing target, but body name collides
+	// with an existing competition). Pre-fix the uniqueness check ran
+	// BEFORE the existence check, so this returned 400 "name already
+	// exists" — making it impossible to distinguish "the target doesn't
+	// exist" from "the name is taken." Post-fix the existence check
+	// runs first, so a missing target is always reported as 404
+	// regardless of the body's Name.
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "collision-target", Name: "TakenName"}))
+	collision := state.Competition{ID: "missing-id", Name: "TakenName"}
+	body, _ = json.Marshal(collision)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/missing-id", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code, "PUT must 404 on missing competition even when body name collides")
+	assert.NotContains(t, w.Body.String(), "already exists", "missing-target 404 must not leak name-collision detail")
 }
 
 func TestCompetitionsEmptyList(t *testing.T) {

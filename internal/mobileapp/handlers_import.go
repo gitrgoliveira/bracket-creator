@@ -278,8 +278,19 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 
 	// Save participants — already parsed pre-save, so this is a pure
 	// disk write that can only fail on I/O.
+	//
+	// Atomicity: SaveCompetition above has already written config.md
+	// (the visible "this competition exists" marker, enforced by the
+	// ID-collision check at the top of the lock). If SaveParticipants
+	// or SaveSeeds below fails, the config is orphaned — and the
+	// ID-collision check now blocks retries with the same manifest
+	// (the row says "save participants: …" but the disk says "ID
+	// already exists" on the next attempt). Roll back the config on
+	// post-save failure so the row is fully reversed and the operator
+	// can re-run the import after fixing the I/O issue.
 	if len(parsedPlayers) > 0 {
 		if err := store.SaveParticipants(entry.ID, parsedPlayers); err != nil {
+			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
 			res.Error = "save participants: " + err.Error()
 			return res
 		}
@@ -292,9 +303,11 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// when disk write failed (permission denied, no space, etc.), so the
 	// admin UI showed a green "import successful" while seeds.csv was
 	// empty / missing. Mirror the SaveParticipants pattern above —
-	// errors abort the row with a clear message.
+	// errors abort the row with a clear message AND roll back so a
+	// retry isn't blocked by the ID-collision check.
 	if len(parsedSeeds) > 0 {
 		if err := store.SaveSeeds(entry.ID, parsedSeeds); err != nil {
+			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
 			res.Error = "save seeds: " + err.Error()
 			return res
 		}

@@ -190,13 +190,26 @@ function normalizeDate(d) {
 
 // HTML <input type="date"> uses ISO YYYY-MM-DD for value/min/max attributes.
 // These converters bridge the input boundary; everywhere else uses DMY.
+//
+// dmyToIso accepts an ISO YYYY-MM-DD pass-through as a transition convenience:
+// `normalizeDate` and `formatDate` also accept ISO as input, and any record
+// saved by a pre-canonicalization build still has an ISO date in state until
+// the next save round-trips it. Without the pass-through, an ISO value would
+// produce an empty <input type="date"> value, blanking the picker in the UI.
 function dmyToIso(dmy) {
-  if (!dmy || !/^\d{2}-\d{2}-\d{4}$/.test(dmy)) return "";
+  if (!dmy) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dmy)) return dmy;
+  if (!/^\d{2}-\d{2}-\d{4}$/.test(dmy)) return "";
   const [dd, mm, yyyy] = dmy.split('-');
   return `${yyyy}-${mm}-${dd}`;
 }
+// isoToDmy accepts a DMY DD-MM-YYYY pass-through symmetrically — most callers
+// feed it the raw `e.target.value` from <input type="date">, which is ISO,
+// but defense-in-depth costs nothing here.
 function isoToDmy(iso) {
-  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+  if (!iso) return "";
+  if (/^\d{2}-\d{2}-\d{4}$/.test(iso)) return iso;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
   const [yyyy, mm, dd] = iso.split('-');
   return `${dd}-${mm}-${yyyy}`;
 }

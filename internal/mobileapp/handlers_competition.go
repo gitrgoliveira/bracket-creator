@@ -345,13 +345,24 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		var notFoundFlag bool
 		var changed bool
 		err := store.WithCompetitionRenameLock(func() error {
-			if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
-				return nil
-			}
 			var updateErr error
 			changed, updateErr = store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 				if current == nil {
 					notFoundFlag = true
+					return nil, nil
+				}
+				// Existence first, uniqueness second. Pre-fix order ran
+				// checkUniqueCompName BEFORE the transform, so a PUT to
+				// a missing :id whose body Name happened to collide with
+				// an existing competition would 400 "name already exists"
+				// instead of the documented 404 missing. Folding the
+				// check into the transform — after current == nil — is
+				// safe under WithCompetitionRenameLock: the rename mutex
+				// serializes rename ops, so the LoadCompetition calls on
+				// OTHER comp IDs that checkUniqueCompName performs can't
+				// race a concurrent rename of those comps (see store.go
+				// "Lock ordering note" on WithCompetitionRenameLock).
+				if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
 					return nil, nil
 				}
 				// Settings-only merge. Status, Players, and
@@ -375,11 +386,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.Format = comp.Format
 				current.Kind = comp.Kind
 				current.Mirror = comp.Mirror
-				// When the body carries Players, the participants save
-				// below will write a UUID-prefixed participants.csv —
-				// flip HasParticipantIDs to match so a later viewer load
-				// that passes HasIDs hint=true parses correctly (see
-				// handlers_viewer.go:46).
+				// When the body carries a populated Players list, the
+				// participants save below will write a UUID-prefixed
+				// participants.csv — flip HasParticipantIDs to match so
+				// a later viewer load that passes HasIDs hint=true
+				// parses correctly (see handlers_viewer.go:46).
+				//
+				// Use len > 0 here (not just != nil) because an explicit
+				// empty Players=[] payload from AdminParticipants clears
+				// the roster (handled by the post-transform save block,
+				// which is gated on != nil). An empty roster has no UUID
+				// rows to mark, so HasParticipantIDs stays as-is.
 				if len(comp.Players) > 0 {
 					current.HasParticipantIDs = true
 				}
@@ -387,23 +404,40 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			})
 			return updateErr
 		})
-		if nameErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
-			return
-		}
+		// 404 before 400 — with the uniqueness check now inside the
+		// transform (after the current == nil branch), notFoundFlag and
+		// nameErr are mutually exclusive. Order kept defensive in case
+		// either flag escapes the transform unexpectedly.
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if nameErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
 			return
 		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// Participants/seeds save (separate file) — runs only when the
-		// PUT body carries Players. AdminParticipants uses this path
-		// (`{ ...c, players: np }`); AdminSettings now does not.
+		// Participants/seeds save (separate file) — runs whenever the
+		// PUT body PRESENT (non-nil) Players field, including an
+		// explicit empty `players: []` payload to CLEAR the roster.
+		// AdminParticipants uses `{ ...c, players: np }` to either
+		// populate or clear; AdminSettings's saveNow allowlist OMITS
+		// the players field entirely (decodes to nil in Go), so it
+		// skips this block.
+		//
+		// nil vs empty matters: a `null` / omitted players field
+		// (settings-only PUT) decodes to nil and must NOT touch
+		// participants.csv. An explicit `[]` from "clear roster"
+		// decodes to a non-nil zero-length slice and DOES need to
+		// land an empty participants.csv + clear seeds.csv. Pre-fix
+		// `len > 0` collapsed both into "skip," leaving the prior
+		// roster on disk even though the UI reported "Saved 0
+		// participants."
 		participantsChanged := false
-		if len(comp.Players) > 0 {
+		if comp.Players != nil {
 			if err := store.SaveParticipants(id, comp.Players); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
 				return
@@ -429,7 +463,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusOK, comp)
 			return
 		}
-		if len(comp.Players) > 0 {
+		// Preserve Players from the body whenever it was PRESENT (non-nil),
+		// even if empty — AdminParticipants's clear-roster path sends [] and
+		// expects the response to reflect the cleared roster.
+		if comp.Players != nil {
 			updated.Players = comp.Players
 		}
 		c.JSON(http.StatusOK, updated)

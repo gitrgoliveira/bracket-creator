@@ -582,4 +582,71 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			}
 		}
 	})
+
+	// PUT contract: distinguish omitted Players (settings-only PUT) from
+	// explicit empty Players (clear roster). Pre-fix the handler keyed
+	// the participants save on `len(comp.Players) > 0`, which collapsed
+	// both into "skip save" — so the AdminParticipants "clear roster"
+	// flow showed "Saved 0 participants" while the prior roster stayed
+	// on disk. Post-fix the gate is `comp.Players != nil`: omitted is
+	// nil → skip, explicit [] is non-nil empty → save empty CSV.
+	t.Run("PUT Empty Players Clears Roster", func(t *testing.T) {
+		const cid = "empty-players-clear"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                cid,
+			Name:              "Empty Players Source",
+			HasParticipantIDs: true,
+		}))
+		require.NoError(t, store.SaveParticipants(cid, []helper.Player{
+			{Name: "Alice", Dojo: "Dojo A"},
+			{Name: "Bob", Dojo: "Dojo B"},
+		}))
+		// Confirm the roster is on disk before the clear.
+		prior, err := store.LoadParticipants(cid, false)
+		require.NoError(t, err)
+		require.Len(t, prior, 2, "preconditions: roster must be populated before clear")
+
+		// PUT with `players: []` (explicit empty, NOT omitted). Use
+		// json.RawMessage to force the field to render rather than
+		// relying on the encoder dropping nil slices.
+		clearBody := []byte(`{"id":"empty-players-clear","name":"Empty Players Source","players":[]}`)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(clearBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "PUT with players=[] must succeed: %s", w.Body.String())
+
+		// Verify the roster on disk is now empty.
+		after, err := store.LoadParticipants(cid, false)
+		require.NoError(t, err)
+		assert.Len(t, after, 0, "PUT with explicit empty Players must clear the roster")
+	})
+
+	// Symmetric to the test above: PUT with the Players field OMITTED
+	// (AdminSettings.saveNow's allowlist) must NOT touch participants.csv.
+	t.Run("PUT Omitted Players Preserves Roster", func(t *testing.T) {
+		const cid = "omitted-players-preserve"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                cid,
+			Name:              "Omitted Players Source",
+			HasParticipantIDs: true,
+		}))
+		require.NoError(t, store.SaveParticipants(cid, []helper.Player{
+			{Name: "Alice", Dojo: "Dojo A"},
+			{Name: "Bob", Dojo: "Dojo B"},
+		}))
+		// Settings-only PUT: no players field in body. AdminSettings's
+		// saveNow allowlist produces this shape.
+		settingsBody := []byte(`{"id":"omitted-players-preserve","name":"Renamed Comp"}`)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(settingsBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "PUT with omitted players must succeed: %s", w.Body.String())
+
+		// Roster on disk MUST be unchanged.
+		after, err := store.LoadParticipants(cid, false)
+		require.NoError(t, err)
+		assert.Len(t, after, 2, "PUT with omitted Players must NOT clear the roster")
+	})
 }

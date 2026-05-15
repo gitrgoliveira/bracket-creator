@@ -116,6 +116,28 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
+  // Best-effort post-mutation refresh. Several mutation handlers below
+  // (moveMatchCourt, editMatchScore, addCompetition, createPlayoff,
+  // startCompetition) used to wrap the mutation AND the follow-up
+  // fetchCompetitions in the same try/catch — so a transient refresh
+  // failure (server slow, network blip) surfaced as a mutation failure,
+  // even though the action was already persisted on disk. That misled
+  // operators into retrying score saves / start-competition / create-playoff
+  // ops that had already succeeded, sometimes producing "already started"
+  // or duplicate-ID errors on the second attempt. Separating the refresh
+  // into this helper makes the contract explicit: mutation errors throw,
+  // refresh errors log + toast a "reload to see latest" hint.
+  const refreshCompsBestEffort = async (actionLabel) => {
+    try {
+      const comps = await window.API.fetchCompetitions();
+      if (!mountedRef.current) return;
+      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+    } catch (e) {
+      console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
+      if (mountedRef.current) showToast(`${actionLabel} succeeded; refresh failed — reload to see latest`, "error");
+    }
+  };
+
   // Re-throws after surfacing the error toast so callers can branch on
   // success vs failure. Pre-fix the catch swallowed the rejection, so
   // every caller that chained .then / .catch (or expected to await this)
@@ -153,40 +175,42 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
   };
 
+  // Mutation handlers split into two phases:
+  //   1. Server mutation — failure shows the error toast and rethrows
+  //      (or returns, depending on caller contract) so caller sees the
+  //      real outcome.
+  //   2. Post-mutation refresh — best-effort via refreshCompsBestEffort.
+  //      A refresh failure cannot make the mutation "look failed."
   const moveMatchCourt = async (compId, matchId, newCourt) => {
     try {
       await window.API.moveMatchCourt(compId, matchId, newCourt, password);
-      const comps = await window.API.fetchCompetitions();
-      // tRef/onUpdateRef instead of closure-captured t/onUpdate — see
-      // mergeCompetitionsIntoTournament docstring for the stale-closure
-      // bug shape this avoids.
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
     } catch (e) {
       showToast(e.message, "error");
+      return;
     }
+    await refreshCompsBestEffort("Move");
   };
 
   const editMatchScore = async (compId, matchId, result, match) => {
     try {
       await window.API.recordScore(compId, matchId, result, password, match);
-      const comps = await window.API.fetchCompetitions();
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
     } catch (e) {
       showToast(e.message, "error");
       throw e;
     }
+    await refreshCompsBestEffort("Score");
   };
 
   const addCompetition = async (c) => {
+    let created;
     try {
-      const created = await window.API.createCompetition(c, password);
-      const comps = await window.API.fetchCompetitions();
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
-      return created;
+      created = await window.API.createCompetition(c, password);
     } catch (e) {
       showToast(e.message, "error");
       throw e;
     }
+    await refreshCompsBestEffort("Create");
+    return created;
   };
 
   const startAllCompetitions = async () => {
@@ -232,16 +256,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   };
 
   const createPlayoff = async (sourceId) => {
+    let created;
     try {
-      const created = await window.API.createPlayoff(sourceId, password);
-      const comps = await window.API.fetchCompetitions();
-      if (!mountedRef.current) return;
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
-      setView({ kind: "competition", id: created.id, section: "participants" });
-      showToast(`Playoff "${created.name}" created`);
+      created = await window.API.createPlayoff(sourceId, password);
     } catch (e) {
       if (mountedRef.current) showToast(e.message, "error");
+      return;
     }
+    await refreshCompsBestEffort("Playoff create");
+    if (!mountedRef.current) return;
+    setView({ kind: "competition", id: created.id, section: "participants" });
+    showToast(`Playoff "${created.name}" created`);
   };
 
   const startCompetition = async (cid) => {
@@ -250,12 +275,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     showToast(`Starting ${c.name}…`);
     try {
       await window.API.startCompetition(cid, password);
-      const comps = await window.API.fetchCompetitions();
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
-      showToast(`${c.name} started`);
     } catch (e) {
       showToast(e.message, "error");
+      return;
     }
+    await refreshCompsBestEffort("Start");
+    showToast(`${c.name} started`);
   };
 
   const updateTournament = async (patch) => {

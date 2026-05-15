@@ -4,10 +4,25 @@
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
+// Canonical "match has both sides for real participants" predicate.
+// Replaces the local `m.sideA && m.sideB` shorthand that treated the
+// `{id:"",name:""}` placeholder from normalizeMatch as a real side —
+// see admin_helpers.jsx for the full bug shape and rationale.
+//
+// Wrapped as a lazy callable rather than `const x = window.hasBothSides`
+// because index.html loads viewer.js BEFORE admin_helpers.js (viewer
+// is reachable pre-auth; admin helpers load later). At module-eval
+// time, window.hasBothSides is undefined; by the time any React render
+// runs, admin_helpers.js has executed and set the global, so deferring
+// the lookup to call time is safe.
+const hasBothSides = (m) => window.hasBothSides(m);
+// Lazy callable for the same load-order reason as hasBothSides above.
+// Canonical date format is DD-MM-YYYY, which doesn't lex-sort
+// chronologically — use compareDmy as the sort comparator everywhere
+// dates are ordered.
+const compareDmy = (a, b) => window.compareDmy(a, b);
 
 function competitionKindLabel(c) {
-  // c may be a kind string for backward-compat or a competition obj
-  if (typeof c === "string") return c === "team" ? "Teams" : "Individual";
   const base = c.kind === "team" ? "Teams" : "Individual";
   if (c.gender === "M") return `${base} · Men`;
   if (c.gender === "F") return `${base} · Women`;
@@ -48,9 +63,9 @@ function tournamentMatches(t) {
 // Next match to be played in this competition (live first, else first scheduled in time order)
 function currentMatchOf(c) {
   const ms = compMatches(c);
-  const live = ms.find((m) => m.status === "running" && m.sideA && m.sideB);
+  const live = ms.find((m) => m.status === "running" && hasBothSides(m));
   if (live) return live;
-  const sched = ms.filter((m) => m.status === "scheduled" && m.sideA && m.sideB);
+  const sched = ms.filter((m) => m.status === "scheduled" && hasBothSides(m));
   sched.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"));
   return sched[0] || null;
 }
@@ -67,7 +82,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     });
     return map;
   }, [comps, t.date]);
-  const dates = Object.keys(compsByDate).sort();
+  const dates = Object.keys(compsByDate).sort(compareDmy);
 
   const [courtFilter, setCourtFilter] = useState("all");
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -75,8 +90,13 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
   const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status !== "setup").map(c => c.id)), [t.competitions]);
-  const live = allMatches.filter((m) => m.status === "running" && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
-  let upNext = allMatches.filter((m) => m.status === "scheduled" && m.sideA && m.sideB && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
+  // Apply hasBothSides here too — pre-fix, a bracket match marked
+  // `running` while one side was still an unresolved "Winner of rX-mY"
+  // placeholder would appear in the public LIVE NOW strip, even though
+  // the upcoming list / cards / detail view all reject placeholder
+  // sides. Mirrors the upNext filter below.
+  const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
+  let upNext = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
   if (courtFilter === "all") upNext = upNext.slice(0, 3);
 
   return (
@@ -117,7 +137,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <span className="vlist-item__icon">🗓</span>
             <div className="vlist-item__rowbody">
               <div className="vlist-item__rowtitle">Full schedule</div>
-              <div className="vlist-item__rowsub">{pluralize(allMatches.filter((m) => m.sideA && m.sideB).length, "match", "matches")} across {pluralize(tournament.courts.length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
+              <div className="vlist-item__rowsub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} across {pluralize(tournament.courts.length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
             </div>
             <span className="vlist-item__rowchev">→</span>
           </button>
@@ -138,7 +158,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               <div className="section-title">{formatDate(d)}</div>
               <div className="vlist">
                 {compsByDate[d].map((c) => {
-                  const matches = compMatches(c).filter((m) => m.sideA && m.sideB);
+                  const matches = compMatches(c).filter(hasBothSides);
                   const total = matches.length;
                   const done = matches.filter((m) => m.status === "completed").length;
                   const liveCount = matches.filter((m) => m.status === "running").length;
@@ -205,8 +225,8 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
     return out;
   }, [pools, poolMatches, bracket]);
 
-  const liveMatches = allMatches.filter((m) => m.status === "running" && m.sideA && m.sideB);
-  const upcomingMatches = allMatches.filter((m) => m.status === "scheduled" && m.sideA && m.sideB).slice(0, 3);
+  const liveMatches = allMatches.filter((m) => m.status === "running" && hasBothSides(m));
+  const upcomingMatches = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m)).slice(0, 3);
   const recentMatches = allMatches.filter((m) => m.status === "completed" && m.winner).slice(-5).reverse();
 
   // pick a "my match" — placeholder for now
@@ -239,9 +259,9 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
-      const live = allMatches.find((m) => m.status === "running" && m.sideA && m.sideB);
+      const live = allMatches.find((m) => m.status === "running" && hasBothSides(m));
       if (live) return live;
-      const sched = allMatches.filter((m) => m.status === "scheduled" && m.sideA && m.sideB);
+      const sched = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m));
       sched.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"));
       return sched[0] || null;
   }, [allMatches]);
@@ -904,7 +924,7 @@ if (typeof window !== 'undefined') {
 
 // Tournament-wide schedule (across competitions) — grouped by day, then court swimlanes + filter
 function ScheduleViewer({ tournament, tweaks }) {
-  const allMatches = useMemo(() => tournamentMatches(tournament).filter((m) => m.sideA && m.sideB), [tournament]);
+  const allMatches = useMemo(() => tournamentMatches(tournament).filter(hasBothSides), [tournament]);
   const courts = tournament.courts;
   const [picked, setPicked] = useState([]);
   const [dojoText, setDojoText] = useState("");
@@ -915,7 +935,7 @@ function ScheduleViewer({ tournament, tweaks }) {
     const days = new Set();
     (tournament.competitions || []).forEach((c) => { if (c.date) days.add(c.date); });
     allMatches.forEach((m) => { if (m.date) days.add(m.date); });
-    const sorted = Array.from(days).sort();
+    const sorted = Array.from(days).sort(compareDmy);
     return sorted.length > 0 ? sorted : [""];
   }, [tournament, allMatches]);
 

@@ -7,6 +7,38 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// requireValidCompID extracts the `:id` URL parameter and validates it
+// via state.ValidateCompetitionID. Rejects:
+//   - empty
+//   - > 64 chars
+//   - any character outside [a-zA-Z0-9_-]
+//   - a leading non-alphanumeric character (so "_foo", "-foo" are
+//     rejected even though "_" and "-" are allowed elsewhere in the
+//     string — the regex is ^[a-zA-Z0-9][a-zA-Z0-9_-]*$)
+//
+// On invalid input, writes a 400 response and returns ("", false); the
+// caller should `return` immediately.
+//
+// Every handler that reads `c.Param("id")` and passes it to
+// store.compPath(id, ...) must use this helper. compPath does
+// filepath.Clean(filepath.Join(folder, "competitions", id, ...)) — an
+// id like "../../../etc/passwd" would cleanly escape the data dir.
+//
+// Called from BOTH authenticated routes (handlers_competition.go gated
+// by AuthMiddleware via X-Tournament-Password) AND the public viewer
+// detail route (handlers_viewer.go GET /api/viewer/competitions/:id,
+// no auth). Path-traversal defense therefore matters on unauthenticated
+// inputs too — anyone on the network can hit the viewer route. Keep
+// the regex narrow and apply at every handler entry point.
+func requireValidCompID(c *gin.Context) (string, bool) {
+	id := c.Param("id")
+	if err := state.ValidateCompetitionID(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return "", false
+	}
+	return id, true
+}
+
 func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		t, err := store.LoadTournament()
@@ -23,6 +55,38 @@ func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 				return
 			}
 			c.JSON(http.StatusForbidden, gin.H{"error": "tournament not configured yet"})
+			c.Abort()
+			return
+		}
+
+		// Defense-in-depth for the F4 sentinel-into-auth-field scenario.
+		// The password comparison below (`password != t.Password`) is
+		// satisfied vacuously when both sides are "" — an unauthenticated
+		// client sending no `X-Tournament-Password` header (or an empty
+		// one) would match an empty stored password, exposing every
+		// /api/* endpoint anonymously. The POST + PUT handlers in
+		// handlers_tournament.go block writes that would land an empty
+		// Password through the API, but an operator who manually edits
+		// tournament.md (or any out-of-band write bypassing the handlers)
+		// could still land an empty Password on disk. The uninitialized
+		// branch above only covers the literal "New Tournament" + empty
+		// case — a real-named tournament with empty Password is a
+		// misconfiguration, and refusing to authorize is the safer
+		// fail-closed choice. The 403 message tells the operator to fix
+		// the password rather than the misleading 401 ("invalid
+		// tournament password" — which would imply the request is wrong,
+		// not the server state).
+		//
+		// Recovery: since this branch returns 403 BEFORE the password
+		// check OR the uninitialized-bootstrap branch can run, there's
+		// no API path to fix the password (the bootstrap exception only
+		// matches the literal "New Tournament" default name). Operator
+		// must repair the file out-of-band: stop the server, edit
+		// tournament.md to either delete it (forces fresh bootstrap) or
+		// add a non-empty `password:` field, then restart. Documented in
+		// specs/openapi.yaml under the security scheme description.
+		if t.Password == "" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "tournament misconfigured: password is not set"})
 			c.Abort()
 			return
 		}

@@ -10,9 +10,27 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
+// LoadSeeds and SaveSeeds use the PER-COMPETITION lock (not the store-wide
+// `s.mu`) so they serialize against other per-comp readers/writers — in
+// particular against the StartCompetition transform held by
+// UpdateCompetitionChanged. Pre-fix, SaveSeeds took `s.mu.Lock()`
+// (store-wide) and the StartCompetition transform took the per-comp lock,
+// so the seeds drift check inside the transform (via FileMtime) had a
+// race window: a concurrent SaveSeeds could land AFTER the mtime check
+// but BEFORE the status commit, leaving status=Pools on disk with
+// seeds.csv reflecting roster the engine never read.
+//
+// Switching to per-comp locking ALSO improves scalability — concurrent
+// seed saves for DIFFERENT comps no longer block each other on the
+// global store mutex. Same locking strategy participants.csv and
+// pools.csv already use.
 func (s *Store) LoadSeeds(compID string) ([]domain.SeedAssignment, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
+	mu := s.getCompLock(compID)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	path := s.compPath(compID, "seeds.csv")
 	result, err := helper.ParseSeedsFile(path)
@@ -26,8 +44,12 @@ func (s *Store) LoadSeeds(compID string) ([]domain.SeedAssignment, error) {
 }
 
 func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	path := s.compPath(compID, "seeds.csv")
 

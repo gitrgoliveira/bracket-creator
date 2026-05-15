@@ -5,9 +5,14 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
+const dmyToIso = window.dmyToIso;
+const isoToDmy = window.isoToDmy;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
+// Canonical courts cap (admin_helpers.jsx) — mirrors helper.MaxCourts
+// on the Go side. Anchored to the A–Z labelling used on Shiaijo headers.
+const MAX_COURTS = window.MAX_COURTS;
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -80,7 +85,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     if (!trimmedName) { setError("Tournament name is required."); return; }
     const { norm, error: dateError } = validateAndNormalizeDate(date);
     if (dateError) { setError(dateError); return; }
-    if (!Number.isInteger(courts) || courts < 1 || courts > 26) { setError("Number of courts must be a whole number between 1 and 26."); return; }
+    if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
 
     onSave({
       name: trimmedName,
@@ -106,11 +111,12 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <div className="field"><label className="field__label">Name</label><input className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} /></div>
             <div className="field">
               <label className="field__label">Date</label>
-              {/* Picker bounds mirror admin_competition.jsx:348 and the */}
-              {/* MIN_YEAR/MAX_YEAR range that validateAndNormalizeDate */}
-              {/* enforces at handleSave — keeps the picker from offering */}
-              {/* years the validator will then reject on submit. */}
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={date} onChange={(e) => { setDate(e.target.value); setError(""); }} />
+              {/* Picker bounds mirror AdminSettings's date input in */}
+              {/* admin_competition.jsx and the MIN_YEAR/MAX_YEAR range */}
+              {/* that validateAndNormalizeDate enforces at handleSave — */}
+              {/* keeps the picker from offering years the validator */}
+              {/* will then reject on submit. */}
+              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
               <div className="field__hint">Pick the tournament day.</div>
             </div>
           </div>
@@ -121,18 +127,19 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             {/* NaN as "" so React doesn't warn ("Received NaN for the value */}
             {/* attribute") and the cleared input stays visually empty. */}
             {/* handleSave's Number.isInteger(courts) && courts >= 1 && */}
-            {/* courts <= 26 guard catches NaN, so the explicit Save click */}
-            {/* can't push an invalid value to onSave. */}
+            {/* courts <= MAX_COURTS guard catches NaN, so the explicit Save */}
+            {/* click can't push an invalid value to onSave. MAX_COURTS */}
+            {/* mirrors helper.MaxCourts (admin_helpers.jsx). */}
             <input
               className="input"
               type="number"
               min="1"
-              max="26"
+              max={MAX_COURTS}
               step="1"
               value={Number.isFinite(courts) ? courts : ""}
               onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
             />
-            <div className="field__hint">Enter a number (1-26). Courts will be automatically labeled A, B, C, etc.</div>
+            <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
           <div className="field">
             <label className="field__label">Admin Password</label>
@@ -196,6 +203,19 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (!poolResult.ok) {
       setError(poolResult.error);
       return;
+    }
+
+    // Team-size guard. StableInput's NaN-on-clear fix means teamSize can
+    // now legitimately be NaN — buildEmptyCompetition would silently
+    // fall back to 5 via `teamSize || 5`, so the user's cleared input
+    // produces a different stored value than they see. Reject early
+    // when kind=team. (Individual competitions don't expose this field;
+    // teamSize=0 is the canonical value there.)
+    if (kind === "team") {
+      if (!Number.isInteger(teamSize) || teamSize < 1 || teamSize > MAX_TEAM_SIZE) {
+        setError(`Team size must be a whole number between 1 and ${MAX_TEAM_SIZE}.`);
+        return;
+      }
     }
 
     // Two distinct names can normalize to the same slug (e.g. "Men's" vs
@@ -292,8 +312,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <label className="field__label">Date</label>
               {/* Picker bounds match validateAndNormalizeDate at create() — */}
               {/* see the equivalent comment on AdminEditTournament's date */}
-              {/* field above and admin_competition.jsx:348. */}
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={date} onChange={(e) => setDate(e.target.value)} />
+              {/* field above and AdminSettings's date input in */}
+              {/* admin_competition.jsx. */}
+              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
               <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">
@@ -381,7 +402,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {kind === "team" && (
             <div className="field">
               <label className="field__label">Team size</label>
-              <window.StableInput className="input" type="number" min="1" max={MAX_TEAM_SIZE} value={teamSize} onChange={(val) => setTeamSize(val)} />
+              {/* Non-debounced input — uses onChange directly, not StableInput. */}
+              {/* StableInput debounces 200ms; if the user clears the field and */}
+              {/* immediately clicks "Create", the parent teamSize would still */}
+              {/* hold the previous good value and the guard at create() would */}
+              {/* let the stale value through. Direct onChange + decideNumericUpdate */}
+              {/* keeps parent state synchronous with what the user sees. */}
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max={MAX_TEAM_SIZE}
+                value={Number.isFinite(teamSize) ? teamSize : ""}
+                onChange={(e) => setTeamSize(decideNumericUpdate(e.target.value, 1).value)}
+              />
               <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
             </div>
           )}
@@ -409,6 +443,12 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const [preview, setPreview] = useStateA(null);
   const [loading, setLoading] = useStateA(false);
   const [results, setResults] = useStateA(null);
+  // doImport's setResults/setError/setLoading and onImported timer fire
+  // post-await. The page can unmount via onBack() while the upload is in
+  // flight — gate via mountedRef in addition to the existing timer
+  // cleanup below.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
   // Tracks the success-confirmation timer so we can cancel it if the page
   // unmounts before onImported fires (avoids stray navigation after teardown).
   const importedTimerRef = useRefA(null);
@@ -456,18 +496,37 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       // Use the centralized API wrapper (api.jsx) so auth + error handling
       // stay consistent with the rest of the admin UI.
       const body = await window.API.importCompetitions(fd, password);
+      // mountedRef gates the post-await setStates so a navigate-back
+      // during the upload doesn't fire setResults / setTimeout on a
+      // torn-down component. importedTimerRef has its own unmount
+      // cleanup, but only if it was set — so don't even schedule it
+      // post-unmount.
+      if (!mountedRef.current) return;
       setResults(body.results || []);
       const hasErrors = (body.results || []).some(r => r.error);
       if (!hasErrors) {
         importedTimerRef.current = setTimeout(() => {
           importedTimerRef.current = null;
-          onImported();
+          // onImported is async (admin.jsx wires it to fetchCompetitions
+          // + navigate). Wrap in Promise.resolve so a refresh rejection
+          // doesn't surface as an unhandled promise rejection and leave
+          // the UI stuck on the import page. Surface as a non-fatal
+          // toast — the server-side import already completed; the user
+          // can reload to recover.
+          Promise.resolve()
+            .then(() => onImported())
+            .catch((e) => {
+              console.warn("post-import refresh failed:", e);
+              if (mountedRef.current) {
+                setError("Import succeeded; refresh failed — please reload the page. " + (e?.message || ""));
+              }
+            });
         }, 1500);
       }
     } catch (e) {
-      setError(e.message);
+      if (mountedRef.current) setError(e.message);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 

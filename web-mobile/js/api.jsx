@@ -3,10 +3,8 @@ const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
 
-// Canonical draw value is "hikiwake"; "hikewake" (missing 'i') is the legacy
-// spelling and is still accepted on read for backward compatibility. All new
-// writes use "hikiwake". See specs/openapi.yaml for details.
-function isHikiwake(v) { return v === "hikiwake" || v === "hikewake"; }
+// Canonical draw value is "hikiwake". See specs/openapi.yaml for details.
+function isHikiwake(v) { return v === "hikiwake"; }
 
 // Translate UI score patch into backend MatchResult shape.
 // UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }

@@ -3,6 +3,10 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 const pluralize = window.pluralize;
+// Canonical rank cap (admin_helpers.jsx) — mirrors helper.MaxRankOverride
+// on the Go side. The override-rank handler ALSO validates against the
+// actual pool size; this cap is the absolute overflow guard.
+const MAX_RANK = window.MAX_RANK;
 
 // Pure decision logic for what RankInput.handleBlur should do, given the
 // state of its refs and props at blur time. Returned as a tagged action so
@@ -16,9 +20,12 @@ const pluralize = window.pluralize;
 //      otherwise noop. This is the focus-without-edit TOCTOU guard:
 //      committing the stale focus-time value here would clobber a
 //      concurrent server update.
-//   3. Invalid input (not finite, ≤ 0, > 1000) → revert visually to
+//   3. Invalid input (not finite, ≤ 0, > MAX_RANK) → revert visually to
 //      String(initial) so the user doesn't see garbage persist as if
-//      accepted. 1000 mirrors the server-side cap.
+//      accepted. MAX_RANK mirrors the server-side overflow cap
+//      (helper.MaxRankOverride); the backend ALSO rejects when the
+//      rank exceeds the actual pool size, which is the real semantic
+//      constraint — this cap is the overflow guard.
 //   4. Valid edit different from initial → commit String(parsed).
 //      Same value as initial (e.g. typed "02" when initial is 2,
 //      or no-op retype) → noop.
@@ -31,7 +38,7 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
     return { action: "noop" };
   }
   const next = parseInt(v);
-  if (!Number.isFinite(next) || next <= 0 || next > 1000) {
+  if (!Number.isFinite(next) || next <= 0 || next > MAX_RANK) {
     return { action: "revert", value: String(initial) };
   }
   if (String(next) !== String(initial)) return { action: "commit", value: String(next) };
@@ -106,7 +113,7 @@ function RankInput({ initial, className, onCommit, style }) {
     <input
       type="number"
       min="1"
-      max="1000"
+      max={MAX_RANK}
       className={className}
       value={v}
       onChange={(e) => setV(e.target.value)}

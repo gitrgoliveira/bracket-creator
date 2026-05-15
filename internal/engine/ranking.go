@@ -116,40 +116,55 @@ func (e *Engine) GetPoolRanking(compID string, rank int) (*helper.Player, error)
 }
 
 // resolveReservedSlots replaces placeholder participants (Tag="reserved") with
-// real players from source competition results (bracket or pools).
-func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([]helper.Player, error) {
+// real players from source competition results (bracket or pools). Returns
+// the (possibly-mutated) players slice, a bool indicating whether ANY
+// mutation actually happened (in-place field update OR placeholder removal),
+// and any error encountered. The mutated flag lets callers gate a trailing
+// SaveParticipants on real changes only — re-saving an unmutated snapshot
+// would clobber a concurrent participants upload.
+func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([]helper.Player, bool, error) {
+	// LoadReservedSlots returns ([]ReservedSlot{}, nil) for the "file does
+	// not exist" case (see parseReservedSlotsFile). Any other error from
+	// LoadReservedSlots is a genuine I/O / parse failure (corrupt JSON,
+	// permission, etc.). Previously this swallowed the error and returned
+	// (players, false, nil), making the caller think "no slots, no save
+	// needed" — but a corrupt slots file would silently proceed to generate
+	// pools / bracket with the placeholder "Reserved: rank N" entries left
+	// in `players`, since the resolution step was skipped. Propagate the
+	// error so StartCompetition aborts before generating broken artifacts.
 	slots, err := e.store.LoadReservedSlots(compID)
 	if err != nil {
-		return players, nil
+		return nil, false, fmt.Errorf("cannot load reserved slots for %q: %w", compID, err)
 	}
 	if len(slots) == 0 {
-		return players, nil
+		return players, false, nil
 	}
 
 	slotsChanged := false
+	playersMutated := false
 	var toRemove []string
 
 	for sIdx, slot := range slots {
 		srcComp, err := e.store.LoadCompetition(slot.SourceCompID)
 		if err != nil || srcComp == nil {
-			return nil, notFoundErrorf("reserved slot source competition %q not found", slot.SourceCompID)
+			return nil, false, notFoundErrorf("reserved slot source competition %q not found", slot.SourceCompID)
 		}
 
 		var real *helper.Player
 		if srcComp.Format == state.CompFormatPools {
 			if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
-				return nil, validationErrorf("reserved slot source %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
+				return nil, false, validationErrorf("reserved slot source %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
 			}
 			real, err = e.GetPoolRanking(slot.SourceCompID, slot.SourceRank)
 		} else {
 			if srcComp.Status != state.CompStatusPlayoffs && srcComp.Status != state.CompStatusComplete {
-				return nil, validationErrorf("reserved slot source %q has not reached playoffs yet (status: %s)", srcComp.Name, srcComp.Status)
+				return nil, false, validationErrorf("reserved slot source %q has not reached playoffs yet (status: %s)", srcComp.Name, srcComp.Status)
 			}
 			real, err = e.GetBracketRanking(slot.SourceCompID, slot.SourceRank)
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("cannot resolve rank %d from %q: %w", slot.SourceRank, slot.SourceCompID, err)
+			return nil, false, fmt.Errorf("cannot resolve rank %d from %q: %w", slot.SourceRank, slot.SourceCompID, err)
 		}
 
 		// Find placeholder and check for existing name
@@ -178,12 +193,13 @@ func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([
 			players[placeholderIdx].DisplayName = real.DisplayName
 			players[placeholderIdx].Dojo = real.Dojo
 			players[placeholderIdx].Tag = "" // no longer a placeholder
+			playersMutated = true
 		}
 	}
 
 	if slotsChanged {
 		if err := e.store.SaveReservedSlots(compID, slots); err != nil {
-			return nil, fmt.Errorf("failed to save updated reserved slots: %w", err)
+			return nil, false, fmt.Errorf("failed to save updated reserved slots: %w", err)
 		}
 	}
 
@@ -199,7 +215,8 @@ func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([
 			}
 		}
 		players = filtered
+		playersMutated = true
 	}
 
-	return players, nil
+	return players, playersMutated, nil
 }

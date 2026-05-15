@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -121,8 +122,9 @@ func TestResolveReservedSlots(t *testing.T) {
 		{ID: "P2", Name: "Normal"},
 	}
 
-	resolved, err := eng.resolveReservedSlots(targetID, players)
+	resolved, mutated, err := eng.resolveReservedSlots(targetID, players)
 	require.NoError(t, err)
+	assert.True(t, mutated, "placeholder was updated in place — mutated must be true")
 	assert.Len(t, resolved, 2)
 	assert.Equal(t, "Winner", resolved[0].Name)
 	assert.Equal(t, "", resolved[0].Tag)
@@ -142,15 +144,16 @@ func TestResolveReservedSlots_Errors(t *testing.T) {
 	players := []helper.Player{{ID: "P1", Tag: "reserved"}}
 
 	// No slots file - should return players unchanged
-	res, err := eng.resolveReservedSlots(compID, players)
+	res, mutated, err := eng.resolveReservedSlots(compID, players)
 	assert.NoError(t, err)
+	assert.False(t, mutated, "no slots file → no mutation possible")
 	assert.Equal(t, players, res)
 
 	// Slot with missing source competition
 	slots := []state.ReservedSlot{{ParticipantID: "P1", SourceCompID: "missing", SourceRank: 1}}
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Test"}))
 	require.NoError(t, store.SaveReservedSlots(compID, slots))
-	_, err = eng.resolveReservedSlots(compID, players)
+	_, _, err = eng.resolveReservedSlots(compID, players)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 
@@ -158,9 +161,45 @@ func TestResolveReservedSlots_Errors(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "not-ready", Status: "setup"}))
 	slots[0].SourceCompID = "not-ready"
 	require.NoError(t, store.SaveReservedSlots(compID, slots))
-	_, err = eng.resolveReservedSlots(compID, players)
+	_, _, err = eng.resolveReservedSlots(compID, players)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not reached playoffs yet")
+}
+
+// TestResolveReservedSlots_CorruptSlotsFile pins the invariant that a
+// genuine LoadReservedSlots I/O / parse failure surfaces as an error
+// from resolveReservedSlots rather than being swallowed into a
+// "(players, false, nil)" no-op. Pre-fix, a corrupt reserved-slots.json
+// caused StartCompetition to proceed past resolution with the
+// placeholder "Reserved: rank N" entries left in the players slice —
+// the bracket / pool files would be generated with those placeholders
+// as real participants. The fix in resolveReservedSlots propagates
+// the error; this test injects a corrupt JSON file directly and
+// asserts the resolution call surfaces it.
+func TestResolveReservedSlots_CorruptSlotsFile(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-slots-corrupt-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "corrupt-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Corrupt"}))
+
+	// Write malformed JSON directly to reserved-slots.json. The file path
+	// matches state.Store.compPath(compID, "reserved-slots.json").
+	slotsPath := filepath.Join(store.GetFolder(), "competitions", compID, "reserved-slots.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(slotsPath), 0700))
+	require.NoError(t, os.WriteFile(slotsPath, []byte("{ not valid json"), 0600))
+
+	players := []helper.Player{{ID: "P1", Name: "Real", Tag: ""}}
+	res, mutated, err := eng.resolveReservedSlots(compID, players)
+	require.Error(t, err, "corrupt slots file must surface as error, not silent no-op")
+	assert.Contains(t, err.Error(), "cannot load reserved slots")
+	assert.Nil(t, res, "error path returns nil players")
+	assert.False(t, mutated)
 }
 
 func TestResolveReservedSlots_Duplicate(t *testing.T) {
@@ -197,8 +236,9 @@ func TestResolveReservedSlots_Duplicate(t *testing.T) {
 	require.NoError(t, store.SaveReservedSlots(targetID, slots))
 
 	// Resolve slots
-	resolved, err := eng.resolveReservedSlots(targetID, players)
+	resolved, mutated, err := eng.resolveReservedSlots(targetID, players)
 	require.NoError(t, err)
+	assert.True(t, mutated, "placeholder was removed (duplicate-merge path) — mutated must be true")
 
 	// SHOULD now only have 1 player! (the existing one)
 	assert.Len(t, resolved, 1)

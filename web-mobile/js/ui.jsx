@@ -20,7 +20,11 @@ function StatusBadge({ status, showLiveDot }) {
 function formatDate(d) {
   if (!d) return "Date TBA";
   let iso = d;
-  // If it's DD-MM-YYYY or DD/MM/YYYY, convert to DD-MM-YYYY for the Date constructor
+  // Accept the canonical DD-MM-YYYY form (and the lax DD/MM/YYYY variant)
+  // and convert to ISO YYYY-MM-DD, which is what the Date constructor
+  // parses unambiguously. Any other shape is passed through unchanged so
+  // the Date constructor's NaN check below converts unrecognized inputs
+  // to the "Date TBA" fallback.
   const match = d.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (match) {
     iso = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
@@ -49,6 +53,14 @@ function Toast({ message, type, onClose }) {
 // StableInput solves the character duplication issue by using a local state
 // that only syncs with the parent onBlur or after a debounce, while still
 // being "controlled" by receiving props.
+//
+// For type="number", a cleared input lands as NaN in local state (NOT 0
+// as `+""` would produce) so the parent's onChange receives NaN
+// explicitly. The render layer maps NaN-or-non-finite values back to ""
+// at the value prop so React doesn't warn about "Received NaN for the
+// value attribute" and the cleared input stays visually empty. Mirrors
+// the decideNumericUpdate pattern used by the AdminSettings team/pool
+// inputs at admin_competition.jsx.
 function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
   const [local, setLocal] = React.useState(value);
   const timer = React.useRef(null);
@@ -60,10 +72,21 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     if (!composing.current && value !== local) setLocal(value);
   }, [value]);
 
+  // Cancel the 200ms debounce on unmount so the timer can't fire
+  // onChange(val) (which is the parent's setState) after teardown.
+  // Pre-existing in this component before the PR but fits the same
+  // teardown-race theme as the admin-side mountedRef sweep — fixing
+  // here while the file is open for the NaN-display changes.
+  React.useEffect(() => () => clearTimeout(timer.current), []);
+
   const handleChange = (e) => {
-    const val = type === 'number' ? +e.target.value : e.target.value;
+    const raw = e.target.value;
+    // For number inputs: empty string → NaN, so a cleared input doesn't
+    // collapse to 0 via `+""`. Non-empty strings still parse via unary +
+    // (so "2.5" stays 2.5, "abc" becomes NaN — same as before for those).
+    const val = type === 'number' ? (raw === "" ? NaN : +raw) : raw;
     setLocal(val);
-    
+
     // Immediate local update, debounced parent update to avoid race conditions
     // during typing if the parent re-renders the whole tree.
     clearTimeout(timer.current);
@@ -83,13 +106,19 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     if (props.onFocus) props.onFocus(e);
   };
 
+  // Render NaN / non-finite numeric local state as "" so React doesn't
+  // warn ("Received NaN for the value attribute") and the input stays
+  // visually empty after the user clears it. Non-number types pass
+  // through unchanged.
+  const displayValue = type === 'number' && !Number.isFinite(local) ? "" : local;
+
   return (
-    <input 
-      {...props} 
-      type={type} 
-      value={local} 
-      onChange={handleChange} 
-      onBlur={handleBlur} 
+    <input
+      {...props}
+      type={type}
+      value={displayValue}
+      onChange={handleChange}
+      onBlur={handleBlur}
       onFocus={handleFocus}
     />
   );

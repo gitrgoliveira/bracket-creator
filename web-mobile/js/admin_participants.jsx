@@ -152,6 +152,14 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const [dragOver, setDragOver] = useStateA(false);
   const fileRef = useRefA(null);
   const seedFileRef = useRefA(null);
+  // apply() is async (awaits onUpdate which now re-throws on PUT failure).
+  // If the user navigates away (or AdminCompetition unmounts AdminParticipants)
+  // while the PUT is in flight, the post-await setImportSummary(null) would
+  // setState on a torn-down component. Track mount state via ref and
+  // gate post-await setState behind it. Pre-fix this was silent under
+  // React 18 but still a real teardown-race signal.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
   const textFocusRef = useRefA(false);
 
   const generateText = (playersList) => (playersList || []).map((p) => {
@@ -172,7 +180,13 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const handleSeedFile = (file) => {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
+    // reader.onload is an async closure so we can await onUpdate before
+    // showing the "Matched N seeds" success toast. Pre-fix: the PUT was
+    // fire-and-forget (Promise.resolve(...).catch(()=>{})) and the
+    // success toast fired immediately — on PUT failure the user saw
+    // "Matched N seeds" followed (~1s later) by an error toast, which
+    // misleads about whether the persisted state was actually updated.
+    reader.onload = async (e) => {
       const raw = e.target.result;
       const np = [...(c.players || [])];
       let updatedCount = 0;
@@ -215,11 +229,36 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         }
       });
 
+      // Always render the summary panel with the parsed counts (matched
+      // + unmatched rows) so the admin sees what the file produced even
+      // when the save fails. The PUT only fires when there's something
+      // to save; the success toast only fires on successful save.
+      //
+      // Pre-fix-of-fix: the catch branch set updatedCount=0 in the
+      // summary, which hid the parsed-match count from the admin after
+      // a PUT failure (they saw "0 matched, K unmatched" even though
+      // parse found N matches). Fix: surface the parsed N regardless
+      // of save outcome; the success toast (and updateCompetition's
+      // error toast) are what communicate save status.
+      let saveError = null;
       if (updatedCount > 0) {
-        onUpdate({ ...c, players: np });
-        showToast(`Matched ${updatedCount} seeds`);
+        try {
+          await onUpdate({ ...c, players: np });
+        } catch (err) {
+          // updateCompetition already surfaced an error toast. Log for
+          // dev-console diagnosis but don't emit a second toast or a
+          // misleading "Matched N seeds" success message.
+          console.error("AdminParticipants: seed import PUT failed", err);
+          saveError = err;
+        }
+        if (!mountedRef.current) return;
+        if (!saveError) {
+          showToast(`Matched ${updatedCount} seeds`);
+        }
       }
-      setSeedImportResult({ updatedCount, unmatched, totalRows: updatedCount + unmatched.length });
+      if (mountedRef.current) {
+        setSeedImportResult({ updatedCount, unmatched, totalRows: updatedCount + unmatched.length });
+      }
     };
     reader.readAsText(file);
   };
@@ -258,32 +297,66 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     return { gaps, hasGaps: gaps.length > 0 };
   }, [players]);
 
-  const updateSeed = (idx, val) => {
+  // Extracted from inline onClick so we can await + log instead of
+  // silencing the rejection. Same pattern as updateSeed below: success
+  // toast omitted because clearing all seeds is visible in the UI
+  // (rows re-render without rank), but errors must surface (via
+  // updateCompetition's catch in admin.jsx).
+  const clearAllSeeds = async () => {
+    try {
+      await onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) });
+    } catch (err) {
+      console.error("AdminParticipants: clearAllSeeds PUT failed", err);
+    }
+  };
+
+  // Async so we can await onUpdate(): updateCompetition re-throws on
+  // PUT failure (admin.jsx) and surfaces the error via showToast.
+  // The pre-async fire-and-forget form silenced the rejection here
+  // with `.catch(() => {})` — asymmetric with the other now-awaited
+  // mutation flows in this component (apply(), handleSeedFile,
+  // shuffleUnseeded). No success toast needed: rank changes are
+  // implicit-feedback (the input commits visually), so we just need
+  // to NOT swallow errors silently.
+  const updateSeed = async (idx, val) => {
     const np = [...(c.players || [])];
     const seed = parseInt(val);
     np[idx] = { ...np[idx], seed: isNaN(seed) || seed <= 0 ? null : seed };
-    onUpdate({ ...c, players: np });
+    try {
+      await onUpdate({ ...c, players: np });
+    } catch (err) {
+      console.error("AdminParticipants: updateSeed PUT failed", err);
+      // updateCompetition already toasted the error.
+    }
   };
 
   const dragIdxRef = useRefA(null);
   const [dragOverIdx, setDragOverIdx] = useStateA(null);
-  const moveSeedRow = (fromIdx, toIdx) => {
+  // Same async + await + log pattern as updateSeed. The drop completes
+  // visually before the PUT; await is for error surfacing, not for
+  // gating the UI.
+  const moveSeedRow = async (fromIdx, toIdx) => {
     if (fromIdx === toIdx) return;
     const np = [...(c.players || [])];
     const [moved] = np.splice(fromIdx, 1);
     np.splice(toIdx, 0, moved);
     // Re-assign seeds by new position order (only for currently-seeded players)
     const seededCount = np.filter(p => p.seed).length;
-    if (seededCount > 0) {
-      let rank = 1;
-      const renumbered = np.map(p => p.seed ? { ...p, seed: rank++ } : p);
-      onUpdate({ ...c, players: renumbered });
-    } else {
-      onUpdate({ ...c, players: np });
+    const payloadPlayers = seededCount > 0
+      ? (() => { let rank = 1; return np.map(p => p.seed ? { ...p, seed: rank++ } : p); })()
+      : np;
+    try {
+      await onUpdate({ ...c, players: payloadPlayers });
+    } catch (err) {
+      console.error("AdminParticipants: moveSeedRow PUT failed", err);
     }
   };
 
-  const shuffleUnseeded = () => {
+  // Async so the "Unseeded list shuffled" success toast is gated on the
+  // PUT actually succeeding. Pre-fix: fire-and-forget + immediate toast
+  // → on PUT failure the admin saw "shuffled" while the persisted order
+  // was unchanged (only the error toast hinted at the discrepancy).
+  const shuffleUnseeded = async () => {
     const np = [...(c.players || [])];
     const unseeded = np.filter(p => !p.seed);
     if (unseeded.length < 2) return;
@@ -293,8 +366,15 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
     let uIdx = 0;
     const shuffled = np.map(p => p.seed ? p : unseeded[uIdx++]);
-    onUpdate({ ...c, players: shuffled });
-    showToast("Unseeded list shuffled");
+    try {
+      await onUpdate({ ...c, players: shuffled });
+    } catch (err) {
+      console.error("AdminParticipants: shuffleUnseeded PUT failed", err);
+      // updateCompetition already toasted the error; don't double-toast
+      // or emit a misleading success message.
+      return;
+    }
+    if (mountedRef.current) showToast("Unseeded list shuffled");
   };
 
   const [showSlotForm, setShowSlotForm] = useStateA(false);
@@ -316,6 +396,11 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     setSlotLoading(true);
     try {
       await window.API.addReservedSlot(c.id, slotSrcComp, slotRank, password);
+      // mountedRef declared above gates post-await own setStates so a
+      // navigate-away during the PUT can't setState on a torn-down
+      // component. showToast is safe (lifted to AdminApp). alert is a
+      // browser API, safe regardless.
+      if (!mountedRef.current) return;
       setShowSlotForm(false);
       setSlotSrcComp("");
       setSlotRank(1);
@@ -323,7 +408,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     } catch (e) {
       alert("Failed to add reserved slot: " + e.message);
     } finally {
-      setSlotLoading(false);
+      // Skip when unmounted — setSlotLoading on a dead component is a
+      // teardown signal even if React 18 silently no-ops.
+      if (mountedRef.current) setSlotLoading(false);
     }
   };
 
@@ -336,7 +423,17 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
   };
 
-  const apply = () => {
+  // Async so we can await onUpdate(): updateCompetition re-throws on
+  // PUT failure now, so awaiting lets us gate the "Saved N participants"
+  // toast on actual success. Pre-fix the rejection was swallowed and
+  // the success + error toasts fired back-to-back.
+  //
+  // Split into two try blocks so local errors (parse / mint) get a
+  // user-visible toast, while PUT failures only log here — the latter
+  // are already toasted by updateCompetition's catch, so a second
+  // toast would double up.
+  const apply = async () => {
+    let np, added, updatedCount;
     try {
       const withZekken = c.withZekkenName;
       const parsed = window.parseParticipantLines(lines, withZekken);
@@ -354,8 +451,24 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         return;
       }
 
-      const { np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed);
-      onUpdate({ ...c, players: np });
+      ({ np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed));
+    } catch (err) {
+      // Local errors: parseParticipantLines throws on malformed input
+      // (bad column counts, etc.), mintParticipantIds can throw on
+      // unexpected shape. Surface so the user knows what went wrong.
+      console.error("AdminParticipants: parse failed", err);
+      showToast("Failed to parse participants: " + err.message, "error");
+      return;
+    }
+
+    try {
+      await onUpdate({ ...c, players: np });
+
+      // Bail if we unmounted during the in-flight PUT — see mountedRef
+      // declaration above. showToast is safe (lifted to AdminApp, still
+      // mounted on logout-free navigation), but setImportSummary targets
+      // this component's local state.
+      if (!mountedRef.current) return;
 
       const label = c.kind === "team" ? "team" : "participant";
       let msg = `Saved ${pluralize(np.length, label)}`;
@@ -365,8 +478,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       showToast(msg);
       setImportSummary(null);
     } catch (err) {
-      console.error("AdminParticipants: Apply failed", err);
-      showToast("Failed to apply participants: " + err.message, "error");
+      // PUT failure path. updateCompetition already showed an error
+      // toast for the user; log here so the dev console has the stack
+      // for diagnosis but don't emit a second toast.
+      console.error("AdminParticipants: PUT failed", err);
     }
   };
 
@@ -380,6 +495,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const pasteFromExcel = async () => {
     try {
       const clipboardText = await navigator.clipboard.readText();
+      // Same teardown-race guard as apply() / addSlot — gate the
+      // post-await setText so a navigate-away during clipboard read
+      // doesn't fire setState on a dead component.
+      if (!mountedRef.current) return;
       // Normalise tabs to commas, strip leading row numbers (e.g. "1, Name, Dojo")
       setText(parsePastedRows(clipboardText, (s) => s.replace(/\t/g, ", ").replace(/^\d+,\s*/, "")).join("\n"));
     } catch (err) {
@@ -550,7 +669,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0} title="Shuffle unseeded players">Shuffle unseeded</button>
               <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
-              <button className="btn btn--sm" type="button" onClick={() => onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) })}>Clear seeds</button>
+              <button className="btn btn--sm" type="button" onClick={clearAllSeeds}>Clear seeds</button>
             </div>
           </div>
           <div className="card__body" style={{ paddingTop: 0, paddingBottom: 8 }}>

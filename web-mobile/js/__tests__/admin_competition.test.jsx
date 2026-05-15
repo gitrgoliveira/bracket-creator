@@ -288,3 +288,286 @@ describe('loadScoreboardPoints', () => {
     });
   });
 });
+
+// ── H3 regression: AdminSettings useEffect deps completeness ──
+//
+// AdminSettings syncs server-pushed changes into local state via a
+// useEffect whose deps list every c.* field rendered in the JSX (via
+// `local.*`). A missing dep means an SSE update to that field won't
+// propagate — the user sees stale data (the UI keeps showing the
+// pre-SSE value).
+//
+// This used to ALSO matter for save correctness because saveNow spread
+// `{ ...c, ...next }` into the PUT — so a stale `local.status` would
+// be PUT back over a server-side status change. That's now handled
+// independently by the saveNow whitelist below (it builds the PUT
+// body from settings fields only, never including non-settings fields
+// like status/players/hasParticipantIDs). The deps-list test is still
+// required for UI freshness; the whitelist test is required for save
+// safety. Both decoupled = a missing dep is a UI bug only, not a
+// silent server-state revert.
+//
+// If you add a new `local.foo` reference in AdminSettings' JSX, add
+// `c.foo` to the useEffect deps AND add "foo" to EXPECTED_DEPS below.
+// If you add a new settings field that saveNow should PUT, add it to
+// SAVE_NOW_FIELDS (and EXPECTED_DEPS so the UI stays in sync).
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
+  // Fields the sync useEffect must list as deps. Two reasons a field
+  // lands here:
+  //
+  //   (a) The JSX reads `local.<field>` — without `c.<field>` in deps,
+  //       SSE-pushed changes don't propagate and the UI shows stale
+  //       data. Example: `local.status` is read for the delete-warning
+  //       prompt, so SSE-driven status changes must update local.
+  //
+  //   (b) saveNow PUTs `next.<field>` (allowlist) — without `c.<field>`
+  //       in deps, a concurrent admin's PUT (broadcast via SSE) won't
+  //       update local, and the next save of any other field would PUT
+  //       a stale value over the server's update. Example: `mirror` is
+  //       not in the JSX but IS in saveNow's allowlist, so it needs to
+  //       round-trip through local for the same defense.
+  //
+  // If you add a `local.<field>` reference OR a `<field>: next.<field>`
+  // entry in finalNext, add `<field>` here AND add `c.<field>` to the
+  // sync useEffect deps array.
+  const EXPECTED_DEPS = [
+    'id', 'name', 'date', 'startTime',
+    'poolSize', 'poolWinners', 'poolSizeMode',
+    'courts', 'roundRobin', 'withZekkenName',
+    'teamSize', 'numberPrefix',
+    'format', 'kind',
+    // status: JSX-read (delete-warning prompt)
+    'status',
+    // mirror: saveNow-allowlist (defense against zero-value clobber)
+    'mirror',
+  ];
+
+  it('useEffect deps include every field rendered via local.*', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'admin_competition.jsx'),
+      'utf8'
+    );
+
+    // Find the sync-to-local useEffect. After round-15, the body merges
+    // field-by-field with an edited-fields guard (Copilot finding on
+    // the prior `{ ...prev, ...c }` overwrite that lost user edits
+    // during the debounce window). The distinctive marker is
+    // `editedFieldsRef.current.has(k)` inside the Object.keys(c) loop.
+    // Extract the deps array from the closing `}, [c.id, c.name, ...])`
+    // line.
+    const depsMatch = src.match(
+      /editedFieldsRef\.current\.has\(k\)[\s\S]*?\}, \[([^\]]+)\]\)/
+    );
+    expect(depsMatch).not.toBeNull();
+
+    const depsLine = depsMatch[1];
+    for (const field of EXPECTED_DEPS) {
+      const pattern = `c.${field}`;
+      expect(
+        depsLine.includes(pattern),
+        `expected deps to include ${pattern} — if you added local.${field} to the JSX, add c.${field} to the useEffect deps`
+      ).toBe(true);
+    }
+  });
+});
+
+// ── saveNow payload whitelist ──
+//
+// AdminSettings.saveNow used to spread `{ ...c, ...next }` into the
+// PUT body, which carried fields like status/players/hasParticipantIDs
+// that AdminSettings doesn't manage. If the sync-to-local deps array
+// was incomplete for any such field (Copilot finding on the H3 sync
+// effect), a setting save would PUT a stale value back over the
+// server-side change.
+//
+// Fix: build the finalNext object from a fixed allowlist of settings
+// fields, ignoring whatever else is in `local`. This makes
+// AdminSettings genuinely settings-only at the wire boundary and
+// decouples save correctness from the sync effect's dep coverage.
+//
+// Structural test: read the source and verify finalNext's object
+// literal contains ONLY allowlisted keys (so a future refactor that
+// re-introduces a `{ ...c, ...next }` spread can't sneak past CI).
+
+describe('AdminSettings.saveNow payload whitelist', () => {
+  // Settings fields the PUT body is allowed to include. Must match
+  // (a) the OpenAPI settings list in specs/openapi.yaml for PUT
+  //     /competitions/{id} and (b) the backend transform in
+  //     handlers_competition.go (which copies these fields from body
+  //     onto disk). Server-managed fields (status, players,
+  //     hasParticipantIDs) and viewer-derived fields (poolMatches,
+  //     pools, bracket, schedule) must NOT appear.
+  //
+  // `mirror` IS in this allowlist even though AdminSettings doesn't
+  // show a Mirror checkbox: data.jsx:200 defaults `mirror: true` for
+  // new competitions and the backend transform unconditionally writes
+  // `current.Mirror = comp.Mirror`. Omitting it would JSON-encode to
+  // false and clobber the disk value on every settings save.
+  const ALLOWED = new Set([
+    'id', 'name', 'date', 'startTime',
+    'poolSize', 'poolWinners', 'poolSizeMode',
+    'courts', 'roundRobin', 'withZekkenName',
+    'teamSize', 'numberPrefix',
+    'format', 'kind',
+    'mirror',
+  ]);
+  // Fields that MUST NOT appear in the PUT body — pinning the
+  // negative invariant explicitly so a careless re-add is caught.
+  const FORBIDDEN = ['status', 'players', 'hasParticipantIDs', 'poolMatches', 'pools', 'bracket', 'schedule'];
+
+  it('finalNext contains only allowlisted settings keys', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'admin_competition.jsx'),
+      'utf8'
+    );
+
+    // Find `const finalNext = { ... };` and extract its top-level keys.
+    // The literal is multi-line, so match through the closing brace.
+    const fnMatch = src.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
+    expect(fnMatch, 'expected `const finalNext = { ... };` in saveNow').not.toBeNull();
+    const body = fnMatch[1];
+
+    // No spread allowed — saveNow used to do `{ ...c, ...next, ... }`
+    // and that's exactly the regression we want to prevent.
+    expect(/\.\.\./.test(body), 'finalNext must not use spread — list each field explicitly').toBe(false);
+
+    // Extract key names (everything before `:` per line, ignoring
+    // strings/comments). Simple but sufficient for an object literal.
+    const keys = [];
+    for (const line of body.split('\n')) {
+      const m = line.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/);
+      if (m) keys.push(m[1]);
+    }
+    expect(keys.length, 'finalNext appears to have no fields — parse failed').toBeGreaterThan(0);
+
+    for (const k of keys) {
+      expect(ALLOWED.has(k), `finalNext key "${k}" is not in the settings allowlist — either add it to ALLOWED here (if it really is a setting) or remove it from finalNext`).toBe(true);
+    }
+    for (const forbidden of FORBIDDEN) {
+      expect(keys.includes(forbidden), `finalNext must NOT include "${forbidden}" — that field is server-managed via a dedicated endpoint, not settings`).toBe(false);
+    }
+  });
+
+  // Numeric finalNext fields (poolSize / poolWinners / teamSize) must
+  // wrap their value in the safeInt fallback. The bug shape: cleared
+  // number input stores NaN in local; if user then edits a non-numeric
+  // field, saveNow PUTs next.poolSize=NaN → JSON encodes null → Go
+  // binds 0 → backend transform writes PoolSize=0 → disk clobbered.
+  // safeInt(next.X, c.X) preserves disk value when local isn't a
+  // usable positive integer.
+  it('finalNext numeric fields are wrapped in safeInt fallback', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'admin_competition.jsx'),
+      'utf8'
+    );
+    const fnMatch = src.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch[1];
+
+    for (const field of ['poolSize', 'poolWinners', 'teamSize']) {
+      const pattern = new RegExp(`\\b${field}:\\s*safeInt\\(`);
+      expect(
+        pattern.test(body),
+        `finalNext.${field} must use safeInt(...) — raw next.${field} is NaN-clobber prone (JSON.stringify({${field}: NaN}) → "${field}":null → Go zero-value)`
+      ).toBe(true);
+    }
+  });
+
+  // The safeInt helper itself must check the full set of dimensions
+  // that the NaN-clobber bug requires: Number.isFinite (catches NaN /
+  // Infinity), Number.isInteger (catches fractional), and >= 1 (catches
+  // 0 / negative). Pin the full set so a future "simplification" that
+  // drops Number.isInteger doesn't silently re-introduce the
+  // fractional-clobber dimension.
+  it('safeInt helper guards isFinite + isInteger + >= 1', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'admin_competition.jsx'),
+      'utf8'
+    );
+    const safeIntMatch = src.match(/const safeInt = \(v, fallback\) =>\s*([^;]+);/);
+    expect(safeIntMatch, 'expected `const safeInt = (v, fallback) => ...;` in saveNow').not.toBeNull();
+    const body = safeIntMatch[1];
+    expect(body, 'safeInt must guard Number.isFinite').toContain('Number.isFinite');
+    expect(body, 'safeInt must guard Number.isInteger').toContain('Number.isInteger');
+    expect(body, 'safeInt must require >= 1').toMatch(/>=\s*1/);
+  });
+});
+
+// ── saveNow reads latest c + edited overlay (Copilot round-15) ──
+//
+// Pre-fix: saveLater(next) captured `next` at keystroke time; the
+// debounce-gate sync effect dropped SSE updates during the 400ms
+// window; saveNow then PUT the stale captured snapshot, silently
+// reverting concurrent admin changes to fields the user wasn't
+// editing. The fix has three structural invariants we pin here:
+//
+//   1. saveLater takes NO snapshot arg — it relies on refs at fire time.
+//   2. saveNow builds an `effective` object by overlaying `localRef.current`
+//      values onto `cRef.current` for each field in `editedFieldsRef`.
+//   3. update / updateNow / updateNumber call `editedFieldsRef.current.add(k)`
+//      before scheduling the save.
+//
+// Behavioral tests for the full lifecycle are blocked by vitest.setup's
+// stubbed React hooks; structural tests are the durable mechanism.
+describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
+  const src = readFileSync(
+    resolve(__dirname, '..', 'admin_competition.jsx'),
+    'utf8'
+  );
+
+  it('saveLater takes no snapshot argument', () => {
+    // Pre-fix: `const saveLater = (next) => { ... saveNow(next); }`
+    // Post-fix: `const saveLater = () => { ... saveNow(); }`
+    // The argument-less form proves the timer reads refs at fire time
+    // instead of capturing a snapshot.
+    const m = src.match(/const saveLater = \(([^)]*)\) =>/);
+    expect(m, 'expected `const saveLater = (...) =>` declaration').not.toBeNull();
+    expect(m[1].trim()).toBe('');
+  });
+
+  it('saveNow builds effective from cRef + editedFieldsRef overlay', () => {
+    // Match the start of saveNow's body and look for the three
+    // distinctive identifiers in the overlay block.
+    const m = src.match(/const saveNow = \(\) => \{([\s\S]*?)Promise\.resolve\(onUpdate/);
+    expect(m, 'expected `const saveNow = () => { ... Promise.resolve(onUpdate` block').not.toBeNull();
+    const body = m[1];
+    expect(body).toContain('cRef.current');
+    expect(body).toContain('localRef.current');
+    expect(body).toContain('editedFieldsRef.current.forEach');
+  });
+
+  it('user-edit handlers mark fields via editedFieldsRef.add', () => {
+    // Each handler that mutates `local` must mark the edited field
+    // BEFORE scheduling the save, so the sync effect preserves it
+    // when SSE arrives during the debounce window.
+    for (const handler of ['update', 'updateNow', 'updateNumber']) {
+      const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
+      const m = src.match(re);
+      expect(m, `expected \`const ${handler} = (...) => { ... };\` declaration`).not.toBeNull();
+      expect(
+        m[2],
+        `${handler} must call editedFieldsRef.current.add(...) so the sync effect preserves the user's edit during the debounce window`
+      ).toContain('editedFieldsRef.current.add');
+    }
+  });
+
+  it('sync effect uses editedFieldsRef.has guard, not blanket debounceRef gate', () => {
+    // Pre-fix sync effect: `if (debounceRef.current) return prev;`
+    // — dropped ALL updates during the debounce, losing SSE changes to
+    // fields the user wasn't editing. Post-fix: per-field check via
+    // `editedFieldsRef.current.has(k)` inside Object.keys(c).
+    expect(src).toContain('editedFieldsRef.current.has(k)');
+    // The blanket gate must be gone. The simple textual check would
+    // false-positive on other debounceRef usages (saveLater +
+    // cleanup), so anchor on the specific shape: `if
+    // (debounceRef.current) return prev` was the bug, scoped to the
+    // sync effect.
+    expect(src).not.toMatch(/if \(debounceRef\.current\)\s+return prev/);
+  });
+});

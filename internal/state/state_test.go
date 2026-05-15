@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -65,7 +66,7 @@ func TestStore_TournamentYAML(t *testing.T) {
 
 	tourney := &Tournament{
 		Name:     "Test Tournament",
-		Date:     "2026-05-01",
+		Date:     "01-05-2026", // DD-MM-YYYY canonical format
 		Venue:    "Test Venue",
 		Courts:   []string{"A", "B"},
 		Password: "pass",
@@ -139,6 +140,13 @@ func TestStore_TournamentYAML_Fallback(t *testing.T) {
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
 	assert.Equal(t, "New Tournament", loaded.Name)
+	// Canonical date format invariant: DD-MM-YYYY. If this regex fails,
+	// the bootstrap default in tournament.go is using the wrong layout.
+	// Validator handlers_tournament.validateDateDMY rejects any other
+	// shape with 400, so an ISO-formatted bootstrap default would force
+	// admins to retype the date even when not editing it.
+	assert.Regexp(t, `^\d{2}-\d{2}-\d{4}$`, loaded.Date,
+		"bootstrap default Date must use DD-MM-YYYY canonical format")
 }
 
 func TestStore_TournamentYAML_MalformedFrontMatter(t *testing.T) {
@@ -157,6 +165,9 @@ func TestStore_TournamentYAML_MalformedFrontMatter(t *testing.T) {
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
 	assert.Equal(t, "New Tournament", loaded.Name)
+	// Same DMY-canonical invariant as the fallback test above.
+	assert.Regexp(t, `^\d{2}-\d{2}-\d{4}$`, loaded.Date,
+		"malformed-front-matter fallback Date must use DD-MM-YYYY canonical format")
 }
 
 // --- Participants CSV ---
@@ -703,6 +714,54 @@ func TestStore_Seeds_NotExists(t *testing.T) {
 	assert.Empty(t, loaded)
 }
 
+// LoadSeeds and SaveSeeds now use the per-competition lock (not the
+// store-wide s.mu) so they serialize against the StartCompetition
+// transform held by UpdateCompetitionChanged. Pin two contracts:
+//
+//  1. The validateCompetitionID precondition fires on bogus IDs before
+//     any disk I/O — proves the new per-comp locking path runs the
+//     same validation the other per-comp Load/Save methods do (and
+//     guards against the path-traversal class).
+//  2. Concurrent SaveSeeds on DIFFERENT comps don't block each other.
+//     Previously s.mu.Lock made every seed save store-wide-serial; the
+//     per-comp switch is a scalability improvement on top of the race fix.
+func TestStore_Seeds_PerCompLocking(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// (1) Bogus comp ID — must surface as a validation error, same as
+	// LoadParticipants / LoadPools / etc.
+	_, err = store.LoadSeeds("../escape")
+	assert.Error(t, err, "LoadSeeds must validate the comp ID")
+	err = store.SaveSeeds("../escape", []domain.SeedAssignment{{Name: "A", SeedRank: 1}})
+	assert.Error(t, err, "SaveSeeds must validate the comp ID")
+
+	// (2) Concurrent SaveSeeds on different comps must both land.
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "alpha"}))
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "beta"}))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_ = store.SaveSeeds("alpha", []domain.SeedAssignment{{Name: "A", SeedRank: 1}})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = store.SaveSeeds("beta", []domain.SeedAssignment{{Name: "B", SeedRank: 1}})
+	}()
+	wg.Wait()
+
+	a, _ := store.LoadSeeds("alpha")
+	b, _ := store.LoadSeeds("beta")
+	assert.Len(t, a, 1)
+	assert.Len(t, b, 1)
+}
+
 func TestStore_ResetOverrides(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-test-*")
 	require.NoError(t, err)
@@ -815,7 +874,7 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 
 func TestIsDraw(t *testing.T) {
 	assert.True(t, IsDraw("hikiwake"), "canonical spelling")
-	assert.True(t, IsDraw("hikewake"), "legacy spelling preserved for backward compat")
+	assert.False(t, IsDraw("hikewake"), "legacy misspelling no longer accepted")
 	assert.False(t, IsDraw(""))
 	assert.False(t, IsDraw("ippon"))
 	assert.False(t, IsDraw("HIKIWAKE"), "case-sensitive — wire format is lowercase")

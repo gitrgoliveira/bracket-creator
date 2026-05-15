@@ -27,18 +27,21 @@ describe('API Utils', () => {
       expect(result.decision).toBe('hikiwake');
     });
 
-    it('should still treat legacy hikewake score.type as a draw on write', () => {
+    it('treats hikewake misspelling as ippon (not a draw) on write', () => {
+      // Mobile-app cleanup: hikewake legacy spelling is no longer accepted.
+      // A score.type of "hikewake" passes through without draw conversion,
+      // leaving decision empty (the ippon default).
       const match = { sideA: 'A', sideB: 'B' };
       const patch = { status: 'complete', score: { type: 'hikewake' } };
       const result = toBackendMatchResult(patch, match);
-      expect(result.decision).toBe('hikiwake'); // normalises to canonical
+      expect(result.decision).toBe('');
     });
   });
 
   describe('isHikiwake', () => {
-    it('accepts canonical and legacy spellings', () => {
+    it('accepts only the canonical spelling', () => {
       expect(isHikiwake('hikiwake')).toBe(true);
-      expect(isHikiwake('hikewake')).toBe(true);
+      expect(isHikiwake('hikewake')).toBe(false);
     });
 
     it('rejects other values', () => {

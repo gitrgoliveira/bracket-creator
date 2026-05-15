@@ -195,6 +195,52 @@ func TestMatchHandlers_Extended(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
+	// Sibling of the rank-override TrimSpace test in
+	// handlers_competition_test.go. Downstream bracket math compares
+	// m.Winner to roster names by exact string equality, so padded
+	// "  Foo  " won't match canonical "Foo" — pin the trim contract.
+	t.Run("Override Bracket Winner Trims Whitespace", func(t *testing.T) {
+		bracket := &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{ID: "b-trim", SideA: "P1", SideB: "P2"}},
+			},
+		}
+		store.SaveBracket("c1", bracket)
+
+		reqBody, _ := json.Marshal(map[string]string{"winnerName": "  P1  "})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b-trim/override-winner", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		stored, err := store.LoadBracket("c1")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		var found *state.BracketMatch
+		for i := range stored.Rounds {
+			for j := range stored.Rounds[i] {
+				if stored.Rounds[i][j].ID == "b-trim" {
+					found = &stored.Rounds[i][j]
+				}
+			}
+		}
+		require.NotNil(t, found, "bracket match b-trim not found")
+		assert.Equal(t, "P1", found.Winner, "winner should be trimmed before propagation")
+	})
+
+	t.Run("Override Bracket Winner Rejects Whitespace-Only", func(t *testing.T) {
+		// Whitespace-only winnerName trims to empty — same shape as the
+		// rank-override empty-after-trim rejection.
+		reqBody, _ := json.Marshal(map[string]string{"winnerName": "   "})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "winnerName is required")
+	})
+
 	t.Run("Update Match Time", func(t *testing.T) {
 		reqBody, _ := json.Marshal(map[string]string{"scheduledAt": "10:00"})
 		w := httptest.NewRecorder()

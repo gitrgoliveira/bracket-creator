@@ -42,8 +42,21 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				if comp == nil {
 					return
 				}
-				hasIDs := comp.HasParticipantIDs
-				players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: &hasIDs})
+				// Only pass HasIDs=true hint; false means unset so auto-detect
+				// runs for competitions created before the flag existed AND
+				// for the narrow window where a deferred HasParticipantIDs
+				// flip fails after SaveParticipants succeeded (file has UUIDs
+				// but flag is still false on disk). Pre-fix this site passed
+				// `&hasIDs` (non-nil false) which bypassed auto-detect and
+				// misparsed UUID-prefix rows as plain Name fields. Mirrors
+				// the detail-view pattern at line ~101 and the engine load
+				// pattern in StartCompetition.
+				var hasIDsHint *bool
+				if comp.HasParticipantIDs {
+					t := true
+					hasIDsHint = &t
+				}
+				players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
 				comp.Players = players
 
 				// Global views like Scoring/Schedule need matches and brackets
@@ -69,7 +82,17 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	})
 
 	r.GET("/competitions/:id", func(c *gin.Context) {
-		id := c.Param("id")
+		// Validate the :id like the admin handlers do — pre-fix, an
+		// invalid ID here returned 500 (LoadCompetition's internal
+		// ValidateCompetitionID surfaced as a generic error response)
+		// while the OpenAPI spec on the CompetitionId parameter
+		// documents 400 for invalid IDs. Aligning to 400 makes the
+		// spec accurate and matches the path-traversal-defense
+		// rationale documented in the spec.
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -1,7 +1,7 @@
 // Tournament-wide schedule, score editor, and export pages. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useMemo: useMemoA } = React;
+const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
@@ -421,6 +421,13 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
   const [statusFilter, setStatusFilter] = useStateA("all");
   const [openMatch, setOpenMatch] = useStateA(null);
+  // ScoreEditorModal's onSubmit / onSubmitAndNext callbacks await
+  // onEditScore (which routes through AdminApp.editMatchScore — a
+  // server PUT). If AdminScoreEditor unmounts during the in-flight
+  // save (parent navigates away), the post-await setOpenMatch fires
+  // on a torn-down component. Gate via mountedRef.
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
 
   const tournament = t || (c ? { competitions: [c] } : { competitions: [] });
   const allMatches = useMemoA(
@@ -542,7 +549,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
             onSubmit={async (patch) => {
               try {
                 await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-                setOpenMatch(null);
+                if (mountedRef.current) setOpenMatch(null);
               } catch (_err) {
                 // Error handled by onEditScore/toast, but we catch here to keep modal open
               }
@@ -550,7 +557,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
             onSubmitAndNext={nextMatch ? async (patch) => {
               try {
                 await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-                setOpenMatch(nextMatch);
+                if (mountedRef.current) setOpenMatch(nextMatch);
               } catch (_err) { /* keep modal open on error */ }
             } : null}
           />

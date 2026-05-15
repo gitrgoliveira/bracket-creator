@@ -64,7 +64,7 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 		// If it's not a front-matter file, return a default tournament
 		t = Tournament{
 			Name:  "New Tournament",
-			Date:  time.Now().Format("2006-01-02"),
+			Date:  time.Now().Format("02-01-2006"),
 			Venue: "Venue TBA",
 		}
 	}
@@ -124,6 +124,106 @@ func (s *Store) SaveTournamentChanged(t *Tournament) (bool, error) {
 func (s *Store) SaveTournament(t *Tournament) error {
 	_, err := s.SaveTournamentChanged(t)
 	return err
+}
+
+// UpdateTournamentChanged atomically loads the current tournament under
+// the store's write lock, calls transform(current, desired) which may
+// modify desired in place (e.g. to preserve fields from current), and
+// — if transform returns nil — persists desired. Returns (changed, err)
+// like SaveTournamentChanged.
+//
+// This is the race-free primitive for "load the existing record, copy
+// some fields forward, save the result." Without it, a handler that
+// calls LoadTournament + SaveTournamentChanged sequentially has a
+// TOCTOU window between the two calls during which a concurrent
+// writer can land changes that the load-modify-save then clobbers.
+//
+// Specifically motivated by the PUT /api/tournament password-preserve
+// semantics: when the incoming body sends Password == "", the handler
+// must copy the stored Password into the desired record. Two
+// concurrent PUTs — one with empty Password (intent: keep), one with
+// a new password (intent: change) — could race in the old code so
+// that the empty-Password PUT's late save clobbers the
+// change-Password PUT's earlier save. With this method, the load +
+// transform + save sequence is serialized under the store's lock.
+//
+// `current` is nil ONLY when the tournament.md file does not exist
+// yet (first-ever save). When the file exists but parses cleanly,
+// `current` holds the parsed record. When the file exists but the
+// front matter is corrupt, the load below falls back to a default
+// Tournament record (matching LoadTournament's behavior) and that
+// default is passed to `transform` — `current` is still non-nil in
+// that case. transform must handle both cases. If transform returns
+// a non-nil error, no write happens and the error is returned to
+// the caller as-is (callers can use errors.Is to discriminate
+// validation vs. I/O).
+//
+// IMPORTANT: transform runs while this method holds both s.mu and
+// s.tournamentMu (non-recursive locks). It MUST NOT call back into
+// any Store method that acquires either lock — that includes
+// LoadTournament, SaveTournament, SaveTournamentChanged, and a
+// recursive UpdateTournamentChanged. Deadlock would result. The
+// transform should only mutate `desired` (possibly by copying fields
+// from `current`) and return; for any cross-resource coordination
+// (e.g. updating a competition during a tournament update), perform
+// the load BEFORE calling this method and pass the resulting data
+// in via a closure over local variables.
+func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(current *Tournament, desired *Tournament) error) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.tournamentMu.Lock()
+	defer s.tournamentMu.Unlock()
+
+	path := filepath.Clean(filepath.Join(s.folder, "tournament.md"))
+
+	// Load current under the lock. Mirror LoadTournament's parse
+	// fallback so the transform sees the same "default record" view
+	// that the rest of the system gets — except return nil when the
+	// file doesn't exist (so callers can distinguish "first save" from
+	// "subsequent save"; LoadTournament also returns nil in that case).
+	var current *Tournament
+	if data, rerr := os.ReadFile(path); rerr == nil { // #nosec G304
+		var t Tournament
+		if perr := parseFrontMatter(data, &t); perr == nil {
+			current = &t
+		} else {
+			// Parse failure: fall back to the same default record
+			// LoadTournament constructs, so transform's view is
+			// consistent.
+			current = &Tournament{
+				Name:  "New Tournament",
+				Date:  time.Now().Format("02-01-2006"),
+				Venue: "Venue TBA",
+			}
+		}
+	} else if !os.IsNotExist(rerr) {
+		return false, rerr
+	}
+
+	if err := transform(current, desired); err != nil {
+		return false, err
+	}
+
+	newData, err := writeFrontMatter(desired)
+	if err != nil {
+		return false, err
+	}
+
+	if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, newData) { // #nosec G304
+		return false, nil
+	}
+
+	if err := os.WriteFile(path, newData, 0600); err != nil {
+		return false, err
+	}
+
+	s.cachedTourn = desired
+	if info, serr := os.Stat(path); serr == nil && info != nil {
+		s.tournMtime = info.ModTime().UnixNano()
+	}
+
+	return true, nil
 }
 
 func parseFrontMatter(data []byte, v interface{}) error {

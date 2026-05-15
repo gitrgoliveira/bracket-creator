@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, isValidISODate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -72,6 +72,54 @@ describe('hasBothSides', () => {
     expect(hasBothSides({ sideA: "Alice", sideB: "" })).toBe(false);
   });
 
+  // Copilot review finding on PR #104: hasBothSides previously only
+  // checked for non-empty side names, which let bracket placeholder
+  // strings like "Winner of r2-m0" slip through as "real participants".
+  // Unresolved future-round bracket matches then showed up in the
+  // viewer's upcoming-matches list. The fix excludes any "Winner of "
+  // prefix explicitly.
+  it('returns false when either side is an unresolved "Winner of" bracket placeholder', () => {
+    expect(hasBothSides({ sideA: "Alice", sideB: "Winner of r0-m1" })).toBe(false);
+    expect(hasBothSides({ sideA: "Winner of r1-m0", sideB: "Bob" })).toBe(false);
+    expect(hasBothSides({ sideA: "Winner of r0-m0", sideB: "Winner of r0-m1" })).toBe(false);
+  });
+
+  it('returns false when "Winner of" placeholders are inside normalizeMatch side objects', () => {
+    // normalizeMatch wraps raw side strings into {id, name} objects.
+    // The "Winner of" prefix could still be in the name field.
+    expect(hasBothSides({ sideA: { id: "", name: "Winner of r1-m0" }, sideB: real("b", "Bob") })).toBe(false);
+    expect(hasBothSides({ sideA: real("a", "Alice"), sideB: { id: "", name: "Winner of r0-m0" } })).toBe(false);
+  });
+
+  it('returns true for resolved bracket matches (no "Winner of" prefix)', () => {
+    // After the source match resolves, the bracket entry's side updates
+    // to the actual winner's name. hasBothSides should accept those.
+    expect(hasBothSides({ sideA: "Alice", sideB: "Charlie" })).toBe(true);
+  });
+
+  // Copilot round-4 finding on PR #104: the prefix-match `startsWith("Winner of ")`
+  // was too broad — it rejected real participants whose names happened to
+  // start with "Winner of " (e.g. "Winner of the 2025 Cup"). The placeholder
+  // pattern emitted by the bracket generator is the exact shape
+  // `Winner of r<digits>-m<digits>`; only that should be rejected.
+  it('accepts legitimate participants whose names start with "Winner of "', () => {
+    expect(hasBothSides({ sideA: "Winner of the 2025 Cup", sideB: "Alice" })).toBe(true);
+    expect(hasBothSides({ sideA: "Alice", sideB: "Winner of the 2025 Cup" })).toBe(true);
+    // "Winner of " without the rX-mY suffix is a real name, not a placeholder.
+    expect(hasBothSides({ sideA: "Winner of Tournament", sideB: "Bob" })).toBe(true);
+    // Mixed case or extra whitespace shouldn't match the strict placeholder shape.
+    expect(hasBothSides({ sideA: "winner of r0-m1", sideB: "Bob" })).toBe(true);
+  });
+
+  it('still rejects the exact placeholder shape Winner of r<n>-m<n>', () => {
+    // Pin the regex against representative bracket-generator outputs.
+    // internal/engine/bracket.go emits "Winner of r%d-m%d" — round and
+    // match indices are zero-based non-negative integers.
+    expect(hasBothSides({ sideA: "Winner of r0-m0", sideB: "Alice" })).toBe(false);
+    expect(hasBothSides({ sideA: "Winner of r10-m255", sideB: "Alice" })).toBe(false);
+    expect(hasBothSides({ sideA: "Winner of r1-m1", sideB: "Winner of r1-m2" })).toBe(false);
+  });
+
   it('returns a real boolean (not a truthy/falsy value) for use in JSX guards', () => {
     // Important for `{hasBothSides(m) ? <Component /> : null}` rendering —
     // returning a non-boolean truthy value (e.g. a string) would render
@@ -140,35 +188,39 @@ describe('compMatchStats', () => {
 });
 
 describe('normalizeDate', () => {
+  // Canonical output is DD-MM-YYYY. ISO YYYY-MM-DD is accepted as input
+  // (boundary convenience for HTML `<input type="date">`) and converted.
+  // See admin_helpers.jsx for rationale.
+
   it('returns falsy input unchanged', () => {
     expect(normalizeDate(null)).toBe(null);
     expect(normalizeDate(undefined)).toBe(undefined);
     expect(normalizeDate("")).toBe("");
   });
 
-  it('passes through ISO-format dates', () => {
-    expect(normalizeDate("2026-05-13")).toBe("2026-05-13");
+  it('passes through canonical DD-MM-YYYY dates', () => {
+    expect(normalizeDate("13-05-2026")).toBe("13-05-2026");
   });
 
-  it('converts DD-MM-YYYY to ISO', () => {
-    expect(normalizeDate("13-05-2026")).toBe("2026-05-13");
+  it('converts ISO YYYY-MM-DD to DD-MM-YYYY (boundary convenience)', () => {
+    expect(normalizeDate("2026-05-13")).toBe("13-05-2026");
   });
 
-  it('converts DD/MM/YYYY to ISO', () => {
-    expect(normalizeDate("13/05/2026")).toBe("2026-05-13");
+  it('converts DD/MM/YYYY to DD-MM-YYYY', () => {
+    expect(normalizeDate("13/05/2026")).toBe("13-05-2026");
   });
 
   it('zero-pads single-digit days and months', () => {
-    expect(normalizeDate("3-5-2026")).toBe("2026-05-03");
-    expect(normalizeDate("3/5/2026")).toBe("2026-05-03");
+    expect(normalizeDate("3-5-2026")).toBe("03-05-2026");
+    expect(normalizeDate("3/5/2026")).toBe("03-05-2026");
   });
 
-  it('returns unrecognized strings unchanged (caller validates)', () => {
-    expect(normalizeDate("not a date")).toBe("not a date");
-    expect(normalizeDate("2026/05/13")).toBe("2026/05/13"); // wrong separator order
+  it('rejects unrecognized strings (returns null)', () => {
+    expect(normalizeDate("not a date")).toBe(null);
+    expect(normalizeDate("2026/05/13")).toBe(null); // wrong separator order
   });
 
-  it('rejects semantically invalid ISO dates', () => {
+  it('rejects semantically invalid ISO dates (post-conversion)', () => {
     expect(normalizeDate("2026-13-32")).toBe(null);
     expect(normalizeDate("2026-02-31")).toBe(null);
     expect(normalizeDate("2026-00-15")).toBe(null);
@@ -182,65 +234,153 @@ describe('normalizeDate', () => {
   });
 
   it('accepts Feb 29 in leap years and rejects in non-leap years', () => {
-    expect(normalizeDate("2024-02-29")).toBe("2024-02-29");
-    expect(normalizeDate("2026-02-29")).toBe(null);
+    expect(normalizeDate("29-02-2024")).toBe("29-02-2024");
+    expect(normalizeDate("2024-02-29")).toBe("29-02-2024"); // ISO → DMY
+    expect(normalizeDate("29-02-2026")).toBe(null);
   });
 });
 
-describe('isValidISODate', () => {
-  // This is the predicate used by AdminCompetition's "Start competition"
-  // button gate. The Copilot finding: pre-fix, this function only did a
-  // shape regex + year range check, so semantically-invalid dates like
-  // "2026-13-32" (which normalizeDate correctly rejects) still enabled
-  // the button, letting the operator start a competition with a date
-  // that AdminSettings.saveNow would refuse to save.
+describe('dmyToIso / isoToDmy', () => {
+  // Boundary converters for HTML `<input type="date">`, which uses ISO
+  // YYYY-MM-DD natively. Everywhere else in the app uses DMY.
+  it('dmyToIso converts canonical DD-MM-YYYY to ISO', () => {
+    expect(dmyToIso("13-05-2026")).toBe("2026-05-13");
+  });
+  it('dmyToIso passes ISO YYYY-MM-DD through unchanged', () => {
+    // Defense-in-depth for code paths that still hand ISO values (e.g.
+    // a competition record loaded from a pre-canonicalization save still
+    // has an ISO date in state until the next save round-trips it). Pre-fix
+    // dmyToIso returned "" for ISO input, which blanked the date picker
+    // in the admin UI until the user manually picked a date again.
+    expect(dmyToIso("2026-05-13")).toBe("2026-05-13");
+  });
+  it('dmyToIso returns "" for invalid input', () => {
+    expect(dmyToIso("")).toBe("");
+    expect(dmyToIso(null)).toBe("");
+    expect(dmyToIso("13/05/2026")).toBe("");
+    expect(dmyToIso("garbage")).toBe("");
+  });
+  it('isoToDmy converts ISO YYYY-MM-DD to canonical DD-MM-YYYY', () => {
+    expect(isoToDmy("2026-05-13")).toBe("13-05-2026");
+  });
+  it('isoToDmy passes DMY DD-MM-YYYY through unchanged', () => {
+    // Symmetric defense-in-depth for the reverse direction.
+    expect(isoToDmy("13-05-2026")).toBe("13-05-2026");
+  });
+  it('isoToDmy returns "" for invalid input', () => {
+    expect(isoToDmy("")).toBe("");
+    expect(isoToDmy(null)).toBe("");
+    expect(isoToDmy("garbage")).toBe("");
+  });
+});
 
-  it('accepts a valid ISO date in range', () => {
-    expect(isValidISODate("2026-05-13")).toBe(true);
-    expect(isValidISODate("1900-01-01")).toBe(true); // year boundary
-    expect(isValidISODate("2100-12-31")).toBe(true); // year boundary
+describe('compareDmy', () => {
+  // Deep-review finding: JS's default `.sort()` does lex compare on
+  // strings. That happens to match chronological order for ISO
+  // YYYY-MM-DD (the format we used before the cleanup) but NOT for the
+  // canonical DMY DD-MM-YYYY: "01-06-2026" (June 1) sorts before
+  // "12-05-2026" (May 12) lexically. This caused the multi-day viewer
+  // tab strip and the home-page day grouping to show months
+  // out-of-order whenever competitions crossed a month boundary.
+
+  it('orders DMY dates chronologically (cross-month)', () => {
+    // The bug case: May 12 comes before June 1 chronologically; lex
+    // compare gets it wrong. compareDmy must get it right.
+    const sorted = ["01-06-2026", "12-05-2026"].sort(compareDmy);
+    expect(sorted).toEqual(["12-05-2026", "01-06-2026"]);
   });
 
-  it('accepts DD-MM-YYYY input that normalizeDate canonicalizes', () => {
-    expect(isValidISODate("13-05-2026")).toBe(true);
-    expect(isValidISODate("13/05/2026")).toBe(true);
+  it('orders DMY dates chronologically (cross-year)', () => {
+    const sorted = ["01-01-2027", "31-12-2026"].sort(compareDmy);
+    expect(sorted).toEqual(["31-12-2026", "01-01-2027"]);
   });
 
-  it('rejects semantically invalid dates (Copilot finding)', () => {
-    // These all have valid shape but represent impossible days.
-    expect(isValidISODate("2026-13-32")).toBe(false);
-    expect(isValidISODate("2026-02-31")).toBe(false);
-    expect(isValidISODate("2026-00-15")).toBe(false);
-    expect(isValidISODate("2026-04-31")).toBe(false); // April has 30 days
-    expect(isValidISODate("2026-02-29")).toBe(false); // non-leap
+  it('orders DMY dates chronologically (same year, mixed months)', () => {
+    const sorted = ["15-03-2026", "01-01-2026", "31-12-2026", "15-07-2026"].sort(compareDmy);
+    expect(sorted).toEqual([
+      "01-01-2026", "15-03-2026", "15-07-2026", "31-12-2026",
+    ]);
+  });
+
+  it('puts empty strings first (lexically smallest)', () => {
+    const sorted = ["12-05-2026", "", "01-06-2026"].sort(compareDmy);
+    expect(sorted).toEqual(["", "12-05-2026", "01-06-2026"]);
+  });
+
+  it('falls back to string compare for non-DMY values', () => {
+    // Defensive: a stray non-DMY string (shouldn't happen post-validation
+    // but we don't want compareDmy to throw on it) sorts by raw value.
+    const sorted = ["zzz", "12-05-2026", "aaa"].sort(compareDmy);
+    // The two non-DMY entries fall through toKey unchanged; the DMY
+    // entry maps to "2026-05-12". Lex order: "12-05-2026"→"2026-05-12",
+    // "aaa", "zzz" → ["2026-05-12", "aaa", "zzz"]. Map back: the DMY
+    // entry stays as the input "12-05-2026".
+    expect(sorted[0]).toBe("12-05-2026");
+    expect(sorted[1]).toBe("aaa");
+    expect(sorted[2]).toBe("zzz");
+  });
+
+  it('is a stable comparator (returns 0 for equal inputs)', () => {
+    expect(compareDmy("12-05-2026", "12-05-2026")).toBe(0);
+    expect(compareDmy("", "")).toBe(0);
+  });
+
+  it('returns negative/positive/zero per the comparator contract', () => {
+    expect(compareDmy("12-05-2026", "01-06-2026") < 0).toBe(true);  // earlier
+    expect(compareDmy("01-06-2026", "12-05-2026") > 0).toBe(true);  // later
+    expect(compareDmy("12-05-2026", "12-05-2026")).toBe(0);          // equal
+  });
+});
+
+describe('isValidDate', () => {
+  // Predicate used by AdminCompetition's "Start competition" button gate.
+  // Canonical input is DD-MM-YYYY; ISO accepted as boundary convenience.
+
+  it('accepts a valid DD-MM-YYYY date in range', () => {
+    expect(isValidDate("13-05-2026")).toBe(true);
+    expect(isValidDate("01-01-1900")).toBe(true); // year boundary
+    expect(isValidDate("31-12-2100")).toBe(true); // year boundary
+  });
+
+  it('accepts ISO YYYY-MM-DD input that normalizeDate canonicalizes', () => {
+    expect(isValidDate("2026-05-13")).toBe(true);
+    expect(isValidDate("13/05/2026")).toBe(true);
+  });
+
+  it('rejects semantically invalid dates', () => {
+    expect(isValidDate("32-13-2026")).toBe(false);
+    expect(isValidDate("31-02-2026")).toBe(false);
+    expect(isValidDate("00-05-2026")).toBe(false);
+    expect(isValidDate("31-04-2026")).toBe(false); // April has 30 days
+    expect(isValidDate("29-02-2026")).toBe(false); // non-leap
   });
 
   it('accepts Feb 29 in a leap year', () => {
-    expect(isValidISODate("2024-02-29")).toBe(true);
+    expect(isValidDate("29-02-2024")).toBe(true);
   });
 
   it('rejects years outside [1900, 2100]', () => {
-    expect(isValidISODate("1899-12-31")).toBe(false);
-    expect(isValidISODate("2101-01-01")).toBe(false);
-    expect(isValidISODate("0001-01-01")).toBe(false);
+    expect(isValidDate("31-12-1899")).toBe(false);
+    expect(isValidDate("01-01-2101")).toBe(false);
+    expect(isValidDate("01-01-0001")).toBe(false);
   });
 
   it('rejects falsy / empty / undefined input', () => {
-    expect(isValidISODate("")).toBe(false);
-    expect(isValidISODate(null)).toBe(false);
-    expect(isValidISODate(undefined)).toBe(false);
+    expect(isValidDate("")).toBe(false);
+    expect(isValidDate(null)).toBe(false);
+    expect(isValidDate(undefined)).toBe(false);
   });
 
   it('rejects unrecognized strings', () => {
-    expect(isValidISODate("not a date")).toBe(false);
-    expect(isValidISODate("2026/05/13")).toBe(false); // wrong separator order
-    expect(isValidISODate("13.05.2026")).toBe(false);
+    expect(isValidDate("not a date")).toBe(false);
+    expect(isValidDate("2026/05/13")).toBe(false); // wrong separator order
+    expect(isValidDate("13.05.2026")).toBe(false);
   });
 
-  it('returns a real boolean (for use in disabled={!isValidISODate(...)} props)', () => {
-    expect(typeof isValidISODate("2026-05-13")).toBe("boolean");
-    expect(typeof isValidISODate("")).toBe("boolean");
-    expect(typeof isValidISODate(null)).toBe("boolean");
+  it('returns a real boolean (for use in disabled={!isValidDate(...)} props)', () => {
+    expect(typeof isValidDate("13-05-2026")).toBe("boolean");
+    expect(typeof isValidDate("")).toBe("boolean");
+    expect(typeof isValidDate(null)).toBe("boolean");
   });
 });
 
@@ -249,26 +389,26 @@ describe('validateAndNormalizeDate', () => {
   // the user-facing error message AND the normalized date value to save.
   // Two consumers: AdminEditTournament.handleSave, AdminCreateCompetition.create.
 
-  it('returns {norm, error: null} for a valid date', () => {
-    expect(validateAndNormalizeDate("2026-05-13")).toEqual({
-      norm: "2026-05-13",
+  it('returns {norm, error: null} for a valid DD-MM-YYYY date', () => {
+    expect(validateAndNormalizeDate("13-05-2026")).toEqual({
+      norm: "13-05-2026",
       error: null,
     });
   });
 
-  it('normalizes DD-MM-YYYY input to ISO', () => {
-    expect(validateAndNormalizeDate("13-05-2026")).toEqual({
-      norm: "2026-05-13",
+  it('normalizes ISO YYYY-MM-DD input to canonical DD-MM-YYYY', () => {
+    expect(validateAndNormalizeDate("2026-05-13")).toEqual({
+      norm: "13-05-2026",
       error: null,
     });
   });
 
   it('returns the "Invalid date" message for semantically invalid input', () => {
-    expect(validateAndNormalizeDate("2026-13-32")).toEqual({
+    expect(validateAndNormalizeDate("32-13-2026")).toEqual({
       norm: null,
       error: "Invalid date. Please pick a valid day.",
     });
-    expect(validateAndNormalizeDate("2026-02-29")).toEqual({
+    expect(validateAndNormalizeDate("29-02-2026")).toEqual({
       norm: null,
       error: "Invalid date. Please pick a valid day.",
     });
@@ -281,27 +421,27 @@ describe('validateAndNormalizeDate', () => {
   });
 
   it('returns the "Year must be..." message for out-of-range years', () => {
-    expect(validateAndNormalizeDate("1899-12-31")).toEqual({
+    expect(validateAndNormalizeDate("31-12-1899")).toEqual({
       norm: null,
       error: "Year must be between 1900 and 2100.",
     });
-    expect(validateAndNormalizeDate("2101-01-01")).toEqual({
+    expect(validateAndNormalizeDate("01-01-2101")).toEqual({
       norm: null,
       error: "Year must be between 1900 and 2100.",
     });
   });
 
   it('accepts year boundary values 1900 and 2100', () => {
-    expect(validateAndNormalizeDate("1900-01-01").error).toBe(null);
-    expect(validateAndNormalizeDate("2100-12-31").error).toBe(null);
+    expect(validateAndNormalizeDate("01-01-1900").error).toBe(null);
+    expect(validateAndNormalizeDate("31-12-2100").error).toBe(null);
   });
 
   it('returns the canonical DATE_ERR_* constants (lockstep with saveNow)', () => {
-    // saveNow in admin_competition.jsx imports the same constants from
-    // window.DATE_ERR_*, so this assertion mechanically guarantees that
-    // the four date-validation sites can't drift on error messages.
+    // saveNow in admin_competition.jsx delegates to validateAndNormalizeDate
+    // for the canonical error string. This mechanically guarantees the
+    // four date-validation sites can't drift on error messages.
     expect(validateAndNormalizeDate("not a date").error).toBe(DATE_ERR_INVALID_FORMAT);
-    expect(validateAndNormalizeDate("1850-01-01").error).toBe(DATE_ERR_YEAR_RANGE);
+    expect(validateAndNormalizeDate("01-01-1850").error).toBe(DATE_ERR_YEAR_RANGE);
   });
 
   it('DATE_ERR_* constants have the expected user-facing strings', () => {
@@ -328,6 +468,14 @@ describe('numeric bounds constants', () => {
     // Pin the current bounds. If anyone tightens to (2000, 2050) or
     // loosens further, this test fails and tells them to also update
     // docs / screenshot fixtures / saveNow's still-inline usage.
+    //
+    // Mirrors helper.MinDateYear / helper.MaxDateYear in
+    // internal/helper/constants.go — the Go HTTP handlers
+    // (validateDateDMY in handlers_tournament.go) reject out-of-range
+    // years on every write path. Bumping these here without bumping
+    // the Go side (or vice versa) would let the UI offer dates the
+    // backend rejects (or land dates the UI then refuses to render).
+    // The Go pin tests in constants_test.go assert the same literals.
     expect(MIN_YEAR).toBe(1900);
     expect(MAX_YEAR).toBe(2100);
   });
@@ -339,6 +487,25 @@ describe('numeric bounds constants', () => {
     expect(MAX_TEAM_SIZE).toBe(9);
   });
 
+  it('MAX_COURTS matches A–Z labelling cap (lockstep with helper.MaxCourts)', () => {
+    // Pin the courts cap. Anchored to the single-letter A..Z labelling
+    // used on Shiaijo headers in the Excel output and in
+    // CourtPicker / admin_setup.jsx's courts input. The Go side
+    // declares the same value at internal/helper/constants.go as
+    // `MaxCourts`. Bumping past 26 here without bumping there (or
+    // vice versa) would let the UI offer values the backend rejects.
+    expect(MAX_COURTS).toBe(26);
+  });
+
+  it('MAX_RANK matches helper.MaxRankOverride (Go-side overflow cap)', () => {
+    // Pin the rank-override absolute cap. The override-rank handler
+    // ALSO validates against the actual pool size (real semantic
+    // constraint); this constant is the defense-in-depth overflow
+    // guard. Mirrors helper.MaxRankOverride in
+    // internal/helper/constants.go — keep both in lockstep.
+    expect(MAX_RANK).toBe(1000);
+  });
+
   it('validateAndNormalizeDate predicate matches MIN_YEAR/MAX_YEAR bounds', () => {
     // The boundary cases must be in lockstep with the constants
     // (off-by-one regression guard).
@@ -348,12 +515,12 @@ describe('numeric bounds constants', () => {
     expect(validateAndNormalizeDate(`${MAX_YEAR + 1}-01-01`).error).toBe(DATE_ERR_YEAR_RANGE);
   });
 
-  it('isValidISODate is a thin wrapper that returns error === null', () => {
-    // Verify the two helpers stay in lockstep — isValidISODate is now
+  it('isValidDate is a thin wrapper that returns error === null', () => {
+    // Verify the two helpers stay in lockstep — isValidDate is now
     // implemented as `validateAndNormalizeDate(d).error === null`.
-    const cases = ["2026-05-13", "13-05-2026", "2026-13-32", "1899-01-01", "", null];
+    const cases = ["13-05-2026", "2026-05-13", "32-13-2026", "31-12-1899", "", null];
     cases.forEach((c) => {
-      expect(isValidISODate(c)).toBe(validateAndNormalizeDate(c).error === null);
+      expect(isValidDate(c)).toBe(validateAndNormalizeDate(c).error === null);
     });
   });
 });

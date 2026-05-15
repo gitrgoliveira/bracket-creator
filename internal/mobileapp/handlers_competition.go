@@ -40,6 +40,18 @@ func slugifyID(name string) string {
 // are present, saves participants and extracts seed assignments.
 // Returns (true, nil) when the on-disk content changed, so callers can decide
 // whether to broadcast.
+//
+// IMPORTANT: this function is intended for CREATE paths only (POST
+// /competitions). On a SaveParticipants failure AFTER SaveCompetitionChanged
+// succeeded, it rolls back by calling DeleteCompetition — without that
+// rollback, the ID-collision check at the top of POST /competitions would
+// block retries because the orphaned config.md is on disk but
+// participants.csv isn't. Calling this on an UPDATE path would delete the
+// existing record on participants-save failure, so callers updating an
+// existing competition must use store.SaveParticipants directly (see the
+// PUT /competitions/:id handler, which writes participants after the
+// transform commits and treats save errors as retriable since PUT is
+// idempotent — no ID-collision trap).
 func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bool, error) {
 	if len(comp.Players) > 0 {
 		comp.HasParticipantIDs = true // participants.csv always written with UUID IDs
@@ -52,10 +64,22 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 		return changed, nil
 	}
 	if err := store.SaveParticipants(comp.ID, comp.Players); err != nil {
+		// Rollback: SaveCompetitionChanged wrote config.md, but
+		// participants.csv didn't land. Without removing config.md the
+		// caller's ID-collision check on retry would 400 "ID already
+		// exists" even though the prior attempt failed. Mirror the
+		// import handler's rollback pattern (handlers_import.go).
+		_ = store.DeleteCompetition(comp.ID) // best-effort rollback
 		return false, fmt.Errorf("failed to save participants: %w", err)
 	}
 	assignments := extractSeeds(comp.Players)
 	if err := store.SaveSeeds(comp.ID, assignments); err != nil {
+		// SaveSeeds is best-effort by historical contract (the same
+		// Printf-warning pattern is used in the PUT handler's
+		// participants block). seeds.csv missing is recoverable
+		// — the operator can re-set seeds without re-creating the
+		// competition. No rollback to avoid surprising the caller
+		// with a deleted record over a non-critical write.
 		fmt.Printf("Warning: failed to save seeds: %v\n", err)
 	}
 	return changed, nil
@@ -116,11 +140,53 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Mirrors the comp.Name trim above (and the frontend trim in
 		// admin_competition.jsx saveNow + admin_setup.jsx create).
 		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
-		if err := checkUniqueCompName(store, comp.Name, ""); err != nil {
+		// Trim the remaining string fields too. Cross-file guard symmetry
+		// with handlers_import.go (which trims all 7 string fields). The
+		// admin UI sends these via dropdowns / time / date inputs that
+		// don't pad, but a hand-crafted POST could send "  individual  "
+		// as Kind — downstream switch statements would silently fall
+		// through to "unknown kind" semantics.
+		comp.Kind = strings.TrimSpace(comp.Kind)
+		comp.Format = strings.TrimSpace(comp.Format)
+		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
+		comp.StartTime = strings.TrimSpace(comp.StartTime)
+		comp.Date = strings.TrimSpace(comp.Date)
+
+		// Reject whitespace-only Name. The admin_setup.jsx Create form
+		// validates this client-side (deriveCompetitionName + the
+		// empty-name check), but hand-crafted POSTs with an explicit
+		// `id` bypass the slugifyID empty-name fallback below — so
+		// without this guard, an explicit-ID request with Name="   "
+		// lands as Name="" on disk and renders a blank competition
+		// card. Cross-file guard symmetry with handlers_tournament.go
+		// (which rejects empty Name on PUT and POST).
+		if comp.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
+			return
+		}
+
+		// Reject non-canonical Date format. See validateDateDMY in
+		// handlers_tournament.go for the canonical-format rationale.
+		if err := validateDateDMY(comp.Date); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
+		// Cross-file guard symmetry with POST/PUT /tournament: same
+		// label + cap check via validateCompetitionCourts (looser than
+		// the tournament version — empty courts is allowed because the
+		// engine applies a 1-court default and the import handler has
+		// the same fallback). Defense against direct API callers
+		// sending multi-character labels.
+		if err := validateCompetitionCourts(comp.Courts); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+			return
+		}
+
+		// Derive ID from name BEFORE acquiring the rename lock — the ID
+		// derivation has no concurrency concern (pure function of Name)
+		// and an empty derived ID should fast-fail without holding the
+		// global mutex.
 		if comp.ID == "" {
 			comp.ID = slugifyID(comp.Name)
 			if comp.ID == "" {
@@ -128,8 +194,53 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 		}
+		// Validate the derived OR caller-supplied ID upfront with a 400.
+		// Without this, a non-empty but invalid ID (e.g. "../../etc/passwd"
+		// or "foo bar") would skip the derive block, then LoadCompetition
+		// would silently drop the validation error (`_, _ :=`), and the
+		// SaveCompetitionChanged inside saveCompetitionWithPlayers would
+		// surface "invalid competition ID" as a 500 — masking malformed
+		// input as a server failure. The middleware.requireValidCompID
+		// helper does the equivalent check for routes that take :id in
+		// the URL; this is the body-supplied-id sibling.
+		if err := state.ValidateCompetitionID(comp.ID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
-		if _, err := saveCompetitionWithPlayers(&comp, store); err != nil {
+		// Atomic uniqueness-check + save under the global
+		// competition-rename mutex. Closes the AB-BA window where two
+		// concurrent POSTs (or PUT renames) to the same new name both
+		// passed checkUniqueCompName (each seeing the other still had
+		// its old name) and both landed. See state.Store
+		// WithCompetitionRenameLock for full rationale.
+		//
+		// Also checks ID uniqueness: pre-fix, a POST with an existing
+		// `id` but different `name` passed checkUniqueCompName (the
+		// name was unique) and then SaveCompetitionChanged silently
+		// overwrote the existing competition. POST is documented as
+		// CREATE, so an existing ID is a 409 / 400 case.
+		var nameErr, idErr error
+		err := store.WithCompetitionRenameLock(func() error {
+			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
+				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
+				return nil
+			}
+			if nameErr = checkUniqueCompName(store, comp.Name, ""); nameErr != nil {
+				return nil
+			}
+			_, saveErr := saveCompetitionWithPlayers(&comp, store)
+			return saveErr
+		})
+		if idErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
+			return
+		}
+		if nameErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+			return
+		}
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -139,7 +250,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.GET("/competitions/:id", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -153,38 +267,317 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.PUT("/competitions/:id", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		var comp state.Competition
 		if err := c.ShouldBindJSON(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		comp.ID = id // ensure ID matches URL
+		// Reject mismatched body.ID rather than silently overriding it.
+		// Pre-fix, a caller doing `PUT /api/competitions/comp-a` with
+		// `{"id":"comp-b",...}` would have its body.ID silently ignored
+		// (the line below set comp.ID = id from the URL). That accepted
+		// malformed input as valid; the safer contract is to surface
+		// the mismatch.
+		if comp.ID != "" && comp.ID != id {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("competition ID mismatch: URL %q vs body %q", id, comp.ID)})
+			return
+		}
+		comp.ID = id // ensure ID matches URL (also for empty-body case)
 		comp.Name = strings.TrimSpace(comp.Name)
 		// See POST handler comment — same trim is needed here so the
 		// SETTINGS edit path can't persist whitespace-padded prefixes.
 		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
+		// Cross-file guard symmetry with handlers_import.go and the POST
+		// handler above. The admin UI uses dropdowns for Kind/Format/
+		// PoolSizeMode and date/time pickers for StartTime/Date — none
+		// of which produce padded values — but defense-in-depth against
+		// hand-crafted PUT requests.
+		comp.Kind = strings.TrimSpace(comp.Kind)
+		comp.Format = strings.TrimSpace(comp.Format)
+		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
+		comp.StartTime = strings.TrimSpace(comp.StartTime)
+		comp.Date = strings.TrimSpace(comp.Date)
 
-		if err := checkUniqueCompName(store, comp.Name, id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		// Settings-specific validations — gate on comp.Players == nil
+		// (settings-only PUT). Roster-only PUTs (comp.Players != nil)
+		// carry a stale-snapshot of settings fields from the frontend
+		// (AdminParticipants spreads `{ ...c, players: np }` over a
+		// possibly outdated `c`), and those fields are IGNORED downstream
+		// of the transform branch decision. Pre-fix, an on-disk
+		// legacy/stale settings value (e.g. a pre-DMY-canonical Date
+		// like `2026-05-12`) made the roster save fail with
+		// "date must be DD-MM-YYYY" even though the date wasn't being
+		// edited — the validators ran before the branch decision and
+		// rejected on a field the request was about to ignore. Moving
+		// these behind `comp.Players == nil` keeps the defense-in-depth
+		// against bad settings PUTs and unblocks roster saves on legacy
+		// state.
+		if comp.Players == nil {
+			// Reject whitespace-only Name (see POST handler above). The
+			// admin SETTINGS edit path (AdminSettings.saveNow in
+			// admin_competition.jsx) empty-checks the name client-side
+			// first — defense-in-depth for direct API callers.
+			if comp.Name == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
+				return
+			}
+
+			// Reject non-canonical Date format.
+			if err := validateDateDMY(comp.Date); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Cross-file guard symmetry with POST handler + POST/PUT /tournament:
+			// validateCompetitionCourts label + cap check (empty allowed
+			// because the engine applies a 1-court default for competitions).
+			if err := validateCompetitionCourts(comp.Courts); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+				return
+			}
 		}
 
-		changed, err := saveCompetitionWithPlayers(&comp, store)
+		// Atomic uniqueness-check + 404-on-missing + settings-only merge
+		// + save under the global competition-rename mutex.
+		//
+		// Three invariants enforced here:
+		//
+		// 1. AB-BA rename race closure: two concurrent PUTs renaming
+		//    different competitions to the same new name both passed
+		//    checkUniqueCompName pre-fix (each seeing the other still
+		//    had its old name) and both landed. The dedicated rename
+		//    mutex (different from any per-comp lock) serializes the
+		//    check+save for uniqueness. An earlier attempt folded the
+		//    check into UpdateCompetitionChanged's per-comp transform —
+		//    deadlocked AB-BA because each goroutine held its own
+		//    comp's per-comp write lock and tried to read-lock the
+		//    other to do the check.
+		//
+		// 2. 404 on missing: pre-fix, saveCompetitionWithPlayers
+		//    would CREATE the record if id didn't exist on disk —
+		//    contradicting the OpenAPI-documented 404 response and
+		//    surprising clients that expected idempotent "edit only".
+		//    UpdateCompetitionChanged's transform now returns
+		//    notFoundFlag for current == nil.
+		//
+		// 3. Settings-only merge for non-participants fields: pre-fix,
+		//    the PUT body REPLACED the whole config — including
+		//    Status / HasParticipantIDs that AdminSettings doesn't
+		//    manage. If the JSON omitted Status (e.g. the new
+		//    admin_competition.jsx saveNow whitelist that genuinely
+		//    sends settings-only), the saved record would have
+		//    status="" / hasParticipantIDs=false, reverting server-side
+		//    start / participant changes. The transform copies ONLY the
+		//    settings fields from the body onto current, so Status /
+		//    HasParticipantIDs stay as they are on disk regardless of
+		//    body contents. Defense-in-depth for direct API callers too.
+		//
+		// AdminParticipants STILL uses this same PUT to save the roster
+		// (`{ ...c, players: np }`): when the body has Players, we run
+		// the participants/seeds save AFTER the transform commits and
+		// set HasParticipantIDs=true (saveParticipants writes UUID rows).
+		var nameErr error
+		var notFoundFlag bool
+		var changed bool
+		err := store.WithCompetitionRenameLock(func() error {
+			var updateErr error
+			changed, updateErr = store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+				if current == nil {
+					notFoundFlag = true
+					return nil, nil
+				}
+				// Roster-only PUT: when the body carries a Players field
+				// (present, possibly empty), treat the request as
+				// participants-only and DON'T touch settings. The
+				// AdminParticipants flow sends `{ ...c, players: np }`
+				// where `c` is a (potentially stale) frontend snapshot
+				// of the competition; copying every settings field from
+				// that snapshot onto a fresh `current` would revert any
+				// concurrent settings change that landed after the
+				// participants page loaded its `c` snapshot (e.g. an
+				// admin in another tab adjusts poolSize / courts /
+				// startTime). The trailing SaveParticipants block runs
+				// regardless via the post-transform gate
+				// `if comp.Players != nil`.
+				//
+				// Settings updates use AdminSettings which OMITS the
+				// players field (decodes to nil in Go) and takes the
+				// settings-merge branch below. With this branch split,
+				// settings-PUT and roster-PUT no longer step on each
+				// other's writes.
+				if comp.Players != nil {
+					// Roster-only PUT — do NOT flip HasParticipantIDs
+					// here. Pre-fix, the transform committed the flag
+					// (HasParticipantIDs=true) BEFORE the post-transform
+					// SaveParticipants call. If that save failed (disk
+					// full, EISDIR, etc.) the config on disk would carry
+					// HasParticipantIDs=true while participants.csv
+					// retained the OLD non-UUID format — and the
+					// list-view's HasIDs hint would then misparse the
+					// file (trying to extract UUID prefix from each
+					// non-UUID row). Defer the flag flip to the
+					// post-transform block AFTER SaveParticipants
+					// succeeds; see the participants/seeds save block
+					// below for the deferred flip.
+					return current, nil
+				}
+
+				// Settings-only PUT (Players field absent in body).
+				// Existence first, uniqueness second. Pre-fix order ran
+				// checkUniqueCompName BEFORE the transform, so a PUT to
+				// a missing :id whose body Name happened to collide with
+				// an existing competition would 400 "name already exists"
+				// instead of the documented 404 missing. Folding the
+				// check into the transform — after current == nil — is
+				// safe under WithCompetitionRenameLock: the rename mutex
+				// serializes rename ops, so the LoadCompetition calls on
+				// OTHER comp IDs that checkUniqueCompName performs can't
+				// race a concurrent rename of those comps (see store.go
+				// "Lock ordering note" on WithCompetitionRenameLock).
+				if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
+					return nil, nil
+				}
+				// Settings-only merge. Status, Players, and
+				// HasParticipantIDs are deliberately not copied from
+				// the body. Status is managed via dedicated endpoints
+				// (start/complete/invalidate). Players is persisted
+				// separately to participants.csv (see post-transform
+				// block below). HasParticipantIDs is auto-managed —
+				// only set to true in the roster-only branch above when
+				// participants are being saved.
+				current.Name = comp.Name
+				current.Date = comp.Date
+				current.StartTime = comp.StartTime
+				current.PoolSize = comp.PoolSize
+				current.PoolWinners = comp.PoolWinners
+				current.PoolSizeMode = comp.PoolSizeMode
+				current.Courts = comp.Courts
+				current.RoundRobin = comp.RoundRobin
+				current.WithZekkenName = comp.WithZekkenName
+				current.TeamSize = comp.TeamSize
+				current.NumberPrefix = comp.NumberPrefix
+				current.Format = comp.Format
+				current.Kind = comp.Kind
+				current.Mirror = comp.Mirror
+				return current, nil
+			})
+			return updateErr
+		})
+		// 404 before 400 — with the uniqueness check now inside the
+		// transform (after the current == nil branch), notFoundFlag and
+		// nameErr are mutually exclusive. Order kept defensive in case
+		// either flag escapes the transform unexpectedly.
+		if notFoundFlag {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if nameErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+			return
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if changed {
+		// Participants/seeds save (separate file) — runs whenever the
+		// PUT body PRESENT (non-nil) Players field, including an
+		// explicit empty `players: []` payload to CLEAR the roster.
+		// AdminParticipants uses `{ ...c, players: np }` to either
+		// populate or clear; AdminSettings's saveNow allowlist OMITS
+		// the players field entirely (decodes to nil in Go), so it
+		// skips this block.
+		//
+		// nil vs empty matters: a `null` / omitted players field
+		// (settings-only PUT) decodes to nil and must NOT touch
+		// participants.csv. An explicit `[]` from "clear roster"
+		// decodes to a non-nil zero-length slice and DOES need to
+		// land an empty participants.csv + clear seeds.csv. Pre-fix
+		// `len > 0` collapsed both into "skip," leaving the prior
+		// roster on disk even though the UI reported "Saved 0
+		// participants."
+		participantsChanged := false
+		if comp.Players != nil {
+			if err := store.SaveParticipants(id, comp.Players); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
+				return
+			}
+			assignments := extractSeeds(comp.Players)
+			if err := store.SaveSeeds(id, assignments); err != nil {
+				fmt.Printf("Warning: failed to save seeds: %v\n", err)
+			}
+			// Deferred HasParticipantIDs flip — runs ONLY after the
+			// participants file lands successfully. See the roster-only
+			// branch in the transform above for the pre-fix bug shape
+			// (flag committed before save → mismatch on disk when save
+			// failed). A second transform here is cheap (metadata-only)
+			// and runs under the per-comp lock, so subsequent loads see
+			// a consistent (flag, file) pair.
+			if len(comp.Players) > 0 {
+				if _, fierr := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+					if current == nil {
+						return nil, nil
+					}
+					current.HasParticipantIDs = true
+					return current, nil
+				}); fierr != nil {
+					// Log only — the file save succeeded (load-bearing
+					// write). A stale `false` flag is safe because every
+					// reader (handlers_viewer.go list + detail,
+					// engine StartCompetition) uses the conditional hint
+					// pattern: pass &true only when HasParticipantIDs is
+					// true; otherwise pass nil and let
+					// LoadParticipantsOpt auto-detect from the first
+					// line's UUID prefix. Aborting the PUT here after a
+					// successful save would mislead the caller into
+					// thinking the roster save failed.
+					fmt.Printf("Warning: failed to flip HasParticipantIDs after SaveParticipants: %v\n", fierr)
+				}
+			}
+			participantsChanged = true
+		}
+		if changed || participantsChanged {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		c.JSON(http.StatusOK, comp)
+		// Re-load to return the actual on-disk state (with non-settings
+		// fields preserved from current) rather than the partial body.
+		// LoadCompetition doesn't repopulate Players from participants.csv,
+		// so we ALWAYS need to populate Players on the response — otherwise
+		// admin.jsx's updateCompetition merges `{ ...c, ...updated }` with
+		// `updated.players: null` (Go nil slice → JSON null), wiping the
+		// frontend's local roster and crashing render paths that read
+		// `c.players.length`.
+		updated, _ := store.LoadCompetition(id)
+		if updated == nil {
+			c.JSON(http.StatusOK, comp)
+			return
+		}
+		if comp.Players != nil {
+			// Roster-PUT: reflect what we just saved. AdminParticipants's
+			// clear-roster path sends [] and expects the response to
+			// reflect the cleared roster — preserve that shape.
+			updated.Players = comp.Players
+		} else {
+			// Settings-only PUT — load the on-disk roster for the
+			// response so the merge doesn't push null into local state.
+			// Falling back to an empty slice on load failure is safer
+			// than nil (which JSON-encodes as null).
+			if players, lerr := store.LoadParticipants(id, updated.WithZekkenName); lerr == nil {
+				updated.Players = players
+			} else {
+				fmt.Printf("Warning: failed to load participants for settings-PUT response: %v\n", lerr)
+				updated.Players = []helper.Player{}
+			}
+		}
+		c.JSON(http.StatusOK, updated)
 	})
 
 	r.DELETE("/competitions/:id", func(c *gin.Context) {
-		id := c.Param("id")
-		if err := state.ValidateCompetitionID(id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		id, ok := requireValidCompID(c)
+		if !ok {
 			return
 		}
 		// If the config loads cleanly, gate on status. If it doesn't load
@@ -207,35 +600,57 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/invalidate", func(c *gin.Context) {
-		id := c.Param("id")
-		if err := state.ValidateCompetitionID(id); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		id, ok := requireValidCompID(c)
+		if !ok {
 			return
 		}
-		comp, err := store.LoadCompetition(id)
+
+		// Atomic Load + Status check + Save. Pre-fix, the
+		// LoadCompetition + saveCompetitionWithPlayers sequence had
+		// a TOCTOU window: a concurrent
+		// MaybeAutoCompletePools (triggered by a score-save from the
+		// last pool match) could move Status to "complete" between
+		// our read and write — admin's "invalidate" would then
+		// silently revert to "complete".
+		var compOut *state.Competition
+		var statusErr error
+		var notFoundFlag bool
+		changed, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			if current == nil {
+				notFoundFlag = true
+				return nil, nil
+			}
+			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
+				statusErr = fmt.Errorf("only in-progress competitions can be invalidated (current status: %q)", current.Status)
+				return nil, nil
+			}
+			current.Status = state.CompStatusInvalid
+			compOut = current
+			return current, nil
+		})
+		if notFoundFlag {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if statusErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": statusErr.Error()})
+			return
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		if comp.Status != state.CompStatusPools && comp.Status != state.CompStatusPlayoffs {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("only in-progress competitions can be invalidated (current status: %q)", comp.Status)})
-			return
-		}
-		comp.Status = state.CompStatusInvalid
-		if _, err := saveCompetitionWithPlayers(comp, store); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.JSON(http.StatusOK, comp)
+		c.JSON(http.StatusOK, compOut)
 	})
 
 	r.GET("/competitions/:id/reserved-slots", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		slots, err := store.LoadReservedSlots(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -245,7 +660,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/reserved-slots", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		var req struct {
 			SourceCompID string `json:"sourceCompID"`
 			SourceRank   int    `json:"sourceRank"`
@@ -273,7 +691,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.DELETE("/competitions/:id/reserved-slots/:slotID", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		slotID := c.Param("slotID")
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {
@@ -289,7 +710,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/start", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		if err := eng.StartCompetition(id); err != nil {
 			var notFound *engine.NotFoundError
 			var validation *engine.ValidationError
@@ -331,31 +755,57 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/complete", func(c *gin.Context) {
-		id := c.Param("id")
-		comp, err := store.LoadCompetition(id)
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+
+		// Atomic Load + Status check + Save. Pre-fix, the
+		// LoadCompetition + saveCompetitionWithPlayers sequence had
+		// a TOCTOU window where a concurrent invalidate (or a score-
+		// save's MaybeAutoCompletePools) could move Status between
+		// our read and write — losing one of the two mutations.
+		var compOut *state.Competition
+		var statusErr error
+		var notFoundFlag bool
+		changed, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			if current == nil {
+				notFoundFlag = true
+				return nil, nil
+			}
+			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
+				statusErr = fmt.Errorf("competition cannot be completed from status %q", current.Status)
+				return nil, nil
+			}
+			current.Status = state.CompStatusComplete
+			compOut = current
+			return current, nil
+		})
+		if notFoundFlag {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if statusErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": statusErr.Error()})
+			return
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
+		// Only broadcast on an actual content change (same idempotency
+		// semantics as the prior saveCompetitionWithPlayers call).
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		if comp.Status != state.CompStatusPools && comp.Status != state.CompStatusPlayoffs {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("competition cannot be completed from status %q", comp.Status)})
-			return
-		}
-		comp.Status = state.CompStatusComplete
-		if _, err := saveCompetitionWithPlayers(comp, store); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.JSON(http.StatusOK, comp)
+		c.JSON(http.StatusOK, compOut)
 	})
 
 	r.GET("/competitions/:id/export", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -369,7 +819,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.PUT("/competitions/:id/pools/:poolId/override-rank", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		poolId := c.Param("poolId")
 		var req struct {
 			PlayerName string `json:"playerName"`
@@ -381,8 +834,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		// Defense-in-depth: the JS client already guards isNaN/<=0, but a stale
 		// or hand-crafted request could persist garbage rank values. Reject
-		// non-positive ranks (and anything implausibly large — no real pool
-		// has 1000+ participants). Trim whitespace from the player name so
+		// non-positive ranks here. Trim whitespace from the player name so
 		// "   " doesn't slip through the empty check and so padded names
 		// don't create keys that miss later lookups.
 		playerName := strings.TrimSpace(req.PlayerName)
@@ -390,8 +842,45 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": "playerName is required"})
 			return
 		}
-		if req.Rank <= 0 || req.Rank > 1000 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer ≤ 1000"})
+		if req.Rank <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer"})
+			return
+		}
+		// Absolute overflow guard — defense-in-depth against weird
+		// stale-pool or LoadPools-error edge cases. The real semantic
+		// validation against the pool's actual size happens below.
+		if req.Rank > helper.MaxRankOverride {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank must be a positive integer ≤ %d", helper.MaxRankOverride)})
+			return
+		}
+		// Pool-size validation: rank within a pool is bounded by the
+		// number of players in that pool. Load the comp's pools and
+		// look up the target pool by name (the URL :poolId matches
+		// Pool.PoolName). Pre-fix, the only check was an absolute 1000
+		// cap which let a stale/hand-crafted request store
+		// rank=500 against a 4-player pool — meaningless override
+		// values were silently accepted. Cost: one LoadPools per
+		// override request. Rank overrides are rare admin actions, so
+		// the extra read is negligible.
+		pools, err := store.LoadPools(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load pools: " + err.Error()})
+			return
+		}
+		var targetPool *helper.Pool
+		for i := range pools {
+			if pools[i].PoolName == poolId {
+				targetPool = &pools[i]
+				break
+			}
+		}
+		if targetPool == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("pool %q not found in competition %q", poolId, id)})
+			return
+		}
+		poolSize := len(targetPool.Players)
+		if req.Rank > poolSize {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank %d exceeds pool size %d", req.Rank, poolSize)})
 			return
 		}
 
@@ -407,7 +896,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.PUT("/competitions/:id/schedule", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		var entries []state.ScheduleEntry
 		if err := c.ShouldBindJSON(&entries); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -426,7 +918,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions/:id/playoffs", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		src, err := store.LoadCompetition(id)
 		if err != nil || src == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "source competition not found"})
@@ -462,25 +957,76 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		playoff.ID = slugifyID(playoff.Name)
 
-		if _, err := store.SaveCompetitionChanged(&playoff); err != nil {
+		// Cross-file guard symmetry with POST + PUT /competitions:
+		// uniqueness-check + save under WithCompetitionRenameLock,
+		// AND an ID-existence check (a manually-created competition
+		// could have the same slug but a different name —
+		// checkUniqueCompName would pass, then SaveCompetitionChanged
+		// would silently overwrite the existing config). Both checks
+		// run inside the lock to avoid TOCTOU.
+		var nameErr, idErr error
+		err = store.WithCompetitionRenameLock(func() error {
+			if existing, _ := store.LoadCompetition(playoff.ID); existing != nil {
+				idErr = fmt.Errorf("derived playoff ID %q already exists (rename the conflicting competition or its source)", playoff.ID)
+				return nil
+			}
+			if nameErr = checkUniqueCompName(store, playoff.Name, ""); nameErr != nil {
+				return nil
+			}
+			_, saveErr := store.SaveCompetitionChanged(&playoff)
+			return saveErr
+		})
+		if idErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
+			return
+		}
+		if nameErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+			return
+		}
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Link reserved slots (this will also add placeholder participants)
+		// Link reserved slots (this will also add placeholder participants).
+		// Rollback on failure: SaveCompetitionChanged above already wrote
+		// config.md for the playoff. If any AddReservedSlot iteration
+		// fails (I/O error, EISDIR, etc.) the playoff is half-created —
+		// config on disk, slots/placeholders partial or absent — and the
+		// ID-collision guard inside WithCompetitionRenameLock above would
+		// block a retry with "derived playoff ID already exists". Mirror
+		// the import handler's rollback pattern (handlers_import.go).
 		for i := 1; i <= totalWinners; i++ {
 			if _, err := store.AddReservedSlot(playoff.ID, id, i, playoff.WithZekkenName); err != nil {
+				_ = store.DeleteCompetition(playoff.ID) // best-effort rollback
 				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to add reserved slot %d: %v", i, err)})
 				return
 			}
 		}
 
+		// Populate Players on the response from disk (the playoff has
+		// reserved-slot placeholders persisted by AddReservedSlot above,
+		// but `playoff` is the pre-save struct with Players: nil → JSON
+		// null. The frontend's refreshCompsAfterCreate fallback merges
+		// this record into local state, and a null Players field crashes
+		// render paths reading `c.players.length`. Mirror the PUT
+		// settings-PUT response fix.
+		if players, lerr := store.LoadParticipants(playoff.ID, playoff.WithZekkenName); lerr == nil {
+			playoff.Players = players
+		} else {
+			fmt.Printf("Warning: failed to load participants for POST /playoffs response: %v\n", lerr)
+			playoff.Players = []helper.Player{}
+		}
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusCreated, playoff)
 	})
 
 	r.DELETE("/competitions/:id/overrides", func(c *gin.Context) {
-		id := c.Param("id")
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
 		changed, err := store.ResetOverridesChanged(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

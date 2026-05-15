@@ -1777,3 +1777,130 @@ func TestStartCompetition_SingleCourtFallback(t *testing.T) {
 		assert.Equal(t, "A", m.Court, "all matches should be on court A with single court")
 	}
 }
+
+// TestStartCompetition_AutoDefaultsTeamSize pins the StartCompetition
+// transform's TeamSize handling after the /deep-review fix:
+//   - The pipeline applies a default of 5 when Kind=="team" and TeamSize==0.
+//   - The validation check compares current.TeamSize to the SNAPSHOT
+//     loadedTeamSize (the pre-default value), NOT to the
+//     post-pipeline comp.TeamSize.
+//   - The transform then assigns comp.TeamSize (with the default applied)
+//     to current.TeamSize, persisting 5 on disk.
+//
+// Pre-fix, the validation compared current.TeamSize to comp.TeamSize,
+// which would have falsely flagged the auto-default (current=0 vs
+// comp=5) as drift and rejected the start.
+//
+// We pin this by starting a team competition with TeamSize=0 and
+// asserting (a) the start succeeds and (b) the persisted TeamSize is
+// the default 5.
+func TestStartCompetition_AutoDefaultsTeamSize(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-default-test"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Team Test",
+		Kind:         "team",
+		Format:       "pools",
+		PoolSize:     2,
+		PoolSizeMode: "min",
+		PoolWinners:  1,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       state.CompStatusSetup,
+		TeamSize:     0, // → pipeline default applies (5)
+	}))
+	saveTestParticipants(t, store, compID, []string{"Team A", "Team B", "Team C", "Team D"})
+
+	require.NoError(t, eng.StartCompetition(compID),
+		"team competition with TeamSize=0 should start (pipeline applies default 5; validation must not falsely flag this as drift)")
+
+	stored, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 5, stored.TeamSize, "TeamSize must be defaulted to 5 for team competitions starting with 0")
+	assert.Equal(t, state.CompStatusPools, stored.Status)
+}
+
+// TestStartCompetition_PreservesExplicitTeamSize pins the "TeamSize
+// already set explicitly survives start" path — exercises the merge
+// branch where current.TeamSize == loadedTeamSize but != 0, so the
+// pipeline's auto-default isn't applied. Pre-fix, the transform
+// unconditionally assigned `current.TeamSize = comp.TeamSize` —
+// correct for this case (loaded==comp==7) but wrong for the
+// concurrent-admin-change case (loaded=0, comp=5, current=9 would
+// clobber to 5 instead of preserving admin's 9).
+//
+// The concurrent-change direction requires engine hooks to simulate
+// deterministically; pinning the explicit-TeamSize-no-default path
+// at least catches the case where the entire merge block was
+// removed by a regression.
+func TestStartCompetition_PreservesExplicitTeamSize(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-preserve-test"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Team Preserve Test",
+		Kind:         "team",
+		Format:       "pools",
+		PoolSize:     2,
+		PoolSizeMode: "min",
+		PoolWinners:  1,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       state.CompStatusSetup,
+		TeamSize:     7,
+	}))
+	saveTestParticipants(t, store, compID, []string{"Team A", "Team B", "Team C", "Team D"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	stored, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 7, stored.TeamSize,
+		"explicit TeamSize=7 must survive start (no auto-default applied)")
+}
+
+// TestStartCompetition_PreservesNumberPrefix pins the NumberPrefix /
+// StartTime / RoundRobin additions to the StartCompetition transform's
+// field-mismatch validation. With these fields in the validation list,
+// a happy-path start (no drift) must succeed — these tests are the
+// "validation list doesn't reject valid starts" guard. The drift-
+// detection direction (concurrent change DOES reject) isn't pinned
+// here because reproducing the race deterministically would require
+// engine hooks that don't exist. The forward direction is sufficient
+// to catch a typo or wrong field reference in the validation block.
+func TestStartCompetition_PreservesNumberPrefix(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "prefix-test"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Prefix Test",
+		Kind:         "individual",
+		Format:       "pools",
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		NumberPrefix: "K",
+		StartTime:    "10:30",
+		Status:       state.CompStatusSetup,
+	}))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	stored, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, "K", stored.NumberPrefix, "NumberPrefix must survive the atomic commit")
+	assert.Equal(t, "10:30", stored.StartTime, "StartTime must survive the atomic commit")
+	assert.True(t, stored.RoundRobin, "RoundRobin must survive the atomic commit")
+}

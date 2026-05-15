@@ -37,7 +37,6 @@ type CompetitionStatus string
 
 const (
 	CompStatusSetup    CompetitionStatus = "setup"
-	CompStatusPending  CompetitionStatus = "pending"
 	CompStatusPools    CompetitionStatus = "pools"
 	CompStatusPlayoffs CompetitionStatus = "playoffs"
 	CompStatusComplete CompetitionStatus = "completed"
@@ -52,27 +51,18 @@ const (
 	MatchStatusCompleted MatchStatus = "completed"
 )
 
-// Competition.Format values. Kept as untyped string constants because the
-// Competition.Format field is a plain `string` for backward compatibility
-// with existing YAML/JSON state files.
+// Competition.Format values. Currently "pools" or "playoffs".
 const (
 	CompFormatPools    = "pools"
 	CompFormatPlayoffs = "playoffs"
 )
 
-// DecisionDraw is the canonical value for a tied (hikiwake) match. The
-// legacy spelling "hikewake" (missing the 'i') was used historically and is
-// still accepted by IsDraw() for backward compatibility on existing data,
-// but all new writes use this canonical spelling.
-const (
-	DecisionDraw       = "hikiwake"
-	decisionDrawLegacy = "hikewake"
-)
+// DecisionDraw is the canonical value for a tied (hikiwake) match.
+const DecisionDraw = "hikiwake"
 
 // IsDraw reports whether a match decision string represents a draw.
-// Accepts both the canonical "hikiwake" and the legacy "hikewake".
 func IsDraw(decision string) bool {
-	return decision == DecisionDraw || decision == decisionDrawLegacy
+	return decision == DecisionDraw
 }
 
 type SubMatchResult struct {

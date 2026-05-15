@@ -24,7 +24,7 @@ func TestStaleSeedsBug(t *testing.T) {
 		ID:     compID,
 		Name:   "Seeded Competition",
 		Format: "playoffs",
-		Courts: []string{"Court A"},
+		Courts: []string{"A"},
 		Players: []helper.Player{
 			{Name: "Alice", Seed: 1, Dojo: "Dojo A"},
 			{Name: "Bob", Seed: 2, Dojo: "Dojo B"},
@@ -47,7 +47,7 @@ func TestStaleSeedsBug(t *testing.T) {
 		ID:     compID,
 		Name:   "Seeded Competition",
 		Format: "playoffs",
-		Courts: []string{"Court A"},
+		Courts: []string{"A"},
 		Players: []helper.Player{
 			{Name: "Alice", Seed: 0, Dojo: "Dojo A"},
 			{Name: "Bob", Seed: 0, Dojo: "Dojo B"},

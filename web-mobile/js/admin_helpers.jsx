@@ -13,12 +13,29 @@ function sideName(side) {
 }
 
 // True when a match has both sides resolved to a real participant (not a
-// bye, not a TBD bracket placeholder). The naïve `m.sideA && m.sideB` test
-// is almost always wrong post-normalizeMatch — that function substitutes
-// {id:"",name:""} for missing sides, which is truthy. Use this helper in
-// filter predicates / rendering guards instead.
+// bye, not a TBD bracket placeholder, not an unresolved "Winner of rX-mY"
+// reference). The naïve `m.sideA && m.sideB` test is almost always wrong
+// post-normalizeMatch — that function substitutes {id:"",name:""} for
+// missing sides, which is truthy. Use this helper in filter predicates
+// / rendering guards instead.
+//
+// Bracket-side caveat: future-round matches carry placeholder side
+// names like `"Winner of r0-m1"` until the source match resolves. Those
+// are non-empty strings — sideName() returns them as-is — so the
+// underlying `sideName(...)` check ALONE isn't enough. We reject the
+// EXACT placeholder shape `Winner of r<n>-m<n>` (the literal format
+// emitted by internal/engine/bracket.go at lines 65 and 73), NOT every
+// name that happens to start with "Winner of " — a legitimate
+// participant named "Winner of the 2025 Cup" should still pass.
+// (See web-mobile/js/viewer.jsx for the consumer.)
+const BRACKET_PLACEHOLDER_RE = /^Winner of r\d+-m\d+$/;
 function hasBothSides(m) {
-  return !!(m && sideName(m.sideA) && sideName(m.sideB));
+  if (!m) return false;
+  const a = sideName(m.sideA);
+  const b = sideName(m.sideB);
+  if (!a || !b) return false;
+  if (BRACKET_PLACEHOLDER_RE.test(a) || BRACKET_PLACEHOLDER_RE.test(b)) return false;
+  return true;
 }
 
 // Returns { total, done, live } match counts for a single competition object.
@@ -29,11 +46,15 @@ function hasBothSides(m) {
 // endpoints when match counts are needed.
 function compMatchStats(c) {
   let total = 0, done = 0, live = 0;
-  // Truthy-checking the side itself isn't enough — normalizeMatch substitutes
-  // {id:"",name:""} for missing sides, which is truthy. sideName() returns
-  // "" for those, so byes and unresolved bracket slots stay uncounted.
+  // Use hasBothSides() — the canonical cross-file predicate — so admin
+  // dashboard / overview / live-strip stats can't drift from viewer-side
+  // filtering. Inline `sideName(m.sideA) && sideName(m.sideB)` was almost
+  // right (skips byes / normalizeMatch's empty-side substitute) but missed
+  // bracket placeholders like "Winner of r0-m1" — those have truthy
+  // sideName() values, so future-round matches were counted as real before
+  // their source resolves. hasBothSides also rejects that exact shape.
   const count = (m) => {
-    if (!m || !sideName(m.sideA) || !sideName(m.sideB)) return;
+    if (!hasBothSides(m)) return;
     total++;
     if (m.status === "completed") done++;
     if (m.status === "running") live++;
@@ -56,9 +77,23 @@ function compMatchStats(c) {
 // admin_scoring_modal.jsx), and the team-size inputs in admin_competition
 // + admin_setup use it as their HTML `max` attribute. Bumping any of these
 // here flows to every consumer mechanically.
+//
+// MIN_YEAR / MAX_YEAR mirror helper.MinDateYear / helper.MaxDateYear
+// (internal/helper/constants.go) — the API's validateDateDMY rejects
+// out-of-range years to keep the wire contract symmetric with the UI.
+// MAX_COURTS mirrors helper.MaxCourts (same Go file) — anchored to the
+// A–Z labelling cap. MAX_RANK mirrors helper.MaxRankOverride — overflow
+// guard for the override-rank handler; the real semantic constraint is
+// pool size, enforced server-side.
+//
+// Pin tests on BOTH sides assert the literal values (this file's vitest
+// suite + internal/helper/constants_test.go) so cross-language drift
+// fails CI rather than waiting for a downstream UX bug.
 const MIN_YEAR = 1900;
 const MAX_YEAR = 2100;
 const MAX_TEAM_SIZE = 9;
+const MAX_COURTS = 26;
+const MAX_RANK = 1000;
 
 // Canonical date error messages. Referenced by validateAndNormalizeDate
 // AND by AdminSettings.saveNow's inline asymmetric validation, so the
@@ -70,36 +105,32 @@ const DATE_ERR_INVALID_FORMAT = "Invalid date. Please pick a valid day.";
 const DATE_ERR_YEAR_RANGE = `Year must be between ${MIN_YEAR} and ${MAX_YEAR}.`;
 
 // Combined date validation + normalization. Returns:
-//   - { norm: "YYYY-MM-DD", error: null }  on success
+//   - { norm: "DD-MM-YYYY", error: null }  on success
 //   - { norm: null, error: "<message>" }   on failure
 //
 // Canonical predicate for date inputs across the admin UI. Save paths
-// (AdminEditTournament.handleSave, AdminCreateCompetition.create) use the
-// `error` for user-facing messaging AND `norm` for the value to save.
-// Pure boolean callers use `isValidISODate` below.
-//
-// AdminSettings.saveNow has an intentional asymmetry (shape-invalid +
-// unchanged → allow save, preserving legacy data; year-invalid → always
-// block) so it doesn't use this helper directly — see comment there.
-// It does use DATE_ERR_* constants above so error UX stays in lockstep.
+// (AdminEditTournament.handleSave, AdminCreateCompetition.create,
+// AdminSettings.saveNow) use the `error` for user-facing messaging AND
+// `norm` for the value to save. Pure boolean callers use `isValidDate`
+// below.
 function validateAndNormalizeDate(date) {
   const norm = normalizeDate(date);
-  if (!norm || !/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+  if (!norm || !/^\d{2}-\d{2}-\d{4}$/.test(norm)) {
     return { norm: null, error: DATE_ERR_INVALID_FORMAT };
   }
-  const year = parseInt(norm.substring(0, 4));
+  const year = parseInt(norm.substring(6, 10));
   if (year < MIN_YEAR || year > MAX_YEAR) {
     return { norm: null, error: DATE_ERR_YEAR_RANGE };
   }
   return { norm, error: null };
 }
 
-// Boolean predicate: is `date` a valid ISO-format day in the supported
+// Boolean predicate: is `date` a valid DD-MM-YYYY day in the supported
 // year range (1900–2100)? Used by AdminCompetition's "Start competition"
 // button gate — anywhere a boolean result is enough. For save flows that
 // need both the boolean AND the normalized value, use
 // validateAndNormalizeDate above.
-function isValidISODate(date) {
+function isValidDate(date) {
   return validateAndNormalizeDate(date).error === null;
 }
 
@@ -120,10 +151,14 @@ function isValidISODate(date) {
 //   keep the cleared display empty (matches the matchDuration pattern at
 //   admin_schedule.jsx).
 // - `shouldSave` is true only when the parsed value is a positive integer
-//   ≥ min. Callers should skip saveLater on false AND cancel any pending
-//   save (otherwise an earlier in-flight debounced save with the old good
-//   value would land on the server while the user sees an empty input,
-//   producing a state mismatch that only resolves on next SSE refresh).
+//   ≥ min. Callers MUST still issue a saveLater on false — the debounceRef
+//   is single-slot and covers all fields, so an earlier scheduled save
+//   captured the OLD valid value for THIS field and will commit it over
+//   the wire if not replaced. Use saveLater(next-with-NaN) so the
+//   commit-side safeInt fallback resolves the field to the on-disk
+//   c.<field>, while cross-field edits in `next` (e.g. Name typed
+//   concurrently) still propagate. `shouldSave` is therefore informational
+//   only — callers no longer branch on it.
 //
 // Exported for vitest at __tests__/admin_helpers.test.jsx.
 function decideNumericUpdate(raw, min = 1) {
@@ -135,20 +170,30 @@ function decideNumericUpdate(raw, min = 1) {
   return { value: parsed, shouldSave: true };
 }
 
+// Normalize a date string to the canonical DD-MM-YYYY format. Accepts
+// DD-MM-YYYY (no-op normalization) and ISO YYYY-MM-DD (converted to DMY,
+// for paths still handing over the HTML `<input type="date">` raw value).
+// Returns null for malformed shape or semantically invalid days (Feb 31 etc.).
 function normalizeDate(d) {
   if (!d) return d;
-  let out;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-    out = d;
+  let day, m, y;
+  if (/^\d{2}-\d{2}-\d{4}$/.test(d)) {
+    [day, m, y] = d.split('-').map(Number);
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    [y, m, day] = d.split('-').map(Number);
   } else {
+    // Match the older permissive parser shape (D-M-YYYY, D/M/YYYY) for
+    // user-pasted text via admin import. Canonical output is still
+    // zero-padded DD-MM-YYYY.
     const match = d.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-    if (!match) return d;
-    out = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+    if (!match) return null;
+    day = Number(match[1]);
+    m = Number(match[2]);
+    y = Number(match[3]);
   }
-  // Reject semantically invalid dates like "2026-13-32" or "31-02-2026".
+  // Reject semantically invalid dates like "32-13-2026" or "31-02-2026".
   // JS's Date constructor silently rolls invalid components over (Feb 31 →
   // Mar 3), so round-trip the parts through UTC and require an exact match.
-  const [y, m, day] = out.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, day));
   if (
     isNaN(dt.getTime()) ||
@@ -158,7 +203,49 @@ function normalizeDate(d) {
   ) {
     return null;
   }
-  return out;
+  return `${String(day).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`;
+}
+
+// HTML <input type="date"> uses ISO YYYY-MM-DD for value/min/max attributes.
+// These converters bridge the input boundary; everywhere else uses DMY.
+//
+// dmyToIso accepts an ISO YYYY-MM-DD pass-through as a transition convenience:
+// `normalizeDate` and `formatDate` also accept ISO as input, and any record
+// saved by a pre-canonicalization build still has an ISO date in state until
+// the next save round-trips it. Without the pass-through, an ISO value would
+// produce an empty <input type="date"> value, blanking the picker in the UI.
+function dmyToIso(dmy) {
+  if (!dmy) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dmy)) return dmy;
+  if (!/^\d{2}-\d{2}-\d{4}$/.test(dmy)) return "";
+  const [dd, mm, yyyy] = dmy.split('-');
+  return `${yyyy}-${mm}-${dd}`;
+}
+// isoToDmy accepts a DMY DD-MM-YYYY pass-through symmetrically — most callers
+// feed it the raw `e.target.value` from <input type="date">, which is ISO,
+// but defense-in-depth costs nothing here.
+function isoToDmy(iso) {
+  if (!iso) return "";
+  if (/^\d{2}-\d{2}-\d{4}$/.test(iso)) return iso;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+  const [yyyy, mm, dd] = iso.split('-');
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+// Chronological comparator for DD-MM-YYYY date strings. JS's default
+// `Array.sort()` does lexical compare, which works for ISO YYYY-MM-DD
+// (lex == chronological) but produces wrong order for DMY: "01-06-2026"
+// (June 1) sorts before "12-05-2026" (May 12) lexically. This helper
+// converts each value to an ISO sort key so lex compare matches
+// chronological order. Non-DMY inputs (e.g. "") fall back to string
+// compare so a mix of valid + empty dates still sorts deterministically.
+function compareDmy(a, b) {
+  const toKey = (d) => {
+    if (!d) return "";
+    const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(d);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : d;
+  };
+  return toKey(a).localeCompare(toKey(b));
 }
 
 // Guard window assignments so this file stays safely importable in
@@ -168,7 +255,10 @@ if (typeof window !== "undefined") {
   window.hasBothSides = hasBothSides;
   window.compMatchStats = compMatchStats;
   window.normalizeDate = normalizeDate;
-  window.isValidISODate = isValidISODate;
+  window.dmyToIso = dmyToIso;
+  window.isoToDmy = isoToDmy;
+  window.compareDmy = compareDmy;
+  window.isValidDate = isValidDate;
   window.validateAndNormalizeDate = validateAndNormalizeDate;
   window.decideNumericUpdate = decideNumericUpdate;
   window.DATE_ERR_INVALID_FORMAT = DATE_ERR_INVALID_FORMAT;
@@ -176,6 +266,8 @@ if (typeof window !== "undefined") {
   window.MIN_YEAR = MIN_YEAR;
   window.MAX_YEAR = MAX_YEAR;
   window.MAX_TEAM_SIZE = MAX_TEAM_SIZE;
+  window.MAX_COURTS = MAX_COURTS;
+  window.MAX_RANK = MAX_RANK;
 }
 
 // Also exported so the vitest suite under web-mobile/js/__tests__/ can
@@ -185,7 +277,10 @@ export {
   hasBothSides,
   compMatchStats,
   normalizeDate,
-  isValidISODate,
+  dmyToIso,
+  isoToDmy,
+  compareDmy,
+  isValidDate,
   validateAndNormalizeDate,
   decideNumericUpdate,
   DATE_ERR_INVALID_FORMAT,
@@ -193,4 +288,6 @@ export {
   MIN_YEAR,
   MAX_YEAR,
   MAX_TEAM_SIZE,
+  MAX_COURTS,
+  MAX_RANK,
 };

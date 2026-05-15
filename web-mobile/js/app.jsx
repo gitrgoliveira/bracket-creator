@@ -1,7 +1,7 @@
 // Main App — single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-const { useState: useS, useEffect: useE } = React;
+const { useState: useS, useEffect: useE, useRef: useR } = React;
 const mergeMatchPatch = window.mergeMatchPatch;
 
 const patchCompetitionData = (prev, event) => {
@@ -321,6 +321,13 @@ function AuthModal({ onClose, onSuccess }) {
   const [err, setErr] = useS("");
   const [checking, setChecking] = useS(false);
   window.useEscapeToClose(onClose);
+  // AuthModal can be dismissed by backdrop click / Escape during the
+  // in-flight fetch (the input/submit are disabled while checking but
+  // the dismissal paths aren't). Without this guard the post-await
+  // setErr / setChecking would fire on a torn-down modal. Same shape
+  // as the admin-side mountedRef pattern.
+  const mountedRef = useR(true);
+  useE(() => () => { mountedRef.current = false; }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -331,18 +338,20 @@ function AuthModal({ onClose, onSuccess }) {
       const res = await fetch('/api/tournament', {
         headers: { 'X-Tournament-Password': pw }
       });
+      if (!mountedRef.current) return;
       if (res.ok) {
         onSuccess(pw);
       } else if (res.status === 401) {
         setErr("Invalid password. Please try again.");
       } else {
         const body = await res.json().catch(() => ({}));
+        if (!mountedRef.current) return;
         setErr(body.error || "Authentication failed. Please try again.");
       }
     } catch {
-      setErr("Could not reach server. Please try again.");
+      if (mountedRef.current) setErr("Could not reach server. Please try again.");
     } finally {
-      setChecking(false);
+      if (mountedRef.current) setChecking(false);
     }
   };
   return (
@@ -376,33 +385,75 @@ function AuthModal({ onClose, onSuccess }) {
 
 function CreateTournament({ onCreated }) {
   const [name, setName] = useS("");
-  const [date, setDate] = useS(new Date().toISOString().split("T")[0]);
+  // Initialize date in canonical DD-MM-YYYY format, not ISO YYYY-MM-DD.
+  // toISOString() emits ISO; without this conversion the picker boundary
+  // (dmyToIso below) reads it as malformed and renders empty, AND the
+  // submit body would send ISO to POST /api/tournament — which now
+  // rejects non-DMY dates with 400 "date must be DD-MM-YYYY".
+  const today = new Date();
+  const todayDmy = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+  const [date, setDate] = useS(todayDmy);
   const [venue, setVenue] = useS("");
   const [courts, setCourts] = useS(2);
   const [pass, setPass] = useS("");
   const [saving, setSaving] = useS(false);
+  // submit's catch sets setSaving(false) post-await; on success the
+  // parent calls onCreated which unmounts CreateTournament. The catch
+  // branch only fires on error, so the unmount race is narrow but real
+  // (parent navigates away on a different signal during the in-flight
+  // fetch). Gate via mountedRef for symmetry with the admin sweep.
+  const mountedRef = useR(true);
+  useE(() => () => { mountedRef.current = false; }, []);
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!name || !pass) {
+    // Trim before the empty-check so whitespace-only ("   ") doesn't
+    // pass the truthy gate. The backend POST /tournament now trims too
+    // (handlers_tournament.go), but trimming here avoids the
+    // "  My Tournament  " round-trip producing a canonical name that
+    // diverges from what the user just typed.
+    const trimmedName = name.trim();
+    const trimmedVenue = venue.trim();
+    if (!trimmedName || !pass) {
       alert("Name and Password are required.");
+      return;
+    }
+    // Match the admin-side handleSave guard from admin_setup.jsx.
+    // Browser number inputs accept fractional values unless explicitly
+    // guarded; Array.from({length:2.5}) silently truncates to 2. This
+    // client-side guard provides immediate feedback before submit.
+    // The POST /tournament handler now calls validateCourts (which
+    // wraps helper.ValidateCourts + per-label single-character check),
+    // so a hand-crafted request bypassing this guard is still rejected
+    // server-side with a 400 — the two checks are defensive duplicates
+    // for the same invariant rather than the client-side being the
+    // sole defense.
+    if (!Number.isInteger(courts) || courts < 1 || courts > window.MAX_COURTS) {
+      alert(`Number of courts must be a whole number between 1 and ${window.MAX_COURTS}.`);
       return;
     }
     setSaving(true);
     try {
       const config = {
-        name, date, venue,
+        name: trimmedName, date, venue: trimmedVenue,
         password: pass,
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
       };
       const t = await window.API.createTournament(config);
+      if (!mountedRef.current) return;
       // Wait for backend to broadcast or just pass it up
       onCreated(t, pass);
     } catch (err) {
       alert(err.message);
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   };
+
+  // Same render-NaN-as-"" pattern as admin_setup.jsx so clearing the
+  // courts input doesn't trigger React's "Received NaN for the value
+  // attribute" warning. decideNumericUpdate lives in admin_helpers.jsx,
+  // which loads before app.js per index.html.
+  const decideNumericUpdate = window.decideNumericUpdate;
 
   return (
     <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
@@ -415,13 +466,27 @@ function CreateTournament({ onCreated }) {
             <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. London Cup 2026" required />
           </div>
           <div className="row">
-            <div className="field"><label className="field__label">Date</label><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></div>
+            <div className="field"><label className="field__label">Date</label>
+              {/* Picker bounds mirror admin_setup.jsx + admin_competition.jsx. */}
+              {/* validateAndNormalizeDate enforces MIN_YEAR–MAX_YEAR; without */}
+              {/* these bounds the user could pick 1850 and only learn on submit. */}
+              <input className="input" type="date" min={`${window.MIN_YEAR}-01-01`} max={`${window.MAX_YEAR}-12-31`} value={window.dmyToIso(date)} onChange={(e) => setDate(window.isoToDmy(e.target.value))} required />
+            </div>
             <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
           </div>
           <div className="field">
             <label className="field__label">Number of Shiaijo (courts)</label>
-            <input className="input" type="number" min="1" max="26" value={courts} onChange={(e) => setCourts(+e.target.value)} required />
-            <div className="field__hint">Enter a number (1-26). Courts will be automatically labeled A, B, C, etc.</div>
+            <input
+              className="input"
+              type="number"
+              min="1"
+              max={window.MAX_COURTS}
+              step="1"
+              value={Number.isFinite(courts) ? courts : ""}
+              onChange={(e) => setCourts(decideNumericUpdate(e.target.value, 1).value)}
+              required
+            />
+            <div className="field__hint">{`Enter a number (1-${window.MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
           <div className="field">
             <label className="field__label">Admin Password</label>

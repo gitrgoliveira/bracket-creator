@@ -184,21 +184,20 @@ func (e *Engine) StartCompetition(id string) error {
 		return err
 	}
 
-	// Snapshot whether ANY reserved slots existed. The trailing
-	// SaveParticipants call below is conditional on this: if no slots
-	// existed, resolveReservedSlots is a no-op and the players slice
-	// matches disk byte-for-byte — re-saving it is wasted I/O AND a
-	// participant-race risk (a concurrent admin participants upload
-	// between our outer Load and the trailing SaveParticipants would
-	// be clobbered by our stale snapshot). When slots DID exist, the
-	// save is required to persist resolved IDs/names; the small race
-	// window for that case is a documented pipeline limitation (see
-	// function-level comment).
-	slots, _ := e.store.LoadReservedSlots(id)
-	hadReservedSlots := len(slots) > 0
-
 	// Resolve any cross-competition reserved slots before generation.
-	players, err = e.resolveReservedSlots(id, players)
+	// The returned `mutated` flag tells us whether the function actually
+	// changed the players slice (in-place field update OR placeholder
+	// removal). We gate the trailing SaveParticipants on this flag: if
+	// nothing was mutated, the players slice still matches disk
+	// byte-for-byte, so re-saving it is wasted I/O AND a participant-
+	// race risk (a concurrent admin participants upload between our
+	// outer Load and the trailing save would be clobbered by our stale
+	// snapshot). Deriving the flag from the function's actual mutation
+	// (rather than an outer LoadReservedSlots call) avoids a TOCTOU
+	// window where the outer check sees no slots but resolveReservedSlots
+	// then sees them under a race.
+	var resolvedSlots bool
+	players, resolvedSlots, err = e.resolveReservedSlots(id, players)
 	if err != nil {
 		return err
 	}
@@ -314,10 +313,10 @@ func (e *Engine) StartCompetition(id string) error {
 		return err
 	}
 
-	// See `hadReservedSlots` snapshot above. Skip the save when the
-	// pipeline didn't mutate the roster (no reserved-slot resolution),
-	// otherwise persist the resolved IDs/names.
-	if hadReservedSlots {
+	// See `resolvedSlots` flag from resolveReservedSlots above. Skip the
+	// save when the pipeline didn't mutate the roster (no reserved-slot
+	// resolution happened); otherwise persist the resolved IDs/names.
+	if resolvedSlots {
 		if err := e.store.SaveParticipants(id, players); err != nil {
 			return err
 		}

@@ -12,18 +12,38 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// minDateYear / maxDateYear mirror MIN_YEAR / MAX_YEAR in
+// web-mobile/js/admin_helpers.jsx. The frontend's validateAndNormalizeDate
+// rejects years outside this range on every settings save; without
+// matching bounds here, a direct API/import write that lands an
+// out-of-range date (e.g. "01-01-1800") would block the admin UI from
+// saving ANY unrelated setting — every settings PUT re-validates the
+// stored date and surfaces an inline error before reaching the wire.
+// Keep these in lockstep with the JS constants.
+const (
+	minDateYear = 1900
+	maxDateYear = 2100
+)
+
 // validateDateDMY validates that `date` is either empty or a syntactically
 // AND semantically valid day in DD-MM-YYYY format. Uses Go's time-parsing
 // reference layout `02-01-2006` which catches both shape errors and
-// out-of-range days (Feb 31, 32-01-2026, etc.). Shared helper used by
-// tournament + competition + import write paths to keep the canonical
-// format invariant in one place.
+// out-of-range days (Feb 31, 32-01-2026, etc.). Also enforces the same
+// minDateYear..maxDateYear range that the frontend validator applies
+// (see admin_helpers.jsx MIN_YEAR/MAX_YEAR) so direct API callers can't
+// persist a year the UI then refuses to display or save against.
+// Shared helper used by tournament + competition + import write paths
+// to keep the canonical format invariant in one place.
 func validateDateDMY(date string) error {
 	if date == "" {
 		return nil
 	}
-	if _, err := time.Parse("02-01-2006", date); err != nil {
+	parsed, err := time.Parse("02-01-2006", date)
+	if err != nil {
 		return fmt.Errorf("date must be DD-MM-YYYY")
+	}
+	if year := parsed.Year(); year < minDateYear || year > maxDateYear {
+		return fmt.Errorf("date year must be between %d and %d", minDateYear, maxDateYear)
 	}
 	return nil
 }
@@ -41,6 +61,7 @@ func validateCourtLabels(courts []string) error {
 	if len(courts) > helper.MaxCourts {
 		return fmt.Errorf("courts must be <= %d (Shiaijo are labelled A–Z), got %d", helper.MaxCourts, len(courts))
 	}
+	seen := make(map[string]bool, len(courts))
 	for i, label := range courts {
 		if label == "" {
 			return fmt.Errorf("courts[%d]: court label cannot be empty", i)
@@ -52,6 +73,19 @@ func validateCourtLabels(courts []string) error {
 		if len([]rune(label)) != 1 {
 			return fmt.Errorf("courts[%d]: court label %q must be a single character", i, label)
 		}
+		// Reject duplicate labels. The frontend uses court labels as
+		// identity keys: `<div key={cc}>` per-court rendering, filter
+		// values, the schedule view's `byCourt[m.court]` bucket map.
+		// Duplicates collapse the byCourt map (two courts' matches end
+		// up in one lane) and trigger React duplicate-key warnings.
+		// The admin UI's AdminEditTournament generates courts via
+		// `Array.from({length: n}, (_, i) => String.fromCharCode(65 + i))`
+		// so duplicates can't arise via the form, but direct API/import
+		// payloads bypass that — defense-in-depth at the validator.
+		if seen[label] {
+			return fmt.Errorf("courts[%d]: duplicate court label %q", i, label)
+		}
+		seen[label] = true
 	}
 	return nil
 }

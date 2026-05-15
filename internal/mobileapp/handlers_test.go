@@ -197,6 +197,32 @@ func TestTournamentHandlers(t *testing.T) {
 		}
 	}
 
+	// Year must be within minDateYear..maxDateYear (1900..2100). The JS
+	// validator at admin_helpers.jsx applies the same range; without
+	// matching bounds here, a direct API call landing e.g. "01-01-1800"
+	// on disk would block every subsequent admin settings save because
+	// the frontend's saveLater re-validates the stored date on every
+	// PUT and surfaces an inline error before reaching the wire.
+	for _, method := range []string{"PUT", "POST"} {
+		for _, outOfRangeDate := range []string{
+			"01-01-1800", // below MIN_YEAR
+			"01-01-1899", // just below MIN_YEAR
+			"01-01-2101", // just above MAX_YEAR
+			"01-01-3000", // far above MAX_YEAR
+		} {
+			bad := state.Tournament{Name: "Some Name", Venue: "Venue", Date: outOfRangeDate, Password: "secret", Courts: []string{"A"}}
+			body, _ = json.Marshal(bad)
+			w = httptest.NewRecorder()
+			req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"%s /api/tournament with Date=%q must return 400 (year out of range)", method, outOfRangeDate)
+			assert.Contains(t, w.Body.String(), "date year must be between",
+				"%s /api/tournament rejection should explain the year-range requirement", method)
+		}
+	}
+
 	// POST /api/tournament must reject empty Password. AuthMiddleware
 	// allows POST /api/tournament unauthenticated when the tournament
 	// is uninitialized (bootstrap path). If Password == "" lands on
@@ -901,6 +927,13 @@ func TestPOSTTournament_ValidatesCourts(t *testing.T) {
 		}(), "courts must be"},
 		{"multi-char label", []string{"AA", "B"}, "must be a single character"},
 		{"empty label", []string{"A", ""}, "cannot be empty"},
+		// Duplicate labels are rejected because the frontend keys per-court
+		// rendering and `byCourt` bucketing on the label string — duplicates
+		// collapse two courts' matches into one lane and trigger React
+		// duplicate-key warnings. The admin UI generates unique A,B,C,...
+		// so duplicates only arise via direct API/import callers.
+		{"duplicate labels", []string{"A", "A"}, "duplicate court label"},
+		{"duplicate labels non-adjacent", []string{"A", "B", "A"}, "duplicate court label"},
 	}
 
 	for _, tc := range cases {

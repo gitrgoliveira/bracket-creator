@@ -1239,9 +1239,13 @@ components:
           description: >
             Event date in DD-MM-YYYY format. Trimmed server-side; rejected
             with 400 if non-empty and not a syntactically valid day in
-            that format (Feb 31 etc. → 400). The web frontend converts
-            the HTML `<input type="date">` ISO output to DMY at the input
-            boundary; direct API clients send DMY directly.
+            that format (Feb 31 etc. → 400) OR if the year falls outside
+            1900–2100. The year-range matches the frontend validator
+            (web-mobile/js/admin_helpers.jsx MIN_YEAR/MAX_YEAR) so a
+            value the API accepts is also one the admin UI can edit. The
+            web frontend converts the HTML `<input type="date">` ISO
+            output to DMY at the input boundary; direct API clients
+            send DMY directly.
         venue:
           type: string
           description: Venue name. Trimmed server-side.
@@ -1249,7 +1253,12 @@ components:
           type: array
           items:
             type: string
-          description: Court labels (e.g. ["A", "B"]). Each label is a single character; 26-court cap (A–Z).
+          description: >
+            Court labels (e.g. ["A", "B"]). Each label is a single
+            character; 26-court cap (A–Z). Duplicate labels are rejected
+            with 400 — the frontend uses labels as identity keys (per-court
+            rendering, schedule `byCourt` bucketing, filter values) and
+            duplicates would collapse data structures.
         password:
           type: string
           description: >
@@ -1306,6 +1315,12 @@ components:
           type: array
           items:
             type: string
+          description: >
+            Per-competition court labels (subset of Tournament.courts).
+            Each label is a single character; 26-court cap; duplicates
+            rejected with 400. Empty array means "use the tournament
+            default" — the engine defaults a competition with no Courts
+            to 1 court.
         startTime:
           type: string
           description: First-match start time (HH:MM). Trimmed server-side.
@@ -1313,9 +1328,9 @@ components:
           type: string
           description: >
             Competition date in DD-MM-YYYY format. Same shape as
-            `Tournament.date`. Trimmed server-side; rejected with 400 if
+            `Tournament.date`: trimmed server-side; rejected with 400 if
             non-empty and not a syntactically valid day in that format
-            (Feb 31 etc. → 400).
+            (Feb 31 etc. → 400) OR if the year falls outside 1900–2100.
         status:
           type: string
           description: >

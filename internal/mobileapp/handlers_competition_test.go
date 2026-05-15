@@ -472,6 +472,75 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, "01-01-2026", stored.Date, "seed date untouched by failed PUTs")
 	})
 
+	// validateDateDMY must reject years outside minDateYear..maxDateYear
+	// (mirroring JS MIN_YEAR/MAX_YEAR). Without matching server bounds,
+	// a direct API call landing e.g. "01-01-1800" on a competition would
+	// block every subsequent admin Settings save — saveLater re-validates
+	// the stored date on every PUT.
+	t.Run("Year Out Of Range Rejected On Create And Update", func(t *testing.T) {
+		seed := state.Competition{ID: "year-range-test", Name: "Year Range Test", Date: "01-01-2026"}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		outOfRange := []string{"01-01-1800", "31-12-1899", "01-01-2101", "01-01-3000"}
+		for _, badDate := range outOfRange {
+			post := state.Competition{ID: "year-post-" + badDate[6:10], Name: "Year Post " + badDate[6:10], Date: badDate}
+			body, _ := json.Marshal(post)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"POST /competitions with Date=%q must return 400 (year out of range)", badDate)
+			assert.Contains(t, w.Body.String(), "date year must be between")
+
+			put := state.Competition{ID: "year-range-test", Name: "Year Range Test", Date: badDate}
+			body, _ = json.Marshal(put)
+			w = httptest.NewRecorder()
+			req, _ = http.NewRequest("PUT", "/api/competitions/year-range-test", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"PUT /competitions/year-range-test with Date=%q must return 400 (year out of range)", badDate)
+		}
+		stored, _ := store.LoadCompetition("year-range-test")
+		require.NotNil(t, stored)
+		assert.Equal(t, "01-01-2026", stored.Date, "seed date untouched by failed year-range PUTs")
+	})
+
+	// validateCompetitionCourts must reject duplicate court labels.
+	// The frontend keys per-court rendering and `byCourt[m.court]`
+	// bucketing on the label string — duplicates collapse two courts'
+	// matches into one lane and trigger React duplicate-key warnings.
+	t.Run("Duplicate Court Labels Rejected On Create And Update", func(t *testing.T) {
+		seed := state.Competition{ID: "dup-courts-test", Name: "Dup Courts Test", Date: "01-01-2026", Courts: []string{"A", "B"}}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		dupCases := [][]string{{"A", "A"}, {"A", "B", "A"}, {"C", "C", "C"}}
+		for i, dupCourts := range dupCases {
+			post := state.Competition{ID: fmt.Sprintf("dup-courts-post-%d", i), Name: fmt.Sprintf("Dup Courts Post %d", i), Date: "01-01-2026", Courts: dupCourts}
+			body, _ := json.Marshal(post)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"POST /competitions with Courts=%v must return 400 (duplicate labels)", dupCourts)
+			assert.Contains(t, w.Body.String(), "duplicate court label")
+
+			put := state.Competition{ID: "dup-courts-test", Name: "Dup Courts Test", Date: "01-01-2026", Courts: dupCourts}
+			body, _ = json.Marshal(put)
+			w = httptest.NewRecorder()
+			req, _ = http.NewRequest("PUT", "/api/competitions/dup-courts-test", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"PUT /competitions/dup-courts-test with Courts=%v must return 400 (duplicate labels)", dupCourts)
+		}
+		stored, _ := store.LoadCompetition("dup-courts-test")
+		require.NotNil(t, stored)
+		assert.Equal(t, []string{"A", "B"}, stored.Courts, "seed courts untouched by failed duplicate-label PUTs")
+	})
+
 	// Copilot round-4 finding on PR #104: POST /competitions with a
 	// non-empty but invalid `id` (e.g. "../../etc/passwd", "foo bar",
 	// "foo.bar") skipped the derive-from-name block, hit

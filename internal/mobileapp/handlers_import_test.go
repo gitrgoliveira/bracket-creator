@@ -680,6 +680,73 @@ competitions:
 			">26 courts should be rejected by validateCompetitionCourts")
 		stored2, _ := store.LoadCompetition("too-many-courts")
 		assert.Nil(t, stored2, "too-many-courts must not have been persisted")
+
+		// Duplicate court labels. Same cross-file symmetry: POST/PUT
+		// /competitions reject `["A","A"]`; the import path must too,
+		// or a manifest can persist court labels that no REST call
+		// would accept and that collapse the frontend's `byCourt`
+		// bucketing.
+		bodyDup := &bytes.Buffer{}
+		writerDup := multipart.NewWriter(bodyDup)
+		manifestPartDup, _ := writerDup.CreateFormFile("files", "manifest.yaml")
+		manifestPartDup.Write([]byte(`
+competitions:
+  - id: "dup-courts-import"
+    name: "Dup Courts Import"
+    kind: "individual"
+    format: "pools"
+    courts: ["A", "A"]
+`))
+		writerDup.Close()
+		wDup := httptest.NewRecorder()
+		reqDup, _ := http.NewRequest("POST", "/api/tournament/import", bodyDup)
+		reqDup.Header.Set("Content-Type", writerDup.FormDataContentType())
+		r.ServeHTTP(wDup, reqDup)
+		assert.Equal(t, http.StatusOK, wDup.Code)
+		var respDup struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(wDup.Body.Bytes(), &respDup))
+		require.Len(t, respDup.Results, 1)
+		assert.Contains(t, respDup.Results[0].Error, "duplicate court label",
+			"duplicate court labels should be rejected by validateCompetitionCourts")
+		storedDup, _ := store.LoadCompetition("dup-courts-import")
+		assert.Nil(t, storedDup, "dup-courts-import must not have been persisted")
+	})
+
+	// validateDateDMY year-range enforcement: a manifest with a date
+	// outside minDateYear..maxDateYear (mirroring JS MIN_YEAR/MAX_YEAR)
+	// must error per-row rather than persisting a year the admin
+	// Settings UI then refuses to display or save against.
+	t.Run("Year Out Of Range Rejected Per Row", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "year-out-of-range-import"
+    name: "Year Out Of Range Import"
+    kind: "individual"
+    format: "pools"
+    date: "01-01-1800"
+    courts: ["A"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Contains(t, resp.Results[0].Error, "date year must be between",
+			"out-of-range year should land in ImportResult.Error (not persist)")
+		stored, _ := store.LoadCompetition("year-out-of-range-import")
+		assert.Nil(t, stored, "year-out-of-range-import must not have been persisted")
 	})
 }
 

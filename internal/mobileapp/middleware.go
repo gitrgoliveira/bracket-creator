@@ -23,8 +23,13 @@ import (
 // store.compPath(id, ...) must use this helper. compPath does
 // filepath.Clean(filepath.Join(folder, "competitions", id, ...)) — an
 // id like "../../../etc/passwd" would cleanly escape the data dir.
-// Gated by AuthMiddleware (X-Tournament-Password), so requires admin
-// compromise — but defense-in-depth.
+//
+// Called from BOTH authenticated routes (handlers_competition.go gated
+// by AuthMiddleware via X-Tournament-Password) AND the public viewer
+// detail route (handlers_viewer.go GET /api/viewer/competitions/:id,
+// no auth). Path-traversal defense therefore matters on unauthenticated
+// inputs too — anyone on the network can hit the viewer route. Keep
+// the regex narrow and apply at every handler entry point.
 func requireValidCompID(c *gin.Context) (string, bool) {
 	id := c.Param("id")
 	if err := state.ValidateCompetitionID(id); err != nil {

@@ -299,13 +299,22 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Sync server-driven changes into local state (SSE → AdminApp → c prop).
-  // IMPORTANT: deps MUST include EVERY c.* field that appears in the JSX
-  // below (via `local.*`) or that saveNow spreads into the PUT payload
-  // via `{ ...c, ...next }`. A missing dep means an SSE-pushed change to
-  // that field won't propagate into `local`; the user sees stale data AND
-  // the next save of any other field clobbers the server value with the
-  // stale local. The debounceRef gate skips the sync while a user edit
-  // is in-flight so the debounced save doesn't race with the SSE update.
+  // IMPORTANT: deps MUST include EVERY c.* field that backs a `local.*`
+  // read in the JSX below OR is intentionally round-tripped through the
+  // saveNow PUT-payload allowlist (see `finalNext` below). A missing dep
+  // means an SSE-pushed change to that field won't propagate into `local`,
+  // so the user sees stale data; for any allowlisted field, the next save
+  // also writes the stale value back to the server.
+  //
+  // Historical note: pre-df524aa, saveNow spread `{ ...c, ...next }` into
+  // the PUT body, so the deps list had to mirror EVERY c.* field
+  // (including server-managed ones like `status` / `players`). After the
+  // saveNow allowlist change, deps only need to cover UI-rendered fields
+  // and explicitly-round-tripped fields; status/players/poolMatches/etc.
+  // are no longer at risk of being clobbered by a stale-local save.
+  //
+  // The debounceRef gate skips the sync while a user edit is in-flight
+  // so the debounced save doesn't race with the SSE update.
   useEffectA(() => {
     setLocal(prev => {
       if (debounceRef.current) return prev;

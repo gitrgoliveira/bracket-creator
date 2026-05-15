@@ -311,7 +311,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       if (debounceRef.current) return prev;
       return { ...prev, ...c };
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status]);
 
   const saveNow = (next) => {
     // Use the shared validator (admin_helpers.jsx). Returns the
@@ -385,22 +385,45 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     //
     // Fields server-managed via dedicated endpoints (status, players,
     // hasParticipantIDs) are deliberately excluded. If a new settings
-    // field is added to the JSX, also add it here.
+    // field is added to the JSX or the OpenAPI settings list, also add
+    // it here.
+    //
+    // `mirror` is in the allowlist even though AdminSettings doesn't
+    // expose it as an editable control. data.jsx:200 (buildEmptyCompetition)
+    // defaults new competitions to `mirror: true`; the backend transform
+    // unconditionally applies `current.Mirror = comp.Mirror`, so an
+    // omitted field would JSON-encode to false and clobber the disk
+    // value on every settings save. Round-tripping `next.mirror` (which
+    // mirrors c.mirror via the sync effect) preserves the value.
+    //
+    // safeInt for the numeric fields: decideNumericUpdate stores NaN in
+    // local state when the user clears a number input (so the render
+    // layer can show "" instead of "0"). If the user clears poolSize
+    // and THEN edits a non-numeric field, the new field's saveLater
+    // fires saveNow with `next.poolSize = NaN`. JSON.stringify({n: NaN})
+    // produces '{"n":null}' — Go binds JSON null to int as 0 — backend
+    // transform writes 0 to disk, clobbering the prior good value.
+    // Falling back to `c.<field>` when local isn't a usable positive
+    // integer preserves the disk value until the user types a valid
+    // replacement.
+    const safeInt = (v, fallback) =>
+      Number.isFinite(v) && Number.isInteger(v) && v >= 1 ? v : fallback;
     const finalNext = {
       id: c.id,
       name: trimmedName,
       date: dateNorm,
       startTime: next.startTime,
-      poolSize: next.poolSize,
-      poolWinners: next.poolWinners,
+      poolSize: safeInt(next.poolSize, c.poolSize),
+      poolWinners: safeInt(next.poolWinners, c.poolWinners),
       poolSizeMode: next.poolSizeMode,
       courts: next.courts,
       roundRobin: next.roundRobin,
       withZekkenName: next.withZekkenName,
-      teamSize: next.teamSize,
+      teamSize: safeInt(next.teamSize, c.teamSize),
       numberPrefix: trimmedPrefix,
       format: next.format,
       kind: next.kind,
+      mirror: next.mirror,
     };
     Promise.resolve(onUpdate(finalNext)).then(() => {
       if (!mountedRef.current) return;

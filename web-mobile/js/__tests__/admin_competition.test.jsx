@@ -318,15 +318,34 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
-  // Fields rendered via `local.*` in AdminSettings' JSX. Each must
-  // appear as `c.<field>` in the useEffect deps array so SSE-driven
-  // changes propagate to the UI.
+  // Fields the sync useEffect must list as deps. Two reasons a field
+  // lands here:
+  //
+  //   (a) The JSX reads `local.<field>` — without `c.<field>` in deps,
+  //       SSE-pushed changes don't propagate and the UI shows stale
+  //       data. Example: `local.status` is read for the delete-warning
+  //       prompt, so SSE-driven status changes must update local.
+  //
+  //   (b) saveNow PUTs `next.<field>` (allowlist) — without `c.<field>`
+  //       in deps, a concurrent admin's PUT (broadcast via SSE) won't
+  //       update local, and the next save of any other field would PUT
+  //       a stale value over the server's update. Example: `mirror` is
+  //       not in the JSX but IS in saveNow's allowlist, so it needs to
+  //       round-trip through local for the same defense.
+  //
+  // If you add a `local.<field>` reference OR a `<field>: next.<field>`
+  // entry in finalNext, add `<field>` here AND add `c.<field>` to the
+  // sync useEffect deps array.
   const EXPECTED_DEPS = [
     'id', 'name', 'date', 'startTime',
     'poolSize', 'poolWinners', 'poolSizeMode',
     'courts', 'roundRobin', 'withZekkenName',
     'teamSize', 'numberPrefix',
     'format', 'kind',
+    // status: JSX-read (delete-warning prompt)
+    'status',
+    // mirror: saveNow-allowlist (defense against zero-value clobber)
+    'mirror',
   ];
 
   it('useEffect deps include every field rendered via local.*', () => {
@@ -373,15 +392,26 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
 // re-introduces a `{ ...c, ...next }` spread can't sneak past CI).
 
 describe('AdminSettings.saveNow payload whitelist', () => {
-  // Settings fields the PUT body is allowed to include. Server-managed
-  // fields (status, players, hasParticipantIDs) and viewer-derived
-  // fields (poolMatches, pools, bracket, schedule) must NOT appear.
+  // Settings fields the PUT body is allowed to include. Must match
+  // (a) the OpenAPI settings list in specs/openapi.yaml for PUT
+  //     /competitions/{id} and (b) the backend transform in
+  //     handlers_competition.go (which copies these fields from body
+  //     onto disk). Server-managed fields (status, players,
+  //     hasParticipantIDs) and viewer-derived fields (poolMatches,
+  //     pools, bracket, schedule) must NOT appear.
+  //
+  // `mirror` IS in this allowlist even though AdminSettings doesn't
+  // show a Mirror checkbox: data.jsx:200 defaults `mirror: true` for
+  // new competitions and the backend transform unconditionally writes
+  // `current.Mirror = comp.Mirror`. Omitting it would JSON-encode to
+  // false and clobber the disk value on every settings save.
   const ALLOWED = new Set([
     'id', 'name', 'date', 'startTime',
     'poolSize', 'poolWinners', 'poolSizeMode',
     'courts', 'roundRobin', 'withZekkenName',
     'teamSize', 'numberPrefix',
     'format', 'kind',
+    'mirror',
   ]);
   // Fields that MUST NOT appear in the PUT body — pinning the
   // negative invariant explicitly so a careless re-add is caught.
@@ -418,5 +448,49 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     for (const forbidden of FORBIDDEN) {
       expect(keys.includes(forbidden), `finalNext must NOT include "${forbidden}" — that field is server-managed via a dedicated endpoint, not settings`).toBe(false);
     }
+  });
+
+  // Numeric finalNext fields (poolSize / poolWinners / teamSize) must
+  // wrap their value in the safeInt fallback. The bug shape: cleared
+  // number input stores NaN in local; if user then edits a non-numeric
+  // field, saveNow PUTs next.poolSize=NaN → JSON encodes null → Go
+  // binds 0 → backend transform writes PoolSize=0 → disk clobbered.
+  // safeInt(next.X, c.X) preserves disk value when local isn't a
+  // usable positive integer.
+  it('finalNext numeric fields are wrapped in safeInt fallback', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'admin_competition.jsx'),
+      'utf8'
+    );
+    const fnMatch = src.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch[1];
+
+    for (const field of ['poolSize', 'poolWinners', 'teamSize']) {
+      const pattern = new RegExp(`\\b${field}:\\s*safeInt\\(`);
+      expect(
+        pattern.test(body),
+        `finalNext.${field} must use safeInt(...) — raw next.${field} is NaN-clobber prone (JSON.stringify({${field}: NaN}) → "${field}":null → Go zero-value)`
+      ).toBe(true);
+    }
+  });
+
+  // The safeInt helper itself must check the full set of dimensions
+  // that the NaN-clobber bug requires: Number.isFinite (catches NaN /
+  // Infinity), Number.isInteger (catches fractional), and >= 1 (catches
+  // 0 / negative). Pin the full set so a future "simplification" that
+  // drops Number.isInteger doesn't silently re-introduce the
+  // fractional-clobber dimension.
+  it('safeInt helper guards isFinite + isInteger + >= 1', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'admin_competition.jsx'),
+      'utf8'
+    );
+    const safeIntMatch = src.match(/const safeInt = \(v, fallback\) =>\s*([^;]+);/);
+    expect(safeIntMatch, 'expected `const safeInt = (v, fallback) => ...;` in saveNow').not.toBeNull();
+    const body = safeIntMatch[1];
+    expect(body, 'safeInt must guard Number.isFinite').toContain('Number.isFinite');
+    expect(body, 'safeInt must guard Number.isInteger').toContain('Number.isInteger');
+    expect(body, 'safeInt must require >= 1').toMatch(/>=\s*1/);
   });
 });

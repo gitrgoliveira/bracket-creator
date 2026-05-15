@@ -298,31 +298,70 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
+  // Refs for the async saveNow timer to read fresh state at fire time
+  // (NOT closure-captured at saveLater() call time). Same shape as
+  // admin.jsx's tRef/onUpdateRef pattern from round-11.
+  const cRef = useRefA(c);
+  useEffectA(() => { cRef.current = c; }, [c]);
+  const localRef = useRefA(local);
+  useEffectA(() => { localRef.current = local; }, [local]);
+
+  // Track which settings fields the user has actively edited since the
+  // last successful save. Used by:
+  //  (a) the sync effect below — preserve user's pending edits on these
+  //      fields while still absorbing SSE updates to OTHER fields, and
+  //  (b) saveNow's payload builder — overlay user-edited values onto a
+  //      FRESH snapshot of `c` (cRef.current), so the PUT body reflects
+  //      concurrent server-side changes to fields the user isn't editing
+  //      rather than stale values captured at keystroke time.
+  //
+  // Without this set, the prior debounce-gate approach (`if
+  // (debounceRef.current) return prev`) had a 400ms window where a
+  // concurrent admin's settings change would land in `c` but be dropped
+  // by the sync effect AND overwritten by saveNow's stale captured
+  // snapshot — net effect: one-field edits silently revert
+  // simultaneous edits to other fields. Caught by Copilot round-15.
+  const editedFieldsRef = useRefA(new Set());
+
   // Sync server-driven changes into local state (SSE → AdminApp → c prop).
-  // IMPORTANT: deps MUST include EVERY c.* field that backs a `local.*`
-  // read in the JSX below OR is intentionally round-tripped through the
-  // saveNow PUT-payload allowlist (see `finalNext` below). A missing dep
-  // means an SSE-pushed change to that field won't propagate into `local`,
-  // so the user sees stale data; for any allowlisted field, the next save
-  // also writes the stale value back to the server.
+  // For each field on `c`, propagate to `local` UNLESS the user has an
+  // unsaved edit pending on that field (tracked in editedFieldsRef).
+  // This absorbs concurrent admin changes without clobbering the user's
+  // in-progress typing.
   //
-  // Historical note: pre-df524aa, saveNow spread `{ ...c, ...next }` into
-  // the PUT body, so the deps list had to mirror EVERY c.* field
-  // (including server-managed ones like `status` / `players`). After the
-  // saveNow allowlist change, deps only need to cover UI-rendered fields
-  // and explicitly-round-tripped fields; status/players/poolMatches/etc.
-  // are no longer at risk of being clobbered by a stale-local save.
-  //
-  // The debounceRef gate skips the sync while a user edit is in-flight
-  // so the debounced save doesn't race with the SSE update.
+  // Deps cover UI-rendered fields and any field round-tripped through
+  // saveNow's PUT allowlist (`finalNext`). Status is listed so a
+  // concurrent start/complete propagates into local for the delete-
+  // confirm prompt's `local.status && local.status !== "setup"` check.
   useEffectA(() => {
     setLocal(prev => {
-      if (debounceRef.current) return prev;
-      return { ...prev, ...c };
+      const next = { ...prev };
+      Object.keys(c).forEach(k => {
+        if (!editedFieldsRef.current.has(k)) {
+          next[k] = c[k];
+        }
+      });
+      return next;
     });
   }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status]);
 
-  const saveNow = (next) => {
+  const saveNow = () => {
+    // Build `effective` from the LATEST server-known state (cRef.current)
+    // overlaid with the user's currently-edited fields. Pre-fix this
+    // function took a captured `next` arg from saveLater, which held a
+    // snapshot from the moment of the keystroke — so any SSE updates
+    // that landed during the 400ms debounce were ignored at save time,
+    // and the PUT body silently reverted concurrent admin changes to
+    // unrelated fields. Reading from refs at fire time (not closure
+    // capture) absorbs those concurrent changes naturally. Caught by
+    // Copilot round-15.
+    const latestC = cRef.current;
+    const localSnap = localRef.current;
+    const effective = { ...latestC };
+    editedFieldsRef.current.forEach(k => {
+      effective[k] = localSnap[k];
+    });
+
     // Use the shared validator (admin_helpers.jsx). Returns the
     // canonical DD-MM-YYYY form on success, or an error message on
     // failure (bad shape, semantic-invalid day, year out of range).
@@ -335,8 +374,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // first debounced saveLater fires saveNow, which rejects with
     // "Invalid date" even though the user hasn't touched the date.
     let dateNorm = "";
-    if (next.date && next.date.trim() !== "") {
-      const { norm, error: dateError } = validateAndNormalizeDate(next.date);
+    if (effective.date && effective.date.trim() !== "") {
+      const { norm, error: dateError } = validateAndNormalizeDate(effective.date);
       if (dateError) {
         setSaveErr(dateError);
         return;
@@ -350,7 +389,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // canonical "Men's Cup" and miss — landing two competitions with the
     // same effective name. Send the trimmed value so the value the user
     // sees in the input matches what the server stores.
-    const trimmedName = (next.name || "").trim();
+    const trimmedName = (effective.name || "").trim();
     // Cross-file guard symmetry with the tournament edit/create paths
     // (admin_setup.jsx AdminEditTournament:80, app.jsx CreateTournament:410)
     // and with handlers_competition.go PUT (which now returns 400 on
@@ -363,8 +402,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       setSaveErr("Competition name is required.");
       return;
     }
-    if (trimmedName.toLowerCase() !== c.name.toLowerCase()) {
-      const exists = (tournament.competitions || []).some(cc => cc.id !== c.id && cc.name.toLowerCase() === trimmedName.toLowerCase());
+    if (trimmedName.toLowerCase() !== latestC.name.toLowerCase()) {
+      const exists = (tournament.competitions || []).some(cc => cc.id !== latestC.id && cc.name.toLowerCase() === trimmedName.toLowerCase());
       if (exists) {
         setSaveErr(`Competition name "${trimmedName}" is already in use.`);
         return;
@@ -379,7 +418,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // mirrors that for the SETTINGS edit flow so participant numbers
     // generated from the prefix can't end up like "  A1" / "  A2".
     // Cross-file guard symmetry: same shape as the comp.Name trim above.
-    const trimmedPrefix = (next.numberPrefix || "").trim();
+    const trimmedPrefix = (effective.numberPrefix || "").trim();
     // Build the PUT payload from settings fields ONLY — do NOT spread the
     // full `c` snapshot or the full `next` snapshot. Pre-fix this was
     // `{ ...c, ...next, ... }`, which carried `local.status` and
@@ -402,45 +441,57 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // defaults new competitions to `mirror: true`; the backend transform
     // unconditionally applies `current.Mirror = comp.Mirror`, so an
     // omitted field would JSON-encode to false and clobber the disk
-    // value on every settings save. Round-tripping `next.mirror` (which
-    // mirrors c.mirror via the sync effect) preserves the value.
+    // value on every settings save. Round-tripping `effective.mirror`
+    // (sourced from latestC unless the user edited it) preserves the value.
     //
     // safeInt for the numeric fields: decideNumericUpdate stores NaN in
     // local state when the user clears a number input (so the render
     // layer can show "" instead of "0"). If the user clears poolSize
     // and THEN edits a non-numeric field, the new field's saveLater
-    // fires saveNow with `next.poolSize = NaN`. JSON.stringify({n: NaN})
-    // produces '{"n":null}' — Go binds JSON null to int as 0 — backend
-    // transform writes 0 to disk, clobbering the prior good value.
-    // Falling back to `c.<field>` when local isn't a usable positive
-    // integer preserves the disk value until the user types a valid
-    // replacement.
+    // fires saveNow with the cleared poolSize still in the edited
+    // overlay. JSON.stringify({n: NaN}) produces '{"n":null}' — Go binds
+    // JSON null to int as 0 — backend transform writes 0 to disk,
+    // clobbering the prior good value. Falling back to `latestC.<field>`
+    // when the effective value isn't a usable positive integer preserves
+    // the disk value until the user types a valid replacement.
     const safeInt = (v, fallback) =>
       Number.isFinite(v) && Number.isInteger(v) && v >= 1 ? v : fallback;
     const finalNext = {
-      id: c.id,
+      id: latestC.id,
       name: trimmedName,
       date: dateNorm,
-      startTime: next.startTime,
-      poolSize: safeInt(next.poolSize, c.poolSize),
-      poolWinners: safeInt(next.poolWinners, c.poolWinners),
-      poolSizeMode: next.poolSizeMode,
-      courts: next.courts,
-      roundRobin: next.roundRobin,
-      withZekkenName: next.withZekkenName,
-      teamSize: safeInt(next.teamSize, c.teamSize),
+      startTime: effective.startTime,
+      poolSize: safeInt(effective.poolSize, latestC.poolSize),
+      poolWinners: safeInt(effective.poolWinners, latestC.poolWinners),
+      poolSizeMode: effective.poolSizeMode,
+      courts: effective.courts,
+      roundRobin: effective.roundRobin,
+      withZekkenName: effective.withZekkenName,
+      teamSize: safeInt(effective.teamSize, latestC.teamSize),
       numberPrefix: trimmedPrefix,
-      format: next.format,
-      kind: next.kind,
-      mirror: next.mirror,
+      format: effective.format,
+      kind: effective.kind,
+      mirror: effective.mirror,
     };
+    // Capture the snapshot of edited fields we're about to persist. On
+    // success we clear ONLY those fields from the edited set — preserving
+    // any fields the user touched DURING the in-flight save (those need
+    // to round-trip through a subsequent save).
+    const persistingFields = new Set(editedFieldsRef.current);
     Promise.resolve(onUpdate(finalNext)).then(() => {
       if (!mountedRef.current) return;
+      // Drop the fields we just persisted from the edited set so the
+      // sync effect can absorb the server-confirmed values on the next
+      // SSE round-trip. Fields edited DURING the in-flight save stay in
+      // the set and roll into the next saveLater.
+      persistingFields.forEach(k => editedFieldsRef.current.delete(k));
       const now = new Date();
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);
       setSaveErr(null);
     }).catch((e) => {
       if (!mountedRef.current) return;
+      // Keep edited fields in the set — the user can retry. The next
+      // saveLater will pick them up via the same edited-overlay path.
       // updateCompetition already surfaced the error via showToast;
       // mirror it inline next to the input so the user sees the cause
       // next to the field they were editing without a duplicate toast.
@@ -448,11 +499,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     });
   };
 
-  const saveLater = (next) => {
+  // saveLater takes NO snapshot arg — pre-fix it captured `next` at
+  // call time, which became stale if SSE updated `c` during the 400ms
+  // debounce. saveNow now reads cRef.current + localRef.current at
+  // fire time, so the captured-snapshot bug is gone.
+  const saveLater = () => {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       debounceRef.current = null;
-      saveNow(next);
+      saveNow();
     }, 400);
   };
 
@@ -466,42 +521,41 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   }, []);
 
   const update = (k, v) => {
+    editedFieldsRef.current.add(k);
     const next = { ...local, [k]: v };
     setLocal(next);
-    saveLater(next);
+    saveLater();
   };
 
   const updateNow = (k, v) => {
+    editedFieldsRef.current.add(k);
     const next = { ...local, [k]: v };
     setLocal(next);
-    saveNow(next);
+    // localRef syncs via useEffect; for immediate-save handlers we need
+    // saveNow to see the just-set value. Update the ref synchronously
+    // so saveNow's read happens before React's batched state flush.
+    localRef.current = next;
+    saveNow();
   };
 
   // Number-input variant of `update`. Stores NaN in local state for empty
   // input so the render side can keep the display empty (see
-  // decideNumericUpdate's contract).
+  // decideNumericUpdate's contract). Marks the field as edited so the
+  // sync effect preserves the user's in-progress clear / typed value
+  // even if SSE pushes a c-update during the 400ms debounce window.
   //
-  // Always schedules a saveLater with the CURRENT next snapshot, even when
-  // the parsed value is invalid (NaN / fractional / below min). Pre-fix
-  // path skipped saveLater on invalid input, but the single debounceRef
-  // covers ALL fields — so a previously-scheduled save with a CAPTURED
-  // snapshot still held the OLD valid value for the field the user just
-  // cleared. When that timer fired, it committed the cleared value's
-  // predecessor over the wire, reverting the user's clear visually on
-  // the next SSE / PUT-response merge.
-  //
-  // Replacing the pending save with the current snapshot keeps the
-  // debounceRef in sync with the visible state. safeInt in saveNow's
-  // finalNext allowlist then bridges the gap: an invalid value (NaN /
-  // 1.5 / -1) round-trips to the on-disk c.<field> value, so the PUT
-  // is a no-op for that field but cross-field saves (e.g. Name typed
-  // concurrently) still land. The cleared display resolves to the
-  // saved value on the next SSE / PUT-response merge.
+  // safeInt in saveNow's finalNext allowlist bridges the gap: an invalid
+  // value (NaN / 1.5 / -1) falls back to latestC.<field>, so the PUT is
+  // a no-op for that field but cross-field saves (e.g. Name typed
+  // concurrently) still land. The cleared display resolves to the saved
+  // value on the next SSE / PUT-response merge after the user types a
+  // valid replacement or moves on.
   const updateNumber = (k, raw, min = 1) => {
     const { value } = decideNumericUpdate(raw, min);
+    editedFieldsRef.current.add(k);
     const next = { ...local, [k]: value };
     setLocal(next);
-    saveLater(next);
+    saveLater();
   };
 
   const toggleCourt = (cc) => {

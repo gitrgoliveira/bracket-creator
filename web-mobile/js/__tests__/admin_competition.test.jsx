@@ -354,11 +354,15 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
       'utf8'
     );
 
-    // Find the sync-to-local useEffect. It's the one whose body contains
-    // `{ ...prev, ...c }` — the distinctive merge shape. Extract the deps
-    // array from the closing `}, [c.id, c.name, ...])`  line.
+    // Find the sync-to-local useEffect. After round-15, the body merges
+    // field-by-field with an edited-fields guard (Copilot finding on
+    // the prior `{ ...prev, ...c }` overwrite that lost user edits
+    // during the debounce window). The distinctive marker is
+    // `editedFieldsRef.current.has(k)` inside the Object.keys(c) loop.
+    // Extract the deps array from the closing `}, [c.id, c.name, ...])`
+    // line.
     const depsMatch = src.match(
-      /\{ \.\.\.prev, \.\.\.c \}[\s\S]*?\}, \[([^\]]+)\]\)/
+      /editedFieldsRef\.current\.has\(k\)[\s\S]*?\}, \[([^\]]+)\]\)/
     );
     expect(depsMatch).not.toBeNull();
 
@@ -492,5 +496,78 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     expect(body, 'safeInt must guard Number.isFinite').toContain('Number.isFinite');
     expect(body, 'safeInt must guard Number.isInteger').toContain('Number.isInteger');
     expect(body, 'safeInt must require >= 1').toMatch(/>=\s*1/);
+  });
+});
+
+// ── saveNow reads latest c + edited overlay (Copilot round-15) ──
+//
+// Pre-fix: saveLater(next) captured `next` at keystroke time; the
+// debounce-gate sync effect dropped SSE updates during the 400ms
+// window; saveNow then PUT the stale captured snapshot, silently
+// reverting concurrent admin changes to fields the user wasn't
+// editing. The fix has three structural invariants we pin here:
+//
+//   1. saveLater takes NO snapshot arg — it relies on refs at fire time.
+//   2. saveNow builds an `effective` object by overlaying `localRef.current`
+//      values onto `cRef.current` for each field in `editedFieldsRef`.
+//   3. update / updateNow / updateNumber call `editedFieldsRef.current.add(k)`
+//      before scheduling the save.
+//
+// Behavioral tests for the full lifecycle are blocked by vitest.setup's
+// stubbed React hooks; structural tests are the durable mechanism.
+describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
+  const src = readFileSync(
+    resolve(__dirname, '..', 'admin_competition.jsx'),
+    'utf8'
+  );
+
+  it('saveLater takes no snapshot argument', () => {
+    // Pre-fix: `const saveLater = (next) => { ... saveNow(next); }`
+    // Post-fix: `const saveLater = () => { ... saveNow(); }`
+    // The argument-less form proves the timer reads refs at fire time
+    // instead of capturing a snapshot.
+    const m = src.match(/const saveLater = \(([^)]*)\) =>/);
+    expect(m, 'expected `const saveLater = (...) =>` declaration').not.toBeNull();
+    expect(m[1].trim()).toBe('');
+  });
+
+  it('saveNow builds effective from cRef + editedFieldsRef overlay', () => {
+    // Match the start of saveNow's body and look for the three
+    // distinctive identifiers in the overlay block.
+    const m = src.match(/const saveNow = \(\) => \{([\s\S]*?)Promise\.resolve\(onUpdate/);
+    expect(m, 'expected `const saveNow = () => { ... Promise.resolve(onUpdate` block').not.toBeNull();
+    const body = m[1];
+    expect(body).toContain('cRef.current');
+    expect(body).toContain('localRef.current');
+    expect(body).toContain('editedFieldsRef.current.forEach');
+  });
+
+  it('user-edit handlers mark fields via editedFieldsRef.add', () => {
+    // Each handler that mutates `local` must mark the edited field
+    // BEFORE scheduling the save, so the sync effect preserves it
+    // when SSE arrives during the debounce window.
+    for (const handler of ['update', 'updateNow', 'updateNumber']) {
+      const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
+      const m = src.match(re);
+      expect(m, `expected \`const ${handler} = (...) => { ... };\` declaration`).not.toBeNull();
+      expect(
+        m[2],
+        `${handler} must call editedFieldsRef.current.add(...) so the sync effect preserves the user's edit during the debounce window`
+      ).toContain('editedFieldsRef.current.add');
+    }
+  });
+
+  it('sync effect uses editedFieldsRef.has guard, not blanket debounceRef gate', () => {
+    // Pre-fix sync effect: `if (debounceRef.current) return prev;`
+    // — dropped ALL updates during the debounce, losing SSE changes to
+    // fields the user wasn't editing. Post-fix: per-field check via
+    // `editedFieldsRef.current.has(k)` inside Object.keys(c).
+    expect(src).toContain('editedFieldsRef.current.has(k)');
+    // The blanket gate must be gone. The simple textual check would
+    // false-positive on other debounceRef usages (saveLater +
+    // cleanup), so anchor on the specific shape: `if
+    // (debounceRef.current) return prev` was the bug, scoped to the
+    // sync effect.
+    expect(src).not.toMatch(/if \(debounceRef\.current\)\s+return prev/);
   });
 });

@@ -302,40 +302,137 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Atomic uniqueness-check + save under the global
-		// competition-rename mutex. Closes the AB-BA window where
-		// two concurrent PUTs renaming different competitions to the
-		// same new name both passed checkUniqueCompName (each seeing
-		// the other still had its old name) and both landed.
+		// Atomic uniqueness-check + 404-on-missing + settings-only merge
+		// + save under the global competition-rename mutex.
 		//
-		// An earlier attempt folded the uniqueness check into
-		// UpdateCompetitionChanged's per-comp lock transform —
-		// deadlocked AB-BA because each goroutine held its own
-		// comp's per-comp write lock and tried to read-lock the
-		// other to do the check. The dedicated rename mutex (a
-		// different mutex from any per-comp lock) sidesteps that.
+		// Three invariants enforced here:
+		//
+		// 1. AB-BA rename race closure: two concurrent PUTs renaming
+		//    different competitions to the same new name both passed
+		//    checkUniqueCompName pre-fix (each seeing the other still
+		//    had its old name) and both landed. The dedicated rename
+		//    mutex (different from any per-comp lock) serializes the
+		//    check+save for uniqueness. An earlier attempt folded the
+		//    check into UpdateCompetitionChanged's per-comp transform —
+		//    deadlocked AB-BA because each goroutine held its own
+		//    comp's per-comp write lock and tried to read-lock the
+		//    other to do the check.
+		//
+		// 2. 404 on missing: pre-fix, saveCompetitionWithPlayers
+		//    would CREATE the record if id didn't exist on disk —
+		//    contradicting the OpenAPI-documented 404 response and
+		//    surprising clients that expected idempotent "edit only".
+		//    UpdateCompetitionChanged's transform now returns
+		//    notFoundFlag for current == nil.
+		//
+		// 3. Settings-only merge for non-participants fields: pre-fix,
+		//    the PUT body REPLACED the whole config — including
+		//    Status / HasParticipantIDs that AdminSettings doesn't
+		//    manage. If the JSON omitted Status (e.g. the new
+		//    admin_competition.jsx saveNow whitelist that genuinely
+		//    sends settings-only), the saved record would have
+		//    status="" / hasParticipantIDs=false, reverting server-side
+		//    start / participant changes. The transform copies ONLY the
+		//    settings fields from the body onto current, so Status /
+		//    HasParticipantIDs stay as they are on disk regardless of
+		//    body contents. Defense-in-depth for direct API callers too.
+		//
+		// AdminParticipants STILL uses this same PUT to save the roster
+		// (`{ ...c, players: np }`): when the body has Players, we run
+		// the participants/seeds save AFTER the transform commits and
+		// set HasParticipantIDs=true (saveParticipants writes UUID rows).
 		var nameErr error
+		var notFoundFlag bool
 		var changed bool
 		err := store.WithCompetitionRenameLock(func() error {
 			if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
 				return nil
 			}
-			var saveErr error
-			changed, saveErr = saveCompetitionWithPlayers(&comp, store)
-			return saveErr
+			var updateErr error
+			changed, updateErr = store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+				if current == nil {
+					notFoundFlag = true
+					return nil, nil
+				}
+				// Settings-only merge. Status, Players, and
+				// HasParticipantIDs are deliberately not copied from
+				// the body. Status is managed via dedicated endpoints
+				// (start/complete/invalidate). Players is persisted
+				// separately to participants.csv (see post-transform
+				// block below). HasParticipantIDs is auto-managed (set
+				// to true below when participants are saved).
+				current.Name = comp.Name
+				current.Date = comp.Date
+				current.StartTime = comp.StartTime
+				current.PoolSize = comp.PoolSize
+				current.PoolWinners = comp.PoolWinners
+				current.PoolSizeMode = comp.PoolSizeMode
+				current.Courts = comp.Courts
+				current.RoundRobin = comp.RoundRobin
+				current.WithZekkenName = comp.WithZekkenName
+				current.TeamSize = comp.TeamSize
+				current.NumberPrefix = comp.NumberPrefix
+				current.Format = comp.Format
+				current.Kind = comp.Kind
+				current.Mirror = comp.Mirror
+				// When the body carries Players, the participants save
+				// below will write a UUID-prefixed participants.csv —
+				// flip HasParticipantIDs to match so a later viewer load
+				// that passes HasIDs hint=true parses correctly (see
+				// handlers_viewer.go:46).
+				if len(comp.Players) > 0 {
+					current.HasParticipantIDs = true
+				}
+				return current, nil
+			})
+			return updateErr
 		})
 		if nameErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+			return
+		}
+		if notFoundFlag {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if changed {
+		// Participants/seeds save (separate file) — runs only when the
+		// PUT body carries Players. AdminParticipants uses this path
+		// (`{ ...c, players: np }`); AdminSettings now does not.
+		participantsChanged := false
+		if len(comp.Players) > 0 {
+			if err := store.SaveParticipants(id, comp.Players); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
+				return
+			}
+			assignments := extractSeeds(comp.Players)
+			if err := store.SaveSeeds(id, assignments); err != nil {
+				fmt.Printf("Warning: failed to save seeds: %v\n", err)
+			}
+			participantsChanged = true
+		}
+		if changed || participantsChanged {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		c.JSON(http.StatusOK, comp)
+		// Re-load to return the actual on-disk state (with non-settings
+		// fields preserved from current) rather than the partial body.
+		// Preserve Players from the body in the response — LoadCompetition
+		// doesn't repopulate Players from participants.csv, and
+		// admin.jsx's updateCompetition merges the response onto local
+		// state via `{ ...c, ...updated }`, so a missing Players field
+		// would null out the local roster after a participants save.
+		updated, _ := store.LoadCompetition(id)
+		if updated == nil {
+			c.JSON(http.StatusOK, comp)
+			return
+		}
+		if len(comp.Players) > 0 {
+			updated.Players = comp.Players
+		}
+		c.JSON(http.StatusOK, updated)
 	})
 
 	r.DELETE("/competitions/:id", func(c *gin.Context) {

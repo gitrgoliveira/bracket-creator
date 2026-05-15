@@ -307,6 +307,19 @@ func (e *Engine) StartCompetition(id string) error {
 		// disagree with the parsed-with-IDs participant list we just
 		// re-saved.
 		current.HasParticipantIDs = comp.HasParticipantIDs
+		// When resolveReservedSlots mutated the roster, the trailing
+		// SaveParticipants below will rewrite participants.csv with
+		// UUID-prefixed rows regardless of the prior on-disk format.
+		// The list-view endpoint (handlers_viewer.go:46) passes
+		// HasIDs: &hasIDs where hasIDs comes from this flag — so a
+		// competition that started with HasParticipantIDs=false (e.g.
+		// import path with a manual non-UUID roster) would have its
+		// new UUID file misparsed: the UUID becomes part of the "Name".
+		// Set the flag now so the persisted metadata matches the file
+		// we're about to save.
+		if resolvedSlots {
+			current.HasParticipantIDs = true
+		}
 		return current, nil
 	})
 	if err != nil {

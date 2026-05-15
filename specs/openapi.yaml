@@ -436,15 +436,26 @@ paths:
       tags: [competitions]
       summary: Update competition
       description: |
-        Replaces the competition record (body-replace semantics). The server
-        trims string fields (`name`, `numberPrefix`, `kind`, `format`,
-        `poolSizeMode`, `startTime`, `date`) and rejects the request with
-        400 if `name` is empty after trim or if it collides
-        (case-insensitive) with another competition's name. Status field
-        is server-managed — see Competition.status for transition
-        endpoints; sending `status` here is accepted but bypasses the
-        invariants the dedicated /start, /complete, /invalidate endpoints
-        enforce.
+        Settings-only update. The server applies these fields from the
+        body onto the on-disk record: `name`, `date`, `startTime`,
+        `poolSize`, `poolWinners`, `poolSizeMode`, `courts`,
+        `roundRobin`, `withZekkenName`, `teamSize`, `numberPrefix`,
+        `format`, `kind`, `mirror`. String fields are trimmed
+        server-side. The request is rejected with 400 if `name` is
+        empty after trim, if `name` collides (case-insensitive) with
+        another competition's name, or if `date` is non-empty and not
+        in canonical `DD-MM-YYYY` format. Returns 404 when the
+        competition does not exist (this endpoint never creates).
+
+        Server-managed fields — `status`, `hasParticipantIDs` — are
+        IGNORED in the body. Use the dedicated transition endpoints
+        (`/start`, `/complete`, `/invalidate`) to change status.
+
+        When the body carries `players`, the server ALSO writes the
+        participants.csv and seeds.csv files for the competition (this
+        is how the admin participants page saves the roster via the
+        same PUT). Seeds are extracted from each player's `seed`
+        field; players with `seed: 0` produce no seed entry.
       security:
         - TournamentPassword: []
       requestBody:

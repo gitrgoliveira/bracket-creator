@@ -940,12 +940,13 @@ func TestCompetitionHandlers(t *testing.T) {
 	os.Remove(filepath.Join(tempDir, "competitions"))
 	os.Mkdir(filepath.Join(tempDir, "competitions"), 0755)
 	// PUT /api/competitions/:id (update existing)
-	// Reset comp.ID to "c1" to match the URL — the prior reuse of the
-	// `comp` variable left ID="fail" from the save-error block above,
-	// and the PUT handler now rejects body.ID/URL.id mismatches
-	// (defense-in-depth from Copilot review #1).
-	comp.ID = "c1"
-	comp.Name = "Updated c1"
+	// Re-seed c1 first — the test deleted it above (line 907) and the
+	// PUT handler now correctly returns 404 for missing competitions
+	// (settings-only update, never creates; OpenAPI documents this and
+	// pre-fix the handler would silently create via
+	// saveCompetitionWithPlayers).
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", Name: "c1 reseed"}))
+	comp = state.Competition{ID: "c1", Name: "Updated c1"}
 	body, _ = json.Marshal(comp)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/c1", bytes.NewBuffer(body))
@@ -958,6 +959,15 @@ func TestCompetitionHandlers(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	// PUT /api/competitions/:id (not found — never creates per OpenAPI)
+	missing := state.Competition{ID: "never-existed", Name: "Phantom"}
+	body, _ = json.Marshal(missing)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/never-existed", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code, "PUT must 404 on missing competition")
+	assert.Contains(t, w.Body.String(), "not found")
 }
 
 func TestCompetitionsEmptyList(t *testing.T) {

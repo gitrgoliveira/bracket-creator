@@ -178,6 +178,42 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		comp.PoolSizeMode = "max"
 	}
 
+	// Parse participants AND seeds BEFORE saving the competition config.
+	// Pre-fix, the config was saved first and the participants parse
+	// happened after — so a malformed participants file left a half-
+	// written competition on disk (config.md present, no participants.
+	// csv). The ID-collision guard then made retries impossible: the
+	// next attempt with the same manifest ID got "already exists" even
+	// though the prior attempt failed. Parsing first means a parse
+	// failure surfaces res.Error without ever touching disk; the user
+	// can fix the file and retry the manifest cleanly.
+	var parsedPlayers []helper.Player
+	if entry.Participants != "" {
+		data := findFile(files, entry.Participants)
+		if data == nil {
+			res.Error = fmt.Sprintf("participants file %q not found in upload", entry.Participants)
+			return res
+		}
+		lines := csvLines(data)
+		players, err := helper.CreatePlayers(lines, entry.WithZekkenName)
+		if err != nil {
+			res.Error = "parse participants: " + err.Error()
+			return res
+		}
+		parsedPlayers = players
+	}
+
+	var parsedSeeds []domain.SeedAssignment
+	if entry.Seeds != "" {
+		data := findFile(files, entry.Seeds)
+		if data != nil {
+			assignments, err := parseSeedsBytes(data)
+			if err == nil && len(assignments) > 0 {
+				parsedSeeds = assignments
+			}
+		}
+	}
+
 	// Cross-file guard symmetry with handlers_competition.go POST + PUT:
 	// the uniqueness check + save run under WithCompetitionRenameLock
 	// so two concurrent imports (or an import racing against a POST)
@@ -191,7 +227,11 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		// comp.Name passes the name-uniqueness check (its name IS
 		// unique) and then SaveCompetition silently overwrites the
 		// existing record. POST is documented as CREATE, so an
-		// existing ID is a 400-ish conflict.
+		// existing ID is a 400-ish conflict. Retry-after-failure is
+		// safe because the participants/seeds parse above happens
+		// pre-save — a parse failure aborts the row before this guard
+		// runs, so the disk stays clean and the retry's collision
+		// check passes on a never-saved ID.
 		if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
 			res.Error = fmt.Sprintf("competition ID %q already exists", comp.ID)
 			return nil
@@ -199,6 +239,12 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		if uniqueErr := checkUniqueCompName(store, comp.Name, comp.ID); uniqueErr != nil {
 			res.Error = uniqueErr.Error()
 			return nil
+		}
+		if len(parsedPlayers) > 0 {
+			// Mirror saveCompetitionWithPlayers semantics: when
+			// participants land, the config records that fact so
+			// later HasIDs-hinted loads parse correctly.
+			comp.HasParticipantIDs = true
 		}
 		return store.SaveCompetition(comp)
 	}); err != nil {
@@ -211,36 +257,20 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 
-	// Save participants if file is provided.
-	if entry.Participants != "" {
-		data := findFile(files, entry.Participants)
-		if data == nil {
-			res.Error = fmt.Sprintf("participants file %q not found in upload", entry.Participants)
-			return res
-		}
-		lines := csvLines(data)
-		players, err := helper.CreatePlayers(lines, entry.WithZekkenName)
-		if err != nil {
-			res.Error = "parse participants: " + err.Error()
-			return res
-		}
-		if err := store.SaveParticipants(entry.ID, players); err != nil {
+	// Save participants — already parsed pre-save, so this is a pure
+	// disk write that can only fail on I/O.
+	if len(parsedPlayers) > 0 {
+		if err := store.SaveParticipants(entry.ID, parsedPlayers); err != nil {
 			res.Error = "save participants: " + err.Error()
 			return res
 		}
-		res.ParticipantCount = len(players)
+		res.ParticipantCount = len(parsedPlayers)
 	}
 
-	// Save seeds if file is provided.
-	if entry.Seeds != "" {
-		data := findFile(files, entry.Seeds)
-		if data != nil {
-			assignments, err := parseSeedsBytes(data)
-			if err == nil && len(assignments) > 0 {
-				_ = store.SaveSeeds(entry.ID, assignments)
-				res.SeedCount = len(assignments)
-			}
-		}
+	// Save seeds — already parsed pre-save.
+	if len(parsedSeeds) > 0 {
+		_ = store.SaveSeeds(entry.ID, parsedSeeds)
+		res.SeedCount = len(parsedSeeds)
 	}
 
 	return res

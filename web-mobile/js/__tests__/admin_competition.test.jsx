@@ -294,16 +294,23 @@ describe('loadScoreboardPoints', () => {
 // AdminSettings syncs server-pushed changes into local state via a
 // useEffect whose deps list every c.* field rendered in the JSX (via
 // `local.*`). A missing dep means an SSE update to that field won't
-// propagate — the user sees stale data AND the next save of any other
-// field clobbers the server value (saveNow spreads { ...c, ...next }).
+// propagate — the user sees stale data (the UI keeps showing the
+// pre-SSE value).
 //
-// This structural test reads the source file and verifies the deps array
-// contains every c.* field that the JSX accesses through `local.*`.
-// It replaces a rendering test (which would need @testing-library/react,
-// not available in the current vitest stub-React setup).
+// This used to ALSO matter for save correctness because saveNow spread
+// `{ ...c, ...next }` into the PUT — so a stale `local.status` would
+// be PUT back over a server-side status change. That's now handled
+// independently by the saveNow whitelist below (it builds the PUT
+// body from settings fields only, never including non-settings fields
+// like status/players/hasParticipantIDs). The deps-list test is still
+// required for UI freshness; the whitelist test is required for save
+// safety. Both decoupled = a missing dep is a UI bug only, not a
+// silent server-state revert.
 //
 // If you add a new `local.foo` reference in AdminSettings' JSX, add
 // `c.foo` to the useEffect deps AND add "foo" to EXPECTED_DEPS below.
+// If you add a new settings field that saveNow should PUT, add it to
+// SAVE_NOW_FIELDS (and EXPECTED_DEPS so the UI stays in sync).
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -311,9 +318,9 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
-  // Fields rendered via `local.*` in AdminSettings' JSX or consumed by
-  // saveNow's `{ ...c, ...next }` spread. Each must appear as `c.<field>`
-  // in the useEffect deps array so SSE-driven changes propagate.
+  // Fields rendered via `local.*` in AdminSettings' JSX. Each must
+  // appear as `c.<field>` in the useEffect deps array so SSE-driven
+  // changes propagate to the UI.
   const EXPECTED_DEPS = [
     'id', 'name', 'date', 'startTime',
     'poolSize', 'poolWinners', 'poolSizeMode',
@@ -343,6 +350,73 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
         depsLine.includes(pattern),
         `expected deps to include ${pattern} — if you added local.${field} to the JSX, add c.${field} to the useEffect deps`
       ).toBe(true);
+    }
+  });
+});
+
+// ── saveNow payload whitelist ──
+//
+// AdminSettings.saveNow used to spread `{ ...c, ...next }` into the
+// PUT body, which carried fields like status/players/hasParticipantIDs
+// that AdminSettings doesn't manage. If the sync-to-local deps array
+// was incomplete for any such field (Copilot finding on the H3 sync
+// effect), a setting save would PUT a stale value back over the
+// server-side change.
+//
+// Fix: build the finalNext object from a fixed allowlist of settings
+// fields, ignoring whatever else is in `local`. This makes
+// AdminSettings genuinely settings-only at the wire boundary and
+// decouples save correctness from the sync effect's dep coverage.
+//
+// Structural test: read the source and verify finalNext's object
+// literal contains ONLY allowlisted keys (so a future refactor that
+// re-introduces a `{ ...c, ...next }` spread can't sneak past CI).
+
+describe('AdminSettings.saveNow payload whitelist', () => {
+  // Settings fields the PUT body is allowed to include. Server-managed
+  // fields (status, players, hasParticipantIDs) and viewer-derived
+  // fields (poolMatches, pools, bracket, schedule) must NOT appear.
+  const ALLOWED = new Set([
+    'id', 'name', 'date', 'startTime',
+    'poolSize', 'poolWinners', 'poolSizeMode',
+    'courts', 'roundRobin', 'withZekkenName',
+    'teamSize', 'numberPrefix',
+    'format', 'kind',
+  ]);
+  // Fields that MUST NOT appear in the PUT body — pinning the
+  // negative invariant explicitly so a careless re-add is caught.
+  const FORBIDDEN = ['status', 'players', 'hasParticipantIDs', 'poolMatches', 'pools', 'bracket', 'schedule'];
+
+  it('finalNext contains only allowlisted settings keys', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'admin_competition.jsx'),
+      'utf8'
+    );
+
+    // Find `const finalNext = { ... };` and extract its top-level keys.
+    // The literal is multi-line, so match through the closing brace.
+    const fnMatch = src.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
+    expect(fnMatch, 'expected `const finalNext = { ... };` in saveNow').not.toBeNull();
+    const body = fnMatch[1];
+
+    // No spread allowed — saveNow used to do `{ ...c, ...next, ... }`
+    // and that's exactly the regression we want to prevent.
+    expect(/\.\.\./.test(body), 'finalNext must not use spread — list each field explicitly').toBe(false);
+
+    // Extract key names (everything before `:` per line, ignoring
+    // strings/comments). Simple but sufficient for an object literal.
+    const keys = [];
+    for (const line of body.split('\n')) {
+      const m = line.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/);
+      if (m) keys.push(m[1]);
+    }
+    expect(keys.length, 'finalNext appears to have no fields — parse failed').toBeGreaterThan(0);
+
+    for (const k of keys) {
+      expect(ALLOWED.has(k), `finalNext key "${k}" is not in the settings allowlist — either add it to ALLOWED here (if it really is a setting) or remove it from finalNext`).toBe(true);
+    }
+    for (const forbidden of FORBIDDEN) {
+      expect(keys.includes(forbidden), `finalNext must NOT include "${forbidden}" — that field is server-managed via a dedicated endpoint, not settings`).toBe(false);
     }
   });
 });

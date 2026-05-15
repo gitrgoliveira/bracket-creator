@@ -46,11 +46,15 @@ function hasBothSides(m) {
 // endpoints when match counts are needed.
 function compMatchStats(c) {
   let total = 0, done = 0, live = 0;
-  // Truthy-checking the side itself isn't enough — normalizeMatch substitutes
-  // {id:"",name:""} for missing sides, which is truthy. sideName() returns
-  // "" for those, so byes and unresolved bracket slots stay uncounted.
+  // Use hasBothSides() — the canonical cross-file predicate — so admin
+  // dashboard / overview / live-strip stats can't drift from viewer-side
+  // filtering. Inline `sideName(m.sideA) && sideName(m.sideB)` was almost
+  // right (skips byes / normalizeMatch's empty-side substitute) but missed
+  // bracket placeholders like "Winner of r0-m1" — those have truthy
+  // sideName() values, so future-round matches were counted as real before
+  // their source resolves. hasBothSides also rejects that exact shape.
   const count = (m) => {
-    if (!m || !sideName(m.sideA) || !sideName(m.sideB)) return;
+    if (!hasBothSides(m)) return;
     total++;
     if (m.status === "completed") done++;
     if (m.status === "running") live++;

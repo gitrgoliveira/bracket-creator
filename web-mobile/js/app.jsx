@@ -385,7 +385,14 @@ function AuthModal({ onClose, onSuccess }) {
 
 function CreateTournament({ onCreated }) {
   const [name, setName] = useS("");
-  const [date, setDate] = useS(new Date().toISOString().split("T")[0]);
+  // Initialize date in canonical DD-MM-YYYY format, not ISO YYYY-MM-DD.
+  // toISOString() emits ISO; without this conversion the picker boundary
+  // (dmyToIso below) reads it as malformed and renders empty, AND the
+  // submit body would send ISO to POST /api/tournament — which now
+  // rejects non-DMY dates with 400 "date must be DD-MM-YYYY".
+  const today = new Date();
+  const todayDmy = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+  const [date, setDate] = useS(todayDmy);
   const [venue, setVenue] = useS("");
   const [courts, setCourts] = useS(2);
   const [pass, setPass] = useS("");

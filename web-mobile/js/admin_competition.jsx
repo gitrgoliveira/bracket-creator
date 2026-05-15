@@ -317,10 +317,22 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // Use the shared validator (admin_helpers.jsx). Returns the
     // canonical DD-MM-YYYY form on success, or an error message on
     // failure (bad shape, semantic-invalid day, year out of range).
-    const { norm: dateNorm, error: dateError } = validateAndNormalizeDate(next.date);
-    if (dateError) {
-      setSaveErr(dateError);
-      return;
+    //
+    // Skip validation for empty date — the backend's validateDateDMY
+    // accepts "" as "Date TBA" and competitions created via the import
+    // path can land here with an empty Date. Without this skip, the
+    // user would be unable to change ANY unrelated setting on a
+    // date-less competition (round-robin toggle, pool size, etc.) — the
+    // first debounced saveLater fires saveNow, which rejects with
+    // "Invalid date" even though the user hasn't touched the date.
+    let dateNorm = "";
+    if (next.date && next.date.trim() !== "") {
+      const { norm, error: dateError } = validateAndNormalizeDate(next.date);
+      if (dateError) {
+        setSaveErr(dateError);
+        return;
+      }
+      dateNorm = norm;
     }
 
     // Trim before comparing AND before sending. The backend trims
@@ -359,7 +371,37 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // generated from the prefix can't end up like "  A1" / "  A2".
     // Cross-file guard symmetry: same shape as the comp.Name trim above.
     const trimmedPrefix = (next.numberPrefix || "").trim();
-    const finalNext = { ...c, ...next, name: trimmedName, numberPrefix: trimmedPrefix, date: dateNorm };
+    // Build the PUT payload from settings fields ONLY — do NOT spread the
+    // full `c` snapshot or the full `next` snapshot. Pre-fix this was
+    // `{ ...c, ...next, ... }`, which carried `local.status` and
+    // `local.players` (and any other field the JSX/effects don't touch)
+    // into the PUT body. If the sync-to-local effect deps list was
+    // incomplete for any such field, SSE-pushed changes to that field
+    // would not propagate into `local`, and the next save of ANY unrelated
+    // setting would PUT the stale value back to the server — effectively
+    // reverting the server-side change. Whitelisting the payload makes
+    // AdminSettings genuinely settings-only and decouples save correctness
+    // from the deps-list completeness of the sync effect.
+    //
+    // Fields server-managed via dedicated endpoints (status, players,
+    // hasParticipantIDs) are deliberately excluded. If a new settings
+    // field is added to the JSX, also add it here.
+    const finalNext = {
+      id: c.id,
+      name: trimmedName,
+      date: dateNorm,
+      startTime: next.startTime,
+      poolSize: next.poolSize,
+      poolWinners: next.poolWinners,
+      poolSizeMode: next.poolSizeMode,
+      courts: next.courts,
+      roundRobin: next.roundRobin,
+      withZekkenName: next.withZekkenName,
+      teamSize: next.teamSize,
+      numberPrefix: trimmedPrefix,
+      format: next.format,
+      kind: next.kind,
+    };
     Promise.resolve(onUpdate(finalNext)).then(() => {
       if (!mountedRef.current) return;
       const now = new Date();

@@ -190,9 +190,14 @@ describe('refreshCompsAfterCreate merge mutator', () => {
 // and checking that the merge result reflects the LATEST competitions
 // list, not a snapshotted closure capture.
 describe('mergeTournamentPatch', () => {
+  // NB: test fixtures below use the literal strings "X", "Y", "Z" for
+  // password values. Avoid anything that looks like a credential (e.g.
+  // "session-secret", "new-pw") — generic-password secret scanners
+  // (GitGuardian etc.) match on keyword-adjacent string values regardless
+  // of context, and a flagged test fixture noise-fails CI.
   it('overlays patch fields onto the latest tournament', () => {
-    const t = { id: 't1', name: 'Old', date: '01-01-2026', venue: 'Hall', password: 'sess' };
-    const result = mergeTournamentPatch(t, { name: 'New', venue: 'Dojo' }, 'sess');
+    const t = { id: 't1', name: 'Old', date: '01-01-2026', venue: 'Hall', password: 'X' };
+    const result = mergeTournamentPatch(t, { name: 'New', venue: 'Dojo' }, 'X');
     expect(result.name).toBe('New');
     expect(result.venue).toBe('Dojo');
     expect(result.date).toBe('01-01-2026');
@@ -203,16 +208,16 @@ describe('mergeTournamentPatch', () => {
     // freshly fetched tournament has password=""; we need to refill it
     // from the session before sending back to the server.
     const t = { id: 't1', name: 'Cup', password: '' };
-    const result = mergeTournamentPatch(t, { name: 'New' }, 'session-secret');
-    expect(result.password).toBe('session-secret');
+    const result = mergeTournamentPatch(t, { name: 'New' }, 'Y');
+    expect(result.password).toBe('Y');
   });
 
   it('keeps the patch password when explicitly provided', () => {
     // The "user wants to change the password" path: patch.password wins
     // over the session password, regardless of what was on disk.
-    const t = { id: 't1', name: 'Cup', password: 'old' };
-    const result = mergeTournamentPatch(t, { password: 'new-pw' }, 'session-irrelevant');
-    expect(result.password).toBe('new-pw');
+    const t = { id: 't1', name: 'Cup', password: 'X' };
+    const result = mergeTournamentPatch(t, { password: 'Z' }, 'Y');
+    expect(result.password).toBe('Z');
   });
 
   it('preserves the latest tournament competitions when patch omits them', () => {
@@ -224,14 +229,14 @@ describe('mergeTournamentPatch', () => {
     // tRef.current through it, so SSE updates that landed mid-flight are
     // preserved in the merged result.
     const latestT = {
-      id: 't1', name: 'Old', password: 'sess',
+      id: 't1', name: 'Old', password: 'X',
       competitions: [
         { id: 'c1', name: 'Pools', status: 'pools' }, // SSE-updated mid-flight
         { id: 'c2', name: 'Playoffs', status: 'completed' }, // SSE-added mid-flight
       ],
     };
     const patch = { name: 'New tournament name' };
-    const result = mergeTournamentPatch(latestT, patch, 'sess');
+    const result = mergeTournamentPatch(latestT, patch, 'X');
     expect(result.name).toBe('New tournament name');
     // The SSE-driven competitions list is preserved — pre-fix this would
     // have been the closure-captured pre-PUT snapshot (whatever t was at
@@ -248,7 +253,7 @@ describe('mergeTournamentPatch', () => {
     // refactor doesn't accidentally swap the spread order (which would
     // make the latest snapshot win, ignoring the user's edit).
     const t = { id: 't1', name: 'A', date: '01-01-2026' };
-    const result = mergeTournamentPatch(t, { name: 'B', date: '02-01-2026' }, 'sess');
+    const result = mergeTournamentPatch(t, { name: 'B', date: '02-01-2026' }, 'X');
     expect(result.name).toBe('B');
     expect(result.date).toBe('02-01-2026');
   });
@@ -258,7 +263,7 @@ describe('mergeTournamentPatch', () => {
     // mergeTournamentPatch must always produce a new tournament object
     // so the parent's setT triggers a re-render.
     const t = { id: 't1', name: 'A' };
-    const result = mergeTournamentPatch(t, {}, 'sess');
+    const result = mergeTournamentPatch(t, {}, 'X');
     expect(result).not.toBe(t);
   });
 });

@@ -64,7 +64,7 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 		// If it's not a front-matter file, return a default tournament
 		t = Tournament{
 			Name:  "New Tournament",
-			Date:  time.Now().Format("2006-01-02"),
+			Date:  time.Now().Format("02-01-2006"),
 			Venue: "Venue TBA",
 		}
 	}
@@ -189,7 +189,7 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 			// consistent.
 			current = &Tournament{
 				Name:  "New Tournament",
-				Date:  time.Now().Format("2006-01-02"),
+				Date:  time.Now().Format("02-01-2006"),
 				Venue: "Venue TBA",
 			}
 		}

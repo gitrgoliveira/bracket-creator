@@ -65,7 +65,7 @@ func TestStore_TournamentYAML(t *testing.T) {
 
 	tourney := &Tournament{
 		Name:     "Test Tournament",
-		Date:     "2026-05-01",
+		Date:     "01-05-2026", // DD-MM-YYYY canonical format
 		Venue:    "Test Venue",
 		Courts:   []string{"A", "B"},
 		Password: "pass",
@@ -139,6 +139,13 @@ func TestStore_TournamentYAML_Fallback(t *testing.T) {
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
 	assert.Equal(t, "New Tournament", loaded.Name)
+	// Canonical date format invariant: DD-MM-YYYY. If this regex fails,
+	// the bootstrap default in tournament.go is using the wrong layout.
+	// Validator handlers_tournament.validateDateDMY rejects any other
+	// shape with 400, so an ISO-formatted bootstrap default would force
+	// admins to retype the date even when not editing it.
+	assert.Regexp(t, `^\d{2}-\d{2}-\d{4}$`, loaded.Date,
+		"bootstrap default Date must use DD-MM-YYYY canonical format")
 }
 
 func TestStore_TournamentYAML_MalformedFrontMatter(t *testing.T) {
@@ -157,6 +164,9 @@ func TestStore_TournamentYAML_MalformedFrontMatter(t *testing.T) {
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
 	assert.Equal(t, "New Tournament", loaded.Name)
+	// Same DMY-canonical invariant as the fallback test above.
+	assert.Regexp(t, `^\d{2}-\d{2}-\d{4}$`, loaded.Date,
+		"malformed-front-matter fallback Date must use DD-MM-YYYY canonical format")
 }
 
 // --- Participants CSV ---

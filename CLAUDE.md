@@ -137,5 +137,6 @@ All changes must be validated with `make go/test` and inspection of the generate
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+shell commands, and other important information, read the current plan:
+`specs/003-tournament-gap-closure/plan.md`
 <!-- SPECKIT END -->

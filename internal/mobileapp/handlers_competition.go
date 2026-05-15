@@ -40,6 +40,18 @@ func slugifyID(name string) string {
 // are present, saves participants and extracts seed assignments.
 // Returns (true, nil) when the on-disk content changed, so callers can decide
 // whether to broadcast.
+//
+// IMPORTANT: this function is intended for CREATE paths only (POST
+// /competitions). On a SaveParticipants failure AFTER SaveCompetitionChanged
+// succeeded, it rolls back by calling DeleteCompetition — without that
+// rollback, the ID-collision check at the top of POST /competitions would
+// block retries because the orphaned config.md is on disk but
+// participants.csv isn't. Calling this on an UPDATE path would delete the
+// existing record on participants-save failure, so callers updating an
+// existing competition must use store.SaveParticipants directly (see the
+// PUT /competitions/:id handler, which writes participants after the
+// transform commits and treats save errors as retriable since PUT is
+// idempotent — no ID-collision trap).
 func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bool, error) {
 	if len(comp.Players) > 0 {
 		comp.HasParticipantIDs = true // participants.csv always written with UUID IDs
@@ -52,10 +64,22 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 		return changed, nil
 	}
 	if err := store.SaveParticipants(comp.ID, comp.Players); err != nil {
+		// Rollback: SaveCompetitionChanged wrote config.md, but
+		// participants.csv didn't land. Without removing config.md the
+		// caller's ID-collision check on retry would 400 "ID already
+		// exists" even though the prior attempt failed. Mirror the
+		// import handler's rollback pattern (handlers_import.go).
+		_ = store.DeleteCompetition(comp.ID) // best-effort rollback
 		return false, fmt.Errorf("failed to save participants: %w", err)
 	}
 	assignments := extractSeeds(comp.Players)
 	if err := store.SaveSeeds(comp.ID, assignments); err != nil {
+		// SaveSeeds is best-effort by historical contract (the same
+		// Printf-warning pattern is used in the PUT handler's
+		// participants block). seeds.csv missing is recoverable
+		// — the operator can re-set seeds without re-creating the
+		// competition. No rollback to avoid surprising the caller
+		// with a deleted record over a non-critical write.
 		fmt.Printf("Warning: failed to save seeds: %v\n", err)
 	}
 	return changed, nil
@@ -850,9 +874,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Link reserved slots (this will also add placeholder participants)
+		// Link reserved slots (this will also add placeholder participants).
+		// Rollback on failure: SaveCompetitionChanged above already wrote
+		// config.md for the playoff. If any AddReservedSlot iteration
+		// fails (I/O error, EISDIR, etc.) the playoff is half-created —
+		// config on disk, slots/placeholders partial or absent — and the
+		// ID-collision guard inside WithCompetitionRenameLock above would
+		// block a retry with "derived playoff ID already exists". Mirror
+		// the import handler's rollback pattern (handlers_import.go).
 		for i := 1; i <= totalWinners; i++ {
 			if _, err := store.AddReservedSlot(playoff.ID, id, i, playoff.WithZekkenName); err != nil {
+				_ = store.DeleteCompetition(playoff.ID) // best-effort rollback
 				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to add reserved slot %d: %v", i, err)})
 				return
 			}

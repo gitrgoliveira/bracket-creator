@@ -765,6 +765,117 @@ func TestPlayoff_RejectsDerivedIDCollision(t *testing.T) {
 	assert.Equal(t, "PRESERVED", stored.NumberPrefix)
 }
 
+// TestPOSTCompetition_RollbackOnSaveParticipantsFailure pins the K3
+// rollback: when POST /competitions carries a populated Players list,
+// saveCompetitionWithPlayers does SaveCompetitionChanged → SaveParticipants
+// sequentially. If SaveParticipants fails after SaveCompetitionChanged
+// already wrote config.md, the orphaned config blocks retries with the
+// ID-collision guard ("competition ID already exists"). The rollback
+// removes config.md so the operator can re-run the POST after fixing
+// the I/O issue. Mirrors the import handler's rollback contract
+// (handlers_import_test.go Import Rollback On SaveSeeds I/O Failure).
+//
+// Forces a deterministic SaveParticipants I/O failure by pre-creating
+// a directory where participants.csv is supposed to be a file — on
+// macOS/Linux/Windows, os.WriteFile against a directory path returns
+// EISDIR / equivalent reliably.
+func TestPOSTCompetition_RollbackOnSaveParticipantsFailure(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "rollback-create-test"
+	// Plant a directory where participants.csv must be a file. POST
+	// /competitions for `cid` will create the comp dir (MkdirAll is
+	// idempotent), then SaveCompetitionChanged writes config.md
+	// successfully, then SaveParticipants tries to write to
+	// participants.csv → fails because the path is a directory.
+	participantsAsDir := filepath.Join(tempDir, "competitions", cid, "participants.csv")
+	require.NoError(t, os.MkdirAll(participantsAsDir, 0700))
+
+	body := map[string]any{
+		"id":     cid,
+		"name":   "Rollback Test",
+		"kind":   "individual",
+		"format": "pools",
+		"date":   "12-05-2026",
+		"courts": []string{"A"},
+		// Populated Players triggers the saveCompetitionWithPlayers
+		// SaveParticipants step that the planted directory blocks.
+		"players": []map[string]any{
+			{"Name": "Player 1", "Dojo": "Dojo A"},
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code,
+		"POST must surface SaveParticipants I/O failure as 500")
+	assert.Contains(t, w.Body.String(), "failed to save participants",
+		"error message must identify the failing step")
+
+	// Rollback assertion: the orphaned config.md must be gone so a
+	// retry of the same POST passes the ID-collision guard at the
+	// top of WithCompetitionRenameLock.
+	stored, _ := store.LoadCompetition(cid)
+	assert.Nil(t, stored,
+		"rollback must remove config.md so retry isn't blocked by 'ID already exists'")
+}
+
+// TestCreatePlayoff_RollbackOnReservedSlotFailure pins the K3 rollback
+// for POST /competitions/:id/playoffs. SaveCompetitionChanged commits the
+// playoff config inside WithCompetitionRenameLock, then the
+// AddReservedSlot loop runs OUTSIDE the lock. If any slot's I/O fails,
+// the orphaned playoff config would block the operator's retry with
+// "derived playoff ID already exists" — the same shape as the
+// POST /competitions rollback above and the import handler's rollback.
+//
+// Forces deterministic failure by planting a directory at the playoff's
+// future participants.csv path (AddReservedSlot writes a placeholder
+// participant via saveParticipantsLocked, which encounters EISDIR).
+func TestCreatePlayoff_RollbackOnReservedSlotFailure(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Source competition with 3 participants → numPools=1 with default
+	// poolSize=3 → totalWinners = 1*2 = 2 (two AddReservedSlot calls).
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "rollback-src",
+		Name:   "Rollback Src",
+		Format: state.CompFormatPools,
+		Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants("rollback-src", []helper.Player{
+		{Name: "P1", Dojo: "D"},
+		{Name: "P2", Dojo: "D"},
+		{Name: "P3", Dojo: "D"},
+	}))
+
+	// Plant a directory where the playoff's participants.csv should be
+	// a file. Derived playoff ID = slugifyID("Rollback Src - Playoffs")
+	// = "rollback-src-playoffs". Created BEFORE the POST so when
+	// AddReservedSlot tries to saveParticipantsLocked the placeholder,
+	// the path is a directory → EISDIR.
+	playoffID := "rollback-src-playoffs"
+	participantsAsDir := filepath.Join(tempDir, "competitions", playoffID, "participants.csv")
+	require.NoError(t, os.MkdirAll(participantsAsDir, 0700))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/rollback-src/playoffs", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code,
+		"POST /playoffs must surface AddReservedSlot I/O failure as 500")
+	assert.Contains(t, w.Body.String(), "failed to add reserved slot",
+		"error message must identify the failing step")
+
+	// Rollback assertion: the orphaned playoff config must be gone so a
+	// retry isn't blocked by the ID-collision guard.
+	stored, _ := store.LoadCompetition(playoffID)
+	assert.Nil(t, stored,
+		"rollback must remove the playoff config.md so retry passes the ID-collision guard")
+}
+
 // TestPOSTTournament_ValidatesCourts pins Copilot #8: POST and PUT
 // /api/tournament now call validateCourts (1..26 single-char labels)
 // matching the spec. Direct API callers can no longer persist >26

@@ -69,6 +69,25 @@ const MaxCourts = 26
 // participants.
 const MaxRankOverride = 1000
 
+// MinDateYear / MaxDateYear are the inclusive bounds on the year
+// component of tournament + competition dates. The mobile-app HTTP
+// handlers (validateDateDMY in handlers_tournament.go) enforce these
+// on every write path so a value the API accepts is also one the
+// admin UI can edit. Without matching bounds, a direct API/import
+// write landing an out-of-range date would block every subsequent
+// admin Settings save — the JS validator re-validates the stored
+// date on every PUT and surfaces an inline error before reaching the
+// wire.
+//
+// Mirrored client-side as `MIN_YEAR` / `MAX_YEAR` in
+// web-mobile/js/admin_helpers.jsx — keep all four in lockstep. Pin
+// tests on both sides assert the literal values so cross-language
+// drift fails CI rather than waiting for a date-related UX bug.
+const (
+	MinDateYear = 1900
+	MaxDateYear = 2100
+)
+
 // CourtsColumnsPerCourt is the number of Excel columns allocated to each
 // court (Shiaijo) on the Pool Matches and Elimination Matches sheets.
 // Layout: Name | V | P | vs | P | V | Name | Spacer = 8 columns.

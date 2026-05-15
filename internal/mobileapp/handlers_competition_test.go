@@ -541,6 +541,49 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, []string{"A", "B"}, stored.Courts, "seed courts untouched by failed duplicate-label PUTs")
 	})
 
+	// Copilot round-15 finding: validateCourtLabels accepted single-
+	// whitespace labels because `label == ""` is false and
+	// `len([]rune(" ")) == 1`. Such a label persists to disk and becomes
+	// a React `key={cc}` value, schedule `byCourt[m.court]` bucket key,
+	// and filter dropdown value — visually blank but structurally
+	// distinct from "". Each whitespace shape (space, tab, NBSP) needs
+	// rejection.
+	t.Run("Whitespace-Only Court Labels Rejected On Create And Update", func(t *testing.T) {
+		seed := state.Competition{ID: "ws-courts-test", Name: "WS Courts Test", Date: "01-01-2026", Courts: []string{"A", "B"}}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		wsCases := [][]string{
+			{" "},      // single ASCII space
+			{"\t"},     // tab
+			{" "},      // non-breaking space (still single rune)
+			{"A", " "}, // mixed: valid + whitespace-only
+			{"　"},      // ideographic space
+		}
+		for i, wsCourts := range wsCases {
+			post := state.Competition{ID: fmt.Sprintf("ws-courts-post-%d", i), Name: fmt.Sprintf("WS Courts Post %d", i), Date: "01-01-2026", Courts: wsCourts}
+			body, _ := json.Marshal(post)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"POST /competitions with Courts=%v must return 400 (whitespace-only label)", wsCourts)
+			assert.Contains(t, w.Body.String(), "whitespace-only")
+
+			put := state.Competition{ID: "ws-courts-test", Name: "WS Courts Test", Date: "01-01-2026", Courts: wsCourts}
+			body, _ = json.Marshal(put)
+			w = httptest.NewRecorder()
+			req, _ = http.NewRequest("PUT", "/api/competitions/ws-courts-test", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"PUT /competitions/ws-courts-test with Courts=%v must return 400 (whitespace-only label)", wsCourts)
+		}
+		stored, _ := store.LoadCompetition("ws-courts-test")
+		require.NotNil(t, stored)
+		assert.Equal(t, []string{"A", "B"}, stored.Courts, "seed courts untouched by failed whitespace-label PUTs")
+	})
+
 	// Copilot round-4 finding on PR #104: POST /competitions with a
 	// non-empty but invalid `id` (e.g. "../../etc/passwd", "foo bar",
 	// "foo.bar") skipped the derive-from-name block, hit

@@ -362,12 +362,22 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // the SSE-driven updates with pre-save state until the next refresh.
       const sendBody = mergeTournamentPatch(tRef.current, patch, password);
       await window.API.updateTournament(sendBody, password);
+      // Bail if the admin navigated away during the in-flight PUT —
+      // mirrors startAllCompetitions / refreshCompsAfterCreate /
+      // createPlayoff. Without this gate, onUpdateRef.current (parent's
+      // setState) and showToast fire on an unmounted component,
+      // producing the standard React setState-after-unmount warning.
+      // Caught by /deep-review iterative pass after round-11 swept
+      // updateTournament to tRef/onUpdateRef but missed the unmount
+      // guard the other handlers carry.
+      if (!mountedRef.current) return;
       // Re-read tRef.current AFTER the await — additional SSE events may
       // have landed during the save. The patch we just persisted is
       // applied on top of the freshest snapshot.
       onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password));
       showToast("Tournament updated");
     } catch (e) {
+      if (!mountedRef.current) return;
       showToast(e.message, "error");
     }
   };

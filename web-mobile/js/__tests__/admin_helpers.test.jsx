@@ -468,6 +468,14 @@ describe('numeric bounds constants', () => {
     // Pin the current bounds. If anyone tightens to (2000, 2050) or
     // loosens further, this test fails and tells them to also update
     // docs / screenshot fixtures / saveNow's still-inline usage.
+    //
+    // Mirrors helper.MinDateYear / helper.MaxDateYear in
+    // internal/helper/constants.go — the Go HTTP handlers
+    // (validateDateDMY in handlers_tournament.go) reject out-of-range
+    // years on every write path. Bumping these here without bumping
+    // the Go side (or vice versa) would let the UI offer dates the
+    // backend rejects (or land dates the UI then refuses to render).
+    // The Go pin tests in constants_test.go assert the same literals.
     expect(MIN_YEAR).toBe(1900);
     expect(MAX_YEAR).toBe(2100);
   });

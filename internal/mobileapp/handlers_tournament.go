@@ -12,28 +12,16 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// minDateYear / maxDateYear mirror MIN_YEAR / MAX_YEAR in
-// web-mobile/js/admin_helpers.jsx. The frontend's validateAndNormalizeDate
-// rejects years outside this range on every settings save; without
-// matching bounds here, a direct API/import write that lands an
-// out-of-range date (e.g. "01-01-1800") would block the admin UI from
-// saving ANY unrelated setting — every settings PUT re-validates the
-// stored date and surfaces an inline error before reaching the wire.
-// Keep these in lockstep with the JS constants.
-const (
-	minDateYear = 1900
-	maxDateYear = 2100
-)
-
 // validateDateDMY validates that `date` is either empty or a syntactically
 // AND semantically valid day in DD-MM-YYYY format. Uses Go's time-parsing
 // reference layout `02-01-2006` which catches both shape errors and
 // out-of-range days (Feb 31, 32-01-2026, etc.). Also enforces the same
-// minDateYear..maxDateYear range that the frontend validator applies
-// (see admin_helpers.jsx MIN_YEAR/MAX_YEAR) so direct API callers can't
-// persist a year the UI then refuses to display or save against.
-// Shared helper used by tournament + competition + import write paths
-// to keep the canonical format invariant in one place.
+// year range that the frontend validator applies (see admin_helpers.jsx
+// MIN_YEAR/MAX_YEAR — kept in lockstep with helper.MinDateYear /
+// helper.MaxDateYear) so direct API callers can't persist a year the UI
+// then refuses to display or save against. Shared helper used by
+// tournament + competition + import write paths to keep the canonical
+// format invariant in one place.
 func validateDateDMY(date string) error {
 	if date == "" {
 		return nil
@@ -42,8 +30,8 @@ func validateDateDMY(date string) error {
 	if err != nil {
 		return fmt.Errorf("date must be DD-MM-YYYY")
 	}
-	if year := parsed.Year(); year < minDateYear || year > maxDateYear {
-		return fmt.Errorf("date year must be between %d and %d", minDateYear, maxDateYear)
+	if year := parsed.Year(); year < helper.MinDateYear || year > helper.MaxDateYear {
+		return fmt.Errorf("date year must be between %d and %d", helper.MinDateYear, helper.MaxDateYear)
 	}
 	return nil
 }
@@ -65,6 +53,20 @@ func validateCourtLabels(courts []string) error {
 	for i, label := range courts {
 		if label == "" {
 			return fmt.Errorf("courts[%d]: court label cannot be empty", i)
+		}
+		// Reject whitespace-only labels. Pre-fix, the `label == ""`
+		// check above and the single-character check below both passed
+		// for a label like " " (single space) — `label != ""` is true
+		// and `len([]rune(" ")) == 1`. The label then propagated to
+		// disk and became a React `key={cc}` value, schedule
+		// `byCourt[m.court]` bucket key, and filter value. Visually
+		// blank but structurally distinct from "" — broke the admin's
+		// court-filter dropdown and produced an unnamed schedule
+		// column. The admin UI's auto-generated A,B,C... labels can't
+		// produce whitespace, so this is defense-in-depth against
+		// direct API/import payloads.
+		if strings.TrimSpace(label) == "" {
+			return fmt.Errorf("courts[%d]: court label cannot be whitespace-only", i)
 		}
 		// Spec: single-character labels. The bracket-generator's
 		// CourtLabel helper produces "A"..."Z" exactly. Multi-character

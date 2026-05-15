@@ -78,13 +78,17 @@ function compMatchStats(c) {
 // + admin_setup use it as their HTML `max` attribute. Bumping any of these
 // here flows to every consumer mechanically.
 //
-// MAX_COURTS mirrors helper.MaxCourts (internal/helper/constants.go) —
-// anchored to the A–Z labelling cap. MAX_RANK mirrors helper.MaxRankOverride
-// (same Go file) — overflow guard for the override-rank handler; the real
-// semantic constraint is pool size, enforced server-side. Keep both
-// constants in lockstep with the Go-side declarations; they sit next to
-// each other in this file and the Go file for visibility at both edit
-// points.
+// MIN_YEAR / MAX_YEAR mirror helper.MinDateYear / helper.MaxDateYear
+// (internal/helper/constants.go) — the API's validateDateDMY rejects
+// out-of-range years to keep the wire contract symmetric with the UI.
+// MAX_COURTS mirrors helper.MaxCourts (same Go file) — anchored to the
+// A–Z labelling cap. MAX_RANK mirrors helper.MaxRankOverride — overflow
+// guard for the override-rank handler; the real semantic constraint is
+// pool size, enforced server-side.
+//
+// Pin tests on BOTH sides assert the literal values (this file's vitest
+// suite + internal/helper/constants_test.go) so cross-language drift
+// fails CI rather than waiting for a downstream UX bug.
 const MIN_YEAR = 1900;
 const MAX_YEAR = 2100;
 const MAX_TEAM_SIZE = 9;

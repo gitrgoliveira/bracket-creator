@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeCompetitionsIntoTournament } from '../admin.jsx';
+import { mergeCompetitionsIntoTournament, mergeTournamentPatch } from '../admin.jsx';
 
 // /deep-review finding on UI side: AdminApp's async handlers
 // (updateCompetition, moveMatchCourt, editMatchScore, addCompetition,
@@ -168,5 +168,97 @@ describe('refreshCompsAfterCreate merge mutator', () => {
     const created = { id: 'c1', name: 'First' };
     const result = mergeCompetitionsIntoTournament(t, appendIfMissing(created));
     expect(result.competitions).toEqual([{ id: 'c1', name: 'First' }]);
+  });
+});
+
+// /deep-review round-11 finding: AdminApp.updateTournament was the last
+// async mutation handler still using closure-captured `t` and `onUpdate`
+// instead of tRef.current / onUpdateRef.current. The other 7+ async
+// handlers were migrated in earlier rounds (see
+// mergeCompetitionsIntoTournament docstring), but updateTournament's
+// inline `onUpdate({ ...t, ...patch })` was missed. Same bug shape:
+// SSE-driven updates to the tournament (e.g. match_updated bumping a
+// competition's matches, competition_started flipping status) that
+// land during the in-flight `await window.API.updateTournament(...)`
+// get clobbered by the post-await onUpdate pushing the stale closure-
+// captured `t`.
+//
+// Pinning the merge behaviour as a pure test — the handler itself is a
+// closure inside AdminApp and can't be rendered in this vitest setup
+// (mocked React hooks). The test simulates the bug by passing a
+// "latest" tournament (mirroring what tRef.current would hold post-SSE)
+// and checking that the merge result reflects the LATEST competitions
+// list, not a snapshotted closure capture.
+describe('mergeTournamentPatch', () => {
+  it('overlays patch fields onto the latest tournament', () => {
+    const t = { id: 't1', name: 'Old', date: '01-01-2026', venue: 'Hall', password: 'sess' };
+    const result = mergeTournamentPatch(t, { name: 'New', venue: 'Dojo' }, 'sess');
+    expect(result.name).toBe('New');
+    expect(result.venue).toBe('Dojo');
+    expect(result.date).toBe('01-01-2026');
+  });
+
+  it('restores session password when the patch omits password', () => {
+    // The viewer API strips tournament.password from responses, so a
+    // freshly fetched tournament has password=""; we need to refill it
+    // from the session before sending back to the server.
+    const t = { id: 't1', name: 'Cup', password: '' };
+    const result = mergeTournamentPatch(t, { name: 'New' }, 'session-secret');
+    expect(result.password).toBe('session-secret');
+  });
+
+  it('keeps the patch password when explicitly provided', () => {
+    // The "user wants to change the password" path: patch.password wins
+    // over the session password, regardless of what was on disk.
+    const t = { id: 't1', name: 'Cup', password: 'old' };
+    const result = mergeTournamentPatch(t, { password: 'new-pw' }, 'session-irrelevant');
+    expect(result.password).toBe('new-pw');
+  });
+
+  it('preserves the latest tournament competitions when patch omits them', () => {
+    // The CORE bug shape — pre-fix, updateTournament used the closure-
+    // captured `t` to build `next = { ...t, ...patch }`, so a SSE update
+    // that mutated `tRef.current.competitions` during the in-flight PUT
+    // was clobbered when `onUpdate(next)` fired post-await. The helper
+    // now takes the LATEST tournament as input; the caller threads
+    // tRef.current through it, so SSE updates that landed mid-flight are
+    // preserved in the merged result.
+    const latestT = {
+      id: 't1', name: 'Old', password: 'sess',
+      competitions: [
+        { id: 'c1', name: 'Pools', status: 'pools' }, // SSE-updated mid-flight
+        { id: 'c2', name: 'Playoffs', status: 'completed' }, // SSE-added mid-flight
+      ],
+    };
+    const patch = { name: 'New tournament name' };
+    const result = mergeTournamentPatch(latestT, patch, 'sess');
+    expect(result.name).toBe('New tournament name');
+    // The SSE-driven competitions list is preserved — pre-fix this would
+    // have been the closure-captured pre-PUT snapshot (whatever t was at
+    // handler-definition time), reverting status changes on every save.
+    expect(result.competitions).toEqual([
+      { id: 'c1', name: 'Pools', status: 'pools' },
+      { id: 'c2', name: 'Playoffs', status: 'completed' },
+    ]);
+  });
+
+  it('allows the patch to override fields the latest snapshot also carries', () => {
+    // Belt-and-braces: the spread semantics (`{ ...latest, ...patch }`)
+    // mean the patch wins on any conflicting field. Pin this so a future
+    // refactor doesn't accidentally swap the spread order (which would
+    // make the latest snapshot win, ignoring the user's edit).
+    const t = { id: 't1', name: 'A', date: '01-01-2026' };
+    const result = mergeTournamentPatch(t, { name: 'B', date: '02-01-2026' }, 'sess');
+    expect(result.name).toBe('B');
+    expect(result.date).toBe('02-01-2026');
+  });
+
+  it('produces a new object reference (immutable update)', () => {
+    // React's setState relies on reference equality to detect changes.
+    // mergeTournamentPatch must always produce a new tournament object
+    // so the parent's setT triggers a re-render.
+    const t = { id: 't1', name: 'A' };
+    const result = mergeTournamentPatch(t, {}, 'sess');
+    expect(result).not.toBe(t);
   });
 });

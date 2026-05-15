@@ -46,6 +46,24 @@ function mergeCompetitionsIntoTournament(currentT, mutator) {
   return { ...currentT, competitions: mutator(currentT.competitions || []) };
 }
 
+// Pure helper for the "merge a tournament-level patch onto the latest
+// tournament state" pattern used by AdminApp.updateTournament. Same
+// bug-shape rationale as mergeCompetitionsIntoTournament above, but for
+// top-level fields (name/date/venue/password) rather than the
+// competitions array.
+//
+// Session-password restore: the viewer API strips tournament.password
+// from server responses, so a tournament loaded via the viewer endpoint
+// has password="" locally even when the session still holds the real
+// password. When the patch doesn't carry a new password, we restore the
+// session password to the merged result so a subsequent re-save (or the
+// API body we build from it) doesn't silently wipe the on-disk password.
+function mergeTournamentPatch(currentT, patch, sessionPassword) {
+  const next = { ...currentT, ...patch };
+  if (!patch.password) next.password = sessionPassword;
+  return next;
+}
+
 function patchCompetitionData(prev, event) {
   if (!prev || !event.data) return prev;
   const { result, results } = event.data;
@@ -320,17 +338,24 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   const updateTournament = async (patch) => {
     try {
-      const next = { ...t, ...patch };
-      // If password was not in the patch, preserve the current session password
-      // (since tournament.password is cleared in the viewer API)
-      if (!patch.password) {
-        next.password = password;
-      } else {
-        // New password provided in the patch - update parent state and storage
-        if (onPasswordChange) onPasswordChange(patch.password);
-      }
-      await window.API.updateTournament(next, password);
-      onUpdate(next);
+      // Surface a new password to the parent BEFORE the API call so the
+      // session/store updates even if the request errors after (matches
+      // pre-fix timing — onPasswordChange fired pre-await in the original).
+      if (patch.password && onPasswordChange) onPasswordChange(patch.password);
+      // Use tRef.current (not the closure-captured `t`) for BOTH the API
+      // body and the post-await local-state update — same closure-capture
+      // bug shape that mergeCompetitionsIntoTournament's docstring
+      // describes for the other async handlers. If SSE updates the
+      // tournament (e.g. a competition starts, a match completes in
+      // another comp) during the in-flight save, the closure-captured
+      // `t` would be stale; using it for `onUpdate(next)` would clobber
+      // the SSE-driven updates with pre-save state until the next refresh.
+      const sendBody = mergeTournamentPatch(tRef.current, patch, password);
+      await window.API.updateTournament(sendBody, password);
+      // Re-read tRef.current AFTER the await — additional SSE events may
+      // have landed during the save. The patch we just persisted is
+      // applied on top of the freshest snapshot.
+      onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password));
       showToast("Tournament updated");
     } catch (e) {
       showToast(e.message, "error");
@@ -577,5 +602,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
 window.AdminApp = AdminApp;
 window.mergeCompetitionsIntoTournament = mergeCompetitionsIntoTournament;
+window.mergeTournamentPatch = mergeTournamentPatch;
 
-export { mergeCompetitionsIntoTournament };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch };

@@ -7,6 +7,12 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// MaxCourts is the hard upper bound on the `courts` parameter accepted
+// by EstimateSchedule. Mirrors the CLI's A–Z (26) cap (CLAUDE.md) and
+// is also enforced by the handler so a hostile query-string cannot
+// trigger an excessive allocation (CodeQL go/uncontrolled-allocation-size).
+const MaxCourts = 26
+
 // ScheduleEstimate is the wire response for GET /api/schedule/estimate
 // and the return type of EstimateSchedule. All durations are in minutes,
 // rounded to the nearest integer.
@@ -76,12 +82,17 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	}
 
 	// Total clock time across all matches, distributed evenly across
-	// courts. Courts < 1 is clamped to 1 so a malformed input doesn't
-	// divide-by-zero or yield a negative per-court estimate.
+	// courts. Courts is clamped to [1, MaxCourts] so a malformed or
+	// hostile input cannot trigger a giant slice allocation downstream
+	// (CodeQL go/uncontrolled-allocation-size) nor divide by zero.
+	// MaxCourts matches the CLI's A–Z hard cap (CLAUDE.md, FR limit).
 	totalMin := perMatchMin * float64(in.NumMatches)
 	courts := in.NumCourts
 	if courts < 1 {
 		courts = 1
+	}
+	if courts > MaxCourts {
+		courts = MaxCourts
 	}
 	perCourt := totalMin / float64(courts)
 

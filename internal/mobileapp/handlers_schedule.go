@@ -65,6 +65,18 @@ func scheduleEstimateHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "courts must be an integer"})
 		return
 	}
+	// Reject hostile/garbage `courts` values up front rather than
+	// silently clamping in the engine — the operator deserves a clear
+	// 400 if their UI sends nonsense. engine.MaxCourts mirrors the
+	// CLI's A–Z (26) cap; this guard also closes the
+	// CodeQL go/uncontrolled-allocation-size finding on the engine's
+	// slice allocation.
+	if courts < 1 || courts > engine.MaxCourts {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "courts must be between 1 and 26",
+		})
+		return
+	}
 
 	// Optional fields default to 0/1; intDefault clamps parse failures
 	// silently so a malformed optional param doesn't 400 the whole

@@ -99,6 +99,13 @@ func extractSeeds(players []helper.Player) []domain.SeedAssignment {
 // message for invalid Format / PoolFormat values. Empty values are
 // accepted (defaults applied on load). "swiss" returns 501 Not
 // Implemented per A-5 (deferred). Unknown values return 400.
+func validateCompetitionDurations(comp *state.Competition) error {
+	if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
+		return fmt.Errorf("match duration must be >= 0")
+	}
+	return nil
+}
+
 func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	switch format {
 	case "", state.CompFormatPools, state.CompFormatPlayoffs,
@@ -213,8 +220,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		// Reject negative per-phase or legacy durations.
-		if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "match duration must be >= 0"})
+		if err := validateCompetitionDurations(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -384,8 +391,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 
 			// Reject negative per-phase or legacy durations.
-			if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "match duration must be >= 0"})
+			if err := validateCompetitionDurations(&comp); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 

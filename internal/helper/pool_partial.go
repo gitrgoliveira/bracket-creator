@@ -30,8 +30,7 @@ func CreatePartialPoolMatches(pools []Pool) {
 		// Re-map back to helper.Match pointing at the original p.Players
 		// entries — preserve the address invariant the rest of the
 		// helper package (Excel rendering, etc.) relies on.
-		for k, m := range sub {
-			_ = m // sub[k].SideA.ID == p.Players[k].Name; we use index k directly
+		for k := range sub {
 			p.Matches = append(p.Matches, Match{
 				SideA: &p.Players[k],
 				SideB: &p.Players[k+1],

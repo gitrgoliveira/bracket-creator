@@ -31,20 +31,20 @@ type courtLiveSide struct {
 // after json.Unmarshal — the assertions read only what each test cares
 // about.
 type courtLiveResponse struct {
-	Court       string         `json:"court"`
-	Status      string         `json:"status"`
+	Court       string `json:"court"`
+	Status      string `json:"status"`
 	Competition *struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"competition,omitempty"`
-	Phase    string        `json:"phase,omitempty"`
+	Phase    string         `json:"phase,omitempty"`
 	SideA    *courtLiveSide `json:"sideA,omitempty"`
 	SideB    *courtLiveSide `json:"sideB,omitempty"`
-	IpponsA  []string      `json:"ipponsA,omitempty"`
-	IpponsB  []string      `json:"ipponsB,omitempty"`
-	HansokuA int           `json:"hansokuA,omitempty"`
-	HansokuB int           `json:"hansokuB,omitempty"`
-	Error    string        `json:"error,omitempty"`
+	IpponsA  []string       `json:"ipponsA,omitempty"`
+	IpponsB  []string       `json:"ipponsB,omitempty"`
+	HansokuA int            `json:"hansokuA,omitempty"`
+	HansokuB int            `json:"hansokuB,omitempty"`
+	Error    string         `json:"error,omitempty"`
 }
 
 // TestCourtLiveReturnsLivePayload — T052

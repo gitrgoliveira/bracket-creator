@@ -71,7 +71,7 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 // a time; the concrete `*engine.Engine` remains a drop-in
 // implementation of `ScoringEngine` so the `tryAutoCompletePools` and
 // score endpoint paths can already accept the interface today.
-func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, hub *Hub) {
+func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, hub *Hub) {
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -184,7 +184,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, hub *Hub) {
 	// engine call. The closure captures `*engine.Engine` / `*Hub` and
 	// adapts them to the interfaces at the call boundary — same wire
 	// behaviour as before.
-	registerScoreHandler(r, eng, hub)
+	registerScoreHandler(r, eng, store, hub)
 
 	r.PUT("/competitions/:id/matches/:mid/court", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -300,7 +300,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, hub *Hub) {
 // — or grows a "use this StoreTx if passed" overload — the same
 // load+set+post-write pattern applies here. T155 infrastructure is the
 // higher-value half; this TODO is the deliberate scope-cut.
-func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, hub Broadcaster) {
+func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, hub Broadcaster) {
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -324,6 +324,23 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, hub Broadcaster
 			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+
+		// T104/CHK029: enforce MaxEnchoPeriods cap. The cap is a
+		// per-competition setting; 0 means unlimited (FIK default). The
+		// operator can override by sending ?force=true after confirming
+		// the warning banner — the UI's job is to surface that prompt
+		// when the cap is reached.
+		if req.Encho != nil && req.Encho.PeriodCount > 0 {
+			if comp, cerr := store.LoadCompetition(id); cerr == nil && comp != nil && comp.MaxEnchoPeriods > 0 {
+				if req.Encho.PeriodCount > comp.MaxEnchoPeriods && c.Query("force") != "true" {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"error": "max_encho_exceeded",
+						"limit": comp.MaxEnchoPeriods,
+					})
+					return
+				}
+			}
 		}
 
 		result := req.AsMatchResult()

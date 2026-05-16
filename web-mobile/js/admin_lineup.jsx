@@ -74,10 +74,18 @@ function canRevise(competition, round) {
   //   2) every running/scheduled match in round+1 hasn't started yet.
   // TODO(T130): once the wire shape exposes a numeric round on every
   // match, switch to a strict (round === r && completed) test.
-  const inProgressNext = all.some(m => (m.status === "running" || m.status === "completed") && m.round === `Round ${round + 2}`);
+  const currentLabel = `Round ${round + 1}`;
+  const nextLabel = `Round ${round + 2}`;
+  // Fail closed if NO match in the comp uses the "Round N" label we
+  // expect — that means the wire format has drifted and the heuristic
+  // below is unreliable. Erring toward "cannot revise" is safer than
+  // surfacing a Revise button mid-round.
+  const recognisable = all.some(m => typeof m.round === "string" && /^Round \d+$/.test(m.round));
+  if (!recognisable) return false;
+  const inProgressNext = all.some(m => (m.status === "running" || m.status === "completed") && m.round === nextLabel);
   if (inProgressNext) return false;
   // Otherwise allow revise as long as no current-round match is still live
-  const currentLive = all.some(m => m.status === "running" && m.round === `Round ${round + 1}`);
+  const currentLive = all.some(m => m.status === "running" && m.round === currentLabel);
   return !currentLive;
 }
 

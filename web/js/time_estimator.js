@@ -9,16 +9,18 @@ export function matchesPerPool(n, isRoundRobin) {
 
 export function formatDuration(totalMinutes) {
     if (totalMinutes <= 0) return '0m';
-    const h = Math.floor(totalMinutes / 60);
-    const m = Math.round(totalMinutes % 60);
+    const roundedMins = Math.round(totalMinutes);
+    const h = Math.floor(roundedMins / 60);
+    const m = roundedMins % 60;
     if (h > 0 && m > 0) return `${h}h ${m}m`;
     if (h > 0) return `${h}h`;
     return `${m}m`;
 }
 
 export function formatTime(totalMinutes) {
-    const h = Math.floor(totalMinutes / 60) % 24;
-    const m = Math.round(totalMinutes % 60);
+    const roundedMins = Math.round(totalMinutes);
+    const h = Math.floor(roundedMins / 60) % 24;
+    const m = roundedMins % 60;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 

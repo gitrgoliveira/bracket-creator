@@ -59,8 +59,11 @@ type ScoringEngine interface {
 	RecordMatchResultWithIneligibility(compID string, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
 	// RecordDecision auto-fills the scoreline + winner from the
 	// decision/decisionBy/encho triple and persists the result. Used by
-	// the dedicated POST /decision endpoint (T090).
-	RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata) (*state.MatchResult, *domain.CompetitorStatus, error)
+	// the dedicated POST /decision endpoint (T090). When the prior
+	// result on the match already carried a kiken/fusenpai decision the
+	// engine enforces the downstream-match lock (T103/CHK024); force=true
+	// bypasses the lock so an operator can confirm an override.
+	RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done. Returns whether the
 	// transition actually happened (so callers know whether to broadcast

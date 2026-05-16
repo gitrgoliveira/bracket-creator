@@ -42,6 +42,11 @@ describe("formatDuration", () => {
     it("formats mixed durations as 'Xh Ym'", () => {
         expect(formatDuration(95)).toBe("1h 35m");
     });
+
+    it("rolls minutes into the next hour when rounding would yield 60", () => {
+        // 119.6 → rounds to 120 → "2h", not "1h 60m".
+        expect(formatDuration(119.6)).toBe("2h");
+    });
 });
 
 describe("formatTime", () => {
@@ -51,6 +56,11 @@ describe("formatTime", () => {
 
     it("wraps past 24h", () => {
         expect(formatTime(26 * 60)).toBe("02:00");
+    });
+
+    it("rolls minutes into the next hour when rounding would yield 60", () => {
+        // 59.8 minutes → rounds to 60 → "01:00", not "00:60".
+        expect(formatTime(59.8)).toBe("01:00");
     });
 });
 

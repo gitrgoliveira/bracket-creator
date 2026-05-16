@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -32,6 +33,63 @@ func (e *IneligibleCompetitorError) Error() string {
 
 func (e *IneligibleCompetitorError) Is(target error) bool {
 	return target == ErrIneligibleCompetitor
+}
+
+// AlreadyIneligibleError is returned by RecordDecision when the
+// intended loser already carries Eligible:false from a *different*
+// match — indicating two operators on different courts concurrently
+// tried to kiken/fusenpai the same player (CHK047, T105, NFR-010).
+type AlreadyIneligibleError struct {
+	PlayerID string
+	MatchID  string
+	Reason   string
+}
+
+func (e *AlreadyIneligibleError) Error() string {
+	return fmt.Sprintf("competitor %q already ineligible (match %s)", e.PlayerID, e.MatchID)
+}
+
+// checkConcurrentIneligibility returns *AlreadyIneligibleError when
+// loserName already has Eligible:false from a different match. Returns
+// nil on any lookup failure (non-fatal — missing player IDs, store
+// errors) so a degraded-mode run doesn't break the score flow.
+//
+// CHK047, T105.
+func (e *Engine) checkConcurrentIneligibility(compID, matchID, loserName string) error {
+	if loserName == "" {
+		return nil
+	}
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil || comp == nil {
+		if err != nil {
+			log.Printf("engine: checkConcurrentIneligibility LoadCompetition compId=%s: %v (T105 guard skipped)", compID, err)
+		}
+		return nil
+	}
+	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	if err != nil {
+		log.Printf("engine: checkConcurrentIneligibility LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
+		return nil
+	}
+	pool := append([]helper.Player{}, comp.Players...)
+	pool = append(pool, participants...)
+	playerID := lookupPlayerID(pool, loserName)
+	if playerID == "" {
+		return nil
+	}
+	statuses, err := e.store.LoadCompetitorStatus(compID)
+	if err != nil {
+		log.Printf("engine: checkConcurrentIneligibility LoadCompetitorStatus compId=%s: %v (T105 guard skipped)", compID, err)
+		return nil
+	}
+	if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
+		return &AlreadyIneligibleError{
+			PlayerID: playerID,
+			MatchID:  st.MatchID,
+			Reason:   st.Reason,
+		}
+	}
+	return nil
 }
 
 // CheckEligibility consults the competitor-status store for compID and
@@ -78,17 +136,62 @@ func (e *Engine) StartMatch(compID, matchID string) error {
 // canonical SideA=Aka / SideB=Shiro mapping (CLAUDE.md) is used to
 // translate decisionBy → which side wins the auto-filled X-0 scoreline.
 //
-// Returns the persisted MatchResult and the new CompetitorStatus (or
-// nil when no status change applies).
+// When the match already has a kiken/fusenpai decision recorded (the
+// "undo" path, T103/CHK024) the engine enforces the
+// contracts/match-decisions.md §Decision lock & undo rule: if any
+// subsequent match involving either prior participant has started
+// since the original decision was recorded, the engine returns
+// ErrDecisionLocked unless force is true. On a successful overwrite
+// where the prior loser is no longer the new loser, the prior loser's
+// CompetitorStatus is restored to Eligible: true and surfaced as the
+// returned status so the handler can broadcast the change.
 //
-// T090, contracts/match-decisions.md §POST /decision.
-func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata) (*state.MatchResult, *domain.CompetitorStatus, error) {
+// Returns the persisted MatchResult and the most-recent
+// CompetitorStatus change (new ineligibility OR restored eligibility),
+// or nil when no status change applies.
+//
+// T090, T103, contracts/match-decisions.md §POST /decision.
+func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	if decisionBy != "shiro" && decisionBy != "aka" {
 		return nil, nil, validationErrorf("decisionBy must be 'shiro' or 'aka', got %q", decisionBy)
 	}
 	sideA, sideB, err := e.lookupMatchSides(compID, matchID)
 	if err != nil {
 		return nil, nil, err
+	}
+	// T105/CHK047: reject concurrent kiken — if the intended loser is
+	// already ineligible from a *different* match, two operators are
+	// trying to kiken the same player simultaneously. Return 409 so the
+	// second operator sees the conflict before any write happens.
+	loserName := sideB
+	if decisionBy == "aka" {
+		loserName = sideA
+	}
+	if cerr := e.checkConcurrentIneligibility(compID, matchID, loserName); cerr != nil {
+		return nil, nil, cerr
+	}
+	// T103: look up the prior result so we know whether this is an
+	// overwrite of a kiken/fusenpai (the "undo" path).
+	prior, err := e.lookupExistingResult(compID, matchID)
+	if err != nil {
+		return nil, nil, err
+	}
+	priorLoser := ""
+	if prior != nil && (prior.Decision == string(domain.DecisionKiken) || prior.Decision == string(domain.DecisionFusenpai)) {
+		priorLoser = loserSideName(prior)
+	}
+	// T103: downstream-match check. The contract scope is "either
+	// participant" — if any subsequent match for either side has been
+	// started or completed since the kiken/fusenpai, refuse the undo
+	// unless force is set.
+	if priorLoser != "" && !force {
+		started, err := e.hasDownstreamMatchStarted(compID, []string{sideA, sideB}, matchID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if started {
+			return nil, nil, ErrDecisionLocked
+		}
 	}
 	winningCount := 2
 	if encho != nil {
@@ -122,7 +225,152 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	if err != nil {
 		return nil, nil, err
 	}
+	// T103: when the prior loser is no longer the new loser (decision
+	// type changed away from kiken/fusenpai, or decisionBy flipped),
+	// restore the prior loser's eligibility and surface the resulting
+	// status so the handler can broadcast it. If RecordMatchResult
+	// just wrote a *new* ineligibility for the same player, that wins
+	// (the player is still ineligible). Only restore when the prior
+	// loser is no longer the current loser.
+	if priorLoser != "" {
+		newLoser := loserSideName(result)
+		if priorLoser != newLoser {
+			restored, rerr := e.restoreCompetitorEligibility(compID, priorLoser, matchID)
+			if rerr == nil && restored != nil {
+				status = restored
+			}
+		}
+	}
 	return result, status, nil
+}
+
+// lookupExistingResult fetches the currently-persisted MatchResult for
+// compID/matchID from either the pool-matches or bracket store. For
+// bracket matches the BracketMatch fields are projected onto a
+// MatchResult so callers (loserSideName, etc.) see a uniform shape;
+// only the fields the kiken-undo path needs are populated. Returns a
+// *NotFoundError when the match is unknown.
+func (e *Engine) lookupExistingResult(compID, matchID string) (*state.MatchResult, error) {
+	poolMatches, err := e.store.LoadPoolMatches(compID)
+	if err == nil {
+		for i := range poolMatches {
+			if poolMatches[i].ID == matchID {
+				r := poolMatches[i]
+				return &r, nil
+			}
+		}
+	}
+	bracket, err := e.store.LoadBracket(compID)
+	if err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == matchID {
+					return &state.MatchResult{
+						ID:             bm.ID,
+						SideA:          bm.SideA,
+						SideB:          bm.SideB,
+						Winner:         bm.Winner,
+						Status:         bm.Status,
+						Decision:       bm.Decision,
+						DecisionBy:     bm.DecisionBy,
+						DecisionReason: bm.DecisionReason,
+						Encho:          bm.Encho,
+					}, nil
+				}
+			}
+		}
+	}
+	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
+}
+
+// hasDownstreamMatchStarted reports whether any pool or bracket match
+// other than excludeMatchID has either SideA or SideB matching one of
+// playerNames AND has status running or completed. Used by the
+// kiken-undo flow (T103) to enforce the decision-lock rule.
+func (e *Engine) hasDownstreamMatchStarted(compID string, playerNames []string, excludeMatchID string) (bool, error) {
+	wantSet := make(map[string]struct{}, len(playerNames))
+	for _, n := range playerNames {
+		if n != "" {
+			wantSet[n] = struct{}{}
+		}
+	}
+	if len(wantSet) == 0 {
+		return false, nil
+	}
+	involvesAny := func(a, b string) bool {
+		if _, ok := wantSet[a]; ok {
+			return true
+		}
+		_, ok := wantSet[b]
+		return ok
+	}
+	isStarted := func(s state.MatchStatus) bool {
+		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
+	}
+	poolMatches, err := e.store.LoadPoolMatches(compID)
+	if err == nil {
+		for _, m := range poolMatches {
+			if m.ID == excludeMatchID {
+				continue
+			}
+			if isStarted(m.Status) && involvesAny(m.SideA, m.SideB) {
+				return true, nil
+			}
+		}
+	}
+	bracket, err := e.store.LoadBracket(compID)
+	if err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == excludeMatchID {
+					continue
+				}
+				if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
+}
+
+// restoreCompetitorEligibility writes a CompetitorStatus{Eligible: true}
+// for the player named priorLoser on competition compID. Used by the
+// kiken-undo flow (T103) after a previous kiken/fusenpai has been
+// overwritten with a different outcome. matchID is the originating
+// match (the one being undone) — carried for traceability.
+//
+// Returns (nil, nil) when the player can't be resolved (unknown name),
+// so the caller can fall through to the regular response without
+// failing the undo.
+func (e *Engine) restoreCompetitorEligibility(compID, priorLoser, matchID string) (*domain.CompetitorStatus, error) {
+	if priorLoser == "" {
+		return nil, nil
+	}
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, err
+	}
+	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	if err != nil {
+		return nil, err
+	}
+	pool := append([]helper.Player{}, comp.Players...)
+	pool = append(pool, participants...)
+	playerID := lookupPlayerID(pool, priorLoser)
+	if playerID == "" {
+		return nil, nil
+	}
+	status := domain.CompetitorStatus{
+		PlayerID:   playerID,
+		Eligible:   true,
+		MatchID:    matchID,
+		RecordedAt: time.Now().UTC(),
+	}
+	if err := e.store.SetCompetitorStatus(compID, status); err != nil {
+		return nil, err
+	}
+	return &status, nil
 }
 
 // resolveMatchParticipantIDs finds the match (pool or bracket) and

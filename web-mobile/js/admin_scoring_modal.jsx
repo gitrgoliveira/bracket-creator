@@ -219,6 +219,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
   const [submitting, setSubmitting] = useStateA(false);
+  // T104/CHK029: MaxEnchoPeriods cap from the competition config.
+  // Fetched once on open so the warning banner can fire before the
+  // operator submits (the server validates the same cap on PUT /score).
+  const [maxEnchoPeriods, setMaxEnchoPeriods] = useStateA(0);
   // T093–T098: decision (kiken/fusenpai) prompt state. promptKind is
   // "" | "kiken" | "fusenpai"; when non-empty the inline prompt replaces the
   // bottom controls. After the POST /decision succeeds, withdrawnPlayer holds
@@ -234,6 +238,14 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // only external/parent-driven unmount.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+  useEffectA(() => {
+    if (!m.compId) return;
+    let cancelled = false;
+    window.API.fetchCompetitionDetails(m.compId).then(d => {
+      if (!cancelled && d?.maxEnchoPeriods > 0) setMaxEnchoPeriods(d.maxEnchoPeriods);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [m.compId]);
 
   // T093/T094: shared decision-submit path for kiken & fusenpai.
   // - decisionBy is "shiro" or "aka" per the server contract.
@@ -242,13 +254,18 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // - On success we close the modal (matching the Save button contract) UNLESS
   //   the decision is kiken — in that case we keep the modal open and surface
   //   the RemainingMatchesPanel so the operator can chain default-win awards.
-  const submitDecision = async (kind, { decisionBy, decisionReason }) => {
+  // - T103/CHK024: when the server replies 409 decision_locked (the
+  //   prior kiken on this match can't be safely overwritten because a
+  //   subsequent match for either side has started), prompt the
+  //   operator to confirm and re-send with force=true.
+  const submitDecision = async (kind, { decisionBy, decisionReason }, opts = {}) => {
     setDecisionSubmitting(true);
     setDecisionErr("");
     try {
       const body = { decision: kind, decisionBy };
       if (decisionReason) body.decisionReason = decisionReason;
       if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
+      if (opts.force) body.force = true;
       const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
       if (kind === "kiken") {
@@ -270,7 +287,22 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
         onClose();
       }
     } catch (e) {
-      if (mountedRef.current) setDecisionErr(e?.message || "Failed to record decision");
+      const msg = e?.message || "Failed to record decision";
+      // T103: the server returns the literal "decision_locked" string
+      // as the error body when the kiken-undo would invalidate a
+      // downstream match. Re-prompt the operator and retry with force.
+      if (!opts.force && /decision_locked/i.test(msg)) {
+        if (mountedRef.current && confirm(
+          "A subsequent match for one of these competitors has already started.\n\n" +
+          "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?"
+        )) {
+          await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
+          return;
+        }
+        if (mountedRef.current) setDecisionErr("Override cancelled.");
+      } else if (mountedRef.current) {
+        setDecisionErr(msg);
+      }
     } finally {
       if (mountedRef.current) setDecisionSubmitting(false);
     }
@@ -466,6 +498,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   aria-label="Increase overtime period count"
                 >+</button>
               </div>
+            )}
+            {maxEnchoPeriods > 0 && enchoPeriodCount >= maxEnchoPeriods && (
+              <span style={{ color: "var(--danger, #d32f2f)", fontSize: "0.8em", marginTop: 4, display: "block" }}>
+                Maximum encho periods reached
+              </span>
             )}
           </div>
           <div className="scoring-board">
@@ -725,19 +762,22 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // from match-level compFormat (when set by compMatches) or the comp
   // fetch fallback. Phase === "bracket" is the in-modal signal.
   const compFormat = m.compFormat || compMeta?.format || "";
+  const maxEnchoPeriods = compMeta?.maxEnchoPeriods || 0;
   const isKnockoutPhase = m.phase === "bracket" || compFormat === "playoffs" || compFormat === "mixed";
 
   // Mirror of submitDecision in ScoreEditorModal — kept inline rather than
   // hoisted to a shared hook because the two modals own different "after
   // success" semantics (the individual modal doesn't have per-bout state to
-  // preserve, but the wiring is identical otherwise).
-  const submitDecision = async (kind, { decisionBy, decisionReason }) => {
+  // preserve, but the wiring is identical otherwise). T103/CHK024:
+  // 409 decision_locked triggers a confirm-and-retry-with-force loop.
+  const submitDecision = async (kind, { decisionBy, decisionReason }, opts = {}) => {
     setDecisionSubmitting(true);
     setDecisionErr("");
     try {
       const body = { decision: kind, decisionBy };
       if (decisionReason) body.decisionReason = decisionReason;
       if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
+      if (opts.force) body.force = true;
       const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
       if (kind === "kiken") {
@@ -753,25 +793,61 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         onClose();
       }
     } catch (e) {
-      if (mountedRef.current) setDecisionErr(e?.message || "Failed to record decision");
+      const msg = e?.message || "Failed to record decision";
+      if (!opts.force && /decision_locked/i.test(msg)) {
+        if (mountedRef.current && confirm(
+          "A subsequent match for one of these teams has already started.\n\n" +
+          "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?"
+        )) {
+          await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
+          return;
+        }
+        if (mountedRef.current) setDecisionErr("Override cancelled.");
+      } else if (mountedRef.current) {
+        setDecisionErr(msg);
+      }
     } finally {
       if (mountedRef.current) setDecisionSubmitting(false);
     }
   };
 
   const existingSub = m.subResults || [];
+  // T096/FR-031: round-trip per-bout fusensho. SubMatchResult.decision is
+  // the canonical signal — when "fusensho", figure out which side it
+  // belongs to via the recorded winner so the UI re-opens with the
+  // affordance shown as active.
+  const sideAName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+  const sideBName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
   const initSubs = positions.map((_, idx) => {
     const existing = existingSub.find(s => s.position === idx + 1);
+    let fusensho = "";
+    if (existing?.decision === "fusensho") {
+      if (existing.winner === sideAName) fusensho = "a";
+      else if (existing.winner === sideBName) fusensho = "b";
+    }
     return {
       aPts: existing ? (existing.ipponsA || []).filter(x => x !== "•") : [],
       bPts: existing ? (existing.ipponsB || []).filter(x => x !== "•") : [],
       aFouls: existing ? existing.hansokuA || 0 : 0,
       bFouls: existing ? existing.hansokuB || 0 : 0,
+      fusensho,
     };
   });
   const [subs, setSubs] = useStateA(initSubs);
 
   const updateSub = (idx, fn) => setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s));
+
+  // T096/FR-031: per-bout Fusensho — award a 2-0 default win to the
+  // present side. Re-clicking the active side toggles the flag off
+  // (keeps the score so operator can edit manually); clicking the other
+  // side switches the default win to that side.
+  const setFusenshoFor = (idx, side) => {
+    updateSub(idx, prev => {
+      if (prev.fusensho === side) return { ...prev, fusensho: "" };
+      if (side === "a") return { aPts: ["M", "M"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a" };
+      return { aPts: [], bPts: ["M", "M"], aFouls: 0, bFouls: 0, fusensho: "b" };
+    });
+  };
 
   const subTotals = subs.map(s => {
     const aH = Math.floor(s.bFouls / 2);
@@ -797,6 +873,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       const aAll = [...s.aPts, ...Array(t.aHansoku).fill("H")].slice(0, 2);
       const bAll = [...s.bPts, ...Array(t.bHansoku).fill("H")].slice(0, 2);
       const w = t.winner === "a" ? m.sideA : t.winner === "b" ? m.sideB : null;
+      // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought
+      // mapping. The bout was awarded as a default win — backend tally treats
+      // it as a victory for IV but the canonical decision string makes it
+      // distinguishable from a fought 2-0 in reports and audit trails.
+      let decision = "";
+      if (s.fusensho) decision = "fusensho";
+      else if (t.winner === null) decision = "hikiwake";
       return {
         position: idx + 1,
         sideA: typeof m.sideA === "object" ? m.sideA?.name : m.sideA,
@@ -806,7 +889,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         hansokuA: s.aFouls,
         hansokuB: s.bFouls,
         winner: w ? (typeof w === "object" ? w.name : w) : "",
-        decision: t.winner === null ? "hikiwake" : "",
+        decision,
       };
     });
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
@@ -937,6 +1020,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 >+</button>
               </div>
             )}
+            {maxEnchoPeriods > 0 && enchoPeriodCount >= maxEnchoPeriods && (
+              <span style={{ color: "var(--danger, #d32f2f)", fontSize: "0.8em", marginTop: 4, display: "block" }}>
+                Maximum encho periods reached
+              </span>
+            )}
           </div>
           {/* Team header */}
           <div className="sb-match" style={{ marginBottom: 16 }}>
@@ -1027,14 +1115,18 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             const playerBName = pickFromLineup(lineupB) || existingSubAtIdx?.sideB || "";
 
             // Each row: [left side, center score, right side] — left=SHIRO, right=AKA
+            // T096/FR-031: manual pts/fouls edits clear the per-bout fusensho
+            // flag so the bout becomes a regular fought 2-0 once the operator
+            // intervenes. Re-applying via the Fusensho button is the way to
+            // restore the default-win semantics.
             const rowSides = [
               { key: "b", pts: s.bPts, fouls: s.bFouls, hansokuPts: t.bHansoku,
-                setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f })),
+                setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts, fusensho: "" })),
+                setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f, fusensho: "" })),
                 color: "shiro", label: "SHIRO" },
               { key: "a", pts: s.aPts, fouls: s.aFouls, hansokuPts: t.aHansoku,
-                setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f })),
+                setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts, fusensho: "" })),
+                setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f, fusensho: "" })),
                 color: "aka", label: "AKA" },
             ];
 
@@ -1090,6 +1182,22 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                             <button className="tsm-fouls__btn" onClick={() => rs.setFouls(f => Math.min(4, f + 1))} disabled={rs.fouls >= 4}>+</button>
                           </div>
                           {rs.hansokuPts > 0 && <span className="tsm-fouls__h">→ +{rs.hansokuPts}H</span>}
+                        </div>
+                        {/* T096/FR-031: per-bout Fusensho. Awards the bout
+                            2-0 to this side as a default win (opponent
+                            forfeited the bout). Toggle off to keep the
+                            score but clear the fusensho flag. */}
+                        <div className="tsm-fusensho" style={{ marginTop: 4 }}>
+                          <button
+                            type="button"
+                            className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
+                            onClick={() => setFusenshoFor(idx, rs.key)}
+                            title={s.fusensho === rs.key
+                              ? `Click to clear fusensho on this bout (keeps the 2-0 score)`
+                              : `Mark bout as fusensho — default win 2-0 to ${rs.label}`}
+                          >
+                            {s.fusensho === rs.key ? "✓ Fusensho" : "Fusensho"}
+                          </button>
                         </div>
                       </div>
                       {rsIdx === 0 && (
@@ -1176,30 +1284,21 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             );
           })()}
 
-          {/* T093–T098: decision (kiken/fusenpai/fusensho) controls. In the
-              team editor, Fusensho is per-bout and would belong on each
-              sub-match row — the wiring for the per-bout score path lives in
-              the existing score-update flow but isn't exposed as a single
-              click yet. TODO(T096) layers the per-bout button onto each row;
-              for now we surface a disabled placeholder so operators see the
-              eventual surface and the team-match decisions (kiken/fusenpai)
-              fire against the overall team match. */}
+          {/* T093–T098: decision (kiken/fusenpai) controls for the overall
+              team match. Per-bout Fusensho lives on each sub-match row
+              (see the row-level "Fusensho" button per side, T096). */}
           {!withdrawnPlayer && !decisionPromptKind && (
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
-              <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
+              <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Team decision:</span>
               <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
                 Kiken
               </button>
               <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
                 Fusenpai
               </button>
-              {/* TODO(T096): wire per-bout fusensho onto each sub-match row.
-                  Per spec the per-bout decision routes through the existing
-                  score update path (not /decision), marking the bout 2–0 to
-                  the present side. Disabled here until that path lands. */}
-              <button type="button" className="btn btn--sm" disabled title="Per-bout fusensho will be added to each sub-match row (TODO T096)">
-                Fusensho (per bout)
-              </button>
+              <span style={{ color: "var(--ink-3)", fontSize: 11, marginLeft: 4 }}>
+                (Fusensho is per-bout — use the "Fusensho" button on each row above.)
+              </span>
             </div>
           )}
           {decisionErr && (

@@ -74,6 +74,18 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
+	// 7. Kachinuki Detail sheet (T195–T203, CHK037). Opt-in: only emitted
+	//    when the competition runs the kachinuki team-match format AND has
+	//    at least one match with bout data. The renderer is a no-op for
+	//    empty input, so this is safe even when the format is fixed.
+	kachinukiMatches, err := e.collectKachinukiMatches(id, comp)
+	if err != nil {
+		return nil, err
+	}
+	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
+		return nil, err
+	}
+
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
 		return nil, err

@@ -1057,6 +1057,256 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
+  /api/competitions/{id}/matches/{mid}/decision:
+    post:
+      tags: [matches]
+      summary: Record decision outcome (kiken/fusenpai/fusensho/daihyosen)
+      description: >
+        Records a non-scored decision for a match. Use this instead of
+        `/score` when the outcome is determined by walkover, withdrawal,
+        or representative bout rather than ippon scoring.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, decisionBy]
+              properties:
+                decision:
+                  type: string
+                  enum: [kiken, fusenpai, fusensho, daihyosen]
+                decisionBy:
+                  type: string
+                  enum: [shiro, aka]
+                decisionReason:
+                  type: string
+                  maxLength: 200
+                encho:
+                  $ref: '#/components/schemas/EnchoMetadata'
+      responses:
+        '200':
+          description: Decision recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Competitor not eligible (ineligible_competitor).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/competitions/{id}/matches/{mid}/daihyosen:
+    post:
+      tags: [matches]
+      summary: Add representative (daihyosen) bout to a tied team match
+      description: >
+        Adds a daihyosen (representative) bout to break a tie in an
+        elimination team match. Rejected if the match is not tied,
+        if it is a pool match, or if neither team has sufficient
+        eligible competitors.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: Daihyosen bout added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchResult'
+        '400':
+          description: Match is not tied (`not_tied`) or is a pool match (`pool_match`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Insufficient eligible competitors (`insufficient_eligibility`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/competitions/{id}/competitor-status:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: List competitor eligibility statuses
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Current competitor statuses.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statuses:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CompetitorStatus'
+    post:
+      tags: [competitions]
+      summary: Set a competitor status entry
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompetitorStatus'
+      responses:
+        '200':
+          description: Status entry recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompetitorStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/competitions/{id}/teams/{tid}/lineups/{round}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: tid
+        required: true
+        schema:
+          type: string
+        description: Team ID.
+      - in: path
+        name: round
+        required: true
+        schema:
+          type: integer
+        description: Tournament round number.
+    get:
+      tags: [competitions]
+      summary: Get team lineup for round
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Team lineup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamLineup'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [competitions]
+      summary: Save team lineup for round
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamLineup'
+      responses:
+        '200':
+          description: Lineup saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamLineup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Lineup is locked and cannot be edited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [competitions]
+      summary: Delete team lineup for round
+      security:
+        - TournamentPassword: []
+      responses:
+        '204':
+          description: Lineup deleted.
+
+  /api/schedule/estimate:
+    get:
+      tags: [viewer]
+      summary: Estimate schedule duration
+      description: >
+        Stateless schedule estimator. Computes total wall-clock duration
+        and per-court breakdown given match counts, durations, and court
+        configuration. No auth required.
+      parameters:
+        - in: query
+          name: matchDuration
+          required: true
+          schema:
+            type: integer
+          description: Per-match clock duration in minutes.
+        - in: query
+          name: multiplier
+          required: true
+          schema:
+            type: number
+          description: Clock-to-elapsed multiplier (e.g. 1.6).
+        - in: query
+          name: numMatches
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: courts
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: teamSize
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: boutsPerTeamMatch
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: buffer
+          required: false
+          schema:
+            type: integer
+          description: Slowest-court buffer percentage.
+        - in: query
+          name: ceremony
+          required: false
+          schema:
+            type: integer
+          description: Ceremony allowance in minutes.
+      responses:
+        '200':
+          description: Estimated schedule duration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleEstimate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
   # ── Viewer (Public, no auth) ───────────────────────────────────────────────
 
   /api/viewer/tournament:
@@ -1119,6 +1369,38 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ScheduleEntry'
+
+  /api/viewer/court/{court}/live:
+    get:
+      tags: [viewer]
+      summary: Get current and upcoming matches for a court
+      description: Court-live display feed. Returns the in-progress match and a queue of upcoming matches for the given court.
+      parameters:
+        - in: path
+          name: court
+          required: true
+          schema:
+            type: string
+          description: Court label (e.g. "A").
+      responses:
+        '200':
+          description: Court live state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [court, current, upcoming]
+                properties:
+                  court:
+                    type: string
+                  current:
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/MatchResult'
+                  upcoming:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchResult'
 
 components:
 
@@ -1272,6 +1554,21 @@ components:
             to keep current"). Sending a non-empty string updates it.
 
             Omitted from viewer responses (`/api/viewer/tournament`).
+        openingBlock:
+          type: string
+          description: Opening ceremony block label/duration.
+        lunchBlock:
+          type: string
+          description: Lunch break block label/duration.
+        closingBlock:
+          type: string
+          description: Closing ceremony block label/duration.
+        clockToElapsedMultiplier:
+          type: number
+          description: Multiplier converting on-clock match minutes to wall-clock elapsed minutes.
+        slowestCourtBufferPct:
+          type: integer
+          description: Buffer percentage applied to the slowest court when estimating overall duration.
 
     Competition:
       type: object
@@ -1348,6 +1645,13 @@ components:
           type: string
         hasParticipantIDs:
           type: boolean
+        teamMatchType:
+          type: string
+          description: Team-match scoring model — `fixed` (positions) or `kachinuki` (winner-stays).
+          enum: [fixed, kachinuki]
+        maxEnchoPeriods:
+          type: integer
+          description: Maximum number of encho (extended time) periods permitted per match.
         players:
           type: array
           description: >
@@ -1445,13 +1749,21 @@ components:
         decision:
           type: string
           description: >
-            Decision code for the match outcome. Valid values:
-            `""` — normal victory (winner field determines the result);
-            `"hikiwake"` — draw/tie, recorded when the operator enters 'X' in the vs column
-            or when both sides finish with equal scores.
-            Note: encho (extended time) is a play mechanism, not a decision value — a match
-            that goes to encho still resolves as a normal victory or hikiwake.
-            For individual sub-matches within team matches see `SubMatchResult.decision`.
+            Decision code for the match outcome. Extended set:
+            `none`/`""` — no decision recorded; `fought` — resolved by scoring;
+            `hikiwake` — draw/tie; `kiken` — withdrawal; `fusenpai` — forfeit loss;
+            `fusensho` — forfeit win; `daihyosen` — resolved by representative bout;
+            `kachinuki-exhaustion` — kachinuki team match ended with one side exhausted.
+          enum: [none, fought, hikiwake, kiken, fusenpai, fusensho, daihyosen, kachinuki-exhaustion]
+        decisionBy:
+          type: string
+          description: Which side the decision favours (shiro = white = left, aka = red = right).
+          enum: [shiro, aka]
+        decisionReason:
+          type: string
+          description: Free-text operator note for the decision.
+        encho:
+          $ref: '#/components/schemas/EnchoMetadata'
         status:
           type: string
           enum: [scheduled, running, completed]
@@ -1642,4 +1954,63 @@ components:
         sourceCompID:
           type: string
         sourceRank:
+          type: integer
+
+    EnchoMetadata:
+      type: object
+      description: Metadata about extended-time (encho) periods played for a match.
+      properties:
+        periodCount:
+          type: integer
+          minimum: 1
+
+    CompetitorStatus:
+      type: object
+      description: Eligibility status for a single competitor.
+      required: [playerId, eligible]
+      properties:
+        playerId:
+          type: string
+        eligible:
+          type: boolean
+        reason:
+          type: string
+        matchId:
+          type: string
+        recordedAt:
+          type: string
+          format: date-time
+
+    TeamLineup:
+      type: object
+      description: Per-round lineup assigning team members to positions.
+      required: [teamId, competitionId, round, positions]
+      properties:
+        teamId:
+          type: string
+        competitionId:
+          type: string
+        round:
+          type: integer
+        positions:
+          type: object
+          additionalProperties:
+            type: string
+          description: Map of position label to player ID.
+        lockedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ScheduleEstimate:
+      type: object
+      description: Result of a stateless schedule duration estimate.
+      properties:
+        totalDurationMinutes:
+          type: integer
+        perCourtMinutes:
+          type: array
+          items:
+            type: integer
+        ceremonyMinutes:
           type: integer

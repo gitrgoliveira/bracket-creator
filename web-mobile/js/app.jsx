@@ -6,8 +6,7 @@ import { applyPatch as patchCompetitionData } from './patch.jsx';
 const { useState: useS, useEffect: useE, useRef: useR } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
-// synchronisation, replacing the manual getRouteFromUrl / popstate
-// machinery that lived inline. The render path itself still drives off
+// synchronisation. The render path itself still drives off
 // `mode` / `viewerScreen` / `viewerCompId` / `adminView` state because
 // those carry richer information than path components alone (e.g., the
 // admin section sub-tab); the Router only hydrates and updates that

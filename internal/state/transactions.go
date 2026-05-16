@@ -33,9 +33,19 @@
 package state
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
+
+// ErrMismatchedTxCompID is returned by StoreTx methods when the
+// supplied compID (or c.ID on SaveCompetition) does not match the
+// competition the transaction was opened on. The transaction holds
+// the per-comp lock for one ID only, so dispatching the locked
+// helpers for any other ID would perform unlocked I/O.
+var ErrMismatchedTxCompID = errors.New("compID does not match transaction's competition")
 
 // StoreTx is the transactional handle passed to fn in WithTransaction.
 // Methods mirror the corresponding *Store methods but DO NOT re-acquire
@@ -45,11 +55,11 @@ import (
 // keeps StoreTx methods source-compatible with their *Store siblings,
 // so the migration path for a handler is "wrap in WithTransaction +
 // replace `store.` with `tx.`" with no further rewrites. The transaction
-// is bound to a single competition (passed to WithTransaction), so
-// passing a different compID to any StoreTx method is a programmer
-// error — the implementation does NOT cross-check, but will operate on
-// the requested compID without re-locking, which would mean unlocked
-// I/O against a different competition's files. Don't do it.
+// is bound to a single competition (passed to WithTransaction); every
+// StoreTx method guards the supplied compID against the bound one and
+// returns ErrMismatchedTxCompID on mismatch, so a stale or wrong ID
+// surfaces as a normal error instead of silently doing unlocked I/O
+// against another competition's files.
 type StoreTx interface {
 	LoadCompetition(compID string) (*Competition, error)
 	SaveCompetition(c *Competition) error
@@ -95,19 +105,41 @@ type storeTx struct {
 	compID string
 }
 
+// checkCompID enforces the transaction-bound-compID invariant. Wraps
+// ErrMismatchedTxCompID with both IDs so error messages identify the
+// programmer mistake unambiguously.
+func (t *storeTx) checkCompID(compID string) error {
+	if compID != t.compID {
+		return fmt.Errorf("%w: tx=%q, got=%q", ErrMismatchedTxCompID, t.compID, compID)
+	}
+	return nil
+}
+
 func (t *storeTx) LoadCompetition(compID string) (*Competition, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
 	return t.store.loadCompetitionLocked(compID)
 }
 
 func (t *storeTx) SaveCompetition(c *Competition) error {
+	if err := t.checkCompID(c.ID); err != nil {
+		return err
+	}
 	return t.store.saveCompetitionLocked(c)
 }
 
 func (t *storeTx) LoadPoolMatches(compID string) ([]MatchResult, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
 	return t.store.LoadPoolMatchesLocked(compID)
 }
 
 func (t *storeTx) SavePoolMatches(compID string, matches []MatchResult) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
@@ -115,10 +147,16 @@ func (t *storeTx) SavePoolMatches(compID string, matches []MatchResult) error {
 }
 
 func (t *storeTx) LoadBracket(compID string) (*Bracket, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
 	return t.store.loadBracketLocked(compID)
 }
 
 func (t *storeTx) SaveBracket(compID string, b *Bracket) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
@@ -126,18 +164,30 @@ func (t *storeTx) SaveBracket(compID string, b *Bracket) error {
 }
 
 func (t *storeTx) LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
 	return t.store.loadCompetitorStatusLocked(compID)
 }
 
 func (t *storeTx) SetCompetitorStatus(compID string, status domain.CompetitorStatus) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
 	return t.store.setCompetitorStatusLocked(compID, status)
 }
 
 func (t *storeTx) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
 	return t.store.loadTeamLineupsLocked(compID)
 }
 
 func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
@@ -145,5 +195,8 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 }
 
 func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]helper.Player, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
 	return t.store.loadParticipantsLocked(compID, withZekkenName)
 }

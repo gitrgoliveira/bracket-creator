@@ -278,3 +278,84 @@ func TestWithTransaction_CrossFile_PoolMatchesAndBracket(t *testing.T) {
 	require.Len(t, loadedBracket.Rounds, 1)
 	assert.Len(t, loadedBracket.Rounds[0], 1)
 }
+
+// TestStoreTx_MismatchedCompIDRejected pins that every StoreTx method
+// rejects a compID different from the one WithTransaction was opened
+// with. Without the guard, a stale or copy-pasted compID inside fn
+// would dispatch the *Locked helper for another competition while
+// holding only the original's lock — unlocked I/O.
+//
+// The body never reads or writes the "wrong" competition (no fixture
+// for it exists); the guard short-circuits before the locked helper
+// runs. Each subtest asserts ErrMismatchedTxCompID via errors.Is.
+func TestStoreTx_MismatchedCompIDRejected(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-tx-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	boundID := "tx-bound"
+	otherID := "tx-other"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: boundID, Name: "bound"}))
+
+	err = store.WithTransaction(boundID, func(tx StoreTx) error {
+		t.Run("LoadCompetition", func(t *testing.T) {
+			_, err := tx.LoadCompetition(otherID)
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("SaveCompetition via c.ID", func(t *testing.T) {
+			err := tx.SaveCompetition(&Competition{ID: otherID, Name: "x"})
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("LoadPoolMatches", func(t *testing.T) {
+			_, err := tx.LoadPoolMatches(otherID)
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("SavePoolMatches", func(t *testing.T) {
+			err := tx.SavePoolMatches(otherID, nil)
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("LoadBracket", func(t *testing.T) {
+			_, err := tx.LoadBracket(otherID)
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("SaveBracket", func(t *testing.T) {
+			err := tx.SaveBracket(otherID, &Bracket{})
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("LoadCompetitorStatus", func(t *testing.T) {
+			_, err := tx.LoadCompetitorStatus(otherID)
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("SetCompetitorStatus", func(t *testing.T) {
+			err := tx.SetCompetitorStatus(otherID, domain.CompetitorStatus{})
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("LoadTeamLineups", func(t *testing.T) {
+			_, err := tx.LoadTeamLineups(otherID)
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("SetTeamLineup", func(t *testing.T) {
+			err := tx.SetTeamLineup(otherID, domain.TeamLineup{}, 3)
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		t.Run("LoadParticipants", func(t *testing.T) {
+			_, err := tx.LoadParticipants(otherID, false)
+			assert.ErrorIs(t, err, ErrMismatchedTxCompID)
+		})
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Sanity: bound compID still works inside a fresh transaction.
+	err = store.WithTransaction(boundID, func(tx StoreTx) error {
+		c, err := tx.LoadCompetition(boundID)
+		require.NoError(t, err)
+		require.NotNil(t, c)
+		assert.Equal(t, "bound", c.Name)
+		return nil
+	})
+	require.NoError(t, err)
+}

@@ -46,15 +46,17 @@ If you need a sequence the existing primitives don't cover, add a new one rather
 
 4. **Read operations should use `Load…` (not the atomic primitives).** `LoadCompetition`, `LoadTournament`, `LoadParticipants`, etc. take read locks. The atomic primitives are for write paths.
 
-### Planned: `Store.WithTransaction` (Slice 6 / NFR-010)
+### `Store.WithTransaction` (T155 / NFR-010)
 
-Slice 6 lands `Store.WithTransaction(fn func(tx StoreTx) error) error` (tasks T155/T156) which formalizes the lock-ordering rule into a single primitive. The rough shape:
+`Store.WithTransaction(compID, fn func(tx StoreTx) error) error` holds the per-competition write lock for the entire duration of `fn`, so a handler that needs several load/save operations against multiple files (config.md, pool-matches.csv, bracket.json, lineups.yaml, …) can run them all under a single lock acquire.
 
-- `WithTransaction` acquires the relevant locks in a fixed order — **competition mutex first, then any match-level mutex** (anticipating per-match locks added in later work, though the current tree has none).
-- The `tx StoreTx` handle is restricted to lock-free read/write methods, so transforms can't accidentally re-enter a lock.
-- Commit happens on `fn` returning `nil`; rollback (no save) on error.
+Key contract points (full package docs live in [transactions.go](../state/transactions.go)):
 
-Three handlers are scheduled to migrate first (T156): the score-update path, the lineup PUT, and the decision endpoint. Until that lands, the slice-3 race-condition guards (T105 CHK047, T128a CHK048) use the existing per-competition lock via `UpdateCompetitionChanged` — this CONVENTIONS.md is the reference they cite.
+- **Lock-level atomicity, NOT filesystem ACID.** There is NO rollback. If `fn` writes file A successfully and then fails on file B, file A stays written. Callers MUST do all validation first and confine writes to the tail of `fn`.
+- **Use the supplied `StoreTx` handle.** Calling `s.LoadCompetition`, `s.SavePoolMatches`, or any other public `Store` method from inside `fn` would deadlock — the per-comp mutex is a non-recursive `sync.RWMutex` and `WithTransaction` already holds it.
+- **`StoreTx` is bound to one competition.** Every method guards the supplied `compID` (and `SaveCompetition`'s `c.ID`) against the bound one and returns `ErrMismatchedTxCompID` on mismatch. Cross-competition operations need a fresh `WithTransaction` call.
+
+Handler call sites today: `handlers_lineup.go` (PUT body). The score-update and decision endpoints have TODO markers (T156) to migrate once the engine grows tx-aware `RecordMatchResult` / `RecordDecision` variants — at present those internal engine calls re-acquire the per-comp lock via `UpdatePoolMatchByID`, so wrapping them in `WithTransaction` would deadlock.
 
 ### When in doubt
 

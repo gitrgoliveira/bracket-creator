@@ -86,13 +86,19 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 		}
 		*r = *result
 	})
-	if err == nil {
-		return nil
+	if err != nil {
+		if !errors.Is(err, errMatchNotFound) {
+			return err
+		}
+		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
+			return err
+		}
 	}
-	if !errors.Is(err, errMatchNotFound) {
-		return err
-	}
-	return e.recordBracketMatchResult(compId, matchId, result)
+	// T085 — persist the loser's competitor-status when this update
+	// recorded a kiken or fusenpai decision. Failure to write the
+	// status is non-fatal to the score-recording itself; the handler
+	// will log and may surface a degraded-broadcast warning.
+	return e.recordIneligibilityFromDecision(compId, matchId, result)
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {

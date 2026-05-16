@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveCompetitionName, validatePoolSettings } from '../admin_setup.jsx';
+import { deriveCompetitionName, validatePoolSettings, validateSwissSettings } from '../admin_setup.jsx';
 
 describe('deriveCompetitionName', () => {
   // Copilot round-8 finding: AdminCreateCompetition.create used
@@ -171,6 +171,65 @@ describe('validatePoolSettings', () => {
       // doesn't silently change UX.
       const r = validatePoolSettings('pools', NaN, NaN);
       expect(r.error).toMatch(/Players per pool/);
+    });
+  });
+});
+
+describe('validateSwissSettings (T190 / FR-050a)', () => {
+  // Same NaN/fractional/zero/negative concerns as validatePoolSettings:
+  // the Swiss-rounds input uses decideNumericUpdate so a cleared field
+  // stores NaN, which would slip past `swissRounds || 4` in the
+  // create payload. This guard rejects them at submit time.
+
+  describe('non-swiss formats short-circuit', () => {
+    it('format=playoffs ignores swissRounds', () => {
+      expect(validateSwissSettings('playoffs', NaN)).toEqual({ ok: true, error: null });
+      expect(validateSwissSettings('playoffs', 0)).toEqual({ ok: true, error: null });
+    });
+
+    it('format=pools / mixed / league all skip the guard', () => {
+      expect(validateSwissSettings('pools', NaN)).toEqual({ ok: true, error: null });
+      expect(validateSwissSettings('mixed', NaN)).toEqual({ ok: true, error: null });
+      expect(validateSwissSettings('league', NaN)).toEqual({ ok: true, error: null });
+    });
+  });
+
+  describe('format=swiss, valid inputs pass', () => {
+    it('boundary: swissRounds=1', () => {
+      expect(validateSwissSettings('swiss', 1)).toEqual({ ok: true, error: null });
+    });
+
+    it('typical: swissRounds=4 (default)', () => {
+      expect(validateSwissSettings('swiss', 4)).toEqual({ ok: true, error: null });
+    });
+
+    it('large: swissRounds=10', () => {
+      expect(validateSwissSettings('swiss', 10)).toEqual({ ok: true, error: null });
+    });
+  });
+
+  describe('format=swiss, invalid inputs blocked', () => {
+    it('NaN swissRounds (cleared input) → blocked', () => {
+      const r = validateSwissSettings('swiss', NaN);
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/Swiss rounds/);
+    });
+
+    it('fractional swissRounds=4.5 → blocked', () => {
+      const r = validateSwissSettings('swiss', 4.5);
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/whole number/);
+    });
+
+    it('swissRounds=0 below min → blocked', () => {
+      const r = validateSwissSettings('swiss', 0);
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/≥ 1/);
+    });
+
+    it('negative swissRounds → blocked', () => {
+      const r = validateSwissSettings('swiss', -3);
+      expect(r.ok).toBe(false);
     });
   });
 });

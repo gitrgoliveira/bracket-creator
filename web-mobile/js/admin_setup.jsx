@@ -76,6 +76,21 @@ function validatePoolSettings(format, poolSize, winners) {
   return { ok: true, error: null };
 }
 
+// T190 (US13 — FR-050a): submit-time validation for the swissRounds
+// field. Only meaningful when format === "swiss"; short-circuits with
+// { ok: true } for other formats. Same shape as validatePoolSettings —
+// NaN/fractional/zero/negative all blocked. Default UI value is 4
+// (common Swiss tournament size for ~16 players).
+//
+// Exported for vitest at __tests__/admin_setup.test.jsx.
+function validateSwissSettings(format, swissRounds) {
+  if (format !== "swiss") return { ok: true, error: null };
+  if (!Number.isInteger(swissRounds) || swissRounds < 1) {
+    return { ok: false, error: "Number of Swiss rounds must be a whole number ≥ 1." };
+  }
+  return { ok: true, error: null };
+}
+
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode }) {
   const [name, setName] = useStateA(tournament.name);
   const [venue, setVenue] = useStateA(tournament.venue);
@@ -181,6 +196,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [poolMode, setPoolMode] = useStateA("max");
   const [poolSize, setPoolSize] = useStateA(3);
   const [winners, setWinners] = useStateA(2);
+  // T190 (FR-050a): Swiss round count. Default 4 is the canonical
+  // Swiss tournament size for ~16 players (log2 of typical field) —
+  // matches the example in spec.md US13. Only used when format=swiss.
+  const [swissRounds, setSwissRounds] = useStateA(4);
   const [startTime, setStartTime] = useStateA("09:00");
   const [date, setDate] = useStateA(tournament.date);
   const [teamSize, setTeamSize] = useStateA(5);
@@ -217,6 +236,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     const poolResult = validatePoolSettings(format, poolSize, winners);
     if (!poolResult.ok) {
       setError(poolResult.error);
+      return;
+    }
+
+    // T190 (FR-050a): Swiss-format guard. Same shape/concerns as
+    // validatePoolSettings — NaN/fractional/zero/negative all blocked
+    // before they can land on the backend.
+    const swissResult = validateSwissSettings(format, swissRounds);
+    if (!swissResult.ok) {
+      setError(swissResult.error);
       return;
     }
 
@@ -280,6 +308,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // play — knockout-only competitions have no pool phase.
     if (format === "pools" || format === "mixed" || format === "league") {
       c.poolFormat = poolFormat;
+    }
+    // T190 (FR-050a): persist swissRounds when format=swiss. Same
+    // post-construction pattern as poolFormat above — buildCompetition
+    // doesn't know about this field; setting it on the result object
+    // lets the backend's JSON binding pick up the camelCase key. The
+    // backend uses `omitempty` so the field is invisible on non-Swiss
+    // competitions even if it were set.
+    if (format === "swiss") {
+      c.swissRounds = swissRounds;
     }
     onCreate(c);
   };
@@ -350,7 +387,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           <div className="field">
             <label className="field__label">Format</label>
-            {/* FR-050 / T044: four-option format taxonomy. */}
+            {/* FR-050 / T044 / T190: five-option format taxonomy. */}
             {/* - "playoffs" — knockout only (no pools). */}
             {/* - "mixed"    — pools followed by knockout (the new */}
             {/*               canonical value for what the old UI labelled */}
@@ -361,17 +398,23 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             {/*               playoff phase. IsPlayoffEnabled returns */}
             {/*               false on the backend, so the create-playoff */}
             {/*               affordance is hidden for these (T045). */}
+            {/* - "swiss"    — Swiss-system pairing across N rounds */}
+            {/*               (FR-050a); no pools or bracket. The */}
+            {/*               swissRounds field below configures the */}
+            {/*               round count. */}
             <div className="radio-group">
               <button className={`radio-pill ${format === "playoffs" ? "is-active" : ""}`} type="button" onClick={() => setFormat("playoffs")}>Knockout only</button>
               <button className={`radio-pill ${format === "mixed" ? "is-active" : ""}`} type="button" onClick={() => setFormat("mixed")}>Pools + Knockout</button>
               <button className={`radio-pill ${format === "pools" ? "is-active" : ""}`} type="button" onClick={() => setFormat("pools")}>Pools only</button>
               <button className={`radio-pill ${format === "league" ? "is-active" : ""}`} type="button" onClick={() => setFormat("league")}>League</button>
+              <button className={`radio-pill ${format === "swiss" ? "is-active" : ""}`} type="button" onClick={() => setFormat("swiss")}>Swiss</button>
             </div>
             <div className="field__hint">
               {format === "playoffs" && "Direct single-elimination knockout."}
               {format === "mixed" && "Round-robin pools first, then top finishers advance to a knockout bracket."}
               {format === "pools" && "Round-robin pool play; standings within each pool decide placements (no knockout)."}
               {format === "league" && "Single round-robin across all participants; final standings determine the winner (no knockout)."}
+              {format === "swiss" && "Swiss-system: fixed number of rounds, pairing players with equal win counts; cumulative standings decide the winner."}
             </div>
           </div>
 
@@ -383,6 +426,28 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 <button className={`radio-pill ${poolFormat === "partial" ? "is-active" : ""}`} type="button" onClick={() => setPoolFormat("partial")}>Partial / neighbour-only</button>
               </div>
               <div className="field__hint">{poolFormat === "full" ? "Every participant plays every other participant in their pool." : "Each participant plays a neighbourhood subset — useful when a full round-robin would not fit in the day's schedule."}</div>
+            </div>
+          )}
+
+          {/* T190 (FR-050a): Swiss rounds input. Only rendered for */}
+          {/* format=swiss — keeps the create form uncluttered for other */}
+          {/* formats. Same NaN-as-"" + decideNumericUpdate pattern as */}
+          {/* poolSize / winners above; validateSwissSettings at submit */}
+          {/* time rejects NaN / fractional / <1 before the field reaches */}
+          {/* the backend. */}
+          {format === "swiss" && (
+            <div className="field">
+              <label className="field__label">Number of rounds</label>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                step="1"
+                value={Number.isFinite(swissRounds) ? swissRounds : ""}
+                onChange={(e) => setSwissRounds(decideNumericUpdate(e.target.value, 1).value)}
+                style={{ maxWidth: 120 }}
+              />
+              <div className="field__hint">Typical: 4 rounds for 16 players, 5 for 32, 6 for 64 (≈ log₂ of field size).</div>
             </div>
           )}
 
@@ -682,4 +747,4 @@ window.AdminImportPage = AdminImportPage;
 
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { deriveCompetitionName, validatePoolSettings };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };

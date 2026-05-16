@@ -434,6 +434,42 @@ const API = {
             throw new Error(err.error || "Failed to add daihyosen");
         }
         return res.json();
+    },
+    // T190-T193 (US13 — Swiss format). Generate the next Swiss round.
+    // Backend pre-conditions: format=swiss; all matches in the current
+    // round must be completed; swissCurrentRound must be < swissRounds.
+    // Returns { round, matches, swissCurrentRound } on 201, throws on
+    // 4xx/5xx. 409 with code="round_incomplete" surfaces a friendly
+    // "current round still has incomplete matches" message in the UI;
+    // the caller checks `e.code === "round_incomplete"` to branch.
+    async swissGenerateRound(compID, password) {
+        const res = await fetch(`/api/competitions/${compID}/swiss/generate-round`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            // Preserve the structured 409 payload (code + round) on the
+            // thrown Error so the caller can show a precise message. The
+            // generic .message stays as the server-reported error string.
+            const e = new Error(err.error || "Failed to generate Swiss round");
+            if (err.code) e.code = err.code;
+            if (err.round !== undefined) e.round = err.round;
+            throw e;
+        }
+        return res.json();
+    },
+    // T190-T193 (US13). Public endpoint — returns cumulative Swiss
+    // standings ranked by wins > points > head-to-head. Returns []
+    // when the competition hasn't started yet. Each entry is a
+    // state.PlayerStanding (same shape used by pool standings).
+    async swissStandings(compID) {
+        const res = await fetch(`/api/competitions/${compID}/swiss/standings`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load Swiss standings");
+        }
+        return res.json();
     }
 };
 

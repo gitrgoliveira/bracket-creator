@@ -289,6 +289,19 @@ function App() {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
             }
             jitteredTimeout(load, jitter);
+        } else if (event.type === "swiss_round_generated") {
+            // T192 (US13 — FR-050d): a new Swiss round's matches have been
+            // generated. The payload carries competitionId + swissCurrentRound
+            // (see handlers_swiss.go) but the viewer needs the freshly-saved
+            // poolMatches + the updated comp.swissCurrentRound on the
+            // tournament list, so we refetch both. Mirrors the match_updated
+            // path's jittered fetchCompetitionDetails + load pattern.
+            if (mode === "display") {
+                jitteredTimeout(load, jitter);
+            } else if (viewerCompId === event.data?.competitionId) {
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            }
+            jitteredTimeout(load, jitter);
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can

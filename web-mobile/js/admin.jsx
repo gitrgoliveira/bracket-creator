@@ -23,6 +23,12 @@ const REFRESHABLE_EVENTS = new Set([
   // relevance check at the subscription site treats any nil-data event as
   // tournament-wide and always triggers the fetchCompetitionDetails refresh).
   "schedule_updated",
+  // T191/T192 (US13 — FR-050d): swiss_round_generated fires when a new
+  // Swiss round's matches are persisted. Carries competitionId +
+  // swissCurrentRound + matchCount; the admin section refetches comp
+  // detail so the round counter, match list, and "Generate next round"
+  // button enable-state all reconcile.
+  "swiss_round_generated",
 ]);
 
 // Page components rendered by AdminApp's view switch (produced by sibling
@@ -466,7 +472,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           if (event.type === "match_updated"
               || event.type === "competition_started"
               || event.type === "competition_completed"
-              || event.type === "competitor_status_updated") {
+              || event.type === "competitor_status_updated"
+              || event.type === "swiss_round_generated") {
             scheduleTournamentRefresh(false);
           } else if (event.type === "tournament_updated") {
             scheduleTournamentRefresh(true);

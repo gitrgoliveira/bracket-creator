@@ -714,6 +714,135 @@ function DisplayModes({ tournament }) {
   );
 }
 
+// T192 (US13 — FR-050e): pure helpers for the Swiss standings viewer.
+// Extracted so the conditional header / winner-detection logic is unit
+// testable without mounting the component. Mirrors the
+// admin_competition.jsx swiss helpers pattern.
+
+// `comp.swissCurrentRound >= comp.swissRounds` is the precondition for
+// "final standings"; we also require every match in the final round
+// to be completed so a half-finished final round doesn't prematurely
+// claim a winner.
+function isSwissFinalStandings(comp, poolMatches) {
+  if (!comp || comp.format !== "swiss") return false;
+  const total = comp.swissRounds || 0;
+  const current = comp.swissCurrentRound || 0;
+  if (total < 1 || current < total) return false;
+  const finalRoundPrefix = `Swiss-R${total}-`;
+  const finalMatches = (poolMatches || []).filter(m => (m.id || "").startsWith(finalRoundPrefix));
+  if (finalMatches.length === 0) return false;
+  return finalMatches.every(m => m.status === "completed");
+}
+
+// Heading string for the standings table. "After round N" while
+// the competition is in progress; "Final standings" once every
+// configured round is in the books.
+function swissStandingsHeading(comp, poolMatches) {
+  if (isSwissFinalStandings(comp, poolMatches)) return "Final standings";
+  const current = (comp && comp.swissCurrentRound) || 0;
+  if (current === 0) return "Standings — pending";
+  return `Standings after round ${current}`;
+}
+
+function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
+  const c = competition;
+  const [standings, setStandings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Re-fetch whenever the round counter advances (SSE-driven) so the
+  // standings table reflects the latest cumulative state. Also depend
+  // on poolMatches length so a fresh round's matches landing triggers
+  // a refresh — the round may have completed even when swissCurrentRound
+  // didn't move (final round).
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    window.API.swissStandings(c.id)
+      .then(data => {
+        if (cancelled) return;
+        setStandings(Array.isArray(data) ? data : []);
+        setLoading(false);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error("Failed to load Swiss standings", err);
+        setError(err.message || "Failed to load standings");
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [c.id, c.swissCurrentRound, (poolMatches || []).length]);
+
+  const isFinal = isSwissFinalStandings(c, poolMatches);
+  const heading = swissStandingsHeading(c, poolMatches);
+  const winner = isFinal && standings.length > 0 ? standings[0] : null;
+
+  if (loading) return <div className="loading">Loading standings…</div>;
+  if (error) return <div className="alert alert--error">{error}</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {isFinal && winner && (
+        <div className="winner-badge" style={{
+          padding: "10px 14px",
+          background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
+          color: "white",
+          borderRadius: 8,
+          fontWeight: 700,
+          fontSize: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 18 }}>🏆</span>
+          <span>Winner: {winner.player?.name || ""}</span>
+        </div>
+      )}
+      <div className="pool" style={{ padding: 14 }}>
+        <div className="pool__head">
+          <div className="pool__name">{heading}</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+            Round {c.swissCurrentRound || 0} of {c.swissRounds || 0}
+          </div>
+        </div>
+        <table className="pool__table">
+          <thead>
+            {/* Head-to-head is a tiebreaker between equal-wins-and-points */}
+            {/* pairs; surfaced as the column label so the order is */}
+            {/* explicit to viewers. The backend resolves head-to-head */}
+            {/* into the stable rank value used for row order. */}
+            <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
+          </thead>
+          <tbody>
+            {standings.length > 0 ? standings.map((s, i) => (
+              <tr key={s.player?.id || s.player?.name || i}>
+                <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
+                <td>
+                  <div style={{ fontWeight: 500 }}>{s.player?.name || ""}</div>
+                  {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
+                </td>
+                <td className="num">{s.wins || 0}</td>
+                <td className="num">{s.losses || 0}</td>
+                <td className="num">{s.draws || 0}</td>
+                <td className="num">{s.ipponsGiven || 0}</td>
+                <td className="num">{s.ipponsTaken || 0}</td>
+              </tr>
+            )) : (
+              <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--ink-3)", fontSize: 13, padding: 16 }}>No matches scored yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+        {standings.length > 0 && (
+          <div className="pool-matrix__legend" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
+            Ranked by: wins → points scored (PW) → head-to-head.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ViewerCompetition({ _tournament, competition, pools, poolMatches, standings, bracket, onBack, _onAdminClick, tweaks }) {
   const [tab, setTab] = useState("overview");
   const c = competition;
@@ -760,11 +889,17 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
 
   const hasPools = !!pools && pools.length > 0;
   const hasBracket = !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
+  // T192 (FR-050e): Swiss competitions surface a dedicated standings
+  // tab in place of pools/bracket. The standings tab fetches its own
+  // data via /swiss/standings (it's not part of the competition-detail
+  // payload — see api_client.jsx).
+  const isSwiss = c.format === "swiss";
   const tabs = [
     { id: "overview", label: "Overview" },
-    hasPools ? { id: "pools", label: "Pools" } : null,
-    hasBracket ? { id: "bracket", label: "Bracket" } : null,
-    c.status === "completed" ? { id: "results", label: "Results" } : null,
+    isSwiss ? { id: "swiss", label: "Standings" } : null,
+    hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
+    hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
+    c.status === "completed" && !isSwiss ? { id: "results", label: "Results" } : null,
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
@@ -841,6 +976,9 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           )}
           {tab === "pools" && hasPools && (
             <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} />
+          )}
+          {tab === "swiss" && isSwiss && (
+            <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
           {tab === "results" && c.status === "completed" && derivedBracket && (
             <ResultsViewer c={c} bracket={derivedBracket} />
@@ -1466,7 +1604,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -1842,6 +1980,7 @@ window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;
 window.ViewerSchedule = ViewerSchedule;
 window.ScheduleViewer = ScheduleViewer;
+window.SwissStandingsViewer = SwissStandingsViewer;
 window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;

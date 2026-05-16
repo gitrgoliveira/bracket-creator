@@ -299,6 +299,85 @@ describe('API Utils', () => {
           .rejects.toThrow('permission denied');
       });
     });
+
+    // T190–T193 (US13 — FR-050a / FR-050d / FR-050e): Swiss endpoint
+    // wrappers. The generate-round call carries auth and returns the
+    // new round payload; the 409 / round_incomplete contract carries
+    // structured fields (code, round) that the helper must propagate
+    // on the Error object so the admin UI can branch on them.
+    describe('swissGenerateRound', () => {
+      it('POSTs to the correct endpoint with auth header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 201,
+          json: async () => ({ round: 2, matches: [], swissCurrentRound: 2 }),
+        });
+        const r = await API.swissGenerateRound('c1', 'secret');
+        expect(r.round).toBe(2);
+        expect(r.swissCurrentRound).toBe(2);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/c1/swiss/generate-round',
+          expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({ 'X-Tournament-Password': 'secret' }),
+          })
+        );
+      });
+
+      it('propagates 409 round_incomplete with code on the thrown Error', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({ error: 'round 2 not yet completed', code: 'round_incomplete', round: 2 }),
+        });
+        try {
+          await API.swissGenerateRound('c1', 'pw');
+          throw new Error('should have rejected');
+        } catch (e) {
+          // The admin section checks `e.code === "round_incomplete"`
+          // to surface the friendly inline error. Pin the field
+          // propagation so a refactor can't silently drop it.
+          expect(e.message).toMatch(/round 2 not yet completed/);
+          expect(e.code).toBe('round_incomplete');
+          expect(e.round).toBe(2);
+        }
+      });
+
+      it('throws default message when server gives no error body', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          json: async () => { throw new Error('parse'); },
+        });
+        await expect(API.swissGenerateRound('c1', 'pw'))
+          .rejects.toThrow('Failed to generate Swiss round');
+      });
+    });
+
+    describe('swissStandings', () => {
+      it('GETs the standings without auth (public endpoint)', async () => {
+        const sample = [{ player: { name: 'Alice' }, wins: 3, losses: 1, draws: 0 }];
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => sample,
+        });
+        const r = await API.swissStandings('c1');
+        expect(r).toEqual(sample);
+        // No password header on the public endpoint — pin the call
+        // shape so a refactor doesn't accidentally make it admin-only.
+        expect(global.fetch).toHaveBeenCalledWith('/api/competitions/c1/swiss/standings');
+      });
+
+      it('throws with server message on error', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 404,
+          json: async () => ({ error: 'competition not found' }),
+        });
+        await expect(API.swissStandings('c1')).rejects.toThrow('competition not found');
+      });
+    });
   });
 });
 

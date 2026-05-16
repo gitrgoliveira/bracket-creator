@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { buildLiveIpponResult, loadScoreboardPoints } from '../admin_competition.jsx';
+import {
+  buildLiveIpponResult,
+  loadScoreboardPoints,
+  swissRoundIDPrefix,
+  filterSwissRoundMatches,
+  isSwissRoundComplete,
+  canGenerateNextSwissRound,
+  isSwissCompetitionComplete,
+} from '../admin_competition.jsx';
 
 // Copilot finding on PR #103: LiveMatchPanel's scoreboard mode supports
 // 2-ippon wins (and 2-1 with loser points), but the old recordWinner
@@ -429,6 +437,11 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // FR-052..FR-054 / T047: per-phase duration overrides. Zero means
     // "use legacy default" — fall through to backend ApplyCompetitionDefaults.
     'poolMatchDuration', 'playoffMatchDuration',
+    // FR-050a / T190: Swiss rounds (number of rounds the operator
+    // configured for a Swiss-format competition). Editable pre-start
+    // and during play; the next "Generate next round" call respects
+    // the latest value.
+    'swissRounds',
   ]);
   // Fields that MUST NOT appear in the PUT body — pinning the
   // negative invariant explicitly so a careless re-add is caught.
@@ -582,5 +595,191 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     // (debounceRef.current) return prev` was the bug, scoped to the
     // sync effect.
     expect(src).not.toMatch(/if \(debounceRef\.current\)\s+return prev/);
+  });
+});
+
+// ============================================================
+// Swiss helpers (T190–T193, FR-050a / FR-050d / FR-050e)
+// ============================================================
+//
+// The Swiss-round admin section ships four pure helpers that together
+// implement the "current round complete, generate next" decision flow.
+// Exported separately so the conditional logic can be pinned without
+// mounting AdminSwissRounds (the React vitest setup stubs hooks at the
+// component level — only the helpers can be exercised here).
+
+describe('swissRoundIDPrefix', () => {
+  // Must match engine/swiss.go swissMatchID format: "Swiss-R{N}-".
+  // A drift here would cause filterSwissRoundMatches to silently
+  // return [] for a round that has matches on the server.
+  it('formats round 1 as "Swiss-R1-"', () => {
+    expect(swissRoundIDPrefix(1)).toBe('Swiss-R1-');
+  });
+
+  it('formats round 4 as "Swiss-R4-"', () => {
+    expect(swissRoundIDPrefix(4)).toBe('Swiss-R4-');
+  });
+
+  it('formats round 10 as "Swiss-R10-"', () => {
+    expect(swissRoundIDPrefix(10)).toBe('Swiss-R10-');
+  });
+});
+
+describe('filterSwissRoundMatches', () => {
+  const r1m0 = { id: 'Swiss-R1-0', status: 'completed' };
+  const r1m1 = { id: 'Swiss-R1-1', status: 'completed' };
+  const r2m0 = { id: 'Swiss-R2-0', status: 'scheduled' };
+  const r2m1 = { id: 'Swiss-R2-1', status: 'running' };
+
+  it('returns only the matches for the given round', () => {
+    const all = [r1m0, r1m1, r2m0, r2m1];
+    expect(filterSwissRoundMatches(all, 1)).toEqual([r1m0, r1m1]);
+    expect(filterSwissRoundMatches(all, 2)).toEqual([r2m0, r2m1]);
+  });
+
+  it('returns [] for a round that has no matches yet', () => {
+    expect(filterSwissRoundMatches([r1m0, r1m1], 3)).toEqual([]);
+  });
+
+  it('returns [] for null/undefined/empty inputs', () => {
+    expect(filterSwissRoundMatches(null, 1)).toEqual([]);
+    expect(filterSwissRoundMatches(undefined, 1)).toEqual([]);
+    expect(filterSwissRoundMatches([], 1)).toEqual([]);
+  });
+
+  it('returns [] for invalid round numbers (0, -1, null)', () => {
+    expect(filterSwissRoundMatches([r1m0], 0)).toEqual([]);
+    expect(filterSwissRoundMatches([r1m0], -1)).toEqual([]);
+    expect(filterSwissRoundMatches([r1m0], null)).toEqual([]);
+  });
+
+  it('does NOT confuse "Swiss-R1-" prefix with "Swiss-R10-"', () => {
+    // If filterSwissRoundMatches used a contains check instead of
+    // startsWith on the canonical prefix, round 1 would match round
+    // 10's matches too. Pin the behaviour explicitly.
+    const r10m0 = { id: 'Swiss-R10-0', status: 'scheduled' };
+    expect(filterSwissRoundMatches([r1m0, r10m0], 1)).toEqual([r1m0]);
+    expect(filterSwissRoundMatches([r1m0, r10m0], 10)).toEqual([r10m0]);
+  });
+
+  it('ignores non-Swiss matches (e.g. pool matches with same shape)', () => {
+    // A pool-match ID like "PoolA-0" must not slip into a Swiss round.
+    const poolM = { id: 'PoolA-0', status: 'completed' };
+    expect(filterSwissRoundMatches([poolM, r1m0], 1)).toEqual([r1m0]);
+  });
+});
+
+describe('isSwissRoundComplete', () => {
+  it('true when every match is completed', () => {
+    expect(isSwissRoundComplete([
+      { status: 'completed' },
+      { status: 'completed' },
+    ])).toBe(true);
+  });
+
+  it('false when any match is still scheduled', () => {
+    expect(isSwissRoundComplete([
+      { status: 'completed' },
+      { status: 'scheduled' },
+    ])).toBe(false);
+  });
+
+  it('false when any match is running (live)', () => {
+    expect(isSwissRoundComplete([
+      { status: 'completed' },
+      { status: 'running' },
+    ])).toBe(false);
+  });
+
+  it('false for empty list (unbegun round is not complete)', () => {
+    // The Generate Next Round button must stay disabled when there
+    // are no matches yet — pre-fix, returning true for [] would
+    // enable the button before round 1 even exists.
+    expect(isSwissRoundComplete([])).toBe(false);
+    expect(isSwissRoundComplete(null)).toBe(false);
+    expect(isSwissRoundComplete(undefined)).toBe(false);
+  });
+});
+
+describe('canGenerateNextSwissRound', () => {
+  const mkComp = (overrides) => ({
+    format: 'swiss',
+    swissRounds: 4,
+    swissCurrentRound: 1,
+    ...overrides,
+  });
+  const completedR1 = [
+    { id: 'Swiss-R1-0', status: 'completed' },
+    { id: 'Swiss-R1-1', status: 'completed' },
+  ];
+  const incompleteR1 = [
+    { id: 'Swiss-R1-0', status: 'completed' },
+    { id: 'Swiss-R1-1', status: 'scheduled' },
+  ];
+
+  it('true when format=swiss, round complete, more rounds remaining', () => {
+    expect(canGenerateNextSwissRound(mkComp(), completedR1)).toBe(true);
+  });
+
+  it('false when format !== swiss', () => {
+    expect(canGenerateNextSwissRound(mkComp({ format: 'pools' }), completedR1)).toBe(false);
+    expect(canGenerateNextSwissRound(mkComp({ format: 'playoffs' }), completedR1)).toBe(false);
+  });
+
+  it('false when current round still has incomplete matches', () => {
+    expect(canGenerateNextSwissRound(mkComp(), incompleteR1)).toBe(false);
+  });
+
+  it('false when all configured rounds are done (current >= total)', () => {
+    expect(canGenerateNextSwissRound(mkComp({ swissCurrentRound: 4 }), completedR1)).toBe(false);
+    expect(canGenerateNextSwissRound(mkComp({ swissCurrentRound: 5 }), completedR1)).toBe(false);
+  });
+
+  it('false when no rounds configured', () => {
+    expect(canGenerateNextSwissRound(mkComp({ swissRounds: 0 }), completedR1)).toBe(false);
+  });
+
+  it('false when current round is 0 (setup, round 1 not generated)', () => {
+    // Operator hasn't hit Start yet — must press "Start competition"
+    // first; the Generate Next Round button is not a substitute.
+    expect(canGenerateNextSwissRound(mkComp({ swissCurrentRound: 0 }), [])).toBe(false);
+  });
+
+  it('false for null/missing competition', () => {
+    expect(canGenerateNextSwissRound(null, completedR1)).toBe(false);
+    expect(canGenerateNextSwissRound(undefined, completedR1)).toBe(false);
+  });
+});
+
+describe('isSwissCompetitionComplete', () => {
+  const mkComp = (overrides) => ({
+    format: 'swiss',
+    swissRounds: 4,
+    swissCurrentRound: 4,
+    ...overrides,
+  });
+  const completedR4 = [
+    { id: 'Swiss-R4-0', status: 'completed' },
+    { id: 'Swiss-R4-1', status: 'completed' },
+  ];
+  const incompleteR4 = [
+    { id: 'Swiss-R4-0', status: 'completed' },
+    { id: 'Swiss-R4-1', status: 'running' },
+  ];
+
+  it('true when current >= total AND final-round matches all complete', () => {
+    expect(isSwissCompetitionComplete(mkComp(), completedR4)).toBe(true);
+  });
+
+  it('false when on the final round but not all matches completed', () => {
+    expect(isSwissCompetitionComplete(mkComp(), incompleteR4)).toBe(false);
+  });
+
+  it('false when current round < total rounds', () => {
+    expect(isSwissCompetitionComplete(mkComp({ swissCurrentRound: 3 }), completedR4)).toBe(false);
+  });
+
+  it('false when format !== swiss', () => {
+    expect(isSwissCompetitionComplete(mkComp({ format: 'pools' }), completedR4)).toBe(false);
   });
 });

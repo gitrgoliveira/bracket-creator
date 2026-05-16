@@ -70,6 +70,145 @@ function currentMatchOf(c) {
   return sched[0] || null;
 }
 
+// --- Slice 4 helpers: "Find my matches" + Watchlist (FR-020 / FR-022 / FR-024) ---
+
+// Pull a participant id off a match in either the canonical shape
+// (`m.sideA.id` / `m.sideB.id` as produced by api_serializers.jsx) or
+// the flat shape (`m.sideAId` / `m.sideBId`) some tests/fixtures use.
+// Returns the two ids as a [aId, bId] tuple, either of which may be "".
+function matchParticipantIds(m) {
+  if (!m) return ["", ""];
+  const aId = (m.sideA && typeof m.sideA === "object" ? m.sideA.id : null) || m.sideAId || "";
+  const bId = (m.sideB && typeof m.sideB === "object" ? m.sideB.id : null) || m.sideBId || "";
+  return [aId, bId];
+}
+
+// Pull the two display names off a match, again tolerant of both shapes.
+function matchParticipantNames(m) {
+  if (!m) return ["", ""];
+  const aName = (m.sideA && typeof m.sideA === "object" ? m.sideA.name : m.sideA) || "";
+  const bName = (m.sideB && typeof m.sideB === "object" ? m.sideB.name : m.sideB) || "";
+  return [aName, bName];
+}
+
+// Return the subset of `matches` where the followed player participates.
+// Matching is by UUID first; if `fallbackName` is provided and no UUID hits
+// (e.g., legacy data that still keys by display name), fall back to a
+// case-insensitive substring match on either side's name.
+function buildPlayerMatchHighlight(playerId, matches, fallbackName) {
+  const id = (playerId || "").toString();
+  const list = Array.isArray(matches) ? matches : [];
+  const byId = id ? list.filter((m) => {
+    const [a, b] = matchParticipantIds(m);
+    return (a && a === id) || (b && b === id);
+  }) : [];
+  if (byId.length > 0 || !fallbackName) return byId;
+  const needle = String(fallbackName).toLowerCase();
+  if (!needle) return byId;
+  return list.filter((m) => {
+    const [an, bn] = matchParticipantNames(m);
+    return (an && an.toLowerCase().includes(needle))
+        || (bn && bn.toLowerCase().includes(needle));
+  });
+}
+
+// LocalStorage keys for FR-020 / FR-024. Centralised so the deep-link
+// handler (T114) writes the same keys the panels read.
+const LS_MY_PLAYER_ID = "bc_my_player_id";
+const LS_MY_PLAYER_NAME = "bc_my_player_name";
+const LS_WATCHLIST = "bc_watchlist";
+const WATCHLIST_MAX = 50;
+const WATCHED_UPCOMING_MAX = 6;
+
+// Hook: followed-player ({id, name} or null) backed by localStorage.
+// Read on mount, surfaces a setter that persists. A `null` clears both keys
+// (used by the "[X]" header indicator in T113). We deliberately avoid
+// useCallback here — the setter identity churning on each render is fine
+// because the consumers wrap it in event handlers, and this keeps the
+// hook portable across the vitest setup (which only mocks a small set of
+// React primitives).
+function useFollowedPlayer() {
+  const [player, setPlayer] = useState(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const id = window.localStorage.getItem(LS_MY_PLAYER_ID) || "";
+      const name = window.localStorage.getItem(LS_MY_PLAYER_NAME) || "";
+      if (!id && !name) return null;
+      return { id, name };
+    } catch (_e) {
+      return null;
+    }
+  });
+  const update = (next) => {
+    setPlayer(next);
+    if (typeof window === "undefined") return;
+    try {
+      if (next && next.id) {
+        window.localStorage.setItem(LS_MY_PLAYER_ID, next.id);
+        window.localStorage.setItem(LS_MY_PLAYER_NAME, next.name || "");
+      } else {
+        window.localStorage.removeItem(LS_MY_PLAYER_ID);
+        window.localStorage.removeItem(LS_MY_PLAYER_NAME);
+      }
+    } catch (_e) {
+      // Silent: localStorage can throw in private-mode Safari; the
+      // in-memory state still works for the session.
+    }
+  };
+  return [player, update];
+}
+
+// Hook: watchlist (array of `{id, name, dojo}`) backed by localStorage.
+// Defends against malformed JSON in storage (rare, but a corrupt key
+// shouldn't crash the viewer for everyone using that browser profile).
+function useWatchlist() {
+  const [list, setList] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(LS_WATCHLIST);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((x) => x && typeof x === "object" && x.id);
+    } catch (_e) {
+      return [];
+    }
+  });
+  const persist = (next) => {
+    const capped = next.slice(0, WATCHLIST_MAX);
+    setList(capped);
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(capped));
+    } catch (_e) { /* see useFollowedPlayer */ }
+  };
+  return [list, persist];
+}
+
+// Return up to 6 upcoming matches across any watched player, sorted by
+// scheduledAt ascending (empty/missing times sort last via "99:99" sentinel).
+// "Upcoming" = status !== "completed" — we keep `running` matches in the
+// list so a coach can spot a watched player who just started.
+function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX) {
+  const watchedIds = new Set();
+  (Array.isArray(watched) ? watched : []).forEach((w) => {
+    if (w && w.id) watchedIds.add(String(w.id));
+  });
+  if (watchedIds.size === 0) return [];
+  const list = Array.isArray(allMatches) ? allMatches : [];
+  const upcoming = list.filter((m) => {
+    if (!m || m.status === "completed") return false;
+    const [a, b] = matchParticipantIds(m);
+    return (a && watchedIds.has(a)) || (b && watchedIds.has(b));
+  });
+  upcoming.sort((x, y) => {
+    const xt = x.scheduledAt || "99:99";
+    const yt = y.scheduledAt || "99:99";
+    return xt.localeCompare(yt);
+  });
+  return upcoming.slice(0, max);
+}
+
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -87,6 +226,47 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const [courtFilter, setCourtFilter] = useState("all");
   const [selectedMatch, setSelectedMatch] = useState(null);
 
+  // Slice 4 / FR-020 / FR-022 / FR-024: per-viewer personalisation —
+  // the followed player ("Find my matches") and a watchlist of up to 50
+  // participants. Both panels read/write localStorage so the selection
+  // survives reload and SSE-driven re-renders.
+  const [followedPlayer, setFollowedPlayer] = useFollowedPlayer();
+  const [watchlist, setWatchlist] = useWatchlist();
+
+  // T114: parse `?player=<uuid>` (and optionally `?name=<name>`) deep
+  // links from QR codes. We don't import useQuery here because the parsing
+  // is tiny and we want the auto-apply to run exactly once, even if
+  // history is later changed in-app via route(). When the UUID hits a
+  // participant we set the followed-player; if the UUID misses we fall
+  // back to a name match (FR-020 / acceptance scenario 5).
+  const roster = useMemo(() => {
+    const map = new Map();
+    (t.competitions || []).forEach((c) => {
+      (c.players || []).forEach((p) => { if (p && p.id && !map.has(p.id)) map.set(p.id, p); });
+    });
+    return Array.from(map.values());
+  }, [t]);
+
+  const deepLinkApplied = useRefV(false);
+  React.useEffect(() => {
+    if (deepLinkApplied.current) return;
+    if (typeof window === "undefined" || !window.location) return;
+    if (roster.length === 0) return; // wait until participants are loaded
+    const params = new URLSearchParams(window.location.search || "");
+    const qpPlayer = (params.get("player") || "").trim();
+    const qpName = (params.get("name") || "").trim();
+    if (!qpPlayer && !qpName) { deepLinkApplied.current = true; return; }
+    // 1) UUID lookup
+    let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
+    // 2) Fall back to name (use ?name= if present, else treat ?player= as a name)
+    if (!hit) {
+      const needle = (qpName || qpPlayer).toLowerCase();
+      if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));
+    }
+    if (hit) setFollowedPlayer({ id: hit.id, name: hit.name });
+    deepLinkApplied.current = true;
+  }, [roster, setFollowedPlayer]);
+
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
   const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status !== "setup").map(c => c.id)), [t.competitions]);
@@ -98,6 +278,31 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
   let upNext = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
   if (courtFilter === "all") upNext = upNext.slice(0, 3);
+
+  // FR-020 / FR-022: derive my-player's next match across all competitions
+  // for the activated "Your next match" card (T112).
+  const myNextMatch = useMemo(() => {
+    if (!followedPlayer || !followedPlayer.id) return null;
+    const mine = buildPlayerMatchHighlight(followedPlayer.id, allMatches, followedPlayer.name)
+      .filter(hasBothSides)
+      .filter((m) => m.status !== "completed");
+    mine.sort((a, b) => {
+      // Live ahead of scheduled — a followed player mid-match should be
+      // the top thing the viewer sees, not their *next* scheduled fight.
+      const ao = a.status === "running" ? 0 : 1;
+      const bo = b.status === "running" ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
+    });
+    return mine[0] || null;
+  }, [followedPlayer, allMatches]);
+
+  // FR-024: up to 6 upcoming matches across the watchlist for the home
+  // "Watched matches" section (T116).
+  const watchedUpcoming = useMemo(
+    () => buildWatchlistUpcoming(watchlist, allMatches.filter(hasBothSides)),
+    [watchlist, allMatches]
+  );
 
   return (
     <div className="viewer">
@@ -120,6 +325,29 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                {(t.courts || ["A"]).map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
              </select>
           </div>
+
+          {/* T111 / T112 / FR-020 / FR-022: "Find my matches" + "Your next
+              match" card. Rendered up top so a competitor or coach who
+              opens the viewer mid-tournament lands on their next fight
+              without scrolling past the competition list. */}
+          <MyMatchPanel
+            roster={roster}
+            followedPlayer={followedPlayer}
+            setFollowedPlayer={setFollowedPlayer}
+            nextMatch={myNextMatch}
+            onMatchClick={setSelectedMatch}
+          />
+
+          {/* T115 / T116 / FR-024: Watchlist + Watched matches. Coaches
+              follow multiple students; up to six upcoming watched matches
+              are surfaced as a single list. */}
+          <WatchlistPanel
+            tournament={t}
+            watchlist={watchlist}
+            setWatchlist={setWatchlist}
+            upcoming={watchedUpcoming}
+            onMatchClick={setSelectedMatch}
+          />
 
           {live.length > 0 && (
             <div className="hero-live">
@@ -211,6 +439,225 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
+    </div>
+  );
+}
+
+// SinglePlayerPicker — typeahead search over the full tournament roster.
+// Used by MyMatchPanel + WatchlistPanel. Distinct from PlayerMultiFilter
+// because we want a one-shot "pick a player" interaction (followed
+// player is single-valued; watchlist entries are added one at a time)
+// rather than a chip-list of active filters.
+function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRefV(null);
+  const excluded = useMemo(() => new Set(excludeIds || []), [excludeIds]);
+  const q = query.trim().toLowerCase();
+  const candidates = useMemo(() => {
+    const base = roster.filter((p) => !excluded.has(p.id));
+    if (!q) return base.slice(0, 20);
+    return base.filter((p) =>
+      (p.name || "").toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q)
+    ).slice(0, 20);
+  }, [roster, q, excluded]);
+
+  React.useEffect(() => {
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  return (
+    <div className="pmf" ref={ref} style={{ marginBottom: 8 }}>
+      <div className="pmf__bar" onClick={() => setOpen(true)}>
+        <input
+          className="pmf__input"
+          placeholder={placeholder || "Search by name or dojo…"}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+        />
+      </div>
+      {open && candidates.length > 0 && (
+        <div className="pmf__dropdown">
+          <div className="pmf__dropdown-head">
+            {q ? pluralize(candidates.length, "match", "matches") : `${pluralize(roster.length, "participant")} — type to search`}
+          </div>
+          {candidates.map((p) => (
+            <button
+              key={p.id}
+              className="pmf__option"
+              onClick={() => { onPick(p); setQuery(""); setOpen(false); }}
+            >
+              <span className="pmf__check"></span>
+              <span className="pmf__opt-body">
+                <span className="pmf__opt-name">{p.name}</span>
+                <span className="pmf__opt-dojo">{p.dojo || ""}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// MyMatchPanel — "Find my matches" entry point + active "Your next match"
+// card. Two states:
+//   1) No followed player yet → render a picker; selecting persists to
+//      localStorage via setFollowedPlayer (FR-020).
+//   2) Followed player set → render the next-match card (or a finished
+//      empty-state if all matches are complete) + a "Following: name [X]"
+//      header so the viewer can clear the selection (FR-022).
+function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, onMatchClick }) {
+  if (!followedPlayer || !followedPlayer.id) {
+    return (
+      <div className="card" style={{ marginBottom: 16, padding: 14 }}>
+        <div className="section-title" style={{ marginTop: 0 }}>Find my matches</div>
+        <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
+          Pick a participant — we'll surface their next match and highlight them across the schedule.
+        </div>
+        <SinglePlayerPicker
+          roster={roster}
+          onPick={(p) => setFollowedPlayer({ id: p.id, name: p.name })}
+          placeholder="Type your name or dojo…"
+        />
+      </div>
+    );
+  }
+
+  // Followed-player state: header indicator + next-match details.
+  const header = (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+      <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Following:</span>
+      <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
+      <button
+        className="btn btn--ghost btn--sm"
+        onClick={() => setFollowedPlayer(null)}
+        aria-label="Stop following"
+        style={{ marginLeft: 4 }}
+      >
+        ×
+      </button>
+    </div>
+  );
+
+  if (!nextMatch) {
+    return (
+      <div className="card" style={{ marginBottom: 16, padding: 14 }}>
+        {header}
+        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>All your matches are completed.</div>
+      </div>
+    );
+  }
+
+  const aId = nextMatch.sideA && nextMatch.sideA.id ? nextMatch.sideA.id : "";
+  const isOnSideA = aId === followedPlayer.id;
+  const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
+  const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
+
+  return (
+    <div className="my-match" style={{ marginBottom: 16 }}>
+      {header}
+      <div className="my-match__lbl">Your next match</div>
+      <div className="my-match__name">{followedPlayer.name}</div>
+      <div className="my-match__round">
+        {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
+        {nextMatch.status === "running" ? " · LIVE NOW" : ""}
+      </div>
+      <div className="my-match__row">
+        <div className="my-match__chip">
+          <span className="l">Court</span>
+          <span className="v">Shiaijo {nextMatch.court || "—"}</span>
+        </div>
+        <div className="my-match__chip">
+          <span className="l">Time</span>
+          <span className="v">{nextMatch.scheduledAt || "TBA"}</span>
+        </div>
+      </div>
+      {opponent && (typeof opponent === "object") ? (
+        <button
+          className="my-match__opp"
+          onClick={() => onMatchClick && onMatchClick(nextMatch)}
+          style={{ border: "none", background: "none", textAlign: "left", padding: 0, width: "100%", cursor: "pointer" }}
+        >
+          <div className="l">vs Opponent</div>
+          <div className="n">{opponent.name}</div>
+          {opponent.dojo ? <div className="d">{opponent.dojo}</div> : null}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// WatchlistPanel — Watchlist management + "Watched matches" home section.
+// Empty state hides the list; once at least one watched player exists,
+// renders the chip list, an "Add another" picker, and (when applicable)
+// the upcoming-matches preview.
+function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatchClick }) {
+  const removeOne = (id) => setWatchlist(watchlist.filter((w) => w.id !== id));
+  const addOne = (p) => {
+    if (watchlist.find((w) => w.id === p.id)) return;
+    setWatchlist([...watchlist, { id: p.id, name: p.name, dojo: p.dojo || "" }]);
+  };
+  const roster = useMemo(() => {
+    const map = new Map();
+    (tournament.competitions || []).forEach((c) => {
+      (c.players || []).forEach((p) => { if (p && p.id && !map.has(p.id)) map.set(p.id, p); });
+    });
+    return Array.from(map.values());
+  }, [tournament]);
+
+  return (
+    <div className="card" style={{ marginBottom: 16, padding: 14 }}>
+      <div className="section-title" style={{ marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
+        <span>Watchlist</span>
+        {watchlist.length > 0 && (
+          <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 500 }}>
+            {pluralize(watchlist.length, "player")}
+          </span>
+        )}
+      </div>
+      {watchlist.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
+          Watching a coach's students or a few key competitors? Add up to {WATCHLIST_MAX} participants and we'll surface their upcoming matches.
+        </div>
+      ) : (
+        <div className="pmf__bar" style={{ marginBottom: 8 }}>
+          {watchlist.map((w) => (
+            <span key={w.id} className="pmf__chip">
+              {w.name}
+              <button onClick={() => removeOne(w.id)} aria-label={`Remove ${w.name}`}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <SinglePlayerPicker
+        roster={roster}
+        onPick={addOne}
+        placeholder={watchlist.length === 0 ? "Add a participant to watch…" : "Add another participant…"}
+        excludeIds={watchlist.map((w) => w.id)}
+      />
+
+      {upcoming.length > 0 && (
+        <>
+          <div className="section-title" style={{ marginTop: 14, fontSize: 13 }}>
+            Watched matches · upcoming {upcoming.length}
+          </div>
+          <div className="vsched">
+            {upcoming.map((m) => (
+              <VSchedItem
+                key={m.compId + m.id}
+                m={m}
+                tweaks={{ showDojo: true }}
+                showCompetition
+                onClick={() => onMatchClick && onMatchClick(m)}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1019,19 +1466,47 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
     window.applyFilters = applyFilters;
     window.matchHighlightedBy = matchHighlightedBy;
+    window.buildPlayerMatchHighlight = buildPlayerMatchHighlight;
+    window.buildWatchlistUpcoming = buildWatchlistUpcoming;
 }
 
 // Tournament-wide schedule (across competitions) — grouped by day, then court swimlanes + filter
 function ScheduleViewer({ tournament, tweaks }) {
   const allMatches = useMemo(() => tournamentMatches(tournament).filter(hasBothSides), [tournament]);
   const courts = tournament.courts;
-  const [picked, setPicked] = useState([]);
+
+  // T113 / T117 / FR-022 / FR-024: auto-populate the schedule's `picked`
+  // filter with the followed-player + watchlist so the existing
+  // matchHighlightedBy / .tw-match--highlight path lights up the rows the
+  // viewer cares about. Both lists are seeded once from localStorage; the
+  // user can still add or remove chips like before — we only set the
+  // initial value, then `picked` is owned by the schedule (no live
+  // re-sync to localStorage, which would fight the user's edits).
+  const [followedPlayer, setFollowedPlayer] = useFollowedPlayer();
+  const [watchlist] = useWatchlist();
+  const initialPicked = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    const push = (p) => {
+      if (!p || !p.id || seen.has(p.id)) return;
+      seen.add(p.id);
+      out.push({ id: p.id, name: p.name || "", dojo: p.dojo || "" });
+    };
+    if (followedPlayer && followedPlayer.id) push(followedPlayer);
+    (watchlist || []).forEach(push);
+    return out;
+    // Compute once at mount only — re-derivation would clobber user edits
+    // as soon as they removed a seeded chip. Re-sync explicitly via the
+    // Clear/Reseed buttons instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [picked, setPicked] = useState(initialPicked);
   const [dojoText, setDojoText] = useState("");
   const [courtFilter, setCourtFilter] = useState("all");
 
@@ -1079,6 +1554,32 @@ function ScheduleViewer({ tournament, tweaks }) {
 
   return (
     <div className="tw-sched">
+      {followedPlayer && followedPlayer.id ? (
+        <div
+          className="tw-sched__following"
+          style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+            marginBottom: 8, fontSize: 13, background: "var(--bg-2)",
+            border: "1px solid var(--line)", borderRadius: 6
+          }}
+        >
+          <span style={{ color: "var(--ink-3)" }}>Following:</span>
+          <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
+          <button
+            className="btn btn--ghost btn--sm"
+            style={{ marginLeft: "auto" }}
+            onClick={() => {
+              // Clear both the persisted selection and the local schedule
+              // chip so the highlight disappears without a reload.
+              setFollowedPlayer(null);
+              setPicked(picked.filter((p) => p.id !== followedPlayer.id));
+            }}
+            aria-label="Stop following"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       <div className="tw-sched__filters">
         <PlayerMultiFilter tournament={tournament} picked={picked} setPicked={setPicked} dojoText={dojoText} setDojoText={setDojoText} />
         <select className="input" style={{ width: "auto", minWidth: 160 }} value={compFilter} onChange={(e) => setCompFilter(e.target.value)}>

@@ -85,7 +85,3 @@ function applyPatch(prev, event) {
 }
 
 export { applyPatch };
-
-if (typeof window !== 'undefined') {
-    window.applyPatch = applyPatch;
-}

@@ -23,7 +23,6 @@ const _Router = PreactRouter ? PreactRouter.Router : null;
 const _route = PreactRouter ? PreactRouter.route : null;
 const _Link = PreactRouter ? PreactRouter.Link : null;
 const _getCurrentUrl = PreactRouter ? PreactRouter.getCurrentUrl : (() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
-const _useRouter = PreactRouter ? PreactRouter.useRouter : null;
 
 // <Router> — wrapper that simply forwards to preact-router's Router.
 // We keep it as a thin pass-through so callers can later swap the
@@ -58,22 +57,10 @@ function route(url, replace = false) {
     return false;
 }
 
-// useQuery() — parse the current URL's query string into a plain object.
-// We parse fresh on every render rather than memoising because (a) the
-// query strings are short, (b) memoising would require a stable cache
-// key derived from window.location.search which we'd have to subscribe
-// to anyway, defeating the optimisation. preact-router's own router-
-// context hook gives us the re-render trigger via `useRouter()`.
-function useQuery() {
-    // Subscribe to the router so this hook re-runs when the route
-    // changes. _useRouter returns [args, route]; we only need it to
-    // schedule re-renders when the URL updates.
-    if (_useRouter) {
-        try { _useRouter(); } catch { /* not under a Router; fall through */ }
-    }
-    const search = (typeof window !== 'undefined' && window.location)
-        ? window.location.search
-        : '';
+// Pure parse of a search string into a plain object. Extracted so the
+// useQuery hook below stays trivial and so the parser can be unit-tested
+// without a DOM.
+function parseSearch(search) {
     const params = {};
     if (!search || search.length < 2) return params;
     const trimmed = search.startsWith('?') ? search.slice(1) : search;
@@ -89,6 +76,28 @@ function useQuery() {
         }
     }
     return params;
+}
+
+// useQuery() — parse the current URL's query string into a plain object,
+// re-rendering the calling component on history-stack changes. We
+// subscribe to `popstate` explicitly rather than calling preact-router's
+// useRouter() purely for its side effect, because conditional hook calls
+// inside try/catch violate the Rules of Hooks and silently swallow real
+// failures. `route()` from preact-router dispatches `popstate` after
+// pushState, so this covers programmatic navigation too.
+function useQuery() {
+    const { useState, useEffect } = React;
+    const getSearch = () => (typeof window !== 'undefined' && window.location)
+        ? window.location.search
+        : '';
+    const [search, setSearch] = useState(getSearch);
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        const onChange = () => setSearch(window.location.search);
+        window.addEventListener('popstate', onChange);
+        return () => window.removeEventListener('popstate', onChange);
+    }, []);
+    return parseSearch(search);
 }
 
 function getCurrentUrl() {

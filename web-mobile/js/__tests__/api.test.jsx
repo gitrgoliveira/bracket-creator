@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, API } from '../api.jsx';
+import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake } from '../api_serializers.jsx';
+import { API } from '../api_client.jsx';
 
 describe('API Utils', () => {
   describe('toBackendMatchResult', () => {

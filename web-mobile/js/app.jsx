@@ -1,15 +1,9 @@
 // Main App — single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-const { useState: useS, useEffect: useE, useRef: useR } = React;
+import { applyPatch as patchCompetitionData } from './patch.jsx';
 
-// SSE patch-apply logic moved to patch.jsx (T008 / NFR-006). The local
-// patchCompetitionData here used to be a duplicate of admin.jsx's
-// implementation; both now go through window.applyPatch.
-const patchCompetitionData = (prev, event) => {
-  if (window.applyPatch) return window.applyPatch(prev, event);
-  return prev;
-};
+const { useState: useS, useEffect: useE, useRef: useR } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
 // synchronisation, replacing the manual getRouteFromUrl / popstate

@@ -1,6 +1,8 @@
 // Admin side — single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
+import { applyPatch as patchCompetitionData } from './patch.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const REFRESHABLE_EVENTS = new Set([
@@ -9,10 +11,6 @@ const REFRESHABLE_EVENTS = new Set([
   "match_updated",
   "tournament_updated",
 ]);
-
-// SSE patch-apply logic moved to patch.jsx (T008 / NFR-006). Both
-// app.jsx and admin.jsx used to carry an identical patchCompetitionData
-// implementation; both now go through window.applyPatch.
 
 // Page components rendered by AdminApp's view switch (produced by sibling
 // admin_*.jsx files, all loaded before this one — see web-mobile/admin_split_plan.md).
@@ -63,14 +61,6 @@ function mergeTournamentPatch(currentT, patch, sessionPassword) {
   const next = { ...currentT, ...patch };
   if (!patch.password) next.password = sessionPassword;
   return next;
-}
-
-// Thin wrapper that delegates to the centralised patch.jsx. Kept as a
-// named local function so the existing call sites below (`setAdminCompData(prev =>
-// patchCompetitionData(prev, event))`) read unchanged.
-function patchCompetitionData(prev, event) {
-  if (window.applyPatch) return window.applyPatch(prev, event);
-  return prev;
 }
 
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast }) {

@@ -50,12 +50,7 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 // a time; the concrete `*engine.Engine` remains a drop-in
 // implementation of `ScoringEngine` so the `tryAutoCompletePools` and
 // score endpoint paths can already accept the interface today.
-//
-// `store` is intentionally unused at present — kept on the signature so
-// the wiring in server.go doesn't need to change as later slices add
-// store-touching handlers (e.g. eligibility lookups in Slice 3).
-func RegisterMatchHandlers(r *gin.RouterGroup, _ *state.Store, eng *engine.Engine, hub *Hub) {
-
+func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, hub *Hub) {
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

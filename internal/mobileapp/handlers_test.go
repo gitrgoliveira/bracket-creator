@@ -39,6 +39,10 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	RegisterViewerHandlers(viewer, store, eng)
 	RegisterDisplayHandlers(viewer, store)
 
+	// Stateless schedule estimator — public, no auth.
+	publicAPI := r.Group("/api")
+	RegisterScheduleHandlers(publicAPI)
+
 	// Admin API
 	admin := r.Group("/api")
 	RegisterTournamentHandlers(admin, store, hub)
@@ -48,7 +52,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	RegisterMatchHandlers(admin, eng, hub)
 	RegisterDecisionHandlers(admin, eng, hub)
 	RegisterEligibilityHandlers(admin, store, hub)
-	RegisterLineupHandlers(admin, store, store)
+	RegisterLineupHandlers(admin, store, store, store)
 
 	return r, store, eng, hub, tempDir
 }

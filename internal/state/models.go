@@ -12,6 +12,43 @@ type Tournament struct {
 	Venue    string   `yaml:"venue" json:"venue"`
 	Courts   []string `yaml:"courts" json:"courts"`
 	Password string   `yaml:"password" json:"password"`
+
+	// Ceremony blocks expressed as human duration strings (e.g. "30m",
+	// "1h"). When set, the auto-scheduler reserves a contiguous range
+	// at the appropriate point in the day and skips match slots that
+	// would land inside it. Optional; zero/empty means no block.
+	// FR-056, R9, data-model §6.
+	OpeningBlock string `yaml:"opening_block,omitempty" json:"openingBlock,omitempty"`
+	LunchBlock   string `yaml:"lunch_block,omitempty" json:"lunchBlock,omitempty"`
+	ClosingBlock string `yaml:"closing_block,omitempty" json:"closingBlock,omitempty"`
+
+	// ClockToElapsedMultiplier scales the on-clock match duration to
+	// "real elapsed minutes" — coin tosses, scoring transitions, salutes
+	// and crossings, etc. Defaults to 1.5 via ApplyTournamentDefaults
+	// when zero. FR-055, R9.
+	ClockToElapsedMultiplier float64 `yaml:"clock_to_elapsed_multiplier,omitempty" json:"clockToElapsedMultiplier,omitempty"`
+
+	// SlowestCourtBufferPct is the % buffer added when distributing total
+	// elapsed minutes across N parallel courts — the slowest court usually
+	// runs longer than the mean. Defaults to 10 via ApplyTournamentDefaults
+	// when zero. FR-057, R9.
+	SlowestCourtBufferPct int `yaml:"slowest_court_buffer_pct,omitempty" json:"slowestCourtBufferPct,omitempty"`
+}
+
+// ApplyTournamentDefaults fills zero-valued schedule-estimator tuning
+// fields on t with their canonical defaults: ClockToElapsedMultiplier=1.5
+// and SlowestCourtBufferPct=10. Idempotent; safe to call repeatedly.
+// FR-055, FR-057, R9.
+func ApplyTournamentDefaults(t *Tournament) {
+	if t == nil {
+		return
+	}
+	if t.ClockToElapsedMultiplier == 0 {
+		t.ClockToElapsedMultiplier = 1.5
+	}
+	if t.SlowestCourtBufferPct == 0 {
+		t.SlowestCourtBufferPct = 10
+	}
 }
 
 type Competition struct {

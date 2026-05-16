@@ -127,7 +127,20 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
+	return s.setTeamLineupLocked(compID, lineup, teamSize)
+}
 
+// setTeamLineupLocked applies the freeze-check + load-mutate-save dance
+// WITHOUT acquiring the per-competition lock. Caller MUST already hold
+// it (typically via WithTransaction).
+//
+// Validate() is re-run here so the lock-free path is as safe as the
+// public method — transaction bodies don't have to remember to
+// validate first.
+func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int) error {
+	if err := lineup.Validate(teamSize); err != nil {
+		return err
+	}
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {
 		return err

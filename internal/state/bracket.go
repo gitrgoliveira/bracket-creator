@@ -62,6 +62,27 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	return s.saveBracketLocked(compID, b)
 }
 
+// loadBracketLocked reads the bracket directly from disk WITHOUT
+// acquiring the per-competition lock. Caller MUST already hold the
+// per-comp lock (typically via WithTransaction). Bypasses the cache for
+// the same reason UpdateBracket does: the caller's lock is what
+// coordinates with concurrent writers.
+//
+// Returns an empty `&Bracket{Rounds: [][]BracketMatch{}}` when no file
+// exists, matching LoadBracket's never-nil contract.
+func (s *Store) loadBracketLocked(compID string) (*Bracket, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
+	path := s.compPath(compID, "bracket.json")
+	parsed, err := parseBracketFile(path)
+	if err != nil {
+		return nil, err
+	}
+	bracket, _ := parsed.(*Bracket)
+	return s.copyBracket(bracket), nil
+}
+
 // saveBracketLocked persists the bracket to disk and refreshes the
 // cache. Caller MUST hold the per-competition lock
 // (s.getCompLock(compID)). Used by both SaveBracket (which takes the

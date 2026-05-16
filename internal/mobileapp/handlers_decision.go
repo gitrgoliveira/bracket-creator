@@ -67,6 +67,15 @@ func (r *DecisionRequest) Validate() error {
 // consumer-boundary interfaces.
 //
 // T090, NFR-002.
+//
+// TODO(T156): wrap eng.RecordDecision + tryAutoCompletePools in a
+// single state.Store.WithTransaction once the engine grows tx-aware
+// variants. eng.RecordDecision internally calls
+// RecordMatchResultWithIneligibility which acquires the per-comp lock
+// via UpdatePoolMatchByID / UpdateBracket; nesting that inside a
+// WithTransaction would deadlock (sync.RWMutex is non-recursive). The
+// migration template lives in handlers_lineup.go (the PUT body); same
+// scope-cut rationale as the score handler in handlers_match.go.
 func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, hub Broadcaster) {
 	r.POST("/competitions/:id/matches/:mid/decision", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)

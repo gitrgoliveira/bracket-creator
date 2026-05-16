@@ -288,6 +288,18 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, hub *Hub) {
 // (Status outside the documented enum, Winner not naming either side).
 // The engine's preserve-on-empty-side fallback continues to handle the
 // "client sends scoring fields only" case.
+//
+// TODO(T156): wrap eng.RecordMatchResultWithIneligibility +
+// eng.MaybeAdvanceKachinuki + tryAutoCompletePools in a single
+// state.Store.WithTransaction once the engine grows tx-aware variants.
+// Today every engine call acquires its own per-comp lock via
+// UpdatePoolMatchByID / UpdateBracket, so nesting them inside a
+// WithTransaction would deadlock (sync.RWMutex is non-recursive). The
+// migration template lives in handlers_lineup.go (the PUT body): once
+// engine.Engine exposes RecordMatchResultWithIneligibilityTx(stx, ...)
+// — or grows a "use this StoreTx if passed" overload — the same
+// load+set+post-write pattern applies here. T155 infrastructure is the
+// higher-value half; this TODO is the deliberate scope-cut.
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, hub Broadcaster) {
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)

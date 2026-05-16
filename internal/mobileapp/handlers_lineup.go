@@ -40,7 +40,17 @@ type LineupRequest struct {
 // existing AuthMiddleware (mounted on the admin router group in
 // server.go) as the auth boundary; a richer role check lands when
 // per-role auth is implemented.
-func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore) {
+//
+// The third parameter (`tx CompetitionTransactor`) is the T156 hook.
+// The PUT body wraps its three store calls — load comp (for teamSize),
+// set lineup, reload lineup (for the response) — in one
+// WithTransaction so they all commit under a single per-comp lock
+// acquire. The GET and DELETE paths stay on the lock-per-call form
+// because they're single-operation flows where the extra primitive
+// would just be ceremony. `*state.Store` satisfies all three
+// interfaces (TeamLineupStore + CompetitionStore + CompetitionTransactor)
+// so wiring stays drop-in.
+func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor) {
 	r.GET("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
@@ -71,28 +81,6 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 
-		// TeamSize is competition-level: a 3-person team and a 5-person
-		// team cannot coexist in the same competition. We need it here
-		// to drive Validate(); not having a competition is a 404.
-		comp, err := comps.LoadCompetition(compID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		}
-		teamSize := comp.TeamSize
-		if teamSize <= 0 {
-			// Validate() would catch this, but we surface a clearer
-			// message: a non-team competition shouldn't have lineups.
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "competition is not configured for team play (teamSize must be > 0)",
-			})
-			return
-		}
-
 		lineup := domain.TeamLineup{
 			TeamID:        teamID,
 			CompetitionID: compID,
@@ -100,40 +88,97 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			Positions:     req.Positions,
 		}
 
-		if err := store.SetTeamLineup(compID, lineup, teamSize); err != nil {
-			switch {
-			case errors.Is(err, state.ErrLineupLocked):
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			case errors.Is(err, domain.ErrLineupMissingSenpo),
-				errors.Is(err, domain.ErrLineupMissingTaisho),
-				errors.Is(err, domain.ErrLineupTooManyMissing),
-				errors.Is(err, domain.ErrLineupTeamSizeInvalid):
-				// Shape errors from Validate land here — 400 with the
-				// sentinel message so the UI can render it directly.
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				// Fall-through: the generic "position X not allowed in
-				// N-person team" / "with 1 vacancy the missing position
-				// must be Jiho" messages are dynamically formatted and
-				// don't have a sentinel — but they're still validation
-				// failures, surfaced as 400.
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		// T156: load comp (for teamSize) + Set lineup + reload lineup (for
+		// the response) all run under one WithTransaction acquire. Before
+		// this migration the three calls each took their own per-comp
+		// lock — a concurrent admin "force-lock round" between Set and
+		// the reload could stamp LockedAt onto the response payload that
+		// wasn't on the actual saved record. Same atomicity argument the
+		// engine UpdatePoolMatchByID / UpdateBracket primitives already
+		// make for their own multi-step flows.
+		//
+		// httpErr carries the (status, body) pair the response should
+		// emit; we set it from inside the tx and write the response
+		// AFTER the lock releases. Writing JSON while holding the lock
+		// would let a slow consumer stall every other writer for the
+		// same competition for the entire stream duration.
+		type httpErr struct {
+			status int
+			body   gin.H
+		}
+		var respErr *httpErr
+		var persistedLineup domain.TeamLineup
+		txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
+			// TeamSize is competition-level: a 3-person team and a
+			// 5-person team cannot coexist in the same competition. We
+			// need it here to drive Validate(); not having a competition
+			// is a 404.
+			comp, err := stx.LoadCompetition(compID)
+			if err != nil {
+				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": err.Error()}}
+				return nil
 			}
+			if comp == nil {
+				respErr = &httpErr{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
+				return nil
+			}
+			teamSize := comp.TeamSize
+			if teamSize <= 0 {
+				respErr = &httpErr{
+					status: http.StatusBadRequest,
+					body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
+				}
+				return nil
+			}
+
+			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
+				switch {
+				case errors.Is(err, state.ErrLineupLocked):
+					respErr = &httpErr{status: http.StatusConflict, body: gin.H{"error": err.Error()}}
+				case errors.Is(err, domain.ErrLineupMissingSenpo),
+					errors.Is(err, domain.ErrLineupMissingTaisho),
+					errors.Is(err, domain.ErrLineupTooManyMissing),
+					errors.Is(err, domain.ErrLineupTeamSizeInvalid):
+					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
+				default:
+					// Generic dynamic validation messages (e.g.
+					// "position X not allowed in N-person team") also map
+					// to 400; same surface as the sentinel path.
+					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
+				}
+				return nil
+			}
+			// Reload after write so the response carries the persisted
+			// CompetitionID (auto-stamped by Set) and any future
+			// server-managed fields. This reload reads the same on-disk
+			// state as the Set above because no concurrent writer can
+			// have taken the per-comp lock between them.
+			lineups, err := stx.LoadTeamLineups(compID)
+			if err != nil {
+				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": err.Error()}}
+				return nil
+			}
+			key := fmt.Sprintf("%s-%d", teamID, round)
+			if persisted, ok := lineups[key]; ok {
+				persistedLineup = persisted
+			} else {
+				// Defensive: SetTeamLineup just succeeded, so the entry
+				// MUST be present on reload. Falling back to the request
+				// payload keeps the response shape sane if the
+				// invariant is somehow violated.
+				persistedLineup = lineup
+			}
+			return nil
+		})
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
 			return
 		}
-		// Reload after write so the response carries the persisted
-		// CompetitionID (auto-stamped by Set) and any future
-		// server-managed fields.
-		lineups, err := store.LoadTeamLineups(compID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if respErr != nil {
+			c.JSON(respErr.status, respErr.body)
 			return
 		}
-		key := fmt.Sprintf("%s-%d", teamID, round)
-		if persisted, ok := lineups[key]; ok {
-			lineup = persisted
-		}
-		c.JSON(http.StatusOK, lineup)
+		c.JSON(http.StatusOK, persistedLineup)
 	})
 
 	r.DELETE("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {

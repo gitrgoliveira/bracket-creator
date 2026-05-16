@@ -117,3 +117,30 @@ export function parseStartTime(startTimeStr) {
     if (Number.isNaN(h) || Number.isNaN(m)) return 0;
     return h * 60 + m;
 }
+
+// fetchScheduleEstimate calls GET /api/schedule/estimate and returns the
+// server's ScheduleEstimate { totalDurationMinutes, perCourtMinutes,
+// ceremonyMinutes } shape, or null on any error/abort.
+//
+// The server endpoint (T147a, T152a) is the canonical source of truth
+// for FR-055/057/058 calculation; the synchronous estimateSchedule()
+// above remains for renderers that need a richer pool/elim breakdown
+// (the server returns aggregate totals only).
+//
+// params: { matchDuration, multiplier, numMatches, courts, teamSize,
+//           boutsPerTeamMatch, buffer, ceremonyMinutes }
+export async function fetchScheduleEstimate(params, fetchImpl = (typeof fetch !== 'undefined' ? fetch : null)) {
+    if (!fetchImpl) return null;
+    const qs = new URLSearchParams();
+    Object.entries(params || {}).forEach(([k, v]) => {
+        if (v === undefined || v === null || v === '') return;
+        qs.set(k, String(v));
+    });
+    try {
+        const resp = await fetchImpl(`/api/schedule/estimate?${qs.toString()}`);
+        if (!resp.ok) return null;
+        return await resp.json();
+    } catch (err) {
+        return null;
+    }
+}

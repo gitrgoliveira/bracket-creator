@@ -93,6 +93,43 @@ func (s *Store) SaveCompetition(c *Competition) error {
 	return err
 }
 
+// loadCompetitionLocked reads the competition record directly from disk
+// WITHOUT acquiring the per-competition lock. Caller MUST already hold
+// the per-comp lock (typically via WithTransaction). Bypasses the
+// loadCached path because the caller's lock is what coordinates with
+// concurrent writers — going through the cache would risk reading a
+// snapshot mutated between cache populate and our acquire.
+//
+// Returns (nil, nil) when no file exists for compID, mirroring
+// LoadCompetition's "missing == nil" contract.
+func (s *Store) loadCompetitionLocked(compID string) (*Competition, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, fmt.Errorf("invalid competition ID: %w", err)
+	}
+	path := s.compPath(compID, "config.md")
+	parsed, err := parseCompetitionFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if parsed == nil {
+		return nil, nil
+	}
+	c, _ := parsed.(*Competition)
+	return s.copyCompetition(c), nil
+}
+
+// saveCompetitionLocked persists c WITHOUT acquiring the per-competition
+// lock. Caller MUST already hold the per-comp lock. Thin void wrapper
+// around saveCompetitionChangedLocked for callers (like WithTransaction)
+// that only care about the success-or-error signal, not the changed bool.
+func (s *Store) saveCompetitionLocked(c *Competition) error {
+	if err := ValidateCompetitionID(c.ID); err != nil {
+		return fmt.Errorf("invalid competition ID: %w", err)
+	}
+	_, err := s.saveCompetitionChangedLocked(c)
+	return err
+}
+
 // saveCompetitionChangedLocked persists c to disk and refreshes the
 // cache. Caller MUST hold the per-competition lock
 // (s.getCompLock(c.ID)). Used by both SaveCompetitionChanged (which

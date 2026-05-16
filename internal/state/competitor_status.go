@@ -87,6 +87,20 @@ func (s *Store) SetCompetitorStatus(compID string, status domain.CompetitorStatu
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
+	return s.setCompetitorStatusLocked(compID, status)
+}
+
+// setCompetitorStatusLocked applies the load-mutate-save dance without
+// acquiring the per-competition lock. Caller MUST already hold it
+// (typically via WithTransaction).
+//
+// status.Validate() is still re-run here so the lock-free path is just
+// as safe as the public method when called from a transaction body —
+// callers don't have to remember to validate before invoking.
+func (s *Store) setCompetitorStatusLocked(compID string, status domain.CompetitorStatus) error {
+	if err := status.Validate(); err != nil {
+		return err
+	}
 	current, err := s.loadCompetitorStatusLocked(compID)
 	if err != nil {
 		return err

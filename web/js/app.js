@@ -15,7 +15,8 @@ import {
     formatDuration,
     formatTime,
     estimateSchedule,
-    parseStartTime
+    parseStartTime,
+    fetchScheduleEstimate
 } from './time_estimator.js';
 import { validateSeedAssignments } from './seeding.js';
 import {
@@ -1015,6 +1016,49 @@ function calculateTimeEstimate() {
 
     document.getElementById('estPoolTimeCol').style.display = isPools ? '' : 'none';
     document.getElementById('estPoolMatchTimeGroup').style.display = isPools ? '' : 'none';
+
+    // FR-059 / T152: refresh the total from the canonical server
+    // calculator. Failures are silent — the locally rendered total above
+    // remains as a fallback when the endpoint is unreachable.
+    refreshServerEstimate(estimate, isPools).catch(() => {});
+}
+
+// refreshServerEstimate calls GET /api/schedule/estimate with the
+// same parameters that produced `local` and, on success, overwrites
+// the displayed total + finish time with the server-derived values.
+// Kept as a separate async function so the synchronous renderer can
+// short-circuit on empty input without paying for a network round-trip.
+async function refreshServerEstimate(local, isPools) {
+    const matchDurationMins = isPools
+        ? parseFloat(document.getElementById('estPoolMatchTime').value) || 3
+        : parseFloat(document.getElementById('estElimMatchTime').value) || 4;
+    const courts = parseInt(document.getElementById('courts').value, 10) || 1;
+    const teamSize = parseInt(document.getElementById('teamMatches').value, 10) || 0;
+
+    // Convert local computed totals back into match counts so the
+    // server's calculator sees an equivalent input. (The breakdown
+    // helper above already did the heavy lifting; we re-derive
+    // numMatches from totalParallelMinutes / perMatch to avoid
+    // double-tracking pool-vs-elim split here.)
+    const numMatches = Math.max(1, Math.round(local.totalSequentialMinutes / Math.max(matchDurationMins, 0.1)));
+
+    const params = {
+        matchDuration: Math.round(matchDurationMins),
+        multiplier: 1.5,
+        numMatches,
+        courts,
+        // The local breakdown already accounts for team size by
+        // multiplying perMatch * teamSize; for the server fetch we
+        // pass teamSize=0 so its scaling logic doesn't double-apply.
+        teamSize: 0,
+        buffer: 10
+    };
+    const server = await fetchScheduleEstimate(params);
+    if (server && typeof server.totalDurationMinutes === 'number') {
+        document.getElementById('estTotalTimeResult').textContent = formatDuration(server.totalDurationMinutes);
+        const startMins = parseStartTime(document.getElementById('estStartTime').value || '09:00');
+        document.getElementById('estFinishTimeResult').textContent = formatTime(startMins + server.totalDurationMinutes);
+    }
 }
 
 // Wire up estimator to all relevant inputs

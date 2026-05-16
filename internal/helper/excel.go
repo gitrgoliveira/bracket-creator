@@ -18,6 +18,16 @@
 //     so the bracket updates automatically when scores are entered.
 //
 // Row-count thresholds and layout constants are defined in constants.go.
+//
+// CHK037 — Kachinuki Excel rendering decision (T160):
+// Kachinuki matches are emitted as a single team-match row with the suffix
+// "(Kachinuki, <N> bouts)" rather than a variable-bout grid. Rationale: the
+// 8-column-per-court layout invariant (see CourtsColumnsPerCourt in
+// constants.go and CLAUDE.md) prevents variable bout counts from rendering
+// cleanly — a fully expanded grid would either overflow the column budget
+// or force a layout-mode switch the rest of the workbook can't accommodate.
+// A fuller representation (e.g. a separate "Kachinuki Detail" sheet) is
+// deferred — see T170 in specs/003-tournament-gap-closure/tasks.md.
 package helper
 
 import (

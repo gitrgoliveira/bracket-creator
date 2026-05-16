@@ -82,6 +82,17 @@ func (stubTeamLineupStore) LockTeamLineupsForRound(string, int, time.Time) error
 	return nil
 }
 
+// stubCompetitionTransactor is a no-op implementation of
+// CompetitionTransactor. fn runs immediately with a nil StoreTx; tests
+// that exercise the transactional path use the real *state.Store
+// instead. Same rationale as the other stubs — proves the interface is
+// mockable. (T156.)
+type stubCompetitionTransactor struct{}
+
+func (stubCompetitionTransactor) WithTransaction(string, func(state.StoreTx) error) error {
+	return nil
+}
+
 // TestDepsInterfacesCompile is a compile-time guard that the consumer-
 // boundary interfaces (deps.go) are satisfied by both the stub
 // implementations above AND the production concrete types. If a method
@@ -94,10 +105,11 @@ func (stubTeamLineupStore) LockTeamLineupsForRound(string, int, time.Time) error
 func TestDepsInterfacesCompile(t *testing.T) {
 	// Stubs — proves the interfaces are mockable for handler tests.
 	var (
-		_ CompetitionStore = stubCompetitionStore{}
-		_ ScoringEngine    = stubScoringEngine{}
-		_ Broadcaster      = stubBroadcaster{}
-		_ TeamLineupStore  = stubTeamLineupStore{}
+		_ CompetitionStore      = stubCompetitionStore{}
+		_ ScoringEngine         = stubScoringEngine{}
+		_ Broadcaster           = stubBroadcaster{}
+		_ TeamLineupStore       = stubTeamLineupStore{}
+		_ CompetitionTransactor = stubCompetitionTransactor{}
 	)
 
 	// Concrete types — proves the production types remain drop-in
@@ -110,5 +122,9 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		_ Broadcaster           = (*Hub)(nil)
 		_ CompetitorStatusStore = (*state.Store)(nil)
 		_ TeamLineupStore       = (*state.Store)(nil)
+		// T156: CompetitionTransactor is the WithTransaction adapter
+		// the lineup PUT migration uses. *state.Store satisfies it via
+		// the Slice 6 / T155 method.
+		_ CompetitionTransactor = (*state.Store)(nil)
 	)
 }

@@ -47,6 +47,13 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 		RegisterDisplayHandlers(viewer, store)
 	}
 
+	// Stateless schedule estimator — no auth, no state-store access.
+	// Registered directly under /api so the path matches the canonical
+	// CLI web-server route exactly (T147a, T152a). Shared by both
+	// `make run` and `make run-mobile` frontends.
+	api := r.Group("/api")
+	RegisterScheduleHandlers(api)
+
 	// Admin API endpoints (protected)
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(store))
@@ -58,7 +65,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 		RegisterMatchHandlers(admin, eng, hub)
 		RegisterDecisionHandlers(admin, eng, hub)
 		RegisterEligibilityHandlers(admin, store, hub)
-		RegisterLineupHandlers(admin, store, store)
+		RegisterLineupHandlers(admin, store, store, store)
 		RegisterDaihyosenHandlers(admin, eng, store, hub)
 	}
 

@@ -121,3 +121,23 @@ type Broadcaster interface {
 	// subscriber. Mirrors Hub.Broadcast.
 	Broadcast(eventType EventType, data any)
 }
+
+// CompetitionTransactor is the consumer-boundary view of
+// state.Store.WithTransaction used by handler families that need to
+// commit multiple file mutations under one per-comp lock acquire
+// (T155/T156). Kept as a single-method interface deliberately —
+// handlers that ALSO need read access compose this with the
+// CompetitionStore / TeamLineupStore / etc. interfaces at the
+// registration site, same pattern the other handler families use.
+//
+// Consumers (current): handlers_lineup.go (the PUT, T156). The score
+// and decision handlers are queued for migration once the engine
+// methods learn tx-aware variants; until then they hold the concrete
+// *engine.Engine which internally locks per-comp.
+type CompetitionTransactor interface {
+	// WithTransaction runs fn under the per-competition write lock for
+	// compID. fn receives a state.StoreTx handle whose methods skip
+	// re-locking; the lock is released on return (success or error).
+	// Mirrors state.Store.WithTransaction.
+	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
+}

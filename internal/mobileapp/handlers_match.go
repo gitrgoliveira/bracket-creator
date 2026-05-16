@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -17,7 +18,12 @@ import (
 // clients can detect the failure (and refresh) without us leaking
 // internal store details. Broadcasts EventCompetitionCompleted when the
 // transition actually happens.
-func tryAutoCompletePools(c *gin.Context, eng *engine.Engine, hub *Hub, compID string) {
+//
+// Takes the consumer-boundary interfaces (T014) so handler tests can
+// stub the engine + hub without spinning up the full state/engine
+// stack. Production code passes `*engine.Engine` and `*Hub` which
+// satisfy the interfaces by structural match.
+func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, compID string) {
 	autoCompleted, err := eng.MaybeAutoCompletePools(compID)
 	if err != nil {
 		log.Printf("MaybeAutoCompletePools(%s): %v", compID, err)
@@ -29,7 +35,27 @@ func tryAutoCompletePools(c *gin.Context, eng *engine.Engine, hub *Hub, compID s
 	}
 }
 
-func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
+// RegisterMatchHandlers wires up the score / quick-score / bulk-score /
+// court / override-winner / time endpoints under the admin group.
+//
+// The score endpoint is the Slice 0 / NFR-002 demonstration of the
+// interface-based dependency injection pattern (T017): it consumes
+// `ScoringEngine` and `Broadcaster` rather than the concrete
+// `*engine.Engine` and `*Hub`, plus the `ScoreRequest.Validate()`
+// pattern (T015 / NFR-004) for request-shape validation.
+//
+// The remaining endpoints in this file still hold concrete pointers
+// (the function signature accepts the concrete `*engine.Engine` for
+// methods not yet on the interface). Later slices migrate those one at
+// a time; the concrete `*engine.Engine` remains a drop-in
+// implementation of `ScoringEngine` so the `tryAutoCompletePools` and
+// score endpoint paths can already accept the interface today.
+//
+// `store` is intentionally unused at present — kept on the signature so
+// the wiring in server.go doesn't need to change as later slices add
+// store-touching handlers (e.g. eligibility lookups in Slice 3).
+func RegisterMatchHandlers(r *gin.RouterGroup, _ *state.Store, eng *engine.Engine, hub *Hub) {
+
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -134,33 +160,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 		c.JSON(http.StatusOK, result)
 	})
 
-	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		mid := c.Param("mid")
-		var result state.MatchResult
-		if err := c.ShouldBindJSON(&result); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := eng.RecordMatchResult(id, mid, &result); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Broadcast update
-		hub.Broadcast(EventMatchUpdated, gin.H{
-			"competitionId": id,
-			"matchId":       mid,
-			"result":        result,
-		})
-		tryAutoCompletePools(c, eng, hub, id)
-
-		c.JSON(http.StatusOK, result)
-	})
+	// Score endpoint — Slice 0 demonstration of the interface-DI +
+	// Validate() pattern (T015 / T017 / NFR-002 / NFR-004). Calls go
+	// through ScoringEngine and Broadcaster (the consumer-boundary
+	// interfaces from deps.go) rather than the concrete types, and the
+	// request body is validated via ScoreRequest.Validate() before any
+	// engine call. The closure captures `*engine.Engine` / `*Hub` and
+	// adapts them to the interfaces at the call boundary — same wire
+	// behaviour as before.
+	registerScoreHandler(r, eng, hub)
 
 	r.PUT("/competitions/:id/matches/:mid/court", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -248,5 +256,63 @@ func RegisterMatchHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 
 		hub.Broadcast(EventScheduleUpdated, nil)
 		c.Status(http.StatusOK)
+	})
+}
+
+// registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`
+// endpoint via the consumer-boundary interfaces (T014/T017) instead of
+// the concrete `*engine.Engine` / `*Hub`. This is the Slice 0
+// demonstration of the interface-DI pattern (NFR-002): handler tests
+// can drive this code path with a stub ScoringEngine + Broadcaster, no
+// temp dirs, no real engine wiring.
+//
+// Behaviour is identical to the pre-Slice-0 version except for the new
+// ScoreRequest.Validate() call, which surfaces a 400 with the field
+// name when the body is malformed against its own shape rules
+// (Status outside the documented enum, Winner not naming either side).
+// The engine's preserve-on-empty-side fallback continues to handle the
+// "client sends scoring fields only" case.
+func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, hub Broadcaster) {
+	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		mid := c.Param("mid")
+
+		var req ScoreRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := req.Validate(); err != nil {
+			// Map ValidationError → 400 with the validator's message.
+			// Engine errors below remain 500 (they surface I/O / state
+			// failures, not request-shape errors).
+			var verr *ValidationError
+			if errors.As(err, &verr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		result := req.AsMatchResult()
+		if err := eng.RecordMatchResult(id, mid, result); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Broadcast match update with the full (post-merge) result so
+		// SSE consumers see the same payload they'd see on a re-fetch.
+		hub.Broadcast(EventMatchUpdated, gin.H{
+			"competitionId": id,
+			"matchId":       mid,
+			"result":        result,
+		})
+		tryAutoCompletePools(c, eng, hub, id)
+
+		c.JSON(http.StatusOK, result)
 	})
 }

@@ -2,46 +2,23 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 const { useState: useS, useEffect: useE, useRef: useR } = React;
-const mergeMatchPatch = window.mergeMatchPatch;
 
+// SSE patch-apply logic moved to patch.jsx (T008 / NFR-006). The local
+// patchCompetitionData here used to be a duplicate of admin.jsx's
+// implementation; both now go through window.applyPatch.
 const patchCompetitionData = (prev, event) => {
-  if (!prev || !event.data) return prev;
-  const { result, results } = event.data;
-  const resultsToApply = results || (result ? [result] : []);
-  if (resultsToApply.length === 0) return prev;
-
-  const resultMap = new Map(resultsToApply.map(r => [r.id, r]));
-  const next = { ...prev };
-  let changed = false;
-
-  if (next.poolMatches) {
-    next.poolMatches = next.poolMatches.map(m => {
-      const update = resultMap.get(m.id);
-      if (update) { changed = true; return mergeMatchPatch(m, update); }
-      return m;
-    });
-  }
-
-  if (next.bracket && next.bracket.rounds) {
-    let bChanged = false;
-    const rounds = next.bracket.rounds.map(round =>
-      round.map(m => {
-        const update = resultMap.get(m.id);
-        if (update) {
-          bChanged = true; changed = true;
-          const patch = { ...update };
-          if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
-          if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-          return mergeMatchPatch(m, patch);
-        }
-        return m;
-      })
-    );
-    if (bChanged) next.bracket = { ...next.bracket, rounds };
-  }
-
-  return changed ? next : prev;
+  if (window.applyPatch) return window.applyPatch(prev, event);
+  return prev;
 };
+
+// preact-router wrapper from router.jsx (T005). Used for URL → state
+// synchronisation, replacing the manual getRouteFromUrl / popstate
+// machinery that lived inline. The render path itself still drives off
+// `mode` / `viewerScreen` / `viewerCompId` / `adminView` state because
+// those carry richer information than path components alone (e.g., the
+// admin section sub-tab); the Router only hydrates and updates that
+// state from the URL.
+const AppRouter = window.AppRouter || null;
 
 const THEME = {
   "accentColor": "#1d3557",
@@ -49,26 +26,10 @@ const THEME = {
   "cardVariant": 1
 };
 
-function App() {
-  const [tournament, setTournament] = useS(null);
-  const [loading, setLoading] = useS(true);
-  const [mode, setMode] = useS("viewer"); // viewer | admin
-  const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
-  const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
-  const [authPrompt, setAuthPrompt] = useS(false);
-  const [viewerCompId, setViewerCompId] = useS(null);
-  const [viewerScreen, setViewerScreen] = useS("home"); // home | schedule
-  const [adminView, setAdminView] = useS({ kind: "dashboard" });
-  const [toast, setToast] = useS(null);
-  const authPromptRef = React.useRef(false);
-
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
-  };
-
-  // --- Routing Logic ---
-  const getRouteFromUrl = () => {
-    const path = window.location.pathname;
+// Pure helper: parse the current pathname into the App's view state.
+// Extracted so it remains unit-testable; previously inlined as a
+// closure in App() which prevented both reuse and isolated testing.
+function parsePath(path) {
     if (path.startsWith("/admin")) {
       const parts = path.split("/").filter(Boolean);
       if (parts.length === 1) return { mode: "admin", admin: { kind: "dashboard" } };
@@ -90,9 +51,10 @@ function App() {
       return { mode: "viewer", viewerScreen: "schedule" };
     }
     return { mode: "viewer", viewerScreen: "home" };
-  };
+}
 
-  const getUrlFromRoute = (m, vs, vcid, av) => {
+// Pure helper: render the App's view state back into a URL pathname.
+function pathFromState(m, vs, vcid, av) {
     if (m === "admin") {
       if (av.kind === "dashboard") return "/admin";
       if (av.kind === "schedule") return "/admin/schedule";
@@ -110,11 +72,64 @@ function App() {
     if (vcid) return `/competition/${vcid}`;
     if (vs === "schedule") return "/schedule";
     return "/";
+}
+
+// ErrorBoundary — Preact Components support componentDidCatch via the
+// preact/compat layer (window.React above is aliased to preactCompat).
+// On caught render exception we render a recoverable banner with a
+// reload button instead of letting the whole tree go blank. Per NFR-008.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  componentDidCatch(error) {
+    console.error("App crashed:", error);
+    this.setState({ error });
+  }
+  render() {
+    if (this.state.error) {
+      return React.createElement('div', { className: 'page', style: { padding: 24 } },
+        React.createElement('div', { className: 'card card--pad-lg' },
+          React.createElement('h2', null, 'Something went wrong'),
+          React.createElement('p', { style: { color: 'var(--ink-3)', marginBottom: 16 } },
+            'The app hit an unexpected error. Reload to try again.'),
+          React.createElement('pre', {
+            style: { background: 'var(--bg-2)', padding: 12, borderRadius: 6, overflow: 'auto', fontSize: 12, marginBottom: 16 }
+          }, String(this.state.error?.message || this.state.error)),
+          React.createElement('button', {
+            className: 'btn btn--primary',
+            onClick: () => window.location.reload()
+          }, 'Reload')
+        )
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function App() {
+  const [tournament, setTournament] = useS(null);
+  const [loading, setLoading] = useS(true);
+  const [mode, setMode] = useS("viewer"); // viewer | admin
+  const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
+  const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
+  const [authPrompt, setAuthPrompt] = useS(false);
+  const [viewerCompId, setViewerCompId] = useS(null);
+  const [viewerScreen, setViewerScreen] = useS("home"); // home | schedule
+  const [adminView, setAdminView] = useS({ kind: "dashboard" });
+  const [toast, setToast] = useS(null);
+  const authPromptRef = React.useRef(false);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
   };
 
-  // Initial load from URL
+  // Hydrate state from the current URL on first render. Without this,
+  // a deep-link page-load (e.g. /admin/schedule typed directly) would
+  // boot into the default viewer-home view until the user navigated.
   useE(() => {
-    const route = getRouteFromUrl();
+    const route = parsePath(window.location.pathname);
     if (route.mode === "admin") {
       setMode("admin");
       if (route.admin) setAdminView(route.admin);
@@ -126,18 +141,31 @@ function App() {
     }
   }, []);
 
-  // Sync state to URL
+  // Sync state to URL whenever it changes. Uses the AppRouter.route()
+  // helper (preact-router-backed) which mirrors history.pushState while
+  // also notifying any mounted Routers — letting <Router>-driven
+  // listeners react to programmatic navigation without a separate
+  // popstate dispatch.
   useE(() => {
-    const url = getUrlFromRoute(mode, viewerScreen, viewerCompId, adminView);
+    const url = pathFromState(mode, viewerScreen, viewerCompId, adminView);
     if (window.location.pathname !== url) {
-      history.pushState(null, "", url);
+      if (AppRouter && AppRouter.route) {
+        AppRouter.route(url);
+      } else {
+        history.pushState(null, "", url);
+      }
     }
   }, [mode, viewerScreen, viewerCompId, adminView]);
 
-  // Handle popstate (back/forward)
+  // The popstate handler is preserved as a fallback for back/forward
+  // navigation. preact-router would also fire its own listeners on
+  // history changes, but our App owns the routing-state-of-record so
+  // we keep this explicit. (The previous implementation used the same
+  // pattern; we did not remove it because the App's state machine is
+  // richer than what's encodable in path components.)
   useE(() => {
     const handlePop = () => {
-      const route = getRouteFromUrl();
+      const route = parsePath(window.location.pathname);
       if (route.mode === "admin") {
         setMode("admin");
         if (route.admin) setAdminView(route.admin);
@@ -192,7 +220,7 @@ function App() {
                 // Refresh current competition (jittered) — the backend has
                 // already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                setTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData), jitter);
+                setTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
             }
             // Also refresh tournament list for status updates
             setTimeout(load, jitter);
@@ -503,4 +531,16 @@ function CreateTournament({ onCreated }) {
 }
 
 window.App = App;
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+window.ErrorBoundary = ErrorBoundary;
+window.parsePath = parsePath;
+window.pathFromState = pathFromState;
+
+// Mount the App inside an ErrorBoundary so any uncaught render exception
+// renders a recoverable banner instead of a blank screen. Per NFR-008.
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+
+export { parsePath, pathFromState, ErrorBoundary };

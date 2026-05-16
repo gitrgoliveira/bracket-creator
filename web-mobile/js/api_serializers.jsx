@@ -54,6 +54,13 @@ function toBackendMatchResult(patch, match) {
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }
+    // FR-033: encho metadata round-trips so the (E) suffix persists. The
+    // backend in Slice 1 (T039) accepts the field passively — Slice 3 wires
+    // the decision/kiken/fusenpai semantics, but we already keep the
+    // periodCount alongside the score so re-edits and history retain it.
+    if (patch.encho && patch.encho.periodCount > 0) {
+        result.encho = { periodCount: patch.encho.periodCount };
+    }
     return result;
 }
 

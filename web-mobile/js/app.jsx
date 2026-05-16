@@ -37,6 +37,16 @@ function parsePath(path) {
       }
       return { mode: "admin", admin: { kind: "dashboard" } };
     }
+    // T060: `/display` family — public, no-auth, read-only consumer
+    // surfaces (TV / lobby / overlay). Surface the mode here so App()
+    // can short-circuit the normal viewer/admin render path. Query
+    // params (?court=, ?overlay=, ?position=) are read inside
+    // DisplayRoute via useQuery() — they intentionally don't shape the
+    // mode token because changing query params shouldn't remount the
+    // display surfaces (the SSE-driven tournament state stays alive).
+    if (path === "/display" || path.startsWith("/display?")) {
+      return { mode: "display" };
+    }
     if (path.startsWith("/competition/")) {
       const id = path.split("/")[2];
       return { mode: "viewer", viewerCompId: id };
@@ -105,7 +115,13 @@ class ErrorBoundary extends React.Component {
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
-  const [mode, setMode] = useS("viewer"); // viewer | admin
+  // mode: viewer | admin | display.
+  // "display" is the public /display family — read-only TV / lobby /
+  // OBS overlay surfaces. We track it here (rather than as a sub-state
+  // of viewer) so App() can short-circuit the viewer/admin auth/render
+  // logic entirely; the display surfaces require no auth and don't
+  // touch viewerCompId / viewerScreen.
+  const [mode, setMode] = useS("viewer");
   const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
   const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
   const [authPrompt, setAuthPrompt] = useS(false);
@@ -113,6 +129,12 @@ function App() {
   const [viewerScreen, setViewerScreen] = useS("home"); // home | schedule
   const [adminView, setAdminView] = useS({ kind: "dashboard" });
   const [toast, setToast] = useS(null);
+  // T063: SSE connection status, surfaced to display surfaces so the
+  // TV / lobby / overlay can render a reconnect indicator during the
+  // window between EventSource error and reconnect-onopen. The
+  // EventSource itself lives inside subscribeToEvents; the second
+  // callback hands status events up here.
+  const [sseConnected, setSseConnected] = useS(true);
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
@@ -128,6 +150,8 @@ function App() {
       setMode("admin");
       if (route.admin) setAdminView(route.admin);
       if (!authed) setAuthPrompt(true);
+    } else if (route.mode === "display") {
+      setMode("display");
     } else {
       setMode("viewer");
       if (route.viewerCompId) setViewerCompId(route.viewerCompId);
@@ -141,6 +165,11 @@ function App() {
   // listeners react to programmatic navigation without a separate
   // popstate dispatch.
   useE(() => {
+    // Display mode doesn't have an internal state machine — the URL is
+    // already at /display?... and DisplayRoute reads the query params
+    // on its own. Skip URL syncing here to avoid stripping the
+    // query string (pathFromState only emits the path, not the query).
+    if (mode === "display") return;
     const url = pathFromState(mode, viewerScreen, viewerCompId, adminView);
     if (window.location.pathname !== url) {
       if (AppRouter && AppRouter.route) {
@@ -163,6 +192,8 @@ function App() {
       if (route.mode === "admin") {
         setMode("admin");
         if (route.admin) setAdminView(route.admin);
+      } else if (route.mode === "display") {
+        setMode("display");
       } else {
         setMode("viewer");
         setViewerCompId(route.viewerCompId || null);
@@ -205,7 +236,18 @@ function App() {
         if (event.type === "tournament_updated") {
             if (!authPromptRef.current) setTimeout(load, jitter);
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
-            if (viewerCompId === event.data.competitionId) {
+            // Display mode (T060) reads the full tournament tree
+            // (every competition's poolMatches + bracket) and needs a
+            // refresh on every match update — without this, the TV
+            // would stay frozen on the initial snapshot. We piggy-back
+            // on the existing load() which re-fetches both /tournament
+            // and /competitions, so the display sees the new match
+            // state on the next render. The jittered refresh avoids
+            // thundering the server when many displays are mounted on
+            // the same venue LAN.
+            if (mode === "display") {
+                setTimeout(load, jitter);
+            } else if (viewerCompId === event.data.competitionId) {
                 // Apply partial update immediately (match_updated only —
                 // competition_completed has no per-match payload)
                 if (event.type === "match_updated") {
@@ -219,9 +261,13 @@ function App() {
             // Also refresh tournament list for status updates
             setTimeout(load, jitter);
         }
+    }, (status) => {
+        // T063: track SSE connection status so /display surfaces can
+        // render a reconnect indicator during disconnects.
+        setSseConnected(status === 'open');
     });
     return unsub;
-  }, [viewerCompId]);
+  }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);
 
@@ -267,6 +313,29 @@ function App() {
       setPassword(p);
     }} />
   );
+
+  // T060: /display family — public, read-only TV / lobby / overlay
+  // surfaces. Short-circuit before viewer/admin so no auth prompt is
+  // shown, no admin chrome leaks in, and the DisplayRoute owns its
+  // own query-param routing (court=, overlay=, position=). The
+  // tournament prop carries .competitions already (load() merges
+  // them), and `connected` is the SSE-status boolean from T063.
+  if (mode === "display") {
+    const DisplayRoute = window.DisplayRoute;
+    if (!DisplayRoute) {
+      // Defensive: display.js bundle is part of the standard build, so
+      // this should never fire in production. Render a minimal message
+      // rather than a blank screen if it does.
+      return <div className="loading" style={{ background: '#000', color: '#fff', padding: 40 }}>Display module not loaded.</div>;
+    }
+    return (
+      <DisplayRoute
+        tournament={tournament}
+        competitions={tournament.competitions || []}
+        connected={sseConnected}
+      />
+    );
+  }
 
   if (mode === "admin" && authed) {
     return (

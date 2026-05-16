@@ -346,6 +346,14 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     'status',
     // mirror: saveNow-allowlist (defense against zero-value clobber)
     'mirror',
+    // FR-050 / T044: poolFormat round-trips through saveNow's PUT body,
+    // so it needs a dep to absorb SSE-pushed concurrent admin changes.
+    'poolFormat',
+    // FR-052..FR-054 / T047: per-phase duration inputs are rendered in
+    // the settings form AND round-tripped via finalNext. Sync deps
+    // required so an SSE-driven update lands in local state while the
+    // user is on the settings page.
+    'poolMatchDuration', 'playoffMatchDuration',
   ];
 
   it('useEffect deps include every field rendered via local.*', () => {
@@ -416,6 +424,11 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     'teamSize', 'numberPrefix',
     'format', 'kind',
     'mirror',
+    // FR-050 / T044: round-robin shape selector.
+    'poolFormat',
+    // FR-052..FR-054 / T047: per-phase duration overrides. Zero means
+    // "use legacy default" — fall through to backend ApplyCompetitionDefaults.
+    'poolMatchDuration', 'playoffMatchDuration',
   ]);
   // Fields that MUST NOT appear in the PUT body — pinning the
   // negative invariant explicitly so a careless re-add is caught.

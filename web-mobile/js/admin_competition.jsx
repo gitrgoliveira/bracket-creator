@@ -343,7 +343,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -456,6 +456,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
     // the disk value until the user types a valid replacement.
     const safeInt = (v, fallback) =>
       Number.isFinite(v) && Number.isInteger(v) && v >= 1 ? v : fallback;
+    // safeNonNegInt is the >=0 sibling for the per-phase duration
+    // fields. T047: 0 means "no override — fall through to the legacy
+    // matchDuration default per backend ApplyCompetitionDefaults", so
+    // we DO want 0 to round-trip. Same NaN/fractional/negative guards
+    // as safeInt; the only difference is the lower bound. Same
+    // disk-clobber concern as safeInt: cleared input → NaN → JSON
+    // null → Go zero. We fall back to latestC.<field> in that case so
+    // an unrelated-field save doesn't silently zero out a duration the
+    // user previously typed.
+    const safeNonNegInt = (v, fallback) =>
+      Number.isFinite(v) && Number.isInteger(v) && v >= 0 ? v : fallback;
     const finalNext = {
       id: latestC.id,
       name: trimmedName,
@@ -472,6 +483,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       format: effective.format,
       kind: effective.kind,
       mirror: effective.mirror,
+      // FR-050 / T044: round-robin shape selector. Only meaningful when
+      // the format runs pool play; the backend's validateCompetitionFormat
+      // accepts the empty value, so a non-pool format can safely PUT "".
+      poolFormat: effective.poolFormat || "",
+      // FR-052..FR-054 / T047: per-phase duration overrides. Zero means
+      // "use legacy default" — fall through to safeNonNegInt with
+      // latestC's value to avoid NaN-clobbering a previously-set value.
+      poolMatchDuration: safeNonNegInt(effective.poolMatchDuration, latestC.poolMatchDuration || 0),
+      playoffMatchDuration: safeNonNegInt(effective.playoffMatchDuration, latestC.playoffMatchDuration || 0),
     };
     // Capture the snapshot of edited fields we're about to persist. On
     // success we clear ONLY those fields from the edited set — preserving
@@ -621,7 +641,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
         </div>
         <div className="field__hint">Concurrency = number of shiaijo (courts) assigned. Schedule prevents double-booking with other competitions.</div>
       </div>
-      {local.format === "pools" && (
+      {/* Pool-size controls apply to formats that run multiple pools: */}
+      {/* legacy "pools" (back-compat: pools-then-playoff in the old */}
+      {/* taxonomy) and the new "mixed" (pools + knockout). "league" */}
+      {/* uses a single round-robin and so doesn't expose pool-size; */}
+      {/* "playoffs" has no pool phase. FR-050 / T044. */}
+      {(local.format === "pools" || local.format === "mixed") && (
         <>
           <div className="field">
             <label className="field__label">Pool size is a</label>
@@ -650,6 +675,52 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
             /></div>
           </div>
         </>
+      )}
+      {/* FR-052..FR-054 / T047: per-phase match-duration inputs. */}
+      {/* Render rules: */}
+      {/*   - poolMatchDuration: any format that runs pool play */}
+      {/*     ("pools", "mixed", "league"). */}
+      {/*   - playoffMatchDuration: any format with a knockout phase */}
+      {/*     ("playoffs", "mixed"). */}
+      {/* Both fields use the NaN-as-"" + updateNumber pattern; */}
+      {/* zero/empty means "fall through to the legacy matchDuration */}
+      {/* default" per backend ApplyCompetitionDefaults. The legacy */}
+      {/* `matchDuration` field is no longer exposed in the UI — it */}
+      {/* round-trips invisibly via the mirror/safeInt path so existing */}
+      {/* on-disk values are preserved. */}
+      {(local.format === "pools" || local.format === "mixed" || local.format === "league" || (local.format === "playoffs")) && (
+        <div className="row">
+          {(local.format === "pools" || local.format === "mixed" || local.format === "league") && (
+            <div className="field">
+              <label className="field__label">Pool match duration (min)</label>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="1"
+                value={Number.isFinite(local.poolMatchDuration) && local.poolMatchDuration > 0 ? local.poolMatchDuration : ""}
+                onChange={(e) => updateNumber("poolMatchDuration", e.target.value, 0)}
+                placeholder="default"
+              />
+              <div className="field__hint">Estimated minutes per pool match. Leave blank for default.</div>
+            </div>
+          )}
+          {(local.format === "playoffs" || local.format === "mixed") && (
+            <div className="field">
+              <label className="field__label">Playoff match duration (min)</label>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="1"
+                value={Number.isFinite(local.playoffMatchDuration) && local.playoffMatchDuration > 0 ? local.playoffMatchDuration : ""}
+                onChange={(e) => updateNumber("playoffMatchDuration", e.target.value, 0)}
+                placeholder="default"
+              />
+              <div className="field__hint">Estimated minutes per playoff/knockout match. Leave blank for default.</div>
+            </div>
+          )}
+        </div>
       )}
       <div className="field">
         <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
@@ -903,7 +974,18 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 )}
               </>
             )}
-            {c.format === "pools" && c.status !== "setup" && onCreatePlayoff && (() => {
+            {/* FR-050 / FR-051 / T045: the create-playoff affordance */}
+            {/* is gated by format. Legacy "pools" rows kept their old */}
+            {/* pools-then-playoff semantics, so they still show the */}
+            {/* button. "league" runs standings-only — show an inline */}
+            {/* note instead of the button so operators know the */}
+            {/* competition completes via pool standings. Other formats */}
+            {/* ("playoffs", "mixed") build their bracket up front and */}
+            {/* don't need the create-playoff button at all. */}
+            {(c.format === "pools" || c.format === "league") && c.status !== "setup" && onCreatePlayoff && (() => {
+              if (c.format === "league") {
+                return <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>League: standings determine the winner</div>;
+              }
               const playoffName = c.name + " - Playoffs";
               const hasPlayoff = (t.competitions || []).some(cc => cc.name === playoffName);
               return hasPlayoff

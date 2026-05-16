@@ -33,10 +33,17 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Use ?? not || so an explicit 0 isn't treated as "unset"
   const initialAFouls = m.hansokuA ?? m.score?.fouls?.a ?? 0;
   const initialBFouls = m.hansokuB ?? m.score?.fouls?.b ?? 0;
+  // FR-033: encho (overtime) counter rides alongside the score. Initialized
+  // from the existing match.encho?.periodCount so re-opens of completed
+  // matches retain the toggle. Slice 1 ships the operator-visible toggle and
+  // round-trips the count via toBackendMatchResult; Slice 3 (T093+) layers
+  // the decision/kiken UI on top.
+  const initialEnchoPeriods = m.encho?.periodCount || 0;
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
   const [aFouls, setAFouls] = useStateA(initialAFouls);
   const [bFouls, setBFouls] = useStateA(initialBFouls);
+  const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
   const [submitting, setSubmitting] = useStateA(false);
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
@@ -61,6 +68,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     else setBPts((p) => p.filter((_, i) => i !== idx));
   };
 
+  // FR-033: when the operator has marked overtime, attach the encho block
+  // to non-"reset" patches. periodCount=0 means "no overtime"; emitting the
+  // field as undefined keeps the wire payload clean (omitempty server-side).
+  const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+
   const buildPatch = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0 };
@@ -69,18 +81,19 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"),
       hansokuA: aFouls, hansokuB: bFouls,
       score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
+      ...enchoBlock(),
     };
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete } };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
     // ippon
     const aLetters = aPts.filter(x => x !== "•");
     const bLetters = bPts.filter(x => x !== "•");
     const aFinal = [...aLetters, ...Array(aHansokuPts).fill("H")].slice(0, 2);
     const bFinal = [...bLetters, ...Array(bHansokuPts).fill("H")].slice(0, 2);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete } };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete } };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock() };
   };
 
   const doSubmit = async (fn) => {
@@ -106,7 +119,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     !window.arraysEqual(bPts, initialBPts) ||
     aFouls !== initialAFouls ||
     bFouls !== initialBFouls ||
-    isDrawToggled !== initialIsDrawToggled;
+    isDrawToggled !== initialIsDrawToggled ||
+    enchoPeriodCount !== initialEnchoPeriods;
   const handleDismiss = () => {
     if (submitting) return; // don't close while save is in-flight
     if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
@@ -183,6 +197,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
               {m.compName} · {m.phase === "pool" ? m.poolName : m.round}
+              {enchoPeriodCount > 0 && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
             <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, letterSpacing: "-0.01em" }}>
               Shiaijo {m.court} · {m.scheduledAt || "Live"}
@@ -197,6 +212,39 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
         </div>
 
         <div className="editor-modal__body">
+          {/* FR-033 encho toggle: small counter that lets the operator
+              mark an overtime period and increment it for subsequent
+              periods. Slice 3 will wire decision/kiken; Slice 1 only
+              persists the count via toBackendMatchResult so the (E)
+              suffix survives re-opens and shows in the match list. */}
+          <div className="encho-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={enchoPeriodCount > 0}
+                onChange={(e) => setEnchoPeriodCount(e.target.checked ? Math.max(1, enchoPeriodCount) : 0)}
+              />
+              Encho started (overtime)
+            </label>
+            {enchoPeriodCount > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => setEnchoPeriodCount(c => Math.max(1, c - 1))}
+                  disabled={enchoPeriodCount <= 1}
+                  aria-label="Decrease overtime period count"
+                >−</button>
+                <span style={{ minWidth: 24, textAlign: "center", fontFamily: "var(--font-mono)", fontWeight: 700 }}>×{enchoPeriodCount}</span>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => setEnchoPeriodCount(c => c + 1)}
+                  aria-label="Increase overtime period count"
+                >+</button>
+              </div>
+            )}
+          </div>
           <div className="scoring-board">
               {/* Score slots + point buttons */}
               <div className="sb-match">
@@ -301,6 +349,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const m = match;
   const isComplete = m.status === "completed";
   const positions = TEAM_POSITIONS.slice(0, teamSize);
+  // FR-033: encho counter for team matches (overtime period count rides
+  // alongside the score on the wire — same shape as ScoreEditorModal).
+  const initialEnchoPeriods = m.encho?.periodCount || 0;
+  const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
   const [submitting, setSubmitting] = useStateA(false);
   // Same teardown-race guard as ScoreEditorModal — covers external/
   // parent-driven unmount during in-flight save.
@@ -336,6 +388,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const pwB = subTotals.reduce((sum, s) => sum + s.bTotal, 0);
   const teamWinner = ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null;
 
+  const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+
   const buildPatch = (targetStatus) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
     const subResults = subs.map((s, idx) => {
@@ -369,6 +423,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         ipponsB: [],
         score: { type: "ippon", winnerPts: 0, loserPts: 0, fouls: { a: 0, b: 0 }, live: true, corrected: isComplete },
         subResults,
+        ...enchoBlock(),
       };
     }
     return {
@@ -378,6 +433,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       ipponsB: [],
       score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete },
       subResults,
+      ...enchoBlock(),
     };
   };
 
@@ -391,7 +447,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // discarding multi-sub-match edits. Team scoring typically has 3–9 sub
   // entries; the JSON serialize approach is fine for that size and keeps
   // the comparison robust against array identity drift from setSubs.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubs);
+  // Encho toggle is included so an operator-only encho change still
+  // triggers the discard confirm.
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubs) || enchoPeriodCount !== initialEnchoPeriods;
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has
@@ -436,6 +494,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
               {m.compName} · {m.phase === "pool" ? m.poolName : m.round}
+              {enchoPeriodCount > 0 && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
             <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, letterSpacing: "-0.01em" }}>
               Shiaijo {m.court} · {m.scheduledAt || "Live"}
@@ -450,6 +509,35 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         </div>
 
         <div className="editor-modal__body">
+          {/* FR-033 encho toggle: see ScoreEditorModal for the contract. */}
+          <div className="encho-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={enchoPeriodCount > 0}
+                onChange={(e) => setEnchoPeriodCount(e.target.checked ? Math.max(1, enchoPeriodCount) : 0)}
+              />
+              Encho started (overtime)
+            </label>
+            {enchoPeriodCount > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => setEnchoPeriodCount(c => Math.max(1, c - 1))}
+                  disabled={enchoPeriodCount <= 1}
+                  aria-label="Decrease overtime period count"
+                >−</button>
+                <span style={{ minWidth: 24, textAlign: "center", fontFamily: "var(--font-mono)", fontWeight: 700 }}>×{enchoPeriodCount}</span>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => setEnchoPeriodCount(c => c + 1)}
+                  aria-label="Increase overtime period count"
+                >+</button>
+              </div>
+            )}
+          </div>
           {/* Team header */}
           <div className="sb-match" style={{ marginBottom: 16 }}>
             {teamSides.map((s, idx) => (

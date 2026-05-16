@@ -102,4 +102,32 @@ describe('formatIpponsScore', () => {
       expect(result).toBe('M–K');
     });
   });
+
+  // FR-033: encho is rendered as a trailing " (E)" so the match list and
+  // bracket views surface that the match went to overtime.
+  describe('encho suffix', () => {
+    it('appends (E) to a normal ippon score when encho has a positive period count', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
+    });
+
+    it('appends (E) to a draw', () => {
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('△ (E)');
+    });
+
+    it('appends (E) to a no-score draw', () => {
+      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E)');
+    });
+
+    it('appends (E) to a hantei result', () => {
+      expect(formatIpponsScore([], [], { type: 'hantei' }, null, { periodCount: 1 })).toBe('H (E)');
+    });
+
+    it('does not append (E) when periodCount is 0', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M–K');
+    });
+
+    it('is a no-op when encho argument is missing entirely', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null)).toBe('M–K');
+    });
+  });
 });

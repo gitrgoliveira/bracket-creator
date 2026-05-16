@@ -30,10 +30,18 @@ func (e *Engine) generatePools(comp *state.Competition, players []helper.Player,
 		}
 	}
 
-	if comp.RoundRobin {
-		helper.CreatePoolRoundRobinMatches(pools)
-	} else {
-		helper.CreatePoolMatches(pools)
+	switch comp.PoolFormat {
+	case state.PoolFormatPartial:
+		helper.CreatePartialPoolMatches(pools)
+	default:
+		// PoolFormatFull (default / unset) and any unrecognized value fall
+		// through to the legacy code path. RoundRobin remains the inner
+		// switch for backward compatibility (FR-052, R9).
+		if comp.RoundRobin {
+			helper.CreatePoolRoundRobinMatches(pools)
+		} else {
+			helper.CreatePoolMatches(pools)
+		}
 	}
 
 	// Save pools

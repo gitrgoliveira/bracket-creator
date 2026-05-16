@@ -37,6 +37,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Public viewer
 	viewer := r.Group("/api/viewer")
 	RegisterViewerHandlers(viewer, store, eng)
+	RegisterDisplayHandlers(viewer, store)
 
 	// Admin API
 	admin := r.Group("/api")

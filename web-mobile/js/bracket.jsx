@@ -25,24 +25,30 @@ function sideLabel(side) {
 
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
 // Returns something like "MM–K", "M–", "△", "H"
-function formatIpponsScore(ipponsA, ipponsB, score, decision) {
+//
+// FR-033: when `encho` carries a positive periodCount, append " (E)" to the
+// rendered string so operators and viewers see at a glance that the match
+// went to overtime. Argument is optional and ignored when undefined/null,
+// keeping all existing call sites valid.
+function formatIpponsScore(ipponsA, ipponsB, score, decision, encho) {
+  const enchoSuffix = (encho && encho.periodCount > 0) ? " (E)" : "";
   if (score?.type === "bye") return "BYE";
-  if (score?.type === "hantei") return "H";
+  if (score?.type === "hantei") return "H" + enchoSuffix;
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
   const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
   if (isDraw) {
     // No-score draw → X; with scores → △
-    return (!aStr && !bStr) ? "X" : "△";
+    return ((!aStr && !bStr) ? "X" : "△") + enchoSuffix;
   }
   if (!aStr && !bStr) {
     // Fall back to numeric if ippons arrays are missing but score exists
     if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
-      return `${score.winnerPts}–${score.loserPts}`;
+      return `${score.winnerPts}–${score.loserPts}` + enchoSuffix;
     }
     return "";
   }
-  return `${aStr || "·"}–${bStr || "·"}`;
+  return `${aStr || "·"}–${bStr || "·"}` + enchoSuffix;
 }
 
 const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD }) => {
@@ -100,6 +106,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
+        {match.encho?.periodCount > 0 ? <span className="bc-encho" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}>(E)</span> : null}
       </div>
       <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} />
       <div className="bc-divider"></div>

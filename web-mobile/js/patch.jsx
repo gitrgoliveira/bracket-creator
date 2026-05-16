@@ -41,6 +41,49 @@
 // than fall through to a wrong-shape merge.
 import { mergeMatchPatch as _mergeMatchPatch } from './data.jsx';
 
+// Recompute queuePosition on scheduled poolMatches per court after an
+// SSE patch transitions a match to completed. The backend recomputes
+// server-side on the next GET (see internal/state/match.go), but SSE
+// patches only carry the single updated match — without this client-side
+// step the UI would still show stale "3 before yours" labels until the
+// next viewer refresh. FR-025, R3.
+//
+// Algorithm mirrors state.DeriveQueuePositions: walk the slice in its
+// current order and assign 1, 2, 3, … to scheduled matches per court.
+// Running/completed get 0. The slice is already ordered by the server
+// (typically by scheduledAt), so re-walking in array order produces the
+// same positions the server would on its next response.
+//
+// Touches only matches whose existing queuePosition differs from the
+// recomputed value, preserving object identity for unaffected matches
+// (matters for React.memo on VSchedItem / TWMatch).
+function recomputeQueuePositions(matches) {
+    if (!matches || matches.length === 0) return matches;
+    // If the server's payload never populated queuePosition (older
+    // backends or non-annotated views), do nothing — there's no UI
+    // baseline to keep in sync and assigning positions risks adding a
+    // field the UI doesn't currently render. Avoids gratuitous identity
+    // churn for memoised match-card components.
+    const hasAnyQueuePosition = matches.some(m => m.queuePosition !== undefined);
+    if (!hasAnyQueuePosition) return matches;
+    const counters = {};
+    let touched = false;
+    const next = matches.map(m => {
+        let pos = 0;
+        if (m.status === "scheduled") {
+            const court = m.court || "";
+            counters[court] = (counters[court] || 0) + 1;
+            pos = counters[court];
+        }
+        if ((m.queuePosition || 0) !== pos) {
+            touched = true;
+            return { ...m, queuePosition: pos };
+        }
+        return m;
+    });
+    return touched ? next : matches;
+}
+
 function applyPatch(prev, event) {
     if (!prev || !event || !event.data) return prev;
     const { result, results } = event.data;
@@ -50,13 +93,27 @@ function applyPatch(prev, event) {
     const resultMap = new Map(resultsToApply.map(r => [r.id, r]));
     const next = { ...prev };
     let changed = false;
+    // Track whether any patch was a scheduled/running → completed
+    // transition; only then is a queue-position recompute meaningful.
+    let needsQueueRecompute = false;
 
     if (next.poolMatches) {
         next.poolMatches = next.poolMatches.map(m => {
             const update = resultMap.get(m.id);
-            if (update) { changed = true; return _mergeMatchPatch(m, update); }
+            if (update) {
+                changed = true;
+                const prevStatus = m.status;
+                const merged = _mergeMatchPatch(m, update);
+                if (merged.status === "completed" && (prevStatus === "scheduled" || prevStatus === "running")) {
+                    needsQueueRecompute = true;
+                }
+                return merged;
+            }
             return m;
         });
+        if (needsQueueRecompute) {
+            next.poolMatches = recomputeQueuePositions(next.poolMatches);
+        }
     }
 
     if (next.bracket && next.bracket.rounds) {
@@ -84,4 +141,4 @@ function applyPatch(prev, event) {
     return changed ? next : prev;
 }
 
-export { applyPatch };
+export { applyPatch, recomputeQueuePositions };

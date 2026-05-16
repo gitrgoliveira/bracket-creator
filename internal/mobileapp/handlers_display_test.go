@@ -1,0 +1,241 @@
+package mobileapp
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// courtLiveSide mirrors the per-side payload defined in
+// contracts/api-viewer-court-live.md. Kept local to the test file
+// because the production response type does not exist yet — the Red
+// state for T052/T053/T055 is that the route is not registered, so
+// the JSON body assertions on this struct will fail because Gin's
+// default no-route returns plain text.
+type courtLiveSide struct {
+	PlayerID    string `json:"playerId"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Dojo        string `json:"dojo"`
+}
+
+// courtLiveResponse mirrors the full live/idle response shape from the
+// contract. Fields that don't appear on the idle branch are zero-valued
+// after json.Unmarshal — the assertions read only what each test cares
+// about.
+type courtLiveResponse struct {
+	Court       string         `json:"court"`
+	Status      string         `json:"status"`
+	Competition *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"competition,omitempty"`
+	Phase    string        `json:"phase,omitempty"`
+	SideA    *courtLiveSide `json:"sideA,omitempty"`
+	SideB    *courtLiveSide `json:"sideB,omitempty"`
+	IpponsA  []string      `json:"ipponsA,omitempty"`
+	IpponsB  []string      `json:"ipponsB,omitempty"`
+	HansokuA int           `json:"hansokuA,omitempty"`
+	HansokuB int           `json:"hansokuB,omitempty"`
+	Error    string        `json:"error,omitempty"`
+}
+
+// TestCourtLiveReturnsLivePayload — T052
+// Setup a tournament with Court A, save a competition, place a match in
+// "running" status on Court A, then GET /api/viewer/court/A/live and
+// assert the contract payload (200 + status=="live" + sides + counts).
+func TestCourtLiveReturnsLivePayload(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Test Tournament",
+		Password: "secret",
+		Courts:   []string{"A", "B"},
+	}))
+
+	comp := state.Competition{
+		ID:     "kyu-individual",
+		Name:   "Individual — Kyu Division",
+		Status: state.CompStatusPools,
+		Courts: []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SaveParticipants("kyu-individual", []helper.Player{
+		{Name: "Takeshi Yamada", DisplayName: "Takeshi Yamada", Dojo: "Nakano Kendo Club"},
+		{Name: "Ichiro Tanaka", DisplayName: "Ichiro Tanaka", Dojo: "Setagaya Dojo"},
+	}))
+	require.NoError(t, store.SavePoolMatches("kyu-individual", []state.MatchResult{
+		{
+			ID:       "PoolA-1",
+			SideA:    "Takeshi Yamada",
+			SideB:    "Ichiro Tanaka",
+			Status:   state.MatchStatusRunning,
+			Court:    "A",
+			IpponsA:  []string{"M"},
+			IpponsB:  nil,
+			HansokuA: 0,
+			HansokuB: 1,
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/live", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code,
+		"expected 200 for live match on Court A; got %d body=%q", w.Code, w.Body.String())
+
+	var resp courtLiveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp),
+		"response body must be valid JSON: %q", w.Body.String())
+	assert.Equal(t, "live", resp.Status, "status field must be 'live' when a match is running")
+	assert.Equal(t, "A", resp.Court, "court must be normalized to uppercase 'A'")
+	require.NotNil(t, resp.Competition, "competition object must be present on live payload")
+	assert.Equal(t, "kyu-individual", resp.Competition.ID)
+	assert.NotEmpty(t, resp.Phase, "phase field must be populated (pool name or round label)")
+	require.NotNil(t, resp.SideA, "sideA must be present on live payload")
+	require.NotNil(t, resp.SideB, "sideB must be present on live payload")
+	assert.Equal(t, "Takeshi Yamada", resp.SideA.Name)
+	assert.Equal(t, "Ichiro Tanaka", resp.SideB.Name)
+}
+
+// TestCourtLiveReturnsIdleWhenNoLive — T053
+// Tournament with Court A but no running match — assert
+// 200 + {court:"A", status:"idle"}.
+func TestCourtLiveReturnsIdleWhenNoLive(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Test Tournament",
+		Password: "secret",
+		Courts:   []string{"A", "B"},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/live", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code,
+		"expected 200 for idle court A; got %d body=%q", w.Code, w.Body.String())
+
+	var resp courtLiveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp),
+		"response body must be valid JSON: %q", w.Body.String())
+	assert.Equal(t, "A", resp.Court)
+	assert.Equal(t, "idle", resp.Status, "status must be 'idle' when no live match")
+	assert.Nil(t, resp.Competition, "idle payload must not include competition object")
+	assert.Nil(t, resp.SideA, "idle payload must not include sideA")
+	assert.Nil(t, resp.SideB, "idle payload must not include sideB")
+}
+
+// TestCourtLiveReturns404ForUnknownCourt — T054
+// Tournament has Courts A,B; GET court Z — assert 404 +
+// error=="court_not_found", court=="Z".
+func TestCourtLiveReturns404ForUnknownCourt(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Test Tournament",
+		Password: "secret",
+		Courts:   []string{"A", "B"},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/Z/live", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code,
+		"expected 404 for unknown court Z; got %d body=%q", w.Code, w.Body.String())
+
+	var resp courtLiveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp),
+		"response body must be valid JSON: %q", w.Body.String())
+	assert.Equal(t, "court_not_found", resp.Error,
+		"error field must be exactly 'court_not_found' per contract")
+	assert.Equal(t, "Z", resp.Court,
+		"court field must echo the requested (normalized uppercase) court label")
+}
+
+// TestCourtLiveRespectsZekkenName — T055
+// Competition has withZekkenName=true; GET — assert sideA.displayName
+// equals the zekken (different from name).
+func TestCourtLiveRespectsZekkenName(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Test Tournament",
+		Password: "secret",
+		Courts:   []string{"A", "B"},
+	}))
+
+	comp := state.Competition{
+		ID:             "zekken-comp",
+		Name:           "Zekken Test",
+		Status:         state.CompStatusPools,
+		Courts:         []string{"A"},
+		WithZekkenName: true,
+	}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SaveParticipants("zekken-comp", []helper.Player{
+		{Name: "Takeshi Yamada", DisplayName: "Yamada", Dojo: "Nakano Kendo Club"},
+		{Name: "Ichiro Tanaka", DisplayName: "Tanaka", Dojo: "Setagaya Dojo"},
+	}))
+	require.NoError(t, store.SavePoolMatches("zekken-comp", []state.MatchResult{
+		{
+			ID:     "PoolA-1",
+			SideA:  "Takeshi Yamada",
+			SideB:  "Ichiro Tanaka",
+			Status: state.MatchStatusRunning,
+			Court:  "A",
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/live", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code,
+		"expected 200 for live match; got %d body=%q", w.Code, w.Body.String())
+
+	var resp courtLiveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp),
+		"response body must be valid JSON: %q", w.Body.String())
+	require.NotNil(t, resp.SideA, "sideA must be present on live payload")
+	require.NotNil(t, resp.SideB, "sideB must be present on live payload")
+	assert.Equal(t, "Takeshi Yamada", resp.SideA.Name)
+	assert.Equal(t, "Yamada", resp.SideA.DisplayName,
+		"displayName must equal the zekken when withZekkenName=true")
+	assert.NotEqual(t, resp.SideA.Name, resp.SideA.DisplayName,
+		"displayName must differ from name when withZekkenName=true")
+	assert.Equal(t, "Tanaka", resp.SideB.DisplayName,
+		"sideB.displayName must equal the zekken when withZekkenName=true")
+}
+
+// TestCourtLiveReturns503WhenNoTournament — T055a
+// No tournament loaded; GET — assert 503 + error=="no_active_tournament".
+func TestCourtLiveReturns503WhenNoTournament(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Intentionally do NOT save a tournament — setupTestRouter starts
+	// with an empty Store. The contract requires 503 in this case.
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/live", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code,
+		"expected 503 when no tournament loaded; got %d body=%q", w.Code, w.Body.String())
+
+	var resp courtLiveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp),
+		"response body must be valid JSON: %q", w.Body.String())
+	assert.Equal(t, "no_active_tournament", resp.Error,
+		"error field must be exactly 'no_active_tournament' per contract")
+}

@@ -132,14 +132,28 @@ const API = {
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
-    subscribeToEvents(callback) {
+    // Subscribe to the server's SSE event stream. `callback` is fired
+    // for each parsed event. `onStatus` (optional) is fired with
+    // 'open' when the EventSource transitions to open and 'error' when
+    // it transitions away — used by the display surfaces (FR-011
+    // scenario 4 / T063) to render a reconnect indicator when the
+    // browser is between connections. Existing call sites that omit
+    // the second arg are unaffected.
+    subscribeToEvents(callback, onStatus) {
         let source = null;
         let retryTimer = null;
         let cancelled = false;
 
+        const status = (s) => {
+            if (typeof onStatus === 'function') {
+                try { onStatus(s); } catch (err) { console.error('SSE status callback failed:', err); }
+            }
+        };
+
         const connect = () => {
             if (cancelled) return;
             source = new EventSource('/api/events');
+            source.onopen = () => status('open');
             source.onmessage = (event) => {
                 try {
                     callback(JSON.parse(event.data));
@@ -150,6 +164,7 @@ const API = {
             source.onerror = () => {
                 if (source) source.close();
                 source = null;
+                status('error');
                 if (!cancelled) retryTimer = setTimeout(connect, 5000);
             };
         };

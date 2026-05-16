@@ -44,6 +44,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 	viewer := r.Group("/api/viewer")
 	{
 		RegisterViewerHandlers(viewer, store, eng)
+		RegisterDisplayHandlers(viewer, store)
 	}
 
 	// Admin API endpoints (protected)

@@ -11,6 +11,27 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// annotateQueuePositions fills in MatchResult.QueuePosition for each
+// element of matches in-place, using state.DeriveQueuePositions.
+//
+// FR-025, T036: queue positions are derived at serve time rather than
+// persisted — a stored value would go stale the instant any match
+// transitions and we'd have to recompute on every score write anyway.
+// Match-list endpoints (handlers_viewer.go: GET /competitions and
+// GET /competitions/:id) call this just before c.JSON so viewers see
+// "next up: 3" without any background recomputation job. Score-write
+// endpoints return a single MatchResult and intentionally do NOT
+// annotate (a single match has no list ordering to derive against).
+func annotateQueuePositions(matches []state.MatchResult) {
+	if len(matches) == 0 {
+		return
+	}
+	positions := state.DeriveQueuePositions(matches)
+	for i := range matches {
+		matches[i].QueuePosition = positions[i]
+	}
+}
+
 // tryAutoCompletePools runs the auto-complete check after a successful score
 // write. The score itself has already been recorded, so we don't fail the
 // request when the auto-complete check errors; instead we log full details

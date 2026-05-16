@@ -95,6 +95,29 @@ func extractSeeds(players []helper.Player) []domain.SeedAssignment {
 	return out
 }
 
+// validateCompetitionFormat returns an HTTP status code + error
+// message for invalid Format / PoolFormat values. Empty values are
+// accepted (defaults applied on load). "swiss" returns 501 Not
+// Implemented per A-5 (deferred). Unknown values return 400.
+func validateCompetitionFormat(format, poolFormat string) (int, error) {
+	switch format {
+	case "", state.CompFormatPools, state.CompFormatPlayoffs,
+		state.CompFormatMixed, state.CompFormatLeague:
+		// ok
+	case "swiss":
+		return http.StatusNotImplemented, fmt.Errorf("swiss format not implemented yet")
+	default:
+		return http.StatusBadRequest, fmt.Errorf("unknown format %q", format)
+	}
+	switch poolFormat {
+	case "", state.PoolFormatFull, state.PoolFormatPartial:
+		// ok
+	default:
+		return http.StatusBadRequest, fmt.Errorf("unknown poolFormat %q", poolFormat)
+	}
+	return 0, nil
+}
+
 func checkUniqueCompName(store *state.Store, name, excludeID string) error {
 	ids, _ := store.ListCompetitions()
 	for _, existingID := range ids {
@@ -148,9 +171,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// through to "unknown kind" semantics.
 		comp.Kind = strings.TrimSpace(comp.Kind)
 		comp.Format = strings.TrimSpace(comp.Format)
+		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
+
+		// Populate per-phase durations from the legacy MatchDuration field
+		// for callers that still send `matchDuration` only. Idempotent on
+		// modern callers that send both per-phase values.
+		state.ApplyCompetitionDefaults(&comp)
 
 		// Reject whitespace-only Name. The admin_setup.jsx Create form
 		// validates this client-side (deriveCompetitionName + the
@@ -180,6 +209,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// sending multi-character labels.
 		if err := validateCompetitionCourts(comp.Courts); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+			return
+		}
+
+		// Reject negative per-phase or legacy durations.
+		if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "match duration must be >= 0"})
+			return
+		}
+
+		// Format / PoolFormat enum-style validation. Empty values are
+		// accepted; unknown values 400; "swiss" 501 (deferred per A-5).
+		if code, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
+			c.JSON(code, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -298,6 +340,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// hand-crafted PUT requests.
 		comp.Kind = strings.TrimSpace(comp.Kind)
 		comp.Format = strings.TrimSpace(comp.Format)
+		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
@@ -337,6 +380,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// because the engine applies a 1-court default for competitions).
 			if err := validateCompetitionCourts(comp.Courts); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+				return
+			}
+
+			// Reject negative per-phase or legacy durations.
+			if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "match duration must be >= 0"})
+				return
+			}
+
+			// Format / PoolFormat enum-style validation. Empty values are
+			// accepted; unknown values 400; "swiss" 501 (deferred per A-5).
+			if code, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
+				c.JSON(code, gin.H{"error": err.Error()})
 				return
 			}
 		}
@@ -441,6 +497,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
 					return nil, nil
 				}
+				// Populate per-phase durations from legacy MatchDuration
+				// when only the legacy field was supplied. Idempotent.
+				// Runs INSIDE the transform so we can copy the resolved
+				// per-phase values straight into `current` below.
+				state.ApplyCompetitionDefaults(&comp)
+
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
 				// the body. Status is managed via dedicated endpoints
@@ -461,8 +523,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.TeamSize = comp.TeamSize
 				current.NumberPrefix = comp.NumberPrefix
 				current.Format = comp.Format
+				current.PoolFormat = comp.PoolFormat
 				current.Kind = comp.Kind
 				current.Mirror = comp.Mirror
+				current.PoolMatchDuration = comp.PoolMatchDuration
+				current.PlayoffMatchDuration = comp.PlayoffMatchDuration
+				current.MatchDuration = comp.MatchDuration
 				return current, nil
 			})
 			return updateErr

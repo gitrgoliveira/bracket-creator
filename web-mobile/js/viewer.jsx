@@ -198,10 +198,72 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               </div>
             </>
           )}
+
+          {/* T069 / FR-016: "Display modes" — link cards into the public
+              /display routes for TV screens, lobby boards, and OBS browser
+              sources. Each link opens in a new tab so the host page
+              (viewer) keeps its tab and stays interactive. Active courts
+              come from tournament.courts (the full configured list); the
+              "all-courts overview" card is always present. Placed below
+              Up Next so a viewer who has already glanced at their next
+              match can drop into the display mode they need. */}
+          <DisplayModes tournament={t} />
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
     </div>
+  );
+}
+
+// DisplayModes — viewer-home section linking to the public /display routes.
+// Renders one card per configured court plus an "all-courts overview" card.
+// Each card opens in a new tab so the operator's viewer session stays open.
+// Lives in viewer.jsx (not display.jsx) because it's a viewer-side surface
+// that consumes the display routes rather than rendering them.
+function DisplayModes({ tournament }) {
+  const courts = (tournament && tournament.courts) || [];
+  // No court list — render nothing rather than a confusing single "all"
+  // card. The tournament setup flow guarantees ≥1 court in practice; this
+  // guard exists for the very-early-bootstrap window before tournament
+  // data has loaded fully.
+  if (courts.length === 0) return null;
+  return (
+    <>
+      <div className="section-title" style={{ marginTop: 20 }}>Display modes</div>
+      <div className="vlist">
+        {courts.map((cc) => (
+          <a
+            key={cc}
+            className="vlist-item vlist-item--row"
+            href={`/display?court=${encodeURIComponent(cc)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "none" }}
+          >
+            <span className="vlist-item__icon">📺</span>
+            <div className="vlist-item__rowbody">
+              <div className="vlist-item__rowtitle">Shiaijo {cc} display</div>
+              <div className="vlist-item__rowsub">Fullscreen board for a single court · opens in a new tab</div>
+            </div>
+            <span className="vlist-item__rowchev">→</span>
+          </a>
+        ))}
+        <a
+          className="vlist-item vlist-item--row"
+          href="/display?court=all"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ textDecoration: "none" }}
+        >
+          <span className="vlist-item__icon">🪟</span>
+          <div className="vlist-item__rowbody">
+            <div className="vlist-item__rowtitle">All courts overview</div>
+            <div className="vlist-item__rowsub">Lobby grid showing every court at a glance · opens in a new tab</div>
+          </div>
+          <span className="vlist-item__rowchev">→</span>
+        </a>
+      </div>
+    </>
   );
 }
 
@@ -377,7 +439,7 @@ function MatchDetailCard({ match, onClose }) {
         </div>
         <div className="match-detail-card__score">
           {isDone ? (() => {
-            const scoreStr = window.formatIpponsScore(match.ipponsB, match.ipponsA, match.score, match.decision);
+            const scoreStr = window.formatIpponsScore(match.ipponsB, match.ipponsA, match.score, match.decision, match.encho);
             return <span>{scoreStr || "—"}</span>;
           })() : <span className="match-detail-card__vs">vs</span>}
         </div>
@@ -541,7 +603,15 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision) : null;
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : null;
+  // FR-025: queue position is 1-indexed per court for scheduled matches;
+  // running/completed are 0 (set server-side, omitempty in JSON → undefined
+  // on older payloads). Treat null/undefined/0 as "don't render" so the UI
+  // stays gracefully empty for non-queued matches and pre-T046 responses.
+  const qp = m.queuePosition;
+  const queueLabel = (m.status === "scheduled" && qp && qp > 0)
+    ? (qp === 1 ? "Next up" : `${qp - 1} before yours`)
+    : null;
   return (
     <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="vsched-item__head">
@@ -549,6 +619,11 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {showCompetition && m.compName ? <span>· {m.compName}</span> : null}
         {m.phase === "pool" ? <span>· {m.poolName}</span> : <span>· {m.round || ""}</span>}
+        {queueLabel && (
+          <span className="vsched-item__queue" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)" }}>
+            {queueLabel}
+          </span>
+        )}
         {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
         {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
       </div>
@@ -584,7 +659,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
   const bWin = winnerName && winnerName === bName;
 
   const scoreStr = m.status === "completed"
-    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)
+    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)
     : null;
 
   return (
@@ -705,9 +780,39 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3></div>;
   }
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
+  // FR-050 / FR-051: league competitions render Final standings instead of
+  // pool standings, and surface a Winner badge once every match is complete.
+  // Format check is value-based so older competitions without a Format
+  // field render as before (no header relabel, no winner badge).
+  const isLeague = competition && competition.format === "league";
+  const allMatchesComplete = isLeague && (() => {
+    const all = poolMatches || [];
+    return all.length > 0 && all.every(m => m.status === "completed");
+  })();
+  // Winner is the top-ranked player from the (single) league standings.
+  // pools[0] is the only pool for league formats — see internal/engine.
+  const leagueWinner = (isLeague && allMatchesComplete && pools[0] && standings)
+    ? (standings[pools[0].poolName] || [])[0]
+    : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {isLeague && leagueWinner && (
+        <div className="winner-badge" style={{
+          padding: "10px 14px",
+          background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
+          color: "white",
+          borderRadius: 8,
+          fontWeight: 700,
+          fontSize: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 18 }}>🏆</span>
+          <span>Winner: {leagueWinner.player?.name || ""}</span>
+        </div>
+      )}
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
         const matches = poolMatches ? poolMatches.filter(m => {
@@ -717,7 +822,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
         return (
           <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
             <div className="pool__head">
-              <div className="pool__name">{pool.poolName}</div>
+              <div className="pool__name">{isLeague ? "Final standings" : pool.poolName}</div>
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
                 {matches.filter(m => m.status === "completed").length}/{matches.length} matches
               </div>
@@ -1038,12 +1143,24 @@ function ScheduleViewer({ tournament, tweaks }) {
 function TWMatch({ m, highlight, _tweaks, onClick }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision) : null;
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : null;
+  // FR-025: per-court queue position — see VSchedItem for the contract.
+  // Short pill form here because the tw-match row is denser than the
+  // upcoming-list row in the per-competition viewer.
+  const qp = m.queuePosition;
+  const queuePill = (m.status === "scheduled" && qp && qp > 0)
+    ? (qp === 1 ? "Next" : `#${qp}`)
+    : null;
   return (
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div>
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
+        {queuePill && (
+          <div className="tw-match__queue" style={{ fontSize: 10, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
+            {queuePill}
+          </div>
+        )}
       </div>
       <div className="tw-match__players">
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>

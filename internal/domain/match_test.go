@@ -5,6 +5,8 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestMatch(t *testing.T) {
@@ -42,4 +44,25 @@ func TestMatch(t *testing.T) {
 	match.Winner = &player1
 
 	assert.Equal(t, "player1", match.Winner.ID)
+}
+
+// TestEnchoMetadataPersists verifies FR-032: encho (overtime / sudden-death)
+// metadata round-trips through YAML on a domain.MatchResult.
+//
+// This is a Red test — domain.MatchResult and domain.EnchoMetadata do
+// not yet exist. The build must fail until the Green implementation
+// (T034 family) lands.
+func TestEnchoMetadataPersists(t *testing.T) {
+	r := domain.MatchResult{
+		Encho: &domain.EnchoMetadata{PeriodCount: 1},
+	}
+
+	data, err := yaml.Marshal(r)
+	require.NoError(t, err)
+
+	var got domain.MatchResult
+	require.NoError(t, yaml.Unmarshal(data, &got))
+
+	require.NotNil(t, got.Encho, "Encho metadata must survive YAML round-trip")
+	assert.Equal(t, 1, got.Encho.PeriodCount)
 }

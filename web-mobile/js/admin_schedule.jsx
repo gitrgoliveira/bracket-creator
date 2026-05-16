@@ -431,6 +431,14 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
+      {/* T097: formatIpponsScore appends "Kiken / Fus. / DH / (E)" suffixes
+          for non-fought decisions and overtime. The match-level decision
+          covers kiken / fusenpai / daihyosen here; per-bout fusensho is a
+          SubMatchResult and is rendered inside the score modal — the row
+          here doesn't expose individual bout cells.
+          TODO(T096): once per-bout fusensho is wired through the team-score
+          serializer and the schedule row exposes bout details, append an
+          "FS" badge to each affected bout cell. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
         {m.status === "completed" && (
           <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)}</div>

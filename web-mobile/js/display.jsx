@@ -356,6 +356,16 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                                         <span style={{ opacity: 0.4 }}> - </span>
                                         <span style={{ color: '#ff5b54' }}>{(promoted.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0'}</span>
                                     </div>
+                                    {/* T097: decision suffix on the TV's live block. Hand-rolled
+                                        score above keeps the SHIRO/AKA colour split, so we add the
+                                        Kiken/Fus./DH/(E) label as its own line beneath the digits
+                                        rather than re-using formatIpponsScore (which collapses
+                                        both sides into one string). */}
+                                    {window.decisionSuffix && window.decisionSuffix(promoted.match) && (
+                                        <div style={{ fontSize: '2.2vh', opacity: 0.8, fontWeight: 700, letterSpacing: '0.05em' }}>
+                                            {window.decisionSuffix(promoted.match)}
+                                        </div>
+                                    )}
                                     {((promoted.match.hansokuA || 0) + (promoted.match.hansokuB || 0)) > 0 && (
                                         <div style={{ fontSize: '2.2vh', opacity: 0.65, fontWeight: 500 }}>
                                             Fouls {promoted.match.hansokuB || 0} – {promoted.match.hansokuA || 0}
@@ -641,6 +651,14 @@ function LobbyCard({ court, tournament, competitions }) {
                                     <span>{(promoted.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0'}</span>
                                     <span style={{ opacity: 0.4 }}> - </span>
                                     <span style={{ color: '#ff5b54' }}>{(promoted.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0'}</span>
+                                    {/* T097: lobby grid is dense, so the suffix rides inline
+                                        on the same row as the digits rather than a separate
+                                        line. Empty string when no decision/encho applies. */}
+                                    {window.decisionSuffix && window.decisionSuffix(promoted.match) && (
+                                        <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.8, fontWeight: 600 }}>
+                                            {window.decisionSuffix(promoted.match)}
+                                        </span>
+                                    )}
                                 </>
                             ) : (
                                 <span style={{ opacity: 0.4 }}>vs</span>
@@ -726,6 +744,9 @@ function StreamingOverlay({ court, position, competitions }) {
     const aka = hasLive ? sideLabel(live.match.sideA, zekken) : '';
     const ipponsB = hasLive ? ((live.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0') : '';
     const ipponsA = hasLive ? ((live.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0') : '';
+    // T097: Kiken/Fus./DH/(E) suffix on the OBS lower-third. Computed off
+    // the live match so it disappears the moment the overlay fades out.
+    const decSfx = hasLive && window.decisionSuffix ? window.decisionSuffix(live.match) : '';
     const compName = comp?.name || '';
 
     return (
@@ -775,6 +796,9 @@ function StreamingOverlay({ court, position, competitions }) {
                 fontSize: '3.5vh',
             }}>
                 {ipponsB} - {ipponsA}
+                {decSfx && (
+                    <span style={{ marginLeft: '1vw', fontSize: '2.4vh', opacity: 0.85 }}>{decSfx}</span>
+                )}
             </div>
             <div style={{ flex: 1, minWidth: 0, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <span style={{ fontWeight: 600, verticalAlign: 'middle' }}>{aka}</span>

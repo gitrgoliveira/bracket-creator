@@ -10,6 +10,14 @@ const REFRESHABLE_EVENTS = new Set([
   "competition_completed",
   "match_updated",
   "tournament_updated",
+  // T099: competitor_status_updated fires when a participant's eligibility
+  // changes (kiken/fusenpai/fusensho/recovery). Treat it like match_updated
+  // for the purposes of refetching this competition's data — the change
+  // affects who's eligible for downstream matches and the kachinuki
+  // line-up, both of which the schedule/score-editor reads from the
+  // competition-details payload. patch.jsx re-broadcasts the event as a
+  // window-level CustomEvent for views that maintain their own cache.
+  "competitor_status_updated",
 ]);
 
 // Page components rendered by AdminApp's view switch (produced by sibling
@@ -424,8 +432,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             || !event.data?.competitionId
             || event.data.competitionId === compId;
           if (relevant) {
-            // Apply partial update immediately for responsive UI
-            if (event.type === "match_updated") {
+            // Apply partial update immediately for responsive UI.
+            // T099: competitor_status_updated also routes through applyPatch
+            // so the window-level CustomEvent fires for downstream listeners;
+            // applyPatch returns `prev` unchanged for this event type, so
+            // the setAdminCompData call is identity-preserving (no
+            // gratuitous re-render).
+            if (event.type === "match_updated" || event.type === "competitor_status_updated") {
               setAdminCompData(prev => patchCompetitionData(prev, event));
             }
             // Still trigger full refresh (jittered) to reconcile standings/propagation
@@ -447,7 +460,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // tournament_updated also needs the tournament config itself.
           if (event.type === "match_updated"
               || event.type === "competition_started"
-              || event.type === "competition_completed") {
+              || event.type === "competition_completed"
+              || event.type === "competitor_status_updated") {
             scheduleTournamentRefresh(false);
           } else if (event.type === "tournament_updated") {
             scheduleTournamentRefresh(true);

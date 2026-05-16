@@ -84,7 +84,43 @@ function recomputeQueuePositions(matches) {
     return touched ? next : matches;
 }
 
+// T099: re-broadcast competitor_status_updated SSE events as a window-level
+// CustomEvent. Backend wire shape (per specs/003-tournament-gap-closure/
+// contracts/match-decisions.md §SSE):
+//   { type: "competitor_status_updated",
+//     data: { competitionId, status: { playerId, eligible, reason,
+//                                      matchId, recordedAt } } }
+//
+// applyPatch is the only SSE-entry point both app.jsx and admin.jsx route
+// through, so handling status events here keeps the dispatch in one place
+// without restructuring the surrounding subscribers. Subscribers (the
+// schedule list, the score editor, the import panel) listen on
+// `competitor-status-updated` and trigger a refetch — the simplest
+// invalidator that doesn't require restructuring the prop-driven
+// tournament state.
+//
+// We deliberately don't try to mutate `prev` for this event type: the
+// ineligibility change affects derived match-list filtering (who's
+// eligible for which match) rather than any single match's score, so a
+// targeted in-place patch would have to re-walk both poolMatches and
+// bracket.rounds plus seed/participant lists. A full refetch is cheaper
+// to reason about and matches what the existing match_updated path does
+// after applying the partial patch.
 function applyPatch(prev, event) {
+    if (event && event.type === "competitor_status_updated" && event.data) {
+        // Fire-and-forget; bail out early so the result/results plumbing
+        // below doesn't reject the event for missing `result`.
+        try {
+            if (typeof window !== "undefined" && window.dispatchEvent) {
+                window.dispatchEvent(new CustomEvent("competitor-status-updated", { detail: event.data }));
+            }
+        } catch (_) { /* ignore dispatch failures in non-DOM environments */ }
+        // No tournament-state mutation here — caller re-fetches on the
+        // same event via a window listener (see admin_schedule.jsx /
+        // app.jsx subscribeToEvents). Return prev unchanged so memoised
+        // children don't re-render gratuitously.
+        return prev;
+    }
     if (!prev || !event || !event.data) return prev;
     const { result, results } = event.data;
     const resultsToApply = results || (result ? [result] : []);

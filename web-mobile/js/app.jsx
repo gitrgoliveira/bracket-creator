@@ -247,6 +247,17 @@ function App() {
         const jitter = Math.random() * 500;
         if (event.type === "tournament_updated") {
             if (!authPromptRef.current) jitteredTimeout(load, jitter);
+        } else if (event.type === "competitor_status_updated") {
+            // T099: viewer doesn't need to mutate selectedCompData itself —
+            // the eligibility change feeds back through the full
+            // fetchCompetitionDetails refetch below. Route through
+            // patchCompetitionData so the window-level CustomEvent fires
+            // for any view that caches its own derived state.
+            if (viewerCompId === event.data?.competitionId) {
+                setSelectedCompData(prev => patchCompetitionData(prev, event));
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            }
+            jitteredTimeout(load, jitter);
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
             // Display mode (T060) reads the full tournament tree
             // (every competition's poolMatches + bracket) and needs a

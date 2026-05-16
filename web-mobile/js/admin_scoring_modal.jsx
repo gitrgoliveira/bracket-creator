@@ -3,6 +3,180 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+// T093–T098: shared helpers for the decision (kiken/fusenpai/fusensho) flow.
+//
+// Resolve the password to use for the /decision POST. The modal historically
+// took no password prop (the parent does the recordScore call). Rather than
+// re-thread the AdminApp props tree in this slice we accept an explicit prop
+// AND fall back to a window-scoped session value if the caller hasn't wired
+// it yet. The orchestrator marks the prop wiring as a separate follow-up.
+function resolveDecisionPassword(propPassword) {
+  if (propPassword) return propPassword;
+  if (typeof window !== "undefined" && window.adminPassword) return window.adminPassword;
+  return "";
+}
+
+// Render the inline kiken/fusenpai prompt that replaces the score controls
+// while open. Side picker uses radio inputs labelled "SHIRO (White)" / "AKA
+// (Red)" to stay consistent with the score board legend; the value submitted
+// to the backend is "shiro" or "aka" per DecisionRequest.Validate.
+function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, onSubmit, submitting }) {
+  const [side, setSide] = useStateA(defaultSide || "shiro");
+  const [reason, setReason] = useStateA("");
+  const title =
+    kind === "kiken" ? "Kiken (withdrawal)" :
+    kind === "fusenpai" ? "Fusenpai (default loss)" :
+    "Decision";
+
+  const submit = (e) => {
+    e?.preventDefault?.();
+    if (submitting) return;
+    onSubmit({ decisionBy: side, decisionReason: askReason ? reason.trim() : "" });
+  };
+
+  return (
+    <form className="decision-prompt" onSubmit={submit} style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2, #fafafa)" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{title}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+        <div style={{ fontWeight: 600 }}>{kind === "kiken" ? "Which side withdrew?" : "Which side gets the default win?"}</div>
+        <div style={{ display: "flex", gap: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <input type="radio" name="decision-side" value="shiro" checked={side === "shiro"} onChange={() => setSide("shiro")} />
+            <span>SHIRO (White){sideB?.name ? ` — ${sideB.name}` : ""}</span>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <input type="radio" name="decision-side" value="aka" checked={side === "aka"} onChange={() => setSide("aka")} />
+            <span>AKA (Red){sideA?.name ? ` — ${sideA.name}` : ""}</span>
+          </label>
+        </div>
+        {askReason && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+            <span style={{ fontWeight: 600 }}>Reason (optional, ≤200 chars)</span>
+            <input
+              type="text"
+              className="input"
+              maxLength={200}
+              value={reason}
+              onInput={(e) => setReason(e.target.value)}
+              placeholder="e.g. injury, no-show, doctor's stop"
+            />
+          </label>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+        <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting}>
+          {submitting ? "Saving…" : "Record"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// T098: "Remaining matches for [player]" panel. After a kiken decision lands,
+// look up every scheduled match where the just-withdrawn player still appears
+// and offer a one-click "Award default win to opponent" for each. The button
+// calls /decision with decision=fusenpai and decisionBy=<the withdrawn side>
+// — note: that's the side the WITHDRAWN player occupies in THAT match, not
+// the side they had in the originating match (sides can flip across matches).
+function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, onClose }) {
+  const [matches, setMatches] = useStateA(null);
+  const [err, setErr] = useStateA("");
+  const [busyId, setBusyId] = useStateA("");
+
+  useEffectA(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await window.API.fetchCompetitionDetails(compID);
+        if (cancelled) return;
+        const all = window.compMatches ? window.compMatches(detail) : [];
+        const wname = (withdrawnPlayer?.name || "").trim();
+        const wid = withdrawnPlayer?.id || "";
+        const matchesForPlayer = all.filter(m => {
+          if (m.status !== "scheduled") return false;
+          const aMatch = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
+          const bMatch = (wid && m.sideB?.id === wid) || (wname && m.sideB?.name === wname);
+          return aMatch || bMatch;
+        });
+        setMatches(matchesForPlayer);
+      } catch (e) {
+        if (!cancelled) setErr(e?.message || "Failed to load matches");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [compID, withdrawnPlayer?.id, withdrawnPlayer?.name]);
+
+  const award = async (m) => {
+    // Figure out which side the withdrawn player occupies in THIS match —
+    // that's the side that gets the fusenpai (default loss). Pool matches:
+    // sideA = Aka, sideB = Shiro. Same wire mapping in bracket matches.
+    const wname = (withdrawnPlayer?.name || "").trim();
+    const wid = withdrawnPlayer?.id || "";
+    const isOnA = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
+    const decisionBy = isOnA ? "aka" : "shiro";
+    setBusyId(m.id);
+    try {
+      const updated = await window.API.recordDecision(m.compId || compID, m.id, {
+        decision: "fusenpai",
+        decisionBy,
+        decisionReason: `auto: ${wname} withdrawn`,
+      }, password);
+      // Drop the awarded match from the list so the operator can keep walking.
+      setMatches(prev => (prev || []).filter(x => x.id !== m.id));
+      if (typeof onAwarded === "function") onAwarded(updated);
+    } catch (e) {
+      setErr(e?.message || "Failed to award default win");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const playerName = withdrawnPlayer?.name || "player";
+
+  return (
+    <div className="remaining-matches" style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 12, background: "var(--bg-2, #fafafa)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>Remaining matches for {playerName}</div>
+        {onClose && <button className="btn btn--ghost btn--sm" onClick={onClose} style={{ padding: "2px 8px" }}>✕</button>}
+      </div>
+      {err && <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 6 }}>{err}</div>}
+      {matches === null && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading…</div>}
+      {matches !== null && matches.length === 0 && (
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>No remaining scheduled matches.</div>
+      )}
+      {matches && matches.length > 0 && (
+        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+          {matches.map(m => {
+            const wname = (withdrawnPlayer?.name || "").trim();
+            const wid = withdrawnPlayer?.id || "";
+            const isOnA = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
+            const opponent = isOnA ? m.sideB : m.sideA;
+            return (
+              <li key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 12 }}>
+                <div>
+                  <span style={{ fontWeight: 600 }}>{opponent?.name || "?"}</span>
+                  <span style={{ color: "var(--ink-3)", marginLeft: 6 }}>
+                    {m.phase === "pool" ? m.poolName : m.round}{m.court ? ` · Shiaijo ${m.court}` : ""}{m.scheduledAt ? ` · ${m.scheduledAt}` : ""}
+                  </span>
+                </div>
+                <button
+                  className="btn btn--sm"
+                  onClick={() => award(m)}
+                  disabled={busyId === m.id}
+                  title="Record fusenpai — opponent receives the default win"
+                >
+                  {busyId === m.id ? "Saving…" : "Award default win to opponent"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Reusable foul counter: independent +/- buttons per side with clear labeling
 function FoulCounter({ label, fouls, setFouls, color, hansokuPts }) {
   return (
@@ -20,12 +194,12 @@ function FoulCounter({ label, fouls, setFouls, color, hansokuPts }) {
   );
 }
 
-function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext }) {
+function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
   const m = match;
   const isComplete = m.status === "completed";
   const isTeam = m.compKind === "team";
   const teamSize = m.teamSize || 5;
-  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} />;
+  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} />;
 
   const initialAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const initialBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
@@ -45,6 +219,14 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
   const [submitting, setSubmitting] = useStateA(false);
+  // T093–T098: decision (kiken/fusenpai) prompt state. promptKind is
+  // "" | "kiken" | "fusenpai"; when non-empty the inline prompt replaces the
+  // bottom controls. After the POST /decision succeeds, withdrawnPlayer holds
+  // the side that lost so the "Remaining matches" panel can render below.
+  const [decisionPromptKind, setDecisionPromptKind] = useStateA("");
+  const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
+  const [decisionErr, setDecisionErr] = useStateA("");
+  const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
   // AdminScoreEditor unmounts), gate the setState. handleDismiss
@@ -52,6 +234,47 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // only external/parent-driven unmount.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // T093/T094: shared decision-submit path for kiken & fusenpai.
+  // - decisionBy is "shiro" or "aka" per the server contract.
+  // - encho rides along when the operator has marked overtime so the server
+  //   can attach the periodCount metadata to the resulting MatchResult.
+  // - On success we close the modal (matching the Save button contract) UNLESS
+  //   the decision is kiken — in that case we keep the modal open and surface
+  //   the RemainingMatchesPanel so the operator can chain default-win awards.
+  const submitDecision = async (kind, { decisionBy, decisionReason }) => {
+    setDecisionSubmitting(true);
+    setDecisionErr("");
+    try {
+      const body = { decision: kind, decisionBy };
+      if (decisionReason) body.decisionReason = decisionReason;
+      if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
+      const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
+      if (!mountedRef.current) return;
+      if (kind === "kiken") {
+        // The loser is the side != Winner. SideA/SideB on MatchResult are
+        // names; resolve back to {id, name} via the original match for the
+        // remaining-matches lookup.
+        const winnerName = (updated?.winner || "").trim();
+        const loserName = winnerName === (updated?.sideA || "") ? (updated?.sideB || "") : (updated?.sideA || "");
+        // m.sideA / m.sideB are normalized player objects with id+name.
+        const loser =
+          (m.sideA?.name === loserName) ? m.sideA :
+          (m.sideB?.name === loserName) ? m.sideB :
+          { id: "", name: loserName };
+        setWithdrawnPlayer(loser);
+        setDecisionPromptKind("");
+      } else {
+        // fusenpai (and any future kinds that don't need a follow-up panel)
+        // collapses straight back to the parent's onClose/onScored flow.
+        onClose();
+      }
+    } catch (e) {
+      if (mountedRef.current) setDecisionErr(e?.message || "Failed to record decision");
+    } finally {
+      if (mountedRef.current) setDecisionSubmitting(false);
+    }
+  };
 
   // Hansoku → ippon awarded to opponent on every 2nd foul
   const aHansokuPts = Math.floor(bFouls / 2);
@@ -302,6 +525,52 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               </div>
           </div>
 
+          {/* T093–T098: decision (kiken/fusenpai) controls + remaining-matches
+              follow-up. Sits between the scoring board and the footer so the
+              flow is: enter score OR record a decision → either way the modal
+              closes (or surfaces the remaining-matches list for kiken). */}
+          {!withdrawnPlayer && !decisionPromptKind && (
+            <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
+              <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
+              <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
+                Kiken
+              </button>
+              <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
+                Fusenpai
+              </button>
+              {/* TODO(T096): Fusensho (per bout) — only renders inside the team
+                  editor since per-bout is a sub-match concept. Disabled here
+                  in the individual editor. */}
+              <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
+                Fusensho (per bout)
+              </button>
+            </div>
+          )}
+          {decisionErr && (
+            <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
+          )}
+          {decisionPromptKind && (
+            <DecisionPrompt
+              kind={decisionPromptKind}
+              sideA={m.sideA}
+              sideB={m.sideB}
+              defaultSide="shiro"
+              askReason={decisionPromptKind === "kiken"}
+              submitting={decisionSubmitting}
+              onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
+              onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
+            />
+          )}
+          {withdrawnPlayer && (
+            <RemainingMatchesPanel
+              compID={m.compId}
+              password={resolveDecisionPassword(password)}
+              withdrawnPlayer={withdrawnPlayer}
+              onAwarded={() => { /* stay open; operator decides when to close */ }}
+              onClose={() => { setWithdrawnPlayer(null); onClose(); }}
+            />
+          )}
+
         </div>
 
         {/* Sticky navigation + action footer */}
@@ -345,7 +614,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 // flows automatically to all three sites.
 const TEAM_POSITIONS = Array.from({ length: window.MAX_TEAM_SIZE }, (_, i) => String(i + 1));
 
-function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext }) {
+function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
   const m = match;
   const isComplete = m.status === "completed";
   const positions = TEAM_POSITIONS.slice(0, teamSize);
@@ -354,10 +623,48 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const initialEnchoPeriods = m.encho?.periodCount || 0;
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
   const [submitting, setSubmitting] = useStateA(false);
+  // T093–T098: decision state — same shape as the individual editor. See the
+  // ScoreEditorModal copy for the contract.
+  const [decisionPromptKind, setDecisionPromptKind] = useStateA("");
+  const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
+  const [decisionErr, setDecisionErr] = useStateA("");
+  const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
   // Same teardown-race guard as ScoreEditorModal — covers external/
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // Mirror of submitDecision in ScoreEditorModal — kept inline rather than
+  // hoisted to a shared hook because the two modals own different "after
+  // success" semantics (the individual modal doesn't have per-bout state to
+  // preserve, but the wiring is identical otherwise).
+  const submitDecision = async (kind, { decisionBy, decisionReason }) => {
+    setDecisionSubmitting(true);
+    setDecisionErr("");
+    try {
+      const body = { decision: kind, decisionBy };
+      if (decisionReason) body.decisionReason = decisionReason;
+      if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
+      const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
+      if (!mountedRef.current) return;
+      if (kind === "kiken") {
+        const winnerName = (updated?.winner || "").trim();
+        const loserName = winnerName === (updated?.sideA || "") ? (updated?.sideB || "") : (updated?.sideA || "");
+        const loser =
+          (m.sideA?.name === loserName) ? m.sideA :
+          (m.sideB?.name === loserName) ? m.sideB :
+          { id: "", name: loserName };
+        setWithdrawnPlayer(loser);
+        setDecisionPromptKind("");
+      } else {
+        onClose();
+      }
+    } catch (e) {
+      if (mountedRef.current) setDecisionErr(e?.message || "Failed to record decision");
+    } finally {
+      if (mountedRef.current) setDecisionSubmitting(false);
+    }
+  };
 
   const existingSub = m.subResults || [];
   const initSubs = positions.map((_, idx) => {
@@ -643,6 +950,57 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               </React.Fragment>
             ))}
           </div>
+
+          {/* T093–T098: decision (kiken/fusenpai/fusensho) controls. In the
+              team editor, Fusensho is per-bout and would belong on each
+              sub-match row — the wiring for the per-bout score path lives in
+              the existing score-update flow but isn't exposed as a single
+              click yet. TODO(T096) layers the per-bout button onto each row;
+              for now we surface a disabled placeholder so operators see the
+              eventual surface and the team-match decisions (kiken/fusenpai)
+              fire against the overall team match. */}
+          {!withdrawnPlayer && !decisionPromptKind && (
+            <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
+              <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
+              <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
+                Kiken
+              </button>
+              <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
+                Fusenpai
+              </button>
+              {/* TODO(T096): wire per-bout fusensho onto each sub-match row.
+                  Per spec the per-bout decision routes through the existing
+                  score update path (not /decision), marking the bout 2–0 to
+                  the present side. Disabled here until that path lands. */}
+              <button type="button" className="btn btn--sm" disabled title="Per-bout fusensho will be added to each sub-match row (TODO T096)">
+                Fusensho (per bout)
+              </button>
+            </div>
+          )}
+          {decisionErr && (
+            <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
+          )}
+          {decisionPromptKind && (
+            <DecisionPrompt
+              kind={decisionPromptKind}
+              sideA={{ name: m.sideA?.name || m.sideA }}
+              sideB={{ name: m.sideB?.name || m.sideB }}
+              defaultSide="shiro"
+              askReason={decisionPromptKind === "kiken"}
+              submitting={decisionSubmitting}
+              onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
+              onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
+            />
+          )}
+          {withdrawnPlayer && (
+            <RemainingMatchesPanel
+              compID={m.compId}
+              password={resolveDecisionPassword(password)}
+              withdrawnPlayer={withdrawnPlayer}
+              onAwarded={() => { /* stay open; operator decides when to close */ }}
+              onClose={() => { setWithdrawnPlayer(null); onClose(); }}
+            />
+          )}
 
         </div>
 

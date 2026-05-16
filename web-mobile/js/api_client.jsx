@@ -193,6 +193,35 @@ const API = {
         }
         return res.json();
     },
+    // T093–T095: kiken / fusenpai / fusensho / daihyosen — server auto-fills
+    // scoreline and Winner from {decision, decisionBy, encho}. Body shape is
+    // defined by mobileapp.DecisionRequest in handlers_decision.go; decisionBy
+    // MUST be "shiro" or "aka", decisionReason is optional and ≤200 chars.
+    // Response is the updated state.MatchResult.
+    async recordDecision(compID, matchID, body, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/decision`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to record decision");
+        }
+        return res.json();
+    },
+    // T098: competitor eligibility statuses produced by kiken/fusenpai
+    // decisions. Endpoint is read-only and unauthenticated — same contract as
+    // the other /api/competitions/:id/* GETs surfaced to the viewer.
+    async fetchCompetitorStatuses(compID) {
+        const res = await fetch(`/api/competitions/${compID}/competitor-status`);
+        if (!res.ok) throw new Error("Failed to load competitor statuses");
+        const data = await res.json();
+        return data.statuses || [];
+    },
     async overridePoolRank(compID, poolID, playerName, rank, password) {
         const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
             method: 'PUT',

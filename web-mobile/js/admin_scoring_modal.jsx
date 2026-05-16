@@ -300,6 +300,17 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           return;
         }
         if (mountedRef.current) setDecisionErr("Override cancelled.");
+      } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
+        // T104/CHK029: the server caps encho periods per competition.
+        // Same confirm-and-retry-with-force shape as decision_locked.
+        if (mountedRef.current && confirm(
+          "This decision would exceed the configured maximum encho periods.\n\n" +
+          "Record it anyway?"
+        )) {
+          await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
+          return;
+        }
+        if (mountedRef.current) setDecisionErr("Override cancelled.");
       } else if (mountedRef.current) {
         setDecisionErr(msg);
       }
@@ -377,7 +388,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods;
   const handleDismiss = () => {
-    if (submitting) return; // don't close while save is in-flight
+    // Don't close while any save/decision request is in flight — letting
+    // the modal unmount would orphan the pending fetch and lose the
+    // setState landing.
+    if (submitting || decisionSubmitting) return;
     if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
     onClose();
   };
@@ -803,6 +817,16 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           return;
         }
         if (mountedRef.current) setDecisionErr("Override cancelled.");
+      } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
+        // T104/CHK029: encho-cap override, same shape as decision_locked.
+        if (mountedRef.current && confirm(
+          "This decision would exceed the configured maximum encho periods.\n\n" +
+          "Record it anyway?"
+        )) {
+          await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
+          return;
+        }
+        if (mountedRef.current) setDecisionErr("Override cancelled.");
       } else if (mountedRef.current) {
         setDecisionErr(msg);
       }
@@ -939,7 +963,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // unsaved sub-match edits. The earlier version only checked submitting,
   // so an accidental backdrop/Esc silently lost up to 9 sub-match scores.
   const handleDismiss = () => {
-    if (submitting) return;
+    // Same contract as ScoreEditorModal: never close while a save,
+    // decision, or daihyosen request is mid-flight.
+    if (submitting || decisionSubmitting || daihyosenBusy) return;
     if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
     onClose();
   };

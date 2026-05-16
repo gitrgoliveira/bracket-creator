@@ -163,12 +163,19 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	// already ineligible from a *different* match, two operators are
 	// trying to kiken the same player simultaneously. Return 409 so the
 	// second operator sees the conflict before any write happens.
+	//
+	// Only kiken and fusenpai actually mark the loser ineligible; for
+	// fusensho/daihyosen this check would surface a misleading
+	// "already_ineligible" 409 — the StartMatch eligibility gate is the
+	// right place to reject those cases.
 	loserName := sideB
 	if decisionBy == "aka" {
 		loserName = sideA
 	}
-	if cerr := e.checkConcurrentIneligibility(compID, matchID, loserName); cerr != nil {
-		return nil, nil, cerr
+	if decision == string(domain.DecisionKiken) || decision == string(domain.DecisionFusenpai) {
+		if cerr := e.checkConcurrentIneligibility(compID, matchID, loserName); cerr != nil {
+			return nil, nil, cerr
+		}
 	}
 	// T103: look up the prior result so we know whether this is an
 	// overwrite of a kiken/fusenpai (the "undo" path).
@@ -473,8 +480,27 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 		MatchID:    matchID,
 		RecordedAt: time.Now().UTC(),
 	}
-	if err := e.store.SetCompetitorStatus(compID, status); err != nil {
-		return nil, err
+	// K2/CHK047: atomic check-and-set under WithTransaction closes the
+	// TOCTOU window between the pre-RecordDecision check and this write.
+	// Two concurrent kiken writes on the same player from different
+	// matches will serialize on the per-comp lock; the second to acquire
+	// it sees the first's record and returns *AlreadyIneligibleError
+	// instead of silently overwriting.
+	if txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		statuses, err := tx.LoadCompetitorStatus(compID)
+		if err != nil {
+			return err
+		}
+		if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
+			return &AlreadyIneligibleError{
+				PlayerID: playerID,
+				MatchID:  st.MatchID,
+				Reason:   st.Reason,
+			}
+		}
+		return tx.SetCompetitorStatus(compID, status)
+	}); txErr != nil {
+		return nil, txErr
 	}
 	return &status, nil
 }

@@ -214,3 +214,102 @@ func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "re-record same match", nil, false)
 	assert.NoError(t, err, "re-recording the same match must not trigger AlreadyIneligibleError")
 }
+
+// TestRecordDecision_ConcurrentKikenRace verifies K2/CHK047: when two
+// goroutines race to kiken the same player on different matches, the
+// atomic check-and-set inside recordIneligibilityFromDecision serializes
+// them on the per-comp lock — exactly one succeeds and the loser sees
+// *AlreadyIneligibleError. This exercises the post-pre-check race
+// window that the synchronous pre-check alone can't close.
+func TestRecordDecision_ConcurrentKikenRace(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "race-kiken"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	carolID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Carol", SideB: "Alice", Status: state.MatchStatusScheduled},
+	}))
+
+	// Fire both kiken calls in parallel. The atomic check inside
+	// recordIneligibilityFromDecision must reject one of them.
+	type result struct {
+		err     error
+		matchID string
+	}
+	results := make(chan result, 2)
+	go func() {
+		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "race A", nil, false)
+		results <- result{err: err, matchID: "Pool A-0"}
+	}()
+	go func() {
+		_, _, err := eng.RecordDecision(compID, "Pool A-1", "kiken", "shiro", "race B", nil, false)
+		results <- result{err: err, matchID: "Pool A-1"}
+	}()
+
+	var winners, losers []result
+	for range 2 {
+		r := <-results
+		if r.err == nil {
+			winners = append(winners, r)
+		} else {
+			losers = append(losers, r)
+		}
+	}
+	require.Len(t, winners, 1, "exactly one concurrent kiken should succeed; got winners=%+v losers=%+v", winners, losers)
+	require.Len(t, losers, 1, "exactly one concurrent kiken should be rejected; got winners=%+v losers=%+v", winners, losers)
+
+	var alreadyErr *AlreadyIneligibleError
+	require.ErrorAs(t, losers[0].err, &alreadyErr, "loser must be *AlreadyIneligibleError, got %T: %v", losers[0].err, losers[0].err)
+	assert.Equal(t, aliceID, alreadyErr.PlayerID)
+	assert.Equal(t, winners[0].matchID, alreadyErr.MatchID, "rejected operator should see the winning match ID")
+
+	// Final store state must reflect the winning operator's record only.
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	st, ok := statuses[aliceID]
+	require.True(t, ok)
+	assert.False(t, st.Eligible)
+	assert.Equal(t, winners[0].matchID, st.MatchID)
+}
+
+// TestRecordDecision_FusenshoSkipsConcurrentCheck verifies the fix for
+// the over-broad guard: fusensho doesn't create ineligibility, so the
+// concurrent-kiken check should not fire and surface a misleading
+// "already_ineligible" 409. The StartMatch eligibility gate is the
+// right rejector for "player ineligible from elsewhere" cases.
+func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "fusensho-bypass"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	carolID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Carol", SideB: "Alice", Status: state.MatchStatusScheduled},
+	}))
+
+	// Mark Alice ineligible via a prior kiken in Pool A-0.
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil, false)
+	require.NoError(t, err)
+
+	// Now record fusensho on Alice in Pool A-1. This should NOT trip the
+	// concurrent-kiken guard — fusensho doesn't write ineligibility.
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "shiro", "default win", nil, false)
+	assert.NoError(t, err, "fusensho on an already-ineligible player must not trigger AlreadyIneligibleError; got %v", err)
+}

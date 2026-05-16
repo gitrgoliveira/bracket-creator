@@ -154,6 +154,17 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	}
 	status, err := e.recordIneligibilityFromDecision(compId, matchId, result)
 	if err != nil {
+		// K2/CHK047: when the atomic check-and-set inside
+		// recordIneligibilityFromDecision detects a concurrent kiken
+		// (different operator already wrote ineligibility for this
+		// player from another match), propagate the error so the handler
+		// can return HTTP 409. Other store errors keep the old
+		// fail-soft behavior — the score has already been written and
+		// a retry would double-record it.
+		var alreadyErr *AlreadyIneligibleError
+		if errors.As(err, &alreadyErr) {
+			return nil, err
+		}
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 		return nil, nil
 	}

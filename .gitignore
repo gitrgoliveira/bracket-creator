@@ -46,6 +46,7 @@ Thumbs.db
 node_modules/
 specs/*
 !specs/openapi.yaml
+!specs/ARCHITECTURE.md
 .specify
 .agent*
 .playwright-mcp

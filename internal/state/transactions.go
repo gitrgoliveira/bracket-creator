@@ -35,6 +35,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -72,6 +73,24 @@ type StoreTx interface {
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
 	LoadParticipants(compID string, withZekkenName bool) ([]helper.Player, error)
+
+	// UpdatePoolMatchByID is the tx-aware twin of
+	// Store.UpdatePoolMatchByID. Same semantics, same return values; the
+	// only difference is that it skips re-acquiring the per-comp lock
+	// (already held by WithTransaction). Score / decision handlers (T156)
+	// use this to keep their match-result write under the SAME lock
+	// acquire as the competitor-status + lineup-lock side effects.
+	UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error)
+	// UpdateBracket is the tx-aware twin of Store.UpdateBracket. The
+	// mutate closure may modify the bracket arbitrarily and signal "match
+	// not found" by returning an error (typically wrapping the engine's
+	// match-not-found sentinel — see engine.withBracketMatch).
+	UpdateBracket(compID string, mutate func(*Bracket) error) error
+	// LockTeamLineupsForRound is the tx-aware twin of
+	// Store.LockTeamLineupsForRound. Used by the score-path tx body
+	// (T128 / T156) so the lineup freeze happens under the same lock
+	// acquire as the score write.
+	LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error
 }
 
 // WithTransaction runs fn under the per-competition write lock for
@@ -199,4 +218,43 @@ func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]helper
 		return nil, err
 	}
 	return t.store.loadParticipantsLocked(compID, withZekkenName)
+}
+
+// UpdatePoolMatchByID dispatches to a lock-free body that mirrors
+// Store.UpdatePoolMatchByID's load + find + mutate + save sequence.
+// Caller (WithTransaction) is responsible for the per-comp lock.
+func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return false, err
+	}
+	if err := ValidateCompetitionID(compID); err != nil {
+		return false, err
+	}
+	return t.store.updatePoolMatchByIDLocked(compID, matchID, mutate)
+}
+
+// UpdateBracket dispatches to a lock-free body that mirrors
+// Store.UpdateBracket's load + mutate + save sequence. Caller
+// (WithTransaction) is responsible for the per-comp lock.
+func (t *storeTx) UpdateBracket(compID string, mutate func(*Bracket) error) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	return t.store.updateBracketLocked(compID, mutate)
+}
+
+// LockTeamLineupsForRound dispatches to the lock-free body of
+// Store.LockTeamLineupsForRound. Caller (WithTransaction) is
+// responsible for the per-comp lock.
+func (t *storeTx) LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	return t.store.lockTeamLineupsForRoundLocked(compID, round, lockedAt)
 }

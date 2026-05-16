@@ -699,7 +699,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		// cap check exercises the new fail-closed branch. The engine
 		// keeps the real store but never gets called — enforceEnchoCap
 		// aborts the request first.
-		registerScoreHandler(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, hub)
+		registerScoreHandler(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(score(1)))
@@ -714,7 +714,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
 		admin := r.Group("/api")
-		registerScoreHandler(admin, eng, realStore, hub)
+		registerScoreHandler(admin, eng, realStore, realStore, hub)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(score(3)))
@@ -735,7 +735,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
 		admin := r.Group("/api")
-		registerScoreHandler(admin, eng, realStore, hub)
+		registerScoreHandler(admin, eng, realStore, realStore, hub)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score?force=true", bytes.NewBuffer(score(3)))
@@ -765,7 +765,7 @@ func TestBulkScore_FailsClosedOnLoadError(t *testing.T) {
 	// RegisterMatchHandlers takes the concrete *Hub; the cap check
 	// uses the CompetitionStore parameter (which we fault here) and
 	// returns 500 before any handler reaches the hub or engine.
-	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, hub)
+	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub)
 
 	body, _ := json.Marshal([]state.MatchResult{
 		{ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P1", Status: state.MatchStatusCompleted},

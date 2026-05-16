@@ -31,7 +31,15 @@ func (stubScoringEngine) RecordMatchResultWithIneligibility(string, string, *sta
 	return nil, nil
 }
 
+func (stubScoringEngine) RecordMatchResultWithIneligibilityTx(state.StoreTx, string, string, *state.MatchResult) (*domain.CompetitorStatus, error) {
+	return nil, nil
+}
+
 func (stubScoringEngine) RecordDecision(string, string, string, string, string, *state.EnchoMetadata, bool) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	return nil, nil, nil
+}
+
+func (stubScoringEngine) RecordDecisionTx(state.StoreTx, string, string, string, string, string, *state.EnchoMetadata, bool) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	return nil, nil, nil
 }
 

@@ -14,6 +14,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -72,17 +73,19 @@ func (r *DecisionRequest) Validate() error {
 // RegisterDecisionHandlers wires the POST /decision endpoint via the
 // consumer-boundary interfaces.
 //
-// T090, NFR-002.
+// T090, NFR-002. T156: under WithTransaction so the match-write +
+// ineligibility-write + (on undo) prior-loser eligibility restore all
+// commit under ONE per-comp lock acquire instead of 3+ separate ones.
+// `tx` (CompetitionTransactor) is the new dependency for that migration;
+// `eng` exposes the tx-aware RecordDecisionTx the closure dispatches to.
 //
-// TODO(T156): wrap eng.RecordDecision + tryAutoCompletePools in a
-// single state.Store.WithTransaction once the engine grows tx-aware
-// variants. eng.RecordDecision internally calls
-// RecordMatchResultWithIneligibility which acquires the per-comp lock
-// via UpdatePoolMatchByID / UpdateBracket; nesting that inside a
-// WithTransaction would deadlock (sync.RWMutex is non-recursive). The
-// migration template lives in handlers_lineup.go (the PUT body); same
-// scope-cut rationale as the score handler in handlers_match.go.
-func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, hub Broadcaster) {
+// SSE broadcasts and the optional tryAutoCompletePools post-write run
+// AFTER the tx returns — the auto-complete check itself takes the lock
+// internally via UpdateCompetitionChanged, so running it inside the tx
+// would deadlock (non-reentrant mutex). Holding the tx open across an
+// SSE broadcast would let a slow consumer stall every other writer for
+// the same competition.
+func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
 	r.POST("/competitions/:id/matches/:mid/decision", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -107,13 +110,37 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 
 		// T104/CHK029: enforce MaxEnchoPeriods cap on the encho block.
 		// Same shape as the score handler — Force bypasses, 0 cap means
-		// unlimited.
+		// unlimited. Done BEFORE the tx so the read is cheap and we
+		// don't take the lock when the request is going to 400 anyway.
 		if !enforceEnchoCap(c, store, id, req.Encho, req.Force) {
 			return
 		}
 
-		result, status, err := eng.RecordDecision(id, mid, req.Decision, req.DecisionBy, req.DecisionReason, req.Encho, req.Force)
-		if err != nil {
+		// T156: run the entire RecordDecision flow inside one
+		// WithTransaction. The engine call chain — sides lookup, T103
+		// downstream-match check, T105 concurrent-kiken pre-check,
+		// pool/bracket match-write, ineligibility check-and-set, prior-
+		// loser eligibility restore on undo — all use the same StoreTx
+		// handle, so the per-comp lock is acquired exactly once for the
+		// entire mutation.
+		var (
+			result *state.MatchResult
+			status *domain.CompetitorStatus
+			engErr error
+		)
+		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+			result, status, engErr = eng.RecordDecisionTx(stx, id, mid, req.Decision, req.DecisionBy, req.DecisionReason, req.Encho, req.Force)
+			// engine errors are normal failure modes (locked, ineligible,
+			// not-found, validation) — return nil here so the tx
+			// commits whatever partial writes K3-style rollback already
+			// landed; engErr is mapped to the right HTTP status below.
+			return nil
+		})
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			return
+		}
+		if engErr != nil {
 			// Map engine.ValidationError → 400, NotFoundError → 404,
 			// IneligibleCompetitorError → 409 (FR-035),
 			// ErrDecisionLocked → 409 (T103/CHK024).
@@ -122,7 +149,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			var engValErr *engine.ValidationError
 			var engNotFoundErr *engine.NotFoundError
 			switch {
-			case errors.As(err, &alreadyIneligErr):
+			case errors.As(engErr, &alreadyIneligErr):
 				// T105/CHK047: concurrent kiken — another operator already
 				// recorded ineligibility for this player on a different match.
 				c.JSON(http.StatusConflict, gin.H{
@@ -131,23 +158,23 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 					"matchId":  alreadyIneligErr.MatchID,
 					"reason":   alreadyIneligErr.Reason,
 				})
-			case errors.As(err, &ineligErr):
+			case errors.As(engErr, &ineligErr):
 				c.JSON(http.StatusConflict, gin.H{
 					"error":    "ineligible_competitor",
 					"playerId": ineligErr.PlayerID,
 					"reason":   ineligErr.Reason,
 				})
-			case errors.Is(err, engine.ErrDecisionLocked):
+			case errors.Is(engErr, engine.ErrDecisionLocked):
 				c.JSON(http.StatusConflict, gin.H{
 					"error":  "decision_locked",
-					"reason": err.Error(),
+					"reason": engErr.Error(),
 				})
-			case errors.As(err, &engValErr):
+			case errors.As(engErr, &engValErr):
 				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
-			case errors.As(err, &engNotFoundErr):
+			case errors.As(engErr, &engNotFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": engErr.Error()})
 			}
 			return
 		}

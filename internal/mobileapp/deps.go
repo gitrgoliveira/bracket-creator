@@ -57,6 +57,12 @@ type ScoringEngine interface {
 	// when a new ineligibility was persisted — the handler uses that to
 	// drive the competitor-status-updated SSE broadcast (T085/T092).
 	RecordMatchResultWithIneligibility(compID string, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
+	// RecordMatchResultWithIneligibilityTx is the tx-aware twin used by
+	// the score handler under WithTransaction (T156). Same return shape
+	// as RecordMatchResultWithIneligibility; calls flow through the
+	// supplied StoreTx so the match-write + ineligibility-write +
+	// lineup-freeze all commit under one lock acquire.
+	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
 	// RecordDecision auto-fills the scoreline + winner from the
 	// decision/decisionBy/encho triple and persists the result. Used by
 	// the dedicated POST /decision endpoint (T090). When the prior
@@ -64,6 +70,10 @@ type ScoringEngine interface {
 	// engine enforces the downstream-match lock (T103/CHK024); force=true
 	// bypasses the lock so an operator can confirm an override.
 	RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error)
+	// RecordDecisionTx is the tx-aware twin of RecordDecision used by
+	// the decision handler under WithTransaction (T156). Same contract
+	// as RecordDecision; calls flow through the supplied StoreTx.
+	RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done. Returns whether the
 	// transition actually happened (so callers know whether to broadcast

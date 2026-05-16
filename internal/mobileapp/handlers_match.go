@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -109,7 +110,7 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 // a time; the concrete `*engine.Engine` remains a drop-in
 // implementation of `ScoringEngine` so the `tryAutoCompletePools` and
 // score endpoint paths can already accept the interface today.
-func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, hub *Hub) {
+func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, tx CompetitionTransactor, hub *Hub) {
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -235,8 +236,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// request body is validated via ScoreRequest.Validate() before any
 	// engine call. The closure captures `*engine.Engine` / `*Hub` and
 	// adapts them to the interfaces at the call boundary — same wire
-	// behaviour as before.
-	registerScoreHandler(r, eng, store, hub)
+	// behaviour as before. T156 added the CompetitionTransactor `tx`
+	// parameter so the match-write + ineligibility-write + lineup-freeze
+	// commit under one per-comp lock acquire.
+	registerScoreHandler(r, eng, store, tx, hub)
 
 	r.PUT("/competitions/:id/matches/:mid/court", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -341,18 +344,18 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 // The engine's preserve-on-empty-side fallback continues to handle the
 // "client sends scoring fields only" case.
 //
-// TODO(T156): wrap eng.RecordMatchResultWithIneligibility +
-// eng.MaybeAdvanceKachinuki + tryAutoCompletePools in a single
-// state.Store.WithTransaction once the engine grows tx-aware variants.
-// Today every engine call acquires its own per-comp lock via
-// UpdatePoolMatchByID / UpdateBracket, so nesting them inside a
-// WithTransaction would deadlock (sync.RWMutex is non-recursive). The
-// migration template lives in handlers_lineup.go (the PUT body): once
-// engine.Engine exposes RecordMatchResultWithIneligibilityTx(stx, ...)
-// — or grows a "use this StoreTx if passed" overload — the same
-// load+set+post-write pattern applies here. T155 infrastructure is the
-// higher-value half; this TODO is the deliberate scope-cut.
-func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, hub Broadcaster) {
+// T156: the match-write + ineligibility-check-and-set + (T128) lineup-
+// freeze now run inside one Store.WithTransaction so they all commit
+// under a single per-comp lock acquire. The kachinuki advance + auto-
+// complete-pools post-writes deliberately run AFTER the tx — both
+// reach for other per-comp locked operations (UpdatePoolMatchByID,
+// UpdateCompetitionChanged) which would deadlock inside the tx, and
+// they're already structured as best-effort side effects with their
+// own non-fatal failure-handling. Bulk-score handler is intentionally
+// NOT migrated: the partial-success error array semantics need a
+// per-result tx (or a different commit shape) and that's out of scope
+// for this slice.
+func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -388,9 +391,42 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		}
 
 		result := req.AsMatchResult()
-		status, err := eng.RecordMatchResultWithIneligibility(id, mid, result)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+
+		// T156: run the score write + ineligibility update + lineup-freeze
+		// inside a single per-comp lock acquire via WithTransaction. The
+		// engine's RecordMatchResultWithIneligibilityTx dispatches every
+		// store call through `stx`, so no internal call re-acquires the
+		// lock (non-reentrant; nesting would deadlock).
+		var (
+			engStatus *domain.CompetitorStatus
+			engErr    error
+		)
+		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+			engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result)
+			// engErr is a normal application-level signal (AlreadyIneligible
+			// → 409, validation/not-found → other codes); we surface it
+			// after the tx returns. The score-write inside the tx already
+			// includes the K3 rollback for the AlreadyIneligible path —
+			// returning nil here commits whatever final state the engine
+			// settled on.
+			return nil
+		})
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			return
+		}
+		if engErr != nil {
+			var alreadyIneligErr *engine.AlreadyIneligibleError
+			if errors.As(engErr, &alreadyIneligErr) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":    "already_ineligible",
+					"playerId": alreadyIneligErr.PlayerID,
+					"matchId":  alreadyIneligErr.MatchID,
+					"reason":   alreadyIneligErr.Reason,
+				})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": engErr.Error()})
 			return
 		}
 
@@ -404,18 +440,20 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// T085/T092 — when a kiken or fusenpai is recorded, the engine
 		// persisted a CompetitorStatus for the losing player; surface
 		// it so admin clients can invalidate cached match lists.
-		if status != nil {
+		if engStatus != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
 				"competitionId": id,
-				"status":        status,
+				"status":        engStatus,
 			})
 		}
-		// T135 — kachinuki post-score advancement. No-op for non-
-		// kachinuki competitions (engine returns changed=false). A
-		// non-fatal error here doesn't fail the request: the operator's
-		// bout score is already on disk; surfacing a 500 would lead them
-		// to retry and double-record. Mirrors the recordIneligibility
-		// non-fatal pattern.
+		// T135 — kachinuki post-score advancement. Runs OUTSIDE the tx
+		// because MaybeAdvanceKachinuki calls UpdatePoolMatchByID /
+		// UpdateBracket which acquire the per-comp lock themselves;
+		// nesting under our tx would deadlock. A non-fatal error here
+		// doesn't fail the request: the operator's bout score is
+		// already on disk; surfacing a 500 would lead them to retry
+		// and double-record. Mirrors the recordIneligibility non-fatal
+		// pattern.
 		if advanced, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
 			log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
 		} else if advanced {

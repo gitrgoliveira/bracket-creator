@@ -145,6 +145,15 @@ func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error 
 	mu.Lock()
 	defer mu.Unlock()
 
+	return s.updateBracketLocked(compID, mutate)
+}
+
+// updateBracketLocked is the lock-free body of UpdateBracket. Caller
+// MUST already hold the per-comp write lock. Used by the tx-aware
+// path so the same load + mutate + save sequence runs without
+// re-acquiring the lock from inside a WithTransaction closure
+// (T156, NFR-010).
+func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error) error {
 	// Load directly under the lock (see UpdatePoolMatchByID for why
 	// we bypass the cached path here).
 	path := s.compPath(compID, "bracket.json")

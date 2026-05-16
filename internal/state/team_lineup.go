@@ -262,6 +262,19 @@ func (s *Store) LockTeamLineupsForRound(compID string, round int, lockedAt time.
 	mu.Lock()
 	defer mu.Unlock()
 
+	return s.lockTeamLineupsForRoundLocked(compID, round, lockedAt)
+}
+
+// lockTeamLineupsForRoundLocked is the lock-free body of
+// LockTeamLineupsForRound. Caller MUST already hold the per-comp
+// write lock (typically via WithTransaction).
+//
+// Used by the tx-aware score / decision paths (T156) so the lineup
+// freeze runs under the same lock acquire as the score write — without
+// this variant the public LockTeamLineupsForRound would deadlock when
+// called from inside a WithTransaction closure (sync.RWMutex is
+// non-recursive).
+func (s *Store) lockTeamLineupsForRoundLocked(compID string, round int, lockedAt time.Time) error {
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {
 		return err

@@ -377,6 +377,15 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 	mu.Lock()
 	defer mu.Unlock()
 
+	return s.updatePoolMatchByIDLocked(compID, matchID, mutate)
+}
+
+// updatePoolMatchByIDLocked is the lock-free body of
+// UpdatePoolMatchByID. Caller MUST already hold the per-comp write
+// lock. Used by the tx-aware path so the same load + find + mutate +
+// save sequence runs without re-acquiring the lock from inside a
+// WithTransaction closure (T156, NFR-010).
+func (s *Store) updatePoolMatchByIDLocked(compID, matchID string, mutate func(*MatchResult)) (bool, error) {
 	// Load directly from disk under the lock. We deliberately bypass
 	// the loadCached path here because the per-comp lock is what
 	// coordinates with the save below; using the cache would risk

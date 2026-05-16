@@ -54,6 +54,38 @@ match_duration: 5
 	assert.Equal(t, 5, c.PlayoffMatchDuration, "legacy match_duration should fall through to PlayoffMatchDuration")
 }
 
+// TestSwissRoundsFieldPersists verifies FR-050a / NFR-025:
+// the Competition struct round-trips the Swiss-format fields
+// (swissRounds and swissCurrentRound) through YAML so a paused
+// Swiss tournament can resume with its round budget intact.
+func TestSwissRoundsFieldPersists(t *testing.T) {
+	original := Competition{
+		ID:                "swiss-comp",
+		Name:              "Swiss Persistence",
+		Format:            CompFormatSwiss,
+		SwissRounds:       4,
+		SwissCurrentRound: 2,
+	}
+
+	data, err := yaml.Marshal(&original)
+	require.NoError(t, err)
+
+	// Sanity-check the on-disk key naming — the YAML wire format must
+	// use snake_case (existing competition.go convention) so older
+	// loaders that key-match by snake_case continue to work.
+	yamlText := string(data)
+	assert.Contains(t, yamlText, "swiss_rounds: 4")
+	assert.Contains(t, yamlText, "swiss_current_round: 2")
+
+	var loaded Competition
+	err = yaml.Unmarshal(data, &loaded)
+	require.NoError(t, err)
+
+	assert.Equal(t, 4, loaded.SwissRounds, "SwissRounds should round-trip")
+	assert.Equal(t, 2, loaded.SwissCurrentRound, "SwissCurrentRound should round-trip")
+	assert.Equal(t, CompFormatSwiss, loaded.Format, "Format should round-trip")
+}
+
 // TestLeagueFormatHidesPlayoffs verifies FR-050 / FR-051:
 // IsPlayoffEnabled() reports whether the competition's format includes a
 // playoff phase. League and pure-pools formats return false; playoffs and

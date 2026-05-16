@@ -80,6 +80,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 		RegisterEligibilityHandlers(admin, store, hub)
 		RegisterLineupHandlers(admin, store, store, store)
 		RegisterDaihyosenHandlers(admin, eng, store, hub)
+		RegisterSwissHandlers(admin, store, eng, hub)
 	}
 
 	// Static files & SPA Fallback

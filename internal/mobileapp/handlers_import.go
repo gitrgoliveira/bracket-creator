@@ -21,7 +21,7 @@ type ImportManifestComp struct {
 	ID             string   `yaml:"id"`
 	Name           string   `yaml:"name"`
 	Kind           string   `yaml:"kind"`   // "individual" or "team"
-	Format         string   `yaml:"format"` // "pools" or "playoffs"
+	Format         string   `yaml:"format"` // "pools" or "playoffs" or "swiss"
 	Courts         []string `yaml:"courts"`
 	PoolSize       int      `yaml:"pool_size"`
 	PoolSizeMode   string   `yaml:"pool_size_mode"` // "max" or "min"
@@ -33,6 +33,9 @@ type ImportManifestComp struct {
 	Mirror         bool     `yaml:"mirror"`
 	StartTime      string   `yaml:"start_time"`
 	Date           string   `yaml:"date"`
+	// SwissRounds — number of Swiss rounds to play when format=swiss
+	// (FR-050a). Ignored for other formats.
+	SwissRounds int `yaml:"swiss_rounds"`
 	// File names relative to the uploaded set
 	Participants string `yaml:"participants"`
 	Seeds        string `yaml:"seeds"`
@@ -157,6 +160,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		Mirror:         entry.Mirror,
 		StartTime:      strings.TrimSpace(entry.StartTime),
 		Date:           strings.TrimSpace(entry.Date),
+		SwissRounds:    entry.SwissRounds,
 		Status:         state.CompStatusSetup,
 	}
 	if len(comp.Courts) == 0 {
@@ -189,12 +193,17 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 
 	// Cross-file guard symmetry with POST /competitions and PUT
 	// /competitions/:id (handlers_competition.go): reject unknown formats
-	// ("swiss" → 501, other unknowns → 400) so a manifest cannot persist
-	// a Competition whose format would be rejected via the REST API.
-	// PoolFormat is not in ImportManifestComp (always ""), so only
-	// comp.Format needs checking here.
+	// (400) so a manifest cannot persist a Competition whose format would
+	// be rejected via the REST API. PoolFormat is not in
+	// ImportManifestComp (always ""), so only comp.Format needs checking
+	// here. FR-050a: swiss is accepted but additionally requires
+	// swissRounds >= 1 — validateSwissConfig enforces that below.
 	if _, err := validateCompetitionFormat(comp.Format, ""); err != nil {
 		res.Error = "format: " + err.Error()
+		return res
+	}
+	if err := validateSwissConfig(comp); err != nil {
+		res.Error = "swissRounds: " + err.Error()
 		return res
 	}
 

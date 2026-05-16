@@ -714,19 +714,20 @@ competitions:
 		assert.Nil(t, storedDup, "dup-courts-import must not have been persisted")
 	})
 
-	// validateCompetitionFormat cross-file guard symmetry: an unknown
-	// format value (or "swiss" which is 501 via the REST API) must error
-	// per-row rather than persisting a Competition whose format the REST
-	// API would have rejected. This mirrors the validateCompetitionCourts
-	// and validateDateDMY checks already in importCompetition.
-	t.Run("Unknown Format Rejected Per Row", func(t *testing.T) {
+	// validateCompetitionFormat cross-file guard symmetry: a Swiss
+	// competition imported WITHOUT swissRounds must error per-row
+	// rather than persisting (FR-050a). This mirrors the
+	// validateCompetitionCourts and validateDateDMY per-row guards
+	// already in importCompetition. T181: swiss is now an accepted
+	// format value — the validation moves to swissRounds >= 1.
+	t.Run("Swiss Missing Rounds Rejected Per Row", func(t *testing.T) {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
 		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
 		manifestPart.Write([]byte(`
 competitions:
-  - id: "unknown-format-import"
-    name: "Unknown Format Import"
+  - id: "swiss-no-rounds-import"
+    name: "Swiss No Rounds Import"
     kind: "individual"
     format: "swiss"
     courts: ["A"]
@@ -743,10 +744,10 @@ competitions:
 		}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		require.Len(t, resp.Results, 1)
-		assert.Contains(t, resp.Results[0].Error, "format:",
-			"unknown format should land in ImportResult.Error (not persist)")
-		stored, _ := store.LoadCompetition("unknown-format-import")
-		assert.Nil(t, stored, "unknown-format-import must not have been persisted")
+		assert.Contains(t, resp.Results[0].Error, "swissRounds",
+			"swiss without swissRounds should land in ImportResult.Error (not persist)")
+		stored, _ := store.LoadCompetition("swiss-no-rounds-import")
+		assert.Nil(t, stored, "swiss-no-rounds-import must not have been persisted")
 	})
 
 	t.Run("Invalid Non-Swiss Format Rejected Per Row", func(t *testing.T) {

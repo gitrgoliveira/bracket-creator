@@ -92,6 +92,18 @@ type Competition struct {
 	// round-trip through the new schema.
 	MatchDuration int `yaml:"match_duration,omitempty" json:"matchDuration,omitempty"`
 
+	// SwissRounds is the number of rounds played in a Swiss-format
+	// competition (FR-050a). Ignored when Format != CompFormatSwiss.
+	// Persisted so resuming a Swiss tournament reads the same round
+	// budget on subsequent loads.
+	SwissRounds int `yaml:"swiss_rounds,omitempty" json:"swissRounds,omitempty"`
+
+	// SwissCurrentRound tracks which round has been generated so far
+	// (FR-050d). 0 = not started; the value increments after each
+	// successful GenerateSwissRound. Used by the "Generate next round"
+	// gate to refuse re-generation of an in-progress round.
+	SwissCurrentRound int `yaml:"swiss_current_round,omitempty" json:"swissCurrentRound,omitempty"`
+
 	Players []helper.Player `yaml:"-" json:"players"`
 }
 
@@ -150,7 +162,7 @@ const (
 	CompFormatPlayoffs = "playoffs"
 	CompFormatMixed    = "mixed"  // FR-050
 	CompFormatLeague   = "league" // FR-050
-	// Swiss intentionally not added in v1 — deferred per A-5.
+	CompFormatSwiss    = "swiss"  // FR-050, FR-050a (US13)
 
 	PoolFormatFull    = "full"
 	PoolFormatPartial = "partial"

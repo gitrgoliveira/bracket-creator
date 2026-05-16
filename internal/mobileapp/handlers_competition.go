@@ -97,8 +97,10 @@ func extractSeeds(players []helper.Player) []domain.SeedAssignment {
 
 // validateCompetitionFormat returns an HTTP status code + error
 // message for invalid Format / PoolFormat values. Empty values are
-// accepted (defaults applied on load). "swiss" returns 501 Not
-// Implemented per A-5 (deferred). Unknown values return 400.
+// accepted (defaults applied on load). Unknown values return 400.
+//
+// FR-050a: swiss is now accepted; the caller must ALSO run
+// validateSwissConfig when format == swiss to enforce swissRounds >= 1.
 func validateCompetitionDurations(comp *state.Competition) error {
 	if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
 		return fmt.Errorf("match duration must be >= 0")
@@ -109,10 +111,8 @@ func validateCompetitionDurations(comp *state.Competition) error {
 func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	switch format {
 	case "", state.CompFormatPools, state.CompFormatPlayoffs,
-		state.CompFormatMixed, state.CompFormatLeague:
+		state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
 		// ok
-	case "swiss":
-		return http.StatusNotImplemented, fmt.Errorf("swiss format not implemented yet")
 	default:
 		return http.StatusBadRequest, fmt.Errorf("unknown format %q", format)
 	}
@@ -123,6 +123,19 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 		return http.StatusBadRequest, fmt.Errorf("unknown poolFormat %q", poolFormat)
 	}
 	return 0, nil
+}
+
+// validateSwissConfig enforces FR-050a: when Format == swiss, SwissRounds
+// must be at least 1. Returns nil for non-swiss competitions. The caller
+// surfaces the error as HTTP 400.
+func validateSwissConfig(comp *state.Competition) error {
+	if comp.Format != state.CompFormatSwiss {
+		return nil
+	}
+	if comp.SwissRounds < 1 {
+		return fmt.Errorf("swiss format requires swissRounds >= 1")
+	}
+	return nil
 }
 
 func checkUniqueCompName(store *state.Store, name, excludeID string) error {
@@ -226,9 +239,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		// Format / PoolFormat enum-style validation. Empty values are
-		// accepted; unknown values 400; "swiss" 501 (deferred per A-5).
+		// accepted; unknown values 400. FR-050a: swiss is accepted but
+		// validateSwissConfig must additionally enforce swissRounds >= 1.
 		if code, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
 			c.JSON(code, gin.H{"error": err.Error()})
+			return
+		}
+
+		// FR-050a: swiss-specific config validation.
+		if err := validateSwissConfig(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -404,9 +424,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 
 			// Format / PoolFormat enum-style validation. Empty values are
-			// accepted; unknown values 400; "swiss" 501 (deferred per A-5).
+			// accepted; unknown values 400. FR-050a: swiss requires the
+			// additional swissRounds >= 1 check below.
 			if code, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
 				c.JSON(code, gin.H{"error": err.Error()})
+				return
+			}
+
+			// FR-050a: swiss-specific config validation.
+			if err := validateSwissConfig(&comp); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 
@@ -556,6 +583,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PlayoffMatchDuration = comp.PlayoffMatchDuration
 				current.MatchDuration = comp.MatchDuration
 				current.TeamMatchType = comp.TeamMatchType
+				// FR-050a: swiss round budget is admin-editable from
+				// settings until the competition starts (the engine
+				// gates StartCompetition on Status=setup). After start,
+				// the field is read-only via the same Status gate.
+				current.SwissRounds = comp.SwissRounds
 				return current, nil
 			})
 			return updateErr

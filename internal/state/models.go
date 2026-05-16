@@ -33,6 +33,10 @@ type Competition struct {
 	HasParticipantIDs    bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
 	PoolMatchDuration    int               `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
 	PlayoffMatchDuration int               `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+	// MaxEnchoPeriods caps how many encho (overtime) periods one match
+	// may run before the operator must call daihyosen. Zero means
+	// unlimited (FIK general default). T104, CHK029.
+	MaxEnchoPeriods int `yaml:"max_encho_periods,omitempty" json:"maxEnchoPeriods,omitempty"`
 
 	// Legacy single-phase duration. Captured at unmarshal time and used by
 	// ApplyCompetitionDefaults to populate the per-phase fields above when

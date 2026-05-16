@@ -498,3 +498,121 @@ func TestTryAutoCompletePools_SanitizesErrorHeader(t *testing.T) {
 	assert.NotContains(t, got, "invalid",
 		"raw validation error text must not leak into the response header")
 }
+
+// TestPostScoreKikenAutoFillsRegulation — T086: POST /score with
+// decision=kiken, decisionBy=shiro, encho=null and a 0-2 scoreline
+// returns 200 and the persisted match round-trips the decision metadata.
+//
+// FR-031, contracts/match-decisions.md.
+func TestPostScoreKikenAutoFillsRegulation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kiken-reg"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	body, _ := json.Marshal(state.MatchResult{
+		ID:         "PoolA-1",
+		Decision:   "kiken",
+		DecisionBy: "shiro",
+		Winner:     "Alice",
+		IpponsA:    []string{"M", "M"},
+		IpponsB:    nil,
+		Status:     state.MatchStatusCompleted,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, "kiken", stored[0].Decision)
+	assert.Equal(t, "shiro", stored[0].DecisionBy)
+	assert.Equal(t, "Alice", stored[0].Winner)
+}
+
+// TestPostScoreKikenInEncho — T087: POST /score with
+// decision=kiken, decisionBy=shiro, encho.periodCount=1 and a 0-1
+// scoreline returns 200.
+func TestPostScoreKikenInEncho(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kiken-encho"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	body, _ := json.Marshal(state.MatchResult{
+		ID:         "PoolA-1",
+		Decision:   "kiken",
+		DecisionBy: "shiro",
+		Winner:     "Alice",
+		IpponsA:    []string{"M"},
+		IpponsB:    nil,
+		Encho:      &state.EnchoMetadata{PeriodCount: 1},
+		Status:     state.MatchStatusCompleted,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	stored, _ := store.LoadPoolMatches(compID)
+	require.Len(t, stored, 1)
+	require.NotNil(t, stored[0].Encho)
+	assert.Equal(t, 1, stored[0].Encho.PeriodCount)
+}
+
+// TestPostScoreKikenInvalidScoreline — T088: POST /score with
+// decision=kiken, encho=null, and a 0-1 scoreline (regulation requires
+// 2-0) returns 400 with the validator's field message.
+func TestPostScoreKikenInvalidScoreline(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kiken-bad"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	body, _ := json.Marshal(state.MatchResult{
+		ID:         "PoolA-1",
+		Decision:   "kiken",
+		DecisionBy: "shiro",
+		Winner:     "Alice",
+		IpponsA:    []string{"M"},
+		IpponsB:    nil,
+		Status:     state.MatchStatusCompleted,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "scoreline")
+}

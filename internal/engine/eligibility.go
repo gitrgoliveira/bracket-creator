@@ -73,6 +73,58 @@ func (e *Engine) StartMatch(compID, matchID string) error {
 	return e.CheckEligibility(compID, ids)
 }
 
+// RecordDecision auto-fills the scoreline from decision/decisionBy/encho
+// and persists the result via RecordMatchResultWithIneligibility. The
+// canonical SideA=Aka / SideB=Shiro mapping (CLAUDE.md) is used to
+// translate decisionBy → which side wins the auto-filled X-0 scoreline.
+//
+// Returns the persisted MatchResult and the new CompetitorStatus (or
+// nil when no status change applies).
+//
+// T090, contracts/match-decisions.md §POST /decision.
+func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	if decisionBy != "shiro" && decisionBy != "aka" {
+		return nil, nil, validationErrorf("decisionBy must be 'shiro' or 'aka', got %q", decisionBy)
+	}
+	sideA, sideB, err := e.lookupMatchSides(compID, matchID)
+	if err != nil {
+		return nil, nil, err
+	}
+	winningCount := 2
+	if encho != nil {
+		winningCount = 1
+	}
+	winIppons := make([]string, winningCount)
+	for i := range winIppons {
+		winIppons[i] = "M"
+	}
+	result := &state.MatchResult{
+		ID:             matchID,
+		SideA:          sideA,
+		SideB:          sideB,
+		Decision:       decision,
+		DecisionBy:     decisionBy,
+		DecisionReason: decisionReason,
+		Encho:          encho,
+		Status:         state.MatchStatusCompleted,
+	}
+	// shiro=SideB (White, left), aka=SideA (Red, right). The losing
+	// side ends with 0 ippons; the surviving side gets the X auto-fill
+	// and becomes Winner.
+	if decisionBy == "shiro" {
+		result.IpponsA = winIppons
+		result.Winner = sideA
+	} else {
+		result.IpponsB = winIppons
+		result.Winner = sideB
+	}
+	status, err := e.RecordMatchResultWithIneligibility(compID, matchID, result)
+	if err != nil {
+		return nil, nil, err
+	}
+	return result, status, nil
+}
+
 // resolveMatchParticipantIDs finds the match (pool or bracket) and
 // resolves SideA/SideB names to player IDs via the competition's
 // participants list.
@@ -130,38 +182,41 @@ func lookupPlayerID(players []helper.Player, name string) string {
 
 // recordIneligibilityFromDecision is the T085 engine-side side effect.
 // When a top-level match result records a kiken or fusenpai decision,
-// the losing player (the side with zero ippons, which the request-body
-// validator already enforces) becomes ineligible for subsequent
-// matches in this competition.
+// the losing player (the side opposite of result.Winner, with an
+// ippon-count fallback) becomes ineligible for subsequent matches in
+// this competition.
 //
-// The handler layer is responsible for broadcasting the
-// `competitor-status-updated` SSE event after this returns.
+// Returns the persisted CompetitorStatus when a status was written
+// (so the handler layer can broadcast the corresponding
+// `competitor-status-updated` SSE event), or (nil, nil) when no
+// status change applies (non-kiken/fusenpai decision, unresolvable
+// loser, or unknown player).
 //
 // FR-036, contracts/match-decisions.md §side-effects.
-func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result *state.MatchResult) error {
+func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	if result == nil {
-		return nil
+		return nil, nil
 	}
 	if result.Decision != string(domain.DecisionKiken) && result.Decision != string(domain.DecisionFusenpai) {
-		return nil
+		return nil, nil
 	}
 	loser := loserSideName(result)
 	if loser == "" {
-		return nil
+		return nil, nil
 	}
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	pool := append([]helper.Player{}, comp.Players...)
 	pool = append(pool, participants...)
 	playerID := lookupPlayerID(pool, loser)
 	if playerID == "" {
-		return nil
+		return nil, nil
 	}
 	status := domain.CompetitorStatus{
 		PlayerID:   playerID,
@@ -170,7 +225,10 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 		MatchID:    matchID,
 		RecordedAt: time.Now().UTC(),
 	}
-	return e.store.SetCompetitorStatus(compID, status)
+	if err := e.store.SetCompetitorStatus(compID, status); err != nil {
+		return nil, err
+	}
+	return &status, nil
 }
 
 // loserSideName returns the name of the losing side for a

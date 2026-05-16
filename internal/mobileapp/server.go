@@ -56,6 +56,8 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 		RegisterCompetitionHandlers(admin, store, eng, hub)
 		RegisterParticipantHandlers(admin, store)
 		RegisterMatchHandlers(admin, eng, hub)
+		RegisterDecisionHandlers(admin, eng, hub)
+		RegisterEligibilityHandlers(admin, store, hub)
 	}
 
 	// Static files & SPA Fallback

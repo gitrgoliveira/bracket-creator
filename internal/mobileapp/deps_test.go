@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -23,6 +24,14 @@ type stubScoringEngine struct{}
 
 func (stubScoringEngine) RecordMatchResult(string, string, *state.MatchResult) error {
 	return nil
+}
+
+func (stubScoringEngine) RecordMatchResultWithIneligibility(string, string, *state.MatchResult) (*domain.CompetitorStatus, error) {
+	return nil, nil
+}
+
+func (stubScoringEngine) RecordDecision(string, string, string, string, string, *state.EnchoMetadata) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	return nil, nil, nil
 }
 
 func (stubScoringEngine) MaybeAutoCompletePools(string) (bool, error) {
@@ -69,8 +78,9 @@ func TestDepsInterfacesCompile(t *testing.T) {
 	// concrete types must still satisfy the interfaces so wiring stays
 	// drop-in across the migration.)
 	var (
-		_ CompetitionStore = (*state.Store)(nil)
-		_ ScoringEngine    = (*engine.Engine)(nil)
-		_ Broadcaster      = (*Hub)(nil)
+		_ CompetitionStore      = (*state.Store)(nil)
+		_ ScoringEngine         = (*engine.Engine)(nil)
+		_ Broadcaster           = (*Hub)(nil)
+		_ CompetitorStatusStore = (*state.Store)(nil)
 	)
 }

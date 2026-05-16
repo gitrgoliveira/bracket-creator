@@ -15,11 +15,12 @@ import (
 type EventType string
 
 const (
-	EventMatchUpdated         EventType = "match_updated"
-	EventCompetitionStarted   EventType = "competition_started"
-	EventCompetitionCompleted EventType = "competition_completed"
-	EventTournamentUpdated    EventType = "tournament_updated"
-	EventScheduleUpdated      EventType = "schedule_updated"
+	EventMatchUpdated            EventType = "match_updated"
+	EventCompetitionStarted      EventType = "competition_started"
+	EventCompetitionCompleted    EventType = "competition_completed"
+	EventTournamentUpdated       EventType = "tournament_updated"
+	EventScheduleUpdated         EventType = "schedule_updated"
+	EventCompetitorStatusUpdated EventType = "competitor_status_updated"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the

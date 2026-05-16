@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -103,10 +104,55 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 	// double-recording the score. Log and swallow — the next-match
 	// eligibility gate is the safety net that surfaces a missed
 	// status write (FR-035).
-	if err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
+	if _, err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 	}
 	return nil
+}
+
+// RecordMatchResultWithIneligibility is the variant used by the score
+// and decision handlers that need to broadcast the
+// `competitor-status-updated` SSE event after a kiken/fusenpai is
+// recorded. It returns the new CompetitorStatus (or nil when none was
+// written) alongside any error.
+//
+// The match-score persistence semantics are identical to
+// RecordMatchResult; only the side-effect status is surfaced for the
+// caller's broadcast. Side-effect write failures are still non-fatal —
+// the function returns (nil, nil) and logs.
+//
+// T085/T092.
+func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
+	result.ID = matchId
+	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+		if result.SideA == "" {
+			result.SideA = r.SideA
+		}
+		if result.SideB == "" {
+			result.SideB = r.SideB
+		}
+		if result.Court == "" {
+			result.Court = r.Court
+		}
+		if result.ScheduledAt == "" {
+			result.ScheduledAt = r.ScheduledAt
+		}
+		*r = *result
+	})
+	if err != nil {
+		if !errors.Is(err, errMatchNotFound) {
+			return nil, err
+		}
+		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
+			return nil, err
+		}
+	}
+	status, err := e.recordIneligibilityFromDecision(compId, matchId, result)
+	if err != nil {
+		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
+		return nil, nil
+	}
+	return status, nil
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {

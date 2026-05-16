@@ -315,7 +315,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, hub Broadcaster
 		}
 
 		result := req.AsMatchResult()
-		if err := eng.RecordMatchResult(id, mid, result); err != nil {
+		status, err := eng.RecordMatchResultWithIneligibility(id, mid, result)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -327,6 +328,15 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, hub Broadcaster
 			"matchId":       mid,
 			"result":        result,
 		})
+		// T085/T092 — when a kiken or fusenpai is recorded, the engine
+		// persisted a CompetitorStatus for the losing player; surface
+		// it so admin clients can invalidate cached match lists.
+		if status != nil {
+			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
+				"competitionId": id,
+				"status":        status,
+			})
+		}
 		tryAutoCompletePools(c, eng, hub, id)
 
 		c.JSON(http.StatusOK, result)

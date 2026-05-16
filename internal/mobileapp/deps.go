@@ -16,6 +16,7 @@
 package mobileapp
 
 import (
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -42,12 +43,22 @@ type CompetitionStore interface {
 // the full engine + store stack. The interface lets handler tests stub
 // these calls independently.
 //
-// Consumers (current): handlers_match.go.
+// Consumers (current): handlers_match.go, handlers_decision.go.
 type ScoringEngine interface {
 	// RecordMatchResult applies the given result to the pool match (or
 	// falls through to the bracket match) for compID/matchID. Mirrors
 	// engine.Engine.RecordMatchResult.
 	RecordMatchResult(compID string, matchID string, result *state.MatchResult) error
+	// RecordMatchResultWithIneligibility is the variant used by the
+	// score handler when the request may have recorded a kiken or
+	// fusenpai decision. The returned CompetitorStatus is non-nil only
+	// when a new ineligibility was persisted — the handler uses that to
+	// drive the competitor-status-updated SSE broadcast (T085/T092).
+	RecordMatchResultWithIneligibility(compID string, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
+	// RecordDecision auto-fills the scoreline + winner from the
+	// decision/decisionBy/encho triple and persists the result. Used by
+	// the dedicated POST /decision endpoint (T090).
+	RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done. Returns whether the
 	// transition actually happened (so callers know whether to broadcast
@@ -63,6 +74,14 @@ type ScoringEngine interface {
 	// UpdateMatchTime updates a match's scheduledAt. Mirrors
 	// engine.Engine.UpdateMatchTime.
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error
+}
+
+// CompetitorStatusStore is the consumer-boundary view of state.Store
+// used by handlers_eligibility.go. Mirrors the LoadCompetitorStatus /
+// SetCompetitorStatus methods on *state.Store.
+type CompetitorStatusStore interface {
+	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
+	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 }
 
 // Broadcaster is the consumer-boundary view of *Hub used by handlers

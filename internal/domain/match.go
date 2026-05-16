@@ -8,11 +8,24 @@ type Match struct {
 	Winner *Player
 }
 
+// Side identifies which side of a match (Shiro = white, Aka = red).
+//
+// FR-032, data-model §2.
+type Side string
+
+const (
+	SideShiro Side = "shiro"
+	SideAka   Side = "aka"
+)
+
 // MatchResult captures the outcome metadata of a match.
 //
-// Slice-1 minimal — Slice-3 will add Decision/DecisionBy/DecisionReason/etc. per T076.
+// FR-030, FR-032, data-model §2.
 type MatchResult struct {
-	Encho *EnchoMetadata `json:"encho,omitempty" yaml:"encho,omitempty"`
+	Decision       Decision       `json:"decision,omitempty" yaml:"decision,omitempty"`
+	DecisionBy     Side           `json:"decisionBy,omitempty" yaml:"decisionBy,omitempty"`
+	DecisionReason string         `json:"decisionReason,omitempty" yaml:"decisionReason,omitempty"`
+	Encho          *EnchoMetadata `json:"encho,omitempty" yaml:"encho,omitempty"`
 }
 
 // EnchoMetadata records overtime (encho) periods played to resolve a tied match.

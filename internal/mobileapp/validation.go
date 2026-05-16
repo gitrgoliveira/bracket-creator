@@ -70,10 +70,12 @@ type ScoreRequest state.MatchResult
 //   - Winner, when set alongside both sides, must name one of the sides
 //     (a Winner that names neither side would silently miscount in
 //     standings).
-//
-// This is intentionally narrow — Slice 3 (T077) extends this with
-// decision-type validation (kiken-by-side, encho-required, etc.) once
-// the data-model lands.
+//   - Decision (T077, FR-031, contracts/match-decisions.md):
+//     value must be one of fought/hikiwake/kiken/fusenpai/fusensho/
+//     daihyosen/kachinuki-exhaustion (or empty).
+//     kiken/fusenpai require decisionBy and a winning-side scoreline
+//     (2-0 in regulation, 1-0 in encho for kiken). fusensho is only
+//     valid on a per-bout SubResult, not on a top-level score request.
 func (r *ScoreRequest) Validate() error {
 	if r.Status != "" {
 		switch r.Status {
@@ -99,7 +101,64 @@ func (r *ScoreRequest) Validate() error {
 			}
 		}
 	}
+	return r.validateDecision()
+}
+
+// validateDecision enforces the FR-031 / contracts/match-decisions.md
+// rules. Splitting it out keeps Validate() at a glance.
+func (r *ScoreRequest) validateDecision() error {
+	switch r.Decision {
+	case "", "fought", "hikiwake", "kiken", "fusenpai", "fusensho", "daihyosen", "kachinuki-exhaustion":
+		// ok
+	default:
+		return &ValidationError{
+			Field:   "decision",
+			Message: fmt.Sprintf("unknown decision %q", r.Decision),
+		}
+	}
+	if r.DecisionBy != "" && r.DecisionBy != "shiro" && r.DecisionBy != "aka" {
+		return &ValidationError{
+			Field:   "decisionBy",
+			Message: fmt.Sprintf("must be 'shiro' or 'aka', got %q", r.DecisionBy),
+		}
+	}
+	switch r.Decision {
+	case "kiken":
+		if r.DecisionBy == "" {
+			return &ValidationError{Field: "decisionBy", Message: "required when decision is kiken"}
+		}
+		need := 2
+		if r.Encho != nil {
+			need = 1
+		}
+		if !winningScoreline(r.IpponsA, r.IpponsB, need) {
+			return &ValidationError{
+				Field:   "scoreline",
+				Message: fmt.Sprintf("kiken requires %d-0 scoreline", need),
+			}
+		}
+	case "fusenpai":
+		if r.DecisionBy == "" {
+			return &ValidationError{Field: "decisionBy", Message: "required when decision is fusenpai"}
+		}
+		if !winningScoreline(r.IpponsA, r.IpponsB, 2) {
+			return &ValidationError{Field: "scoreline", Message: "fusenpai requires 2-0 scoreline"}
+		}
+	case "fusensho":
+		return &ValidationError{
+			Field:   "decision",
+			Message: "fusensho is only valid on a per-bout sub-result, not a top-level match",
+		}
+	}
 	return nil
+}
+
+// winningScoreline reports whether exactly one of the two ippon slices
+// has `n` entries while the other is empty (i.e. an n-0 result).
+func winningScoreline(ipponsA, ipponsB []string, n int) bool {
+	a := len(ipponsA)
+	b := len(ipponsB)
+	return (a == n && b == 0) || (a == 0 && b == n)
 }
 
 // AsMatchResult returns the underlying state.MatchResult value so the

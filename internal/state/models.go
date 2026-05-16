@@ -125,21 +125,23 @@ type SubMatchResult struct {
 }
 
 type MatchResult struct {
-	ID            string           `json:"id"`
-	SideA         string           `json:"sideA"` // Player/Team Name
-	SideB         string           `json:"sideB"`
-	Winner        string           `json:"winner"`
-	IpponsA       []string         `json:"ipponsA"` // M, K, D, T, H
-	IpponsB       []string         `json:"ipponsB"`
-	HansokuA      int              `json:"hansokuA"`
-	HansokuB      int              `json:"hansokuB"`
-	Decision      string           `json:"decision"`
-	Status        MatchStatus      `json:"status"`
-	Court         string           `json:"court"`
-	ScheduledAt   string           `json:"scheduledAt"`
-	SubResults    []SubMatchResult `json:"subResults,omitempty"`
-	Encho         *EnchoMetadata   `json:"encho,omitempty" yaml:"encho,omitempty"`
-	QueuePosition int              `json:"queuePosition,omitempty" yaml:"-"`
+	ID             string           `json:"id"`
+	SideA          string           `json:"sideA"` // Player/Team Name
+	SideB          string           `json:"sideB"`
+	Winner         string           `json:"winner"`
+	IpponsA        []string         `json:"ipponsA"` // M, K, D, T, H
+	IpponsB        []string         `json:"ipponsB"`
+	HansokuA       int              `json:"hansokuA"`
+	HansokuB       int              `json:"hansokuB"`
+	Decision       string           `json:"decision"`
+	DecisionBy     string           `json:"decisionBy,omitempty"`
+	DecisionReason string           `json:"decisionReason,omitempty"`
+	Status         MatchStatus      `json:"status"`
+	Court          string           `json:"court"`
+	ScheduledAt    string           `json:"scheduledAt"`
+	SubResults     []SubMatchResult `json:"subResults,omitempty"`
+	Encho          *EnchoMetadata   `json:"encho,omitempty" yaml:"encho,omitempty"`
+	QueuePosition  int              `json:"queuePosition,omitempty" yaml:"-"`
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a

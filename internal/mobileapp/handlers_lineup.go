@@ -50,7 +50,16 @@ type LineupRequest struct {
 // would just be ceremony. `*state.Store` satisfies all three
 // interfaces (TeamLineupStore + CompetitionStore + CompetitionTransactor)
 // so wiring stays drop-in.
-func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor) {
+// RegisterPublicLineupHandlers wires the read-only
+// GET /competitions/:id/teams/:tid/lineups/:round endpoint on an
+// unauthenticated router group. Lineup data (position assignments)
+// is not sensitive — coaches and viewers can see who plays where —
+// and the AdminLineup form needs to load the current lineup without
+// holding admin credentials for the initial read.  PUT and DELETE
+// remain on the admin group via RegisterLineupHandlers.
+//
+// Slice 7.B / T127.
+func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 	r.GET("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
@@ -69,7 +78,25 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		}
 		c.JSON(http.StatusOK, lineup)
 	})
+}
 
+// RegisterLineupHandlers wires the PUT/DELETE lineup endpoints under
+// the admin (auth-protected) group. The corresponding GET is public
+// and registered via RegisterPublicLineupHandlers.
+//
+// DELETE is manager-only per the spec — for now we rely on the
+// existing AuthMiddleware (mounted on the admin router group in
+// server.go) as the auth boundary; a richer role check lands when
+// per-role auth is implemented.
+//
+// The third parameter (`tx CompetitionTransactor`) is the T156 hook.
+// The PUT body wraps its three store calls — load comp (for teamSize),
+// set lineup, reload lineup (for the response) — in one
+// WithTransaction so they all commit under a single per-comp lock
+// acquire. `*state.Store` satisfies all three interfaces
+// (TeamLineupStore + CompetitionStore + CompetitionTransactor) so
+// wiring stays drop-in.
+func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor) {
 	r.PUT("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {

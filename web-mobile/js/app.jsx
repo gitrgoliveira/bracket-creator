@@ -282,6 +282,13 @@ function App() {
             }
             // Also refresh tournament list for status updates
             jitteredTimeout(load, jitter);
+        } else if (event.type === "schedule_updated") {
+            // Court/time move: no competitionId in payload, so refresh the
+            // currently selected competition (if any) and the tournament list.
+            if (viewerCompId) {
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            }
+            jitteredTimeout(load, jitter);
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can

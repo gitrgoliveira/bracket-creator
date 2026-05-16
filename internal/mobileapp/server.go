@@ -54,6 +54,19 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 	api := r.Group("/api")
 	RegisterScheduleHandlers(api)
 
+	// Public read-only endpoints for resources whose GET is unauthenticated
+	// (same contract as /api/viewer/*). The write paths for each are on the
+	// admin group below.
+	//
+	// GET /competitions/:id/competitor-status — eligibility state is
+	// derivable from public match results; viewer/display surfaces need it
+	// without admin credentials.
+	// GET /competitions/:id/teams/:tid/lineups/:round — lineup assignments
+	// are visible to coaches and spectators; AdminLineup loads them before
+	// the operator has entered the admin password.
+	RegisterPublicEligibilityHandlers(api, store)
+	RegisterPublicLineupHandlers(api, store)
+
 	// Admin API endpoints (protected)
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(store))

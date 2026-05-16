@@ -18,6 +18,11 @@ const REFRESHABLE_EVENTS = new Set([
   // competition-details payload. patch.jsx re-broadcasts the event as a
   // window-level CustomEvent for views that maintain their own cache.
   "competitor_status_updated",
+  // schedule_updated fires when an operator moves a match to a different
+  // court or changes its scheduled time. It carries no competitionId (the
+  // relevance check at the subscription site treats any nil-data event as
+  // tournament-wide and always triggers the fetchCompetitionDetails refresh).
+  "schedule_updated",
 ]);
 
 // Page components rendered by AdminApp's view switch (produced by sibling

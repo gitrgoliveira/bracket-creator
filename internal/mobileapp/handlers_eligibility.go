@@ -36,11 +36,16 @@ func (r *CompetitorStatusRequest) toDomain() domain.CompetitorStatus {
 	}
 }
 
-// RegisterEligibilityHandlers wires the GET/POST competitor-status
-// endpoints.
+// RegisterPublicEligibilityHandlers wires the read-only
+// GET /competitions/:id/competitor-status endpoint on an unauthenticated
+// router group. This mirrors the other /api/competitions/:id/* viewer
+// GETs: eligibility state is not sensitive (it's derivable from the
+// public match results) and the display/viewer surfaces need it without
+// admin credentials. The write path (POST) stays on the admin group via
+// RegisterEligibilityHandlers.
 //
 // T091, FR-034.
-func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore, hub Broadcaster) {
+func RegisterPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore) {
 	r.GET("/competitions/:id/competitor-status", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -59,7 +64,15 @@ func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore
 		}
 		c.JSON(http.StatusOK, gin.H{"statuses": out})
 	})
+}
 
+// RegisterEligibilityHandlers wires the write-only
+// POST /competitions/:id/competitor-status endpoint on the admin
+// (auth-protected) router group. The corresponding GET is public and
+// registered via RegisterPublicEligibilityHandlers.
+//
+// T091, FR-034.
+func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore, hub Broadcaster) {
 	r.POST("/competitions/:id/competitor-status", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

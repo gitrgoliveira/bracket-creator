@@ -995,7 +995,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               ),
               ...visiblePositions
             ];
-          })().filter(Boolean).map((pos, displayIdx) => {
+          })().filter(Boolean).map((pos, _displayIdx) => {
             // Kachinuki returns a banner element as the first item; pass
             // it through unchanged. Other items are position strings —
             // map them back to their canonical index in `positions`.

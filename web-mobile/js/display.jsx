@@ -573,7 +573,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
 // TvDisplay but rendered at lobby-card scale (px-based instead of vw-
 // based so multiple cards on one screen stay legible regardless of
 // court count). Shows current match + up to 2 queue items.
-function LobbyCard({ court, tournament, competitions }) {
+function LobbyCard({ court, tournament: _tournament, competitions }) {
     const live = useMD(() => findLiveOnCourt(competitions, court), [competitions, court]);
     const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, live ? 2 : 3), [competitions, court, live]);
     const counts = useMD(() => countCourtMatches(competitions, court), [competitions, court]);

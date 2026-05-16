@@ -107,7 +107,7 @@ func (s *Store) SaveTournamentChanged(t *Tournament) (bool, error) {
 		return false, nil
 	}
 
-	if err := os.WriteFile(path, newData, 0600); err != nil {
+	if err := atomicWriteFile(path, newData, 0600); err != nil {
 		return false, err
 	}
 
@@ -214,7 +214,7 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 		return false, nil
 	}
 
-	if err := os.WriteFile(path, newData, 0600); err != nil {
+	if err := atomicWriteFile(path, newData, 0600); err != nil {
 		return false, err
 	}
 

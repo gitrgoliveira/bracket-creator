@@ -158,7 +158,7 @@ func (s *Store) SaveParticipants(compID string, players []helper.Player) error {
 		sb.WriteString(id + ", " + row + "\n")
 	}
 
-	if err := os.WriteFile(path, []byte(sb.String()), 0600); err != nil {
+	if err := atomicWriteFile(path, []byte(sb.String()), 0600); err != nil {
 		return err
 	}
 

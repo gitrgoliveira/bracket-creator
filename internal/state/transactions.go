@@ -14,14 +14,21 @@
 // each other as one operation, not three).
 //
 // What "transaction" means here. Lock-level atomicity, NOT filesystem
-// ACID. There is NO rollback: if fn writes file A successfully but
-// fails on file B, file A stays written. The contract callers MUST
-// honour is "do all your validation first, then write at the END" —
-// once you start saving inside fn, finish saving inside fn. The
-// trade-off is intentional: implementing real per-file rollback would
-// require staging-area + commit/swap-on-success machinery that none of
-// the live-tournament flows justify (the engine is the single source
-// of truth and an operator can always re-key a value).
+// ACID. The per-file write IS atomic + durable: every save in the
+// package goes through atomicWriteFile (atomic_write.go), so a single
+// file either contains the full new content or the full previous
+// content — never a half-written byte stream — and an fsync'd target
+// survives power loss. But there is NO cross-file rollback: if fn
+// writes file A successfully and then fails on file B, file A stays
+// written. The contract callers MUST honour is "do all your validation
+// first, then write at the END" — once you start saving inside fn,
+// finish saving inside fn. Implementing real per-transaction
+// cross-file rollback would require staging-area + commit/swap-on-
+// success machinery (or a write-ahead log) that none of the
+// live-tournament flows justify: the engine is the single source of
+// truth, an operator can always re-key a value, and the per-file
+// atomicity afforded by atomicWriteFile already covers the original
+// failure mode (partial bytes on disk after a crash).
 //
 // Lock ordering. The per-comp lock is a sync.RWMutex; WithTransaction
 // holds the WRITE lock for fn's entire duration. fn MUST call the

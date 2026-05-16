@@ -150,7 +150,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition) (bool, error) {
 		return false, nil
 	}
 
-	if err := os.WriteFile(path, newData, 0600); err != nil {
+	if err := atomicWriteFile(path, newData, 0600); err != nil {
 		return false, err
 	}
 

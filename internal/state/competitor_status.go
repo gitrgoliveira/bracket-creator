@@ -70,7 +70,7 @@ func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]do
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.compPath(compID, competitorStatusFilename), data, 0600)
+	return atomicWriteFile(s.compPath(compID, competitorStatusFilename), data, 0600)
 }
 
 // SetCompetitorStatus persists a status entry, replacing any prior

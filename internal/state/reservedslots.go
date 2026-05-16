@@ -75,7 +75,7 @@ func (s *Store) saveReservedSlotsLocked(compID string, slots []ReservedSlot) err
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := atomicWriteFile(path, data, 0600); err != nil {
 		return err
 	}
 	if slots == nil {
@@ -172,7 +172,7 @@ func (s *Store) saveParticipantsLocked(compID string, players []helper.Player) e
 		}
 		sb.WriteString(id + ", " + row + "\n")
 	}
-	if err := os.WriteFile(path, []byte(sb.String()), 0600); err != nil {
+	if err := atomicWriteFile(path, []byte(sb.String()), 0600); err != nil {
 		return err
 	}
 	for _, key := range []string{"participants.csv", "participants_with_seeds.csv"} {

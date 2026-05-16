@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"os"
@@ -137,16 +138,12 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 
 	path := s.compPath(compID, "pools.csv")
 
-	// #nosec G304
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	writer := csv.NewWriter(f)
+	// Build the CSV body in memory then write it atomically + durably
+	// via atomicWriteFile. Pool CSVs are small (<1MB even for large
+	// tournaments) so memory buffering is fine and gives us crash
+	// safety the os.Create + streaming pattern lacked.
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
 	for _, p := range pools {
 		for i, player := range p.Players {
 			seedStr := ""
@@ -160,6 +157,10 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
+		return err
+	}
+
+	if err := atomicWriteFile(path, buf.Bytes(), 0600); err != nil {
 		return err
 	}
 
@@ -289,16 +290,14 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 // UpdatePoolMatchByID (which holds the lock across load + mutate + save).
 func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult) error {
 	path := s.compPath(compID, "pool-matches.csv")
-	// #nosec G304
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
 
-	writer := csv.NewWriter(f)
+	// Build the CSV body in memory then write it atomically + durably
+	// via atomicWriteFile. Pool-match CSVs stay well under 1MB even for
+	// large tournaments (a few hundred matches × ~14 columns of short
+	// fields), so memory buffering trades trivial RAM for crash safety
+	// the previous os.Create + streaming pattern lacked.
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
 	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt"}); err != nil {
 		return err
 	}
@@ -338,6 +337,10 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult) erro
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
+		return err
+	}
+
+	if err := atomicWriteFile(path, buf.Bytes(), 0600); err != nil {
 		return err
 	}
 

@@ -95,7 +95,7 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket) error {
 		return err
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := atomicWriteFile(path, data, 0600); err != nil {
 		return err
 	}
 

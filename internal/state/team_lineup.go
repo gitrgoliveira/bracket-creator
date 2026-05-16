@@ -103,7 +103,7 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.compPath(compID, teamLineupFilename), data, 0600)
+	return atomicWriteFile(s.compPath(compID, teamLineupFilename), data, 0600)
 }
 
 // SetTeamLineup validates and persists a lineup, replacing any prior

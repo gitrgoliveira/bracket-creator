@@ -66,12 +66,11 @@ type EstimateInput struct {
 //
 // FR-055, FR-057, FR-058, FR-059, data-model §5.
 //
-// TODO(T150, T151): wire this into Engine.GenerateSchedule so each
-// scheduled match's expectedDuration comes from EstimateSchedule and
-// the slot assigner skips ceremony blocks. Tracked separately from
-// this slice — the calculator + endpoint are sufficient for the
-// estimator surface; the auto-scheduler integration is deferred so a
-// regression in slot assignment doesn't take down the whole estimator.
+// The per-match elapsed formula here is duplicated in
+// scheduler_slots.go's perMatchElapsedMinutes, which performs the
+// same calculation per court when assigning slots (T150 / T151). The
+// two MUST agree to satisfy FR-059's 5%-parity requirement against
+// the Excel Time Estimator — covered by the schedule tests.
 func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	// Per-match elapsed minutes.
 	perMatchMin := float64(in.MatchDurationClockMinutes) * in.Multiplier

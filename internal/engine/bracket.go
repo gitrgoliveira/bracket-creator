@@ -87,12 +87,14 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []helper.Play
 			}
 
 			match := state.BracketMatch{
-				ID:          fmt.Sprintf("m-r%d-%d", maxDepth-d, i),
-				SideA:       sideA,
-				SideB:       sideB,
-				Status:      state.MatchStatusScheduled,
-				Court:       court,
-				ScheduledAt: comp.StartTime,
+				ID:     fmt.Sprintf("m-r%d-%d", maxDepth-d, i),
+				SideA:  sideA,
+				SideB:  sideB,
+				Status: state.MatchStatusScheduled,
+				Court:  court,
+				// ScheduledAt is populated below by
+				// assignBracketMatchSlots — uniform start times
+				// were retired in T150.
 			}
 
 			// Auto-resolve byes
@@ -124,6 +126,19 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []helper.Play
 			}
 		}
 	}
+
+	// Per-court slot assignment (T150) + ceremony-block skipping
+	// (T151). See pools.go for the same wiring; tournament load
+	// failures abort the start so the operator notices the missing
+	// schedule data rather than silently shipping a uniform-start
+	// bracket.
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return err
+	}
+	state.ApplyTournamentDefaults(tournament)
+	state.ApplyCompetitionDefaults(comp)
+	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
 
 	return e.store.SaveBracket(comp.ID, bracket)
 }

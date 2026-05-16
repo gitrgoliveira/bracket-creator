@@ -66,15 +66,30 @@ func (e *Engine) generatePools(comp *state.Competition, players []helper.Player,
 		}
 		for i, m := range p.Matches {
 			results = append(results, state.MatchResult{
-				ID:          p.PoolName + "-" + strconv.Itoa(i),
-				SideA:       m.SideA.Name,
-				SideB:       m.SideB.Name,
-				Status:      state.MatchStatusScheduled,
-				Court:       court,
-				ScheduledAt: comp.StartTime,
+				ID:     p.PoolName + "-" + strconv.Itoa(i),
+				SideA:  m.SideA.Name,
+				SideB:  m.SideB.Name,
+				Status: state.MatchStatusScheduled,
+				Court:  court,
+				// ScheduledAt is populated below by
+				// assignPoolMatchSlots — uniform start times were
+				// retired in T150.
 			})
 		}
 	}
+
+	// Per-court slot assignment (T150) + ceremony-block skipping
+	// (T151). Loads the tournament-level tuning (multiplier,
+	// opening / lunch blocks) so a missing tournament.md falls back
+	// to the function's documented defaults without aborting the
+	// pipeline.
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return err
+	}
+	state.ApplyTournamentDefaults(tournament)
+	state.ApplyCompetitionDefaults(comp)
+	results = assignPoolMatchSlots(results, comp, tournament)
 
 	return e.store.SavePoolMatches(comp.ID, results)
 }

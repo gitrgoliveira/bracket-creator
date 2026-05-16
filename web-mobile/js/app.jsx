@@ -231,10 +231,22 @@ function App() {
   useE(() => { load(); }, []);
 
   useE(() => {
+    // Track every jittered timer so the cleanup can cancel them when
+    // viewerCompId / mode changes. Without this, a timer queued for
+    // viewerCompId="A" fires after the user switches to comp "B",
+    // calls setSelectedCompData(data_for_A), and races the new
+    // useEffect([viewerCompId]) fetch — whichever resolves last wins.
+    const pendingTimers = [];
+    const jitteredTimeout = (fn, delay) => {
+        const id = setTimeout(fn, delay);
+        pendingTimers.push(id);
+        return id;
+    };
+
     const unsub = window.API.subscribeToEvents((event) => {
         const jitter = Math.random() * 500;
         if (event.type === "tournament_updated") {
-            if (!authPromptRef.current) setTimeout(load, jitter);
+            if (!authPromptRef.current) jitteredTimeout(load, jitter);
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
             // Display mode (T060) reads the full tournament tree
             // (every competition's poolMatches + bracket) and needs a
@@ -246,7 +258,7 @@ function App() {
             // thundering the server when many displays are mounted on
             // the same venue LAN.
             if (mode === "display") {
-                setTimeout(load, jitter);
+                jitteredTimeout(load, jitter);
             } else if (viewerCompId === event.data.competitionId) {
                 // Apply partial update immediately (match_updated only —
                 // competition_completed has no per-match payload)
@@ -256,17 +268,17 @@ function App() {
                 // Refresh current competition (jittered) — the backend has
                 // already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                setTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
             }
             // Also refresh tournament list for status updates
-            setTimeout(load, jitter);
+            jitteredTimeout(load, jitter);
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can
         // render a reconnect indicator during disconnects.
         setSseConnected(status === 'open');
     });
-    return unsub;
+    return () => { unsub(); pendingTimers.forEach(clearTimeout); };
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);

@@ -105,4 +105,84 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
+
+	t.Run("matchDuration=0 returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=0&multiplier=1.5&courts=2",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "matchDuration")
+	})
+
+	t.Run("negative matchDuration returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=-5&multiplier=1.5&courts=2",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "matchDuration")
+	})
+
+	t.Run("multiplier=NaN returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=NaN&courts=2",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "multiplier")
+	})
+
+	t.Run("multiplier=Inf returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=Inf&courts=2",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "multiplier")
+	})
+
+	t.Run("multiplier=0 returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=0&courts=2",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "multiplier")
+	})
+
+	t.Run("negative multiplier returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=-1.5&courts=2",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "multiplier")
+	})
+
+	t.Run("courts=0 returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=0",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "courts must be between 1 and 26")
+	})
+
+	t.Run("courts=27 returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=27",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "courts must be between 1 and 26")
+	})
 }

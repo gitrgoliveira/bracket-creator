@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 
@@ -55,9 +56,17 @@ func scheduleEstimateHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "matchDuration must be an integer"})
 		return
 	}
+	if matchDuration < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "matchDuration must be >= 1"})
+		return
+	}
 	multiplier, err := strconv.ParseFloat(multiplierStr, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "multiplier must be a number"})
+		return
+	}
+	if multiplier <= 0 || math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "multiplier must be a positive finite number"})
 		return
 	}
 	courts, err := strconv.Atoi(courtsStr)

@@ -22,9 +22,14 @@ const competitorStatusFilename = "competitor-status.yaml"
 
 // LoadCompetitorStatus returns the per-player status map for compID.
 // A missing file is treated as "all eligible" per FR-034 / NFR-025.
+//
+// Uses the per-competition lock (consistent with pools/bracket/etc.)
+// so a concurrent ineligibility write on a different competition does
+// not serialize behind this read.
 func (s *Store) LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	mu := s.getCompLock(compID)
+	mu.RLock()
+	defer mu.RUnlock()
 	return s.loadCompetitorStatusLocked(compID)
 }
 
@@ -71,12 +76,17 @@ func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]do
 // SetCompetitorStatus persists a status entry, replacing any prior
 // entry for the same PlayerID. RecordedAt defaults to time.Now().UTC()
 // when the caller leaves it zero.
+//
+// Uses the per-competition lock so the load-mutate-save cycle is
+// atomic against other competitor-status writers for the same
+// competition.
 func (s *Store) SetCompetitorStatus(compID string, status domain.CompetitorStatus) error {
 	if err := status.Validate(); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
 	current, err := s.loadCompetitorStatusLocked(compID)
 	if err != nil {
 		return err

@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -96,9 +97,16 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 	}
 	// T085 — persist the loser's competitor-status when this update
 	// recorded a kiken or fusenpai decision. Failure to write the
-	// status is non-fatal to the score-recording itself; the handler
-	// will log and may surface a degraded-broadcast warning.
-	return e.recordIneligibilityFromDecision(compId, matchId, result)
+	// status is non-fatal to the score-recording itself: the match
+	// score is already on disk, so propagating an error here would
+	// give the operator a 500 response that they would retry,
+	// double-recording the score. Log and swallow — the next-match
+	// eligibility gate is the safety net that surfaces a missed
+	// status write (FR-035).
+	if err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
+		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
+	}
+	return nil
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {
@@ -328,6 +336,10 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].Status = status
 					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
 					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
+					bracket.Rounds[rIdx][mIdx].Decision = result.Decision
+					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
+					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
+					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
 					// Echo the persisted scheduling fields back into the result so the
 					// caller (and SSE broadcast) sees the full, correct match state
 					// rather than the empty Court/ScheduledAt the scoring UI sends.

@@ -184,6 +184,13 @@ type BracketMatch struct {
 	ScoreA       string `json:"scoreA"`
 	ScoreB       string `json:"scoreB"`
 	IsOverridden bool   `json:"isOverridden"`
+	// Decision-type metadata mirrors MatchResult so an elimination-stage
+	// kiken/fusenpai/encho is reconstructable from bracket.json alone
+	// (label rendering, Excel export, SSE replays).
+	Decision       string         `json:"decision,omitempty"`
+	DecisionBy     string         `json:"decisionBy,omitempty"`
+	DecisionReason string         `json:"decisionReason,omitempty"`
+	Encho          *EnchoMetadata `json:"encho,omitempty"`
 }
 
 type Bracket struct {

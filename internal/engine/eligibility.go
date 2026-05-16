@@ -173,10 +173,23 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 	return e.store.SetCompetitorStatus(compID, status)
 }
 
-// loserSideName returns the SideA or SideB name of the side with zero
-// ippons (the loser in a kiken/fusenpai). Returns "" when the scoreline
-// is ambiguous (e.g. both empty or both populated).
+// loserSideName returns the name of the losing side for a
+// kiken/fusenpai. It prefers result.Winner (the canonical surviving
+// side, set by the score handler after T077 validation) and falls
+// back to the ippon-count heuristic only when Winner is unset.
+//
+// Returns "" when neither path is conclusive — callers must treat
+// that as "no ineligibility recorded" and the operator will need to
+// fix the request shape before the eligibility gate works.
 func loserSideName(result *state.MatchResult) string {
+	if result.Winner != "" {
+		switch result.Winner {
+		case result.SideA:
+			return result.SideB
+		case result.SideB:
+			return result.SideA
+		}
+	}
 	aEmpty := len(result.IpponsA) == 0
 	bEmpty := len(result.IpponsB) == 0
 	switch {

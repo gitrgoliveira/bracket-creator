@@ -137,12 +137,18 @@ func (r *ScoreRequest) validateDecision() error {
 				Message: fmt.Sprintf("kiken requires %d-0 scoreline", need),
 			}
 		}
+		if err := r.requireWinnerForDecision("kiken"); err != nil {
+			return err
+		}
 	case "fusenpai":
 		if r.DecisionBy == "" {
 			return &ValidationError{Field: "decisionBy", Message: "required when decision is fusenpai"}
 		}
 		if !winningScoreline(r.IpponsA, r.IpponsB, 2) {
 			return &ValidationError{Field: "scoreline", Message: "fusenpai requires 2-0 scoreline"}
+		}
+		if err := r.requireWinnerForDecision("fusenpai"); err != nil {
+			return err
 		}
 	case "fusensho":
 		return &ValidationError{
@@ -159,6 +165,21 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 	a := len(ipponsA)
 	b := len(ipponsB)
 	return (a == n && b == 0) || (a == 0 && b == n)
+}
+
+// requireWinnerForDecision enforces that Winner is set when a kiken/
+// fusenpai is recorded — the engine's eligibility side effect uses
+// Winner as the canonical surviving side. Without this, a bulk-score
+// or hand-crafted request could record an ineligibility against the
+// wrong player.
+func (r *ScoreRequest) requireWinnerForDecision(label string) error {
+	if r.Winner == "" {
+		return &ValidationError{
+			Field:   "winner",
+			Message: fmt.Sprintf("required when decision is %s (names the surviving side)", label),
+		}
+	}
+	return nil
 }
 
 // AsMatchResult returns the underlying state.MatchResult value so the

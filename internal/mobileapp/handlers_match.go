@@ -32,6 +32,44 @@ func annotateQueuePositions(matches []state.MatchResult) {
 	}
 }
 
+// enchoExceedsCap reports whether an encho block would exceed the
+// competition's MaxEnchoPeriods cap. Returns false (within limit) when
+// encho is unset, comp is nil, the cap is 0 (unlimited — FIK default),
+// the count is within the cap, or force is set. T104/CHK029.
+func enchoExceedsCap(encho *state.EnchoMetadata, comp *state.Competition, force bool) bool {
+	if encho == nil || encho.PeriodCount <= 0 {
+		return false
+	}
+	if comp == nil || comp.MaxEnchoPeriods <= 0 {
+		return false
+	}
+	return encho.PeriodCount > comp.MaxEnchoPeriods && !force
+}
+
+// enforceEnchoCap is the gin-handler wrapper around enchoExceedsCap for
+// the single-result score / decision endpoints. Loads the competition
+// (writing 500 on store failure rather than silently bypassing the cap)
+// and writes the 400 max_encho_exceeded response when the cap is
+// exceeded. Returns true if the handler should continue.
+func enforceEnchoCap(c *gin.Context, store CompetitionStore, id string, encho *state.EnchoMetadata, force bool) bool {
+	if encho == nil || encho.PeriodCount <= 0 {
+		return true
+	}
+	comp, err := store.LoadCompetition(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate encho limits"})
+		return false
+	}
+	if enchoExceedsCap(encho, comp, force) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "max_encho_exceeded",
+			"limit": comp.MaxEnchoPeriods,
+		})
+		return false
+	}
+	return true
+}
+
 // tryAutoCompletePools runs the auto-complete check after a successful score
 // write. The score itself has already been recorded, so we don't fail the
 // request when the auto-complete check errors; instead we log full details
@@ -91,7 +129,21 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// Only successfully-recorded results go into the SSE broadcast so
 		// clients never patch with values the engine rejected.
 		var successful []state.MatchResult
+
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate encho limits"})
+			return
+		}
+		force := c.Query("force") == "true"
+
 		for i := range results {
+			// T104/CHK029: enforce MaxEnchoPeriods cap on bulk-score payload.
+			if enchoExceedsCap(results[i].Encho, comp, force) {
+				errs = append(errs, scoreError{MatchID: results[i].ID, Error: "max_encho_exceeded"})
+				continue
+			}
+
 			if err := eng.RecordMatchResult(id, results[i].ID, &results[i]); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 			} else {
@@ -331,16 +383,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// operator can override by sending ?force=true after confirming
 		// the warning banner — the UI's job is to surface that prompt
 		// when the cap is reached.
-		if req.Encho != nil && req.Encho.PeriodCount > 0 {
-			if comp, cerr := store.LoadCompetition(id); cerr == nil && comp != nil && comp.MaxEnchoPeriods > 0 {
-				if req.Encho.PeriodCount > comp.MaxEnchoPeriods && c.Query("force") != "true" {
-					c.JSON(http.StatusBadRequest, gin.H{
-						"error": "max_encho_exceeded",
-						"limit": comp.MaxEnchoPeriods,
-					})
-					return
-				}
-			}
+		if !enforceEnchoCap(c, store, id, req.Encho, c.Query("force") == "true") {
+			return
 		}
 
 		result := req.AsMatchResult()

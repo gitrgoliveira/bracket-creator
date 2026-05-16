@@ -108,16 +108,8 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// T104/CHK029: enforce MaxEnchoPeriods cap on the encho block.
 		// Same shape as the score handler — Force bypasses, 0 cap means
 		// unlimited.
-		if req.Encho != nil && req.Encho.PeriodCount > 0 {
-			if comp, cerr := store.LoadCompetition(id); cerr == nil && comp != nil && comp.MaxEnchoPeriods > 0 {
-				if req.Encho.PeriodCount > comp.MaxEnchoPeriods && !req.Force {
-					c.JSON(http.StatusBadRequest, gin.H{
-						"error": "max_encho_exceeded",
-						"limit": comp.MaxEnchoPeriods,
-					})
-					return
-				}
-			}
+		if !enforceEnchoCap(c, store, id, req.Encho, req.Force) {
+			return
 		}
 
 		result, status, err := eng.RecordDecision(id, mid, req.Decision, req.DecisionBy, req.DecisionReason, req.Encho, req.Force)

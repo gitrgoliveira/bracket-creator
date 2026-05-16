@@ -614,6 +614,23 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 // flows automatically to all three sites.
 const TEAM_POSITIONS = Array.from({ length: window.MAX_TEAM_SIZE }, (_, i) => String(i + 1));
 
+// T131 helper: human-friendly position label for the team-match scoring
+// modal. 5-person teams use the canonical FIK names; non-5 sizes use the
+// position number. Kept inline here so the team modal doesn't have a
+// hard import dependency on admin_lineup.jsx (the two files are loaded
+// independently and admin_lineup.jsx may not be present in older
+// builds). The mapping mirrors POS_LABELS_5 in admin_lineup.jsx.
+const POS_LABELS_BY_INDEX_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
+function positionLabelFor(teamSize, index, sub) {
+  if (sub && sub.position && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) {
+    // Backend may emit a name string in Position for non-5 sizes once
+    // domain.Position is wire-stable. Use it verbatim when present.
+    return sub.position;
+  }
+  if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_BY_INDEX_5[index];
+  return `Match ${index + 1}`;
+}
+
 function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
   const m = match;
   const isComplete = m.status === "completed";
@@ -629,10 +646,86 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
   const [decisionErr, setDecisionErr] = useStateA("");
   const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
+  // T131: lineup data so each bout cell can show the assigned player
+  // name + canonical position label. Falls back gracefully when the
+  // lineup hasn't been submitted yet (404 → null).
+  const [lineupA, setLineupA] = useStateA(null);
+  const [lineupB, setLineupB] = useStateA(null);
+  // T136 / T141: competition lookup so we can branch on teamMatchType
+  // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
+  // knockout-format precondition. Falls back to compKind/teamSize when
+  // the fetch fails so the existing fixed-grid flow still works.
+  const [compMeta, setCompMeta] = useStateA(null);
+  // T141: error banner mapping for the daihyosen POST. Server returns
+  // 400 not_tied / 400 pool_match / 409 insufficient_eligibility — see
+  // handlers_daihyosen.go for the canonical strings.
+  const [daihyosenErr, setDaihyosenErr] = useStateA("");
+  const [daihyosenBusy, setDaihyosenBusy] = useStateA(false);
   // Same teardown-race guard as ScoreEditorModal — covers external/
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // Fetch lineup + competition data on mount. Both endpoints are
+  // read-only and idempotent; failures degrade gracefully (the modal
+  // still functions, just without position labels / kachinuki mode).
+  useEffectA(() => {
+    let cancelled = false;
+    if (!m.compId) return;
+    // Competition detail for teamMatchType + format. We don't need the
+    // full payload — just the config fields. fetchCompetitionDetails
+    // already exists and is cheap.
+    (async () => {
+      try {
+        const detail = await window.API.fetchCompetitionDetails(m.compId);
+        if (cancelled) return;
+        setCompMeta(detail || null);
+      } catch (e) {
+        // Soft-fail: kachinuki/daihyosen UI just won't render.
+        console.warn("Competition fetch for team modal failed:", e);
+      }
+    })();
+    // Lineups for both teams. compMatches injects m.round as a string
+    // label ("Round 2", "Quarterfinals", ...) — for bracket matches we
+    // extract the numeric index from "Round N" when possible. Pool
+    // matches don't have a per-round lineup in the current model, so
+    // we fall back to round 0 (matches the first set of bouts).
+    // TODO(T131): plumb a numeric round through compMatches so this
+    // lookup is exact for every phase / label.
+    let round = 0;
+    if (typeof m.round === "string") {
+      const mr = /^Round\s+(\d+)$/.exec(m.round);
+      if (mr) round = parseInt(mr[1], 10) - 1;
+    } else if (typeof m.round === "number") {
+      round = m.round;
+    }
+    const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
+    const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
+    if (sideAId) {
+      window.API.fetchTeamLineup(m.compId, sideAId, round).then(l => {
+        if (!cancelled) setLineupA(l);
+      }).catch(() => { /* 404 / network: ignore */ });
+    }
+    if (sideBId) {
+      window.API.fetchTeamLineup(m.compId, sideBId, round).then(l => {
+        if (!cancelled) setLineupB(l);
+      }).catch(() => { /* 404 / network: ignore */ });
+    }
+    return () => { cancelled = true; };
+  }, [m.compId, m.id]);
+
+  // T136: kachinuki branch. Match-level teamMatchType (added by
+  // viewer.compMatches in a sibling slice) is preferred; competition
+  // fetch is the fallback. Default "fixed" preserves the legacy N×1
+  // grid behaviour.
+  const teamMatchType = m.teamMatchType || compMeta?.teamMatchType || "fixed";
+  const isKachinuki = teamMatchType === "kachinuki";
+  // T141: daihyosen is knockout-only — pool matches resolve ties via
+  // the standings tiebreak, not a representative bout. Format comes
+  // from match-level compFormat (when set by compMatches) or the comp
+  // fetch fallback. Phase === "bracket" is the in-modal signal.
+  const compFormat = m.compFormat || compMeta?.format || "";
+  const isKnockoutPhase = m.phase === "bracket" || compFormat === "playoffs" || compFormat === "mixed";
 
   // Mirror of submitDecision in ScoreEditorModal — kept inline rather than
   // hoisted to a shared hook because the two modals own different "after
@@ -862,10 +955,76 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             ))}
           </div>
 
-          {/* Individual match rows */}
-          {positions.map((pos, idx) => {
+          {/* Individual match rows. T136: in kachinuki mode only render
+              the CURRENT bout (the last sub result with a real score, or
+              the first row if nothing has been scored yet) — the server
+              appends new bouts via engine.MaybeAdvanceKachinuki after
+              each score record, so the operator only ever scores one
+              bout at a time. */}
+          {(() => {
+            // T136: kachinuki "current bout" index — last row that has
+            // any data, or 0 if nothing scored yet.
+            let kachinukiIdx = 0;
+            for (let i = subs.length - 1; i >= 0; i--) {
+              if (subs[i].aPts.length > 0 || subs[i].bPts.length > 0 || subs[i].aFouls > 0 || subs[i].bFouls > 0) {
+                kachinukiIdx = i;
+                break;
+              }
+            }
+            // T136: "kachinuki-exhaustion" sentinel — surface the end
+            // banner instead of more bout rows when the backend has
+            // already decided the match.
+            const exhausted = isKachinuki && (m.decision === "kachinuki-exhaustion" || (m.subResults || []).some(s => s.decision === "kachinuki-exhaustion"));
+            const visiblePositions = isKachinuki ? positions.slice(0, kachinukiIdx + 1) : positions;
+            return [
+              isKachinuki && (
+                <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontWeight: 700 }}>Kachinuki (winner-stays)</span>
+                    <span style={{ color: "var(--ink-3)" }}>
+                      {exhausted
+                        ? "One team exhausted — match ended."
+                        : "Score only the current bout. The server appends the next bout automatically; reopen the match to score it."}
+                    </span>
+                  </div>
+                  {/* TODO(T136): inline auto-refresh after each score so
+                      operators don't have to close+reopen the modal —
+                      requires hooking the onSubmit response (current
+                      flow forwards through parent + closes the modal). */}
+                </div>
+              ),
+              ...visiblePositions
+            ];
+          })().filter(Boolean).map((pos, displayIdx) => {
+            // Kachinuki returns a banner element as the first item; pass
+            // it through unchanged. Other items are position strings —
+            // map them back to their canonical index in `positions`.
+            if (React.isValidElement(pos)) return pos;
+            const idx = positions.indexOf(pos);
             const s = subs[idx];
             const t = subTotals[idx];
+            // T131: pull the per-side player + position label. existingSub
+            // (from the match) and lineup data are both consulted so the
+            // bout cell shows e.g. "Match 1 (Senpo) — A. Tanaka vs B. Sato".
+            const existingSubAtIdx = (m.subResults || []).find(sr => sr.position === idx + 1);
+            const posLabel = positionLabelFor(teamSize, idx, existingSubAtIdx);
+            // Resolve the player name occupying this position on each
+            // side: lineup data first (canonical when present), then the
+            // SubMatchResult.SideA/SideB strings from a prior score.
+            //
+            // 5-person teams use named position keys (senpo, jiho, ...);
+            // other sizes use the numeric string "1".."N". Try both
+            // shapes so this stays size-agnostic.
+            const posKey5 = (teamSize === 5 && idx < 5) ? POS_LABELS_BY_INDEX_5[idx].toLowerCase() : null;
+            const posKeyN = String(positions[idx]);
+            const pickFromLineup = (lineup) => {
+              if (!lineup?.positions) return "";
+              if (posKey5 && lineup.positions[posKey5]) return lineup.positions[posKey5];
+              if (lineup.positions[posKeyN]) return lineup.positions[posKeyN];
+              return "";
+            };
+            const playerAName = pickFromLineup(lineupA) || existingSubAtIdx?.sideA || "";
+            const playerBName = pickFromLineup(lineupB) || existingSubAtIdx?.sideB || "";
 
             // Each row: [left side, center score, right side] — left=SHIRO, right=AKA
             const rowSides = [
@@ -887,7 +1046,19 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 
             return (
               <div key={idx} className="team-sub-match">
-                <div className="team-sub-match__pos">Match {pos}</div>
+                <div className="team-sub-match__pos">
+                  {/* T131: position label + assigned player names from
+                      lineup data. The position label (Senpo/Jiho/etc.
+                      for 5-person teams, "Match N" otherwise) comes from
+                      positionLabelFor; player names are joined from the
+                      team lineups when available. */}
+                  <span style={{ fontWeight: 700 }}>{posLabel}</span>
+                  {(playerAName || playerBName) && (
+                    <span style={{ display: "block", fontSize: 11, color: "var(--ink-3)", fontWeight: 500, marginTop: 2 }}>
+                      {playerBName || "?"} (SHIRO) vs {playerAName || "?"} (AKA)
+                    </span>
+                  )}
+                </div>
                 <div className="team-sub-match__row">
                   {rowSides.map((rs, rsIdx) => (
                     <React.Fragment key={rs.key}>
@@ -933,8 +1104,12 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             );
           })}
 
-          {/* Team summary */}
-          <div className="team-summary">
+          {/* Team summary — T138: sticky to the top of the modal body so
+              the IV/PW totals stay visible as the operator scrolls through
+              many bout rows (especially relevant on small screens / when
+              every sub-match has been scored). zIndex: 5 keeps it under
+              the modal head (10) but above the bout cells. */}
+          <div className="team-summary" style={{ position: "sticky", top: 0, background: "var(--bg, white)", zIndex: 5, borderBottom: "1px solid var(--line, #ddd)", paddingBottom: 8 }}>
             {teamSides.map((ts, idx) => (
               <React.Fragment key={ts.key}>
                 <div className="team-summary__side">
@@ -950,6 +1125,56 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               </React.Fragment>
             ))}
           </div>
+
+          {/* T141: daihyosen (representative bout) affordance. Visible
+              when the match is in the knockout stage AND all positions
+              have been scored AND IV/PW tie. Click POSTs to /daihyosen;
+              server validates and appends a new SubMatchResult with
+              decision="daihyosen" that the operator then scores via the
+              regular bout flow. Error responses are mapped to user-
+              visible strings per the contract in handlers_daihyosen.go. */}
+          {(() => {
+            const allComplete = subTotals.every(t => t.aTotal > 0 || t.bTotal > 0 || t.winner !== null);
+            const tied = ivA === ivB && pwA === pwB && (ivA + pwA + ivB + pwB) > 0;
+            if (!isKnockoutPhase || !allComplete || !tied) return null;
+            const onDaihyosen = async () => {
+              setDaihyosenErr("");
+              setDaihyosenBusy(true);
+              try {
+                await window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
+                if (!mountedRef.current) return;
+                // Reload the modal data via parent: closing + reopening
+                // is the cleanest cross-cutting refresh path. The parent
+                // listens for SSE match_updated and will push the new
+                // bout when re-opened.
+                onClose();
+              } catch (e) {
+                if (!mountedRef.current) return;
+                const msg = String(e?.message || "");
+                let userMsg = msg;
+                if (msg === "not_tied") userMsg = "Daihyosen requires a tied result on IV and PW";
+                else if (msg === "pool_match") userMsg = "Daihyosen is only for knockout matches";
+                else if (msg === "insufficient_eligibility") userMsg = "Not enough eligible competitors for a representative bout";
+                setDaihyosenErr(userMsg);
+              } finally {
+                if (mountedRef.current) setDaihyosenBusy(false);
+              }
+            };
+            return (
+              <div className="daihyosen-controls" style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12, padding: 12, border: "1px dashed var(--accent, #888)", borderRadius: 6, background: "var(--bg-2, #fafafa)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>Match tied on IV and PW</div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Add a representative bout (daihyosen) to break the tie. Each side picks one eligible competitor; the bout is scored like any other sub-match.</div>
+                <div>
+                  <button type="button" className="btn btn--primary btn--sm" onClick={onDaihyosen} disabled={daihyosenBusy}>
+                    {daihyosenBusy ? "Adding…" : "Add daihyosen"}
+                  </button>
+                </div>
+                {daihyosenErr && (
+                  <div style={{ color: "var(--danger, #c00)", fontSize: 12 }}>{daihyosenErr}</div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* T093–T098: decision (kiken/fusenpai/fusensho) controls. In the
               team editor, Fusensho is per-bout and would belong on each

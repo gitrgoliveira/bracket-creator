@@ -920,8 +920,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       sec: "Preparation", items: [
         { id: "overview", label: "Overview" },
         { id: "participants", label: "Participants & seeds" },
+        // T136 nav: Lineups is a team-only surface — hide it for
+        // individual competitions so the sidebar stays uncluttered.
+        c.kind === "team" ? { id: "lineups", label: "Lineups" } : null,
         { id: "settings", label: "Settings" },
-      ]
+      ].filter(Boolean)
     },
     {
       sec: "Run", items: [
@@ -1015,6 +1018,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
           <div>
             {section === "overview" && <AdminCompOverview c={c} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} />}
             {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
+            {section === "lineups" && window.AdminTeamLineupsList && <window.AdminTeamLineupsList comp={c} password={password} showToast={showToast} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} />}
             {section === "pools" && <AdminPools c={c} pools={pools} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
             {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onMoveCourt={onMoveCourt} tweaks={tweaks} password={password} showToast={showToast} />}

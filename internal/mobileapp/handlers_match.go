@@ -337,6 +337,20 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, hub Broadcaster
 				"status":        status,
 			})
 		}
+		// T135 — kachinuki post-score advancement. No-op for non-
+		// kachinuki competitions (engine returns changed=false). A
+		// non-fatal error here doesn't fail the request: the operator's
+		// bout score is already on disk; surfacing a 500 would lead them
+		// to retry and double-record. Mirrors the recordIneligibility
+		// non-fatal pattern.
+		if advanced, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
+			log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
+		} else if advanced {
+			hub.Broadcast(EventMatchUpdated, gin.H{
+				"competitionId": id,
+				"matchId":       mid,
+			})
+		}
 		tryAutoCompletePools(c, eng, hub, id)
 
 		c.JSON(http.StatusOK, result)

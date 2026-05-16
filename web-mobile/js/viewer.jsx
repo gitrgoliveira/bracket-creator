@@ -1504,7 +1504,6 @@ function ScheduleViewer({ tournament, tweaks }) {
     // Compute once at mount only — re-derivation would clobber user edits
     // as soon as they removed a seeded chip. Re-sync explicitly via the
     // Clear/Reseed buttons instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [picked, setPicked] = useState(initialPicked);
   const [dojoText, setDojoText] = useState("");

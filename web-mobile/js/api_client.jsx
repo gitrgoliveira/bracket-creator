@@ -373,6 +373,67 @@ const API = {
             throw new Error(err.error || "Failed to delete competition");
         }
         return true;
+    },
+    // T129/T130: per-round team lineups (FR-040). GET returns the persisted
+    // TeamLineup for (compId, teamId, round) — 404 when no lineup has been
+    // submitted yet, which the form treats as "blank, editable". PUT replaces
+    // the lineup; the server rejects with 409 (ErrLineupLocked) once the
+    // round's first match has gone live. DELETE clears the lineup so an
+    // operator can revise pre-lock.
+    async fetchTeamLineup(compID, teamId, round) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
+        if (res.status === 404) return null;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load lineup");
+        }
+        return res.json();
+    },
+    async putTeamLineup(compID, teamId, round, positions, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ teamId, competitionId: compID, round, positions })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to save lineup");
+        }
+        return res.json();
+    },
+    async deleteTeamLineup(compID, teamId, round, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok && res.status !== 404) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to delete lineup");
+        }
+        return true;
+    },
+    // T141: daihyosen (representative bout) appended after a knockout team
+    // match ties on IV and PW. Server validates the tie + eligibility and
+    // returns the updated MatchResult with a new SubMatchResult whose
+    // decision="daihyosen" and Position=-1. The error codes (not_tied,
+    // pool_match, insufficient_eligibility) are surfaced verbatim by the
+    // caller — see TeamScoreEditorModal for the user-visible mapping.
+    async recordDaihyosen(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to add daihyosen");
+        }
+        return res.json();
     }
 };
 

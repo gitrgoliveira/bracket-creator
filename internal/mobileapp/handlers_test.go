@@ -48,6 +48,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	RegisterMatchHandlers(admin, eng, hub)
 	RegisterDecisionHandlers(admin, eng, hub)
 	RegisterEligibilityHandlers(admin, store, hub)
+	RegisterLineupHandlers(admin, store, store)
 
 	return r, store, eng, hub, tempDir
 }

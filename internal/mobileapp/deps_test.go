@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -50,11 +51,36 @@ func (stubScoringEngine) UpdateMatchTime(string, string, string) error {
 	return nil
 }
 
+func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, error) {
+	return false, nil
+}
+
 // stubBroadcaster is a no-op implementation of Broadcaster. Same
 // rationale as the other stubs.
 type stubBroadcaster struct{}
 
 func (stubBroadcaster) Broadcast(EventType, any) {}
+
+// stubTeamLineupStore is a no-op implementation of TeamLineupStore.
+// Same rationale as the other stubs — proves the interface is
+// mockable for handler tests (Slice 7.B / T127).
+type stubTeamLineupStore struct{}
+
+func (stubTeamLineupStore) LoadTeamLineups(string) (map[string]domain.TeamLineup, error) {
+	return nil, nil
+}
+
+func (stubTeamLineupStore) SetTeamLineup(string, domain.TeamLineup, int) error {
+	return nil
+}
+
+func (stubTeamLineupStore) DeleteTeamLineup(string, string, int) error {
+	return nil
+}
+
+func (stubTeamLineupStore) LockTeamLineupsForRound(string, int, time.Time) error {
+	return nil
+}
 
 // TestDepsInterfacesCompile is a compile-time guard that the consumer-
 // boundary interfaces (deps.go) are satisfied by both the stub
@@ -71,6 +97,7 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		_ CompetitionStore = stubCompetitionStore{}
 		_ ScoringEngine    = stubScoringEngine{}
 		_ Broadcaster      = stubBroadcaster{}
+		_ TeamLineupStore  = stubTeamLineupStore{}
 	)
 
 	// Concrete types — proves the production types remain drop-in
@@ -82,5 +109,6 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		_ ScoringEngine         = (*engine.Engine)(nil)
 		_ Broadcaster           = (*Hub)(nil)
 		_ CompetitorStatusStore = (*state.Store)(nil)
+		_ TeamLineupStore       = (*state.Store)(nil)
 	)
 }

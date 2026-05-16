@@ -1,6 +1,8 @@
 package state
 
 import (
+	"fmt"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -37,6 +39,15 @@ type Competition struct {
 	// may run before the operator must call daihyosen. Zero means
 	// unlimited (FIK general default). T104, CHK029.
 	MaxEnchoPeriods int `yaml:"max_encho_periods,omitempty" json:"maxEnchoPeriods,omitempty"`
+
+	// TeamMatchType selects the team-match format (FR-044). Empty value
+	// is treated as TeamMatchTypeFixed for backward compatibility — all
+	// N×1 bouts are pre-scheduled by position. TeamMatchTypeKachinuki
+	// schedules only the first bout; subsequent bouts are derived
+	// dynamically from prior bout outcomes ("winner stays on"). See
+	// engine/kachinuki.go for the advancement semantics. Ignored when
+	// TeamSize is 0 (individual competitions).
+	TeamMatchType TeamMatchType `yaml:"team_match_type,omitempty" json:"teamMatchType,omitempty"`
 
 	// Legacy single-phase duration. Captured at unmarshal time and used by
 	// ApplyCompetitionDefaults to populate the per-phase fields above when
@@ -107,6 +118,41 @@ const (
 	PoolFormatFull    = "full"
 	PoolFormatPartial = "partial"
 )
+
+// TeamMatchType selects the team-match format. FR-044.
+//
+//   - TeamMatchTypeFixed: every N×1 bout is scheduled up-front by
+//     position (Senpo×Senpo, Jiho×Jiho, …). This is the historical
+//     default and the empty value resolves to it for backward compat.
+//   - TeamMatchTypeKachinuki: only the first bout is scheduled. After
+//     each bout, the winner stays on and faces the next un-retired
+//     player from the losing side; on a hikiwake both retire. The team
+//     match ends when one side has no remaining un-retired players.
+//     See engine/kachinuki.go.
+type TeamMatchType string
+
+const (
+	TeamMatchTypeFixed     TeamMatchType = "fixed"
+	TeamMatchTypeKachinuki TeamMatchType = "kachinuki"
+)
+
+// ValidateTeamMatchType returns nil when the value is acceptable on the
+// given Competition (empty == fixed default, kachinuki requires
+// TeamSize >= 2). FR-044.
+func ValidateTeamMatchType(t TeamMatchType, teamSize int) error {
+	switch t {
+	case "", TeamMatchTypeFixed:
+		return nil
+	case TeamMatchTypeKachinuki:
+		if teamSize < 2 {
+			return fmt.Errorf("kachinuki requires teamSize >= 2")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown teamMatchType %q (expected %q or %q)",
+			t, TeamMatchTypeFixed, TeamMatchTypeKachinuki)
+	}
+}
 
 // DecisionDraw is the canonical value for a tied (hikiwake) match.
 const DecisionDraw = "hikiwake"

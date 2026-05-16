@@ -16,6 +16,8 @@
 package mobileapp
 
 import (
+	"time"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -74,6 +76,11 @@ type ScoringEngine interface {
 	// UpdateMatchTime updates a match's scheduledAt. Mirrors
 	// engine.Engine.UpdateMatchTime.
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error
+	// MaybeAdvanceKachinuki runs the post-score advancement for a
+	// kachinuki ("winner-stays-on") team match. No-op for non-kachinuki
+	// competitions. Mirrors engine.Engine.MaybeAdvanceKachinuki.
+	// FR-044, T135.
+	MaybeAdvanceKachinuki(compID, matchID string) (bool, error)
 }
 
 // CompetitorStatusStore is the consumer-boundary view of state.Store
@@ -82,6 +89,23 @@ type ScoringEngine interface {
 type CompetitorStatusStore interface {
 	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
+}
+
+// TeamLineupStore is the consumer-boundary view of state.Store used by
+// handlers_lineup.go (Slice 7.B / T127). Mirrors the LoadTeamLineups /
+// SetTeamLineup / DeleteTeamLineup / LockTeamLineupsForRound methods
+// on *state.Store.
+//
+// The handler also needs the competition's TeamSize to drive
+// TeamLineup.Validate, so it composes this interface with
+// CompetitionStore at the registration site rather than promoting
+// LoadCompetition into this minimal store interface — same pattern
+// the other handler families use.
+type TeamLineupStore interface {
+	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
+	SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize int) error
+	DeleteTeamLineup(compID, teamID string, round int) error
+	LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error
 }
 
 // Broadcaster is the consumer-boundary view of *Hub used by handlers

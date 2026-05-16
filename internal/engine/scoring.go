@@ -129,6 +129,11 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 // T085/T092.
 func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchId
+
+	// T105/CHK047: capture the prior result so we can rollback if the atomic
+	// ineligibility write below fails with AlreadyIneligibleError.
+	prior, _ := e.lookupExistingResult(compId, matchId)
+
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
 		if result.SideA == "" {
 			result.SideA = r.SideA
@@ -158,11 +163,17 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		// recordIneligibilityFromDecision detects a concurrent kiken
 		// (different operator already wrote ineligibility for this
 		// player from another match), propagate the error so the handler
-		// can return HTTP 409. Other store errors keep the old
-		// fail-soft behavior — the score has already been written and
-		// a retry would double-record it.
+		// can return HTTP 409.
 		var alreadyErr *AlreadyIneligibleError
 		if errors.As(err, &alreadyErr) {
+			// K3/CHK047: rollback the partial write. The match score was
+			// already persisted, but the intended loser is already
+			// ineligible from a different match. Revert the match score
+			// to its prior state before returning 409 so the operator
+			// sees a clean rejection rather than a mutated match.
+			if prior != nil {
+				_ = e.RecordMatchResult(compId, matchId, prior)
+			}
 			return nil, err
 		}
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)

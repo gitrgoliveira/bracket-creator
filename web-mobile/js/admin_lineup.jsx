@@ -338,4 +338,4 @@ if (typeof window !== "undefined") {
   window.AdminTeamLineupsList = AdminTeamLineupsList;
 }
 
-export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, teamIdOf };
+export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, teamIdOf, canRevise };

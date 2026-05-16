@@ -213,6 +213,16 @@ func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 	// Same match should NOT be blocked — that's the undo path (T103).
 	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "re-record same match", nil, false)
 	assert.NoError(t, err, "re-recording the same match must not trigger AlreadyIneligibleError")
+
+	// Verify that the failed match (Pool A-1) was rolled back (K3 partial-write fix).
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		if m.ID == "Pool A-1" {
+			assert.Equal(t, state.MatchStatusScheduled, m.Status, "match should have rolled back to Scheduled after partial-write failure")
+			assert.Empty(t, m.Decision, "match should have rolled back Decision after partial-write failure")
+		}
+	}
 }
 
 // TestRecordDecision_ConcurrentKikenRace verifies K2/CHK047: when two

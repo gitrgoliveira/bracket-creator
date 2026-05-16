@@ -16,6 +16,44 @@ function resolveDecisionPassword(propPassword) {
   return "";
 }
 
+// T093/T094: build the /decision POST body. Pure helper so we can pin the
+// wire shape (decision/decisionBy/decisionReason/encho/force) against a
+// moving server contract. `force` is the T103/T104 override flag used when
+// the server replies decision_locked or max_encho_exceeded and the operator
+// confirms the override.
+function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts = {}) {
+  const body = { decision: kind, decisionBy };
+  if (decisionReason) body.decisionReason = decisionReason;
+  if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
+  if (opts.force) body.force = true;
+  return body;
+}
+
+// T104/CHK029: encho-period clamp + banner predicates. maxEnchoPeriods === 0
+// (or nullish) means unlimited per the FIK default
+// (state.CompetitionConfig.MaxEnchoPeriods). shouldShowEnchoMaxBanner
+// surfaces the "Maximum encho periods reached" warning once the operator
+// has incremented to the cap; the + button uses canIncrementEncho to gate
+// further increments client-side (the server enforces the same cap on PUT
+// /score → 409 max_encho_exceeded).
+function shouldShowEnchoMaxBanner(enchoPeriodCount, maxEnchoPeriods) {
+  if (!maxEnchoPeriods || maxEnchoPeriods <= 0) return false;
+  return enchoPeriodCount >= maxEnchoPeriods;
+}
+
+function canIncrementEncho(enchoPeriodCount, maxEnchoPeriods) {
+  if (!maxEnchoPeriods || maxEnchoPeriods <= 0) return true;
+  return enchoPeriodCount < maxEnchoPeriods;
+}
+
+function nextEnchoPeriod(current, maxEnchoPeriods) {
+  return canIncrementEncho(current, maxEnchoPeriods) ? current + 1 : current;
+}
+
+function prevEnchoPeriod(current) {
+  return Math.max(1, current - 1);
+}
+
 // Render the inline kiken/fusenpai prompt that replaces the score controls
 // while open. Side picker uses radio inputs labelled "SHIRO (White)" / "AKA
 // (Red)" to stay consistent with the score board legend; the value submitted
@@ -83,6 +121,11 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   const [matches, setMatches] = useStateA(null);
   const [err, setErr] = useStateA("");
   const [busyId, setBusyId] = useStateA("");
+  const mountedRef = useRefA(true);
+
+  useEffectA(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffectA(() => {
     let cancelled = false;
@@ -122,13 +165,15 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
         decisionBy,
         decisionReason: `auto: ${wname} withdrawn`,
       }, password);
+      if (!mountedRef.current) return;
       // Drop the awarded match from the list so the operator can keep walking.
       setMatches(prev => (prev || []).filter(x => x.id !== m.id));
       if (typeof onAwarded === "function") onAwarded(updated);
     } catch (e) {
+      if (!mountedRef.current) return;
       setErr(e?.message || "Failed to award default win");
     } finally {
-      setBusyId("");
+      if (mountedRef.current) setBusyId("");
     }
   };
 
@@ -262,10 +307,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     setDecisionSubmitting(true);
     setDecisionErr("");
     try {
-      const body = { decision: kind, decisionBy };
-      if (decisionReason) body.decisionReason = decisionReason;
-      if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
-      if (opts.force) body.force = true;
+      const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
       const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
       if (kind === "kiken") {
@@ -500,7 +542,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                 <button
                   type="button"
                   className="btn btn--sm"
-                  onClick={() => setEnchoPeriodCount(c => Math.max(1, c - 1))}
+                  onClick={() => setEnchoPeriodCount(c => prevEnchoPeriod(c))}
                   disabled={enchoPeriodCount <= 1}
                   aria-label="Decrease overtime period count"
                 >−</button>
@@ -508,13 +550,14 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                 <button
                   type="button"
                   className="btn btn--sm"
-                  onClick={() => setEnchoPeriodCount(c => c + 1)}
+                  onClick={() => setEnchoPeriodCount(c => nextEnchoPeriod(c, maxEnchoPeriods))}
+                  disabled={!canIncrementEncho(enchoPeriodCount, maxEnchoPeriods)}
                   aria-label="Increase overtime period count"
                 >+</button>
               </div>
             )}
-            {maxEnchoPeriods > 0 && enchoPeriodCount >= maxEnchoPeriods && (
-              <span style={{ color: "var(--danger, #d32f2f)", fontSize: "0.8em", marginTop: 4, display: "block" }}>
+            {shouldShowEnchoMaxBanner(enchoPeriodCount, maxEnchoPeriods) && (
+              <span role="alert" style={{ color: "var(--danger, #d32f2f)", fontSize: "0.8em", marginTop: 4, display: "block" }}>
                 Maximum encho periods reached
               </span>
             )}
@@ -788,10 +831,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     setDecisionSubmitting(true);
     setDecisionErr("");
     try {
-      const body = { decision: kind, decisionBy };
-      if (decisionReason) body.decisionReason = decisionReason;
-      if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
-      if (opts.force) body.force = true;
+      const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
       const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
       if (kind === "kiken") {
@@ -1033,7 +1073,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 <button
                   type="button"
                   className="btn btn--sm"
-                  onClick={() => setEnchoPeriodCount(c => Math.max(1, c - 1))}
+                  onClick={() => setEnchoPeriodCount(c => prevEnchoPeriod(c))}
                   disabled={enchoPeriodCount <= 1}
                   aria-label="Decrease overtime period count"
                 >−</button>
@@ -1041,13 +1081,14 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 <button
                   type="button"
                   className="btn btn--sm"
-                  onClick={() => setEnchoPeriodCount(c => c + 1)}
+                  onClick={() => setEnchoPeriodCount(c => nextEnchoPeriod(c, maxEnchoPeriods))}
+                  disabled={!canIncrementEncho(enchoPeriodCount, maxEnchoPeriods)}
                   aria-label="Increase overtime period count"
                 >+</button>
               </div>
             )}
-            {maxEnchoPeriods > 0 && enchoPeriodCount >= maxEnchoPeriods && (
-              <span style={{ color: "var(--danger, #d32f2f)", fontSize: "0.8em", marginTop: 4, display: "block" }}>
+            {shouldShowEnchoMaxBanner(enchoPeriodCount, maxEnchoPeriods) && (
+              <span role="alert" style={{ color: "var(--danger, #d32f2f)", fontSize: "0.8em", marginTop: 4, display: "block" }}>
                 Maximum encho periods reached
               </span>
             )}
@@ -1385,3 +1426,15 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 }
 
 window.ScoreEditorModal = ScoreEditorModal;
+
+// ES exports for the vitest suite — pure helpers only. Components stay
+// behind the window.* pattern to match the rest of admin_*.jsx.
+export {
+  resolveDecisionPassword,
+  buildDecisionBody,
+  shouldShowEnchoMaxBanner,
+  canIncrementEncho,
+  nextEnchoPeriod,
+  prevEnchoPeriod,
+  DecisionPrompt,
+};

@@ -589,11 +589,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
                 Fusenpai
               </button>
-              {/* TODO(T096): Fusensho (per bout) — only renders inside the team
-                  editor since per-bout is a sub-match concept. Disabled here
-                  in the individual editor. */}
+              {/* Per-bout fusensho is a sub-match concept — implemented inside
+                  TeamScoreEditorModal. This placeholder explains the affordance
+                  to operators who open the individual-match editor. */}
               <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
-                Fusensho (per bout)
+                Fusensho (team only)
               </button>
             </div>
           )}

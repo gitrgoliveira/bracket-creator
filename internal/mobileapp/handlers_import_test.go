@@ -714,6 +714,71 @@ competitions:
 		assert.Nil(t, storedDup, "dup-courts-import must not have been persisted")
 	})
 
+	// validateCompetitionFormat cross-file guard symmetry: an unknown
+	// format value (or "swiss" which is 501 via the REST API) must error
+	// per-row rather than persisting a Competition whose format the REST
+	// API would have rejected. This mirrors the validateCompetitionCourts
+	// and validateDateDMY checks already in importCompetition.
+	t.Run("Unknown Format Rejected Per Row", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "unknown-format-import"
+    name: "Unknown Format Import"
+    kind: "individual"
+    format: "swiss"
+    courts: ["A"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Contains(t, resp.Results[0].Error, "format:",
+			"unknown format should land in ImportResult.Error (not persist)")
+		stored, _ := store.LoadCompetition("unknown-format-import")
+		assert.Nil(t, stored, "unknown-format-import must not have been persisted")
+	})
+
+	t.Run("Invalid Non-Swiss Format Rejected Per Row", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "bad-format-import"
+    name: "Bad Format Import"
+    kind: "individual"
+    format: "roundrobin"
+    courts: ["A"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Contains(t, resp.Results[0].Error, "format:",
+			"unknown non-swiss format should land in ImportResult.Error (not persist)")
+		stored, _ := store.LoadCompetition("bad-format-import")
+		assert.Nil(t, stored, "bad-format-import must not have been persisted")
+	})
+
 	// validateDateDMY year-range enforcement: a manifest with a date
 	// outside minDateYear..maxDateYear (mirroring JS MIN_YEAR/MAX_YEAR)
 	// must error per-row rather than persisting a year the admin

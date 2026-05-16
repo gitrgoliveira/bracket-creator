@@ -7,12 +7,49 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// loadWebSourceConcat reads web/index.html plus every web/js/*.js (alphabetical)
+// and returns them concatenated. The Excel CLI page used to be a single inline
+// <script> blob; after Slice 0.C extracted modules into web/js/*.js, the contract
+// assertions below scan all sources together.
+func loadWebSourceConcat(t *testing.T) string {
+	t.Helper()
+	candidates := []string{"../web", "web"}
+	var root string
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(c, "index.html")); err == nil {
+			root = c
+			break
+		}
+	}
+	require.NotEmpty(t, root, "could not find web/index.html relative to cwd")
+
+	htmlBytes, err := os.ReadFile(filepath.Join(root, "index.html"))
+	require.NoError(t, err)
+
+	jsPaths, err := filepath.Glob(filepath.Join(root, "js", "*.js"))
+	require.NoError(t, err)
+	sort.Strings(jsPaths)
+
+	var sb strings.Builder
+	sb.Write(htmlBytes)
+	sb.WriteString("\n")
+	for _, p := range jsPaths {
+		b, err := os.ReadFile(p)
+		require.NoError(t, err, "read %s", p)
+		sb.Write(b)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
 
 func TestNewServeCmd(t *testing.T) {
 	t.Parallel()
@@ -581,13 +618,7 @@ func TestRouterStaticFiles(t *testing.T) {
 }
 
 func TestSeedModalParsePayloadContractInWebPage(t *testing.T) {
-	bodyBytes, err := os.ReadFile("../web/index.html")
-	if err != nil {
-		bodyBytes, err = os.ReadFile("web/index.html")
-	}
-	require.NoError(t, err)
-
-	body := string(bodyBytes)
+	body := loadWebSourceConcat(t)
 	assert.Contains(t, body, "document.getElementById('manageSeeds').addEventListener('click'")
 	assert.Contains(t, body, "/api/parse-participants")
 	assert.Contains(t, body, "withZekkenName: withZekkenName")
@@ -601,16 +632,11 @@ func TestSeedModalParsePayloadContractInWebPage(t *testing.T) {
 }
 
 func TestDownloadCompletionPollingContractInWebPage(t *testing.T) {
-	bodyBytes, err := os.ReadFile("../web/index.html")
-	if err != nil {
-		bodyBytes, err = os.ReadFile("web/index.html")
-	}
-	require.NoError(t, err)
-
-	body := string(bodyBytes)
-	assert.Contains(t, body, "fetch('/api/download-status?token=' + encodeURIComponent(downloadToken)")
-	assert.NotContains(t, body, "document.cookie.indexOf('downloadToken=' + downloadToken)")
-	assert.NotContains(t, body, "document.cookie = 'downloadToken=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'")
+	body := loadWebSourceConcat(t)
+	assert.Contains(t, body, "/api/download-status?token=")
+	assert.Contains(t, body, "encodeURIComponent(downloadToken)")
+	assert.NotContains(t, body, "document.cookie.indexOf('downloadToken='")
+	assert.NotContains(t, body, "document.cookie = 'downloadToken=;")
 }
 
 func TestServeOptionsRun(t *testing.T) {

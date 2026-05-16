@@ -10,8 +10,9 @@ const REFRESHABLE_EVENTS = new Set([
   "tournament_updated",
 ]);
 
-// mergeMatchPatch is produced by data.jsx and used by patchCompetitionData below.
-const mergeMatchPatch = window.mergeMatchPatch;
+// SSE patch-apply logic moved to patch.jsx (T008 / NFR-006). Both
+// app.jsx and admin.jsx used to carry an identical patchCompetitionData
+// implementation; both now go through window.applyPatch.
 
 // Page components rendered by AdminApp's view switch (produced by sibling
 // admin_*.jsx files, all loaded before this one — see web-mobile/admin_split_plan.md).
@@ -64,44 +65,12 @@ function mergeTournamentPatch(currentT, patch, sessionPassword) {
   return next;
 }
 
+// Thin wrapper that delegates to the centralised patch.jsx. Kept as a
+// named local function so the existing call sites below (`setAdminCompData(prev =>
+// patchCompetitionData(prev, event))`) read unchanged.
 function patchCompetitionData(prev, event) {
-  if (!prev || !event.data) return prev;
-  const { result, results } = event.data;
-  const resultsToApply = results || (result ? [result] : []);
-  if (resultsToApply.length === 0) return prev;
-
-  const resultMap = new Map(resultsToApply.map(r => [r.id, r]));
-  const next = { ...prev };
-  let changed = false;
-
-  if (next.poolMatches) {
-    next.poolMatches = next.poolMatches.map(m => {
-      const update = resultMap.get(m.id);
-      if (update) { changed = true; return mergeMatchPatch(m, update); }
-      return m;
-    });
-  }
-
-  if (next.bracket && next.bracket.rounds) {
-    let bChanged = false;
-    const rounds = next.bracket.rounds.map(round =>
-      round.map(m => {
-        const update = resultMap.get(m.id);
-        if (update) {
-          bChanged = true; changed = true;
-          // Map MatchResult to BracketMatch fields if needed
-          const patch = { ...update };
-          if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
-          if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-          return mergeMatchPatch(m, patch);
-        }
-        return m;
-      })
-    );
-    if (bChanged) next.bracket = { ...next.bracket, rounds };
-  }
-
-  return changed ? next : prev;
+  if (window.applyPatch) return window.applyPatch(prev, event);
+  return prev;
 }
 
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast }) {

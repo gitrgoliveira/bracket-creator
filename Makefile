@@ -83,11 +83,11 @@ js/validate: js/lint js/security js/test ## Run all Javascript checks
 
 go/test: go/lint go/security js/validate ## Run tests
 	@echo "Running tests..."
-	go test -cover ./cmd/... ./internal/... ./tests/...
+	go test -cover . ./cmd/... ./internal/... ./tests/...
 
 go/test-race: go/lint ## Run tests with race detection
 	@echo "Running tests with race detection..."
-	go test -race -cover ./cmd/... ./internal/... ./tests/...
+	go test -race -cover . ./cmd/... ./internal/... ./tests/...
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 

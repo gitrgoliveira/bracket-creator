@@ -12,11 +12,13 @@
     <script src="/vendor/preact.min.js"></script>
     <script src="/vendor/hooks.umd.js"></script>
     <script src="/vendor/compat.umd.js"></script>
+    <script src="/vendor/preact-router.umd.js"></script>
 
     <script>
         console.log("Preact loaded:", !!window.preact);
         console.log("PreactHooks loaded:", !!window.preactHooks);
         console.log("PreactCompat loaded:", !!window.preactCompat);
+        console.log("PreactRouter loaded:", !!window.preactRouter);
 
         // Alias for React/ReactDOM compatibility
         window.React = window.preactCompat;
@@ -38,8 +40,12 @@
 <body>
     <div id="root"></div>
 
+    <script type="module" src="/dist/api_serializers.js?v=5"></script>
+    <script type="module" src="/dist/api_client.js?v=5"></script>
     <script type="module" src="/dist/api.js?v=5"></script>
     <script type="module" src="/dist/data.js?v=5"></script>
+    <script type="module" src="/dist/patch.js?v=5"></script>
+    <script type="module" src="/dist/router.js?v=5"></script>
     <script type="module" src="/dist/bracket.js?v=5"></script>
     <script type="module" src="/dist/ui.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>

@@ -53,8 +53,14 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 		},
 	}
 
-	err = sm.AddPlayerDataToSheet(players, true)
+	coords, err := sm.AddPlayerDataToSheet(players, true)
 	require.NoError(t, err)
+
+	require.NotNil(t, coords)
+	assert.Equal(t, "data", coords["player1"].SheetName)
+	assert.Equal(t, "$B$2", coords["player1"].Cell)
+	assert.Equal(t, "data", coords["player2"].SheetName)
+	assert.Equal(t, "$B$3", coords["player2"].Cell)
 
 	assertCellValue(t, file, sheetName, "A1", "Number")
 	assertCellValue(t, file, sheetName, "B1", "Player Name")

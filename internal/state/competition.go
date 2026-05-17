@@ -159,7 +159,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 		return false, nil
 	}
 
-if err := write(path, newData, 0600); err != nil {
+	if err := write(path, newData, 0600); err != nil {
 		return false, err
 	}
 

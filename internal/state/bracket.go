@@ -121,7 +121,7 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) erro
 		return err
 	}
 
-if err := write(path, data, 0600); err != nil {
+	if err := write(path, data, 0600); err != nil {
 		return err
 	}
 

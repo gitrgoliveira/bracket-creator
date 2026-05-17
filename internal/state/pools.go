@@ -365,7 +365,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 		return err
 	}
 
-if err := write(path, buf.Bytes(), 0600); err != nil {
+	if err := write(path, buf.Bytes(), 0600); err != nil {
 		return err
 	}
 

@@ -85,7 +85,7 @@ func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]do
 	if err != nil {
 		return err
 	}
-return write(s.compPath(compID, competitorStatusFilename), data, 0600)
+	return write(s.compPath(compID, competitorStatusFilename), data, 0600)
 }
 
 // SetCompetitorStatus persists a status entry, replacing any prior

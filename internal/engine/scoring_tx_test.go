@@ -23,7 +23,7 @@ func TestRecordDecisionTx_BasicEquivalence(t *testing.T) {
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 	}))
@@ -76,7 +76,7 @@ func TestRecordDecisionTx_ConcurrentDoesNotDeadlock(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	carolID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 		{ID: carolID, Name: "Carol", Dojo: "C"},
@@ -172,7 +172,7 @@ func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	carolID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 		{ID: carolID, Name: "Carol", Dojo: "C"},
@@ -220,7 +220,7 @@ func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	carolID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 		{ID: carolID, Name: "Carol", Dojo: "C"},
@@ -254,7 +254,7 @@ func TestRecordMatchResultWithIneligibilityTx_Basic(t *testing.T) {
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 	}))
@@ -299,7 +299,7 @@ func TestStartMatchTx_BlocksIneligibleParticipant(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	carolID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 		{ID: carolID, Name: "Carol", Dojo: "C"},

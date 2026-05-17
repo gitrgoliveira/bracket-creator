@@ -27,7 +27,7 @@ func TestStartMatchBlockedByIneligibleCompetitor(t *testing.T) {
 	// only treats the first column as an ID when it parses as UUID v4.
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
-	players := []helper.Player{
+	players := []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "DojoA"},
 		{ID: bobID, Name: "Bob", Dojo: "DojoB"},
 	}
@@ -75,7 +75,7 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 		aliceID := helper.NewUUID4()
 		bobID := helper.NewUUID4()
 		carolID := helper.NewUUID4()
-		require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 			{ID: aliceID, Name: "Alice", Dojo: "A"},
 			{ID: bobID, Name: "Bob", Dojo: "B"},
 			{ID: carolID, Name: "Carol", Dojo: "C"},
@@ -186,7 +186,7 @@ func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	carolID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 		{ID: carolID, Name: "Carol", Dojo: "C"},
@@ -239,7 +239,7 @@ func TestRecordDecision_ConcurrentKikenRace(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	carolID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 		{ID: carolID, Name: "Carol", Dojo: "C"},
@@ -304,7 +304,7 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	carolID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 		{ID: carolID, Name: "Carol", Dojo: "C"},

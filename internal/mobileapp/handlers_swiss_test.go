@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -45,9 +46,9 @@ func makeSwissComp(t *testing.T, store *state.Store, names []string, rounds int)
 		PoolMatchDuration: 3,
 	}
 	require.NoError(t, store.SaveCompetition(comp))
-	players := make([]helper.Player, len(names))
+	players := make([]domain.Player, len(names))
 	for i, n := range names {
-		players[i] = helper.Player{
+		players[i] = domain.Player{
 			ID:   helper.NewUUID4(),
 			Name: n,
 			Seed: i + 1,

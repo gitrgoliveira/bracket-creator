@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -47,11 +48,11 @@ func TestScoreHandler_NoDeadlockUnderConcurrentLoad(t *testing.T) {
 		Status: state.CompStatusPools,
 	}))
 	const N = 8
-	players := make([]helper.Player, 0, 2*N)
+	players := make([]domain.Player, 0, 2*N)
 	matches := make([]state.MatchResult, 0, N)
 	for i := range N {
-		pa := helper.Player{ID: helper.NewUUID4(), Name: nameFor("A", i), Dojo: "DojoA"}
-		pb := helper.Player{ID: helper.NewUUID4(), Name: nameFor("B", i), Dojo: "DojoB"}
+		pa := domain.Player{ID: helper.NewUUID4(), Name: nameFor("A", i), Dojo: "DojoA"}
+		pb := domain.Player{ID: helper.NewUUID4(), Name: nameFor("B", i), Dojo: "DojoB"}
 		players = append(players, pa, pb)
 		matches = append(matches, state.MatchResult{
 			ID:     poolMatchID(i),
@@ -138,7 +139,7 @@ func TestDecisionHandler_NoDeadlockOnConcurrentKiken(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	carolID := helper.NewUUID4()
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 		{ID: carolID, Name: "Carol", Dojo: "C"},

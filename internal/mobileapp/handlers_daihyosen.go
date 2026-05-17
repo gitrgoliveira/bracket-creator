@@ -28,7 +28,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -56,7 +55,7 @@ type DaihyosenStore interface {
 	LoadPoolMatches(compID string) ([]state.MatchResult, error)
 	LoadBracket(compID string) (*state.Bracket, error)
 	LoadCompetition(compID string) (*state.Competition, error)
-	LoadParticipants(compID string, withZekkenName bool) ([]helper.Player, error)
+	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 	CompetitorStatusStore
 }
 

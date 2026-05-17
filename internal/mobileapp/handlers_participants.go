@@ -5,7 +5,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -54,9 +53,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 
-		players := make([]helper.Player, 0, len(req.Players))
+		players := make([]domain.Player, 0, len(req.Players))
 		for i, p := range req.Players {
-			players = append(players, helper.Player{
+			players = append(players, domain.Player{
 				Name:         p.Name,
 				DisplayName:  p.DisplayName,
 				Dojo:         p.Dojo,

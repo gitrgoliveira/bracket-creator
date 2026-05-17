@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -882,7 +881,7 @@ func TestCreatePlayoff_RollbackOnReservedSlotFailure(t *testing.T) {
 		Format: state.CompFormatPools,
 		Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SaveParticipants("rollback-src", []helper.Player{
+	require.NoError(t, store.SaveParticipants("rollback-src", []domain.Player{
 		{Name: "P1", Dojo: "D"},
 		{Name: "P2", Dojo: "D"},
 		{Name: "P3", Dojo: "D"},
@@ -1039,7 +1038,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	// POST /api/competitions/:id/start
 	comp = state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
 	store.SaveCompetition(&comp)
-	store.SaveParticipants("c1", []helper.Player{{Name: "P1"}, {Name: "P2"}})
+	store.SaveParticipants("c1", []domain.Player{{Name: "P1"}, {Name: "P2"}})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions/c1/start", nil)
 	r.ServeHTTP(w, req)
@@ -1446,7 +1445,7 @@ func TestStartCompetition_BroadcastContract(t *testing.T) {
 	// Format omitted → playoffs path; MaybeAutoCompletePools is a no-op.
 	comp := state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
 	require.NoError(t, store.SaveCompetition(&comp))
-	require.NoError(t, store.SaveParticipants("c1", []helper.Player{{Name: "P1"}, {Name: "P2"}}))
+	require.NoError(t, store.SaveParticipants("c1", []domain.Player{{Name: "P1"}, {Name: "P2"}}))
 
 	ch := hub.Subscribe()
 	defer hub.Unsubscribe(ch)

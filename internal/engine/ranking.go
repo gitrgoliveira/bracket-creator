@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // GetBracketRanking returns the player who achieved rank in the bracket of compID.
 // Supported ranks: 1 (winner), 2 (finalist), 3-4 (semi-final losers).
 // Full player data (dojo, displayName) is resolved from the source competition's participants.
-func (e *Engine) GetBracketRanking(compID string, rank int) (*helper.Player, error) {
+func (e *Engine) GetBracketRanking(compID string, rank int) (*domain.Player, error) {
 	bracket, err := e.store.LoadBracket(compID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load bracket for %q: %w", compID, err)
@@ -73,13 +73,13 @@ func (e *Engine) GetBracketRanking(compID string, rank int) (*helper.Player, err
 		}
 	}
 
-	return &helper.Player{Name: winnerName}, nil
+	return &domain.Player{Name: winnerName}, nil
 }
 
 // GetPoolRanking returns the player who achieved rank in the pool standings of compID.
 // If multiple pools exist, SourceRank is treated as a global index across all pools
 // ordered by pool name (e.g., Rank 1 = Winner of Pool 1, Rank 2 = Winner of Pool 2).
-func (e *Engine) GetPoolRanking(compID string, rank int) (*helper.Player, error) {
+func (e *Engine) GetPoolRanking(compID string, rank int) (*domain.Player, error) {
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (e *Engine) GetPoolRanking(compID string, rank int) (*helper.Player, error)
 // and any error encountered. The mutated flag lets callers gate a trailing
 // SaveParticipants on real changes only — re-saving an unmutated snapshot
 // would clobber a concurrent participants upload.
-func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([]helper.Player, bool, error) {
+func (e *Engine) resolveReservedSlots(compID string, players []domain.Player) ([]domain.Player, bool, error) {
 	// LoadReservedSlots returns ([]ReservedSlot{}, nil) for the "file does
 	// not exist" case (see parseReservedSlotsFile). Any other error from
 	// LoadReservedSlots is a genuine I/O / parse failure (corrupt JSON,
@@ -150,7 +150,7 @@ func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([
 			return nil, false, notFoundErrorf("reserved slot source competition %q not found", slot.SourceCompID)
 		}
 
-		var real *helper.Player
+		var real *domain.Player
 		if srcComp.Format == state.CompFormatPools {
 			if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
 				return nil, false, validationErrorf("reserved slot source %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
@@ -204,7 +204,7 @@ func (e *Engine) resolveReservedSlots(compID string, players []helper.Player) ([
 	}
 
 	if len(toRemove) > 0 {
-		filtered := make([]helper.Player, 0, len(players))
+		filtered := make([]domain.Player, 0, len(players))
 		removeMap := make(map[string]bool)
 		for _, id := range toRemove {
 			removeMap[id] = true

@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 )
@@ -25,7 +25,7 @@ func TestStaleSeedsBug(t *testing.T) {
 		Name:   "Seeded Competition",
 		Format: "playoffs",
 		Courts: []string{"A"},
-		Players: []helper.Player{
+		Players: []domain.Player{
 			{Name: "Alice", Seed: 1, Dojo: "Dojo A"},
 			{Name: "Bob", Seed: 2, Dojo: "Dojo B"},
 		},
@@ -48,7 +48,7 @@ func TestStaleSeedsBug(t *testing.T) {
 		Name:   "Seeded Competition",
 		Format: "playoffs",
 		Courts: []string{"A"},
-		Players: []helper.Player{
+		Players: []domain.Player{
 			{Name: "Alice", Seed: 0, Dojo: "Dojo A"},
 			{Name: "Bob", Seed: 0, Dojo: "Dojo B"},
 			{Name: "Charlie", Seed: 0, Dojo: "Dojo C"},

@@ -8,18 +8,22 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func (e *Engine) generatePlayoffs(comp *state.Competition, players []helper.Player, seeds []domain.SeedAssignment) error {
+func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
+	// helper.ApplySeeds / StandardSeeding / AssignPlayerNumbers touch
+	// Excel cell coordinates and still operate on []helper.Player.
+	// Convert at the engine↔helper boundary (NFR-007, T154).
+	hPlayers := helper.PlayersFromDomain(players)
 	if len(seeds) > 0 {
-		if err := helper.ApplySeeds(players, seeds); err != nil {
+		if err := helper.ApplySeeds(hPlayers, seeds); err != nil {
 			return fmt.Errorf("applying seeds: %w", err)
 		}
 	}
 
 	if comp.NumberPrefix != "" {
-		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
+		helper.AssignPlayerNumbers(hPlayers, comp.NumberPrefix, 1)
 	}
 
-	seededPlayers := helper.StandardSeeding(players)
+	seededPlayers := helper.StandardSeeding(hPlayers)
 
 	// Create balanced tree
 	leaves := make([]string, len(seededPlayers))

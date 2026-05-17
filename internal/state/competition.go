@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 func (s *Store) ListCompetitions() ([]string, error) {
@@ -67,7 +67,7 @@ func (s *Store) copyCompetition(c *Competition) *Competition {
 		copy(cp.Courts, c.Courts)
 	}
 	if c.Players != nil {
-		cp.Players = make([]helper.Player, len(c.Players))
+		cp.Players = make([]domain.Player, len(c.Players))
 		copy(cp.Players, c.Players)
 	}
 	return &cp

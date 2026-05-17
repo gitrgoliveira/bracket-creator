@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +28,7 @@ func TestParticipants(t *testing.T) {
 	assert.Empty(t, players)
 
 	// 2. Save participants
-	playersToSave := []helper.Player{
+	playersToSave := []domain.Player{
 		{Name: "Alice", Dojo: "Dojo A", Tag: "manual"},
 		{Name: "Bob", Dojo: "Dojo B"},
 	}
@@ -52,7 +52,7 @@ func TestParticipants(t *testing.T) {
 	assert.Empty(t, loadedPlayers[1].Tag)
 
 	// 4. Save and load participants with existing IDs
-	playersToSaveWithID := []helper.Player{
+	playersToSaveWithID := []domain.Player{
 		{ID: "00000000-0000-4000-8000-000000000000", Name: "Charlie", Dojo: "Dojo C"},
 	}
 	err = store.SaveParticipants(compID, playersToSaveWithID)
@@ -103,7 +103,7 @@ func TestParticipantsWithZekkenNameRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Players where DisplayName is empty (will be omitted by SaveParticipants → 2-col row)
-	playersToSave := []helper.Player{
+	playersToSave := []domain.Player{
 		{Name: "Alice Smith", Dojo: "Dojo A"},                         // no DisplayName
 		{Name: "Bob Jones", DisplayName: "Bob Jones", Dojo: "Dojo B"}, // DisplayName == Name
 		{Name: "Carol", DisplayName: "C. CAROL", Dojo: "Dojo C"},      // distinct DisplayName

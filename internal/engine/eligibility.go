@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -457,17 +456,14 @@ func lookupPlayerID(players []domain.Player, name string) string {
 // into a single []domain.Player suitable for lookupPlayerID. Several
 // engine code paths need to resolve a Name → ID against both the
 // in-memory competition snapshot and the participants.csv on disk
-// (the two can diverge briefly during config edits). Converting to
-// domain.Player at this boundary keeps the rest of the engine code
-// free of helper-coupled types (NFR-007).
-func combinedPlayerPool(compPlayers []helper.Player, participants []helper.Player) []domain.Player {
+// (the two can diverge briefly during config edits).
+//
+// After T154, both inputs are already []domain.Player; the function
+// just concatenates them (NFR-007).
+func combinedPlayerPool(compPlayers []domain.Player, participants []domain.Player) []domain.Player {
 	out := make([]domain.Player, 0, len(compPlayers)+len(participants))
-	for _, hp := range compPlayers {
-		out = append(out, helper.PlayerToDomain(hp))
-	}
-	for _, hp := range participants {
-		out = append(out, helper.PlayerToDomain(hp))
-	}
+	out = append(out, compPlayers...)
+	out = append(out, participants...)
 	return out
 }
 

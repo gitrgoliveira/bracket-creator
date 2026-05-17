@@ -325,7 +325,10 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// post-save failure so the row is fully reversed and the operator
 	// can re-run the import after fixing the I/O issue.
 	if len(parsedPlayers) > 0 {
-		if err := store.SaveParticipants(entry.ID, parsedPlayers); err != nil {
+		// helper.CreatePlayers builds []helper.Player; convert at the
+		// engine↔state boundary because SaveParticipants takes
+		// []domain.Player after T154.
+		if err := store.SaveParticipants(entry.ID, helper.PlayersToDomain(parsedPlayers)); err != nil {
 			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
 			res.Error = "save participants: " + err.Error()
 			return res

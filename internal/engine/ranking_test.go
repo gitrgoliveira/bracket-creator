@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +27,7 @@ func TestGetBracketRanking(t *testing.T) {
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 
-	players := []helper.Player{
+	players := []domain.Player{
 		{Name: "Alice", Dojo: "DojoA"},
 		{Name: "Bob", Dojo: "DojoB"},
 		{Name: "Charlie", Dojo: "DojoC"},
@@ -104,7 +104,7 @@ func TestResolveReservedSlots(t *testing.T) {
 	// Source competition
 	srcID := "source-comp"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: srcID, Name: "Source", Status: "completed"}))
-	require.NoError(t, store.SaveParticipants(srcID, []helper.Player{{Name: "Winner"}}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{{Name: "Winner"}}))
 	require.NoError(t, store.SaveBracket(srcID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{{{Winner: "Winner", Status: state.MatchStatusCompleted}}},
 	}))
@@ -117,7 +117,7 @@ func TestResolveReservedSlots(t *testing.T) {
 	}
 	require.NoError(t, store.SaveReservedSlots(targetID, slots))
 
-	players := []helper.Player{
+	players := []domain.Player{
 		{ID: "P1", Name: "Placeholder", Tag: "reserved"},
 		{ID: "P2", Name: "Normal"},
 	}
@@ -141,7 +141,7 @@ func TestResolveReservedSlots_Errors(t *testing.T) {
 	eng := New(store)
 
 	compID := "test"
-	players := []helper.Player{{ID: "P1", Tag: "reserved"}}
+	players := []domain.Player{{ID: "P1", Tag: "reserved"}}
 
 	// No slots file - should return players unchanged
 	res, mutated, err := eng.resolveReservedSlots(compID, players)
@@ -194,7 +194,7 @@ func TestResolveReservedSlots_CorruptSlotsFile(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(slotsPath), 0700))
 	require.NoError(t, os.WriteFile(slotsPath, []byte("{ not valid json"), 0600))
 
-	players := []helper.Player{{ID: "P1", Name: "Real", Tag: ""}}
+	players := []domain.Player{{ID: "P1", Name: "Real", Tag: ""}}
 	res, mutated, err := eng.resolveReservedSlots(compID, players)
 	require.Error(t, err, "corrupt slots file must surface as error, not silent no-op")
 	assert.Contains(t, err.Error(), "cannot load reserved slots")
@@ -214,7 +214,7 @@ func TestResolveReservedSlots_Duplicate(t *testing.T) {
 	// Source competition with a winner
 	srcID := "source-comp"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: srcID, Name: "Source", Status: "completed"}))
-	require.NoError(t, store.SaveParticipants(srcID, []helper.Player{{Name: "Robert Young", Dojo: "Team Alpha"}}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{{Name: "Robert Young", Dojo: "Team Alpha"}}))
 	require.NoError(t, store.SaveBracket(srcID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{{{Winner: "Robert Young", Status: state.MatchStatusCompleted}}},
 	}))
@@ -224,7 +224,7 @@ func TestResolveReservedSlots_Duplicate(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: targetID, Name: "Target"}))
 
 	// Two players: one real "Robert Young", one placeholder for Rank 1 of source
-	players := []helper.Player{
+	players := []domain.Player{
 		{ID: "Existing-ID", Name: "Robert Young", Dojo: "Team Alpha"},
 		{ID: "Placeholder-ID", Name: "Reserved: source-comp rank 1", Tag: "reserved"},
 	}

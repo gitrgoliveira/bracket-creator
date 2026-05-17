@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -306,7 +307,7 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 		Status: state.CompStatusPools,
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
-	require.NoError(t, store.SaveParticipants("pools1", []helper.Player{
+	require.NoError(t, store.SaveParticipants("pools1", []domain.Player{
 		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
 	}))
 	require.NoError(t, store.SavePoolMatches("pools1", []state.MatchResult{
@@ -391,7 +392,7 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "bulk1", Format: state.CompFormatPools, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SaveParticipants("bulk1", []helper.Player{
+	require.NoError(t, store.SaveParticipants("bulk1", []domain.Player{
 		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
 	}))
 	require.NoError(t, store.SavePoolMatches("bulk1", []state.MatchResult{
@@ -514,7 +515,7 @@ func TestPostScoreKikenAutoFillsRegulation(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice"}, {Name: "Bob"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -555,7 +556,7 @@ func TestPostScoreKikenInEncho(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice"}, {Name: "Bob"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -595,7 +596,7 @@ func TestPostScoreKikenInvalidScoreline(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice"}, {Name: "Bob"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -674,7 +675,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
 		MaxEnchoPeriods: 2,
 	}))
-	require.NoError(t, realStore.SaveParticipants(compID, []helper.Player{
+	require.NoError(t, realStore.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice"}, {Name: "Bob"},
 	}))
 	require.NoError(t, realStore.SavePoolMatches(compID, []state.MatchResult{

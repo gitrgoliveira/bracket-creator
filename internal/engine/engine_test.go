@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,9 +44,9 @@ func createTestCompetition(t *testing.T, store *state.Store, id string, format s
 
 func saveTestParticipants(t *testing.T, store *state.Store, compID string, names []string) {
 	t.Helper()
-	players := make([]helper.Player, len(names))
+	players := make([]domain.Player, len(names))
 	for i, n := range names {
-		players[i] = helper.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i%5))}
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i%5))}
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 }
@@ -160,7 +159,7 @@ func TestStartCompetition_PoolsFormat_DojoConflictAvoidance(t *testing.T) {
 	createTestCompetition(t, store, compID, "pools", 3)
 
 	// Create players with same-dojo groups
-	players := []helper.Player{
+	players := []domain.Player{
 		{Name: "A1", Dojo: "Mumeishi"},
 		{Name: "A2", Dojo: "Mumeishi"},
 		{Name: "A3", Dojo: "Mumeishi"},

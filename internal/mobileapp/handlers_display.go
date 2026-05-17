@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -115,7 +115,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 // court-live contract. When the participants list cannot resolve the name
 // we fall back to a name-only side so the overlay can still render
 // "Player vs Player" rather than blanking out.
-func buildSide(name string, players []helper.Player, withZekkenName bool) gin.H {
+func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H {
 	displayName := name
 	dojo := ""
 	playerID := ""

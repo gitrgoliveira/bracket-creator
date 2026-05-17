@@ -16,8 +16,8 @@ import (
 // the Swiss engine tests. Each player gets a fresh UUID v4 so the
 // eligibility / kiken paths can resolve them by ID consistently with
 // the rest of the engine code.
-func swissTestPlayer(name string) helper.Player {
-	return helper.Player{
+func swissTestPlayer(name string) domain.Player {
+	return domain.Player{
 		ID:   helper.NewUUID4(),
 		Name: name,
 		Dojo: name + "-Dojo",
@@ -28,7 +28,7 @@ func swissTestPlayer(name string) helper.Player {
 // given player names and seed assignments (nil = no seeds). Returns
 // the engine, store, comp ID, and a name → player map for the test to
 // look up IDs when seeding CompetitorStatus.
-func setupSwissCompetition(t *testing.T, names []string, seeds map[string]int, rounds int) (*Engine, *state.Store, string, map[string]helper.Player) {
+func setupSwissCompetition(t *testing.T, names []string, seeds map[string]int, rounds int) (*Engine, *state.Store, string, map[string]domain.Player) {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 	compID := "swiss-test"
@@ -46,8 +46,8 @@ func setupSwissCompetition(t *testing.T, names []string, seeds map[string]int, r
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 
-	players := make([]helper.Player, len(names))
-	byName := make(map[string]helper.Player, len(names))
+	players := make([]domain.Player, len(names))
+	byName := make(map[string]domain.Player, len(names))
 	for i, n := range names {
 		p := swissTestPlayer(n)
 		if seedRank, ok := seeds[n]; ok {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -15,16 +16,16 @@ type LoadParticipantsOpts struct {
 }
 
 // LoadParticipants loads participants with seeds merged (default behavior).
-func (s *Store) LoadParticipants(compID string, withZekkenName bool) ([]helper.Player, error) {
+func (s *Store) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {
 	return s.loadParticipants(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: true})
 }
 
 // LoadParticipantsOpt loads participants with configurable options.
-func (s *Store) LoadParticipantsOpt(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]helper.Player, error) {
+func (s *Store) LoadParticipantsOpt(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
 	return s.loadParticipants(compID, withZekkenName, opts)
 }
 
-func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]helper.Player, error) {
+func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
@@ -43,8 +44,8 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	}
 
 	if cache.data != nil && cache.mtime == mtime {
-		p := cache.data.([]helper.Player)
-		res := make([]helper.Player, len(p))
+		p := cache.data.([]domain.Player)
+		res := make([]domain.Player, len(p))
 		copy(res, p)
 		cache.mu.RUnlock()
 		return res, nil
@@ -55,8 +56,8 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	defer cache.mu.Unlock()
 	// Re-check after acquiring write lock
 	if cache.data != nil && cache.mtime == mtime {
-		p := cache.data.([]helper.Player)
-		res := make([]helper.Player, len(p))
+		p := cache.data.([]domain.Player)
+		res := make([]domain.Player, len(p))
 		copy(res, p)
 		return res, nil
 	}
@@ -65,9 +66,9 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	lines, err := helper.ReadEntriesFromFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cache.data = []helper.Player{}
+			cache.data = []domain.Player{}
 			cache.mtime = mtime
-			return []helper.Player{}, nil
+			return []domain.Player{}, nil
 		}
 		return nil, err
 	}
@@ -125,15 +126,19 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 			}
 		}
 	}
-	cache.data = players
+	// Convert at the boundary: the helper.CreatePlayers parser still
+	// returns []helper.Player internally, but the cache + return type
+	// is []domain.Player (NFR-007, T154).
+	domainPlayers := helper.PlayersToDomain(players)
+	cache.data = domainPlayers
 	cache.mtime = mtime
 
-	res := make([]helper.Player, len(players))
-	copy(res, players)
+	res := make([]domain.Player, len(domainPlayers))
+	copy(res, domainPlayers)
 	return res, nil
 }
 
-func (s *Store) SaveParticipants(compID string, players []helper.Player) error {
+func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -126,10 +125,9 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	if err != nil {
 		return nil, err
 	}
-	// Convert helper.Player → domain.Player at the boundary so the
-	// internal Swiss pipeline operates on pure domain types (NFR-007).
-	// participants comes from store.LoadParticipants which still
-	// returns helper.Player; the conversion is a shallow copy.
+	// After T154, store.LoadParticipants returns []domain.Player
+	// directly, so the Swiss pipeline doesn't need a conversion at the
+	// boundary (NFR-007).
 	active := make([]domain.Player, 0, len(participants))
 	for _, p := range participants {
 		if p.ID != "" {
@@ -137,7 +135,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 				continue
 			}
 		}
-		active = append(active, helper.PlayerToDomain(p))
+		active = append(active, p)
 	}
 	if len(active) < 2 {
 		return nil, validationErrorf("swiss round requires at least 2 eligible participants, got %d", len(active))

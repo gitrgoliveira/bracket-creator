@@ -85,7 +85,7 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 	return changed, nil
 }
 
-func extractSeeds(players []helper.Player) []domain.SeedAssignment {
+func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 	var out []domain.SeedAssignment
 	for _, p := range players {
 		if p.Seed > 0 {
@@ -694,7 +694,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				updated.Players = players
 			} else {
 				fmt.Printf("Warning: failed to load participants for settings-PUT response: %v\n", lerr)
-				updated.Players = []helper.Player{}
+				updated.Players = []domain.Player{}
 			}
 		}
 		c.JSON(http.StatusOK, updated)
@@ -1141,7 +1141,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			playoff.Players = players
 		} else {
 			fmt.Printf("Warning: failed to load participants for POST /playoffs response: %v\n", lerr)
-			playoff.Players = []helper.Player{}
+			playoff.Players = []domain.Player{}
 		}
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusCreated, playoff)

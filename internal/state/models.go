@@ -3,7 +3,7 @@ package state
 import (
 	"fmt"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 type Tournament struct {
@@ -104,7 +104,7 @@ type Competition struct {
 	// gate to refuse re-generation of an in-progress round.
 	SwissCurrentRound int `yaml:"swiss_current_round,omitempty" json:"swissCurrentRound,omitempty"`
 
-	Players []helper.Player `yaml:"-" json:"players"`
+	Players []domain.Player `yaml:"-" json:"players"`
 }
 
 // ApplyCompetitionDefaults fills zero-valued per-phase durations from the
@@ -254,7 +254,7 @@ type EnchoMetadata struct {
 }
 
 type PlayerStanding struct {
-	Player           helper.Player `json:"player"`
+	Player           domain.Player `json:"player"`
 	Wins             int           `json:"wins"`
 	Losses           int           `json:"losses"`
 	Draws            int           `json:"draws"`

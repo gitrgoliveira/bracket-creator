@@ -66,7 +66,6 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
 
@@ -101,7 +100,7 @@ type StoreTx interface {
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
-	LoadParticipants(compID string, withZekkenName bool) ([]helper.Player, error)
+	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 
 	// UpdatePoolMatchByID is the tx-aware twin of
 	// Store.UpdatePoolMatchByID. Same semantics, same return values; the
@@ -508,7 +507,7 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
 }
 
-func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]helper.Player, error) {
+func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}

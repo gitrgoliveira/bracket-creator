@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -58,11 +59,11 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 		Status: state.CompStatusPools,
 	}))
 	const N = 10
-	players := make([]helper.Player, 0, 2*N)
+	players := make([]domain.Player, 0, 2*N)
 	matches := make([]state.MatchResult, 0, N)
 	for i := range N {
-		pa := helper.Player{ID: helper.NewUUID4(), Name: nameFor("A", i), Dojo: "DojoA"}
-		pb := helper.Player{ID: helper.NewUUID4(), Name: nameFor("B", i), Dojo: "DojoB"}
+		pa := domain.Player{ID: helper.NewUUID4(), Name: nameFor("A", i), Dojo: "DojoA"}
+		pb := domain.Player{ID: helper.NewUUID4(), Name: nameFor("B", i), Dojo: "DojoB"}
 		players = append(players, pa, pb)
 		matches = append(matches, state.MatchResult{
 			ID:     poolMatchID(i),

@@ -9,16 +9,20 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func (e *Engine) generatePools(comp *state.Competition, players []helper.Player, seeds []domain.SeedAssignment) error {
+func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
+	// helper.ApplySeeds / PoolSeeding / CreatePools touch Excel cell
+	// coordinates and still operate on []helper.Player. Convert at the
+	// engine↔helper boundary (NFR-007, T154).
+	hPlayers := helper.PlayersFromDomain(players)
 	if len(seeds) > 0 {
-		if err := helper.ApplySeeds(players, seeds); err != nil {
+		if err := helper.ApplySeeds(hPlayers, seeds); err != nil {
 			return fmt.Errorf("applying seeds: %w", err)
 		}
-		players = helper.PoolSeeding(players, comp.PoolSize, len(comp.Courts))
+		hPlayers = helper.PoolSeeding(hPlayers, comp.PoolSize, len(comp.Courts))
 	}
 
 	isMax := comp.PoolSizeMode == "max"
-	pools, err := helper.CreatePools(players, comp.PoolSize, isMax)
+	pools, err := helper.CreatePools(hPlayers, comp.PoolSize, isMax)
 	if err != nil {
 		return err
 	}

@@ -180,7 +180,7 @@ func TestStore_ParticipantsCSV(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 
-	players := []helper.Player{
+	players := []domain.Player{
 		{Name: "Akira Tanaka", Dojo: "Mumeishi"},
 		{Name: "Hiroshi Sato", Dojo: "Sanshukai"},
 	}
@@ -238,7 +238,7 @@ func TestStore_ParticipantsCSV_WithZekkenName(t *testing.T) {
 	compID := "zekken"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 
-	players := []helper.Player{
+	players := []domain.Player{
 		{Name: "Akira Tanaka", DisplayName: "A. Tanaka", Dojo: "Mumeishi"},
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))

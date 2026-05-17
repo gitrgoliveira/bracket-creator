@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,7 +68,7 @@ func TestCourtLiveReturnsLivePayload(t *testing.T) {
 		Courts: []string{"A"},
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
-	require.NoError(t, store.SaveParticipants("kyu-individual", []helper.Player{
+	require.NoError(t, store.SaveParticipants("kyu-individual", []domain.Player{
 		{Name: "Takeshi Yamada", DisplayName: "Takeshi Yamada", Dojo: "Nakano Kendo Club"},
 		{Name: "Ichiro Tanaka", DisplayName: "Ichiro Tanaka", Dojo: "Setagaya Dojo"},
 	}))
@@ -184,7 +184,7 @@ func TestCourtLiveRespectsZekkenName(t *testing.T) {
 		WithZekkenName: true,
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
-	require.NoError(t, store.SaveParticipants("zekken-comp", []helper.Player{
+	require.NoError(t, store.SaveParticipants("zekken-comp", []domain.Player{
 		{Name: "Takeshi Yamada", DisplayName: "Yamada", Dojo: "Nakano Kendo Club"},
 		{Name: "Ichiro Tanaka", DisplayName: "Tanaka", Dojo: "Setagaya Dojo"},
 	}))

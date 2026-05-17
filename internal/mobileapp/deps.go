@@ -63,6 +63,13 @@ type ScoringEngine interface {
 	// supplied StoreTx so the match-write + ineligibility-write +
 	// lineup-freeze all commit under one lock acquire.
 	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
+	// StartMatchTx is the FR-035 eligibility gate for the
+	// scheduled → running transition. Returns
+	// *engine.IneligibleCompetitorError when a participant is marked
+	// ineligible by a *different* match. The undo path (re-scoring a
+	// match that itself created the ineligibility) is permitted.
+	// Score handler wraps fought/hikiwake submissions with this.
+	StartMatchTx(tx state.StoreTx, compID, matchID string) error
 	// RecordDecision auto-fills the scoreline + winner from the
 	// decision/decisionBy/encho triple and persists the result. Used by
 	// the dedicated POST /decision endpoint (T090). When the prior

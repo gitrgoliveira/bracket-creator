@@ -285,6 +285,56 @@ func TestRecordMatchResultWithIneligibilityTx_Basic(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
 }
 
+// TestStartMatchTx_BlocksIneligibleParticipant verifies the FR-035
+// pre-flight gate. After Alice is recorded as kiken'd on Pool A-0
+// (her status: ineligible, matchID=Pool A-0), StartMatchTx for
+// Pool A-1 (Alice vs Carol) MUST return *IneligibleCompetitorError so
+// the score handler can return 409. UAT-discovered gap (review v3),
+// FR-035.
+func TestStartMatchTx_BlocksIneligibleParticipant(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "fr035-block"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	carolID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []helper.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", Status: state.MatchStatusScheduled},
+	}))
+	// Kiken Alice from Pool A-0.
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "knee", nil, false)
+	require.NoError(t, err)
+
+	// StartMatchTx for Pool A-1 (different match, Alice still a
+	// participant) → ineligible error.
+	var startErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		startErr = eng.StartMatchTx(tx, compID, "Pool A-1")
+		return nil
+	})
+	require.Error(t, startErr)
+	var ineligErr *IneligibleCompetitorError
+	require.ErrorAs(t, startErr, &ineligErr)
+	assert.Equal(t, aliceID, ineligErr.PlayerID)
+	assert.Contains(t, ineligErr.Reason, "kiken")
+
+	// StartMatchTx for Pool A-0 (the SOURCE match itself) → allowed,
+	// so the undo path works.
+	var srcErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		srcErr = eng.StartMatchTx(tx, compID, "Pool A-0")
+		return nil
+	})
+	assert.NoError(t, srcErr, "the match that recorded the ineligibility must be re-scoreable")
+}
+
 // TestStoreTxUpdatePoolMatchByIDLockFree pins that calling
 // tx.UpdatePoolMatchByID inside a WithTransaction does NOT deadlock —
 // proves the lock-free dispatch on the storeTx side is wired up.

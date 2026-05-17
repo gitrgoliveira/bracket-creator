@@ -132,10 +132,11 @@ func (e *Engine) GenerateSchedule(compID string) error {
 		}
 		for _, m := range matches {
 			entries = append(entries, state.ScheduleEntry{
-				MatchType: "pool",
-				MatchRef:  m.ID,
-				Court:     m.Court,
-				Status:    string(m.Status),
+				MatchType:   "pool",
+				MatchRef:    m.ID,
+				Court:       m.Court,
+				ScheduledAt: m.ScheduledAt,
+				Status:      string(m.Status),
 			})
 		}
 	} else {
@@ -151,10 +152,11 @@ func (e *Engine) GenerateSchedule(compID string) error {
 						court = "A" // Default court
 					}
 					entries = append(entries, state.ScheduleEntry{
-						MatchType: "bracket",
-						MatchRef:  fmt.Sprintf("R%d-M%s", rIdx+1, m.ID),
-						Court:     court,
-						Status:    string(m.Status),
+						MatchType:   "bracket",
+						MatchRef:    fmt.Sprintf("R%d-M%s", rIdx+1, m.ID),
+						Court:       court,
+						ScheduledAt: m.ScheduledAt,
+						Status:      string(m.Status),
 					})
 				}
 			}

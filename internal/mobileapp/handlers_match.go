@@ -397,11 +397,29 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// engine's RecordMatchResultWithIneligibilityTx dispatches every
 		// store call through `stx`, so no internal call re-acquires the
 		// lock (non-reentrant; nesting would deadlock).
+		//
+		// FR-035: pre-flight eligibility gate. A "fought" or "hikiwake"
+		// score is the act of starting/finishing real play — refuse it
+		// when a participant is marked ineligible by a *different*
+		// match. Kiken/fusenpai go through this same endpoint to record
+		// a new withdrawal on this match (decisionBy chooses the
+		// loser); StartMatchTx excludes status sourced from this match
+		// so the undo path is permitted, and we additionally skip the
+		// gate entirely for withdrawal-type decisions so the operator
+		// can record kiken on a match whose other participant is
+		// already ineligible.
 		var (
 			engStatus *domain.CompetitorStatus
 			engErr    error
 		)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+			isWithdrawal := result.Decision == "kiken" || result.Decision == "fusenpai"
+			if !isWithdrawal {
+				if err := eng.StartMatchTx(stx, id, mid); err != nil {
+					engErr = err
+					return nil
+				}
+			}
 			engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result)
 			// engErr is a normal application-level signal (AlreadyIneligible
 			// → 409, validation/not-found → other codes); we surface it
@@ -416,6 +434,15 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		if engErr != nil {
+			var ineligErr *engine.IneligibleCompetitorError
+			if errors.As(engErr, &ineligErr) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":    "ineligible_competitor",
+					"playerId": ineligErr.PlayerID,
+					"reason":   ineligErr.Reason,
+				})
+				return
+			}
 			var alreadyIneligErr *engine.AlreadyIneligibleError
 			if errors.As(engErr, &alreadyIneligErr) {
 				c.JSON(http.StatusConflict, gin.H{

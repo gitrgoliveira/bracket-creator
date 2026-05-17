@@ -346,6 +346,49 @@ func (e *Engine) lookupMatchSidesTx(tx state.StoreTx, compID, matchID string) (s
 	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
+// StartMatchTx is the tx-aware FR-035 gate. Same contract as
+// StartMatch: returns *IneligibleCompetitorError when any participant
+// in matchID is marked ineligible from a *different* match. The
+// undo-path is permitted (status with MatchID==matchID is skipped).
+//
+// The score handler wraps RecordMatchResultWithIneligibilityTx with
+// this check so a fought / hikiwake score on a match whose
+// participants include someone previously ineligible is rejected
+// before any disk write. Kiken/fusenpai decisions go through
+// RecordDecisionTx, which intentionally bypasses this gate — they ARE
+// the act of recording a new withdrawal.
+func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
+	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
+	if err != nil {
+		return err
+	}
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil || comp == nil {
+		return err
+	}
+	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	if err != nil {
+		return err
+	}
+	pool := append([]helper.Player{}, comp.Players...)
+	pool = append(pool, participants...)
+	ids := []string{lookupPlayerID(pool, sideA), lookupPlayerID(pool, sideB)}
+
+	statuses, err := tx.LoadCompetitorStatus(compID)
+	if err != nil {
+		return err
+	}
+	for _, pid := range ids {
+		if pid == "" {
+			continue
+		}
+		if st, ok := statuses[pid]; ok && !st.Eligible && st.MatchID != matchID {
+			return &IneligibleCompetitorError{PlayerID: pid, Reason: st.Reason}
+		}
+	}
+	return nil
+}
+
 // checkConcurrentIneligibilityTx is the tx-aware twin of
 // checkConcurrentIneligibility. Same logic, same "log and skip on
 // lookup failure" behaviour — the T105 guard is best-effort, the

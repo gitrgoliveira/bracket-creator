@@ -128,7 +128,28 @@ func (e *Engine) StartMatch(compID, matchID string) error {
 	if err != nil {
 		return err
 	}
-	return e.CheckEligibility(compID, ids)
+	return e.checkEligibilityExcludingMatch(compID, ids, matchID)
+}
+
+// checkEligibilityExcludingMatch is like CheckEligibility but skips
+// CompetitorStatus entries whose source MatchID equals excludeMatchID.
+// This lets a match be re-scored (the T103 undo path) even when its
+// own prior kiken/fusenpai created the ineligibility — the status was
+// recorded BY that match, so it should not block writing back to it.
+func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []string, excludeMatchID string) error {
+	statuses, err := e.store.LoadCompetitorStatus(compID)
+	if err != nil {
+		return err
+	}
+	for _, pid := range playerIDs {
+		if pid == "" {
+			continue
+		}
+		if st, ok := statuses[pid]; ok && !st.Eligible && st.MatchID != excludeMatchID {
+			return &IneligibleCompetitorError{PlayerID: pid, Reason: st.Reason}
+		}
+	}
+	return nil
 }
 
 // RecordDecision auto-fills the scoreline from decision/decisionBy/encho

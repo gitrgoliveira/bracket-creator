@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -125,14 +126,18 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	if err != nil {
 		return nil, err
 	}
-	active := make([]helper.Player, 0, len(participants))
+	// Convert helper.Player → domain.Player at the boundary so the
+	// internal Swiss pipeline operates on pure domain types (NFR-007).
+	// participants comes from store.LoadParticipants which still
+	// returns helper.Player; the conversion is a shallow copy.
+	active := make([]domain.Player, 0, len(participants))
 	for _, p := range participants {
 		if p.ID != "" {
 			if st, ok := statuses[p.ID]; ok && !st.Eligible {
 				continue
 			}
 		}
-		active = append(active, p)
+		active = append(active, helper.PlayerToDomain(p))
 	}
 	if len(active) < 2 {
 		return nil, validationErrorf("swiss round requires at least 2 eligible participants, got %d", len(active))
@@ -206,7 +211,7 @@ func pairKey(a, b string) string {
 // — the rest of the Swiss pipeline operates on names because pool-
 // matches.csv stores names, not IDs (parsePoolMatchesFile sets
 // MatchResult.SideA / .SideB to names).
-func buildRankByName(players []helper.Player) map[string]int {
+func buildRankByName(players []domain.Player) map[string]int {
 	type ranked struct {
 		name string
 		seed int
@@ -239,7 +244,7 @@ func buildRankByName(players []helper.Player) map[string]int {
 // where pairs is the list of (sideA, sideB) tuples and bye is the
 // name of the bye recipient (empty string when no bye applies).
 func (e *Engine) computeSwissPairings(
-	active []helper.Player,
+	active []domain.Player,
 	wins map[string]int,
 	priorPair map[string]bool,
 	hadBye map[string]bool,
@@ -269,7 +274,7 @@ func (e *Engine) computeSwissPairings(
 //     pairing keyed on compID so retries produce the same result
 //     (important for SSE replay / handler-retry semantics).
 func (e *Engine) firstRoundPairings(
-	active []helper.Player,
+	active []domain.Player,
 	hadBye map[string]bool,
 	rankByName map[string]int,
 	compID string,
@@ -364,7 +369,7 @@ func removeName(names []string, target string) []string {
 //     group when a rematch can't be avoided.
 //  4. Within each group, players are ordered by rank (seed → name).
 func (e *Engine) subsequentRoundPairings(
-	active []helper.Player,
+	active []domain.Player,
 	wins map[string]int,
 	priorPair map[string]bool,
 	hadBye map[string]bool,

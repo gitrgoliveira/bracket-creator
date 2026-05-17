@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -128,8 +127,7 @@ func (e *Engine) recordIneligibilityFromDecisionTx(tx state.StoreTx, compID, mat
 	if err != nil {
 		return nil, err
 	}
-	pool := append([]helper.Player{}, comp.Players...)
-	pool = append(pool, participants...)
+	pool := combinedPlayerPool(comp.Players, participants)
 	playerID := lookupPlayerID(pool, loser)
 	if playerID == "" {
 		return nil, nil
@@ -370,8 +368,7 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err != nil {
 		return err
 	}
-	pool := append([]helper.Player{}, comp.Players...)
-	pool = append(pool, participants...)
+	pool := combinedPlayerPool(comp.Players, participants)
 	ids := []string{lookupPlayerID(pool, sideA), lookupPlayerID(pool, sideB)}
 
 	statuses, err := tx.LoadCompetitorStatus(compID)
@@ -410,8 +407,7 @@ func (e *Engine) checkConcurrentIneligibilityTx(tx state.StoreTx, compID, matchI
 		log.Printf("engine: checkConcurrentIneligibilityTx LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
 		return nil
 	}
-	pool := append([]helper.Player{}, comp.Players...)
-	pool = append(pool, participants...)
+	pool := combinedPlayerPool(comp.Players, participants)
 	playerID := lookupPlayerID(pool, loserName)
 	if playerID == "" {
 		return nil
@@ -499,8 +495,7 @@ func (e *Engine) restoreCompetitorEligibilityTx(tx state.StoreTx, compID, priorL
 	if err != nil {
 		return nil, err
 	}
-	pool := append([]helper.Player{}, comp.Players...)
-	pool = append(pool, participants...)
+	pool := combinedPlayerPool(comp.Players, participants)
 	playerID := lookupPlayerID(pool, priorLoser)
 	if playerID == "" {
 		return nil, nil

@@ -71,8 +71,7 @@ func (e *Engine) checkConcurrentIneligibility(compID, matchID, loserName string)
 		log.Printf("engine: checkConcurrentIneligibility LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
 		return nil
 	}
-	pool := append([]helper.Player{}, comp.Players...)
-	pool = append(pool, participants...)
+	pool := combinedPlayerPool(comp.Players, participants)
 	playerID := lookupPlayerID(pool, loserName)
 	if playerID == "" {
 		return nil
@@ -383,8 +382,7 @@ func (e *Engine) restoreCompetitorEligibility(compID, priorLoser, matchID string
 	if err != nil {
 		return nil, err
 	}
-	pool := append([]helper.Player{}, comp.Players...)
-	pool = append(pool, participants...)
+	pool := combinedPlayerPool(comp.Players, participants)
 	playerID := lookupPlayerID(pool, priorLoser)
 	if playerID == "" {
 		return nil, nil
@@ -417,8 +415,7 @@ func (e *Engine) resolveMatchParticipantIDs(compID, matchID string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
-	pool := append([]helper.Player{}, comp.Players...)
-	pool = append(pool, participants...)
+	pool := combinedPlayerPool(comp.Players, participants)
 	return []string{lookupPlayerID(pool, sideA), lookupPlayerID(pool, sideB)}, nil
 }
 
@@ -444,7 +441,7 @@ func (e *Engine) lookupMatchSides(compID, matchID string) (string, string, error
 	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
-func lookupPlayerID(players []helper.Player, name string) string {
+func lookupPlayerID(players []domain.Player, name string) string {
 	if name == "" {
 		return ""
 	}
@@ -454,6 +451,24 @@ func lookupPlayerID(players []helper.Player, name string) string {
 		}
 	}
 	return ""
+}
+
+// combinedPlayerPool merges comp.Players and freshly-loaded participants
+// into a single []domain.Player suitable for lookupPlayerID. Several
+// engine code paths need to resolve a Name → ID against both the
+// in-memory competition snapshot and the participants.csv on disk
+// (the two can diverge briefly during config edits). Converting to
+// domain.Player at this boundary keeps the rest of the engine code
+// free of helper-coupled types (NFR-007).
+func combinedPlayerPool(compPlayers []helper.Player, participants []helper.Player) []domain.Player {
+	out := make([]domain.Player, 0, len(compPlayers)+len(participants))
+	for _, hp := range compPlayers {
+		out = append(out, helper.PlayerToDomain(hp))
+	}
+	for _, hp := range participants {
+		out = append(out, helper.PlayerToDomain(hp))
+	}
+	return out
 }
 
 // recordIneligibilityFromDecision is the T085 engine-side side effect.
@@ -488,8 +503,7 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 	if err != nil {
 		return nil, err
 	}
-	pool := append([]helper.Player{}, comp.Players...)
-	pool = append(pool, participants...)
+	pool := combinedPlayerPool(comp.Players, participants)
 	playerID := lookupPlayerID(pool, loser)
 	if playerID == "" {
 		return nil, nil

@@ -460,6 +460,33 @@ describe('DecisionPrompt → /decision POST integration', () => {
       'pw',
     );
   });
+
+  it('fusenpai: decisionBy is the ABSENT/LOSING side, not the winning side', () => {
+    // The UI label was previously "Which side gets the default win?" —
+    // operators interpreted it as picking the WINNER and sent the wrong
+    // side as decisionBy, inverting the result. The label is now
+    // "Which side did not show up?" so operators pick the ABSENT (losing)
+    // side. This test pins the wire contract: selecting "shiro" means
+    // SHIRO forfeits and AKA receives the auto-filled 2-0 win.
+    const onSubmit = vi.fn((payload) => {
+      return buildDecisionBody('fusenpai', payload, 0);
+    });
+    const tree = DecisionPrompt({
+      kind: 'fusenpai',
+      sideA: { name: 'Hayashi' },
+      sideB: { name: 'Nakamura' },
+      defaultSide: 'shiro',
+      askReason: false,
+      onCancel: vi.fn(),
+      onSubmit,
+      submitting: false,
+    });
+    tree.props.onSubmit({ preventDefault: () => {} });
+    // decisionBy = "shiro" → SHIRO is the absent side → engine gives win to AKA
+    expect(onSubmit).toHaveBeenCalledWith({ decisionBy: 'shiro', decisionReason: '' });
+    const body = buildDecisionBody('fusenpai', { decisionBy: 'shiro', decisionReason: '' }, 0);
+    expect(body).toEqual({ decision: 'fusenpai', decisionBy: 'shiro' });
+  });
 });
 
 describe('+ / − encho button behaviour (T104 clamp invariants)', () => {

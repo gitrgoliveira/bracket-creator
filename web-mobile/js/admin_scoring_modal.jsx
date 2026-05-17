@@ -108,7 +108,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
     <form className="decision-prompt" onSubmit={submit} style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2, #fafafa)" }}>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
-        <div style={{ fontWeight: 600 }}>{kind === "kiken" ? "Which side withdrew?" : "Which side gets the default win?"}</div>
+        <div style={{ fontWeight: 600 }}>{kind === "kiken" ? "Which side withdrew?" : "Which side did not show up?"}</div>
         <div style={{ display: "flex", gap: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <input type="radio" name="decision-side" value="shiro" checked={side === "shiro"} onChange={() => setSide("shiro")} />

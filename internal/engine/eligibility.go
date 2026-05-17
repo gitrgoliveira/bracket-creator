@@ -153,7 +153,7 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 // RecordDecision auto-fills the scoreline from decision/decisionBy/encho
 // and persists the result via RecordMatchResultWithIneligibility. The
 // canonical SideA=Aka / SideB=Shiro mapping (CLAUDE.md) is used to
-// translate decisionBy → which side wins the auto-filled X-0 scoreline.
+// translate decisionBy → which side loses/forfeits the auto-filled X-0 scoreline.
 //
 // When the match already has a kiken/fusenpai decision recorded (the
 // "undo" path, T103/CHK024) the engine enforces the

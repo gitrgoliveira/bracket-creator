@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,17 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+
+		// Per-player length caps — defense-in-depth against unbounded
+		// participants.csv inflation. Reject the whole batch on the
+		// first offender (matches the all-or-nothing semantics
+		// SaveParticipants already enforces on write).
+		for i, p := range req.Players {
+			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+				return
+			}
 		}
 
 		players := make([]domain.Player, 0, len(req.Players))

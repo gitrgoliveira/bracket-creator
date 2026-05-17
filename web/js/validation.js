@@ -82,7 +82,7 @@ export function getParticipantValidationState(playerList, withZekkenName) {
             }
 
             const displayName = columns[1] || sanitizeNameForValidation(name);
-            const duplicateKey = `${normalizeNameForValidation(name)}|${displayName}|${columns[2].toLocaleLowerCase()}`;
+            const duplicateKey = `${normalizeNameForValidation(name)}|${displayName.toLocaleLowerCase()}|${columns[2].toLocaleLowerCase()}`;
             if (seenEntries.has(duplicateKey)) {
                 errors.push(`Line ${lineNumber}: duplicate participant entry also appears on line ${seenEntries.get(duplicateKey)}.`);
                 return;
@@ -125,20 +125,6 @@ export function getParticipantValidationState(playerList, withZekkenName) {
     };
 }
 
-// Pure helper: detects duplicate entries using whole-line equality (mirrors
-// the Go server-side helper.CheckDuplicateEntries comparison rule).
-export function findDuplicateLines(playerList) {
-    const seen = new Map();
-    const dups = [];
-    for (const raw of String(playerList || '').split('\n')) {
-        const line = raw.trim();
-        if (line === '') continue;
-        const count = (seen.get(line) || 0) + 1;
-        seen.set(line, count);
-        if (count === 2) dups.push(line);
-    }
-    return dups;
-}
 
 // Pure validator for the courts (Shiaijo) field — A-Z hard cap at 26.
 export function validateCourtsValue(rawCourts) {

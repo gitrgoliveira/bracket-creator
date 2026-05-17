@@ -126,15 +126,13 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 			}
 		}
 	}
-	// Convert at the boundary: the helper.CreatePlayers parser still
-	// returns []helper.Player internally, but the cache + return type
-	// is []domain.Player (NFR-007, T154).
-	domainPlayers := helper.PlayersToDomain(players)
-	cache.data = domainPlayers
+	// helper.Player is a type alias for domain.Player (NFR-007); the
+	// parser output can flow straight into the cache without conversion.
+	cache.data = players
 	cache.mtime = mtime
 
-	res := make([]domain.Player, len(domainPlayers))
-	copy(res, domainPlayers)
+	res := make([]domain.Player, len(players))
+	copy(res, players)
 	return res, nil
 }
 
@@ -151,8 +149,14 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 		if id == "" {
 			id = newParticipantID()
 		}
+		// Only write the 3-column form when DisplayName carries information
+		// beyond what helper.SanitizeName would derive from Name on load.
+		// Writing the auto-derived form would corrupt non-zekken loads:
+		// LoadParticipants(_, withZekkenName=false) reads column 2 as Dojo
+		// and pushes the real Dojo into Metadata. See the round-trip
+		// regression test in participants_test.go.
 		var row string
-		if p.DisplayName != "" {
+		if p.DisplayName != "" && p.DisplayName != helper.SanitizeName(p.Name) {
 			row = fmt.Sprintf("%s, %s, %s", p.Name, p.DisplayName, p.Dojo)
 		} else {
 			row = fmt.Sprintf("%s, %s", p.Name, p.Dojo)

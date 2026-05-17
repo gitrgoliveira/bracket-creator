@@ -205,3 +205,112 @@ func TestLoadTeamLineupsMissingFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
+
+// TestParseTeamLineupsBytes_MalformedYAML covers the error path in
+// parseTeamLineupsBytes for invalid YAML input.
+func TestParseTeamLineupsBytes_MalformedYAML(t *testing.T) {
+	_, err := parseTeamLineupsBytes([]byte(":\t:bad yaml:"))
+	assert.Error(t, err)
+}
+
+// TestParseTeamLineupsBytes_Empty confirms empty bytes return an empty map.
+func TestParseTeamLineupsBytes_Empty(t *testing.T) {
+	m, err := parseTeamLineupsBytes(nil)
+	require.NoError(t, err)
+	assert.Empty(t, m)
+}
+
+// TestDeleteTeamLineup_NotFound verifies that deleting a lineup that does not
+// exist returns nil without error (idempotent).
+func TestDeleteTeamLineup_NotFound(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-delete-notfound"
+	// No lineup ever written; delete must succeed silently.
+	err := store.DeleteTeamLineup(compID, "team-ghost", 0)
+	require.NoError(t, err, "deleting a non-existent lineup must not error")
+}
+
+// TestDeleteTeamLineup_Success verifies the happy path: set a lineup, then
+// delete it, and confirm it is gone from the persisted map.
+func TestDeleteTeamLineup_Success(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-delete-ok"
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
+
+	// Confirm it exists.
+	got, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+
+	// Delete it.
+	require.NoError(t, store.DeleteTeamLineup(compID, "team-alpha", 0))
+
+	// Must be gone.
+	got, err = store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.Empty(t, got, "lineup must be absent after successful delete")
+}
+
+// TestSetTeamLineup_RoundHasLiveBracketMatch verifies the T128a guard:
+// when a bracket match for the same round is already running, SetTeamLineup
+// must refuse with ErrLineupLocked even if no LockedAt stamp exists yet.
+func TestSetTeamLineup_RoundHasLiveBracketMatch(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-live-bracket"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	// Bracket round 0 has a running match.
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds: [][]BracketMatch{{
+			{ID: "M1", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+		}},
+	}))
+
+	err := store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5)
+	require.ErrorIs(t, err, ErrLineupLocked,
+		"live bracket match in round 0 must block SetTeamLineup with ErrLineupLocked")
+}
+
+// TestSetTeamLineup_RoundHasLivePoolMatch verifies the T128a guard for pool
+// matches: running pool matches collapse to round 0.
+func TestSetTeamLineup_RoundHasLivePoolMatch(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-live-pool"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	// Pool match running → should block round 0 lineup submissions.
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "P1-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+	}))
+
+	err := store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5)
+	require.ErrorIs(t, err, ErrLineupLocked,
+		"running pool match must block round 0 SetTeamLineup with ErrLineupLocked")
+}
+
+// TestSetTeamLineup_RoundHasCompletedMatch verifies that a COMPLETED bracket
+// match in the round also blocks the lineup submission.
+func TestSetTeamLineup_RoundHasCompletedMatch(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-completed-bracket"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds: [][]BracketMatch{{
+			{ID: "M1", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusCompleted, Winner: "TeamA"},
+		}},
+	}))
+
+	err := store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5)
+	require.ErrorIs(t, err, ErrLineupLocked)
+}

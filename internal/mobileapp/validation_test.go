@@ -132,3 +132,125 @@ func TestValidationErrorFormat(t *testing.T) {
 		assert.Equal(t, "top-level shape error", err.Error())
 	})
 }
+
+// TestValidateDecision_UnknownDecision verifies that an unrecognized decision
+// string is rejected.
+func TestValidateDecision_UnknownDecision(t *testing.T) {
+	req := ScoreRequest{Decision: "mystery"}
+	err := req.Validate()
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "decision", verr.Field)
+}
+
+// TestValidateDecision_InvalidDecisionBy verifies that a decisionBy value
+// other than "shiro" or "aka" is rejected.
+func TestValidateDecision_InvalidDecisionBy(t *testing.T) {
+	req := ScoreRequest{Decision: "hikiwake", DecisionBy: "blue"}
+	err := req.Validate()
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "decisionBy", verr.Field)
+}
+
+// TestValidateDecision_KikenRequiresDecisionBy verifies that kiken without
+// decisionBy returns an error on the decisionBy field.
+func TestValidateDecision_KikenRequiresDecisionBy(t *testing.T) {
+	req := ScoreRequest{Decision: "kiken"}
+	err := req.Validate()
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "decisionBy", verr.Field)
+}
+
+// TestValidateDecision_FusenpaiRequiresDecisionBy verifies that fusenpai
+// without decisionBy returns an error on the decisionBy field.
+func TestValidateDecision_FusenpaiRequiresDecisionBy(t *testing.T) {
+	req := ScoreRequest{Decision: "fusenpai"}
+	err := req.Validate()
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "decisionBy", verr.Field)
+}
+
+// TestValidateDecision_FusenshoTopLevel verifies that fusensho is rejected at
+// the top-level score endpoint (only valid on sub-results).
+func TestValidateDecision_FusenshoTopLevel(t *testing.T) {
+	req := ScoreRequest{Decision: "fusensho"}
+	err := req.Validate()
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "decision", verr.Field)
+}
+
+// TestRequireWinnerForDecision_EmptyWinner verifies that kiken with a valid
+// scoreline but no Winner field is rejected.
+func TestRequireWinnerForDecision_EmptyWinner(t *testing.T) {
+	req := ScoreRequest{
+		Decision:   "kiken",
+		DecisionBy: "shiro",
+		IpponsA:    []string{"M", "K"},
+	}
+	err := req.Validate()
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "winner", verr.Field)
+}
+
+// TestValidateDecision_KikenBadScorelline verifies that kiken requires a
+// 2-0 (or 1-0 in encho) scoreline.
+func TestValidateDecision_KikenBadScoreline(t *testing.T) {
+	req := ScoreRequest{
+		Decision:   "kiken",
+		DecisionBy: "shiro",
+		// No ippons — fails winningScoreline check
+	}
+	err := req.Validate()
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "scoreline", verr.Field)
+}
+
+// TestValidateDecision_FusenpaiValidFull verifies that a complete fusenpai
+// request (decisionBy + 2-0 scoreline + winner) passes validation.
+func TestValidateDecision_FusenpaiValidFull(t *testing.T) {
+	req := ScoreRequest{
+		SideA:      "Alice",
+		SideB:      "Bob",
+		Decision:   "fusenpai",
+		DecisionBy: "shiro",
+		IpponsA:    []string{"M", "K"},
+		Winner:     "Alice",
+	}
+	assert.NoError(t, req.Validate())
+}
+
+// TestValidateDecision_FusenpaiNoWinner verifies that fusenpai with a valid
+// scoreline but no Winner is rejected.
+func TestValidateDecision_FusenpaiNoWinner(t *testing.T) {
+	req := ScoreRequest{
+		Decision:   "fusenpai",
+		DecisionBy: "shiro",
+		IpponsA:    []string{"M", "K"},
+	}
+	err := req.Validate()
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "winner", verr.Field)
+}
+
+// TestValidateDecision_KachinukiExhaustionOk verifies that
+// kachinuki-exhaustion is accepted (engine-generated value, not
+// operator-entered).
+func TestValidateDecision_KachinukiExhaustionOk(t *testing.T) {
+	req := ScoreRequest{Decision: "kachinuki-exhaustion"}
+	assert.NoError(t, req.Validate())
+}

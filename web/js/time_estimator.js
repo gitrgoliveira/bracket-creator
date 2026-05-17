@@ -58,6 +58,7 @@ export function estimateSchedule(opts) {
 
     let totalPoolMinutes = 0;
     let playoffParticipants = totalPlayers;
+    let numPoolMatches = 0;
 
     if (isPools) {
         const playersPerPool = parseInt(opts.playersPerPool, 10) || 3;
@@ -74,10 +75,19 @@ export function estimateSchedule(opts) {
         }
 
         const mpp = matchesPerPool(playersPerPool, isRoundRobin);
-        const totalPoolMatches = numPools * mpp;
+        if (isMaxMode) {
+            const remainder = totalPlayers % playersPerPool;
+            if (remainder > 1) {
+                numPoolMatches = (numPools - 1) * mpp + matchesPerPool(remainder, isRoundRobin);
+            } else {
+                numPoolMatches = numPools * mpp;
+            }
+        } else {
+            numPoolMatches = numPools * mpp;
+        }
 
-        totalPoolMinutes = (totalPoolMatches * teamSize * poolMatchMins)
-            + (totalPoolMatches * rotationSecs / 60)
+        totalPoolMinutes = (numPoolMatches * teamSize * poolMatchMins)
+            + (numPoolMatches * rotationSecs / 60)
             + breakMins;
 
         playoffParticipants = numPools * winnersPerPool;
@@ -99,12 +109,14 @@ export function estimateSchedule(opts) {
     return {
         isPools,
         courts,
+        teamSize,
         totalPoolMinutes,
         totalElimMinutes,
         totalSequentialMinutes,
         totalParallelMinutes,
         finishTotalMins,
         playoffParticipants,
+        numPoolMatches,
         numElimMatches
     };
 }

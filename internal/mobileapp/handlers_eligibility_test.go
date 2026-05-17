@@ -132,3 +132,45 @@ func TestEligibilityPOST_RequiresAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
+
+// TestEligibilityPOST_MissingPlayerID verifies that a POST with an empty
+// playerId returns 400 (domain.ErrCompetitorStatusMissingPlayerID).
+func TestEligibilityPOST_MissingPlayerID(t *testing.T) {
+	r, store, _ := setupEligibilityTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "pass"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+
+	body, _ := json.Marshal(map[string]any{
+		"playerId": "",
+		"eligible": false,
+		"reason":   "kiken",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/c1/competitor-status",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "pass")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestEligibilityPOST_MissingReason verifies that marking a player ineligible
+// without a reason returns 400.
+func TestEligibilityPOST_MissingReason(t *testing.T) {
+	r, store, _ := setupEligibilityTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "pass"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+
+	body, _ := json.Marshal(map[string]any{
+		"playerId": "p1",
+		"eligible": false,
+		"reason":   "",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/c1/competitor-status",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "pass")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

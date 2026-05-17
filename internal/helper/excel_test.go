@@ -39,7 +39,7 @@ func TestSanitizeName(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		result := sanitizeName(tc.input)
+		result := SanitizeName(tc.input)
 		if result != tc.expected {
 			t.Errorf("For input '%s', expected '%s', got '%s'", tc.input, tc.expected, result)
 		}

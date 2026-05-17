@@ -193,3 +193,119 @@ func TestLineupDELETE_RequiresAuth(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
 }
+
+// TestParseLineupParams_NonIntegerRound verifies that a non-integer round
+// parameter returns 400.
+func TestParseLineupParams_NonIntegerRound(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/competitions/c1/teams/teamA/lineups/abc", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestParseLineupParams_NegativeRound verifies that a negative round returns 400.
+func TestParseLineupParams_NegativeRound(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/lineups/-1",
+		bytes.NewBufferString("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLineupPUT_NoCompetition verifies that a PUT for an unknown competition
+// returns 404.
+func TestLineupPUT_NoCompetition(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Password: "secret"}))
+
+	body, _ := json.Marshal(map[string]any{
+		"positions": map[string]string{
+			"senpo":   "p1",
+			"jiho":    "p2",
+			"chuken":  "p3",
+			"fukusho": "p4",
+			"taisho":  "p5",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/no-such-comp/teams/teamA/lineups/1",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestLineupPUT_ZeroTeamSize verifies that a competition with TeamSize=0
+// returns 400 because it's not configured for team play.
+func TestLineupPUT_ZeroTeamSize(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 0}))
+
+	body, _ := json.Marshal(map[string]any{
+		"positions": map[string]string{"senpo": "p1"},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/lineups/1",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLineupPUT_ValidationError verifies that a PUT with an invalid lineup
+// (missing senpo for a 5-person team) returns 400.
+func TestLineupPUT_ValidationError(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	// Submit 5 positions but missing senpo — should fail domain validation.
+	body, _ := json.Marshal(map[string]any{
+		"positions": map[string]string{
+			"jiho":    "p2",
+			"chuken":  "p3",
+			"fukusho": "p4",
+			"taisho":  "p5",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/lineups/1",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLineupPUT_InvalidJSON verifies that a malformed body returns 400.
+func TestLineupPUT_InvalidJSON(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/lineups/1",
+		bytes.NewBufferString("{bad-json"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

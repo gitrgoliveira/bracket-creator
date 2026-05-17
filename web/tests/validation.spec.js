@@ -5,7 +5,6 @@ import {
     sanitizeNameForValidation,
     normalizeNameForValidation,
     getParticipantValidationState,
-    findDuplicateLines,
     validateCourtsValue,
     validatePoolSettings
 } from "../js/validation.js";
@@ -81,6 +80,15 @@ describe("getParticipantValidationState", () => {
         expect(state.errors[0]).toMatch(/Name, ZekkenName, Dojo/);
     });
 
+    it("treats zekken duplicates as duplicates regardless of case", () => {
+        const state = getParticipantValidationState(
+            "John Smith, JOHN, Mushin Dojo\nJohn Smith, john, Mushin Dojo",
+            true
+        );
+        expect(state.errors.length).toBe(1);
+        expect(state.errors[0]).toMatch(/Line 2.*duplicate/i);
+    });
+
     it("treats an empty input as empty (no participants, no errors)", () => {
         const state = getParticipantValidationState("\n\n   \n", false);
         expect(state.isEmpty).toBe(true);
@@ -95,23 +103,6 @@ describe("getParticipantValidationState", () => {
         );
         expect(state.infos.length).toBe(1);
         expect(state.infos[0]).toMatch(/Extra columns/);
-    });
-});
-
-describe("findDuplicateLines", () => {
-    it("returns each duplicated line exactly once", () => {
-        const dups = findDuplicateLines(
-            "A, X\nB, Y\nA, X\nB, Y\nA, X"
-        );
-        expect(dups).toEqual(["A, X", "B, Y"]);
-    });
-
-    it("returns an empty list when all lines are unique", () => {
-        expect(findDuplicateLines("A, X\nB, Y\nC, Z")).toEqual([]);
-    });
-
-    it("ignores blank lines", () => {
-        expect(findDuplicateLines("A, X\n\n\nA, X")).toEqual(["A, X"]);
     });
 });
 

@@ -2,9 +2,9 @@
 // table population, button highlighting) lives in app.js.
 
 // Validate the rank assignments captured from the seeds modal. Returns
-// { ok, assignments, errors }. Each assignment is { Name, SeedRank }.
+// { ok, assignments, errors }. Each assignment is { Name, Dojo?, SeedRank }.
 //
-// rawInputs is an array of { name, rawValue } where rawValue is the raw
+// rawInputs is an array of { name, dojo?, rawValue } where rawValue is the raw
 // textbox string (so we can ignore blanks and reject negatives uniformly).
 export function validateSeedAssignments(rawInputs) {
     const assignments = [];
@@ -22,13 +22,10 @@ export function validateSeedAssignments(rawInputs) {
             if (rank > maxRank) {
                 maxRank = rank;
             }
-            assignments.push({
-                Name: input.name,
-                SeedRank: rank
-            });
+            const entry = { Name: input.name, SeedRank: rank };
+            if (input.dojo) entry.Dojo = input.dojo;
+            assignments.push(entry);
         }
-        // Non-positive or blank rawValues are ignored — caller is responsible
-        // for clearing the textbox if it wants to reflect that.
     }
 
     const errors = [];

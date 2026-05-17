@@ -167,6 +167,15 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		comp.Courts = []string{"A"}
 	}
 
+	// Cross-file guard symmetry with handlers_competition.go (POST + PUT):
+	// reject oversized string fields before they land on disk. Without
+	// this an imported manifest could persist a 1MB Name where the REST
+	// API would reject the same value at 200 chars.
+	if err := validateCompetitionLengths(comp); err != nil {
+		res.Error = err.Error()
+		return res
+	}
+
 	// Cross-file guard symmetry with the POST /competitions and
 	// PUT /competitions/:id handlers, which call validateCompetitionCourts
 	// to reject empty / multi-character / >26-court manifests. Pre-fix the
@@ -223,7 +232,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// though the prior attempt failed. Parsing first means a parse
 	// failure surfaces res.Error without ever touching disk; the user
 	// can fix the file and retry the manifest cleanly.
-	var parsedPlayers []helper.Player
+	var parsedPlayers []domain.Player
 	if entry.Participants != "" {
 		data := findFile(files, entry.Participants)
 		if data == nil {
@@ -235,6 +244,17 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		if err != nil {
 			res.Error = "parse participants: " + err.Error()
 			return res
+		}
+		// Cross-file guard symmetry with POST /participants: reject
+		// oversized fields before they land in participants.csv. The
+		// REST API caps the same fields client-side at write time;
+		// without this, the import path could persist values the API
+		// would reject.
+		for i, p := range players {
+			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+				res.Error = fmt.Sprintf("participants[%d]: %s", i, err.Error())
+				return res
+			}
 		}
 		parsedPlayers = players
 	}
@@ -263,6 +283,12 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		if err != nil {
 			res.Error = "parse seeds: " + err.Error()
 			return res
+		}
+		for i, sa := range assignments {
+			if err := validateMaxLen(fmt.Sprintf("seeds[%d].name", i), sa.Name, MaxLenSeedAssignmentName); err != nil {
+				res.Error = err.Error()
+				return res
+			}
 		}
 		if len(assignments) > 0 {
 			parsedSeeds = assignments
@@ -325,10 +351,9 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// post-save failure so the row is fully reversed and the operator
 	// can re-run the import after fixing the I/O issue.
 	if len(parsedPlayers) > 0 {
-		// helper.CreatePlayers builds []helper.Player; convert at the
-		// engine↔state boundary because SaveParticipants takes
-		// []domain.Player after T154.
-		if err := store.SaveParticipants(entry.ID, helper.PlayersToDomain(parsedPlayers)); err != nil {
+		// helper.Player is a type alias for domain.Player (NFR-007); the
+		// parser output flows straight into SaveParticipants.
+		if err := store.SaveParticipants(entry.ID, parsedPlayers); err != nil {
 			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
 			res.Error = "save participants: " + err.Error()
 			return res

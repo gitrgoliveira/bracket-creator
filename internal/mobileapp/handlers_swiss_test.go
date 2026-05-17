@@ -272,3 +272,16 @@ func TestPostCompetition_SwissAccepted(t *testing.T) {
 	assert.Equal(t, state.CompFormatSwiss, saved.Format)
 	assert.Equal(t, 4, saved.SwissRounds)
 }
+
+// TestPublicSwissStandings_NotFound verifies that requesting standings for
+// a non-existent competition returns 404.
+func TestPublicSwissStandings_NotFound(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/competitions/no-such-comp/swiss/standings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -27,18 +28,12 @@ type Pool struct {
 	Matches  []Match  `json:"matches,omitempty"`
 }
 
-type Player struct {
-	ID          string   `json:"id,omitempty"` // stable UUID assigned at first persist
-	Name        string   `json:"name"`
-	DisplayName string   `json:"displayName"`
-	Dojo        string   `json:"dojo"`
-	Metadata    []string `json:"metadata,omitempty"`
-	Tag         string   `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer", "reserved"
-
-	PoolPosition int64  `json:"-"`
-	Seed         int    `json:"seed"`
-	Number       string `json:"number,omitempty"` // e.g. "K1" — assigned when --number-prefix is set
-}
+// Player is a type alias for domain.Player. The helper package used to
+// own a parallel struct during the NFR-007 migration; it was collapsed
+// to an alias once the two were proven field-identical (the converters
+// were copying fields 1:1 with no translation). The helper name is kept
+// for rendering-side ergonomics inside this package.
+type Player = domain.Player
 
 // MatchWinner records the Excel cell that contains a pool or elimination match
 // winner's name; used to build cross-sheet formula references in bracket trees.
@@ -79,7 +74,7 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 			player.Name = c.String(line[0])
 			if len(line) == 2 {
 				// Tolerate 2-column rows (Name, Dojo) written without a distinct display name.
-				player.DisplayName = sanitizeName(line[0])
+				player.DisplayName = SanitizeName(line[0])
 				player.Dojo = line[1]
 				if player.Dojo == "" {
 					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
@@ -93,7 +88,7 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 				}
 				player.DisplayName = line[1]
 				if player.DisplayName == "" {
-					player.DisplayName = sanitizeName(line[0])
+					player.DisplayName = SanitizeName(line[0])
 				}
 				player.Dojo = line[2]
 				if len(line) > 3 {
@@ -110,7 +105,7 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		} else {
 			// backward compatibility: Name, Dojo
 			player.Name = c.String(line[0])
-			player.DisplayName = sanitizeName(line[0])
+			player.DisplayName = SanitizeName(line[0])
 			player.Dojo = "NA"
 			if len(line) >= 2 {
 				player.Dojo = line[1]
@@ -150,7 +145,14 @@ func isParticipantTag(s string) bool {
 	return false
 }
 
-func sanitizeName(name string) string {
+// SanitizeName returns the canonical display form derived from a participant
+// name: a single token uppercased ("KAZUKI") or "F. LAST" for multi-token
+// names. Exported so state.SaveParticipants can detect display names that
+// match the auto-derived form and avoid round-trip data corruption (a 3-column
+// row whose DisplayName equals SanitizeName(Name) carries no extra information
+// and must not be written for non-zekken competitions — see
+// internal/state/participants.go).
+func SanitizeName(name string) string {
 	//removing extra spaces
 	name = strings.TrimSpace(name)
 

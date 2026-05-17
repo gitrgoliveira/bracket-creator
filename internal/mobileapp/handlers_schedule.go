@@ -26,7 +26,7 @@ func RegisterScheduleHandlers(r *gin.RouterGroup) {
 // params, delegates to engine.EstimateSchedule, and returns JSON.
 //
 // Required query params:
-//   - matchDuration: int, on-clock minutes per match (per bout)
+//   - matchDuration: float, on-clock minutes per match (per bout); must be > 0
 //   - multiplier:    float, clock→elapsed multiplier (e.g. 1.5)
 //   - courts:        int >= 1, number of parallel courts
 //
@@ -51,13 +51,13 @@ func scheduleEstimateHandler(c *gin.Context) {
 		return
 	}
 
-	matchDuration, err := strconv.Atoi(matchDurationStr)
+	matchDuration, err := strconv.ParseFloat(matchDurationStr, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "matchDuration must be an integer"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "matchDuration must be a number"})
 		return
 	}
-	if matchDuration < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "matchDuration must be >= 1"})
+	if matchDuration <= 0 || math.IsNaN(matchDuration) || math.IsInf(matchDuration, 0) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "matchDuration must be a positive finite number"})
 		return
 	}
 	multiplier, err := strconv.ParseFloat(multiplierStr, 64)

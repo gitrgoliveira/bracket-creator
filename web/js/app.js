@@ -7,7 +7,6 @@ import {
     getIssueLineNumber,
     sanitizeNameForValidation,
     getParticipantValidationState,
-    findDuplicateLines,
     validateCourtsValue,
     validatePoolSettings
 } from './validation.js';
@@ -24,6 +23,7 @@ import {
     fetchDownloadStatus,
     parseParticipants
 } from './api.js';
+import { startDownloadPoll } from './download_polling.js';
 
 // Fetch application version from API
 async function fetchAppVersion() {
@@ -110,16 +110,6 @@ function validateForm() {
         isValid = false;
     }
 
-    // Reject duplicate participant entries before submission.
-    if (playerList !== '') {
-        const dups = findDuplicateLines(playerList);
-        if (dups.length > 0) {
-            errorMsg.textContent = `Error: Duplicate participant entries: ${dups.join(', ')}`;
-            errorMsg.style.display = 'block';
-            isValid = false;
-        }
-    }
-
     if (isValid) {
         const lines = playerList.split('\n').filter(line => line.trim() !== '');
         const tournamentType = document.getElementById('pools').checked ? 'Pools and Playoffs' : 'Playoffs';
@@ -160,36 +150,23 @@ function validateForm() {
 // explicitly to window.
 window.validateForm = validateForm;
 
-function checkDownloadComplete(downloadToken) {
-    let consecutiveErrors = 0;
-    const interval = setInterval(function () {
-        fetchDownloadStatus(downloadToken)
-            .then(data => {
-                consecutiveErrors = 0;
-                if (data.ready) {
-                    document.getElementById('loading-overlay').classList.remove('active');
-                    clearInterval(interval);
-                }
-            })
-            .catch(error => {
-                consecutiveErrors++;
-                console.error('Failed to poll download status:', error);
-                if (consecutiveErrors >= 5) {
-                    clearInterval(interval);
-                    document.getElementById('loading-overlay').classList.remove('active');
-                    showToast('Lost connection while waiting for the tournament file. Please try again.', 'danger');
-                }
-            });
-    }, 100);
+function hideLoadingOverlay() {
+    document.getElementById('loading-overlay').classList.remove('active');
+}
 
-    // Timeout after 60 seconds
-    setTimeout(function () {
-        if (document.getElementById('loading-overlay').classList.contains('active')) {
-            clearInterval(interval);
-            document.getElementById('loading-overlay').classList.remove('active');
+function checkDownloadComplete(downloadToken) {
+    startDownloadPoll(downloadToken, {
+        fetchStatus: fetchDownloadStatus,
+        onReady: hideLoadingOverlay,
+        onError: () => {
+            hideLoadingOverlay();
+            showToast('Lost connection while waiting for the tournament file. Please try again.', 'danger');
+        },
+        onTimeout: () => {
+            hideLoadingOverlay();
             showToast('Tournament generation timed out. The file may be too large or the server may be busy.', 'warning');
-        }
-    }, 60000);
+        },
+    });
 }
 
 // Tournament type toggle functionality
@@ -874,22 +851,22 @@ document.getElementById('manageSeeds').addEventListener('click', async function 
             // Map existing seeds if any
             const seedMap = {};
             currentSeedAssignments.forEach(a => {
-                seedMap[a.Name] = a.SeedRank;
+                seedMap[a.Name + '|' + (a.Dojo || '')] = a.SeedRank;
             });
 
             data.participants.forEach((p, index) => {
                 const tr = document.createElement('tr');
-                const seedValue = seedMap[p.name] || '';
+                const seedValue = seedMap[p.name + '|' + (p.dojo || '')] || '';
                 const displayNameCell = withZekkenName
-                    ? `<td>${p.displayName || ''}</td>`
+                    ? `<td>${escapeHtml(p.displayName || '')}</td>`
                     : '';
                 tr.innerHTML = `
-                    <td>${p.name}</td>
+                    <td>${escapeHtml(p.name)}</td>
                     ${displayNameCell}
-                    <td>${p.dojo}</td>
+                    <td>${escapeHtml(p.dojo)}</td>
                     <td>
                         <input type="number" class="form-control form-control-sm seed-input"
-                               data-name="${p.name}" min="1" value="${seedValue}" placeholder="Rank">
+                               data-name="${escapeHtml(p.name)}" data-dojo="${escapeHtml(p.dojo || '')}" min="1" value="${seedValue}" placeholder="Rank">
                     </td>
                 `;
                 tableBody.appendChild(tr);
@@ -913,6 +890,7 @@ document.getElementById('saveSeedsBtn').addEventListener('click', function () {
     inputs.forEach(input => {
         rawInputs.push({
             name: input.getAttribute('data-name'),
+            dojo: input.getAttribute('data-dojo') || '',
             rawValue: input.value
         });
         // Mirror the legacy behaviour of clearing invalid non-positive integers
@@ -981,6 +959,7 @@ function calculateTimeEstimate() {
         document.getElementById('estPoolTimeResult').textContent = '--';
         document.getElementById('estElimTimeResult').textContent = '--';
         document.getElementById('estTotalTimeResult').textContent = '--';
+        document.getElementById('estElapsedTimeResult').textContent = '--';
         document.getElementById('estFinishTimeResult').textContent = '--';
     };
 
@@ -1012,53 +991,68 @@ function calculateTimeEstimate() {
     document.getElementById('estElimTimeResult').textContent = formatDuration(estimate.totalElimMinutes);
     document.getElementById('estTotalTimeResult').textContent = formatDuration(estimate.totalParallelMinutes);
     document.getElementById('estCourtsLabel').textContent = estimate.courts;
+    // The elapsed estimate comes from the server. Reset to a placeholder
+    // until the fetch resolves so the user never sees a stale prior value
+    // briefly attached to fresh inputs.
+    document.getElementById('estElapsedTimeResult').textContent = '…';
     document.getElementById('estFinishTimeResult').textContent = formatTime(estimate.finishTotalMins);
 
     document.getElementById('estPoolTimeCol').style.display = isPools ? '' : 'none';
     document.getElementById('estPoolMatchTimeGroup').style.display = isPools ? '' : 'none';
 
-    // FR-059 / T152: refresh the total from the canonical server
-    // calculator. Failures are silent — the locally rendered total above
-    // remains as a fallback when the endpoint is unreachable.
-    refreshServerEstimate(estimate, isPools).catch(() => {});
+    // FR-059 / T152: fetch the canonical elapsed-time estimate from the
+    // server. The displayed Clock time (above) is the local rich-breakdown
+    // estimate; the Elapsed estimate (below) is clock × multiplier ×
+    // slowest-court buffer. The two are intentionally distinct numbers.
+    refreshServerEstimate(estimate).catch(() => {});
 }
 
-// refreshServerEstimate calls GET /api/schedule/estimate with the
-// same parameters that produced `local` and, on success, overwrites
-// the displayed total + finish time with the server-derived values.
-// Kept as a separate async function so the synchronous renderer can
-// short-circuit on empty input without paying for a network round-trip.
-async function refreshServerEstimate(local, isPools) {
-    const matchDurationMins = isPools
-        ? parseFloat(document.getElementById('estPoolMatchTime').value) || 3
-        : parseFloat(document.getElementById('estElimMatchTime').value) || 4;
+// refreshServerEstimate fetches the canonical elapsed-time estimate from
+// GET /api/schedule/estimate, splitting Pools+Playoffs into one fetch per
+// phase so each phase's matchDuration is respected. Renders the result to
+// #estElapsedTimeResult and recomputes #estFinishTimeResult against it.
+// Silent on failure: the placeholder stays so the user sees that the
+// server estimate is unavailable rather than a stale value.
+async function refreshServerEstimate(local) {
     const courts = parseInt(document.getElementById('courts').value, 10) || 1;
-    const teamSize = parseInt(document.getElementById('teamMatches').value, 10) || 0;
+    const poolDur = parseFloat(document.getElementById('estPoolMatchTime').value) || 3;
+    const elimDur = parseFloat(document.getElementById('estElimMatchTime').value) || 4;
+    const teamSize = Math.max(local.teamSize || 1, 1);
 
-    // Convert local computed totals back into match counts so the
-    // server's calculator sees an equivalent input. (The breakdown
-    // helper above already did the heavy lifting; we re-derive
-    // numMatches from totalParallelMinutes / perMatch to avoid
-    // double-tracking pool-vs-elim split here.)
-    const numMatches = Math.max(1, Math.round(local.totalSequentialMinutes / Math.max(matchDurationMins, 0.1)));
+    // multiplier 1.5 = clock→elapsed conversion; buffer 10 = slowest-court
+    // padding % (typical 10–15). Both mirror the defaults in
+    // internal/engine/schedule.go.
+    const baseParams = { multiplier: 1.5, courts, teamSize: 0, buffer: 10 };
 
-    const params = {
-        matchDuration: Math.round(matchDurationMins),
-        multiplier: 1.5,
-        numMatches,
-        courts,
-        // The local breakdown already accounts for team size by
-        // multiplying perMatch * teamSize; for the server fetch we
-        // pass teamSize=0 so its scaling logic doesn't double-apply.
-        teamSize: 0,
-        buffer: 10
-    };
-    const server = await fetchScheduleEstimate(params);
-    if (server && typeof server.totalDurationMinutes === 'number') {
-        document.getElementById('estTotalTimeResult').textContent = formatDuration(server.totalDurationMinutes);
-        const startMins = parseStartTime(document.getElementById('estStartTime').value || '09:00');
-        document.getElementById('estFinishTimeResult').textContent = formatTime(startMins + server.totalDurationMinutes);
+    const calls = [];
+    if (local.isPools && local.numPoolMatches > 0) {
+        calls.push(fetchScheduleEstimate({
+            ...baseParams,
+            matchDuration: poolDur,
+            numMatches: local.numPoolMatches * teamSize
+        }));
     }
+    if (local.numElimMatches > 0) {
+        calls.push(fetchScheduleEstimate({
+            ...baseParams,
+            matchDuration: elimDur,
+            numMatches: local.numElimMatches * teamSize
+        }));
+    }
+    if (calls.length === 0) {
+        document.getElementById('estElapsedTimeResult').textContent = '--';
+        return;
+    }
+
+    const results = await Promise.all(calls);
+    if (results.some(r => !r || typeof r.totalDurationMinutes !== 'number')) {
+        document.getElementById('estElapsedTimeResult').textContent = '--';
+        return;
+    }
+    const totalMins = results.reduce((s, r) => s + r.totalDurationMinutes, 0);
+    document.getElementById('estElapsedTimeResult').textContent = formatDuration(totalMins);
+    const startMins = parseStartTime(document.getElementById('estStartTime').value || '09:00');
+    document.getElementById('estFinishTimeResult').textContent = formatTime(startMins + totalMins);
 }
 
 // Wire up estimator to all relevant inputs

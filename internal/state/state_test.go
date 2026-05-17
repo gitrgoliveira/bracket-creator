@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -878,4 +879,263 @@ func TestIsDraw(t *testing.T) {
 	assert.False(t, IsDraw(""))
 	assert.False(t, IsDraw("ippon"))
 	assert.False(t, IsDraw("HIKIWAKE"), "case-sensitive — wire format is lowercase")
+}
+
+// --- UpdateTournamentChanged ---
+
+func TestUpdateTournamentChanged_Basic(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	initial := &Tournament{Name: "My Tournament", Password: "secret"}
+	require.NoError(t, store.SaveTournament(initial))
+
+	desired := &Tournament{Name: "My Tournament Updated", Password: "secret"}
+	changed, err := store.UpdateTournamentChanged(desired, func(current, d *Tournament) error {
+		return nil // accept as-is
+	})
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, "My Tournament Updated", loaded.Name)
+}
+
+func TestUpdateTournamentChanged_TransformError(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	require.NoError(t, store.SaveTournament(&Tournament{Name: "T"}))
+
+	sentinel := errors.New("transform failed")
+	_, err = store.UpdateTournamentChanged(&Tournament{Name: "T2"}, func(_, _ *Tournament) error {
+		return sentinel
+	})
+	require.ErrorIs(t, err, sentinel)
+}
+
+// --- LoadSchedule ---
+
+func TestLoadSchedule_MissingFile(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "sched-missing"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Sched"}))
+
+	entries, err := store.LoadSchedule(compID)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestLoadSchedule_RoundTrip(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "sched-rt"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Sched RT"}))
+
+	entries := []ScheduleEntry{
+		{MatchType: "pool", MatchRef: "P1-0", Court: "A", ScheduledAt: "09:00", Status: "scheduled"},
+		{MatchType: "pool", MatchRef: "P1-1", Court: "A", ScheduledAt: "09:10", Status: "scheduled"},
+	}
+	require.NoError(t, store.SaveSchedule(compID, entries))
+
+	loaded, err := store.LoadSchedule(compID)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "P1-0", loaded[0].MatchRef)
+	assert.Equal(t, "09:10", loaded[1].ScheduledAt)
+}
+
+func TestLoadSchedule_InvalidCompID(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	_, err = store.LoadSchedule("../bad")
+	assert.Error(t, err)
+}
+
+func TestLoadSchedule_FreshStore(t *testing.T) {
+	// Use a fresh store to read so parseScheduleFile is called (not cache).
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	writeStore, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "sched-fresh"
+	require.NoError(t, writeStore.SaveCompetition(&Competition{ID: compID, Name: "SchedFresh"}))
+
+	entries := []ScheduleEntry{
+		{MatchType: "pool", MatchRef: "P1-0", Court: "A", ScheduledAt: "09:00", Status: "scheduled", Date: "01-01-2026", IsBreak: false, Label: ""},
+		{MatchType: "break", MatchRef: "", Court: "", ScheduledAt: "12:00", Status: "", IsBreak: true, Label: "Lunch"},
+	}
+	require.NoError(t, writeStore.SaveSchedule(compID, entries))
+
+	readStore, err := NewStore(dir)
+	require.NoError(t, err)
+
+	loaded, err := readStore.LoadSchedule(compID)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "P1-0", loaded[0].MatchRef)
+	assert.Equal(t, "01-01-2026", loaded[0].Date)
+	assert.True(t, loaded[1].IsBreak)
+	assert.Equal(t, "Lunch", loaded[1].Label)
+}
+
+// --- UpdateCompetitionChanged ---
+
+func TestUpdateCompetitionChanged_Basic(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "ucc-basic"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Original", Status: CompStatusSetup}))
+
+	changed, err := store.UpdateCompetitionChanged(compID, func(c *Competition) (*Competition, error) {
+		c.Status = CompStatusPools
+		return c, nil
+	})
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	loaded, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, CompStatusPools, loaded.Status)
+}
+
+func TestUpdateCompetitionChanged_NoChange(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "ucc-nochange"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Same"}))
+
+	changed, err := store.UpdateCompetitionChanged(compID, func(c *Competition) (*Competition, error) {
+		// returning nil signals no-op
+		return nil, nil
+	})
+	require.NoError(t, err)
+	assert.False(t, changed)
+}
+
+func TestUpdateCompetitionChanged_TransformError(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "ucc-err"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Err"}))
+
+	sentinel := errors.New("transform error")
+	_, err = store.UpdateCompetitionChanged(compID, func(c *Competition) (*Competition, error) {
+		return nil, sentinel
+	})
+	require.ErrorIs(t, err, sentinel)
+}
+
+func TestUpdateCompetitionChanged_InvalidID(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	_, err = store.UpdateCompetitionChanged("../bad", func(c *Competition) (*Competition, error) {
+		return c, nil
+	})
+	assert.Error(t, err)
+}
+
+// --- SetCompetitorStatus ---
+
+func TestSetCompetitorStatus_NewAndOverwrite(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "scs-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Status Test"}))
+
+	status := domain.CompetitorStatus{
+		PlayerID: "player-1",
+		Eligible: false,
+		Reason:   "kiken",
+	}
+	require.NoError(t, store.SetCompetitorStatus(compID, status))
+
+	loaded, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.Contains(t, loaded, "player-1")
+	assert.False(t, loaded["player-1"].Eligible)
+	assert.Equal(t, "kiken", loaded["player-1"].Reason)
+	assert.False(t, loaded["player-1"].RecordedAt.IsZero(), "RecordedAt should be auto-filled")
+
+	// Overwrite with eligible
+	status2 := domain.CompetitorStatus{PlayerID: "player-1", Eligible: true}
+	require.NoError(t, store.SetCompetitorStatus(compID, status2))
+
+	loaded2, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	assert.True(t, loaded2["player-1"].Eligible)
+}
+
+func TestSetCompetitorStatus_ValidationError(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "scs-val"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Val"}))
+
+	// Missing PlayerID
+	err = store.SetCompetitorStatus(compID, domain.CompetitorStatus{Eligible: false, Reason: "kiken"})
+	assert.Error(t, err)
+
+	// Ineligible but no reason
+	err = store.SetCompetitorStatus(compID, domain.CompetitorStatus{PlayerID: "p1", Eligible: false})
+	assert.Error(t, err)
 }

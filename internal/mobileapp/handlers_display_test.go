@@ -239,3 +239,17 @@ func TestCourtLiveReturns503WhenNoTournament(t *testing.T) {
 	assert.Equal(t, "no_active_tournament", resp.Error,
 		"error field must be exactly 'no_active_tournament' per contract")
 }
+
+// TestPhaseFromMatchID_NoDash verifies that an ID with no dash (or a leading
+// dash) returns the full ID unchanged.
+func TestPhaseFromMatchID_NoDash(t *testing.T) {
+	assert.Equal(t, "B1", phaseFromMatchID("B1"))
+	assert.Equal(t, "-leading", phaseFromMatchID("-leading"))
+}
+
+// TestPhaseFromMatchID_WithDash verifies that an ID with a mid-string dash
+// returns everything before the last dash.
+func TestPhaseFromMatchID_WithDash(t *testing.T) {
+	assert.Equal(t, "Pool A", phaseFromMatchID("Pool A-0"))
+	assert.Equal(t, "R1", phaseFromMatchID("R1-2"))
+}

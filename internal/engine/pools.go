@@ -10,19 +10,17 @@ import (
 )
 
 func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
-	// helper.ApplySeeds / PoolSeeding / CreatePools touch Excel cell
-	// coordinates and still operate on []helper.Player. Convert at the
-	// engine↔helper boundary (NFR-007, T154).
-	hPlayers := helper.PlayersFromDomain(players)
+	// helper.Player is a type alias for domain.Player (NFR-007); the
+	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
-		if err := helper.ApplySeeds(hPlayers, seeds); err != nil {
+		if err := helper.ApplySeeds(players, seeds); err != nil {
 			return fmt.Errorf("applying seeds: %w", err)
 		}
-		hPlayers = helper.PoolSeeding(hPlayers, comp.PoolSize, len(comp.Courts))
+		players = helper.PoolSeeding(players, comp.PoolSize, len(comp.Courts))
 	}
 
 	isMax := comp.PoolSizeMode == "max"
-	pools, err := helper.CreatePools(hPlayers, comp.PoolSize, isMax)
+	pools, err := helper.CreatePools(players, comp.PoolSize, isMax)
 	if err != nil {
 		return err
 	}

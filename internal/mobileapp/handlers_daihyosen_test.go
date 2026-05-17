@@ -1,0 +1,241 @@
+package mobileapp
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func setupDaihyosenTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "daihyosen-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	eng := engine.New(store)
+	hub := NewHub()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterDaihyosenHandlers(api, eng, store, hub)
+
+	return r, store, eng, hub, dir
+}
+
+// TestFindMatchForDaihyosen_PoolFound verifies that a pool match is located
+// when searched by its "Pool *" ID.
+func TestFindMatchForDaihyosen_PoolFound(t *testing.T) {
+	dir, err := os.MkdirTemp("", "find-pool-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	compID := "find-pool"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB"},
+	}))
+
+	match, found, err := findMatchForDaihyosen(store, compID, "Pool A-0")
+	require.NoError(t, err)
+	assert.True(t, found)
+	require.NotNil(t, match)
+	assert.Equal(t, "TeamA", match.SideA)
+}
+
+// TestFindMatchForDaihyosen_PoolNotFound verifies that a missing pool-stage
+// match returns (nil, false, nil).
+func TestFindMatchForDaihyosen_PoolNotFound(t *testing.T) {
+	dir, err := os.MkdirTemp("", "find-pmiss-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	compID := "find-pmiss"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	match, found, err := findMatchForDaihyosen(store, compID, "Pool A-0")
+	require.NoError(t, err)
+	assert.False(t, found)
+	assert.Nil(t, match)
+}
+
+// TestFindMatchForDaihyosen_BracketFound verifies that a bracket match is
+// located when searched by its bracket ID.
+func TestFindMatchForDaihyosen_BracketFound(t *testing.T) {
+	dir, err := os.MkdirTemp("", "find-bracket-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	compID := "find-bracket"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "B1", SideA: "TeamA", SideB: "TeamB"},
+			},
+		},
+	}))
+
+	match, found, err := findMatchForDaihyosen(store, compID, "B1")
+	require.NoError(t, err)
+	assert.True(t, found)
+	require.NotNil(t, match)
+	assert.Equal(t, "B1", match.ID)
+	assert.Equal(t, "TeamA", match.SideA)
+}
+
+// TestFindMatchForDaihyosen_BracketNotFound verifies that a missing bracket
+// match returns (nil, false, nil).
+func TestFindMatchForDaihyosen_BracketNotFound(t *testing.T) {
+	dir, err := os.MkdirTemp("", "find-bnot-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	compID := "find-bnot"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	match, found, err := findMatchForDaihyosen(store, compID, "no-such-bracket-match")
+	require.NoError(t, err)
+	assert.False(t, found)
+	assert.Nil(t, match)
+}
+
+// TestCountEligibleForSides_AllEligible verifies that all participants are
+// counted when no ineligibility records exist.
+func TestCountEligibleForSides_AllEligible(t *testing.T) {
+	dir, err := os.MkdirTemp("", "eligible-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	compID := "eligible-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	// Use proper UUID-format IDs so SaveParticipants/LoadParticipants round-trips correctly.
+	p1ID := "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+	p2ID := "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: p1ID, Name: "Alice", Dojo: "A"},
+		{ID: p2ID, Name: "Bob", Dojo: "B"},
+	}))
+
+	a, b, err := countEligibleForSides(store, compID, "TeamA", "TeamB")
+	require.NoError(t, err)
+	assert.Equal(t, 2, a)
+	assert.Equal(t, 2, b)
+}
+
+// TestCountEligibleForSides_OneIneligible verifies that an ineligible
+// participant is excluded from the eligible count.
+func TestCountEligibleForSides_OneIneligible(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ineligible-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	compID := "ineligible-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	p1ID := "cccccccc-cccc-4ccc-cccc-cccccccccccc"
+	p2ID := "dddddddd-dddd-4ddd-dddd-dddddddddddd"
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: p1ID, Name: "Alice", Dojo: "A"},
+		{ID: p2ID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: p1ID,
+		Eligible: false,
+		Reason:   "kiken",
+	}))
+
+	a, b, err := countEligibleForSides(store, compID, "TeamA", "TeamB")
+	require.NoError(t, err)
+	assert.Equal(t, 1, a)
+	assert.Equal(t, 1, b)
+}
+
+// TestDaihyosenHandler_MatchNotFound verifies that a request for a
+// non-existent match returns 404.
+func TestDaihyosenHandler_MatchNotFound(t *testing.T) {
+	r, store, _, _, _ := setupDaihyosenTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/competitions/c1/matches/no-such-match/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestDaihyosenHandler_HappyPath verifies the full happy-path: a tied bracket
+// match with eligible participants results in a daihyosen bout being appended
+// and the response containing a subResult.
+func TestDaihyosenHandler_HappyPath(t *testing.T) {
+	r, store, _, _, _ := setupDaihyosenTestRouter(t)
+	compID := "dh-happy"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	// Save one eligible participant (so countEligibleForSides returns > 0).
+	p1ID := "11111111-1111-4111-1111-111111111111"
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: p1ID, Name: "Alice", Dojo: "A"},
+	}))
+	// Bracket match with empty SubResults → IV:0-0, PW:0-0 → tied.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "B1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning},
+			},
+		},
+	}))
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/competitions/"+compID+"/matches/B1/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.NotNil(t, resp["subResult"])
+}
+
+// TestDaihyosenHandler_PoolMatchReturnsError verifies that a pool-stage
+// match returns 400 with "pool_match" because daihyosen is knockout-only.
+func TestDaihyosenHandler_PoolMatchReturnsError(t *testing.T) {
+	r, store, _, _, _ := setupDaihyosenTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB"},
+	}))
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/competitions/c1/matches/Pool%20A-0/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "pool_match", resp["error"])
+}

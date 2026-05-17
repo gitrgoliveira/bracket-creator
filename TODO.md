@@ -15,6 +15,14 @@
 6. When displaying the results/scores, it needs to be visible if what points those were, for example: MM-K. Having the number of points is not useful.
 
 
+* Adding the team line up should be optional. If added, then there should be a button to copy the names to the next match. There is usually someone else doing this work, different from someone doing the score registration.
+
+* In the scoring we can't say which side forfeits or is missing
+* In the scoring you can do an impossible results like 2-2
+* It needs a URL path called ./reset to reset the tournament password. Can be disabled by a config, so that the password comes from a hashed environment variable.
+
+
+
 
 
 Some match rules:

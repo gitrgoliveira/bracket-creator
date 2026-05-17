@@ -138,6 +138,25 @@ func validateSwissConfig(comp *state.Competition) error {
 	return nil
 }
 
+// validateCompetitionLengths enforces the persisted-string caps from
+// validation.go on the settings-relevant string fields of comp. Called
+// after trim. Returns the first *ValidationError on failure.
+func validateCompetitionLengths(comp *state.Competition) error {
+	if err := validateMaxLen("name", comp.Name, MaxLenCompetitionName); err != nil {
+		return err
+	}
+	if err := validateMaxLen("numberPrefix", comp.NumberPrefix, MaxLenCompetitionNumberPrefix); err != nil {
+		return err
+	}
+	if err := validateMaxLen("startTime", comp.StartTime, MaxLenCompetitionStartTime); err != nil {
+		return err
+	}
+	if err := validateMaxLen("date", comp.Date, MaxLenCompetitionDate); err != nil {
+		return err
+	}
+	return nil
+}
+
 func checkUniqueCompName(store *state.Store, name, excludeID string) error {
 	ids, _ := store.ListCompetitions()
 	for _, existingID := range ids {
@@ -212,6 +231,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if comp.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
 			return
+		}
+
+		if err := validateCompetitionLengths(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// POST /competitions can land with an embedded roster via
+		// saveCompetitionWithPlayers — same length caps as the
+		// PUT roster-PUT branch and POST /participants.
+		for i, p := range comp.Players {
+			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+				return
+			}
 		}
 
 		// Reject non-canonical Date format. See validateDateDMY in
@@ -379,6 +413,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
 
+		// Roster-PUT length caps. Settings-only PUT's caps are gated
+		// below behind `comp.Players == nil`; the roster-PUT path takes
+		// the other branch in the transform and skips them, so check
+		// player fields here unconditionally when a roster is being
+		// saved. Mirrors the POST /participants validation in
+		// handlers_participants.go.
+		if comp.Players != nil {
+			for i, p := range comp.Players {
+				if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+					return
+				}
+			}
+		}
+
 		// Settings-specific validations — gate on comp.Players == nil
 		// (settings-only PUT). Roster-only PUTs (comp.Players != nil)
 		// carry a stale-snapshot of settings fields from the frontend
@@ -400,6 +449,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// first — defense-in-depth for direct API callers.
 			if comp.Name == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
+				return
+			}
+
+			if err := validateCompetitionLengths(&comp); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 
@@ -965,6 +1019,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		playerName := strings.TrimSpace(req.PlayerName)
 		if playerName == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "playerName is required"})
+			return
+		}
+		if err := validateMaxLen("playerName", playerName, MaxLenPlayerName); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		if req.Rank <= 0 {

@@ -1,14 +1,10 @@
 // Package domain defines the core domain models for the bracket creator
 package domain
 
-// Player represents a tournament participant.
-//
-// Wire format: JSON tags MUST mirror helper.Player exactly so the two
-// types serialise identically — domain.Player is intended as a drop-in
-// successor to helper.Player for code outside internal/helper and
-// internal/excel (NFR-007). See internal/helper/domainconv.go for
-// boundary conversion helpers between the two; the converters live
-// helper-side to avoid a helper → domain → helper import cycle.
+// Player represents a tournament participant. It is the canonical
+// participant type across state, engine, mobileapp, and helper
+// packages; internal/helper re-exports it under helper.Player as a
+// type alias for rendering-side ergonomics (NFR-007).
 type Player struct {
 	ID          string   `json:"id,omitempty"` // stable UUID assigned at first persist
 	Name        string   `json:"name"`

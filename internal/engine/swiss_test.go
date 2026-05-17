@@ -461,3 +461,290 @@ func TestSwissStandingsRanking(t *testing.T) {
 			"match ID %q should have Swiss-R prefix", m.ID)
 	}
 }
+
+// TestCurrentSwissRoundCompleted covers all branches of the function.
+func TestCurrentSwissRoundCompleted(t *testing.T) {
+	t.Run("initial state (SwissCurrentRound==0) is always complete", func(t *testing.T) {
+		eng, store, compID, _ := setupSwissCompetition(t, []string{"A", "B", "C", "D"}, nil, 3)
+		// SwissCurrentRound defaults to 0 → immediately returns true.
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		require.Equal(t, 0, comp.SwissCurrentRound)
+
+		done, err := eng.CurrentSwissRoundCompleted(compID)
+		require.NoError(t, err)
+		assert.True(t, done)
+	})
+
+	t.Run("returns false when current round has incomplete matches", func(t *testing.T) {
+		eng, store, compID, _ := setupSwissCompetition(t, []string{"A", "B", "C", "D"}, nil, 3)
+
+		// Generate round 1 and save (without completing any match).
+		ms, err := eng.GenerateSwissRound(compID, 1)
+		require.NoError(t, err)
+		require.NoError(t, store.SavePoolMatches(compID, ms))
+
+		// Bump SwissCurrentRound to 1 so CurrentSwissRoundCompleted checks round 1.
+		_, err = store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+			c.SwissCurrentRound = 1
+			return c, nil
+		})
+		require.NoError(t, err)
+
+		done, err := eng.CurrentSwissRoundCompleted(compID)
+		require.NoError(t, err)
+		assert.False(t, done, "incomplete round 1 must return false")
+	})
+
+	t.Run("returns true when all matches in current round are completed", func(t *testing.T) {
+		eng, store, compID, _ := setupSwissCompetition(t, []string{"A", "B", "C", "D"}, nil, 3)
+
+		ms, err := eng.GenerateSwissRound(compID, 1)
+		require.NoError(t, err)
+		require.NoError(t, store.SavePoolMatches(compID, ms))
+		_, err = store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+			c.SwissCurrentRound = 1
+			return c, nil
+		})
+		require.NoError(t, err)
+
+		for _, m := range ms {
+			completeSwissMatch(t, store, compID, m.ID, m.SideA)
+		}
+
+		done, err := eng.CurrentSwissRoundCompleted(compID)
+		require.NoError(t, err)
+		assert.True(t, done)
+	})
+
+	t.Run("competition not found returns error", func(t *testing.T) {
+		eng, _, _ := setupTestEngine(t)
+		_, err := eng.CurrentSwissRoundCompleted("nonexistent-comp")
+		assert.Error(t, err)
+	})
+}
+
+// TestSwissRoundNotCompletedError_Error pins the Error() string format.
+func TestSwissRoundNotCompletedError_Error(t *testing.T) {
+	err := &SwissRoundNotCompletedError{CompID: "my-comp", Round: 3}
+	msg := err.Error()
+	assert.Contains(t, msg, "3")
+	assert.Contains(t, msg, "my-comp")
+}
+
+// TestAdvanceSwissRound covers the main happy path and error branches.
+func TestAdvanceSwissRound(t *testing.T) {
+	t.Run("happy path: first round advance", func(t *testing.T) {
+		eng, store, compID, _ := setupSwissCompetition(t,
+			[]string{"A", "B", "C", "D"}, nil, 3)
+
+		// Generate round 1, complete all matches, then advance.
+		ms, err := eng.GenerateSwissRound(compID, 1)
+		require.NoError(t, err)
+		require.NoError(t, store.SavePoolMatches(compID, ms))
+		_, err = store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+			c.SwissCurrentRound = 1
+			return c, nil
+		})
+		require.NoError(t, err)
+		for _, m := range ms {
+			completeSwissMatch(t, store, compID, m.ID, m.SideA)
+		}
+
+		newMatches, nextRound, err := eng.AdvanceSwissRound(compID)
+		require.NoError(t, err)
+		assert.Equal(t, 2, nextRound)
+		assert.NotEmpty(t, newMatches)
+
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		assert.Equal(t, 2, comp.SwissCurrentRound)
+	})
+
+	t.Run("competition not found", func(t *testing.T) {
+		eng, _, _ := setupTestEngine(t)
+		_, _, err := eng.AdvanceSwissRound("no-such-comp")
+		assert.Error(t, err)
+	})
+
+	t.Run("non-swiss format returns validation error", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "pools-comp", Format: state.CompFormatPools, Status: state.CompStatusPools,
+		}))
+		_, _, err := eng.AdvanceSwissRound("pools-comp")
+		assert.Error(t, err)
+	})
+
+	t.Run("all rounds already completed returns error", func(t *testing.T) {
+		eng, store, compID, _ := setupSwissCompetition(t,
+			[]string{"A", "B", "C", "D"}, nil, 1) // 1 round max
+
+		_, err := store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+			c.SwissCurrentRound = 1 // already at max
+			return c, nil
+		})
+		require.NoError(t, err)
+
+		_, _, err = eng.AdvanceSwissRound(compID)
+		assert.Error(t, err)
+	})
+
+	t.Run("current round not complete returns SwissRoundNotCompletedError", func(t *testing.T) {
+		eng, store, compID, _ := setupSwissCompetition(t,
+			[]string{"A", "B", "C", "D"}, nil, 3)
+
+		ms, err := eng.GenerateSwissRound(compID, 1)
+		require.NoError(t, err)
+		require.NoError(t, store.SavePoolMatches(compID, ms))
+		_, err = store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+			c.SwissCurrentRound = 1
+			return c, nil
+		})
+		require.NoError(t, err)
+		// Intentionally NOT completing the matches.
+
+		_, _, err = eng.AdvanceSwissRound(compID)
+		var notDone *SwissRoundNotCompletedError
+		assert.ErrorAs(t, err, &notDone,
+			"AdvanceSwissRound with an incomplete round must return SwissRoundNotCompletedError")
+	})
+}
+
+// TestParseSwissMatchRound covers the error branches: non-matching
+// prefix, no dash, and non-numeric round component.
+func TestParseSwissMatchRound(t *testing.T) {
+	// Prefix is "Swiss-R" (capital R).
+	tests := []struct {
+		id     string
+		wantN  int
+		wantOK bool
+	}{
+		{"Swiss-R1-m0", 1, true},    // happy path
+		{"Pool A-0", 0, false},      // wrong prefix
+		{"Swiss-R1", 0, false},      // no dash in remainder
+		{"Swiss-Rabc-m0", 0, false}, // non-numeric round
+		{"Swiss-R0-m0", 0, false},   // n < 1
+	}
+	for _, tc := range tests {
+		n, ok := parseSwissMatchRound(tc.id)
+		assert.Equal(t, tc.wantOK, ok, "id=%q", tc.id)
+		if ok {
+			assert.Equal(t, tc.wantN, n, "id=%q", tc.id)
+		}
+	}
+}
+
+// TestPickByeFromOrdered covers the two missing branches:
+// empty-ordered (returns "") and all-had-bye (returns last).
+func TestPickByeFromOrdered(t *testing.T) {
+	t.Run("empty ordered returns empty string", func(t *testing.T) {
+		assert.Equal(t, "", pickByeFromOrdered(nil, map[string]bool{}))
+	})
+
+	t.Run("all players already had bye returns last", func(t *testing.T) {
+		ordered := []string{"P3", "P2", "P1"}
+		hadBye := map[string]bool{"P1": true, "P2": true, "P3": true}
+		// All had byes → returns last element.
+		assert.Equal(t, "P1", pickByeFromOrdered(ordered, hadBye))
+	})
+
+	t.Run("some players without bye returns last-without-bye", func(t *testing.T) {
+		ordered := []string{"P3", "P2", "P1"}
+		hadBye := map[string]bool{"P1": true}
+		// Iterates from end: P1 has bye → P2 has no bye → returns P2.
+		assert.Equal(t, "P2", pickByeFromOrdered(ordered, hadBye))
+	})
+}
+
+// TestParseWinnerOf covers the error branch (no match) and the happy
+// path for the "Winner of r1-m0" pattern.
+func TestParseWinnerOf(t *testing.T) {
+	t.Run("valid pattern", func(t *testing.T) {
+		round, idx := parseWinnerOf("Winner of r1-m2", 4)
+		// depth=1, numRounds=4 → round = 4-1 = 3; matchIdx = 2.
+		assert.Equal(t, 3, round)
+		assert.Equal(t, 2, idx)
+	})
+
+	t.Run("invalid pattern returns -1,-1", func(t *testing.T) {
+		round, idx := parseWinnerOf("not a winner string", 4)
+		assert.Equal(t, -1, round)
+		assert.Equal(t, -1, idx)
+	})
+}
+
+// TestSwissStandings_Draw verifies that a draw (hikiwake) increments
+// both players' Draws counter in SwissStandings.
+func TestSwissStandings_Draw(t *testing.T) {
+	eng, store, compID, _ := setupSwissCompetition(t,
+		[]string{"A", "B", "C", "D"}, nil, 3)
+
+	ms, err := eng.GenerateSwissRound(compID, 1)
+	require.NoError(t, err)
+	// Set the first match as a draw (hikiwake), winner A for the rest.
+	for i, m := range ms {
+		if m.SideB == "" {
+			continue // bye
+		}
+		if i == 0 {
+			ms[i].Status = state.MatchStatusCompleted
+			ms[i].Winner = ""
+			ms[i].Decision = string(state.DecisionDraw)
+		} else {
+			ms[i].Status = state.MatchStatusCompleted
+			ms[i].Winner = m.SideA
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, ms))
+
+	standings, err := eng.SwissStandings(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, standings)
+
+	// Players in the draw (ms[0].SideA and ms[0].SideB) must each have 1 draw.
+	if len(ms) > 0 && ms[0].SideB != "" {
+		byName := make(map[string]state.PlayerStanding, len(standings))
+		for _, s := range standings {
+			byName[s.Player.Name] = s
+		}
+		assert.Equal(t, 1, byName[ms[0].SideA].Draws, "SideA of draw match must have 1 draw")
+		assert.Equal(t, 1, byName[ms[0].SideB].Draws, "SideB of draw match must have 1 draw")
+	}
+}
+
+// TestMaybeLockTeamLineupsForRoundViaRecordResult exercises the non-tx
+// variant of maybeLockTeamLineupsForRound through RecordMatchResult on
+// a team competition.
+func TestMaybeLockTeamLineupsForRoundViaRecordResult(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "mlttr-nonteam-team"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, TeamSize: 5, Format: "pools",
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusScheduled},
+	}))
+	// Save a lineup so LockTeamLineupsForRound has something to lock.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo:   "p1",
+			domain.PosJiho:    "p2",
+			domain.PosChuken:  "p3",
+			domain.PosFukusho: "p4",
+			domain.PosTaisho:  "p5",
+		},
+	}, 5))
+
+	// RecordMatchResult with Running status triggers maybeLockTeamLineupsForRound.
+	err := eng.RecordMatchResult(compID, "Pool A-0", &state.MatchResult{
+		SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
+	})
+	require.NoError(t, err)
+
+	lineups, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	got := lineups["RedTeam-0"]
+	assert.NotNil(t, got.LockedAt, "lineup must be locked after RecordMatchResult with Running status")
+}

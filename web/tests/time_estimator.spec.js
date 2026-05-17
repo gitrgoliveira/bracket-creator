@@ -149,4 +149,87 @@ describe("estimateSchedule", () => {
         expect(e.playoffParticipants).toBe(6);
         expect(e.numElimMatches).toBe(5);
     });
+
+    it("accounts for smaller remainder pool in max mode", () => {
+        // 5 players, max 3 per pool → ceil(5/3) = 2 pools.
+        // Pool 1: 3 players = 3 matches. Pool 2: 2 players = 1 match. Total = 4.
+        const e = estimateSchedule({
+            totalPlayers: 5,
+            isPools: true,
+            courts: 1,
+            teamSize: 1,
+            poolMatchMins: 3,
+            elimMatchMins: 4,
+            rotationSecs: 0,
+            breakMins: 0,
+            playersPerPool: 3,
+            winnersPerPool: 2,
+            isMaxMode: true,
+            isRoundRobin: true,
+            startTimeMinutes: 0
+        });
+        expect(e.numPoolMatches).toBe(4);
+    });
+
+    it("handles evenly divisible pools in max mode without remainder", () => {
+        // 6 players, max 3 → 2 full pools. 2 * 3 = 6 matches.
+        const e = estimateSchedule({
+            totalPlayers: 6,
+            isPools: true,
+            courts: 1,
+            teamSize: 1,
+            poolMatchMins: 3,
+            elimMatchMins: 4,
+            rotationSecs: 0,
+            breakMins: 0,
+            playersPerPool: 3,
+            winnersPerPool: 2,
+            isMaxMode: true,
+            isRoundRobin: true,
+            startTimeMinutes: 0
+        });
+        expect(e.numPoolMatches).toBe(6);
+    });
+
+    it("accounts for remainder pool with round-robin and larger pools", () => {
+        // 7 players, max 4, round-robin → ceil(7/4) = 2 pools.
+        // Pool 1: 4 players = 6 matches. Pool 2: 3 players = 3 matches. Total = 9.
+        const e = estimateSchedule({
+            totalPlayers: 7,
+            isPools: true,
+            courts: 1,
+            teamSize: 1,
+            poolMatchMins: 3,
+            elimMatchMins: 4,
+            rotationSecs: 0,
+            breakMins: 0,
+            playersPerPool: 4,
+            winnersPerPool: 2,
+            isMaxMode: true,
+            isRoundRobin: true,
+            startTimeMinutes: 0
+        });
+        expect(e.numPoolMatches).toBe(9);
+    });
+
+    it("does not apply remainder logic in min mode", () => {
+        // 5 players, min 3 → floor(5/3) = 1 pool of 3.
+        // 1 * 3 = 3 matches. Remainder players excluded from pools.
+        const e = estimateSchedule({
+            totalPlayers: 5,
+            isPools: true,
+            courts: 1,
+            teamSize: 1,
+            poolMatchMins: 3,
+            elimMatchMins: 4,
+            rotationSecs: 0,
+            breakMins: 0,
+            playersPerPool: 3,
+            winnersPerPool: 2,
+            isMaxMode: false,
+            isRoundRobin: true,
+            startTimeMinutes: 0
+        });
+        expect(e.numPoolMatches).toBe(3);
+    });
 });

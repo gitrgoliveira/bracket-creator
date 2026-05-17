@@ -364,3 +364,61 @@ func TestAssignSlotsParityWithEstimateSchedule(t *testing.T) {
 	assert.Equal(t, teamEst, teamPer,
 		"team per-match (slot loop) must equal EstimateSchedule total")
 }
+
+// TestParseDurationMinutes_Valid verifies standard Go duration strings
+// are converted to the correct whole-minute value.
+func TestParseDurationMinutes_Valid(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int
+	}{
+		{"30m", 30},
+		{"1h", 60},
+		{"1h30m", 90},
+		{"45m", 45},
+		{"90m", 90},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, parseDurationMinutes(tc.in))
+		})
+	}
+}
+
+// TestParseDurationMinutes_FallbackToZero verifies that empty or
+// unparseable inputs return 0 (treated as "no block configured").
+func TestParseDurationMinutes_FallbackToZero(t *testing.T) {
+	assert.Equal(t, 0, parseDurationMinutes(""))
+	assert.Equal(t, 0, parseDurationMinutes("not-a-duration"))
+	assert.Equal(t, 0, parseDurationMinutes("-1h"))
+}
+
+// TestParseClockHHMM_Valid verifies exact HH:MM parsing.
+func TestParseClockHHMM_Valid(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"09:00", "09:00"},
+		{"13:45", "13:45"},
+		{"00:00", "00:00"},
+		{"23:59", "23:59"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			got := parseClockHHMM(tc.in)
+			assert.Equal(t, tc.want, got.Format("15:04"))
+		})
+	}
+}
+
+// TestParseClockHHMM_FallbackTo0900 verifies that empty and malformed
+// inputs both fall back to the 09:00 default.
+func TestParseClockHHMM_FallbackTo0900(t *testing.T) {
+	fallback := func(s string) string {
+		return parseClockHHMM(s).Format("15:04")
+	}
+	assert.Equal(t, "09:00", fallback(""), "empty string must fall back to 09:00")
+	assert.Equal(t, "09:00", fallback("not-a-time"), "malformed must fall back to 09:00")
+	assert.Equal(t, "09:00", fallback("9:00"), "missing leading zero must fall back to 09:00")
+}

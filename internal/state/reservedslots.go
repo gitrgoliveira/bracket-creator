@@ -148,9 +148,9 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 		}
 	}
 
-	// Convert at the boundary — internal parsing still produces
-	// helper.Player; callers see []domain.Player (NFR-007, T154).
-	return helper.PlayersToDomain(players), nil
+	// helper.Player is a type alias for domain.Player (NFR-007); the
+	// parser output is already []domain.Player.
+	return players, nil
 }
 
 // saveParticipantsLocked writes participants without acquiring a lock and

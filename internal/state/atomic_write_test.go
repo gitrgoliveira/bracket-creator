@@ -183,6 +183,55 @@ func TestAtomicWriteFile_UniqueSuffixAvoidsCollision(t *testing.T) {
 	assert.Empty(t, listTmpOrphans(t, dir), "no .tmp orphan should remain after concurrent writes")
 }
 
+// TestSyncDir_NonExistentPath verifies that syncDir returns an error when the
+// path does not exist (covers the os.Open error return branch on non-Windows).
+func TestSyncDir_NonExistentPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("syncDir is a no-op on Windows")
+	}
+	err := syncDir(filepath.Join(t.TempDir(), "nonexistent-subdir"))
+	assert.Error(t, err, "syncDir on missing path must return error")
+}
+
+// TestAtomicWriteFile_RenameTargetIsDir covers the os.Rename error path:
+// if the final target path already exists as a directory, Rename fails on
+// POSIX (EISDIR). The temp file must be cleaned up — no orphan should remain.
+func TestAtomicWriteFile_RenameTargetIsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Rename semantics differ on Windows")
+	}
+	dir := t.TempDir()
+	// Create a directory at the intended target path.
+	targetDir := filepath.Join(dir, "target")
+	require.NoError(t, os.Mkdir(targetDir, 0700))
+
+	err := atomicWriteFile(targetDir, []byte("data"), 0600)
+	require.Error(t, err, "atomicWriteFile must fail when target is an existing directory")
+
+	// No orphan .tmp file should remain after the Rename failure.
+	assert.Empty(t, listTmpOrphans(t, dir), "no .tmp orphan should remain after Rename failure")
+}
+
+// TestAtomicWriteFile_NoDirComponent covers the `if dir == "" { dir = "." }`
+// branch (line 77-79). filepath.Split returns an empty dir for a bare filename
+// with no path separator, so we chdir to a temp dir and call with a plain name.
+func TestAtomicWriteFile_NoDirComponent(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root may bypass expected behaviour in temp dir")
+	}
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	data := []byte("hello")
+	require.NoError(t, atomicWriteFile("bare-name.txt", data, 0600),
+		"atomicWriteFile with no dir component must succeed (falls back to '.')")
+
+	got, err := os.ReadFile(filepath.Join(tmpDir, "bare-name.txt")) // #nosec G304
+	require.NoError(t, err)
+	assert.Equal(t, data, got)
+	assert.Empty(t, listTmpOrphans(t, tmpDir))
+}
+
 func TestSaveCompetition_NoPartialOnSuccess(t *testing.T) {
 	// End-to-end sanity check: a real Save through the public API
 	// should leave the competition dir without .tmp orphan files.

@@ -9,21 +9,19 @@ import (
 )
 
 func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
-	// helper.ApplySeeds / StandardSeeding / AssignPlayerNumbers touch
-	// Excel cell coordinates and still operate on []helper.Player.
-	// Convert at the engine↔helper boundary (NFR-007, T154).
-	hPlayers := helper.PlayersFromDomain(players)
+	// helper.Player is a type alias for domain.Player (NFR-007); the
+	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
-		if err := helper.ApplySeeds(hPlayers, seeds); err != nil {
+		if err := helper.ApplySeeds(players, seeds); err != nil {
 			return fmt.Errorf("applying seeds: %w", err)
 		}
 	}
 
 	if comp.NumberPrefix != "" {
-		helper.AssignPlayerNumbers(hPlayers, comp.NumberPrefix, 1)
+		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
 	}
 
-	seededPlayers := helper.StandardSeeding(hPlayers)
+	seededPlayers := helper.StandardSeeding(players)
 
 	// Create balanced tree
 	leaves := make([]string, len(seededPlayers))

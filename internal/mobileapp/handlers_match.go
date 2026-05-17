@@ -122,6 +122,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		// Defense-in-depth: bulk-score writes straight to disk via
+		// RecordMatchResult, bypassing ScoreRequest.Validate's length
+		// caps. Reuse the same caps here so a 1MB sideA/winner can't
+		// land. Per-result rejection keeps the partial-success semantics
+		// (good entries still succeed, bad ones surface in `errors`).
 		type scoreError struct {
 			MatchID string `json:"matchId"`
 			Error   string `json:"error"`
@@ -142,6 +147,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// T104/CHK029: enforce MaxEnchoPeriods cap on bulk-score payload.
 			if enchoExceedsCap(results[i].Encho, comp, force) {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: "max_encho_exceeded"})
+				continue
+			}
+
+			if err := validateBulkScoreLengths(&results[i]); err != nil {
+				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
 			}
 
@@ -181,6 +191,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		if req.SideA == "" || req.SideB == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "sideA and sideB are required"})
+			return
+		}
+		if err := validateMaxLen("sideA", req.SideA, MaxLenMatchSide); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := validateMaxLen("sideB", req.SideB, MaxLenMatchSide); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -255,6 +273,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// Cap defensively — the tournament-level validateCourtLabels
+		// enforces single-char labels but per-match court strings have
+		// historically accepted longer values in engine tests (e.g.
+		// "Court Z"). 32 is generous enough not to break any real
+		// caller while rejecting abusive payloads.
+		if err := validateMaxLen("court", req.Court, MaxLenMatchScheduledAt); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		if err := eng.UpdateMatchCourt(id, mid, req.Court); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -296,6 +323,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": "winnerName is required"})
 			return
 		}
+		if err := validateMaxLen("winnerName", winnerName, MaxLenMatchSide); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		if err := eng.OverrideBracketWinner(id, mid, winnerName); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -316,6 +347,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			ScheduledAt string `json:"scheduledAt"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := validateMaxLen("scheduledAt", req.ScheduledAt, MaxLenMatchScheduledAt); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

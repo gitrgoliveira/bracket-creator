@@ -767,6 +767,7 @@ paths:
               properties:
                 playerName:
                   type: string
+                  maxLength: 100
                 rank:
                   type: integer
       responses:
@@ -940,6 +941,7 @@ paths:
               properties:
                 winnerName:
                   type: string
+                  maxLength: 100
       responses:
         '200':
           description: Winner overridden.
@@ -963,6 +965,7 @@ paths:
               properties:
                 scheduledAt:
                   type: string
+                  maxLength: 32
                   description: HH:MM scheduled time.
                   example: "14:30"
       responses:
@@ -1515,9 +1518,11 @@ components:
       properties:
         name:
           type: string
-          description: Tournament name. Trimmed server-side; rejected with 400 if empty after trim.
+          maxLength: 200
+          description: Tournament name. Trimmed server-side; rejected with 400 if empty after trim or longer than 200 characters.
         date:
           type: string
+          maxLength: 10
           description: >
             Event date in DD-MM-YYYY format. Trimmed server-side; rejected
             with 400 if non-empty and not a syntactically valid day in
@@ -1530,6 +1535,7 @@ components:
             send DMY directly.
         venue:
           type: string
+          maxLength: 200
           description: Venue name. Trimmed server-side.
         courts:
           type: array
@@ -1543,6 +1549,7 @@ components:
             duplicates would collapse data structures.
         password:
           type: string
+          maxLength: 256
           description: >
             Admin password. Required (non-empty) on POST /tournament — an
             empty Password on disk would let AuthMiddleware's
@@ -1556,12 +1563,15 @@ components:
             Omitted from viewer responses (`/api/viewer/tournament`).
         openingBlock:
           type: string
+          maxLength: 16
           description: Opening ceremony block label/duration.
         lunchBlock:
           type: string
+          maxLength: 16
           description: Lunch break block label/duration.
         closingBlock:
           type: string
+          maxLength: 16
           description: Closing ceremony block label/duration.
         clockToElapsedMultiplier:
           type: number
@@ -1575,6 +1585,7 @@ components:
       properties:
         id:
           type: string
+          maxLength: 64
           description: >
             Unique competition identifier. Must start with an alphanumeric
             character, contain only alphanumerics / hyphens / underscores,
@@ -1583,9 +1594,11 @@ components:
             Optional on POST — the server derives a slug from `name` when omitted.
         name:
           type: string
+          maxLength: 200
           description: >
             Competition name. Trimmed server-side and rejected with 400
-            (`competition name is required`) if empty after trim.
+            (`competition name is required`) if empty after trim or
+            longer than 200 characters.
             Uniqueness check (case-insensitive) on POST/PUT — duplicate
             names return 400 (`competition name "X" already exists`).
         kind:
@@ -1620,9 +1633,11 @@ components:
             to 1 court.
         startTime:
           type: string
+          maxLength: 8
           description: First-match start time (HH:MM). Trimmed server-side.
         date:
           type: string
+          maxLength: 10
           description: >
             Competition date in DD-MM-YYYY format. Same shape as
             `Tournament.date`: trimmed server-side; rejected with 400 if
@@ -1665,19 +1680,26 @@ components:
       properties:
         id:
           type: string
+          maxLength: 64
         name:
           type: string
+          maxLength: 100
         displayName:
           type: string
+          maxLength: 50
           description: Display name shown on the bracket and Zekken. Defaults to a sanitized form of `name` when omitted.
         dojo:
           type: string
+          maxLength: 100
         metadata:
           type: array
+          maxItems: 16
           items:
             type: string
+            maxLength: 200
         tag:
           type: string
+          maxLength: 200
         seed:
           type: integer
           description: Seed rank (0 = unseeded).
@@ -1690,24 +1712,32 @@ components:
       properties:
         id:
           type: string
+          maxLength: 64
         name:
           type: string
+          maxLength: 100
         displayName:
           type: string
+          maxLength: 50
         dojo:
           type: string
+          maxLength: 100
         metadata:
           type: array
+          maxItems: 16
           items:
             type: string
+            maxLength: 200
         tag:
           type: string
+          maxLength: 200
 
     SeedAssignment:
       type: object
       properties:
         name:
           type: string
+          maxLength: 100
         seedRank:
           type: integer
           description: 1 = top seed.
@@ -1729,10 +1759,13 @@ components:
           type: string
         sideA:
           type: string
+          maxLength: 100
         sideB:
           type: string
+          maxLength: 100
         winner:
           type: string
+          maxLength: 100
         ipponsA:
           type: array
           items:
@@ -1761,6 +1794,7 @@ components:
           enum: [shiro, aka]
         decisionReason:
           type: string
+          maxLength: 200
           description: Free-text operator note for the decision.
         encho:
           $ref: '#/components/schemas/EnchoMetadata'
@@ -1769,8 +1803,10 @@ components:
           enum: [scheduled, running, completed]
         court:
           type: string
+          maxLength: 32
         scheduledAt:
           type: string
+          maxLength: 32
         subResults:
           type: array
           items:
@@ -1784,8 +1820,10 @@ components:
           type: integer
         sideA:
           type: string
+          maxLength: 100
         sideB:
           type: string
+          maxLength: 100
         ipponsA:
           type: array
           items:
@@ -1800,6 +1838,7 @@ components:
           type: integer
         winner:
           type: string
+          maxLength: 100
         decision:
           type: string
           description: >
@@ -1813,17 +1852,22 @@ components:
           type: string
         sideA:
           type: string
+          maxLength: 100
         sideB:
           type: string
+          maxLength: 100
         winner:
           type: string
+          maxLength: 100
         status:
           type: string
           enum: [scheduled, running, completed]
         court:
           type: string
+          maxLength: 32
         scheduledAt:
           type: string
+          maxLength: 32
         scoreA:
           type: string
         scoreB:
@@ -1971,12 +2015,15 @@ components:
       properties:
         playerId:
           type: string
+          maxLength: 64
         eligible:
           type: boolean
         reason:
           type: string
+          maxLength: 200
         matchId:
           type: string
+          maxLength: 64
         recordedAt:
           type: string
           format: date-time

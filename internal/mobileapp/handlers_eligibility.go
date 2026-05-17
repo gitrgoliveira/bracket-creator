@@ -27,6 +27,23 @@ type CompetitorStatusRequest struct {
 	MatchID  string `json:"matchId,omitempty"`
 }
 
+// Validate enforces persisted-string caps on the request shape. The
+// domain.CompetitorStatus.Validate path covers presence (PlayerID,
+// Reason on ineligible) but not length — this fills that gap so a
+// 1MB reason can't bloat competitor_status.yaml.
+func (r *CompetitorStatusRequest) Validate() error {
+	if err := validateMaxLen("playerId", r.PlayerID, MaxLenEntityID); err != nil {
+		return err
+	}
+	if err := validateMaxLen("matchId", r.MatchID, MaxLenEntityID); err != nil {
+		return err
+	}
+	if err := validateMaxLen("reason", r.Reason, MaxLenEligibilityReason); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *CompetitorStatusRequest) toDomain() domain.CompetitorStatus {
 	return domain.CompetitorStatus{
 		PlayerID: r.PlayerID,
@@ -80,6 +97,15 @@ func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore
 		}
 		var req CompetitorStatusRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := req.Validate(); err != nil {
+			var verr *ValidationError
+			if errors.As(err, &verr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

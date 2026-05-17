@@ -779,3 +779,25 @@ func TestBulkScore_FailsClosedOnLoadError(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
 	assert.Contains(t, w.Body.String(), "failed to validate encho limits")
 }
+
+// TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions
+// fills in per-court queue positions for a non-empty match list.
+func TestAnnotateQueuePositions_NonEmpty(t *testing.T) {
+	matches := []state.MatchResult{
+		{ID: "m1", Court: "A", Status: state.MatchStatusScheduled},
+		{ID: "m2", Court: "A", Status: state.MatchStatusScheduled},
+		{ID: "m3", Court: "B", Status: state.MatchStatusScheduled},
+	}
+	annotateQueuePositions(matches)
+	// Positions within a court should be monotonically increasing from 1.
+	assert.Equal(t, 1, matches[0].QueuePosition)
+	assert.Equal(t, 2, matches[1].QueuePosition)
+	assert.Equal(t, 1, matches[2].QueuePosition)
+}
+
+// TestAnnotateQueuePositions_Empty verifies that annotateQueuePositions is
+// a no-op for an empty slice.
+func TestAnnotateQueuePositions_Empty(t *testing.T) {
+	annotateQueuePositions(nil)
+	annotateQueuePositions([]state.MatchResult{})
+}

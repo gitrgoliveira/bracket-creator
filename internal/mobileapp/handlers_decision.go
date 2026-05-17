@@ -64,8 +64,8 @@ func (r *DecisionRequest) Validate() error {
 			Message: fmt.Sprintf("must be 'shiro' or 'aka', got %q", r.DecisionBy),
 		}
 	}
-	if len(r.DecisionReason) > 200 {
-		return &ValidationError{Field: "decisionReason", Message: "must be ≤ 200 characters"}
+	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
+		return err
 	}
 	return nil
 }

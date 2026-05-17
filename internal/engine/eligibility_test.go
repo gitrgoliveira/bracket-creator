@@ -323,3 +323,367 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "shiro", "default win", nil, false)
 	assert.NoError(t, err, "fusensho on an already-ineligible player must not trigger AlreadyIneligibleError; got %v", err)
 }
+
+// TestCheckEligibility_AllEligible verifies that CheckEligibility returns
+// nil when no competitor-status records exist (default-eligible per FR-034).
+func TestCheckEligibility_AllEligible(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "elig-all"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	err := eng.CheckEligibility(compID, []string{"pid1", "pid2", ""})
+	assert.NoError(t, err)
+}
+
+// TestCheckEligibility_OneIneligible verifies that CheckEligibility
+// returns *IneligibleCompetitorError when one of the player IDs has
+// Eligible: false. The empty-string player ID must be skipped.
+func TestCheckEligibility_OneIneligible(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "elig-one"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: "ineligible-pid",
+		Eligible: false,
+		Reason:   "kiken at match-1",
+		MatchID:  "match-1",
+	}))
+
+	err := eng.CheckEligibility(compID, []string{"eligible-pid", "ineligible-pid"})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrIneligibleCompetitor))
+	var ie *IneligibleCompetitorError
+	require.ErrorAs(t, err, &ie)
+	assert.Equal(t, "ineligible-pid", ie.PlayerID)
+	assert.Equal(t, "kiken at match-1", ie.Reason)
+}
+
+// TestCheckEligibility_EmptyIDsSkipped verifies that empty-string IDs
+// are silently skipped (no lookup, no error).
+func TestCheckEligibility_EmptyIDsSkipped(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "elig-empty"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	err := eng.CheckEligibility(compID, []string{"", ""})
+	assert.NoError(t, err)
+}
+
+// TestRecordDecision_OnBracketMatch exercises the bracket-match paths of
+// lookupMatchSides and lookupExistingResult. A kiken decision on a
+// bracket match must succeed, write the competitor status, and set the
+// bracket winner.
+func TestRecordDecision_OnBracketMatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-kiken"
+	createTestCompetition(t, store, compID, "playoffs", 3)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, bracket.Rounds)
+	matchID := bracket.Rounds[0][0].ID
+
+	// Record kiken on the bracket match (Bob withdraws, decisionBy=shiro → Alice wins).
+	result, status, err := eng.RecordDecision(compID, matchID, "kiken", "shiro", "injury", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "Alice", result.Winner)
+	require.NotNil(t, status)
+	assert.Equal(t, bobID, status.PlayerID)
+	assert.False(t, status.Eligible)
+}
+
+// TestStartMatch_BracketMatch_Eligible verifies that StartMatch on a
+// bracket match returns nil when the participants are eligible (exercises
+// lookupMatchSides via the bracket path).
+func TestStartMatch_BracketMatch_Eligible(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-start-match"
+	createTestCompetition(t, store, compID, "playoffs", 3)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	matchID := bracket.Rounds[0][0].ID
+
+	err = eng.StartMatch(compID, matchID)
+	assert.NoError(t, err)
+}
+
+// TestIneligibleCompetitorError_Error verifies the error string format.
+func TestIneligibleCompetitorError_Error(t *testing.T) {
+	err := &IneligibleCompetitorError{PlayerID: "pid-123", Reason: "kiken at m1"}
+	assert.Contains(t, err.Error(), "pid-123")
+	assert.Contains(t, err.Error(), "kiken at m1")
+}
+
+// TestAlreadyIneligibleError_Error verifies the error string format.
+func TestAlreadyIneligibleError_Error(t *testing.T) {
+	err := &AlreadyIneligibleError{PlayerID: "pid-456", MatchID: "match-2", Reason: "prior kiken"}
+	assert.Contains(t, err.Error(), "pid-456")
+	assert.Contains(t, err.Error(), "match-2")
+}
+
+// TestLoserSideName exercises the loserSideName helper for various
+// result shapes: winner set, winner not set but ippons asymmetric.
+func TestLoserSideName(t *testing.T) {
+	tests := []struct {
+		name   string
+		result state.MatchResult
+		want   string
+	}{
+		{
+			"winner is SideA → loser is SideB",
+			state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice"},
+			"Bob",
+		},
+		{
+			"winner is SideB → loser is SideA",
+			state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob"},
+			"Alice",
+		},
+		{
+			"no winner but SideA has ippons → SideB is loser",
+			state.MatchResult{SideA: "Alice", SideB: "Bob", IpponsA: []string{"M"}, IpponsB: nil},
+			"Bob",
+		},
+		{
+			"no winner but SideB has ippons → SideA is loser",
+			state.MatchResult{SideA: "Alice", SideB: "Bob", IpponsA: nil, IpponsB: []string{"M"}},
+			"Alice",
+		},
+		{
+			"both empty ippons and no winner → empty",
+			state.MatchResult{SideA: "Alice", SideB: "Bob"},
+			"",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, loserSideName(&tc.result))
+		})
+	}
+}
+
+// TestLookupPlayerID_EmptyName covers the early-return when name is "".
+func TestLookupPlayerID_EmptyName(t *testing.T) {
+	players := []domain.Player{{ID: "p1", Name: "Alice", Dojo: "A"}}
+	assert.Equal(t, "", lookupPlayerID(players, ""), "empty name should return empty ID")
+}
+
+// TestCheckConcurrentIneligibility_EmptyLoser covers the loserName==""
+// fast path in checkConcurrentIneligibility.
+func TestCheckConcurrentIneligibility_EmptyLoser(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "conc-empty-loser"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	err := eng.checkConcurrentIneligibility(compID, "M1", "")
+	assert.NoError(t, err, "empty loserName should return nil")
+}
+
+// TestCheckConcurrentIneligibility_PlayerNotInParticipants covers the
+// playerID=="" path when the loser name is not registered as a participant.
+func TestCheckConcurrentIneligibility_PlayerNotInParticipants(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "conc-unknown"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	// No participants saved → lookupPlayerID returns ""
+	err := eng.checkConcurrentIneligibility(compID, "M1", "Ghost Player")
+	assert.NoError(t, err, "unknown player should return nil without error")
+}
+
+// TestRestoreCompetitorEligibility_EmptyPriorLoser covers the priorLoser==""
+// fast path in restoreCompetitorEligibility.
+func TestRestoreCompetitorEligibility_EmptyPriorLoser(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "restore-empty"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	status, err := eng.restoreCompetitorEligibility(compID, "", "M1")
+	assert.NoError(t, err)
+	assert.Nil(t, status)
+}
+
+// TestRestoreCompetitorEligibility_PlayerNotInParticipants covers the
+// playerID=="" path when the prior loser is not a registered participant.
+func TestRestoreCompetitorEligibility_PlayerNotInParticipants(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "restore-unknown"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	// No participants → lookupPlayerID returns ""
+	status, err := eng.restoreCompetitorEligibility(compID, "Ghost Player", "M1")
+	assert.NoError(t, err)
+	assert.Nil(t, status)
+}
+
+// TestResolveMatchParticipantIDs_UnknownMatch covers the lookupMatchSides
+// error path in resolveMatchParticipantIDs.
+func TestResolveMatchParticipantIDs_UnknownMatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "resolve-unknown"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	_, err := eng.resolveMatchParticipantIDs(compID, "nonexistent-match")
+	assert.Error(t, err)
+}
+
+// TestHasDownstreamMatchStarted_BracketMatch verifies that a started bracket
+// match involving one of the named players is detected.
+func TestHasDownstreamMatchStarted_BracketMatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "downstream-bracket"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "B1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+			},
+		},
+	}))
+
+	started, err := eng.hasDownstreamMatchStarted(compID, []string{"Alice"}, "other-match")
+	require.NoError(t, err)
+	assert.True(t, started, "started bracket match involving Alice must be detected")
+}
+
+// TestHasDownstreamMatchStarted_EmptyPlayerNames covers the early-return
+// when all player names are empty.
+func TestHasDownstreamMatchStarted_EmptyPlayerNames(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "downstream-empty"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	started, err := eng.hasDownstreamMatchStarted(compID, []string{"", ""}, "M1")
+	require.NoError(t, err)
+	assert.False(t, started)
+}
+
+// TestCheckConcurrentIneligibility_AlreadyIneligible covers the
+// AlreadyIneligibleError path: loserName is registered as a participant
+// and already has an ineligibility status from a DIFFERENT match.
+func TestCheckConcurrentIneligibility_AlreadyIneligible(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "conc-already"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	playerID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: playerID, Name: "Alice", Dojo: "DojoA"},
+	}))
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: playerID,
+		Eligible: false,
+		Reason:   "kiken",
+		MatchID:  "M-prev",
+	}))
+
+	err := eng.checkConcurrentIneligibility(compID, "M-new", "Alice")
+	require.Error(t, err)
+	var alreadyErr *AlreadyIneligibleError
+	require.ErrorAs(t, err, &alreadyErr)
+	assert.Equal(t, playerID, alreadyErr.PlayerID)
+	assert.Equal(t, "M-prev", alreadyErr.MatchID)
+}
+
+// TestCheckConcurrentIneligibility_SameMatchNotBlocked verifies that an
+// ineligibility status recorded from the SAME match (the undo path) does
+// not return an error (matchID == st.MatchID → skip).
+func TestCheckConcurrentIneligibility_SameMatchNotBlocked(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "conc-same-match"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	playerID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: playerID, Name: "Bob", Dojo: "DojoB"},
+	}))
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: playerID,
+		Eligible: false,
+		Reason:   "kiken",
+		MatchID:  "M-current", // same as what we're re-scoring
+	}))
+
+	err := eng.checkConcurrentIneligibility(compID, "M-current", "Bob")
+	assert.NoError(t, err, "same-match ineligibility should not block re-scoring")
+}
+
+// TestCheckEligibilityExcludingMatch_ExcludedMatch covers the
+// st.MatchID == excludeMatchID path: player is ineligible from the exact
+// match being re-scored → not blocked (T103 undo path).
+func TestCheckEligibilityExcludingMatch_ExcludedMatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "excl-match"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	playerID := helper.NewUUID4()
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: playerID,
+		Eligible: false,
+		Reason:   "kiken",
+		MatchID:  "M-same",
+	}))
+
+	err := eng.checkEligibilityExcludingMatch(compID, []string{playerID}, "M-same")
+	assert.NoError(t, err, "ineligibility from excluded match must not block re-scoring")
+}
+
+// TestCheckEligibilityExcludingMatch_BlockedByDifferentMatch verifies
+// that ineligibility from a DIFFERENT match still blocks.
+func TestCheckEligibilityExcludingMatch_BlockedByDifferentMatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "excl-different"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	playerID := helper.NewUUID4()
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: playerID,
+		Eligible: false,
+		Reason:   "kiken",
+		MatchID:  "M-other",
+	}))
+
+	err := eng.checkEligibilityExcludingMatch(compID, []string{playerID}, "M-different")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrIneligibleCompetitor))
+}
+
+// TestStartMatch_MatchNotFound verifies that StartMatch returns an error
+// when the match is not found in pool matches or bracket.
+func TestStartMatch_MatchNotFound(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "start-not-found"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	err := eng.StartMatch(compID, "nonexistent-match-id")
+	assert.Error(t, err)
+}
+
+// TestCheckEligibilityExcludingMatch_EmptyPlayerID covers the pid==""
+// continue branch: an empty player ID must be silently skipped.
+func TestCheckEligibilityExcludingMatch_EmptyPlayerID(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "excl-empty-pid"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	// Pass an empty string as one of the player IDs.
+	err := eng.checkEligibilityExcludingMatch(compID, []string{"", ""}, "M1")
+	assert.NoError(t, err, "empty player IDs must be skipped silently")
+}

@@ -41,7 +41,7 @@ type ScheduleEstimate struct {
 // minutes; team-match duration scales linearly with bouts plus a
 // per-switch transition.
 type EstimateInput struct {
-	MatchDurationClockMinutes int
+	MatchDurationClockMinutes float64
 	Multiplier                float64
 	NumMatches                int
 	NumCourts                 int
@@ -73,9 +73,9 @@ type EstimateInput struct {
 // the Excel Time Estimator — covered by the schedule tests.
 func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	// Per-match elapsed minutes.
-	perMatchMin := float64(in.MatchDurationClockMinutes) * in.Multiplier
+	perMatchMin := in.MatchDurationClockMinutes * in.Multiplier
 	if in.TeamSize > 0 && in.BoutsPerTeamMatch > 0 {
-		perMatchMin = float64(in.BoutsPerTeamMatch) * float64(in.MatchDurationClockMinutes) * in.Multiplier
+		perMatchMin = float64(in.BoutsPerTeamMatch) * in.MatchDurationClockMinutes * in.Multiplier
 		// Inter-bout transition: ~1 minute per switch between bouts.
 		perMatchMin += float64(in.BoutsPerTeamMatch-1) * 1.0
 	}

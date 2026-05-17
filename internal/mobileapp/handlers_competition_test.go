@@ -1154,3 +1154,30 @@ func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
 	assert.Equal(t, "", m.Winner,
 		"running match must have no winner — pre-fix the force-completed path also propagated empty winner upstream")
 }
+
+// TestValidateCompetitionDurations_Negative verifies that a negative duration
+// is rejected.
+func TestValidateCompetitionDurations_Negative(t *testing.T) {
+	err := validateCompetitionDurations(&state.Competition{PoolMatchDuration: -1})
+	assert.Error(t, err)
+	err = validateCompetitionDurations(&state.Competition{PlayoffMatchDuration: -1})
+	assert.Error(t, err)
+	err = validateCompetitionDurations(&state.Competition{MatchDuration: -1})
+	assert.Error(t, err)
+}
+
+// TestValidateCompetitionFormat_UnknownFormat verifies that unknown format
+// strings are rejected.
+func TestValidateCompetitionFormat_UnknownFormat(t *testing.T) {
+	code, err := validateCompetitionFormat("garbage", "")
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, code)
+}
+
+// TestValidateCompetitionFormat_UnknownPoolFormat verifies that unknown pool
+// format strings are rejected.
+func TestValidateCompetitionFormat_UnknownPoolFormat(t *testing.T) {
+	code, err := validateCompetitionFormat("", "garbage")
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, code)
+}

@@ -23,6 +23,127 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// MaxLen* caps the byte length of persisted user-string fields. Picked
+// loose enough that no realistic operator hits them, tight enough that
+// abusive inputs are rejected fast on the write path. Defense-in-depth
+// against unbounded YAML/CSV inflation — Findings #2 reinterpretation
+// from the security review (the recommended HTML-sanitization path was
+// rejected; render-time encoding via Preact JSX is already in place).
+const (
+	MaxLenTournamentName     = 200
+	MaxLenTournamentVenue    = 200
+	MaxLenTournamentDate     = 10  // DD-MM-YYYY, also format-validated
+	MaxLenTournamentPassword = 256 // not trimmed; cap prevents megabyte payloads
+	MaxLenCeremonyBlock      = 16  // "1h30m" etc.
+
+	MaxLenCompetitionName         = 200
+	MaxLenCompetitionNumberPrefix = 3 // matches admin UI maxLength="3"
+	MaxLenCompetitionStartTime    = 8 // "HH:MM"
+	MaxLenCompetitionDate         = 10
+
+	MaxLenPlayerName        = 100
+	MaxLenPlayerDisplayName = 50 // physical zekken fabric-strip size
+	MaxLenPlayerDojo        = 100
+	MaxLenPlayerMetadata    = 200 // per entry
+	MaxPlayerMetadataItems  = 16
+
+	MaxLenMatchSide        = 100 // sideA / sideB / winner
+	MaxLenMatchScheduledAt = 32
+
+	MaxLenDecisionReason    = 200
+	MaxLenEligibilityReason = 200
+	MaxLenEntityID          = 64 // matches state.ValidateCompetitionID cap
+
+	MaxLenSeedAssignmentName = 100
+)
+
+// validateMaxLen returns a ValidationError when val exceeds max bytes.
+// Empty strings pass — required-field checks live separately so callers
+// can compose presence and length independently. Byte length (not rune
+// count) is the right measure here: the cap is about disk/parse cost,
+// which scales with bytes, not display width. Caller is responsible for
+// trimming first if trimming applies.
+func validateMaxLen(field, val string, max int) error {
+	if len(val) > max {
+		return &ValidationError{
+			Field:   field,
+			Message: fmt.Sprintf("must be <= %d characters", max),
+		}
+	}
+	return nil
+}
+
+// validateBulkScoreLengths enforces persisted-string caps on a single
+// MatchResult before it lands in the engine. Used by the bulk-score
+// endpoint, which writes through RecordMatchResult and so bypasses
+// ScoreRequest.Validate's checks. Same caps as ScoreRequest.Validate
+// so the per-result and per-endpoint enforcement stays in lockstep.
+func validateBulkScoreLengths(r *state.MatchResult) error {
+	if err := validateMaxLen("sideA", r.SideA, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("sideB", r.SideB, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("winner", r.Winner, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("scheduledAt", r.ScheduledAt, MaxLenMatchScheduledAt); err != nil {
+		return err
+	}
+	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
+		return err
+	}
+	for i := range r.SubResults {
+		sr := &r.SubResults[i]
+		prefix := fmt.Sprintf("subResults[%d].", i)
+		if err := validateMaxLen(prefix+"sideA", sr.SideA, MaxLenMatchSide); err != nil {
+			return err
+		}
+		if err := validateMaxLen(prefix+"sideB", sr.SideB, MaxLenMatchSide); err != nil {
+			return err
+		}
+		if err := validateMaxLen(prefix+"winner", sr.Winner, MaxLenMatchSide); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validatePlayerLengths enforces caps on every persisted string of a
+// participant. Shared between the participants handler (live UI write)
+// and the import handler (manifest upload) so a malformed CSV or JSON
+// payload from either path is rejected with the same error shape. The
+// Metadata slice is also count-capped — 16 entries is generous given
+// the current schema (Dan, Grade, optional flags) but rejects abusive
+// payloads that would inflate participants.csv into the megabytes.
+func validatePlayerLengths(name, displayName, dojo, tag string, metadata []string) error {
+	if err := validateMaxLen("name", name, MaxLenPlayerName); err != nil {
+		return err
+	}
+	if err := validateMaxLen("displayName", displayName, MaxLenPlayerDisplayName); err != nil {
+		return err
+	}
+	if err := validateMaxLen("dojo", dojo, MaxLenPlayerDojo); err != nil {
+		return err
+	}
+	if err := validateMaxLen("tag", tag, MaxLenPlayerMetadata); err != nil {
+		return err
+	}
+	if len(metadata) > MaxPlayerMetadataItems {
+		return &ValidationError{
+			Field:   "metadata",
+			Message: fmt.Sprintf("must contain <= %d entries", MaxPlayerMetadataItems),
+		}
+	}
+	for i, entry := range metadata {
+		if err := validateMaxLen(fmt.Sprintf("metadata[%d]", i), entry, MaxLenPlayerMetadata); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Validator is the contract every request body should satisfy after
 // JSON binding. Validate() returns nil when the body is well-formed
 // against its own shape rules; ValidationError when it isn't.
@@ -87,6 +208,25 @@ func (r *ScoreRequest) Validate() error {
 				Message: fmt.Sprintf("must be one of scheduled/running/completed, got %q", r.Status),
 			}
 		}
+	}
+	// Length caps — defense-in-depth against unbounded YAML/CSV bloat.
+	// `decisionReason` was previously bounded only in DecisionRequest.Validate
+	// (200 char contract); folding it in here closes the bulk-score gap
+	// where a 1MB reason could land on disk via PUT /matches/:mid/score.
+	if err := validateMaxLen("sideA", r.SideA, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("sideB", r.SideB, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("winner", r.Winner, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("scheduledAt", r.ScheduledAt, MaxLenMatchScheduledAt); err != nil {
+		return err
+	}
+	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
+		return err
 	}
 	// Winner, when supplied, must name one of the two sides. Empty
 	// winner is permitted (draw or pre-completion update). We only

@@ -100,3 +100,54 @@ func TestLoadOverrides_InvalidJSON(t *testing.T) {
 	_, err = store.LoadOverrides(compID)
 	assert.Error(t, err)
 }
+
+// TestLoadOverridesLocked_NilFieldInit verifies that loading a valid but empty
+// JSON object ("{}") initialises PoolRanks and Winners to non-nil empty maps
+// instead of leaving them nil. This exercises the nil-init guard on lines
+// 43-48 of overrides.go.
+func TestLoadOverridesLocked_NilFieldInit(t *testing.T) {
+	dir, err := os.MkdirTemp("", "overrides-nilinit-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "nil-init-comp"
+	compDir := filepath.Join(dir, "competitions", compID)
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	// Write an empty JSON object — Unmarshal leaves both map fields nil.
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "overrides.json"), []byte("{}"), 0600))
+
+	o, err := store.LoadOverrides(compID)
+	require.NoError(t, err)
+	require.NotNil(t, o)
+	assert.NotNil(t, o.PoolRanks, "PoolRanks must be non-nil after loading {}")
+	assert.NotNil(t, o.Winners, "Winners must be non-nil after loading {}")
+	assert.Empty(t, o.PoolRanks)
+	assert.Empty(t, o.Winners)
+}
+
+// TestModifyOverridesChanged_NoChange verifies bytes.Equal early-exit branch:
+// saving the same rank value twice returns changed=false on the second call.
+func TestModifyOverridesChanged_NoChange(t *testing.T) {
+	dir, err := os.MkdirTemp("", "overrides-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "no-change-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "No Change"}))
+
+	// First save sets a rank
+	changed1, err := store.SaveRankOverrideChanged(compID, "Pool1", "Alice", 1)
+	require.NoError(t, err)
+	assert.True(t, changed1)
+
+	// Saving the same value again should return false (no change)
+	changed2, err := store.SaveRankOverrideChanged(compID, "Pool1", "Alice", 1)
+	require.NoError(t, err)
+	assert.False(t, changed2)
+}

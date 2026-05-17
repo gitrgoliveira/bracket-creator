@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -130,4 +131,120 @@ func TestParticipantsWithZekkenNameRoundTrip(t *testing.T) {
 	assert.Equal(t, "Carol", loaded[2].Name)
 	assert.Equal(t, "C. CAROL", loaded[2].DisplayName)
 	assert.Equal(t, "Dojo C", loaded[2].Dojo)
+}
+
+func TestLoadParticipantsOpt_WithSeeds(t *testing.T) {
+	dir, err := os.MkdirTemp("", "participants-opt-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "opt-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Opt"}))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// WithSeeds: true (default path) — must return players
+	loaded, err := store.LoadParticipantsOpt(compID, false, LoadParticipantsOpts{WithSeeds: true})
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "Alice", loaded[0].Name)
+}
+
+func TestLoadParticipantsOpt_HasIDsHint(t *testing.T) {
+	dir, err := os.MkdirTemp("", "participants-opt-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "opt-ids"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "IDs"}))
+
+	// Write a UUID-prefixed participants.csv manually
+	path := filepath.Join(dir, "competitions", compID, "participants.csv")
+	content := "550e8400-e29b-41d4-a716-446655440000, Alice, DojoA\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+	trueVal := true
+	loaded, err := store.LoadParticipantsOpt(compID, false, LoadParticipantsOpts{WithSeeds: false, HasIDs: &trueVal})
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
+}
+
+// Regression: helper.CreatePlayers auto-populates DisplayName in the
+// non-zekken branch (= SanitizeName(Name)). Before the fix, SaveParticipants
+// wrote a 3-column row for that auto-derived display name, and the next
+// LoadParticipants(_, withZekkenName=false) re-parsed column 2 as Dojo —
+// pushing the real Dojo into Metadata and silently corrupting the roster
+// (the trigger path exercised by the mobile-app import handler).
+//
+// The fix omits the 3rd column whenever DisplayName equals the value the
+// loader would derive on its own, so the auto-derived form round-trips
+// safely. Distinct user-provided display names (zekken comps) keep the
+// 3-column form.
+func TestParticipantsNonZekkenImportRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "import-rt"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	// Simulate the import handler's pipeline: helper.CreatePlayers parses
+	// the uploaded CSV in non-zekken mode, which auto-derives DisplayName.
+	parsed, err := helper.CreatePlayers([]string{"Jane Doe, Mushin Dojo"}, false)
+	require.NoError(t, err)
+	require.Equal(t, "J. DOE", parsed[0].DisplayName, "guard: helper still auto-derives DisplayName")
+
+	require.NoError(t, store.SaveParticipants(compID, parsed))
+
+	// The 2-column form must land on disk so the loader doesn't shift columns.
+	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "J. DOE",
+		"auto-derived DisplayName must not be written to disk; got %q", string(raw))
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "Jane Doe", loaded[0].Name)
+	assert.Equal(t, "Mushin Dojo", loaded[0].Dojo, "Dojo must round-trip intact (regression)")
+	assert.Empty(t, loaded[0].Metadata, "real Dojo must not leak into Metadata (regression)")
+	assert.Equal(t, "J. DOE", loaded[0].DisplayName, "loader still re-derives DisplayName")
+}
+
+// Distinct user-provided display names (e.g. zekken competitions) MUST still
+// round-trip the third column intact. This guards against an over-eager fix
+// to TestParticipantsNonZekkenImportRoundTrip that would drop ALL display
+// names instead of just the auto-derived ones.
+func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "distinct-rt"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	players := []domain.Player{
+		// SanitizeName("Carol") == "CAROL", so "C. CAROL" carries new info.
+		{Name: "Carol", DisplayName: "C. CAROL", Dojo: "Dojo C"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "C. CAROL", "distinct DisplayName must be preserved on disk")
+
+	loaded, err := store.LoadParticipants(compID, true)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "C. CAROL", loaded[0].DisplayName)
+	assert.Equal(t, "Dojo C", loaded[0].Dojo)
 }

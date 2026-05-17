@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -299,11 +298,10 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 		matches := poolResults[p.PoolName]
 		playerStandings := make(map[string]*state.PlayerStanding)
 		for _, player := range p.Players {
-			// p.Players is []helper.Player (helper.Pool); convert at
-			// the boundary into the domain.Player carried on
-			// PlayerStanding (NFR-007, T154).
+			// helper.Player is a type alias for domain.Player (NFR-007);
+			// the pool player flows directly into PlayerStanding.
 			playerStandings[player.Name] = &state.PlayerStanding{
-				Player: helper.PlayerToDomain(player),
+				Player: player,
 			}
 		}
 

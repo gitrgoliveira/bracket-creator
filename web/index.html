@@ -288,8 +288,16 @@
                                             <span class="est-value" id="estElimTimeResult">--</span>
                                         </div>
                                         <div class="col">
-                                            <span class="est-label">Total (<span id="estCourtsLabel">2</span> courts)</span>
+                                            <span class="est-label" data-bs-toggle="tooltip"
+                                                title="Sum of match clock minutes (plus rotation and breaks) divided across courts. No multiplier or buffer.">Clock
+                                                time (<span id="estCourtsLabel">2</span> courts)</span>
                                             <span class="est-value" id="estTotalTimeResult">--</span>
+                                        </div>
+                                        <div class="col">
+                                            <span class="est-label" data-bs-toggle="tooltip"
+                                                title="Server-side projection: clock time × 1.5 (clock→elapsed) × 1.10 (slowest-court buffer).">Elapsed
+                                                estimate</span>
+                                            <span class="est-value" id="estElapsedTimeResult">--</span>
                                         </div>
                                         <div class="col">
                                             <span class="est-label">Estimated Finish</span>

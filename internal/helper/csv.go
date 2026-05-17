@@ -42,11 +42,15 @@ func ParseSeedsFile(filePath string) ([]domain.SeedAssignment, error) {
 
 	rankCol := -1
 	nameCol := -1
+	dojoCol := -1
 	for i, h := range header {
-		if strings.EqualFold(strings.TrimSpace(h), "Rank") {
+		switch strings.ToLower(strings.TrimSpace(h)) {
+		case "rank":
 			rankCol = i
-		} else if strings.EqualFold(strings.TrimSpace(h), "Name") {
+		case "name":
 			nameCol = i
+		case "dojo":
+			dojoCol = i
 		}
 	}
 
@@ -80,8 +84,14 @@ func ParseSeedsFile(filePath string) ([]domain.SeedAssignment, error) {
 			continue
 		}
 
+		dojoStr := ""
+		if dojoCol >= 0 && len(record) > dojoCol {
+			dojoStr = strings.TrimSpace(record[dojoCol])
+		}
+
 		assignments = append(assignments, domain.SeedAssignment{
 			Name:     nameStr,
+			Dojo:     dojoStr,
 			SeedRank: rank,
 		})
 	}

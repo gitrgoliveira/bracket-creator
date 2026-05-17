@@ -96,6 +96,44 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
+	t.Run("fractional matchDuration is accepted", func(t *testing.T) {
+		// 20 * 3.5 * 1.5 / 2 * 1.10 = 57.75 → 58.
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3.5&multiplier=1.5&numMatches=20&courts=2&buffer=10",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp engine.ScheduleEstimate
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		delta := resp.TotalDurationMinutes - 58
+		if delta < 0 {
+			delta = -delta
+		}
+		assert.LessOrEqual(t, delta, 2, "expected ~58 for fractional duration, got %d", resp.TotalDurationMinutes)
+	})
+
+	t.Run("matchDuration=NaN returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=NaN&multiplier=1.5&courts=2",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "matchDuration")
+	})
+
+	t.Run("matchDuration=Inf returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=Inf&multiplier=1.5&courts=2",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "matchDuration")
+	})
+
 	t.Run("no auth header still returns 200 (endpoint is public)", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET",

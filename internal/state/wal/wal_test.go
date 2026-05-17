@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -260,6 +261,136 @@ func TestScanReturnsEmptyForMissingWalDir(t *testing.T) {
 	pending, err := Scan(filepath.Join(t.TempDir(), "does-not-exist"), directWrite)
 	require.NoError(t, err)
 	assert.Empty(t, pending)
+}
+
+// TestPendingBytes verifies that PendingBytes returns (data, true) for
+// an appended path and (nil, false) for an unknown path.
+func TestPendingBytes(t *testing.T) {
+	dir := t.TempDir()
+	w, err := BeginTx(dir, "tx-pending", directWrite)
+	require.NoError(t, err)
+
+	// Before any Append: unknown path.
+	data, ok := w.PendingBytes("/some/path")
+	assert.False(t, ok)
+	assert.Nil(t, data)
+
+	// After Append: should return a copy of the data.
+	want := []byte("hello world")
+	w.Append(FileIntent{Path: "/some/path", Data: want, Mode: 0o600})
+
+	data, ok = w.PendingBytes("/some/path")
+	assert.True(t, ok)
+	assert.Equal(t, want, data)
+
+	// Returned slice must be a copy (not aliased).
+	data[0] = 'X'
+	data2, _ := w.PendingBytes("/some/path")
+	assert.Equal(t, want, data2, "PendingBytes must return independent copy")
+}
+
+// TestBeginTx_NilWrite verifies that BeginTx rejects a nil write function.
+func TestBeginTx_NilWrite(t *testing.T) {
+	_, err := BeginTx(t.TempDir(), "tx-nil", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nil")
+}
+
+// TestBeginTx_EmptyID verifies that BeginTx rejects an empty transaction id.
+func TestBeginTx_EmptyID(t *testing.T) {
+	_, err := BeginTx(t.TempDir(), "", directWrite)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty")
+}
+
+// TestDone_NoFileIsNoop verifies that Done returns nil when the WAL
+// file doesn't exist (e.g., after an uncommitted BeginTx or a double Done).
+func TestDone_NoFileIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	w, err := BeginTx(dir, "tx-no-file", directWrite)
+	require.NoError(t, err)
+
+	// No Commit → no WAL file on disk. Done must return nil.
+	err = w.Done()
+	assert.NoError(t, err)
+
+	// Second Done is also a no-op.
+	err = w.Done()
+	assert.NoError(t, err)
+}
+
+// TestCommit_WriteFnError verifies that Commit surfaces the write-fn
+// error (the "write the WAL file itself" step) and the WAL remains
+// uncommitted.
+func TestCommit_WriteFnError(t *testing.T) {
+	errWrite := fmt.Errorf("disk full")
+	failFn := func(path string, data []byte, perm os.FileMode) error {
+		return errWrite
+	}
+	dir := t.TempDir()
+	w, err := BeginTx(dir, "tx-commit-err", failFn)
+	require.NoError(t, err)
+
+	w.Append(FileIntent{Path: filepath.Join(dir, "foo.txt"), Data: []byte("x"), Mode: 0o600})
+
+	err = w.Commit()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "disk full")
+}
+
+// TestScan_WalDirIsRegularFile verifies that Scan returns an error when
+// walDir points to a regular file rather than a directory.
+func TestScan_WalDirIsRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	// Create a regular file where walDir expects a directory.
+	fileAsDir := filepath.Join(dir, "not-a-dir.txt")
+	require.NoError(t, os.WriteFile(fileAsDir, []byte("data"), 0o600))
+
+	_, err := Scan(fileAsDir, directWrite)
+	assert.Error(t, err, "Scan on a regular file path must return an error")
+}
+
+// TestBeginTx_MkdirAllError verifies that BeginTx returns an error when
+// the walDir cannot be created (parent path is a regular file).
+func TestBeginTx_MkdirAllError(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file that blocks creating a subdirectory under it.
+	blocker := filepath.Join(dir, "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+
+	// Try to create walDir as a subpath of the blocker file.
+	_, err := BeginTx(filepath.Join(blocker, "wal"), "tx1", directWrite)
+	assert.Error(t, err, "mkdir under a regular file must fail")
+}
+
+// TestScan_MultipleEntries verifies that Scan returns WALs in id-sorted
+// order when multiple committed WALs are present, and that each carries
+// the correct intents.
+func TestScan_MultipleEntries(t *testing.T) {
+	dir := t.TempDir()
+	target := t.TempDir()
+
+	// Commit two WALs with different data. WAL id ordering is nanos-based,
+	// but we just need two distinct ids.
+	for i, content := range []string{"first", "second"} {
+		w, err := BeginTx(dir, NewWALID(), directWrite)
+		require.NoError(t, err)
+		w.Append(FileIntent{
+			Path: filepath.Join(target, "file.txt"),
+			Data: []byte(content),
+			Mode: 0o600,
+		})
+		require.NoError(t, w.Commit())
+		_ = i
+	}
+
+	wals, err := Scan(dir, directWrite)
+	require.NoError(t, err)
+	assert.Len(t, wals, 2)
+	// IDs should be non-empty and distinct.
+	assert.NotEmpty(t, wals[0].ID())
+	assert.NotEmpty(t, wals[1].ID())
+	assert.NotEqual(t, wals[0].ID(), wals[1].ID())
 }
 
 // TestUniqueWALIDDifferentEachCall pins that two BeginTx calls in the

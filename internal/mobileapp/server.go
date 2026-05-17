@@ -114,6 +114,24 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 				return
 			}
 
+			// Browser-build rewrite: source .jsx files (web-mobile/js/*.jsx)
+			// import siblings via `./X.jsx` paths. esbuild compiles to
+			// .js (web-mobile/dist/*.js) but does NOT rewrite the import
+			// strings — so a browser's `import "./X.jsx"` falls through to
+			// here looking for a non-existent `dist/X.jsx`. Map to the
+			// compiled `.js` sibling. Without this rewrite the SPA fails
+			// to mount because every entry chunk has an unresolved
+			// `.jsx` import. Vitest tests pass because Node-side resolves
+			// `.jsx` to the source file directly.
+			if strings.HasPrefix(filePath, "dist/") && strings.HasSuffix(filePath, ".jsx") {
+				rewritten := strings.TrimSuffix(filePath, ".jsx") + ".js"
+				if _, err := fs.Stat(subFS, rewritten); err == nil {
+					c.Request.URL.Path = "/" + rewritten
+					http.FileServer(http.FS(subFS)).ServeHTTP(c.Writer, c.Request)
+					return
+				}
+			}
+
 			// If it's a sub-route (SPA), serve index.html
 			// (but only if it doesn't look like a file request with an extension)
 			ext := filepath.Ext(filePath)

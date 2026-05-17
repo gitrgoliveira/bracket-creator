@@ -7,6 +7,8 @@ import {
   nextEnchoPeriod,
   prevEnchoPeriod,
   DecisionPrompt,
+  MAX_IPPONS_PER_SIDE,
+  isBoutDecided,
 } from '../admin_scoring_modal.jsx';
 
 // admin_scoring_modal.jsx ships seven module-private helpers that together
@@ -510,5 +512,56 @@ describe('+ / − encho button behaviour (T104 clamp invariants)', () => {
     // Try to go below
     count = prevEnchoPeriod(count); // still 1
     expect(count).toBe(1);
+  });
+});
+
+describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
+  // Kendo best-of-3: once either side reaches 2 ippons the bout ends.
+  // isBoutDecided drives the disabled-prop on ippon-add buttons in both
+  // ScoreEditorModal and TeamScoreEditorModal — once it returns true, all
+  // M/K/D/T/H buttons on BOTH sides are disabled, preventing a 2-2 entry.
+  // Server-side mirror: validateIpponCounts in internal/mobileapp/validation.go.
+
+  it('exports MAX_IPPONS_PER_SIDE = 2', () => {
+    expect(MAX_IPPONS_PER_SIDE).toBe(2);
+  });
+
+  it('returns false when both sides are empty (match not yet started)', () => {
+    expect(isBoutDecided([], [])).toBe(false);
+  });
+
+  it('returns false while both sides are below the cap', () => {
+    expect(isBoutDecided([], ['M'])).toBe(false);
+    expect(isBoutDecided(['K'], [])).toBe(false);
+    expect(isBoutDecided(['M'], ['K'])).toBe(false);  // 1-1 — valid, ongoing
+  });
+
+  it('returns true when side A reaches 2 ippons (decisive win for A)', () => {
+    expect(isBoutDecided(['M', 'K'], [])).toBe(true);   // 2-0
+    expect(isBoutDecided(['M', 'K'], ['D'])).toBe(true); // 2-1
+  });
+
+  it('returns true when side B reaches 2 ippons (decisive win for B)', () => {
+    expect(isBoutDecided([], ['M', 'K'])).toBe(true);   // 0-2
+    expect(isBoutDecided(['D'], ['M', 'K'])).toBe(true); // 1-2
+  });
+
+  it('returns true for 2-2 (the impossible scoreline the fix prevents)', () => {
+    // This mirrors the server-side rejection in validateIpponCounts:
+    //   "both sides cannot have 2 ippons (best-of-3 ends at first to 2)"
+    expect(isBoutDecided(['M', 'K'], ['D', 'T'])).toBe(true);
+  });
+
+  it('handles undefined/null gracefully (defensive — arrays may be initialised late)', () => {
+    expect(isBoutDecided(undefined, [])).toBe(false);
+    expect(isBoutDecided([], null)).toBe(false);
+    expect(isBoutDecided(undefined, undefined)).toBe(false);
+  });
+
+  it('returns false after removing an ippon that previously hit the cap', () => {
+    // Simulate operator hitting 2 then clicking a slot to remove one:
+    // boutDecided re-evaluates on next render with the shorter array.
+    const after = ['M']; // was ['M','K'], operator removed 'K'
+    expect(isBoutDecided(after, ['D'])).toBe(false); // back to 1-1, not decided
   });
 });

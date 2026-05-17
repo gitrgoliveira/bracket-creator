@@ -3,6 +3,22 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+// Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
+// internal/mobileapp/validation.go — the bout ends when one side reaches
+// 2 ippons, so 2-2 is an impossible scoreline. Used to gate the M/K/D/T/H
+// buttons on both sides of every bout (individual + team sub-bout).
+const MAX_IPPONS_PER_SIDE = 2;
+
+// isBoutDecided — true once either side has reached the best-of-3 cap.
+// The UI uses this to disable the add-ippon buttons on BOTH sides at
+// that point: the bout would have ended at first-to-2, so neither side
+// can legitimately add another ippon. Server enforces the same invariant
+// in validateIpponCounts (rejects 2-2 with HTTP 400).
+function isBoutDecided(aPts, bPts) {
+  return (aPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE
+      || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
+}
+
 // Term — kendo-glossary tooltip wrapper. Read lazily off window so the
 // load order between glossary.js and this module doesn't matter (both
 // are type="module" scripts and may execute in any order). Falls back
@@ -438,6 +454,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     { key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls, setFouls: setAFouls, hansokuPts: aHansokuPts, color: "aka", label: "AKA (Red)" },
   ];
 
+  // Bout is decided once either side reaches 2 ippons — disable add-ippon
+  // buttons on BOTH sides (mirrors validateIpponCounts on the server).
+  const boutDecided = isBoutDecided(aPts, bPts);
+
   const canFinish = isDrawToggled || aTotal > 0 || bTotal > 0;
 
   const isDirty =
@@ -598,7 +618,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                       </div>
                       <div className="sb-points-grid">
                         {["M", "K", "D", "T", "H"].map((cc) => (
-                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={s.pts.length >= 2}>{cc}</button>
+                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided}>{cc}</button>
                         ))}
                       </div>
                     </div>
@@ -1227,6 +1247,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 color: "aka", label: "AKA" },
             ];
 
+            // Sub-bout is decided once either side reaches 2 ippons — disable
+            // add-ippon buttons on BOTH sides of THIS sub-bout only (other
+            // sub-bouts in the team match remain independent).
+            const subBoutDecided = isBoutDecided(s.aPts, s.bPts);
+
             const scoreDisplay = (() => {
               if (t.winner === null && t.aTotal === 0 && t.bTotal === 0) return <span style={{ color: "var(--ink-3)" }}>–</span>;
               if (t.winner === null) return <span className="tsm-draw">X</span>;
@@ -1266,8 +1291,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                         <div className="team-sub-match__btns">
                           {["M", "K", "D", "T", "H"].map(cc => (
                             <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
-                              onClick={() => rs.setPts(rs.pts.length < 2 ? [...rs.pts, cc] : rs.pts)}
-                              disabled={rs.pts.length >= 2}>{cc}</button>
+                              onClick={() => rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts)}
+                              disabled={subBoutDecided}>{cc}</button>
                           ))}
                         </div>
                         {/* Independent foul counter */}
@@ -1470,4 +1495,6 @@ export {
   nextEnchoPeriod,
   prevEnchoPeriod,
   DecisionPrompt,
+  MAX_IPPONS_PER_SIDE,
+  isBoutDecided,
 };

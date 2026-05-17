@@ -88,13 +88,23 @@ func RegisterSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 		})
 	})
 
+}
+
+// RegisterPublicSwissHandlers wires read-only Swiss endpoints under the
+// public /api group. Standings are derived from completed match results,
+// which are themselves public via the viewer endpoint — so spectators,
+// coaches, and TV displays need them without admin credentials.
+// Discovered during the post-merge browser UAT pass: the SwissStandings
+// viewer tab broke with "invalid tournament password" because the
+// admin-only RegisterSwissHandlers was the only registration.
+//
+// FR-050e.
+func RegisterPublicSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {
 	// GET /competitions/:id/swiss/standings
 	//
 	// Returns the cumulative Swiss standings ranked by wins → points
 	// scored → head-to-head → name (stable). Always 200 with an array
 	// (possibly empty for a competition that has not yet started).
-	//
-	// FR-050e.
 	r.GET("/competitions/:id/swiss/standings", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

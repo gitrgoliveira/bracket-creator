@@ -66,6 +66,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 	// the operator has entered the admin password.
 	RegisterPublicEligibilityHandlers(api, store)
 	RegisterPublicLineupHandlers(api, store)
+	RegisterPublicSwissHandlers(api, store, eng)
 
 	// Admin API endpoints (protected)
 	admin := r.Group("/api")

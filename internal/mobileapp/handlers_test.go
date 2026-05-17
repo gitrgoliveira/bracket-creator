@@ -42,6 +42,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Stateless schedule estimator — public, no auth.
 	publicAPI := r.Group("/api")
 	RegisterScheduleHandlers(publicAPI)
+	RegisterPublicSwissHandlers(publicAPI, store, eng)
 
 	// Admin API
 	admin := r.Group("/api")

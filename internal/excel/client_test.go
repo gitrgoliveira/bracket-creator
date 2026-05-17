@@ -18,6 +18,9 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestSaveFile(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("Skipping permission test: root can create /nonexistent/directory, so the error path can't be triggered")
+	}
 	file, err := os.CreateTemp("", "test-excel-*.xlsx")
 	if err != nil {
 		t.Skip("Skipping test due to failure to create temp file")

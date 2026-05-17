@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { timeEdited, timeToMinutes, clampMatchDuration } from '../admin_schedule.jsx';
+import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt } from '../admin_schedule.jsx';
 
 describe('timeEdited', () => {
   // Copilot round-9 finding: AdminTWMatch.submitTime() used
@@ -165,5 +165,208 @@ describe('clampMatchDuration', () => {
       expect(clampMatchDuration(NaN, 5)).toBe(5);
       expect(clampMatchDuration(2.5, 10)).toBe(10);
     });
+  });
+});
+
+describe('filterMatchesByCourt', () => {
+  // T024 (US1, FR-001, SC-001): the admin schedule view supports a `?court=A`
+  // query param that scopes the visible matches to a single shiaijo. The
+  // helper is extracted from admin_schedule.jsx so the URL → matches[]
+  // transformation can be unit-tested without mounting the component.
+  //
+  // Contract:
+  //   filterMatchesByCourt(matches, courtParam) → matches[]
+  //   - null/undefined/""/"all" courtParam → returns matches unchanged
+  //   - specific letter (e.g. "A") → only matches whose m.court === "A"
+  //   - case-sensitive: filtering by "A" does NOT match m.court === "a"
+  //   - empty-string / nullish / whitespace-only m.court is treated as
+  //     "unassigned" and excluded when filtering by a specific court.
+  //     This mirrors the existing `(m.court || "")` pattern used by the
+  //     unassigned-bucket logic in admin_schedule.jsx.
+
+  const matches = [
+    { id: 'm1', court: 'A', pool: 'P1' },
+    { id: 'm2', court: 'B', pool: 'P2' },
+    { id: 'm3', court: 'A', pool: 'P3' },
+    { id: 'm4', court: '', pool: 'P4' },
+    { id: 'm5', court: null, pool: 'P5' },
+    { id: 'm6', court: undefined, pool: 'P6' },
+    { id: 'm7', court: '  ', pool: 'P7' },
+    { id: 'm8', court: 'a', pool: 'P8' },
+  ];
+
+  describe('no-filter cases return all matches unchanged', () => {
+    it('null returns all matches', () => {
+      expect(filterMatchesByCourt(matches, null)).toEqual(matches);
+    });
+
+    it('undefined returns all matches', () => {
+      expect(filterMatchesByCourt(matches, undefined)).toEqual(matches);
+    });
+
+    it('"" (empty string) returns all matches', () => {
+      expect(filterMatchesByCourt(matches, "")).toEqual(matches);
+    });
+
+    it('"all" returns all matches', () => {
+      expect(filterMatchesByCourt(matches, "all")).toEqual(matches);
+    });
+  });
+
+  describe('filtering by a specific court letter', () => {
+    it('"A" returns only Court A matches', () => {
+      const result = filterMatchesByCourt(matches, "A");
+      expect(result).toEqual([
+        { id: 'm1', court: 'A', pool: 'P1' },
+        { id: 'm3', court: 'A', pool: 'P3' },
+      ]);
+    });
+
+    it('"B" returns only Court B matches', () => {
+      const result = filterMatchesByCourt(matches, "B");
+      expect(result).toEqual([
+        { id: 'm2', court: 'B', pool: 'P2' },
+      ]);
+    });
+
+    it('"C" (no matches assigned) returns []', () => {
+      expect(filterMatchesByCourt(matches, "C")).toEqual([]);
+    });
+  });
+
+  describe('unassigned matches are excluded when filtering by a specific court', () => {
+    it('empty-string court is excluded when filter is "A"', () => {
+      const result = filterMatchesByCourt(matches, "A");
+      expect(result.find((m) => m.id === 'm4')).toBeUndefined();
+    });
+
+    it('null court is excluded when filter is "A"', () => {
+      const result = filterMatchesByCourt(matches, "A");
+      expect(result.find((m) => m.id === 'm5')).toBeUndefined();
+    });
+
+    it('undefined court is excluded when filter is "A"', () => {
+      const result = filterMatchesByCourt(matches, "A");
+      expect(result.find((m) => m.id === 'm6')).toBeUndefined();
+    });
+
+    it('whitespace-only court is excluded when filter is "A"', () => {
+      // The unassigned-bucket logic in admin_schedule.jsx uses
+      // `(m.court || "")` which would leave "  " in the unassigned
+      // bucket once trimmed. Filtering by "A" must exclude it.
+      const result = filterMatchesByCourt(matches, "A");
+      expect(result.find((m) => m.id === 'm7')).toBeUndefined();
+    });
+  });
+
+  describe('case-sensitivity', () => {
+    it('filtering by "A" does NOT match m.court === "a"', () => {
+      // Per existing app convention (Excel court labels A–Z are uppercase
+      // and the unassigned-bucket comparison is exact), the filter must
+      // be case-sensitive. A lowercase "a" in a match should not leak
+      // into the "A" view.
+      const result = filterMatchesByCourt(matches, "A");
+      expect(result.find((m) => m.id === 'm8')).toBeUndefined();
+    });
+
+    it('filtering by "a" returns only the lowercase "a" match', () => {
+      const result = filterMatchesByCourt(matches, "a");
+      expect(result).toEqual([
+        { id: 'm8', court: 'a', pool: 'P8' },
+      ]);
+    });
+  });
+
+  describe('edge cases', () => {
+    it('empty matches array returns []', () => {
+      expect(filterMatchesByCourt([], "A")).toEqual([]);
+    });
+
+    it('empty matches array with no filter returns []', () => {
+      expect(filterMatchesByCourt([], null)).toEqual([]);
+    });
+  });
+});
+
+describe('AdminScoreEditor chained navigation stays on the same shiaijo (T043 regression)', () => {
+  // T043 (US1, FR-001, SC-001) regression anchor for the CLAUDE.md
+  // invariant: "Chained match navigation in the admin score editor
+  // (Prev/Next buttons, Finish + Start Next, ←/→ keys) must stay on the
+  // current match's shiaijo." The AdminScoreEditor component in
+  // admin_schedule.jsx implements this with
+  //   filtered.filter(m => (m.court || "") === openCourt)
+  // before computing prevMatch / nextMatch. This regression test pins
+  // the same court-equality contract via the filterMatchesByCourt
+  // helper — they share the same court-equality semantics (case-sensitive
+  // exact match), so a future "simplify the comparison" refactor that
+  // breaks the helper would also break the chained-navigation invariant.
+  //
+  // We test the helper rather than mounting AdminScoreEditor because the
+  // component's chained nav depends on internal openMatch state +
+  // ScoreEditorModal callbacks; the pure helper captures the load-bearing
+  // semantic (only same-court matches are candidates for the next match)
+  // and is the right anchor for a regression test. The actual
+  // AdminScoreEditor logic is verified by manual operator testing.
+
+  const matches = [
+    { id: 'mA1', court: 'A', status: 'completed', compId: 'c1' },
+    { id: 'mB1', court: 'B', status: 'running',   compId: 'c1' },
+    { id: 'mA2', court: 'A', status: 'running',   compId: 'c1' },
+    { id: 'mA3', court: 'A', status: 'scheduled', compId: 'c1' },
+    { id: 'mB2', court: 'B', status: 'scheduled', compId: 'c1' },
+    { id: 'mA4', court: 'A', status: 'scheduled', compId: 'c1' },
+  ];
+
+  it('given the current match is on Court A, next-match candidates are all Court A', () => {
+    // Simulates AdminScoreEditor's pre-next-match filter step: scope the
+    // candidate list to the current match's shiaijo. The chained-next
+    // logic in admin_schedule.jsx picks list[openIdx+1] from this list,
+    // so if the helper leaks a Court B match in, the operator would
+    // suddenly hop courts mid-flow.
+    const currentMatch = matches[2]; // mA2 (Court A, running)
+    const sameCourt = filterMatchesByCourt(matches, currentMatch.court);
+
+    expect(sameCourt.every((m) => m.court === 'A')).toBe(true);
+    expect(sameCourt.find((m) => m.court === 'B')).toBeUndefined();
+    expect(sameCourt.map((m) => m.id)).toEqual(['mA1', 'mA2', 'mA3', 'mA4']);
+  });
+
+  it('next match in sequence is the next Court A match, never a Court B match', () => {
+    // Concrete end-to-end shape of the chained-next computation. If the
+    // operator clicks Next on mA2 (Court A, index 1 in the same-court
+    // list), the next match must be mA3 (Court A) — NOT mB2 even though
+    // mB2 might come before mA3 in tournament order.
+    const currentMatch = matches[2]; // mA2
+    const sameCourt = filterMatchesByCourt(matches, currentMatch.court);
+    const openIdx = sameCourt.findIndex((m) => m.id === currentMatch.id);
+    const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+
+    expect(nextMatch).not.toBeNull();
+    expect(nextMatch.court).toBe('A');
+    expect(nextMatch.id).toBe('mA3');
+  });
+
+  it('prev match in sequence is the previous Court A match, never a Court B match', () => {
+    // Symmetric to the next-match check.
+    const currentMatch = matches[2]; // mA2
+    const sameCourt = filterMatchesByCourt(matches, currentMatch.court);
+    const openIdx = sameCourt.findIndex((m) => m.id === currentMatch.id);
+    const prevMatch = openIdx > 0 ? sameCourt[openIdx - 1] : null;
+
+    expect(prevMatch).not.toBeNull();
+    expect(prevMatch.court).toBe('A');
+    expect(prevMatch.id).toBe('mA1');
+  });
+
+  it('last match on a court has no next-match candidate (returns null)', () => {
+    // Edge: clicking Next on the last Court A match must stop chaining
+    // rather than wrap around to the first Court A match or jump to
+    // Court B.
+    const currentMatch = matches[5]; // mA4 — last Court A match
+    const sameCourt = filterMatchesByCourt(matches, currentMatch.court);
+    const openIdx = sameCourt.findIndex((m) => m.id === currentMatch.id);
+    const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+
+    expect(nextMatch).toBeNull();
   });
 });

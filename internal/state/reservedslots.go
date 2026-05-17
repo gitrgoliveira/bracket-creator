@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -75,7 +76,7 @@ func (s *Store) saveReservedSlotsLocked(compID string, slots []ReservedSlot) err
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := s.atomicWrite(path, data, 0600); err != nil {
 		return err
 	}
 	if slots == nil {
@@ -91,10 +92,10 @@ func (s *Store) saveReservedSlotsLocked(compID string, slots []ReservedSlot) err
 
 // loadParticipantsLocked reads participants without acquiring a lock.
 // Caller must hold the per-comp lock for compID. Mirrors LoadParticipants.
-func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]helper.Player, error) {
+func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]domain.Player, error) {
 	path := s.compPath(compID, "participants.csv")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return []helper.Player{}, nil
+		return []domain.Player{}, nil
 	}
 
 	lines, err := helper.ReadEntriesFromFile(path)
@@ -147,13 +148,15 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]he
 		}
 	}
 
+	// helper.Player is a type alias for domain.Player (NFR-007); the
+	// parser output is already []domain.Player.
 	return players, nil
 }
 
 // saveParticipantsLocked writes participants without acquiring a lock and
 // invalidates the participant caches. Caller must hold the per-comp write lock
 // for compID. Mirrors SaveParticipants.
-func (s *Store) saveParticipantsLocked(compID string, players []helper.Player) error {
+func (s *Store) saveParticipantsLocked(compID string, players []domain.Player) error {
 	path := s.compPath(compID, "participants.csv")
 	var sb strings.Builder
 	for _, p := range players {
@@ -172,7 +175,7 @@ func (s *Store) saveParticipantsLocked(compID string, players []helper.Player) e
 		}
 		sb.WriteString(id + ", " + row + "\n")
 	}
-	if err := os.WriteFile(path, []byte(sb.String()), 0600); err != nil {
+	if err := s.atomicWrite(path, []byte(sb.String()), 0600); err != nil {
 		return err
 	}
 	for _, key := range []string{"participants.csv", "participants_with_seeds.csv"} {
@@ -208,7 +211,7 @@ func (s *Store) AddReservedSlot(compID string, sourceCompID string, sourceRank i
 	slotID := newParticipantID()
 	partID := newParticipantID()
 
-	placeholder := helper.Player{
+	placeholder := domain.Player{
 		ID:          partID,
 		Name:        fmt.Sprintf("Reserved: %s rank %d", sourceCompID, sourceRank),
 		DisplayName: fmt.Sprintf("Rsv %s #%d", sourceCompID, sourceRank),
@@ -274,7 +277,7 @@ func (s *Store) RemoveReservedSlot(compID string, slotID string, withZekkenName 
 	if err != nil {
 		return err
 	}
-	filtered := make([]helper.Player, 0, len(players))
+	filtered := make([]domain.Player, 0, len(players))
 	for _, p := range players {
 		if p.ID != partID {
 			filtered = append(filtered, p)

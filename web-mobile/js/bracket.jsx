@@ -4,6 +4,15 @@
 
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
+// TermBC — kendo-glossary tooltip wrapper. Lazy lookup so the script
+// load order between glossary.jsx and this module doesn't matter.
+function TermBC(props) {
+  if (typeof window !== 'undefined' && window.Term) {
+    return React.createElement(window.Term, props, props.children);
+  }
+  return React.createElement('span', null, props.children);
+}
+
 // Local hikiwake check — bracket.jsx is tested in isolation, so we don't rely
 // on window.isHikiwake here. See specs/openapi.yaml.
 function isHikiwakeBC(v) { return v === "hikiwake"; }
@@ -23,26 +32,65 @@ function sideLabel(side) {
   return side === "a" ? "AKA" : "SHIRO";
 }
 
+// Decision-driven suffix appended to score strings on schedule rows, bracket
+// nodes, viewer cards, and TV displays. Mirrors the Visual Rendering Contract
+// in specs/003-tournament-gap-closure/contracts/match-decisions.md §Visual:
+//   decision == "kiken"       → "Kiken"
+//   decision == "fusenpai"    → "Fus."
+//   decision == "daihyosen"   → "DH"
+// Encho (overtime) appends " (E)" on top of any other suffix so a kiken-in-
+// overtime renders "0–2 Kiken (E)". `fusensho` is per-bout only — handled by
+// a separate bout badge, not by this helper. Pure and DOM-free so it can be
+// reused by display.jsx (which builds its own scoreline) without dragging in
+// the rest of formatIpponsScore's bye/hantei special cases.
+function decisionSuffix(match) {
+  if (!match) return "";
+  const d = match.decision || "";
+  const enchoOn = !!(match.encho && match.encho.periodCount > 0);
+  let suffix = "";
+  if (d === "kiken") suffix = "Kiken";
+  else if (d === "fusenpai") suffix = "Fus.";
+  else if (d === "daihyosen") suffix = "DH";
+  if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
+  return suffix;
+}
+
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
 // Returns something like "MM–K", "M–", "△", "H"
-function formatIpponsScore(ipponsA, ipponsB, score, decision) {
+//
+// FR-033: when `encho` carries a positive periodCount, append " (E)" to the
+// rendered string so operators and viewers see at a glance that the match
+// went to overtime. Argument is optional and ignored when undefined/null,
+// keeping all existing call sites valid.
+//
+// T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
+// encho marker — wired through decisionSuffix() so the same string is used
+// by display.jsx's hand-rolled score block. The decision-derived suffix
+// supersedes the bare " (E)" so we don't double-print "(E)" alongside
+// "Kiken (E)".
+function formatIpponsScore(ipponsA, ipponsB, score, decision, encho) {
+  const decSfx = decisionSuffix({ decision, encho });
+  const enchoOnly = (encho && encho.periodCount > 0) ? " (E)" : "";
+  const suffix = decSfx ? " " + decSfx : enchoOnly;
   if (score?.type === "bye") return "BYE";
-  if (score?.type === "hantei") return "H";
+  if (score?.type === "hantei") return "H" + suffix;
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
   const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
   if (isDraw) {
     // No-score draw → X; with scores → △
-    return (!aStr && !bStr) ? "X" : "△";
+    return ((!aStr && !bStr) ? "X" : "△") + suffix;
   }
   if (!aStr && !bStr) {
     // Fall back to numeric if ippons arrays are missing but score exists
     if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
-      return `${score.winnerPts}–${score.loserPts}`;
+      return `${score.winnerPts}–${score.loserPts}` + suffix;
     }
-    return "";
+    // No scores but a decision was recorded (e.g. kiken before any ippon
+    // was struck) — still print the suffix so the operator sees "Kiken".
+    return suffix ? suffix.trimStart() : "";
   }
-  return `${aStr || "·"}–${bStr || "·"}`;
+  return `${aStr || "·"}–${bStr || "·"}` + suffix;
 }
 
 const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD }) => {
@@ -94,12 +142,22 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       aria-label={`Match ${match.id}`}
     >
       <div className="bc-match-meta">
-        <span className="bc-court">Shiaijo {match.court}</span>
+        <span className="bc-court"><TermBC name="shiaijo">Shiaijo</TermBC> {match.court}</span>
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
         {live ? <span className="bc-live">● LIVE</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
+        {match.encho?.periodCount > 0 ? <span className="bc-encho" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="encho">(E)</TermBC></span> : null}
+        {/* T097: decision chip on bracket nodes. The score-line suffix already
+            renders "Kiken/Fus./DH" via formatIpponsScore, but bracket cards
+            print the score on the player rows (aScore/bScore) rather than in
+            the meta row, so the bare ippon count there loses the decision.
+            A chip in the meta keeps the operator and viewers oriented when
+            scanning a wall of bracket cards. */}
+        {match.decision === "kiken" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="kiken">Kiken</TermBC></span> : null}
+        {match.decision === "fusenpai" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="fusenpai">Fus.</TermBC></span> : null}
+        {match.decision === "daihyosen" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="daihyosen">DH</TermBC></span> : null}
       </div>
       <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} />
       <div className="bc-divider"></div>
@@ -215,6 +273,7 @@ window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.roundLabel = roundLabel;
 window.formatIpponsScore = formatIpponsScore;
+window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 
-export { formatIpponsScore, sideLabel, roundLabel };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel };

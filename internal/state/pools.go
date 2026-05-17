@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"os"
@@ -137,16 +138,12 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 
 	path := s.compPath(compID, "pools.csv")
 
-	// #nosec G304
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	writer := csv.NewWriter(f)
+	// Build the CSV body in memory then write it atomically + durably
+	// via atomicWriteFile. Pool CSVs are small (<1MB even for large
+	// tournaments) so memory buffering is fine and gives us crash
+	// safety the os.Create + streaming pattern lacked.
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
 	for _, p := range pools {
 		for i, player := range p.Players {
 			seedStr := ""
@@ -160,6 +157,10 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
+		return err
+	}
+
+	if err := s.atomicWrite(path, buf.Bytes(), 0600); err != nil {
 		return err
 	}
 
@@ -232,7 +233,28 @@ func parsePoolMatchesFile(path string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parsePoolMatchesRecords(records), nil
+}
 
+// parsePoolMatchesBytes parses pool-matches.csv from in-memory bytes.
+// Used by tx-internal read-your-own-writes (the storeTx LoadPoolMatches
+// peek at WAL-staged bytes). Empty input → empty slice, matching the
+// "file does not exist" contract of parsePoolMatchesFile.
+func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
+	if len(raw) == 0 {
+		return []MatchResult{}, nil
+	}
+	records, err := csv.NewReader(bytes.NewReader(raw)).ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	return parsePoolMatchesRecords(records), nil
+}
+
+// parsePoolMatchesRecords turns a CSV record matrix into MatchResults.
+// Extracted so the file-based and bytes-based parsers share the
+// rec-shape→struct mapping verbatim (no drift between the two).
+func parsePoolMatchesRecords(records [][]string) []MatchResult {
 	results := []MatchResult{}
 	for i, rec := range records {
 		if i == 0 && len(rec) > 0 && rec[0] == "PoolName" {
@@ -268,7 +290,7 @@ func parsePoolMatchesFile(path string) (any, error) {
 
 		results = append(results, m)
 	}
-	return results, nil
+	return results
 }
 
 func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
@@ -280,25 +302,27 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.savePoolMatchesLocked(compID, results)
+	return s.savePoolMatchesLocked(compID, results, s.directWrite)
 }
 
 // savePoolMatchesLocked persists results to disk and refreshes the cache.
 // Caller MUST hold the per-competition lock (s.getCompLock(compID)).
 // Used by both SavePoolMatches (which takes the lock) and
 // UpdatePoolMatchByID (which holds the lock across load + mutate + save).
-func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult) error {
+//
+// The write parameter routes the actual file write — directWrite for
+// non-tx callers, a WAL-capturing writer for tx callers. See
+// saveBracketLocked for the cache-refresh rationale (T211/T212).
+func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, write writeFn) error {
 	path := s.compPath(compID, "pool-matches.csv")
-	// #nosec G304
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
 
-	writer := csv.NewWriter(f)
+	// Build the CSV body in memory then write it atomically + durably
+	// via atomicWriteFile. Pool-match CSVs stay well under 1MB even for
+	// large tournaments (a few hundred matches × ~14 columns of short
+	// fields), so memory buffering trades trivial RAM for crash safety
+	// the previous os.Create + streaming pattern lacked.
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
 	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt"}); err != nil {
 		return err
 	}
@@ -341,6 +365,10 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult) erro
 		return err
 	}
 
+	if err := write(path, buf.Bytes(), 0600); err != nil {
+		return err
+	}
+
 	cache := s.getFileCache(compID, "pool-matches.csv")
 	cache.mu.Lock()
 	cache.data = s.copyMatchResults(results)
@@ -377,6 +405,16 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 	mu.Lock()
 	defer mu.Unlock()
 
+	return s.updatePoolMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+}
+
+// updatePoolMatchByIDLocked is the lock-free body of
+// UpdatePoolMatchByID. Caller MUST already hold the per-comp write
+// lock. Used by the tx-aware path so the same load + find + mutate +
+// save sequence runs without re-acquiring the lock from inside a
+// WithTransaction closure (T156, NFR-010). The write parameter
+// selects direct-to-disk vs WAL-capturing semantics (T211/T212).
+func (s *Store) updatePoolMatchByIDLocked(compID, matchID string, mutate func(*MatchResult), write writeFn) (bool, error) {
 	// Load directly from disk under the lock. We deliberately bypass
 	// the loadCached path here because the per-comp lock is what
 	// coordinates with the save below; using the cache would risk
@@ -392,7 +430,7 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 	for i := range results {
 		if results[i].ID == matchID {
 			mutate(&results[i])
-			return true, s.savePoolMatchesLocked(compID, results)
+			return true, s.savePoolMatchesLocked(compID, results, write)
 		}
 	}
 	return false, nil

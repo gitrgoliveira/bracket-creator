@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -24,7 +25,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		comp := state.Competition{
 			ID:   "seeded-comp",
 			Name: "Seeded Competition",
-			Players: []helper.Player{
+			Players: []domain.Player{
 				{Name: "Seed 1", Seed: 1, Dojo: "Dojo A"},
 				{Name: "Seed 2", Seed: 2, Dojo: "Dojo B"},
 				{Name: "No Seed", Seed: 0, Dojo: "Dojo C"},
@@ -757,7 +758,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			Name:              "Empty Players Source",
 			HasParticipantIDs: true,
 		}))
-		require.NoError(t, store.SaveParticipants(cid, []helper.Player{
+		require.NoError(t, store.SaveParticipants(cid, []domain.Player{
 			{Name: "Alice", Dojo: "Dojo A"},
 			{Name: "Bob", Dojo: "Dojo B"},
 		}))
@@ -791,7 +792,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			Name:              "Omitted Players Source",
 			HasParticipantIDs: true,
 		}))
-		require.NoError(t, store.SaveParticipants(cid, []helper.Player{
+		require.NoError(t, store.SaveParticipants(cid, []domain.Player{
 			{Name: "Alice", Dojo: "Dojo A"},
 			{Name: "Bob", Dojo: "Dojo B"},
 		}))
@@ -918,7 +919,7 @@ func TestPUTCompetition_RosterPUTBypassesSettingsValidation(t *testing.T) {
 		ID:   cid,
 		Name: "Legacy",
 		Date: "2026-05-12", // stale ISO from c.date
-		Players: []helper.Player{
+		Players: []domain.Player{
 			{ID: "p1-uuid", Name: "P1", Dojo: "D1"},
 		},
 	})
@@ -958,7 +959,7 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 	}))
 	// Use real UUID v4 IDs so the auto-detect / hinted loader recognises
 	// the format and Names parse correctly on LoadParticipants.
-	require.NoError(t, store.SaveParticipants(cid, []helper.Player{
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
 		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo X"},
 		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Y"},
 	}))
@@ -1008,7 +1009,7 @@ func TestPlayoff_ResponseIncludesPlayers(t *testing.T) {
 		PoolWinners: 2,
 	}
 	require.NoError(t, store.SaveCompetition(&src))
-	require.NoError(t, store.SaveParticipants("src", []helper.Player{
+	require.NoError(t, store.SaveParticipants("src", []domain.Player{
 		{ID: "p1", Name: "P1", Dojo: "D1"},
 		{ID: "p2", Name: "P2", Dojo: "D2"},
 	}))
@@ -1054,7 +1055,7 @@ func TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure(t *testing.T) {
 	body, _ := json.Marshal(state.Competition{
 		ID:   cid,
 		Name: "Save Fails",
-		Players: []helper.Player{
+		Players: []domain.Player{
 			{ID: "p1-uuid", Name: "P1", Dojo: "D1"},
 		},
 	})
@@ -1152,4 +1153,31 @@ func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
 		"bracket match must reflect the incoming `running` status, not be forced to completed")
 	assert.Equal(t, "", m.Winner,
 		"running match must have no winner — pre-fix the force-completed path also propagated empty winner upstream")
+}
+
+// TestValidateCompetitionDurations_Negative verifies that a negative duration
+// is rejected.
+func TestValidateCompetitionDurations_Negative(t *testing.T) {
+	err := validateCompetitionDurations(&state.Competition{PoolMatchDuration: -1})
+	assert.Error(t, err)
+	err = validateCompetitionDurations(&state.Competition{PlayoffMatchDuration: -1})
+	assert.Error(t, err)
+	err = validateCompetitionDurations(&state.Competition{MatchDuration: -1})
+	assert.Error(t, err)
+}
+
+// TestValidateCompetitionFormat_UnknownFormat verifies that unknown format
+// strings are rejected.
+func TestValidateCompetitionFormat_UnknownFormat(t *testing.T) {
+	code, err := validateCompetitionFormat("garbage", "")
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, code)
+}
+
+// TestValidateCompetitionFormat_UnknownPoolFormat verifies that unknown pool
+// format strings are rejected.
+func TestValidateCompetitionFormat_UnknownPoolFormat(t *testing.T) {
+	code, err := validateCompetitionFormat("", "garbage")
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, code)
 }

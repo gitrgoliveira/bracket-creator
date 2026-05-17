@@ -1,162 +1,29 @@
-// Status enum mapping: backend uses "completed"/"running"/"scheduled"
-const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
+// HTTP client for the mobile-app API.
+//
+// Split out of api.jsx (T006 / NFR-006). The serializer helpers
+// (normalizeMatch, normalizeCompetitionDetail, etc.) live in
+// api_serializers.jsx and are imported here for use on responses.
+//
+// Public function signatures intentionally mirror the original API
+// object so importers (admin.jsx, viewer.jsx) keep working unchanged
+// when they go through the api.jsx re-export shim.
+//
+// Auth: mutations send an `X-Tournament-Password` header. Read endpoints
+// (/api/viewer/*) are unauthenticated.
+//
+// Error contract: every method that throws does so with `new Error(msg)`
+// where `msg` is the server-reported `error` field if present, else a
+// per-method default string. Callers decide whether to .catch and toast.
+//
+// Empty-body methods (overridePoolRank, overrideBracketWinner,
+// resetOverrides, updateMatchTime, moveMatchCourt, updateSchedule,
+// deleteReservedSlot, deleteCompetition) deliberately return `true`
+// rather than `res.json()` — calling res.json() on a 200/204 with no
+// body throws SyntaxError per the Fetch spec, which used to surface as
+// "alert: Unexpected end of JSON input" right after a successful save.
+// See __tests__/api.test.jsx for the regression coverage.
 
-function toBackendStatus(s) { return STATUS_MAP[s] || s; }
-
-// Canonical draw value is "hikiwake". See specs/openapi.yaml for details.
-function isHikiwake(v) { return v === "hikiwake"; }
-
-// Translate UI score patch into backend MatchResult shape.
-// UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }
-// Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
-function toBackendMatchResult(patch, match) {
-    const sideAName = typeof match?.sideA === "object" ? match.sideA?.name : match?.sideA;
-    const sideBName = typeof match?.sideB === "object" ? match.sideB?.name : match?.sideB;
-    const winnerName = patch.winner ? (typeof patch.winner === "object" ? patch.winner.name : patch.winner) : "";
-
-    const score = patch.score || {};
-    const ipponsA = (patch.ipponsA || []).filter(x => x !== "•");
-    const ipponsB = (patch.ipponsB || []).filter(x => x !== "•");
-
-    const fouls = score.fouls || {};
-    const result = {
-        sideA: sideAName || "",
-        sideB: sideBName || "",
-        winner: winnerName,
-        ipponsA,
-        ipponsB,
-        hansokuA: fouls.a || 0,
-        hansokuB: fouls.b || 0,
-        decision: isHikiwake(score.type) ? "hikiwake" : "",
-        status: toBackendStatus(patch.status || "scheduled"),
-    };
-    if (patch.subResults) {
-        result.subResults = patch.subResults;
-    }
-    return result;
-}
-
-// Normalize a backend match (string sideA/sideB) into UI shape (object sideA/sideB).
-// Also normalizes score fields so bracket.js MatchCard can display them.
-function normalizeMatch(m, playerMap) {
-    if (!m) return m;
-    const norm = { ...m };
-    // Normalize sideA/sideB from string to {id, name}
-    if (typeof norm.sideA === "string" && norm.sideA) {
-        const p = playerMap?.[norm.sideA];
-        norm.sideA = p || { id: norm.sideA, name: norm.sideA };
-    } else if (!norm.sideA) {
-        norm.sideA = { id: "", name: "" };
-    }
-    if (typeof norm.sideB === "string" && norm.sideB) {
-        const p = playerMap?.[norm.sideB];
-        norm.sideB = p || { id: norm.sideB, name: norm.sideB };
-    } else if (!norm.sideB) {
-        norm.sideB = { id: "", name: "" };
-    }
-    // Normalize winner from string to object
-    if (typeof norm.winner === "string" && norm.winner) {
-        const p = playerMap?.[norm.winner];
-        norm.winner = p || { id: norm.winner, name: norm.winner };
-    }
-    // Build score object from flat scoreA/scoreB if needed (bracket matches)
-    if (!norm.score && (norm.scoreA || norm.scoreB) && norm.status === "completed") {
-        const aLen = (norm.scoreA || "").replace(/\s*\(H\d+\)/g, "").length;
-        const bLen = (norm.scoreB || "").replace(/\s*\(H\d+\)/g, "").length;
-        const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
-        norm.score = {
-            type: "ippon",
-            winnerPts: aWin ? aLen : bLen,
-            loserPts: aWin ? bLen : aLen,
-            ippons: aWin ? (norm.scoreA || "").split("") : (norm.scoreB || "").split(""),
-        };
-    }
-    // Build score from ipponsA/ipponsB for pool matches
-    if (!norm.score && (norm.ipponsA?.length || norm.ipponsB?.length) && norm.status === "completed") {
-        const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
-        norm.score = {
-            type: isHikiwake(norm.decision) ? "hikiwake" : "ippon",
-            winnerPts: aWin ? (norm.ipponsA?.length || 0) : (norm.ipponsB?.length || 0),
-            loserPts: aWin ? (norm.ipponsB?.length || 0) : (norm.ipponsA?.length || 0),
-            ippons: aWin ? norm.ipponsA : norm.ipponsB,
-        };
-    }
-    return norm;
-}
-
-// Build a player lookup map from competition data
-function buildPlayerMap(comp) {
-    const map = {};
-    const add = (p) => {
-        const norm = normalizePlayer(p);
-        if (norm.name) map[norm.name] = { id: norm.name, name: norm.name, dojo: norm.dojo || "", seed: norm.seed ?? 0 };
-    };
-    if (comp?.config?.players) comp.config.players.forEach(add);
-    if (comp?.players) comp.players.forEach(add);
-    if (comp?.pools) {
-        comp.pools.forEach(pool => {
-            (pool.players || pool.Players || []).forEach(add);
-        });
-    }
-    return map;
-}
-
-// Normalize a Go helper.Player (uppercase fields) to frontend shape (lowercase)
-function normalizePlayer(p) {
-    if (!p) return p;
-    if (p.name !== undefined) return p;
-    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "" };
-}
-
-// Normalize an entire competition detail response from the viewer API.
-// Returns a new object; the input is not mutated.
-function normalizeCompetitionDetail(data) {
-    if (!data) return data;
-
-    const result = { ...data };
-
-    // Normalize config.players (Go uses PascalCase, JS expects camelCase)
-    if (result.config && result.config.players) {
-        result.config = { ...result.config, players: result.config.players.map(p => {
-            const norm = normalizePlayer(p);
-            // Preserve id and seed null (normalizePlayer maps Seed:0 → seed:0, but JS uses null for "not seeded")
-            return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
-        })};
-    }
-
-    // Normalize pools (Go: PoolName, Players → poolName, players)
-    if (result.pools) {
-        result.pools = result.pools.map(p => ({
-            poolName: p.PoolName || p.poolName || "",
-            players: (p.Players || p.players || []).map(normalizePlayer),
-            matches: p.Matches || p.matches || [],
-        }));
-    }
-
-    // Normalize standings player field
-    if (result.standings) {
-        const standings = {};
-        for (const key of Object.keys(result.standings)) {
-            standings[key] = result.standings[key].map(s => ({
-                ...s,
-                player: normalizePlayer(s.player),
-            }));
-        }
-        result.standings = standings;
-    }
-
-    const playerMap = buildPlayerMap(result);
-
-    if (result.poolMatches) {
-        result.poolMatches = result.poolMatches.map(m => normalizeMatch(m, playerMap));
-    }
-    if (result.bracket && result.bracket.rounds) {
-        result.bracket = { ...result.bracket, rounds: result.bracket.rounds.map(round =>
-            round.map(m => normalizeMatch(m, playerMap))
-        )};
-    }
-    return result;
-}
+import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult } from './api_serializers.jsx';
 
 const API = {
     async fetchTournament() {
@@ -265,14 +132,28 @@ const API = {
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
-    subscribeToEvents(callback) {
+    // Subscribe to the server's SSE event stream. `callback` is fired
+    // for each parsed event. `onStatus` (optional) is fired with
+    // 'open' when the EventSource transitions to open and 'error' when
+    // it transitions away — used by the display surfaces (FR-011
+    // scenario 4 / T063) to render a reconnect indicator when the
+    // browser is between connections. Existing call sites that omit
+    // the second arg are unaffected.
+    subscribeToEvents(callback, onStatus) {
         let source = null;
         let retryTimer = null;
         let cancelled = false;
 
+        const status = (s) => {
+            if (typeof onStatus === 'function') {
+                try { onStatus(s); } catch (err) { console.error('SSE status callback failed:', err); }
+            }
+        };
+
         const connect = () => {
             if (cancelled) return;
             source = new EventSource('/api/events');
+            source.onopen = () => status('open');
             source.onmessage = (event) => {
                 try {
                     callback(JSON.parse(event.data));
@@ -283,6 +164,7 @@ const API = {
             source.onerror = () => {
                 if (source) source.close();
                 source = null;
+                status('error');
                 if (!cancelled) retryTimer = setTimeout(connect, 5000);
             };
         };
@@ -310,6 +192,35 @@ const API = {
             throw new Error(err.error || "Failed to record score");
         }
         return res.json();
+    },
+    // T093–T095: kiken / fusenpai / fusensho / daihyosen — server auto-fills
+    // scoreline and Winner from {decision, decisionBy, encho}. Body shape is
+    // defined by mobileapp.DecisionRequest in handlers_decision.go; decisionBy
+    // MUST be "shiro" or "aka", decisionReason is optional and ≤200 chars.
+    // Response is the updated state.MatchResult.
+    async recordDecision(compID, matchID, body, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/decision`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to record decision");
+        }
+        return res.json();
+    },
+    // T098: competitor eligibility statuses produced by kiken/fusenpai
+    // decisions. Endpoint is read-only and unauthenticated — same contract as
+    // the other /api/competitions/:id/* GETs surfaced to the viewer.
+    async fetchCompetitorStatuses(compID) {
+        const res = await fetch(`/api/competitions/${compID}/competitor-status`);
+        if (!res.ok) throw new Error("Failed to load competitor statuses");
+        const data = await res.json();
+        return data.statuses || [];
     },
     async overridePoolRank(compID, poolID, playerName, rank, password) {
         const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
@@ -462,16 +373,108 @@ const API = {
             throw new Error(err.error || "Failed to delete competition");
         }
         return true;
+    },
+    // T129/T130: per-round team lineups (FR-040). GET returns the persisted
+    // TeamLineup for (compId, teamId, round) — 404 when no lineup has been
+    // submitted yet, which the form treats as "blank, editable". PUT replaces
+    // the lineup; the server rejects with 409 (ErrLineupLocked) once the
+    // round's first match has gone live. DELETE clears the lineup so an
+    // operator can revise pre-lock.
+    async fetchTeamLineup(compID, teamId, round) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
+        if (res.status === 404) return null;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load lineup");
+        }
+        return res.json();
+    },
+    async putTeamLineup(compID, teamId, round, positions, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ teamId, competitionId: compID, round, positions })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to save lineup");
+        }
+        return res.json();
+    },
+    async deleteTeamLineup(compID, teamId, round, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok && res.status !== 404) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to delete lineup");
+        }
+        return true;
+    },
+    // T141: daihyosen (representative bout) appended after a knockout team
+    // match ties on IV and PW. Server validates the tie + eligibility and
+    // returns the updated MatchResult with a new SubMatchResult whose
+    // decision="daihyosen" and Position=-1. The error codes (not_tied,
+    // pool_match, insufficient_eligibility) are surfaced verbatim by the
+    // caller — see TeamScoreEditorModal for the user-visible mapping.
+    async recordDaihyosen(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to add daihyosen");
+        }
+        return res.json();
+    },
+    // T190-T193 (US13 — Swiss format). Generate the next Swiss round.
+    // Backend pre-conditions: format=swiss; all matches in the current
+    // round must be completed; swissCurrentRound must be < swissRounds.
+    // Returns { round, matches, swissCurrentRound } on 201, throws on
+    // 4xx/5xx. 409 with code="round_incomplete" surfaces a friendly
+    // "current round still has incomplete matches" message in the UI;
+    // the caller checks `e.code === "round_incomplete"` to branch.
+    async swissGenerateRound(compID, password) {
+        const res = await fetch(`/api/competitions/${compID}/swiss/generate-round`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            // Preserve the structured 409 payload (code + round) on the
+            // thrown Error so the caller can show a precise message. The
+            // generic .message stays as the server-reported error string.
+            const e = new Error(err.error || "Failed to generate Swiss round");
+            if (err.code) e.code = err.code;
+            if (err.round !== undefined) e.round = err.round;
+            throw e;
+        }
+        return res.json();
+    },
+    // T190-T193 (US13). Public endpoint — returns cumulative Swiss
+    // standings ranked by wins > points > head-to-head. Returns []
+    // when the competition hasn't started yet. Each entry is a
+    // state.PlayerStanding (same shape used by pool standings).
+    async swissStandings(compID) {
+        const res = await fetch(`/api/competitions/${compID}/swiss/standings`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load Swiss standings");
+        }
+        return res.json();
     }
 };
 
-export { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, isHikiwake, API };
+export { API };
 
 if (typeof window !== 'undefined') {
     window.API = API;
-    window.normalizeMatch = normalizeMatch;
-    window.normalizeCompetitionDetail = normalizeCompetitionDetail;
-    window.buildPlayerMap = buildPlayerMap;
-    window.toBackendStatus = toBackendStatus;
-    window.isHikiwake = isHikiwake;
 }

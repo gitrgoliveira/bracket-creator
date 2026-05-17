@@ -74,7 +74,7 @@ describe('mergeCompetitionsIntoTournament', () => {
     // showing that each call sees only what it was given (no hidden
     // closure-captured state in the helper itself — that's exactly
     // what we want).
-    const t1 = { id: 't1', competitions: [{ id: 'c1', name: 'Original' }] };
+    const _t1 = { id: 't1', competitions: [{ id: 'c1', name: 'Original' }] };
     const t2 = {
       id: 't1', competitions: [
         { id: 'c1', name: 'Updated by SSE' },

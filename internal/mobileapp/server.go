@@ -44,7 +44,29 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 	viewer := r.Group("/api/viewer")
 	{
 		RegisterViewerHandlers(viewer, store, eng)
+		RegisterDisplayHandlers(viewer, store)
 	}
+
+	// Stateless schedule estimator — no auth, no state-store access.
+	// Registered directly under /api so the path matches the canonical
+	// CLI web-server route exactly (T147a, T152a). Shared by both
+	// `make run` and `make run-mobile` frontends.
+	api := r.Group("/api")
+	RegisterScheduleHandlers(api)
+
+	// Public read-only endpoints for resources whose GET is unauthenticated
+	// (same contract as /api/viewer/*). The write paths for each are on the
+	// admin group below.
+	//
+	// GET /competitions/:id/competitor-status — eligibility state is
+	// derivable from public match results; viewer/display surfaces need it
+	// without admin credentials.
+	// GET /competitions/:id/teams/:tid/lineups/:round — lineup assignments
+	// are visible to coaches and spectators; AdminLineup loads them before
+	// the operator has entered the admin password.
+	RegisterPublicEligibilityHandlers(api, store)
+	RegisterPublicLineupHandlers(api, store)
+	RegisterPublicSwissHandlers(api, store, eng)
 
 	// Admin API endpoints (protected)
 	admin := r.Group("/api")
@@ -54,7 +76,12 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 		RegisterImportHandlers(admin, store, hub)
 		RegisterCompetitionHandlers(admin, store, eng, hub)
 		RegisterParticipantHandlers(admin, store)
-		RegisterMatchHandlers(admin, store, eng, hub)
+		RegisterMatchHandlers(admin, eng, store, store, hub)
+		RegisterDecisionHandlers(admin, eng, store, store, hub)
+		RegisterEligibilityHandlers(admin, store, hub)
+		RegisterLineupHandlers(admin, store, store, store)
+		RegisterDaihyosenHandlers(admin, eng, store, hub)
+		RegisterSwissHandlers(admin, store, eng, hub)
 	}
 
 	// Static files & SPA Fallback
@@ -86,6 +113,24 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 				fileServer := http.FileServer(http.FS(subFS))
 				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
+			}
+
+			// Browser-build rewrite: source .jsx files (web-mobile/js/*.jsx)
+			// import siblings via `./X.jsx` paths. esbuild compiles to
+			// .js (web-mobile/dist/*.js) but does NOT rewrite the import
+			// strings — so a browser's `import "./X.jsx"` falls through to
+			// here looking for a non-existent `dist/X.jsx`. Map to the
+			// compiled `.js` sibling. Without this rewrite the SPA fails
+			// to mount because every entry chunk has an unresolved
+			// `.jsx` import. Vitest tests pass because Node-side resolves
+			// `.jsx` to the source file directly.
+			if strings.HasPrefix(filePath, "dist/") && strings.HasSuffix(filePath, ".jsx") {
+				rewritten := strings.TrimSuffix(filePath, ".jsx") + ".js"
+				if _, err := fs.Stat(subFS, rewritten); err == nil {
+					c.Request.URL.Path = "/" + rewritten
+					http.FileServer(http.FS(subFS)).ServeHTTP(c.Writer, c.Request)
+					return
+				}
 			}
 
 			// If it's a sub-route (SPA), serve index.html

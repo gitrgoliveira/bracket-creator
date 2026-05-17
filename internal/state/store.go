@@ -2,10 +2,13 @@ package state
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
 
 var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
@@ -13,6 +16,13 @@ var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 type Store struct {
 	folder string
 	mu     sync.RWMutex
+
+	// walDir is "<folder>/.wal" — where WithTransaction parks its
+	// intent log files (T210/T211/T212). A committed-but-not-applied
+	// WAL here is replayed by init() on every NewStore call so a
+	// crash between the WAL commit and the target writes can't
+	// silently lose the transaction.
+	walDir string
 
 	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
 	compMu sync.Map
@@ -50,6 +60,7 @@ type fileCache struct {
 func NewStore(folder string) (*Store, error) {
 	s := &Store{
 		folder: folder,
+		walDir: filepath.Join(folder, ".wal"),
 	}
 
 	if err := s.init(); err != nil {
@@ -71,6 +82,47 @@ func (s *Store) init() error {
 	// Ensure competitions folder exists
 	if err := os.MkdirAll(filepath.Join(s.folder, "competitions"), 0700); err != nil {
 		return err
+	}
+
+	// Ensure WAL directory exists. WithTransaction stages its intent
+	// log files under here; creating the dir up-front means the
+	// first transaction doesn't have to worry about it.
+	if err := os.MkdirAll(s.walDir, 0o750); err != nil {
+		return err
+	}
+
+	// Replay any committed-but-not-finished transactions left over
+	// from a previous process. The WAL package's Scan returns one
+	// *wal.WAL per persisted intent file in id-sorted order
+	// (uniqueWALID's prefix is unix-nanos, so this is commit-time
+	// order). For each, run Apply (idempotent atomic-writes — safe
+	// to re-run on a WAL that partially applied before the crash)
+	// then Done.
+	//
+	// Errors are logged and skipped, not fatal: a corrupt WAL
+	// shouldn't block startup if the rest are healthy. The
+	// alternative (refuse to start) would brick a tournament over
+	// a single bad intent file.
+	pending, err := wal.Scan(s.walDir, s.directWriteWAL)
+	if err != nil {
+		// Scan only errors on broken ReadDir; treat as "no WAL to
+		// replay" but log so the operator notices.
+		slog.Warn("state: WAL scan failed at startup; skipping replay",
+			"dir", s.walDir, "err", err)
+		return nil
+	}
+	for _, w := range pending {
+		slog.Info("state: replaying WAL transaction",
+			"wal", w.ID(), "intents", len(w.Intents()))
+		if err := w.Apply(); err != nil {
+			slog.Error("state: WAL Apply failed during replay; keeping WAL for next start",
+				"wal", w.ID(), "err", err)
+			continue
+		}
+		if err := w.Done(); err != nil {
+			slog.Warn("state: WAL Done failed after successful replay; will retry on next start",
+				"wal", w.ID(), "err", err)
+		}
 	}
 
 	return nil

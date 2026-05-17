@@ -269,6 +269,18 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 | **Seeds** | Import a seeds CSV to control bracket placement, or type seed numbers per participant. |
 | **Live updates** | Results broadcast to all connected viewers in real time via Server-Sent Events (SSE). |
 
+### Display and operator URLs
+
+The mobile app exposes several court-scoped URLs for running a multi-court event:
+
+| URL | Audience | What it shows |
+|-----|----------|---------------|
+| `/admin/schedule?court=A` | Operator at Shiai-jo A | Admin schedule view filtered to that court. Chained Prev/Next/←/→ stay on the same court. |
+| `/display?court=A` | Spectator screen / TV | Live single-court board: current match, upcoming queue, recent results. |
+| `/display?court=all` | Lobby / overview | 4-card grid showing all courts at once. |
+| `/display?court=A&overlay=true` | OBS / streaming | Transparent variant suitable for chroma-keying into a broadcast overlay. |
+| `/api/viewer/court/:court/live` | Public JSON | Read-only snapshot of one court's live state. No auth. |
+
 ### Data format
 
 Tournament state lives in a folder (default `./tournament-data`):

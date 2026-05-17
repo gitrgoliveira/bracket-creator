@@ -125,6 +125,36 @@ func validateCompetitionCourts(courts []string) error {
 // keeps the handler's errors.Is check stable across refactors.
 var errPasswordRequired = errors.New("tournament password is required")
 
+// validateTournamentLengths enforces the persisted-string caps from
+// validation.go on every string field of t. Called after trim and
+// after the required-field checks so error messages report the
+// post-trim length the client actually persisted. Returns the first
+// *ValidationError on failure for direct mapping to HTTP 400.
+func validateTournamentLengths(t *state.Tournament) error {
+	if err := validateMaxLen("name", t.Name, MaxLenTournamentName); err != nil {
+		return err
+	}
+	if err := validateMaxLen("venue", t.Venue, MaxLenTournamentVenue); err != nil {
+		return err
+	}
+	if err := validateMaxLen("date", t.Date, MaxLenTournamentDate); err != nil {
+		return err
+	}
+	if err := validateMaxLen("password", t.Password, MaxLenTournamentPassword); err != nil {
+		return err
+	}
+	if err := validateMaxLen("openingBlock", t.OpeningBlock, MaxLenCeremonyBlock); err != nil {
+		return err
+	}
+	if err := validateMaxLen("lunchBlock", t.LunchBlock, MaxLenCeremonyBlock); err != nil {
+		return err
+	}
+	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
+		return err
+	}
+	return nil
+}
+
 func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
 	r.GET("/tournament", func(c *gin.Context) {
 		t, err := store.LoadTournament()
@@ -178,6 +208,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// handlers_competition.go + handlers_import.go.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
+
+		if err := validateTournamentLengths(&t); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -254,6 +289,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// Same empty-after-trim guard as the PUT handler.
 		if t.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament name is required"})
+			return
+		}
+
+		if err := validateTournamentLengths(&t); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 

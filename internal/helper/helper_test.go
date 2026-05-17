@@ -235,6 +235,9 @@ func TestReadEntriesFromFile_PermissionError(t *testing.T) {
 	if os.Getenv("GOOS") == "windows" {
 		t.Skip("Skipping permission test on Windows")
 	}
+	if os.Getuid() == 0 {
+		t.Skip("Skipping permission test: root bypasses file permission restrictions")
+	}
 
 	// Create a file with no read permissions
 	tmpDir := t.TempDir()

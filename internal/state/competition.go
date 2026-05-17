@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 func (s *Store) ListCompetitions() ([]string, error) {
@@ -67,7 +67,7 @@ func (s *Store) copyCompetition(c *Competition) *Competition {
 		copy(cp.Courts, c.Courts)
 	}
 	if c.Players != nil {
-		cp.Players = make([]helper.Player, len(c.Players))
+		cp.Players = make([]domain.Player, len(c.Players))
 		copy(cp.Players, c.Players)
 	}
 	return &cp
@@ -85,11 +85,51 @@ func (s *Store) SaveCompetitionChanged(c *Competition) (bool, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.saveCompetitionChangedLocked(c)
+	return s.saveCompetitionChangedLocked(c, s.directWrite)
 }
 
 func (s *Store) SaveCompetition(c *Competition) error {
 	_, err := s.SaveCompetitionChanged(c)
+	return err
+}
+
+// loadCompetitionLocked reads the competition record directly from disk
+// WITHOUT acquiring the per-competition lock. Caller MUST already hold
+// the per-comp lock (typically via WithTransaction). Bypasses the
+// loadCached path because the caller's lock is what coordinates with
+// concurrent writers — going through the cache would risk reading a
+// snapshot mutated between cache populate and our acquire.
+//
+// Returns (nil, nil) when no file exists for compID, mirroring
+// LoadCompetition's "missing == nil" contract.
+func (s *Store) loadCompetitionLocked(compID string) (*Competition, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, fmt.Errorf("invalid competition ID: %w", err)
+	}
+	path := s.compPath(compID, "config.md")
+	parsed, err := parseCompetitionFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if parsed == nil {
+		return nil, nil
+	}
+	c, _ := parsed.(*Competition)
+	return s.copyCompetition(c), nil
+}
+
+// saveCompetitionLocked persists c WITHOUT acquiring the per-competition
+// lock. Caller MUST already hold the per-comp lock. Thin void wrapper
+// around saveCompetitionChangedLocked for callers (like WithTransaction)
+// that only care about the success-or-error signal, not the changed bool.
+//
+// The write parameter selects direct-to-disk vs WAL-capturing semantics;
+// see saveCompetitionChangedLocked for the contract.
+func (s *Store) saveCompetitionLocked(c *Competition, write writeFn) error {
+	if err := ValidateCompetitionID(c.ID); err != nil {
+		return fmt.Errorf("invalid competition ID: %w", err)
+	}
+	_, err := s.saveCompetitionChangedLocked(c, write)
 	return err
 }
 
@@ -98,7 +138,13 @@ func (s *Store) SaveCompetition(c *Competition) error {
 // (s.getCompLock(c.ID)). Used by both SaveCompetitionChanged (which
 // takes the lock) and UpdateCompetitionChanged (which holds the lock
 // across load + transform + save).
-func (s *Store) saveCompetitionChangedLocked(c *Competition) (bool, error) {
+//
+// The write parameter routes the actual file write: directWrite
+// (default) goes straight to atomicWriteFile, while a WAL-capturing
+// writer (from storeTx) stages the bytes for deferred commit. See
+// saveBracketLocked for the cache-refresh rationale that applies
+// equally here (T211/T212).
+func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (bool, error) {
 	if err := os.MkdirAll(s.compPath(c.ID), 0700); err != nil {
 		return false, err
 	}
@@ -113,7 +159,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition) (bool, error) {
 		return false, nil
 	}
 
-	if err := os.WriteFile(path, newData, 0600); err != nil {
+	if err := write(path, newData, 0600); err != nil {
 		return false, err
 	}
 
@@ -196,7 +242,7 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	// we're locking on. Caller may have constructed a new record
 	// without setting ID.
 	desired.ID = id
-	return s.saveCompetitionChangedLocked(desired)
+	return s.saveCompetitionChangedLocked(desired, s.directWrite)
 }
 
 func (s *Store) DeleteCompetition(id string) error {

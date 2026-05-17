@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel } from '../viewer.jsx';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 
 describe('Viewer Utils', () => {
@@ -63,6 +63,81 @@ describe('Viewer Utils', () => {
     it('should return true if dojo matches', () => {
       expect(matchHighlightedBy(match, [], 'Dojo B')).toBe(true);
       expect(matchHighlightedBy(match, [], 'Dojo C')).toBe(false);
+    });
+  });
+
+  // T192 (US13 — FR-050e): Swiss standings page header logic. The
+  // viewer flips its header text from "Standings after round N" to
+  // "Final standings" once every configured round has been played
+  // out — and only then declares a winner. Pure helpers so the
+  // conditional can be pinned without mounting SwissStandingsViewer
+  // (the React vitest setup stubs hooks at component level).
+
+  describe('isSwissFinalStandings', () => {
+    const mkComp = (overrides) => ({
+      format: 'swiss',
+      swissRounds: 4,
+      swissCurrentRound: 4,
+      ...overrides,
+    });
+    const completedR4 = [
+      { id: 'Swiss-R4-0', status: 'completed' },
+      { id: 'Swiss-R4-1', status: 'completed' },
+    ];
+
+    it('true when on the final round and every match in it is completed', () => {
+      expect(isSwissFinalStandings(mkComp(), completedR4)).toBe(true);
+    });
+
+    it('false when not yet on the final round', () => {
+      expect(isSwissFinalStandings(mkComp({ swissCurrentRound: 3 }), completedR4)).toBe(false);
+    });
+
+    it('false when final round has any incomplete match', () => {
+      const incompleteR4 = [
+        { id: 'Swiss-R4-0', status: 'completed' },
+        { id: 'Swiss-R4-1', status: 'running' },
+      ];
+      expect(isSwissFinalStandings(mkComp(), incompleteR4)).toBe(false);
+    });
+
+    it('false when final round has not been generated yet (no matches)', () => {
+      // current=total but pool-matches list is empty — this only
+      // happens transiently between "Generate next round" returning
+      // 201 and the SSE-driven refetch. We must not declare a
+      // winner during that window.
+      expect(isSwissFinalStandings(mkComp(), [])).toBe(false);
+    });
+
+    it('false when format !== swiss', () => {
+      expect(isSwissFinalStandings(mkComp({ format: 'pools' }), completedR4)).toBe(false);
+      expect(isSwissFinalStandings(mkComp({ format: 'playoffs' }), completedR4)).toBe(false);
+    });
+
+    it('false for null/missing competition', () => {
+      expect(isSwissFinalStandings(null, completedR4)).toBe(false);
+      expect(isSwissFinalStandings(undefined, completedR4)).toBe(false);
+    });
+  });
+
+  describe('swissStandingsHeading', () => {
+    it('"Final standings" when all rounds complete', () => {
+      const c = { format: 'swiss', swissRounds: 3, swissCurrentRound: 3 };
+      const matches = [
+        { id: 'Swiss-R3-0', status: 'completed' },
+        { id: 'Swiss-R3-1', status: 'completed' },
+      ];
+      expect(swissStandingsHeading(c, matches)).toBe('Final standings');
+    });
+
+    it('"Standings after round N" while in progress', () => {
+      const c = { format: 'swiss', swissRounds: 4, swissCurrentRound: 2 };
+      expect(swissStandingsHeading(c, [])).toBe('Standings after round 2');
+    });
+
+    it('"Standings — pending" when no round has been generated yet', () => {
+      const c = { format: 'swiss', swissRounds: 4, swissCurrentRound: 0 };
+      expect(swissStandingsHeading(c, [])).toBe('Standings — pending');
     });
   });
 });

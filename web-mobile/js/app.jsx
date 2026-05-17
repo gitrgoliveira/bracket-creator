@@ -1,47 +1,17 @@
 // Main App — single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
+import { applyPatch as patchCompetitionData } from './patch.jsx';
+
 const { useState: useS, useEffect: useE, useRef: useR } = React;
-const mergeMatchPatch = window.mergeMatchPatch;
 
-const patchCompetitionData = (prev, event) => {
-  if (!prev || !event.data) return prev;
-  const { result, results } = event.data;
-  const resultsToApply = results || (result ? [result] : []);
-  if (resultsToApply.length === 0) return prev;
-
-  const resultMap = new Map(resultsToApply.map(r => [r.id, r]));
-  const next = { ...prev };
-  let changed = false;
-
-  if (next.poolMatches) {
-    next.poolMatches = next.poolMatches.map(m => {
-      const update = resultMap.get(m.id);
-      if (update) { changed = true; return mergeMatchPatch(m, update); }
-      return m;
-    });
-  }
-
-  if (next.bracket && next.bracket.rounds) {
-    let bChanged = false;
-    const rounds = next.bracket.rounds.map(round =>
-      round.map(m => {
-        const update = resultMap.get(m.id);
-        if (update) {
-          bChanged = true; changed = true;
-          const patch = { ...update };
-          if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
-          if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-          return mergeMatchPatch(m, patch);
-        }
-        return m;
-      })
-    );
-    if (bChanged) next.bracket = { ...next.bracket, rounds };
-  }
-
-  return changed ? next : prev;
-};
+// preact-router wrapper from router.jsx (T005). Used for URL → state
+// synchronisation. The render path itself still drives off
+// `mode` / `viewerScreen` / `viewerCompId` / `adminView` state because
+// those carry richer information than path components alone (e.g., the
+// admin section sub-tab); the Router only hydrates and updates that
+// state from the URL.
+const AppRouter = window.AppRouter || null;
 
 const THEME = {
   "accentColor": "#1d3557",
@@ -49,26 +19,10 @@ const THEME = {
   "cardVariant": 1
 };
 
-function App() {
-  const [tournament, setTournament] = useS(null);
-  const [loading, setLoading] = useS(true);
-  const [mode, setMode] = useS("viewer"); // viewer | admin
-  const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
-  const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
-  const [authPrompt, setAuthPrompt] = useS(false);
-  const [viewerCompId, setViewerCompId] = useS(null);
-  const [viewerScreen, setViewerScreen] = useS("home"); // home | schedule
-  const [adminView, setAdminView] = useS({ kind: "dashboard" });
-  const [toast, setToast] = useS(null);
-  const authPromptRef = React.useRef(false);
-
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
-  };
-
-  // --- Routing Logic ---
-  const getRouteFromUrl = () => {
-    const path = window.location.pathname;
+// Pure helper: parse the current pathname into the App's view state.
+// Extracted so it remains unit-testable; previously inlined as a
+// closure in App() which prevented both reuse and isolated testing.
+function parsePath(path) {
     if (path.startsWith("/admin")) {
       const parts = path.split("/").filter(Boolean);
       if (parts.length === 1) return { mode: "admin", admin: { kind: "dashboard" } };
@@ -82,6 +36,16 @@ function App() {
       }
       return { mode: "admin", admin: { kind: "dashboard" } };
     }
+    // T060: `/display` family — public, no-auth, read-only consumer
+    // surfaces (TV / lobby / overlay). Surface the mode here so App()
+    // can short-circuit the normal viewer/admin render path. Query
+    // params (?court=, ?overlay=, ?position=) are read inside
+    // DisplayRoute via useQuery() — they intentionally don't shape the
+    // mode token because changing query params shouldn't remount the
+    // display surfaces (the SSE-driven tournament state stays alive).
+    if (path === "/display" || path.startsWith("/display?")) {
+      return { mode: "display" };
+    }
     if (path.startsWith("/competition/")) {
       const id = path.split("/")[2];
       return { mode: "viewer", viewerCompId: id };
@@ -89,10 +53,17 @@ function App() {
     if (path === "/schedule") {
       return { mode: "viewer", viewerScreen: "schedule" };
     }
+    // U1: /glossary — the kendo-term reference page (rendered by
+    // GlossaryPage from glossary.jsx). Public, no auth required;
+    // linked from viewer home as "Help / Glossary".
+    if (path === "/glossary") {
+      return { mode: "viewer", viewerScreen: "glossary" };
+    }
     return { mode: "viewer", viewerScreen: "home" };
-  };
+}
 
-  const getUrlFromRoute = (m, vs, vcid, av) => {
+// Pure helper: render the App's view state back into a URL pathname.
+function pathFromState(m, vs, vcid, av) {
     if (m === "admin") {
       if (av.kind === "dashboard") return "/admin";
       if (av.kind === "schedule") return "/admin/schedule";
@@ -109,16 +80,84 @@ function App() {
     }
     if (vcid) return `/competition/${vcid}`;
     if (vs === "schedule") return "/schedule";
+    if (vs === "glossary") return "/glossary";
     return "/";
+}
+
+// ErrorBoundary — Preact Components support componentDidCatch via the
+// preact/compat layer (window.React above is aliased to preactCompat).
+// On caught render exception we render a recoverable banner with a
+// reload button instead of letting the whole tree go blank. Per NFR-008.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  componentDidCatch(error) {
+    console.error("App crashed:", error);
+    this.setState({ error });
+  }
+  render() {
+    if (this.state.error) {
+      return React.createElement('div', { className: 'page', 'data-testid': 'error-boundary-banner', style: { padding: 24 } },
+        React.createElement('div', { className: 'card card--pad-lg' },
+          React.createElement('h2', null, 'Something went wrong'),
+          React.createElement('p', { style: { color: 'var(--ink-3)', marginBottom: 16 } },
+            'The app hit an unexpected error. Reload to try again.'),
+          React.createElement('pre', {
+            style: { background: 'var(--bg-2)', padding: 12, borderRadius: 6, overflow: 'auto', fontSize: 12, marginBottom: 16 }
+          }, String(this.state.error?.message || this.state.error)),
+          React.createElement('button', {
+            className: 'btn btn--primary',
+            onClick: () => window.location.reload()
+          }, 'Reload')
+        )
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function App() {
+  const [tournament, setTournament] = useS(null);
+  const [loading, setLoading] = useS(true);
+  // mode: viewer | admin | display.
+  // "display" is the public /display family — read-only TV / lobby /
+  // OBS overlay surfaces. We track it here (rather than as a sub-state
+  // of viewer) so App() can short-circuit the viewer/admin auth/render
+  // logic entirely; the display surfaces require no auth and don't
+  // touch viewerCompId / viewerScreen.
+  const [mode, setMode] = useS("viewer");
+  const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
+  const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
+  const [authPrompt, setAuthPrompt] = useS(false);
+  const [viewerCompId, setViewerCompId] = useS(null);
+  const [viewerScreen, setViewerScreen] = useS("home"); // home | schedule
+  const [adminView, setAdminView] = useS({ kind: "dashboard" });
+  const [toast, setToast] = useS(null);
+  // T063: SSE connection status, surfaced to display surfaces so the
+  // TV / lobby / overlay can render a reconnect indicator during the
+  // window between EventSource error and reconnect-onopen. The
+  // EventSource itself lives inside subscribeToEvents; the second
+  // callback hands status events up here.
+  const [sseConnected, setSseConnected] = useS(true);
+  const authPromptRef = React.useRef(false);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
   };
 
-  // Initial load from URL
+  // Hydrate state from the current URL on first render. Without this,
+  // a deep-link page-load (e.g. /admin/schedule typed directly) would
+  // boot into the default viewer-home view until the user navigated.
   useE(() => {
-    const route = getRouteFromUrl();
+    const route = parsePath(window.location.pathname);
     if (route.mode === "admin") {
       setMode("admin");
       if (route.admin) setAdminView(route.admin);
       if (!authed) setAuthPrompt(true);
+    } else if (route.mode === "display") {
+      setMode("display");
     } else {
       setMode("viewer");
       if (route.viewerCompId) setViewerCompId(route.viewerCompId);
@@ -126,21 +165,41 @@ function App() {
     }
   }, []);
 
-  // Sync state to URL
+  // Sync state to URL whenever it changes. Uses the AppRouter.route()
+  // helper (preact-router-backed) which mirrors history.pushState while
+  // also notifying any mounted Routers — letting <Router>-driven
+  // listeners react to programmatic navigation without a separate
+  // popstate dispatch.
   useE(() => {
-    const url = getUrlFromRoute(mode, viewerScreen, viewerCompId, adminView);
+    // Display mode doesn't have an internal state machine — the URL is
+    // already at /display?... and DisplayRoute reads the query params
+    // on its own. Skip URL syncing here to avoid stripping the
+    // query string (pathFromState only emits the path, not the query).
+    if (mode === "display") return;
+    const url = pathFromState(mode, viewerScreen, viewerCompId, adminView);
     if (window.location.pathname !== url) {
-      history.pushState(null, "", url);
+      if (AppRouter && AppRouter.route) {
+        AppRouter.route(url);
+      } else {
+        history.pushState(null, "", url);
+      }
     }
   }, [mode, viewerScreen, viewerCompId, adminView]);
 
-  // Handle popstate (back/forward)
+  // The popstate handler is preserved as a fallback for back/forward
+  // navigation. preact-router would also fire its own listeners on
+  // history changes, but our App owns the routing-state-of-record so
+  // we keep this explicit. (The previous implementation used the same
+  // pattern; we did not remove it because the App's state machine is
+  // richer than what's encodable in path components.)
   useE(() => {
     const handlePop = () => {
-      const route = getRouteFromUrl();
+      const route = parsePath(window.location.pathname);
       if (route.mode === "admin") {
         setMode("admin");
         if (route.admin) setAdminView(route.admin);
+      } else if (route.mode === "display") {
+        setMode("display");
       } else {
         setMode("viewer");
         setViewerCompId(route.viewerCompId || null);
@@ -178,12 +237,46 @@ function App() {
   useE(() => { load(); }, []);
 
   useE(() => {
+    // Track every jittered timer so the cleanup can cancel them when
+    // viewerCompId / mode changes. Without this, a timer queued for
+    // viewerCompId="A" fires after the user switches to comp "B",
+    // calls setSelectedCompData(data_for_A), and races the new
+    // useEffect([viewerCompId]) fetch — whichever resolves last wins.
+    const pendingTimers = [];
+    const jitteredTimeout = (fn, delay) => {
+        const id = setTimeout(fn, delay);
+        pendingTimers.push(id);
+        return id;
+    };
+
     const unsub = window.API.subscribeToEvents((event) => {
         const jitter = Math.random() * 500;
         if (event.type === "tournament_updated") {
-            if (!authPromptRef.current) setTimeout(load, jitter);
+            if (!authPromptRef.current) jitteredTimeout(load, jitter);
+        } else if (event.type === "competitor_status_updated") {
+            // T099: viewer doesn't need to mutate selectedCompData itself —
+            // the eligibility change feeds back through the full
+            // fetchCompetitionDetails refetch below. Route through
+            // patchCompetitionData so the window-level CustomEvent fires
+            // for any view that caches its own derived state.
+            if (viewerCompId === event.data?.competitionId) {
+                setSelectedCompData(prev => patchCompetitionData(prev, event));
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            }
+            jitteredTimeout(load, jitter);
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
-            if (viewerCompId === event.data.competitionId) {
+            // Display mode (T060) reads the full tournament tree
+            // (every competition's poolMatches + bracket) and needs a
+            // refresh on every match update — without this, the TV
+            // would stay frozen on the initial snapshot. We piggy-back
+            // on the existing load() which re-fetches both /tournament
+            // and /competitions, so the display sees the new match
+            // state on the next render. The jittered refresh avoids
+            // thundering the server when many displays are mounted on
+            // the same venue LAN.
+            if (mode === "display") {
+                jitteredTimeout(load, jitter);
+            } else if (viewerCompId === event.data.competitionId) {
                 // Apply partial update immediately (match_updated only —
                 // competition_completed has no per-match payload)
                 if (event.type === "match_updated") {
@@ -192,14 +285,38 @@ function App() {
                 // Refresh current competition (jittered) — the backend has
                 // already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                setTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
             }
             // Also refresh tournament list for status updates
-            setTimeout(load, jitter);
+            jitteredTimeout(load, jitter);
+        } else if (event.type === "schedule_updated") {
+            // Court/time move: no competitionId in payload, so refresh the
+            // currently selected competition (if any) and the tournament list.
+            if (viewerCompId) {
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            }
+            jitteredTimeout(load, jitter);
+        } else if (event.type === "swiss_round_generated") {
+            // T192 (US13 — FR-050d): a new Swiss round's matches have been
+            // generated. The payload carries competitionId + swissCurrentRound
+            // (see handlers_swiss.go) but the viewer needs the freshly-saved
+            // poolMatches + the updated comp.swissCurrentRound on the
+            // tournament list, so we refetch both. Mirrors the match_updated
+            // path's jittered fetchCompetitionDetails + load pattern.
+            if (mode === "display") {
+                jitteredTimeout(load, jitter);
+            } else if (viewerCompId === event.data?.competitionId) {
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            }
+            jitteredTimeout(load, jitter);
         }
+    }, (status) => {
+        // T063: track SSE connection status so /display surfaces can
+        // render a reconnect indicator during disconnects.
+        setSseConnected(status === 'open');
     });
-    return unsub;
-  }, [viewerCompId]);
+    return () => { unsub(); pendingTimers.forEach(clearTimeout); };
+  }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);
 
@@ -246,6 +363,29 @@ function App() {
     }} />
   );
 
+  // T060: /display family — public, read-only TV / lobby / overlay
+  // surfaces. Short-circuit before viewer/admin so no auth prompt is
+  // shown, no admin chrome leaks in, and the DisplayRoute owns its
+  // own query-param routing (court=, overlay=, position=). The
+  // tournament prop carries .competitions already (load() merges
+  // them), and `connected` is the SSE-status boolean from T063.
+  if (mode === "display") {
+    const DisplayRoute = window.DisplayRoute;
+    if (!DisplayRoute) {
+      // Defensive: display.js bundle is part of the standard build, so
+      // this should never fire in production. Render a minimal message
+      // rather than a blank screen if it does.
+      return <div className="loading" style={{ background: '#000', color: '#fff', padding: 40 }}>Display module not loaded.</div>;
+    }
+    return (
+      <DisplayRoute
+        tournament={tournament}
+        competitions={tournament.competitions || []}
+        connected={sseConnected}
+      />
+    );
+  }
+
   if (mode === "admin" && authed) {
     return (
       <>
@@ -287,6 +427,13 @@ function App() {
           onBack={() => setViewerScreen("home")}
           tweaks={THEME}
         />
+      ) : viewerScreen === "glossary" ? (
+        // U1 /glossary: the kendo-term reference page. Lives in
+        // glossary.jsx; we mount it through window.GlossaryPage so
+        // the app.jsx render tree doesn't need a static import.
+        window.GlossaryPage
+          ? <window.GlossaryPage onBack={() => setViewerScreen("home")} />
+          : <div className="loading">Loading glossary…</div>
       ) : (
         <window.ViewerHome
           tournament={tournament}
@@ -503,4 +650,16 @@ function CreateTournament({ onCreated }) {
 }
 
 window.App = App;
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+window.ErrorBoundary = ErrorBoundary;
+window.parsePath = parsePath;
+window.pathFromState = pathFromState;
+
+// Mount the App inside an ErrorBoundary so any uncaught render exception
+// renders a recoverable banner instead of a blank screen. Per NFR-008.
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+
+export { parsePath, pathFromState, ErrorBoundary };

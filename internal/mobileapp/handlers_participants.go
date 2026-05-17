@@ -1,11 +1,11 @@
 package mobileapp
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -54,9 +54,20 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 
-		players := make([]helper.Player, 0, len(req.Players))
+		// Per-player length caps — defense-in-depth against unbounded
+		// participants.csv inflation. Reject the whole batch on the
+		// first offender (matches the all-or-nothing semantics
+		// SaveParticipants already enforces on write).
 		for i, p := range req.Players {
-			players = append(players, helper.Player{
+			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+				return
+			}
+		}
+
+		players := make([]domain.Player, 0, len(req.Players))
+		for i, p := range req.Players {
+			players = append(players, domain.Player{
 				Name:         p.Name,
 				DisplayName:  p.DisplayName,
 				Dojo:         p.Dojo,
@@ -96,6 +107,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 		if err := c.ShouldBindJSON(&assignments); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		// Cross-file guard symmetry with handlers_import.go's seed
+		// validation: reject oversized names so seeds.csv can't grow
+		// unbounded.
+		for i, sa := range assignments {
+			if err := validateMaxLen(fmt.Sprintf("seeds[%d].name", i), sa.Name, MaxLenSeedAssignmentName); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
 
 		if err := store.SaveSeeds(id, assignments); err != nil {

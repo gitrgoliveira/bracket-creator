@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,6 +36,12 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Public viewer
 	viewer := r.Group("/api/viewer")
 	RegisterViewerHandlers(viewer, store, eng)
+	RegisterDisplayHandlers(viewer, store)
+
+	// Stateless schedule estimator — public, no auth.
+	publicAPI := r.Group("/api")
+	RegisterScheduleHandlers(publicAPI)
+	RegisterPublicSwissHandlers(publicAPI, store, eng)
 
 	// Admin API
 	admin := r.Group("/api")
@@ -44,7 +49,11 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	RegisterImportHandlers(admin, store, hub)
 	RegisterCompetitionHandlers(admin, store, eng, hub)
 	RegisterParticipantHandlers(admin, store)
-	RegisterMatchHandlers(admin, store, eng, hub)
+	RegisterMatchHandlers(admin, eng, store, store, hub)
+	RegisterDecisionHandlers(admin, eng, store, store, hub)
+	RegisterEligibilityHandlers(admin, store, hub)
+	RegisterLineupHandlers(admin, store, store, store)
+	RegisterSwissHandlers(admin, store, eng, hub)
 
 	return r, store, eng, hub, tempDir
 }
@@ -324,6 +333,94 @@ func TestTournamentHandlers(t *testing.T) {
 			"PUT with empty Password against legacy empty-password tournament must reject")
 		assert.Contains(t, w.Body.String(), "tournament password is required")
 	}
+}
+
+// TestTournamentHandlers_MaxLengthCaps verifies the defense-in-depth
+// length caps from validation.go are enforced on POST and PUT
+// /tournament. These caps guard against unbounded YAML inflation
+// in tournament.md — a 1MB Name or Venue is silently accepted
+// pre-fix and bloats every subsequent load.
+func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed an initialized tournament so PUT (and not POST-bootstrap)
+	// is what runs the cap check.
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Seed",
+		Password: "secret",
+		Courts:   []string{"A"},
+	}))
+
+	type lengthCase struct {
+		field string
+		body  state.Tournament
+	}
+	overCap := []lengthCase{
+		{
+			field: "name",
+			body: state.Tournament{
+				Name:     strings.Repeat("n", 201),
+				Password: "secret",
+				Courts:   []string{"A"},
+			},
+		},
+		{
+			field: "venue",
+			body: state.Tournament{
+				Name:     "OK",
+				Venue:    strings.Repeat("v", 201),
+				Password: "secret",
+				Courts:   []string{"A"},
+			},
+		},
+		{
+			field: "password",
+			body: state.Tournament{
+				Name:     "OK",
+				Password: strings.Repeat("p", 257),
+				Courts:   []string{"A"},
+			},
+		},
+		{
+			field: "openingBlock",
+			body: state.Tournament{
+				Name:         "OK",
+				Password:     "secret",
+				Courts:       []string{"A"},
+				OpeningBlock: strings.Repeat("o", 17),
+			},
+		},
+	}
+	for _, method := range []string{"PUT", "POST"} {
+		for _, lc := range overCap {
+			body, _ := json.Marshal(lc.body)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"%s /api/tournament over-cap %s must return 400", method, lc.field)
+			assert.Contains(t, w.Body.String(), lc.field,
+				"%s /api/tournament rejection must name the field", method)
+		}
+	}
+
+	// Sanity: exactly-at-cap values pass (when the rest of the body is
+	// valid). Bounds inclusive so the cap is "<= N", not "< N".
+	atCap := state.Tournament{
+		Name:     strings.Repeat("n", 200),
+		Venue:    strings.Repeat("v", 200),
+		Password: "secret",
+		Courts:   []string{"A"},
+	}
+	body, _ := json.Marshal(atCap)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code,
+		"PUT /api/tournament with exactly-200-char Name/Venue must be accepted")
 }
 
 // TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost pins the
@@ -872,7 +969,7 @@ func TestCreatePlayoff_RollbackOnReservedSlotFailure(t *testing.T) {
 		Format: state.CompFormatPools,
 		Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SaveParticipants("rollback-src", []helper.Player{
+	require.NoError(t, store.SaveParticipants("rollback-src", []domain.Player{
 		{Name: "P1", Dojo: "D"},
 		{Name: "P2", Dojo: "D"},
 		{Name: "P3", Dojo: "D"},
@@ -1029,7 +1126,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	// POST /api/competitions/:id/start
 	comp = state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
 	store.SaveCompetition(&comp)
-	store.SaveParticipants("c1", []helper.Player{{Name: "P1"}, {Name: "P2"}})
+	store.SaveParticipants("c1", []domain.Player{{Name: "P1"}, {Name: "P2"}})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions/c1/start", nil)
 	r.ServeHTTP(w, req)
@@ -1436,7 +1533,7 @@ func TestStartCompetition_BroadcastContract(t *testing.T) {
 	// Format omitted → playoffs path; MaybeAutoCompletePools is a no-op.
 	comp := state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
 	require.NoError(t, store.SaveCompetition(&comp))
-	require.NoError(t, store.SaveParticipants("c1", []helper.Player{{Name: "P1"}, {Name: "P2"}}))
+	require.NoError(t, store.SaveParticipants("c1", []domain.Player{{Name: "P1"}, {Name: "P2"}}))
 
 	ch := hub.Subscribe()
 	defer hub.Unsubscribe(ch)

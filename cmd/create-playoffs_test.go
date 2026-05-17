@@ -175,3 +175,50 @@ func TestCreatePlayoffs_WithZekken(t *testing.T) {
 	err := o.createPlayoffs([]string{"Alice,Ali,D1", "Bob,Bobby,D2"})
 	assert.NoError(t, err)
 }
+
+// TestPlayoffOptionsRun_EmptyFile verifies that an empty input file returns
+// a "no entries found" error.
+func TestPlayoffOptionsRun_EmptyFile(t *testing.T) {
+	tmpInput, err := os.CreateTemp("", "empty-input-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpInput.Name())
+	tmpInput.Close()
+
+	tmpOutput, err := os.CreateTemp("", "output-*.xlsx")
+	require.NoError(t, err)
+	defer os.Remove(tmpOutput.Name())
+	tmpOutput.Close()
+
+	o := &playoffOptions{
+		filePath:   tmpInput.Name(),
+		outputPath: tmpOutput.Name(),
+		courts:     2,
+	}
+	err = o.run(nil, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no entries")
+}
+
+// TestPlayoffOptionsRun_InvalidCourts verifies that an invalid court count
+// (over the 26-court cap) returns an error from ValidateCourts.
+func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
+	tmpInput, err := os.CreateTemp("", "input-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpInput.Name())
+	_, err = tmpInput.WriteString("Alice,Dojo1\nBob,Dojo2\n")
+	require.NoError(t, err)
+	tmpInput.Close()
+
+	tmpOutput, err := os.CreateTemp("", "output-*.xlsx")
+	require.NoError(t, err)
+	defer os.Remove(tmpOutput.Name())
+	tmpOutput.Close()
+
+	o := &playoffOptions{
+		filePath:   tmpInput.Name(),
+		outputPath: tmpOutput.Name(),
+		courts:     27, // exceeds 26-court cap
+	}
+	err = o.run(nil, nil)
+	assert.Error(t, err)
+}

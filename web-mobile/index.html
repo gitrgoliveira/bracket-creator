@@ -12,11 +12,13 @@
     <script src="/vendor/preact.min.js"></script>
     <script src="/vendor/hooks.umd.js"></script>
     <script src="/vendor/compat.umd.js"></script>
+    <script src="/vendor/preact-router.umd.js"></script>
 
     <script>
         console.log("Preact loaded:", !!window.preact);
         console.log("PreactHooks loaded:", !!window.preactHooks);
         console.log("PreactCompat loaded:", !!window.preactCompat);
+        console.log("PreactRouter loaded:", !!window.preactRouter);
 
         // Alias for React/ReactDOM compatibility
         window.React = window.preactCompat;
@@ -38,14 +40,23 @@
 <body>
     <div id="root"></div>
 
-    <script type="module" src="/dist/api.js?v=5"></script>
+    <script type="module" src="/dist/api_serializers.js?v=5"></script>
+    <script type="module" src="/dist/api_client.js?v=5"></script>
     <script type="module" src="/dist/data.js?v=5"></script>
+    <script type="module" src="/dist/patch.js?v=5"></script>
+    <script type="module" src="/dist/router.js?v=5"></script>
     <script type="module" src="/dist/bracket.js?v=5"></script>
     <script type="module" src="/dist/ui.js?v=5"></script>
+    <!-- glossary_data.js is generated from internal/domain/glossary.go
+         via `go generate` (runs as part of `make go/build`). glossary.jsx
+         (compiled to dist/glossary.js) imports it via a relative path. -->
+    <script type="module" src="/dist/glossary.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>
+    <script type="module" src="/dist/display.js?v=5"></script>
     <script type="module" src="/dist/admin_helpers.js?v=5"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>
     <script type="module" src="/dist/admin_scoring_modal.js?v=5"></script>
+    <script type="module" src="/dist/admin_lineup.js?v=5"></script>
     <script type="module" src="/dist/admin_participants.js?v=5"></script>
     <script type="module" src="/dist/admin_pools.js?v=5"></script>
     <script type="module" src="/dist/admin_schedule.js?v=5"></script>

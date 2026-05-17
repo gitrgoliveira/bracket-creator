@@ -46,6 +46,7 @@ local/deps: ## Install project dependencies
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
 	@cd web-mobile && npm install
+	@cd web && npm install
 
 go/fmt: ## Format Go code
 	@echo "Formatting Go code..."
@@ -78,16 +79,17 @@ js/security: js/sec ## Run all Javascript security checks
 js/test: ## Run JavaScript unit tests
 	@echo "Running JavaScript tests..."
 	@cd web-mobile && npm test
+	@cd web && npm test
 
 js/validate: js/lint js/security js/test ## Run all Javascript checks
 
 go/test: go/lint go/security js/validate ## Run tests
 	@echo "Running tests..."
-	go test -cover ./cmd/... ./internal/... ./tests/...
+	go test -cover . ./cmd/... ./internal/... ./tests/...
 
 go/test-race: go/lint ## Run tests with race detection
 	@echo "Running tests with race detection..."
-	go test -race -cover ./cmd/... ./internal/... ./tests/...
+	go test -race -cover . ./cmd/... ./internal/... ./tests/...
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 
@@ -97,6 +99,7 @@ vendor-frontend:
 	@curl -sL https://unpkg.com/preact@10.13.1/dist/preact.min.js -o web-mobile/vendor/preact.min.js
 	@curl -sL https://unpkg.com/preact@10.13.1/hooks/dist/hooks.umd.js -o web-mobile/vendor/hooks.umd.js
 	@curl -sL https://unpkg.com/preact@10.13.1/compat/dist/compat.umd.js -o web-mobile/vendor/compat.umd.js
+	@curl -sL https://unpkg.com/preact-router@4.1.2/dist/preact-router.umd.js -o web-mobile/vendor/preact-router.umd.js
 
 esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 	@echo "Pre-compiling JSX files..."

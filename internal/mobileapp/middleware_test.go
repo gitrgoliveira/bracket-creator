@@ -186,6 +186,9 @@ func TestAuthMiddleware_LegacyEmptyStoredPassword_NoBypass(t *testing.T) {
 }
 
 func TestAuthMiddleware_LoadError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("Skipping permission test: root bypasses file permission restrictions")
+	}
 	store, r := setupMiddlewareTest(t)
 
 	// Create a tournament file first, then make it unreadable to force a read error

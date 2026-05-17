@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -27,7 +28,7 @@ func TestGetBracketRanking(t *testing.T) {
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 
-	players := []helper.Player{
+	players := []domain.Player{
 		{Name: "Alice", Dojo: "DojoA"},
 		{Name: "Bob", Dojo: "DojoB"},
 		{Name: "Charlie", Dojo: "DojoC"},
@@ -104,7 +105,7 @@ func TestResolveReservedSlots(t *testing.T) {
 	// Source competition
 	srcID := "source-comp"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: srcID, Name: "Source", Status: "completed"}))
-	require.NoError(t, store.SaveParticipants(srcID, []helper.Player{{Name: "Winner"}}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{{Name: "Winner"}}))
 	require.NoError(t, store.SaveBracket(srcID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{{{Winner: "Winner", Status: state.MatchStatusCompleted}}},
 	}))
@@ -117,7 +118,7 @@ func TestResolveReservedSlots(t *testing.T) {
 	}
 	require.NoError(t, store.SaveReservedSlots(targetID, slots))
 
-	players := []helper.Player{
+	players := []domain.Player{
 		{ID: "P1", Name: "Placeholder", Tag: "reserved"},
 		{ID: "P2", Name: "Normal"},
 	}
@@ -141,7 +142,7 @@ func TestResolveReservedSlots_Errors(t *testing.T) {
 	eng := New(store)
 
 	compID := "test"
-	players := []helper.Player{{ID: "P1", Tag: "reserved"}}
+	players := []domain.Player{{ID: "P1", Tag: "reserved"}}
 
 	// No slots file - should return players unchanged
 	res, mutated, err := eng.resolveReservedSlots(compID, players)
@@ -194,7 +195,7 @@ func TestResolveReservedSlots_CorruptSlotsFile(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(slotsPath), 0700))
 	require.NoError(t, os.WriteFile(slotsPath, []byte("{ not valid json"), 0600))
 
-	players := []helper.Player{{ID: "P1", Name: "Real", Tag: ""}}
+	players := []domain.Player{{ID: "P1", Name: "Real", Tag: ""}}
 	res, mutated, err := eng.resolveReservedSlots(compID, players)
 	require.Error(t, err, "corrupt slots file must surface as error, not silent no-op")
 	assert.Contains(t, err.Error(), "cannot load reserved slots")
@@ -214,7 +215,7 @@ func TestResolveReservedSlots_Duplicate(t *testing.T) {
 	// Source competition with a winner
 	srcID := "source-comp"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: srcID, Name: "Source", Status: "completed"}))
-	require.NoError(t, store.SaveParticipants(srcID, []helper.Player{{Name: "Robert Young", Dojo: "Team Alpha"}}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{{Name: "Robert Young", Dojo: "Team Alpha"}}))
 	require.NoError(t, store.SaveBracket(srcID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{{{Winner: "Robert Young", Status: state.MatchStatusCompleted}}},
 	}))
@@ -224,7 +225,7 @@ func TestResolveReservedSlots_Duplicate(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: targetID, Name: "Target"}))
 
 	// Two players: one real "Robert Young", one placeholder for Rank 1 of source
-	players := []helper.Player{
+	players := []domain.Player{
 		{ID: "Existing-ID", Name: "Robert Young", Dojo: "Team Alpha"},
 		{ID: "Placeholder-ID", Name: "Reserved: source-comp rank 1", Tag: "reserved"},
 	}
@@ -250,4 +251,156 @@ func TestResolveReservedSlots_Duplicate(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, updatedSlots, 1)
 	assert.Equal(t, "Existing-ID", updatedSlots[0].ParticipantID)
+}
+
+// TestGetPoolRanking_Basic verifies that rank 1 returns the winner of
+// pool 1, rank 2 the winner of pool 2, rank 3 the runner-up of pool 1, etc.
+func TestGetPoolRanking_Basic(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pool-ranking"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Pool Ranking",
+		Format: state.CompFormatPools,
+		Status: state.CompStatusComplete,
+	}))
+
+	// Two players so we get one pool and one match.
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+	}))
+
+	// Save pool structure so CalculatePoolStandings has pool info.
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{
+			PoolName: "Pool A",
+			Players: []helper.Player{
+				{Name: "Alice"},
+				{Name: "Bob"},
+			},
+		},
+	}))
+
+	// Alice beats Bob.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:      "Pool A-0",
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Alice",
+			IpponsA: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		},
+	}))
+
+	p, err := eng.GetPoolRanking(compID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", p.Name, "rank 1 must be the pool winner")
+
+	p, err = eng.GetPoolRanking(compID, 2)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", p.Name, "rank 2 must be the pool runner-up")
+}
+
+// TestGetPoolRanking_NotFound verifies that a competition with no pool
+// data returns a not-found error.
+func TestGetPoolRanking_NotFound(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pool-ranking-empty"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Empty",
+		Format: state.CompFormatPools,
+	}))
+
+	_, err := eng.GetPoolRanking(compID, 1)
+	assert.Error(t, err)
+}
+
+// TestGetPoolRanking_OutOfRange verifies that requesting a rank beyond
+// the pool's depth returns an error.
+func TestGetPoolRanking_OutOfRange(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pool-ranking-oob"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "OOB",
+		Format: state.CompFormatPools,
+		Status: state.CompStatusComplete,
+	}))
+
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted},
+	}))
+
+	// Pool has 2 players, so rank 100 should not be found.
+	_, err := eng.GetPoolRanking(compID, 100)
+	assert.Error(t, err)
+}
+
+// TestCalculatePoolStandings_TeamSubDraw covers the sub.Winner=="" branch in
+// computeStandings (lines 341-343). In a best-of-3 team kendo match each
+// position fights individually; a position where both fighters score 2 ippons
+// each is impossible in normal play (the bout ends when one side reaches 2)
+// but valid to construct in tests to exercise the IndividualDraws counter.
+func TestCalculatePoolStandings_TeamSubDraw(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-sub-draw"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Team Sub Draw",
+		Kind:     "team",
+		Format:   state.CompFormatPools,
+		Status:   state.CompStatusPools,
+		TeamSize: 3,
+	}))
+
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "TeamA"}, {Name: "TeamB"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "TeamA"}, {Name: "TeamB"},
+		}},
+	}))
+
+	// Team match is a draw (Winner==""), one sub-bout is also a draw:
+	// 1-1 ippons with time expired — valid in best-of-3 (neither side
+	// reached 2 before the clock ran out).
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:     "Pool A-0",
+			SideA:  "TeamA",
+			SideB:  "TeamB",
+			Winner: "",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				{Position: 0, SideA: "A1", SideB: "B1",
+					IpponsA: []string{"M"}, IpponsB: []string{"M"},
+					Winner: ""},
+			},
+		},
+	}))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	poolStandings := standings["Pool A"]
+	require.Len(t, poolStandings, 2)
+
+	// Both teams drew the match, each sub-bout is also a draw.
+	for _, s := range poolStandings {
+		assert.Equal(t, 1, s.Draws, "%s: team match must be a draw", s.Player.Name)
+		assert.Equal(t, 1, s.IndividualDraws, "%s: sub-bout draw must increment IndividualDraws", s.Player.Name)
+	}
 }

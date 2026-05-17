@@ -1,4 +1,18 @@
-// Sample tournament data.
+// Sample tournament data + small pure utilities used across the app.
+//
+// Per T009 (NFR-006), HTTP and API-payload serializers were moved out:
+//   - api_client.jsx       — fetch / SSE
+//   - api_serializers.jsx  — server payload normalizers (Go ↔ JS shape)
+//
+// What remains here:
+//   - SAMPLE_TOURNAMENTS + the sample-data generators (build* / make* /
+//     simulate* helpers) — used by the standalone UI demo and tests.
+//   - parseParticipantLines: the pasted-CSV → player-object parser used
+//     by AdminParticipants. UI input parsing, not API.
+//   - mergeMatchPatch: a pure state-merge helper consumed by patch.jsx.
+//   - addMinutes, arraysEqual: tiny pure utilities consumed by multiple
+//     screens; trivial enough that a separate util module would add
+//     more navigation cost than the inlining saves.
 //
 // Tournament: a multi-day event held at a venue.
 //   - has its own list of `courts` (Shiaijo) — these are the physical concurrency unit.

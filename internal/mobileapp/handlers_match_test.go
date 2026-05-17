@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -304,7 +307,7 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 		Status: state.CompStatusPools,
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
-	require.NoError(t, store.SaveParticipants("pools1", []helper.Player{
+	require.NoError(t, store.SaveParticipants("pools1", []domain.Player{
 		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
 	}))
 	require.NoError(t, store.SavePoolMatches("pools1", []state.MatchResult{
@@ -389,7 +392,7 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "bulk1", Format: state.CompFormatPools, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SaveParticipants("bulk1", []helper.Player{
+	require.NoError(t, store.SaveParticipants("bulk1", []domain.Player{
 		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
 	}))
 	require.NoError(t, store.SavePoolMatches("bulk1", []state.MatchResult{
@@ -497,4 +500,304 @@ func TestTryAutoCompletePools_SanitizesErrorHeader(t *testing.T) {
 		"raw validation error text must not leak into the response header")
 	assert.NotContains(t, got, "invalid",
 		"raw validation error text must not leak into the response header")
+}
+
+// TestPostScoreKikenAutoFillsRegulation — T086: POST /score with
+// decision=kiken, decisionBy=shiro, encho=null and a 0-2 scoreline
+// returns 200 and the persisted match round-trips the decision metadata.
+//
+// FR-031, contracts/match-decisions.md.
+func TestPostScoreKikenAutoFillsRegulation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kiken-reg"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	body, _ := json.Marshal(state.MatchResult{
+		ID:         "PoolA-1",
+		Decision:   "kiken",
+		DecisionBy: "shiro",
+		Winner:     "Alice",
+		IpponsA:    []string{"M", "M"},
+		IpponsB:    nil,
+		Status:     state.MatchStatusCompleted,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, "kiken", stored[0].Decision)
+	assert.Equal(t, "shiro", stored[0].DecisionBy)
+	assert.Equal(t, "Alice", stored[0].Winner)
+}
+
+// TestPostScoreKikenInEncho — T087: POST /score with
+// decision=kiken, decisionBy=shiro, encho.periodCount=1 and a 0-1
+// scoreline returns 200.
+func TestPostScoreKikenInEncho(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kiken-encho"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	body, _ := json.Marshal(state.MatchResult{
+		ID:         "PoolA-1",
+		Decision:   "kiken",
+		DecisionBy: "shiro",
+		Winner:     "Alice",
+		IpponsA:    []string{"M"},
+		IpponsB:    nil,
+		Encho:      &state.EnchoMetadata{PeriodCount: 1},
+		Status:     state.MatchStatusCompleted,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	stored, _ := store.LoadPoolMatches(compID)
+	require.Len(t, stored, 1)
+	require.NotNil(t, stored[0].Encho)
+	assert.Equal(t, 1, stored[0].Encho.PeriodCount)
+}
+
+// TestPostScoreKikenInvalidScoreline — T088: POST /score with
+// decision=kiken, encho=null, and a 0-1 scoreline (regulation requires
+// 2-0) returns 400 with the validator's field message.
+func TestPostScoreKikenInvalidScoreline(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kiken-bad"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	body, _ := json.Marshal(state.MatchResult{
+		ID:         "PoolA-1",
+		Decision:   "kiken",
+		DecisionBy: "shiro",
+		Winner:     "Alice",
+		IpponsA:    []string{"M"},
+		IpponsB:    nil,
+		Status:     state.MatchStatusCompleted,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "scoreline")
+}
+
+// failingCompetitionStore returns the configured error from
+// LoadCompetition. Used to drive the fail-closed path in
+// enforceEnchoCap / bulk-score when config.md can't be loaded.
+type failingCompetitionStore struct{ err error }
+
+func (f failingCompetitionStore) LoadCompetition(string) (*state.Competition, error) {
+	return nil, f.err
+}
+
+// TestEnchoExceedsCap covers the pure predicate. Force, missing comp,
+// 0 cap, and within-cap all return false; only an over-cap count with
+// !force returns true.
+func TestEnchoExceedsCap(t *testing.T) {
+	cases := []struct {
+		name  string
+		encho *state.EnchoMetadata
+		comp  *state.Competition
+		force bool
+		want  bool
+	}{
+		{name: "nil encho", encho: nil, comp: &state.Competition{MaxEnchoPeriods: 2}, want: false},
+		{name: "zero period count", encho: &state.EnchoMetadata{PeriodCount: 0}, comp: &state.Competition{MaxEnchoPeriods: 2}, want: false},
+		{name: "nil comp", encho: &state.EnchoMetadata{PeriodCount: 5}, comp: nil, want: false},
+		{name: "zero cap means unlimited", encho: &state.EnchoMetadata{PeriodCount: 99}, comp: &state.Competition{MaxEnchoPeriods: 0}, want: false},
+		{name: "within cap", encho: &state.EnchoMetadata{PeriodCount: 2}, comp: &state.Competition{MaxEnchoPeriods: 2}, want: false},
+		{name: "at cap boundary", encho: &state.EnchoMetadata{PeriodCount: 2}, comp: &state.Competition{MaxEnchoPeriods: 3}, want: false},
+		{name: "over cap without force", encho: &state.EnchoMetadata{PeriodCount: 3}, comp: &state.Competition{MaxEnchoPeriods: 2}, want: true},
+		{name: "over cap with force", encho: &state.EnchoMetadata{PeriodCount: 3}, comp: &state.Competition{MaxEnchoPeriods: 2}, force: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := enchoExceedsCap(tc.encho, tc.comp, tc.force)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestEnforceEnchoCap_ScoreHandler covers the gin wrapper as wired
+// into the single-score endpoint: 500 on store failure (the bug this
+// fix closes), 400 with limit echoed on cap exceeded, and 200 when
+// the cap is unset.
+func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "encho-cap-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	realStore, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(realStore)
+	hub := NewHub()
+
+	compID := "encho-cap-test"
+	require.NoError(t, realStore.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+		MaxEnchoPeriods: 2,
+	}))
+	require.NoError(t, realStore.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, realStore.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	score := func(periodCount int) []byte {
+		body, _ := json.Marshal(state.MatchResult{
+			ID: "PoolA-1", SideA: "Alice", SideB: "Bob",
+			Winner: "Alice", IpponsA: []string{"M"},
+			Encho:  &state.EnchoMetadata{PeriodCount: periodCount},
+			Status: state.MatchStatusCompleted,
+		})
+		return body
+	}
+
+	t.Run("load failure returns 500", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		admin := r.Group("/api")
+		// Wire the score handler with a failing CompetitionStore so the
+		// cap check exercises the new fail-closed branch. The engine
+		// keeps the real store but never gets called — enforceEnchoCap
+		// aborts the request first.
+		registerScoreHandler(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(score(1)))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "failed to validate encho limits")
+	})
+
+	t.Run("over cap returns 400 with limit", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		admin := r.Group("/api")
+		registerScoreHandler(admin, eng, realStore, realStore, hub)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(score(3)))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		var resp struct {
+			Error string `json:"error"`
+			Limit int    `json:"limit"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "max_encho_exceeded", resp.Error)
+		assert.Equal(t, 2, resp.Limit)
+	})
+
+	t.Run("force bypasses cap", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		admin := r.Group("/api")
+		registerScoreHandler(admin, eng, realStore, realStore, hub)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score?force=true", bytes.NewBuffer(score(3)))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	})
+}
+
+// TestBulkScore_FailsClosedOnLoadError — when the cap-check load
+// fails for a bulk-score request, the entire batch is rejected with
+// 500 rather than silently bypassing the MaxEnchoPeriods cap on every
+// entry.
+func TestBulkScore_FailsClosedOnLoadError(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "bulk-cap-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	realStore, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(realStore)
+	hub := NewHub()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	// RegisterMatchHandlers takes the concrete *Hub; the cap check
+	// uses the CompetitionStore parameter (which we fault here) and
+	// returns 500 before any handler reaches the hub or engine.
+	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub)
+
+	body, _ := json.Marshal([]state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P1", Status: state.MatchStatusCompleted},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/c1/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "failed to validate encho limits")
+}
+
+// TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions
+// fills in per-court queue positions for a non-empty match list.
+func TestAnnotateQueuePositions_NonEmpty(t *testing.T) {
+	matches := []state.MatchResult{
+		{ID: "m1", Court: "A", Status: state.MatchStatusScheduled},
+		{ID: "m2", Court: "A", Status: state.MatchStatusScheduled},
+		{ID: "m3", Court: "B", Status: state.MatchStatusScheduled},
+	}
+	annotateQueuePositions(matches)
+	// Positions within a court should be monotonically increasing from 1.
+	assert.Equal(t, 1, matches[0].QueuePosition)
+	assert.Equal(t, 2, matches[1].QueuePosition)
+	assert.Equal(t, 1, matches[2].QueuePosition)
+}
+
+// TestAnnotateQueuePositions_Empty verifies that annotateQueuePositions is
+// a no-op for an empty slice.
+func TestAnnotateQueuePositions_Empty(t *testing.T) {
+	annotateQueuePositions(nil)
+	annotateQueuePositions([]state.MatchResult{})
 }

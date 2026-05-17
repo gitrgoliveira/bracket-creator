@@ -2,12 +2,19 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 )
 
 // SeedAssignment represents the mapping of a previous winner to a seed position.
 type SeedAssignment struct {
 	Name     string `json:"name"`
+	Dojo     string `json:"dojo,omitempty"`
 	SeedRank int    `json:"seedRank"`
+}
+
+// seedKey returns the composite lookup key for a seed assignment.
+func seedKey(name, dojo string) string {
+	return name + "|" + dojo
 }
 
 // Validate checks if the seed assignment is valid.
@@ -49,10 +56,11 @@ func ValidateAssignments(assignments []SeedAssignment) error {
 // AssignSeeds applies valid seed assignments to a list of players
 // It swaps seeds if a collision occurs. Returns error if a seeded participant is not found.
 func AssignSeeds(players []Player, assignments []SeedAssignment) error {
-	// Build map for quick lookup by name
 	playerMap := make(map[string]*Player, len(players))
+	nameCount := make(map[string]int, len(players))
 	for i := range players {
-		playerMap[players[i].Name] = &players[i]
+		playerMap[seedKey(players[i].Name, players[i].Dojo)] = &players[i]
+		nameCount[players[i].Name]++
 	}
 
 	// Build a seed→player reverse index for O(1) collision detection.
@@ -65,9 +73,18 @@ func AssignSeeds(players []Player, assignments []SeedAssignment) error {
 	}
 
 	for _, a := range assignments {
-		p, ok := playerMap[a.Name]
+		p, ok := playerMap[seedKey(a.Name, a.Dojo)]
+		if !ok && a.Dojo == "" && nameCount[a.Name] == 1 {
+			for i := range players {
+				if players[i].Name == a.Name {
+					p = &players[i]
+					ok = true
+					break
+				}
+			}
+		}
 		if !ok {
-			return errors.New("seeded participant not found in main list: " + a.Name)
+			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}
 
 		oldRank := p.Seed

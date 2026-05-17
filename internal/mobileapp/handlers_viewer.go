@@ -63,6 +63,11 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				poolMatches, _ := store.LoadPoolMatches(compID)
 				bracket, _ := store.LoadBracket(compID)
 
+				// FR-025, T036: derive per-court queue position at serve time
+				// so viewers see "Next up: 3" without persisting a value that
+				// would go stale the moment any match transitions.
+				annotateQueuePositions(poolMatches)
+
 				results[idx] = gin.H{
 					"config":      comp,
 					"poolMatches": poolMatches,
@@ -106,7 +111,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// Run all independent I/O concurrently.
 		var (
 			pools         any
-			poolMatches   any
+			poolMatches   []state.MatchResult
 			standings     any
 			bracket       any
 			schedule      any
@@ -165,6 +170,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				return
 			}
 		}
+
+		// FR-025, T036: derive per-court queue position at serve time —
+		// see annotateQueuePositions for rationale.
+		annotateQueuePositions(poolMatches)
 
 		c.JSON(http.StatusOK, gin.H{
 			"config":        comp,

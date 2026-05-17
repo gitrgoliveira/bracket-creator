@@ -19,6 +19,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
 
 	"github.com/spf13/cobra"
 )
@@ -105,6 +106,12 @@ func NewRouter() *gin.Engine {
 			c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 		})
 	}
+
+	// Stateless schedule estimator — shared between the CLI web UI and
+	// the mobile app frontend (T152a). Routed under /api so the same
+	// fetch path works in both server modes. Uses gin.Engine.Group("/")
+	// to obtain a RouterGroup pointer to pass to the shared registrar.
+	mobileapp.RegisterScheduleHandlers(r.Group("/api"))
 
 	// Setup API endpoints first
 	r.GET("/api/status", func(c *gin.Context) {

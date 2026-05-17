@@ -35,6 +35,21 @@ function timeEdited(oldScheduledAt, newVal) {
   return (oldScheduledAt || "") !== newVal;
 }
 
+// filterMatchesByCourt(matches, courtParam) — pure list filter.
+//
+// FR-001 / T040 (US1, SC-001): bookmark `/admin/schedule?court=A` to scope
+// an operator's view to a single shiaijo. Returns matches unchanged when no
+// filter is set ("", null, undefined, or "all"); otherwise returns only
+// matches whose `m.court` exactly equals courtParam (case-sensitive — the
+// app's canonical court labels are uppercase A–Z per the Excel layout).
+// Pure and DOM-free so the helper is unit-testable from jsdom without
+// mounting AdminSchedulePage.
+export function filterMatchesByCourt(matches, courtParam) {
+  const c = (courtParam || "").trim();
+  if (c === "" || c === "all") return matches;
+  return matches.filter((m) => m.court === c);
+}
+
 // Coerces the matchDuration form value to a safe integer minutes count
 // for arithmetic in durationEstimate (rendered as "HH h MM m") and the
 // auto-schedule loop (`cursor += safeMatchDuration` + addMinutes).
@@ -54,6 +69,12 @@ function clampMatchDuration(raw, fallback = 3) {
   return Number.isFinite(raw) && Number.isInteger(raw) && raw >= 1 ? raw : fallback;
 }
 
+// T041 (US1, FR-002, SC-002): per-tablet localStorage key. The URL
+// ?court= param remains canonical — localStorage is a fallback that lets
+// a bookmarked operator tablet land on the same shiaijo after they
+// navigate away and return via a bare URL.
+const COURT_STORAGE_KEY = "bc_operator_courts";
+
 function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewerMode, password }) {
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
@@ -64,12 +85,39 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   const [autoStart, setAutoStart] = useStateA(tournament.competitions[0]?.startTime || "09:00");
   const [autoSaving, setAutoSaving] = useStateA(false);
 
+  // T040/T041: read ?court= from the URL; useQuery re-renders on history
+  // changes so navigating between /admin/schedule and /admin/schedule?court=A
+  // toggles the filter without a full page reload. The window.AppRouter
+  // fallback is a defence against the router not being registered yet
+  // (e.g. during JSDOM tests that don't load preact-router).
+  const useQueryFn = (window.AppRouter && window.AppRouter.useQuery) || (() => ({}));
+  const query = useQueryFn();
+  const courtFromURL = query.court;
+
+  // Resolve the active court filter: URL ?court= wins; localStorage is the
+  // fallback when the URL is bare. Whenever the URL carries a court we
+  // persist it back to localStorage so a later bare-URL visit on the same
+  // device restores the same shiaijo. Wrapped in try/catch — Safari private
+  // mode disables localStorage entirely.
+  const effectiveCourt = (() => {
+    if (courtFromURL && courtFromURL.trim() !== "") {
+      try { window.localStorage.setItem(COURT_STORAGE_KEY, courtFromURL); } catch (_) { /* ignore */ }
+      return courtFromURL;
+    }
+    try { return window.localStorage.getItem(COURT_STORAGE_KEY) || ""; } catch (_) { return ""; }
+  })();
+
   const allMatches = useMemoA(
     () => window.tournamentMatches(tournament).filter(hasBothSides),
     [tournament]
   );
 
   const filtered = window.applyFilters(allMatches, picked, dojoText, compFilter);
+  // T040 (US1, FR-001): apply the court scope AFTER the user-driven
+  // player/dojo/competition filters but BEFORE the byCourt bucket split.
+  // Doing it here means SSE patches for off-court matches naturally drop
+  // out of the visible grid without any patch.jsx-side awareness.
+  const courtFiltered = filterMatchesByCourt(filtered, effectiveCourt);
 
   const courts = tournament.courts;
   const byCourt = {};
@@ -78,7 +126,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   // config, or stale) go into a separate "Unassigned" bucket so they stay
   // visible and movable instead of vanishing into an unrendered key.
   const unassigned = [];
-  filtered.forEach((m) => {
+  courtFiltered.forEach((m) => {
     if (m.court && byCourt[m.court]) byCourt[m.court].push(m);
     else unassigned.push(m);
   });
@@ -219,7 +267,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
         </div>
 
         <div className="tw-sched">
-          <div className="tw-sched__filters">
+          <div className="tw-sched__filters" data-testid="admin-schedule-court-filter">
             <window.PlayerMultiFilter tournament={tournament} picked={picked} setPicked={setPicked} dojoText={dojoText} setDojoText={setDojoText} />
             <select className="input" style={{ width: "auto", minWidth: 200 }} value={compFilter} onChange={(e) => setCompFilter(e.target.value)}>
               <option value="all">All competitions</option>
@@ -228,10 +276,32 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
             {hasAnyFilter && (
               <button className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); }}>Clear</button>
             )}
-            <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{filtered.length} of {allMatches.length} matches</span>
+            {/* T042 (US1, FR-001/FR-002): the court-scope badge mirrors the
+                operator's active filter. The "Show all courts" link clears
+                both the URL ?court= param AND the localStorage fallback so
+                a bookmark-driven tablet doesn't immediately re-scope on
+                next render. We navigate via AppRouter.route so preact-router
+                fires its history listeners (useQuery re-renders). */}
+            {effectiveCourt && (
+              <span className="bc-court-badge" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "4px 10px", borderRadius: 14, background: "var(--bg-2, #eef2f7)", fontSize: 12, fontWeight: 600 }}>
+                Showing {window.Term ? React.createElement(window.Term, { name: "shiaijo" }, "Shiaijo") : "Shiaijo"} {effectiveCourt}
+                <button
+                  className="btn btn--ghost btn--sm"
+                  style={{ padding: "0 6px", fontSize: 11, fontWeight: 500 }}
+                  onClick={() => {
+                    try { window.localStorage.removeItem(COURT_STORAGE_KEY); } catch (_) { /* ignore */ }
+                    const routeFn = (window.AppRouter && window.AppRouter.route) || ((url) => { window.history.pushState(null, "", url); window.dispatchEvent(new PopStateEvent("popstate")); });
+                    routeFn("/admin/schedule");
+                  }}
+                >
+                  Show all courts
+                </button>
+              </span>
+            )}
+            <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{courtFiltered.length} of {allMatches.length} matches</span>
           </div>
 
-          <div className="tw-courts">
+          <div className="tw-courts" data-testid="admin-schedule-list">
             {courts.map((cc) => {
               const list = byCourt[cc] || [];
               const liveOn = list.find((m) => m.status === "running");
@@ -361,9 +431,17 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
+      {/* T097: formatIpponsScore appends "Kiken / Fus. / DH / (E)" suffixes
+          for non-fought decisions and overtime. The match-level decision
+          covers kiken / fusenpai / daihyosen here; per-bout fusensho is a
+          SubMatchResult and is rendered inside the score modal — the row
+          here doesn't expose individual bout cells.
+          TODO(T096): once per-bout fusensho is wired through the team-score
+          serializer and the schedule row exposes bout details, append an
+          "FS" badge to each affected bout cell. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
         {m.status === "completed" && (
-          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)}</div>
         )}
         {m.status === "running" && <span className="bc-live">●</span>}
         <CourtPicker
@@ -505,7 +583,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
                   <div className="score-edit-row__score">
-                    {m.status === "completed" && window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)}
+                    {m.status === "completed" && window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)}
                     {m.status === "running" && <span className="bc-live">●</span>}
                     {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                   </div>

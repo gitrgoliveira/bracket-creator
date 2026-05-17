@@ -46,6 +46,16 @@ Thumbs.db
 node_modules/
 specs/*
 !specs/openapi.yaml
+!specs/ARCHITECTURE.md
+# Re-include feature directories so we can carve out subpaths inside them.
+# (git can't re-include a file whose parent directory is excluded.)
+!specs/*/
+# Default: ignore everything inside feature directories.
+specs/*/*
+# UAT screenshot evidence (review.md V5): per-task PNGs captured during browser
+# UAT walks. Tracked so the audit trail survives across machines and reviewers.
+!specs/*/screenshots/
+!specs/*/screenshots/*.png
 .specify
 .agent*
 .playwright-mcp

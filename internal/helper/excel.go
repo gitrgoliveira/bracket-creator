@@ -18,6 +18,24 @@
 //     so the bracket updates automatically when scores are entered.
 //
 // Row-count thresholds and layout constants are defined in constants.go.
+//
+// CHK037 — Kachinuki Excel rendering decision (T160 + T195–T203):
+//
+// The main Pool Matches / Elimination Matches sheets continue to use the
+// 8-column-per-court layout invariant (CourtsColumnsPerCourt = 8 — see
+// constants.go and CLAUDE.md). Variable-bout kachinuki grids would either
+// overflow that budget or force a layout-mode switch the rest of the
+// workbook can't accommodate, so the main sheets carry the team-match
+// row only.
+//
+// Bout-by-bout detail is rendered on a separate "Kachinuki Detail" sheet
+// (helper.SheetKachinukiDetail). See internal/helper/excel_kachinuki.go —
+// the sheet uses a flexible 8-column layout (NOT bound by
+// CourtsColumnsPerCourt) and is opt-in: the engine export path
+// (internal/engine/export.go → collectKachinukiMatches) emits it only
+// when comp.TeamMatchType == kachinuki AND at least one match carries
+// bouts. CLI export paths (cmd/create-pools.go, create-playoffs.go) are
+// kachinuki-agnostic and produce zero changes to existing example files.
 package helper
 
 import (

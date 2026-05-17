@@ -1,6 +1,9 @@
 package engine
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ValidationError represents a client-caused precondition or input failure.
 // Handlers should return HTTP 400 for these.
@@ -24,3 +27,10 @@ func (e *NotFoundError) Error() string { return e.msg }
 func notFoundErrorf(format string, args ...any) *NotFoundError {
 	return &NotFoundError{msg: fmt.Sprintf(format, args...)}
 }
+
+// ErrDecisionLocked is returned when a decision-overwrite (kiken-undo
+// or similar) is attempted on a match whose participants have started
+// a subsequent match. Handlers should return HTTP 409.
+//
+// T103, CHK024.
+var ErrDecisionLocked = errors.New("decision locked: a subsequent match has started")

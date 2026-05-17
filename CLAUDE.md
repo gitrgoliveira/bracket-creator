@@ -47,7 +47,7 @@ go test -cover ./internal/helper/...
 - **`internal/excel/`** — Excel file lifecycle (`Client`), sheet operations (`SheetManager`), style definitions.
 - **`internal/service/`** — Service layer abstraction over helper logic.
 - **`internal/resources/`** — Embedded file management. Resources flow: `main.go` embeds → `resources.NewResources()` → `cmd.ExecuteWithResources()`.
-- **`internal/mobileapp/`** — Gin HTTP handlers for the live tournament app (`mobile-app` command). Routes: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`. Real-time push via SSE (`hub.go`). Auth via `X-Tournament-Password` header (`middleware.go`).
+- **`internal/mobileapp/`** — Gin HTTP handlers for the live tournament app (`mobile-app` command). Routes: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`, `handlers_decision.go` (kiken/fusenpai/daihyosen — `POST /matches/:mid/decision`), `handlers_eligibility.go` (`/competitor-status`), `handlers_lineup.go` (team lineups), `handlers_schedule.go` (`GET /schedule/estimate`, public). Real-time push via SSE (`hub.go`) with events: `match_updated`, `competitor_status_updated`, `competition_completed`, etc. Auth via `X-Tournament-Password` header (`middleware.go`). Consumer-boundary interfaces live in `deps.go` (NFR-002).
 - **`internal/state/`** — File-backed state store for the mobile app. Tournament and competition config lives in `tournament-data/tournament.md` and `tournament-data/competitions/<id>/config.md` (YAML front-matter). Participants are in `participants.csv` alongside each config.
 - **`internal/engine/`** — Thin adapter that drives `internal/helper` pool/bracket generation from a `state.Competition`. Called by the `POST /api/competitions/:id/start` handler.
 - **`web-mobile/`** — Preact/JSX frontend for the mobile app, served embedded in the binary. Entry point: `web-mobile/index.html`. JS modules in `web-mobile/js/` (`admin.js`, `viewer.js`, `app.js`, `api.js`, `data.js`, `bracket.js`). CSS in `web-mobile/css/styles.css`. Pre-compiled to `web-mobile/dist/` by esbuild (run automatically as part of `make go/build`). Key component: `LinedTextarea` in `admin.js` — shows numbered line gutter alongside the participant paste box.
@@ -83,6 +83,11 @@ go test -cover ./internal/helper/...
 - **Excel Layout**: Uses an **8-column per court** layout. Columns A and G (and their court-shifted counterparts) are 30 units wide; others are 5 units wide. A blank row separates pools vertically.
 - **Team Match Labels**: Summaries use **"IV"** (Individual Victories) and **"PW"** (Points Won).
 - **Court limit**: courts are labelled A–Z, so `--courts` is hard-capped at 26 and any value over that returns an error rather than silently truncating.
+- **Match Decision Types** (`internal/domain/decision.go`): 8 canonical wire values — `""` (none), `"fought"`, `"hikiwake"` (draw), `"kiken"` (withdrawal), `"fusenpai"` (no-show), `"fusensho"` (per-bout default win), `"daihyosen"` (rep bout), `"kachinuki-exhaustion"`. Legacy YAML `decision: true` migrates to `"hikiwake"`, `false` to `"fought"` (Decision.UnmarshalYAML). Visual suffixes in the UI: `Kiken`, `Fus.`, `DH`, `(E)` for encho.
+- **Competitor Eligibility** (`internal/state/competitor_status.go`, `internal/engine/eligibility.go`): a kiken/fusenpai decision auto-writes a `CompetitorStatus{Eligible: false}` for the loser; `engine.StartMatch(compID, matchID)` is the pre-flight gate that returns `*IneligibleCompetitorError` (matches `errors.Is(err, ErrIneligibleCompetitor)`). Maps to HTTP 409.
+- **Team Lineups & Kachinuki** (`internal/domain/team_lineup.go`, `internal/engine/kachinuki.go`): TeamLineup pins position→player for a round. FIK 5-person rule: Senpo + Taisho mandatory; 1 vacancy must be Jiho, 2 must be Jiho+Fukusho, 3+ disqualifies. Kachinuki ("winner-stays-on") dynamically appends bouts via `engine.AdvanceKachinuki` until one team is exhausted (`DecisionKachinukiExhaustion`).
+- **Schedule Estimator** (`internal/engine/schedule.go`): `EstimateSchedule(EstimateInput) ScheduleEstimate` produces total/per-court minutes from match duration × multiplier × slowest-court buffer. Exposed via stateless `GET /api/schedule/estimate` on both the CLI web server and the mobile app.
+- **Store Transactions** (`internal/state/transactions.go`): `Store.WithTransaction(compID, fn)` holds the per-comp lock once across multiple load/save operations. Use the `StoreTx` handle inside `fn` — do NOT call public Store methods (they would deadlock the non-reentrant mutex).
 
 ### Excel workbook construction
 
@@ -137,5 +142,6 @@ All changes must be validated with `make go/test` and inspection of the generate
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+shell commands, and other important information, read the current plan:
+`specs/003-tournament-gap-closure/plan.md`
 <!-- SPECKIT END -->

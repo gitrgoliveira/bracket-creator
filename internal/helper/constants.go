@@ -102,6 +102,10 @@ const (
 
 // Sheet names for every tab in the workbook. Use these constants wherever a
 // sheet name is needed so that a rename only requires one edit here.
+//
+// SheetKachinukiDetail is opt-in: only emitted by the engine export path when
+// a competition has teamMatchType=kachinuki AND at least one kachinuki match
+// has bout data to display. See excel_kachinuki.go (T199–T203).
 const (
 	SheetData               = "data"
 	SheetTimeEstimator      = "Time Estimator"
@@ -111,4 +115,5 @@ const (
 	SheetNamesToPrint       = "Names to Print"
 	SheetTags               = "Tags"
 	SheetTree               = "Tree"
+	SheetKachinukiDetail    = "Kachinuki Detail"
 )

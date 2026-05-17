@@ -1,6 +1,8 @@
 // Admin side — single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
+import { applyPatch as patchCompetitionData } from './patch.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const REFRESHABLE_EVENTS = new Set([
@@ -8,10 +10,26 @@ const REFRESHABLE_EVENTS = new Set([
   "competition_completed",
   "match_updated",
   "tournament_updated",
+  // T099: competitor_status_updated fires when a participant's eligibility
+  // changes (kiken/fusenpai/fusensho/recovery). Treat it like match_updated
+  // for the purposes of refetching this competition's data — the change
+  // affects who's eligible for downstream matches and the kachinuki
+  // line-up, both of which the schedule/score-editor reads from the
+  // competition-details payload. patch.jsx re-broadcasts the event as a
+  // window-level CustomEvent for views that maintain their own cache.
+  "competitor_status_updated",
+  // schedule_updated fires when an operator moves a match to a different
+  // court or changes its scheduled time. It carries no competitionId (the
+  // relevance check at the subscription site treats any nil-data event as
+  // tournament-wide and always triggers the fetchCompetitionDetails refresh).
+  "schedule_updated",
+  // T191/T192 (US13 — FR-050d): swiss_round_generated fires when a new
+  // Swiss round's matches are persisted. Carries competitionId +
+  // swissCurrentRound + matchCount; the admin section refetches comp
+  // detail so the round counter, match list, and "Generate next round"
+  // button enable-state all reconcile.
+  "swiss_round_generated",
 ]);
-
-// mergeMatchPatch is produced by data.jsx and used by patchCompetitionData below.
-const mergeMatchPatch = window.mergeMatchPatch;
 
 // Page components rendered by AdminApp's view switch (produced by sibling
 // admin_*.jsx files, all loaded before this one — see web-mobile/admin_split_plan.md).
@@ -62,46 +80,6 @@ function mergeTournamentPatch(currentT, patch, sessionPassword) {
   const next = { ...currentT, ...patch };
   if (!patch.password) next.password = sessionPassword;
   return next;
-}
-
-function patchCompetitionData(prev, event) {
-  if (!prev || !event.data) return prev;
-  const { result, results } = event.data;
-  const resultsToApply = results || (result ? [result] : []);
-  if (resultsToApply.length === 0) return prev;
-
-  const resultMap = new Map(resultsToApply.map(r => [r.id, r]));
-  const next = { ...prev };
-  let changed = false;
-
-  if (next.poolMatches) {
-    next.poolMatches = next.poolMatches.map(m => {
-      const update = resultMap.get(m.id);
-      if (update) { changed = true; return mergeMatchPatch(m, update); }
-      return m;
-    });
-  }
-
-  if (next.bracket && next.bracket.rounds) {
-    let bChanged = false;
-    const rounds = next.bracket.rounds.map(round =>
-      round.map(m => {
-        const update = resultMap.get(m.id);
-        if (update) {
-          bChanged = true; changed = true;
-          // Map MatchResult to BracketMatch fields if needed
-          const patch = { ...update };
-          if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
-          if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-          return mergeMatchPatch(m, patch);
-        }
-        return m;
-      })
-    );
-    if (bChanged) next.bracket = { ...next.bracket, rounds };
-  }
-
-  return changed ? next : prev;
 }
 
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast }) {
@@ -465,8 +443,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             || !event.data?.competitionId
             || event.data.competitionId === compId;
           if (relevant) {
-            // Apply partial update immediately for responsive UI
-            if (event.type === "match_updated") {
+            // Apply partial update immediately for responsive UI.
+            // T099: competitor_status_updated also routes through applyPatch
+            // so the window-level CustomEvent fires for downstream listeners;
+            // applyPatch returns `prev` unchanged for this event type, so
+            // the setAdminCompData call is identity-preserving (no
+            // gratuitous re-render).
+            if (event.type === "match_updated" || event.type === "competitor_status_updated") {
               setAdminCompData(prev => patchCompetitionData(prev, event));
             }
             // Still trigger full refresh (jittered) to reconcile standings/propagation
@@ -488,7 +471,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // tournament_updated also needs the tournament config itself.
           if (event.type === "match_updated"
               || event.type === "competition_started"
-              || event.type === "competition_completed") {
+              || event.type === "competition_completed"
+              || event.type === "competitor_status_updated"
+              || event.type === "swiss_round_generated") {
             scheduleTournamentRefresh(false);
           } else if (event.type === "tournament_updated") {
             scheduleTournamentRefresh(true);

@@ -138,3 +138,50 @@ func TestMatches_CaseSensitive(t *testing.T) {
 	assert.False(t, p.Matches("jane doe"))
 	assert.False(t, p.Matches("Jane doe"))
 }
+
+func TestAssignSeeds_SameNameDifferentDojo(t *testing.T) {
+	players := []Player{
+		{Name: "John Doe", Dojo: "DojoA"},
+		{Name: "John Doe", Dojo: "DojoB"},
+	}
+
+	assignments := []SeedAssignment{
+		{Name: "John Doe", Dojo: "DojoA", SeedRank: 1},
+		{Name: "John Doe", Dojo: "DojoB", SeedRank: 2},
+	}
+
+	err := AssignSeeds(players, assignments)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, players[0].Seed)
+	assert.Equal(t, 2, players[1].Seed)
+}
+
+func TestAssignSeeds_BackwardCompatEmptyDojo(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Dojo: "SomeDojo"},
+		{Name: "Bob", Dojo: "OtherDojo"},
+	}
+
+	assignments := []SeedAssignment{
+		{Name: "Alice", SeedRank: 1},
+	}
+
+	err := AssignSeeds(players, assignments)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, players[0].Seed)
+}
+
+func TestAssignSeeds_AmbiguousNameNoDojo(t *testing.T) {
+	players := []Player{
+		{Name: "John Doe", Dojo: "DojoA"},
+		{Name: "John Doe", Dojo: "DojoB"},
+	}
+
+	assignments := []SeedAssignment{
+		{Name: "John Doe", SeedRank: 1},
+	}
+
+	err := AssignSeeds(players, assignments)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}

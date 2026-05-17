@@ -3,10 +3,13 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -86,13 +89,143 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 		}
 		*r = *result
 	})
-	if err == nil {
-		return nil
+	if err != nil {
+		if !errors.Is(err, errMatchNotFound) {
+			return err
+		}
+		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
+			return err
+		}
 	}
-	if !errors.Is(err, errMatchNotFound) {
-		return err
+	// T085 — persist the loser's competitor-status when this update
+	// recorded a kiken or fusenpai decision. Failure to write the
+	// status is non-fatal to the score-recording itself: the match
+	// score is already on disk, so propagating an error here would
+	// give the operator a 500 response that they would retry,
+	// double-recording the score. Log and swallow — the next-match
+	// eligibility gate is the safety net that surfaces a missed
+	// status write (FR-035).
+	if _, err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
+		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 	}
-	return e.recordBracketMatchResult(compId, matchId, result)
+	// T128 — freeze any team lineups for this round when the match
+	// transitions to running/completed. Side-effect only; failures are
+	// non-fatal for the same reason as the ineligibility write above.
+	e.maybeLockTeamLineupsForRound(compId, result)
+	return nil
+}
+
+// RecordMatchResultWithIneligibility is the variant used by the score
+// and decision handlers that need to broadcast the
+// `competitor-status-updated` SSE event after a kiken/fusenpai is
+// recorded. It returns the new CompetitorStatus (or nil when none was
+// written) alongside any error.
+//
+// The match-score persistence semantics are identical to
+// RecordMatchResult; only the side-effect status is surfaced for the
+// caller's broadcast. Side-effect write failures are still non-fatal —
+// the function returns (nil, nil) and logs.
+//
+// T085/T092.
+func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
+	result.ID = matchId
+
+	// T105/CHK047: capture the prior result so we can rollback if the atomic
+	// ineligibility write below fails with AlreadyIneligibleError.
+	prior, _ := e.lookupExistingResult(compId, matchId)
+
+	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+		if result.SideA == "" {
+			result.SideA = r.SideA
+		}
+		if result.SideB == "" {
+			result.SideB = r.SideB
+		}
+		if result.Court == "" {
+			result.Court = r.Court
+		}
+		if result.ScheduledAt == "" {
+			result.ScheduledAt = r.ScheduledAt
+		}
+		*r = *result
+	})
+	if err != nil {
+		if !errors.Is(err, errMatchNotFound) {
+			return nil, err
+		}
+		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
+			return nil, err
+		}
+	}
+	status, err := e.recordIneligibilityFromDecision(compId, matchId, result)
+	if err != nil {
+		// K2/CHK047: when the atomic check-and-set inside
+		// recordIneligibilityFromDecision detects a concurrent kiken
+		// (different operator already wrote ineligibility for this
+		// player from another match), propagate the error so the handler
+		// can return HTTP 409.
+		var alreadyErr *AlreadyIneligibleError
+		if errors.As(err, &alreadyErr) {
+			// K3/CHK047: rollback the partial write. The match score was
+			// already persisted, but the intended loser is already
+			// ineligible from a different match. Revert the match score
+			// to its prior state before returning 409 so the operator
+			// sees a clean rejection rather than a mutated match.
+			if prior != nil {
+				_ = e.RecordMatchResult(compId, matchId, prior)
+			}
+			return nil, err
+		}
+		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
+		return nil, nil
+	}
+	// T128 — same lineup-lock side effect as RecordMatchResult above.
+	e.maybeLockTeamLineupsForRound(compId, result)
+	return status, nil
+}
+
+// maybeLockTeamLineupsForRound freezes any persisted team lineups for
+// the round this match belongs to, but only when this update marks
+// the match as live (running or completed). Side effect only — any
+// store error is logged and swallowed so the score-recording isn't
+// retried (which would double-record the score; same rationale as
+// recordIneligibilityFromDecision above).
+//
+// TODO(T128): round mapping. The match's "round" is currently always
+// treated as 0 because:
+//   - pool matches have no round field (every pool match is round 0
+//     by convention); and
+//   - bracket-round inference requires loading the bracket and
+//     scanning Rounds[] for matchId, which is overhead we don't
+//     pay until multi-round lineups are actually in use.
+//
+// Once team-pool-rotation or per-round elimination lineups land, this
+// helper grows the bracket-scan lookup. The store-side
+// roundHasLiveOrCompletedMatchLocked in state/team_lineup.go already
+// handles per-round bracket inspection — the gap is just the
+// matchId→round mapping here.
+//
+// FR-040.
+func (e *Engine) maybeLockTeamLineupsForRound(compId string, result *state.MatchResult) {
+	if result == nil {
+		return
+	}
+	// Only act on the running/completed transition — a "scheduled"
+	// update (e.g. time-only adjust) must NOT freeze lineups.
+	if result.Status != state.MatchStatusRunning && result.Status != state.MatchStatusCompleted {
+		return
+	}
+	// Cheap guard: skip the file write entirely for non-team
+	// competitions. A non-team comp can't have lineups, so calling
+	// LockTeamLineupsForRound would always be a no-op file read.
+	comp, err := e.store.LoadCompetition(compId)
+	if err != nil || comp == nil || comp.TeamSize <= 0 {
+		return
+	}
+	const round = 0
+	if err := e.store.LockTeamLineupsForRound(compId, round, time.Now().UTC()); err != nil {
+		log.Printf("engine: LockTeamLineupsForRound compId=%s round=%d: %v", compId, round, err)
+	}
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {
@@ -165,6 +298,8 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 		matches := poolResults[p.PoolName]
 		playerStandings := make(map[string]*state.PlayerStanding)
 		for _, player := range p.Players {
+			// helper.Player is a type alias for domain.Player (NFR-007);
+			// the pool player flows directly into PlayerStanding.
 			playerStandings[player.Name] = &state.PlayerStanding{
 				Player: player,
 			}
@@ -322,6 +457,10 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].Status = status
 					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
 					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
+					bracket.Rounds[rIdx][mIdx].Decision = result.Decision
+					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
+					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
+					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
 					// Echo the persisted scheduling fields back into the result so the
 					// caller (and SSE broadcast) sees the full, correct match state
 					// rather than the empty Court/ScheduledAt the scoring UI sends.

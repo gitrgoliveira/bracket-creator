@@ -353,9 +353,14 @@ func generatePoolPriority(n int) []int {
 // ApplySeeds assigns seeds to the helper players, handling swaps if needed
 // Returns an error if an assigned name could not be matched
 func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
+	c := cases.Title(language.Und, cases.NoLower)
+
 	playerMap := make(map[string]*Player, len(players))
+	nameCount := make(map[string]int, len(players))
 	for i := range players {
-		playerMap[players[i].Name] = &players[i]
+		key := players[i].Name + "|" + players[i].Dojo
+		playerMap[key] = &players[i]
+		nameCount[players[i].Name]++
 	}
 
 	// Build a seed→player reverse index for O(1) collision detection.
@@ -368,7 +373,6 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 	}
 
 	seenSeeds := make(map[int]string)
-	c := cases.Title(language.Und, cases.NoLower)
 	for _, a := range assignments {
 		if a.SeedRank > 0 {
 			if name, seen := seenSeeds[a.SeedRank]; seen {
@@ -377,7 +381,18 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 			seenSeeds[a.SeedRank] = a.Name
 		}
 
-		p, ok := playerMap[c.String(a.Name)]
+		titleName := c.String(a.Name)
+		key := titleName + "|" + a.Dojo
+		p, ok := playerMap[key]
+		if !ok && a.Dojo == "" && nameCount[titleName] == 1 {
+			for i := range players {
+				if players[i].Name == titleName {
+					p = &players[i]
+					ok = true
+					break
+				}
+			}
+		}
 		if !ok {
 			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}

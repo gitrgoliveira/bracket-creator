@@ -19,6 +19,32 @@ function isBoutDecided(aPts, bPts) {
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
 }
 
+// applyFusenshoToggle — pure reducer for the per-bout Fusensho button in
+// TeamScoreEditorModal. Implements three behaviours on top of the sub
+// state {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?}:
+//   1. Toggle-on from a clean state: snapshot {aPts,bPts,aFouls,bFouls}
+//      into _preFusensho, then write the 2-0 default win.
+//   2. Side-switch (fusensho is already on the other side): preserve
+//      the original _preFusensho so a later untoggle restores the
+//      genuine pre-fusensho score, not the intermediate 2-0.
+//   3. Toggle-off (re-clicking the active side): restore from
+//      _preFusensho and clear it. If no snapshot exists (e.g. modal
+//      reopened from saved state — initSubs doesn't round-trip the
+//      snapshot), just clear the flag.
+// Manual pts/fouls edits clear _preFusensho separately (handled in
+// the setPts/setFouls closures) — once the operator hand-edits, the
+// snapshot is stale.
+function applyFusenshoToggle(prev, side) {
+  if (prev.fusensho === side) {
+    const snap = prev._preFusensho;
+    if (snap) return { aPts: snap.aPts, bPts: snap.bPts, aFouls: snap.aFouls, bFouls: snap.bFouls, fusensho: "", _preFusensho: undefined };
+    return { ...prev, fusensho: "", _preFusensho: undefined };
+  }
+  const snap = prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
+  if (side === "a") return { aPts: ["M", "M"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: snap };
+  return { aPts: [], bPts: ["M", "M"], aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
+}
+
 // Term — kendo-glossary tooltip wrapper. Read lazily off window so the
 // load order between glossary.js and this module doesn't matter (both
 // are type="module" scripts and may execute in any order). Falls back
@@ -951,16 +977,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const updateSub = (idx, fn) => setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s));
 
   // T096/FR-031: per-bout Fusensho — award a 2-0 default win to the
-  // present side. Re-clicking the active side toggles the flag off
-  // (keeps the score so operator can edit manually); clicking the other
-  // side switches the default win to that side.
-  const setFusenshoFor = (idx, side) => {
-    updateSub(idx, prev => {
-      if (prev.fusensho === side) return { ...prev, fusensho: "" };
-      if (side === "a") return { aPts: ["M", "M"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a" };
-      return { aPts: [], bPts: ["M", "M"], aFouls: 0, bFouls: 0, fusensho: "b" };
-    });
-  };
+  // present side. Re-clicking the active side undoes the fusensho and
+  // restores the score that existed before fusensho was applied (the
+  // operator's intent on the active button is "undo this"). Clicking
+  // the OTHER side while fusensho is active is a side-switch; the
+  // original pre-fusensho snapshot is preserved so a later untoggle
+  // still restores the genuine prior state, not the intermediate 2-0.
+  const setFusenshoFor = (idx, side) => updateSub(idx, prev => applyFusenshoToggle(prev, side));
 
   const subTotals = subs.map(s => {
     const aH = Math.floor(s.bFouls / 2);
@@ -1233,17 +1256,18 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 
             // Each row: [left side, center score, right side] — left=SHIRO, right=AKA
             // T096/FR-031: manual pts/fouls edits clear the per-bout fusensho
-            // flag so the bout becomes a regular fought 2-0 once the operator
-            // intervenes. Re-applying via the Fusensho button is the way to
-            // restore the default-win semantics.
+            // flag AND discard the _preFusensho snapshot so the bout becomes
+            // a regular fought score once the operator intervenes. Re-applying
+            // via the Fusensho button captures a fresh snapshot from the
+            // current (manually-edited) state.
             const rowSides = [
               { key: "b", pts: s.bPts, fouls: s.bFouls, hansokuPts: t.bHansoku,
-                setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts, fusensho: "" })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f, fusensho: "" })),
+                setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts, fusensho: "", _preFusensho: undefined })),
+                setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f, fusensho: "", _preFusensho: undefined })),
                 color: "shiro", label: "SHIRO" },
               { key: "a", pts: s.aPts, fouls: s.aFouls, hansokuPts: t.aHansoku,
-                setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts, fusensho: "" })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f, fusensho: "" })),
+                setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts, fusensho: "", _preFusensho: undefined })),
+                setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f, fusensho: "", _preFusensho: undefined })),
                 color: "aka", label: "AKA" },
             ];
 
@@ -1307,8 +1331,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                         </div>
                         {/* T096/FR-031: per-bout Fusensho. Awards the bout
                             2-0 to this side as a default win (opponent
-                            forfeited the bout). Toggle off to keep the
-                            score but clear the fusensho flag. */}
+                            forfeited the bout). Re-clicking the active
+                            side undoes the fusensho and restores the
+                            score that existed before it was applied; a
+                            manual pts/fouls edit while active clears the
+                            flag and discards the snapshot. */}
                         <div className="tsm-fusensho" style={{ marginTop: 4 }}>
                           <button
                             data-testid="scoring-modal-fusensho-button"
@@ -1316,7 +1343,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                             className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
                             onClick={() => setFusenshoFor(idx, rs.key)}
                             title={s.fusensho === rs.key
-                              ? `Click to clear fusensho on this bout (keeps the 2-0 score)`
+                              ? `Click to undo fusensho — restores the previous score`
                               : `Mark bout as fusensho — default win 2-0 to ${rs.label}`}
                           >
                             {s.fusensho === rs.key
@@ -1497,4 +1524,5 @@ export {
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
+  applyFusenshoToggle,
 };

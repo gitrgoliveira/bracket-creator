@@ -9,6 +9,7 @@ import {
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
+  applyFusenshoToggle,
 } from '../admin_scoring_modal.jsx';
 
 // admin_scoring_modal.jsx ships seven module-private helpers that together
@@ -590,5 +591,117 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
     // boutDecided re-evaluates on next render with the shorter array.
     const after = ['M']; // was ['M','K'], operator removed 'K'
     expect(isBoutDecided(after, ['D'])).toBe(false); // back to 1-1, not decided
+  });
+});
+
+describe('applyFusenshoToggle', () => {
+  // Per-bout Fusensho is a toggle in TeamScoreEditorModal. Toggle-on
+  // overwrites the bout to a 2-0 default win for the chosen side; the
+  // pre-fusensho points are stashed in _preFusensho so that toggling off
+  // (re-clicking the active side) can restore them. Bug fix: previously
+  // the untoggle only cleared the flag and left the auto-filled 2-0 in
+  // place, losing the operator's prior score.
+
+  const clean = () => ({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "" });
+
+  it('toggle-on from a clean state captures the snapshot and writes 2-0 for A', () => {
+    const prev = { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "" };
+    const next = applyFusenshoToggle(prev, "a");
+    expect(next).toEqual({
+      aPts: ['M', 'M'],
+      bPts: [],
+      aFouls: 0,
+      bFouls: 0,
+      fusensho: "a",
+      _preFusensho: { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 },
+    });
+  });
+
+  it('toggle-on from a clean state captures the snapshot and writes 2-0 for B', () => {
+    const prev = { aPts: [], bPts: ['K'], aFouls: 1, bFouls: 0, fusensho: "" };
+    const next = applyFusenshoToggle(prev, "b");
+    expect(next).toEqual({
+      aPts: [],
+      bPts: ['M', 'M'],
+      aFouls: 0,
+      bFouls: 0,
+      fusensho: "b",
+      _preFusensho: { aPts: [], bPts: ['K'], aFouls: 1, bFouls: 0 },
+    });
+  });
+
+  it('toggle-off (re-click active side) restores the snapshot exactly', () => {
+    // Round trip: scored 1-0 SHIRO, toggled fusensho A, untoggle should
+    // restore the 1-0 instead of leaving the 2-0 in place.
+    const initial = { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "" };
+    const afterOn = applyFusenshoToggle(initial, "a");
+    const afterOff = applyFusenshoToggle(afterOn, "a");
+    expect(afterOff).toEqual({
+      aPts: ['M'],
+      bPts: [],
+      aFouls: 0,
+      bFouls: 0,
+      fusensho: "",
+      _preFusensho: undefined,
+    });
+  });
+
+  it('side-switch preserves the original snapshot, untoggle then restores genuine pre-fusensho state', () => {
+    // 1-0 SHIRO → toggle fusensho A (2-0 A) → toggle fusensho B (2-0 B)
+    // → untoggle fusensho B should restore the original 1-0, NOT zeros
+    // and NOT the intermediate 2-0 for A.
+    const initial = { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "" };
+    const afterA = applyFusenshoToggle(initial, "a");
+    expect(afterA.fusensho).toBe("a");
+    expect(afterA._preFusensho).toEqual({ aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 });
+
+    const afterSwitch = applyFusenshoToggle(afterA, "b");
+    expect(afterSwitch.fusensho).toBe("b");
+    expect(afterSwitch.aPts).toEqual([]);
+    expect(afterSwitch.bPts).toEqual(['M', 'M']);
+    // Snapshot stays anchored to the genuine pre-fusensho state.
+    expect(afterSwitch._preFusensho).toEqual({ aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 });
+
+    const afterUntoggleB = applyFusenshoToggle(afterSwitch, "b");
+    expect(afterUntoggleB).toEqual({
+      aPts: ['M'],
+      bPts: [],
+      aFouls: 0,
+      bFouls: 0,
+      fusensho: "",
+      _preFusensho: undefined,
+    });
+  });
+
+  it('fresh-match round-trip: zeros → toggle → untoggle returns to zeros', () => {
+    const afterOn = applyFusenshoToggle(clean(), "a");
+    expect(afterOn.aPts).toEqual(['M', 'M']);
+    expect(afterOn._preFusensho).toEqual({ aPts: [], bPts: [], aFouls: 0, bFouls: 0 });
+    const afterOff = applyFusenshoToggle(afterOn, "a");
+    expect(afterOff).toEqual({
+      aPts: [],
+      bPts: [],
+      aFouls: 0,
+      bFouls: 0,
+      fusensho: "",
+      _preFusensho: undefined,
+    });
+  });
+
+  it('defensive: untoggle without a snapshot just clears the flag', () => {
+    // Models the modal-reopen case: initSubs reads decision="fusensho"
+    // from the backend payload and lights up the button, but does NOT
+    // round-trip the snapshot. Untoggling in that state must not crash;
+    // it falls through to clearing the flag and leaving the score alone.
+    const prev = { aPts: ['M', 'M'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a" };
+    const next = applyFusenshoToggle(prev, "a");
+    expect(next).toEqual({
+      aPts: ['M', 'M'],
+      bPts: [],
+      aFouls: 0,
+      bFouls: 0,
+      fusensho: "",
+      _preFusensho: undefined,
+    });
   });
 });

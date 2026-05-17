@@ -64,5 +64,5 @@ func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) er
 		fmt.Fprintf(&sb, "%d,%s\n", a.SeedRank, a.Name)
 	}
 
-	return atomicWriteFile(path, []byte(sb.String()), 0600)
+	return s.atomicWrite(path, []byte(sb.String()), 0600)
 }

@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -58,12 +59,20 @@ import (
 // right content; only the directory-entry durability across power loss
 // is at risk, which is the same risk every fsync-less write already
 // has.
+// atomicWrite is the Store-bound write gate. It validates that path is
+// within the store's data folder before delegating to atomicWriteFile,
+// giving CodeQL a verifiable sanitisation boundary for the path value
+// (which ultimately originates from HTTP-supplied competition IDs).
+func (s *Store) atomicWrite(path string, data []byte, perm fs.FileMode) error {
+	cleanPath := filepath.Clean(path)
+	cleanBase := filepath.Clean(s.folder) + string(filepath.Separator)
+	if !strings.HasPrefix(cleanPath, cleanBase) {
+		return fmt.Errorf("write to %q is outside data directory %q", cleanPath, s.folder)
+	}
+	return atomicWriteFile(cleanPath, data, perm)
+}
+
 func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
-	// Canonicalise the path up front so CodeQL's taint-tracking recognises
-	// the sanitisation boundary here (callers already go through compPath
-	// which calls filepath.Clean, but the local clean keeps the analysis
-	// self-contained and prevents any residual path-traversal taint).
-	path = filepath.Clean(path)
 	dir, base := filepath.Split(path)
 	if dir == "" {
 		dir = "."
@@ -142,11 +151,14 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 // package can interop without a cross-package adapter.
 type writeFn func(path string, data []byte, perm fs.FileMode) error
 
-// directWrite is the default writeFn — straight-through delegate to
-// atomicWriteFile. Used by every non-transactional saver call site so
-// behaviour matches the pre-WAL world byte-for-byte.
-func directWrite(path string, data []byte, perm fs.FileMode) error {
-	return atomicWriteFile(path, data, perm)
+// directWrite is the default writeFn for non-transactional savers.
+// It validates that path is within the store's data folder (giving
+// CodeQL a verifiable sanitisation boundary) before delegating to
+// atomicWriteFile. Callers that currently pass the bare function name
+// as a writeFn argument must use `s.directWrite` (a method value) so
+// the Store receiver is captured.
+func (s *Store) directWrite(path string, data []byte, perm fs.FileMode) error {
+	return s.atomicWrite(path, data, perm)
 }
 
 // syncDir opens dirPath and calls Sync() on the resulting directory

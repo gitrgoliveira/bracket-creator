@@ -117,7 +117,7 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 	if err != nil {
 		return err
 	}
-	return write(s.compPath(compID, teamLineupFilename), data, 0600)
+return write(s.compPath(compID, teamLineupFilename), data, 0600)
 }
 
 // SetTeamLineup validates and persists a lineup, replacing any prior
@@ -141,7 +141,7 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.setTeamLineupLocked(compID, lineup, teamSize, directWrite)
+	return s.setTeamLineupLocked(compID, lineup, teamSize, s.directWrite)
 }
 
 // setTeamLineupLocked applies the freeze-check + load-mutate-save dance
@@ -258,7 +258,7 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 		return ErrLineupLocked
 	}
 	delete(current, key)
-	return s.saveTeamLineupsLocked(compID, current, directWrite)
+	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
 
 // LockTeamLineupsForRound stamps LockedAt on every persisted lineup
@@ -277,7 +277,7 @@ func (s *Store) LockTeamLineupsForRound(compID string, round int, lockedAt time.
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.lockTeamLineupsForRoundLocked(compID, round, lockedAt, directWrite)
+	return s.lockTeamLineupsForRoundLocked(compID, round, lockedAt, s.directWrite)
 }
 
 // lockTeamLineupsForRoundLocked is the lock-free body of

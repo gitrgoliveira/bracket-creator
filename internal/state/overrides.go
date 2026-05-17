@@ -59,7 +59,7 @@ func (s *Store) saveOverridesLocked(compID string, o *Overrides) error {
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(s.compPath(compID, "overrides.json"), data, 0600)
+	return s.atomicWrite(s.compPath(compID, "overrides.json"), data, 0600)
 }
 
 // modifyOverridesChanged loads, mutates, and saves overrides under a single

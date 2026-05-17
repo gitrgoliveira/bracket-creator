@@ -75,7 +75,7 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.saveBracketLocked(compID, b, directWrite)
+	return s.saveBracketLocked(compID, b, s.directWrite)
 }
 
 // loadBracketLocked reads the bracket directly from disk WITHOUT
@@ -121,7 +121,7 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) erro
 		return err
 	}
 
-	if err := write(path, data, 0600); err != nil {
+if err := write(path, data, 0600); err != nil {
 		return err
 	}
 
@@ -171,7 +171,7 @@ func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error 
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.updateBracketLocked(compID, mutate, directWrite)
+	return s.updateBracketLocked(compID, mutate, s.directWrite)
 }
 
 // updateBracketLocked is the lock-free body of UpdateBracket. Caller

@@ -85,7 +85,7 @@ func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]do
 	if err != nil {
 		return err
 	}
-	return write(s.compPath(compID, competitorStatusFilename), data, 0600)
+return write(s.compPath(compID, competitorStatusFilename), data, 0600)
 }
 
 // SetCompetitorStatus persists a status entry, replacing any prior
@@ -102,7 +102,7 @@ func (s *Store) SetCompetitorStatus(compID string, status domain.CompetitorStatu
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.setCompetitorStatusLocked(compID, status, directWrite)
+	return s.setCompetitorStatusLocked(compID, status, s.directWrite)
 }
 
 // setCompetitorStatusLocked applies the load-mutate-save dance without

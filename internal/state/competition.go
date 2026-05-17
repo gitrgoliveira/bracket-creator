@@ -85,7 +85,7 @@ func (s *Store) SaveCompetitionChanged(c *Competition) (bool, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.saveCompetitionChangedLocked(c, directWrite)
+	return s.saveCompetitionChangedLocked(c, s.directWrite)
 }
 
 func (s *Store) SaveCompetition(c *Competition) error {
@@ -159,7 +159,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 		return false, nil
 	}
 
-	if err := write(path, newData, 0600); err != nil {
+if err := write(path, newData, 0600); err != nil {
 		return false, err
 	}
 
@@ -242,7 +242,7 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	// we're locking on. Caller may have constructed a new record
 	// without setting ID.
 	desired.ID = id
-	return s.saveCompetitionChangedLocked(desired, directWrite)
+	return s.saveCompetitionChangedLocked(desired, s.directWrite)
 }
 
 func (s *Store) DeleteCompetition(id string) error {

@@ -160,7 +160,7 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 		return err
 	}
 
-	if err := atomicWriteFile(path, buf.Bytes(), 0600); err != nil {
+	if err := s.atomicWrite(path, buf.Bytes(), 0600); err != nil {
 		return err
 	}
 
@@ -302,7 +302,7 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.savePoolMatchesLocked(compID, results, directWrite)
+	return s.savePoolMatchesLocked(compID, results, s.directWrite)
 }
 
 // savePoolMatchesLocked persists results to disk and refreshes the cache.
@@ -365,7 +365,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 		return err
 	}
 
-	if err := write(path, buf.Bytes(), 0600); err != nil {
+if err := write(path, buf.Bytes(), 0600); err != nil {
 		return err
 	}
 
@@ -405,7 +405,7 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.updatePoolMatchByIDLocked(compID, matchID, mutate, directWrite)
+	return s.updatePoolMatchByIDLocked(compID, matchID, mutate, s.directWrite)
 }
 
 // updatePoolMatchByIDLocked is the lock-free body of

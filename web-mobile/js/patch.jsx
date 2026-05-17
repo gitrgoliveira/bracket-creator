@@ -106,6 +106,60 @@ function recomputeQueuePositions(matches) {
 // bracket.rounds plus seed/participant lists. A full refetch is cheaper
 // to reason about and matches what the existing match_updated path does
 // after applying the partial patch.
+// T217 / A2 — SSE ordering gap detection. The backend stamps every
+// envelope with a strictly-monotonic `seq` (T215) and retains the last
+// N events for replay-on-reconnect (T216). The frontend tracks the
+// highest seq seen and reacts on three conditions:
+//
+//   - seq === lastSeq + 1 → normal forward progress; advance and apply.
+//   - seq <= lastSeq      → duplicate (typically a replayed event from
+//                           a reconnect); drop silently to avoid
+//                           re-applying a patch we've already merged.
+//   - seq > lastSeq + 1   → gap detected (one or more events lost
+//                           between the last live event and this one).
+//                           Fire `onGap(missingRange)` so the caller
+//                           can trigger a full refetch of the affected
+//                           scope. We still apply the current patch
+//                           since it's authoritative.
+//
+// The first event seen on a fresh subscription is always accepted (no
+// `+ 1` check against the implicit zero) so initial load doesn't burn
+// a false-positive gap on connect.
+//
+// `state` is an opaque object provided by the caller; we store and
+// mutate `state.lastSeq` so multiple `applyPatchOrdered` calls share
+// a single counter. Decoupling from a module-level singleton makes the
+// helper safe to reuse across multiple competitions or test fixtures.
+function applyPatchOrdered(prev, event, state, onGap) {
+    if (!event || typeof event !== "object") return applyPatch(prev, event);
+    const incoming = typeof event.seq === "number" ? event.seq : null;
+    if (state && incoming != null) {
+        const last = typeof state.lastSeq === "number" ? state.lastSeq : 0;
+        if (last > 0 && incoming <= last) {
+            // Duplicate / replay — drop silently. We've already
+            // merged this seq's patch into `prev`; re-applying would
+            // be harmless but wastes a render.
+            return prev;
+        }
+        if (last > 0 && incoming > last + 1) {
+            // Gap. Fire the callback with the missing range so the
+            // caller can refetch. Still apply the current patch so
+            // the user sees the latest known state immediately.
+            if (typeof onGap === "function") {
+                try {
+                    onGap({ from: last + 1, to: incoming - 1 });
+                } catch (err) {
+                    // The console.error here is intentional: a thrown
+                    // callback shouldn't break SSE processing.
+                    console.error("SSE gap callback failed:", err);
+                }
+            }
+        }
+        state.lastSeq = incoming;
+    }
+    return applyPatch(prev, event);
+}
+
 function applyPatch(prev, event) {
     if (event && event.type === "competitor_status_updated" && event.data) {
         // Fire-and-forget; bail out early so the result/results plumbing
@@ -177,4 +231,4 @@ function applyPatch(prev, event) {
     return changed ? next : prev;
 }
 
-export { applyPatch, recomputeQueuePositions };
+export { applyPatch, applyPatchOrdered, recomputeQueuePositions };

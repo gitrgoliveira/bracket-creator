@@ -275,7 +275,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         : !!(promoted && promoted.competition && promoted.competition.withZekkenName);
 
     return (
-        <div className="tvd" style={{
+        <div className="tvd" data-testid="tv-display-root" style={{
             position: 'fixed', inset: 0,
             background: '#0b0d12', color: '#fff',
             display: 'flex', flexDirection: 'column',
@@ -567,7 +567,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                     No active courts
                 </div>
             ) : (
-                <div style={{
+                <div data-testid="lobby-display-grid" style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
                     gap: 16,
@@ -762,7 +762,7 @@ function StreamingOverlay({ court, position, competitions }) {
     const compName = comp?.name || '';
 
     return (
-        <div className="streaming-overlay" style={{
+        <div className="streaming-overlay" data-testid="streaming-overlay-root" style={{
             position: 'fixed',
             left: '6%', right: '6%',
             bottom: pos === 'top' ? 'auto' : '6%',

@@ -189,7 +189,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   }
 
   return (
-    <div className="page" style={{ padding: 24, maxWidth: 640 }}>
+    <div className="page" data-testid="lineup-form-root" style={{ padding: 24, maxWidth: 640 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
@@ -231,6 +231,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                   : p.label}
               </span>
               <select
+                data-testid={`lineup-position-${p.key}`}
                 className="input"
                 value={values[p.key] || ""}
                 disabled={isLocked || saving}

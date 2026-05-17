@@ -267,7 +267,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
         </div>
 
         <div className="tw-sched">
-          <div className="tw-sched__filters">
+          <div className="tw-sched__filters" data-testid="admin-schedule-court-filter">
             <window.PlayerMultiFilter tournament={tournament} picked={picked} setPicked={setPicked} dojoText={dojoText} setDojoText={setDojoText} />
             <select className="input" style={{ width: "auto", minWidth: 200 }} value={compFilter} onChange={(e) => setCompFilter(e.target.value)}>
               <option value="all">All competitions</option>
@@ -301,7 +301,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
             <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{courtFiltered.length} of {allMatches.length} matches</span>
           </div>
 
-          <div className="tw-courts">
+          <div className="tw-courts" data-testid="admin-schedule-list">
             {courts.map((cc) => {
               const list = byCourt[cc] || [];
               const liveOn = list.find((m) => m.status === "running");

@@ -99,7 +99,7 @@ class ErrorBoundary extends React.Component {
   }
   render() {
     if (this.state.error) {
-      return React.createElement('div', { className: 'page', style: { padding: 24 } },
+      return React.createElement('div', { className: 'page', 'data-testid': 'error-boundary-banner', style: { padding: 24 } },
         React.createElement('div', { className: 'card card--pad-lg' },
           React.createElement('h2', null, 'Something went wrong'),
           React.createElement('p', { style: { color: 'var(--ink-3)', marginBottom: 16 } },

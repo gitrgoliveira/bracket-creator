@@ -240,8 +240,10 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
 
 // Reusable foul counter: independent +/- buttons per side with clear labeling
 function FoulCounter({ label, fouls, setFouls, color, hansokuPts }) {
+  // color is "shiro" or "aka" — surface as data-testid so Playwright probes
+  // (T023a) can target each side without depending on the className.
   return (
-    <div className={`foul-counter foul-counter--${color}`}>
+    <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
       <div className="foul-counter__label">{label} Fouls</div>
       <div className="foul-counter__controls">
         <button className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(f => Math.max(0, f - 1))} disabled={fouls === 0}>−</button>
@@ -518,7 +520,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   }, []); // listener registered once; reads fresh state via kbRef
 
   return (
-    <div className="modal-backdrop" onClick={handleDismiss}>
+    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
       <div className="editor-modal editor-modal--lg" onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
@@ -547,6 +549,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           <div className="encho-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
               <input
+                data-testid="scoring-modal-encho-toggle"
                 type="checkbox"
                 checked={enchoPeriodCount > 0}
                 onChange={(e) => setEnchoPeriodCount(e.target.checked ? Math.max(1, enchoPeriodCount) : 0)}
@@ -642,10 +645,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           {!withdrawnPlayer && !decisionPromptKind && (
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
-              <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
+              <button data-testid="scoring-modal-kiken-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
                 <TermAS name="kiken">Kiken</TermAS>
               </button>
-              <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
+              <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
                 <TermAS name="fusenpai">Fusenpai</TermAS>
               </button>
               {/* Per-bout fusensho is a sub-match concept — implemented inside
@@ -1063,7 +1066,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   ];
 
   return (
-    <div className="modal-backdrop" onClick={handleDismiss}>
+    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
       <div className="editor-modal editor-modal--team" onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
@@ -1088,6 +1091,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           <div className="encho-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
               <input
+                data-testid="scoring-modal-encho-toggle"
                 type="checkbox"
                 checked={enchoPeriodCount > 0}
                 onChange={(e) => setEnchoPeriodCount(e.target.checked ? Math.max(1, enchoPeriodCount) : 0)}
@@ -1267,7 +1271,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                           ))}
                         </div>
                         {/* Independent foul counter */}
-                        <div className="tsm-fouls">
+                        <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                           <span className="tsm-fouls__label">{rs.label} Fouls</span>
                           <div className="tsm-fouls__controls">
                             <button className="tsm-fouls__btn" onClick={() => rs.setFouls(f => Math.max(0, f - 1))} disabled={rs.fouls === 0}>−</button>
@@ -1282,6 +1286,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                             score but clear the fusensho flag. */}
                         <div className="tsm-fusensho" style={{ marginTop: 4 }}>
                           <button
+                            data-testid="scoring-modal-fusensho-button"
                             type="button"
                             className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
                             onClick={() => setFusenshoFor(idx, rs.key)}
@@ -1368,7 +1373,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 <div style={{ fontSize: 12, fontWeight: 700 }}>Match tied on IV and PW</div>
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to break the tie. Each side picks one eligible competitor; the bout is scored like any other sub-match.</div>
                 <div>
-                  <button type="button" className="btn btn--primary btn--sm" onClick={onDaihyosen} disabled={daihyosenBusy}>
+                  <button data-testid="scoring-modal-daihyosen-button" type="button" className="btn btn--primary btn--sm" onClick={onDaihyosen} disabled={daihyosenBusy}>
                     {daihyosenBusy ? "Adding…" : <>Add <TermAS name="daihyosen">daihyosen</TermAS></>}
                   </button>
                 </div>
@@ -1385,10 +1390,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           {!withdrawnPlayer && !decisionPromptKind && (
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Team decision:</span>
-              <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
+              <button data-testid="scoring-modal-kiken-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
                 <TermAS name="kiken">Kiken</TermAS>
               </button>
-              <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
+              <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
                 <TermAS name="fusenpai">Fusenpai</TermAS>
               </button>
               <span style={{ color: "var(--ink-3)", fontSize: 11, marginLeft: 4 }}>

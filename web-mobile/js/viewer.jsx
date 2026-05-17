@@ -546,7 +546,7 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
 function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, onMatchClick }) {
   if (!followedPlayer || !followedPlayer.id) {
     return (
-      <div className="card" style={{ marginBottom: 16, padding: 14 }}>
+      <div className="card" data-testid="viewer-home-mymatch" style={{ marginBottom: 16, padding: 14 }}>
         <div className="section-title" style={{ marginTop: 0 }}>Find my matches</div>
         <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
           Pick a participant — we'll surface their next match and highlight them across the schedule.
@@ -578,7 +578,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 
   if (!nextMatch) {
     return (
-      <div className="card" style={{ marginBottom: 16, padding: 14 }}>
+      <div className="card" data-testid="viewer-home-mymatch" style={{ marginBottom: 16, padding: 14 }}>
         {header}
         <div style={{ fontSize: 13, color: "var(--ink-3)" }}>All your matches are completed.</div>
       </div>
@@ -591,7 +591,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
 
   return (
-    <div className="my-match" style={{ marginBottom: 16 }}>
+    <div className="my-match" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
       {header}
       <div className="my-match__lbl">Your next match</div>
       <div className="my-match__name">{followedPlayer.name}</div>
@@ -643,7 +643,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
   }, [tournament]);
 
   return (
-    <div className="card" style={{ marginBottom: 16, padding: 14 }}>
+    <div className="card" data-testid="viewer-home-watchlist" style={{ marginBottom: 16, padding: 14 }}>
       <div className="section-title" style={{ marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
         <span>Watchlist</span>
         {watchlist.length > 0 && (
@@ -710,7 +710,7 @@ function DisplayModes({ tournament }) {
   return (
     <>
       <div className="section-title" style={{ marginTop: 20 }}>Display modes</div>
-      <div className="vlist">
+      <div className="vlist" data-testid="viewer-home-display-modes">
         {courts.map((cc) => (
           <a
             key={cc}

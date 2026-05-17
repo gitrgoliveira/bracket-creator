@@ -162,6 +162,7 @@ function Term({ name, children, nested }) {
       ref: wrapperRef,
       tabIndex: 0,
       className: wrapClassWithOpen,
+      'data-testid': 'term-wrapper',
       'aria-describedby': tooltipId,
       onClick: handleClick,
       onBlur: handleBlur,

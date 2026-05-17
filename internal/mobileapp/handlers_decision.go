@@ -152,17 +152,21 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			case errors.As(engErr, &alreadyIneligErr):
 				// T105/CHK047: concurrent kiken — another operator already
 				// recorded ineligibility for this player on a different match.
+				// U1: reasonHuman carries the volunteer-readable gloss
+				// alongside the raw kendo-term reason.
 				c.JSON(http.StatusConflict, gin.H{
-					"error":    "already_ineligible",
-					"playerId": alreadyIneligErr.PlayerID,
-					"matchId":  alreadyIneligErr.MatchID,
-					"reason":   alreadyIneligErr.Reason,
+					"error":       "already_ineligible",
+					"playerId":    alreadyIneligErr.PlayerID,
+					"matchId":     alreadyIneligErr.MatchID,
+					"reason":      alreadyIneligErr.Reason,
+					"reasonHuman": domain.ResolveReasonHuman(alreadyIneligErr.Reason),
 				})
 			case errors.As(engErr, &ineligErr):
 				c.JSON(http.StatusConflict, gin.H{
-					"error":    "ineligible_competitor",
-					"playerId": ineligErr.PlayerID,
-					"reason":   ineligErr.Reason,
+					"error":       "ineligible_competitor",
+					"playerId":    ineligErr.PlayerID,
+					"reason":      ineligErr.Reason,
+					"reasonHuman": domain.ResolveReasonHuman(ineligErr.Reason),
 				})
 			case errors.Is(engErr, engine.ErrDecisionLocked):
 				c.JSON(http.StatusConflict, gin.H{

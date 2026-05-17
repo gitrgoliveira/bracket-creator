@@ -436,20 +436,25 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		if engErr != nil {
 			var ineligErr *engine.IneligibleCompetitorError
 			if errors.As(engErr, &ineligErr) {
+				// U1: reasonHuman alongside the raw kendo-term reason
+				// so operator UIs can show "withdrew from match m_12"
+				// instead of "kiken at m_12".
 				c.JSON(http.StatusConflict, gin.H{
-					"error":    "ineligible_competitor",
-					"playerId": ineligErr.PlayerID,
-					"reason":   ineligErr.Reason,
+					"error":       "ineligible_competitor",
+					"playerId":    ineligErr.PlayerID,
+					"reason":      ineligErr.Reason,
+					"reasonHuman": domain.ResolveReasonHuman(ineligErr.Reason),
 				})
 				return
 			}
 			var alreadyIneligErr *engine.AlreadyIneligibleError
 			if errors.As(engErr, &alreadyIneligErr) {
 				c.JSON(http.StatusConflict, gin.H{
-					"error":    "already_ineligible",
-					"playerId": alreadyIneligErr.PlayerID,
-					"matchId":  alreadyIneligErr.MatchID,
-					"reason":   alreadyIneligErr.Reason,
+					"error":       "already_ineligible",
+					"playerId":    alreadyIneligErr.PlayerID,
+					"matchId":     alreadyIneligErr.MatchID,
+					"reason":      alreadyIneligErr.Reason,
+					"reasonHuman": domain.ResolveReasonHuman(alreadyIneligErr.Reason),
 				})
 				return
 			}

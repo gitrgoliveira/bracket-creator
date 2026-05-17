@@ -3,6 +3,18 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+// Term — kendo-glossary tooltip wrapper. Read lazily off window so the
+// load order between glossary.js and this module doesn't matter (both
+// are type="module" scripts and may execute in any order). Falls back
+// to a plain pass-through when window.Term isn't available yet (e.g.
+// vitest harness, or pre-mount of the glossary module).
+function TermAS(props) {
+  if (typeof window !== 'undefined' && window.Term) {
+    return React.createElement(window.Term, props, props.children);
+  }
+  return React.createElement('span', null, props.children);
+}
+
 // T093–T098: shared helpers for the decision (kiken/fusenpai/fusensho) flow.
 //
 // Resolve the password to use for the /decision POST. The modal historically
@@ -61,10 +73,14 @@ function prevEnchoPeriod(current) {
 function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, onSubmit, submitting }) {
   const [side, setSide] = useStateA(defaultSide || "shiro");
   const [reason, setReason] = useStateA("");
-  const title =
-    kind === "kiken" ? "Kiken (withdrawal)" :
-    kind === "fusenpai" ? "Fusenpai (default loss)" :
-    "Decision";
+  // Display rule (locked, glossary.md §Display rule): render the
+  // romaji term ALONE — the popover (via <Term>) carries the gloss.
+  // We keep "Decision" untouched (it's already plain English) and
+  // wrap the kendo terms so a volunteer hovering/tapping the title
+  // gets the full tooltip.
+  const title = (kind === "kiken" || kind === "fusenpai")
+    ? React.createElement(TermAS, { name: kind }, kind === "kiken" ? "Kiken" : "Fusenpai")
+    : "Decision";
 
   const submit = (e) => {
     e?.preventDefault?.();
@@ -80,11 +96,11 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
         <div style={{ display: "flex", gap: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <input type="radio" name="decision-side" value="shiro" checked={side === "shiro"} onChange={() => setSide("shiro")} />
-            <span>SHIRO (White){sideB?.name ? ` — ${sideB.name}` : ""}</span>
+            <span><TermAS name="shiro">SHIRO</TermAS> (White){sideB?.name ? ` — ${sideB.name}` : ""}</span>
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <input type="radio" name="decision-side" value="aka" checked={side === "aka"} onChange={() => setSide("aka")} />
-            <span>AKA (Red){sideA?.name ? ` — ${sideA.name}` : ""}</span>
+            <span><TermAS name="aka">AKA</TermAS> (Red){sideA?.name ? ` — ${sideA.name}` : ""}</span>
           </label>
         </div>
         {askReason && (
@@ -511,7 +527,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               {enchoPeriodCount > 0 && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
             <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, letterSpacing: "-0.01em" }}>
-              Shiaijo {m.court} · {m.scheduledAt || "Live"}
+              <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Live"}
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -535,7 +551,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                 checked={enchoPeriodCount > 0}
                 onChange={(e) => setEnchoPeriodCount(e.target.checked ? Math.max(1, enchoPeriodCount) : 0)}
               />
-              Encho started (overtime)
+              <TermAS name="encho">Encho</TermAS> started (overtime)
             </label>
             {enchoPeriodCount > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -627,16 +643,16 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
               <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
-                Kiken
+                <TermAS name="kiken">Kiken</TermAS>
               </button>
               <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
-                Fusenpai
+                <TermAS name="fusenpai">Fusenpai</TermAS>
               </button>
               {/* Per-bout fusensho is a sub-match concept — implemented inside
                   TeamScoreEditorModal. This placeholder explains the affordance
                   to operators who open the individual-match editor. */}
               <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
-                Fusensho (team only)
+                <TermAS name="fusensho">Fusensho</TermAS> (team only)
               </button>
             </div>
           )}
@@ -715,6 +731,7 @@ const TEAM_POSITIONS = Array.from({ length: window.MAX_TEAM_SIZE }, (_, i) => St
 // independently and admin_lineup.jsx may not be present in older
 // builds). The mapping mirrors POS_LABELS_5 in admin_lineup.jsx.
 const POS_LABELS_BY_INDEX_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
+const POS_TERM_BY_LABEL_5 = { Senpo: "senpo", Jiho: "jiho", Chuken: "chuken", Fukusho: "fukusho", Taisho: "taisho" };
 function positionLabelFor(teamSize, index, sub) {
   if (sub && sub.position && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) {
     // Backend may emit a name string in Position for non-5 sizes once
@@ -723,6 +740,15 @@ function positionLabelFor(teamSize, index, sub) {
   }
   if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_BY_INDEX_5[index];
   return `Match ${index + 1}`;
+}
+
+// renderPositionLabel — wrap a known FIK position label in <Term> so
+// the team scoring modal's bout headings carry the gloss. Falls back to
+// the plain string for non-FIK labels ("Match 3", etc.).
+function renderPositionLabel(label) {
+  const termId = POS_TERM_BY_LABEL_5[label];
+  if (termId) return React.createElement(TermAS, { name: termId }, label);
+  return label;
 }
 
 function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
@@ -1046,7 +1072,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               {enchoPeriodCount > 0 && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
             <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, letterSpacing: "-0.01em" }}>
-              Shiaijo {m.court} · {m.scheduledAt || "Live"}
+              <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Live"}
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -1066,7 +1092,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 checked={enchoPeriodCount > 0}
                 onChange={(e) => setEnchoPeriodCount(e.target.checked ? Math.max(1, enchoPeriodCount) : 0)}
               />
-              Encho started (overtime)
+              <TermAS name="encho">Encho</TermAS> started (overtime)
             </label>
             {enchoPeriodCount > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -1135,7 +1161,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               isKachinuki && (
                 <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontWeight: 700 }}>Kachinuki (winner-stays)</span>
+                    <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner-stays)</span>
                     <span style={{ color: "var(--ink-3)" }}>
                       {exhausted
                         ? "One team exhausted — match ended."
@@ -1211,7 +1237,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                       for 5-person teams, "Match N" otherwise) comes from
                       positionLabelFor; player names are joined from the
                       team lineups when available. */}
-                  <span style={{ fontWeight: 700 }}>{posLabel}</span>
+                  <span style={{ fontWeight: 700 }}>{renderPositionLabel(posLabel)}</span>
                   {(playerAName || playerBName) && (
                     <span style={{ display: "block", fontSize: 11, color: "var(--ink-3)", fontWeight: 500, marginTop: 2 }}>
                       {playerBName || "?"} (SHIRO) vs {playerAName || "?"} (AKA)
@@ -1263,7 +1289,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                               ? `Click to clear fusensho on this bout (keeps the 2-0 score)`
                               : `Mark bout as fusensho — default win 2-0 to ${rs.label}`}
                           >
-                            {s.fusensho === rs.key ? "✓ Fusensho" : "Fusensho"}
+                            {s.fusensho === rs.key
+                              ? <>✓ <TermAS name="fusensho">Fusensho</TermAS></>
+                              : <TermAS name="fusensho">Fusensho</TermAS>}
                           </button>
                         </div>
                       </div>
@@ -1338,10 +1366,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             return (
               <div className="daihyosen-controls" style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12, padding: 12, border: "1px dashed var(--accent, #888)", borderRadius: 6, background: "var(--bg-2, #fafafa)" }}>
                 <div style={{ fontSize: 12, fontWeight: 700 }}>Match tied on IV and PW</div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Add a representative bout (daihyosen) to break the tie. Each side picks one eligible competitor; the bout is scored like any other sub-match.</div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to break the tie. Each side picks one eligible competitor; the bout is scored like any other sub-match.</div>
                 <div>
                   <button type="button" className="btn btn--primary btn--sm" onClick={onDaihyosen} disabled={daihyosenBusy}>
-                    {daihyosenBusy ? "Adding…" : "Add daihyosen"}
+                    {daihyosenBusy ? "Adding…" : <>Add <TermAS name="daihyosen">daihyosen</TermAS></>}
                   </button>
                 </div>
                 {daihyosenErr && (
@@ -1358,13 +1386,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Team decision:</span>
               <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
-                Kiken
+                <TermAS name="kiken">Kiken</TermAS>
               </button>
               <button type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
-                Fusenpai
+                <TermAS name="fusenpai">Fusenpai</TermAS>
               </button>
               <span style={{ color: "var(--ink-3)", fontSize: 11, marginLeft: 4 }}>
-                (Fusensho is per-bout — use the "Fusensho" button on each row above.)
+                (<TermAS name="fusensho">Fusensho</TermAS> is per-bout — use the "Fusensho" button on each row above.)
               </span>
             </div>
           )}

@@ -251,12 +251,16 @@ describe('positionsForSize', () => {
   // the lineup form + the team-scoring modal both consume.
 
   it('returns the canonical FIK 5-position labels for teamSize=5', () => {
+    // U1: each FIK position carries an optional `termId` so the label
+    // can be wrapped in a <Term> tooltip on render. Numeric sizes
+    // (positionsForSize(3) etc.) intentionally omit termId — there is
+    // no canonical kendo term for "Match 3".
     expect(positionsForSize(5)).toEqual([
-      { key: 'senpo', label: 'Senpo' },
-      { key: 'jiho', label: 'Jiho' },
-      { key: 'chuken', label: 'Chuken' },
-      { key: 'fukusho', label: 'Fukusho' },
-      { key: 'taisho', label: 'Taisho' },
+      { key: 'senpo', label: 'Senpo', termId: 'senpo' },
+      { key: 'jiho', label: 'Jiho', termId: 'jiho' },
+      { key: 'chuken', label: 'Chuken', termId: 'chuken' },
+      { key: 'fukusho', label: 'Fukusho', termId: 'fukusho' },
+      { key: 'taisho', label: 'Taisho', termId: 'taisho' },
     ]);
   });
 

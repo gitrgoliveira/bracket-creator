@@ -47,6 +47,10 @@
     <script type="module" src="/dist/router.js?v=5"></script>
     <script type="module" src="/dist/bracket.js?v=5"></script>
     <script type="module" src="/dist/ui.js?v=5"></script>
+    <!-- glossary_data.js is generated from internal/domain/glossary.go
+         via `go generate` (runs as part of `make go/build`). glossary.jsx
+         (compiled to dist/glossary.js) imports it via a relative path. -->
+    <script type="module" src="/dist/glossary.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>
     <script type="module" src="/dist/display.js?v=5"></script>
     <script type="module" src="/dist/admin_helpers.js?v=5"></script>

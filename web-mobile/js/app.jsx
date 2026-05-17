@@ -53,6 +53,12 @@ function parsePath(path) {
     if (path === "/schedule") {
       return { mode: "viewer", viewerScreen: "schedule" };
     }
+    // U1: /glossary — the kendo-term reference page (rendered by
+    // GlossaryPage from glossary.jsx). Public, no auth required;
+    // linked from viewer home as "Help / Glossary".
+    if (path === "/glossary") {
+      return { mode: "viewer", viewerScreen: "glossary" };
+    }
     return { mode: "viewer", viewerScreen: "home" };
 }
 
@@ -74,6 +80,7 @@ function pathFromState(m, vs, vcid, av) {
     }
     if (vcid) return `/competition/${vcid}`;
     if (vs === "schedule") return "/schedule";
+    if (vs === "glossary") return "/glossary";
     return "/";
 }
 
@@ -420,6 +427,13 @@ function App() {
           onBack={() => setViewerScreen("home")}
           tweaks={THEME}
         />
+      ) : viewerScreen === "glossary" ? (
+        // U1 /glossary: the kendo-term reference page. Lives in
+        // glossary.jsx; we mount it through window.GlossaryPage so
+        // the app.jsx render tree doesn't need a static import.
+        window.GlossaryPage
+          ? <window.GlossaryPage onBack={() => setViewerScreen("home")} />
+          : <div className="loading">Loading glossary…</div>
       ) : (
         <window.ViewerHome
           tournament={tournament}

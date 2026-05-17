@@ -20,6 +20,18 @@
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
+// TermD — kendo-glossary tooltip wrapper. Lazy lookup so the script
+// load order between glossary.jsx and display.jsx doesn't matter.
+// On TV/lobby surfaces (public, fullscreen) the popover provides a
+// gloss but operators rarely interact with these screens — the wrap
+// is more about consistency than discoverability. U1 / glossary.md.
+function TermD(props) {
+  if (typeof window !== 'undefined' && window.Term) {
+    return React.createElement(window.Term, props, props.children);
+  }
+  return React.createElement('span', null, props.children);
+}
+
 // Resolve a side's rendered label respecting competition.withZekkenName.
 // When the competition has zekken/display-name mode on, players use a short
 // stage name; otherwise we fall back to the canonical full name. Mirrors
@@ -332,7 +344,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '8vh', fontWeight: 700 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '2.5vh', opacity: 0.6 }}>SHIRO</div>
+                            <div style={{ fontSize: '2.5vh', opacity: 0.6 }}><TermD name="shiro">SHIRO</TermD></div>
                             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sideLabel(promoted.match.sideB, zekken)}</div>
                             {promoted.match.sideB?.dojo && (
                                 <div style={{ fontSize: '2.2vh', opacity: 0.55, fontWeight: 400, marginTop: '0.5vh' }}>
@@ -382,7 +394,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                             )}
                         </div>
                         <div style={{ flex: 1, textAlign: 'right', minWidth: 0 }}>
-                            <div style={{ fontSize: '2.5vh', opacity: 0.7, color: '#e63946' }}>AKA</div>
+                            <div style={{ fontSize: '2.5vh', opacity: 0.7, color: '#e63946' }}><TermD name="aka">AKA</TermD></div>
                             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sideLabel(promoted.match.sideA, zekken)}</div>
                             {promoted.match.sideA?.dojo && (
                                 <div style={{ fontSize: '2.2vh', opacity: 0.55, fontWeight: 400, marginTop: '0.5vh' }}>
@@ -398,12 +410,12 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     {allCompleted ? (
                         <>
                             <span style={{ fontSize: '6vh' }}>✓</span>
-                            <span>All matches completed on Shiaijo {court}</span>
+                            <span>All matches completed on <TermD name="shiaijo">Shiaijo</TermD> {court}</span>
                         </>
                     ) : noMatches ? (
                         <span>No matches scheduled</span>
                     ) : (
-                        <span>No live match on Shiaijo {court}</span>
+                        <span>No live match on <TermD name="shiaijo">Shiaijo</TermD> {court}</span>
                     )}
                 </div>
             )}
@@ -639,7 +651,7 @@ function LobbyCard({ court, tournament: _tournament, competitions }) {
                         fontSize: 22, fontWeight: 600,
                     }}>
                         <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            <div style={{ fontSize: 10, opacity: 0.55, letterSpacing: '0.2em' }}>SHIRO</div>
+                            <div style={{ fontSize: 10, opacity: 0.55, letterSpacing: '0.2em' }}><TermD name="shiro">SHIRO</TermD></div>
                             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sideLabel(promoted.match.sideB, zekken)}</div>
                         </div>
                         <div style={{
@@ -665,7 +677,7 @@ function LobbyCard({ court, tournament: _tournament, competitions }) {
                             )}
                         </div>
                         <div style={{ textAlign: 'right', color: '#ff8a86', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            <div style={{ fontSize: 10, opacity: 0.55, letterSpacing: '0.2em', color: '#e63946' }}>AKA</div>
+                            <div style={{ fontSize: 10, opacity: 0.55, letterSpacing: '0.2em', color: '#e63946' }}><TermD name="aka">AKA</TermD></div>
                             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sideLabel(promoted.match.sideA, zekken)}</div>
                         </div>
                     </div>
@@ -785,7 +797,7 @@ function StreamingOverlay({ court, position, competitions }) {
                     borderRadius: 4,
                     marginRight: 8,
                     verticalAlign: 'middle',
-                }}>SHIRO</span>
+                }}><TermD name="shiro">SHIRO</TermD></span>
                 <span style={{ fontWeight: 600, verticalAlign: 'middle' }}>{shiro}</span>
             </div>
             <div style={{
@@ -812,7 +824,7 @@ function StreamingOverlay({ court, position, competitions }) {
                     borderRadius: 4,
                     marginLeft: 8,
                     verticalAlign: 'middle',
-                }}>AKA</span>
+                }}><TermD name="aka">AKA</TermD></span>
             </div>
             {compName && (
                 <div style={{

@@ -4,6 +4,15 @@
 
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
+// TermBC — kendo-glossary tooltip wrapper. Lazy lookup so the script
+// load order between glossary.jsx and this module doesn't matter.
+function TermBC(props) {
+  if (typeof window !== 'undefined' && window.Term) {
+    return React.createElement(window.Term, props, props.children);
+  }
+  return React.createElement('span', null, props.children);
+}
+
 // Local hikiwake check — bracket.jsx is tested in isolation, so we don't rely
 // on window.isHikiwake here. See specs/openapi.yaml.
 function isHikiwakeBC(v) { return v === "hikiwake"; }
@@ -133,22 +142,22 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       aria-label={`Match ${match.id}`}
     >
       <div className="bc-match-meta">
-        <span className="bc-court">Shiaijo {match.court}</span>
+        <span className="bc-court"><TermBC name="shiaijo">Shiaijo</TermBC> {match.court}</span>
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
         {live ? <span className="bc-live">● LIVE</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
-        {match.encho?.periodCount > 0 ? <span className="bc-encho" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}>(E)</span> : null}
+        {match.encho?.periodCount > 0 ? <span className="bc-encho" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="encho">(E)</TermBC></span> : null}
         {/* T097: decision chip on bracket nodes. The score-line suffix already
             renders "Kiken/Fus./DH" via formatIpponsScore, but bracket cards
             print the score on the player rows (aScore/bScore) rather than in
             the meta row, so the bare ippon count there loses the decision.
             A chip in the meta keeps the operator and viewers oriented when
             scanning a wall of bracket cards. */}
-        {match.decision === "kiken" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}>Kiken</span> : null}
-        {match.decision === "fusenpai" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}>Fus.</span> : null}
-        {match.decision === "daihyosen" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}>DH</span> : null}
+        {match.decision === "kiken" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="kiken">Kiken</TermBC></span> : null}
+        {match.decision === "fusenpai" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="fusenpai">Fus.</TermBC></span> : null}
+        {match.decision === "daihyosen" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="daihyosen">DH</TermBC></span> : null}
       </div>
       <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} />
       <div className="bc-divider"></div>

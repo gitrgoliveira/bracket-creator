@@ -4,6 +4,16 @@
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
+
+// TermV — kendo-glossary tooltip wrapper. Lazy lookup so the script
+// load order between glossary.jsx and viewer.jsx doesn't matter.
+// U1 / glossary.md.
+function TermV(props) {
+  if (typeof window !== 'undefined' && window.Term) {
+    return React.createElement(window.Term, props, props.children);
+  }
+  return React.createElement('span', null, props.children);
+}
 // Canonical "match has both sides for real participants" predicate.
 // Replaces the local `m.sideA && m.sideB` shorthand that treated the
 // `{id:"",name:""}` placeholder from normalizeMatch as a real side —
@@ -436,6 +446,29 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               Up Next so a viewer who has already glanced at their next
               match can drop into the display mode they need. */}
           <DisplayModes tournament={t} />
+
+          {/* U1: link to the kendo glossary so volunteers (and
+              spectators new to kendo) can browse the term register
+              that the inline tooltips draw from. */}
+          <div className="vlist" style={{ marginTop: 12 }}>
+            <a
+              className="vlist-item vlist-item--row"
+              href="/glossary"
+              onClick={(e) => {
+                e.preventDefault();
+                if (window.AppRouter && window.AppRouter.route) window.AppRouter.route("/glossary");
+                else window.location.href = "/glossary";
+              }}
+              style={{ textDecoration: "none" }}
+            >
+              <span className="vlist-item__icon">📖</span>
+              <div className="vlist-item__rowbody">
+                <div className="vlist-item__rowtitle">Kendo glossary</div>
+                <div className="vlist-item__rowsub">Quick reference for scoring-table terms (Kiken, Hikiwake, Encho, etc.)</div>
+              </div>
+              <span className="vlist-item__rowchev">→</span>
+            </a>
+          </div>
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
@@ -569,7 +602,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
       <div className="my-match__row">
         <div className="my-match__chip">
           <span className="l">Court</span>
-          <span className="v">Shiaijo {nextMatch.court || "—"}</span>
+          <span className="v"><TermV name="shiaijo">Shiaijo</TermV> {nextMatch.court || "—"}</span>
         </div>
         <div className="my-match__chip">
           <span className="l">Time</span>
@@ -689,7 +722,7 @@ function DisplayModes({ tournament }) {
           >
             <span className="vlist-item__icon">📺</span>
             <div className="vlist-item__rowbody">
-              <div className="vlist-item__rowtitle">Shiaijo {cc} display</div>
+              <div className="vlist-item__rowtitle"><TermV name="shiaijo">Shiaijo</TermV> {cc} display</div>
               <div className="vlist-item__rowsub">Fullscreen board for a single court · opens in a new tab</div>
             </div>
             <span className="vlist-item__rowchev">→</span>
@@ -1005,7 +1038,7 @@ function MatchDetailCard({ match, onClose }) {
     <div className="match-detail-card">
       <div className="match-detail-card__head">
         <div className="match-detail-card__meta">
-          <span>Shiaijo {match.court}</span>
+          <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
           <span>·</span>
           <span>{match.phase === "pool" ? match.poolName : (match.round || "")}</span>
           {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
@@ -1101,7 +1134,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="my-match__row">
             <div className="my-match__chip">
               <span className="l">Court</span>
-              <span className="v">Shiaijo {myUpcoming.court}</span>
+              <span className="v"><TermV name="shiaijo">Shiaijo</TermV> {myUpcoming.court}</span>
             </div>
             <div className="my-match__chip">
               <span className="l">Time</span>
@@ -1904,7 +1937,7 @@ function MatchViewerModal({ match, onClose }) {
           <button className="btn btn--ghost btn--sm" onClick={onClose}>Close</button>
         </div>
         <div style={{ marginBottom: 16, fontSize: 13, color: "var(--ink-3)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Shiaijo {match.court} · {match.phase === "pool" ? match.poolName : match.round}</span>
+          <span><TermV name="shiaijo">Shiaijo</TermV> {match.court} · {match.phase === "pool" ? match.poolName : match.round}</span>
           <window.StatusBadge status={match.status} showLiveDot={match.status === "running"} />
         </div>
         
@@ -1967,7 +2000,7 @@ function MatchViewerModal({ match, onClose }) {
                </div>
             </div>
             {match.score?.type === "hantei" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
-            {match.score?.type === "hikiwake" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Draw (Hikiwake)</div>}
+            {match.score?.type === "hikiwake" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Draw (<TermV name="hikiwake">Hikiwake</TermV>)</div>}
             {match.score?.type === "bye" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>BYE</div>}
           </div>
         )}

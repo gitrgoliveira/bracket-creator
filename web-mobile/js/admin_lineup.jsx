@@ -23,14 +23,25 @@
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
+// Term — kendo-glossary tooltip wrapper. Lazy lookup so the script
+// load order between glossary.jsx and this module doesn't matter (both
+// are type="module" and execute asynchronously). U1 / glossary.md.
+function TermAL(props) {
+  if (typeof window !== 'undefined' && window.Term) {
+    return React.createElement(window.Term, props, props.children);
+  }
+  return React.createElement('span', null, props.children);
+}
+
 // Canonical FIK position order for 5-person teams. Numeric sizes use
-// "1".."N" generated below.
+// "1".."N" generated below. Each label carries an optional `termId` so
+// the renderer can wrap the label in a <Term> tooltip (U1).
 const POS_LABELS_5 = [
-  { key: "senpo", label: "Senpo" },
-  { key: "jiho", label: "Jiho" },
-  { key: "chuken", label: "Chuken" },
-  { key: "fukusho", label: "Fukusho" },
-  { key: "taisho", label: "Taisho" },
+  { key: "senpo", label: "Senpo", termId: "senpo" },
+  { key: "jiho", label: "Jiho", termId: "jiho" },
+  { key: "chuken", label: "Chuken", termId: "chuken" },
+  { key: "fukusho", label: "Fukusho", termId: "fukusho" },
+  { key: "taisho", label: "Taisho", termId: "taisho" },
 ];
 
 function positionsForSize(teamSize) {
@@ -189,7 +200,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           </h2>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>
             {teamSize}-person team
-            {comp?.teamMatchType === "kachinuki" && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· Kachinuki (winner-stays)</span>}
+            {comp?.teamMatchType === "kachinuki" && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· <TermAL name="kachinuki">Kachinuki</TermAL> (winner-stays)</span>}
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -214,7 +225,11 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {positions.map(p => (
             <label key={p.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>{p.label}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
+                {p.termId
+                  ? <TermAL name={p.termId}>{p.label}</TermAL>
+                  : p.label}
+              </span>
               <select
                 className="input"
                 value={values[p.key] || ""}

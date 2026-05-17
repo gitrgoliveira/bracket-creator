@@ -4370,3 +4370,144 @@ a:hover {
   font-size: 14px;
 }
 
+/* ----------------------------------------------------------------------
+   Kendo glossary — <Term> tooltip + /glossary page.
+   Slice U1 (003-tournament-gap-closure). See web-mobile/js/glossary.jsx
+   for the React component; see internal/domain/glossary.go for the
+   underlying dictionary.
+   ---------------------------------------------------------------------- */
+
+/* Term wrapper — the wrapped kendo word. Dotted underline signals
+   "hover me for context" without screaming. cursor: help works on
+   pointer devices; touch users get a tap-to-toggle popover. */
+.tw-term {
+  position: relative;
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+  display: inline;
+}
+.tw-term:focus-visible {
+  outline: 2px solid var(--accent, #1d3557);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+/* Nested terms inside a tooltip — softer style so the parent popover
+   stays readable when several cross-refs sit in one definition. */
+.tw-term--nested {
+  border-bottom-style: dashed;
+  opacity: 0.92;
+}
+
+/* Tooltip body — always in the DOM (role="tooltip" for screen readers),
+   hidden visually by default. Visibility flips on hover, focus, or the
+   tap-toggled open state. Positioned below the term; width capped so
+   wrapping stays readable on mobile. */
+.tw-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 200;
+  min-width: 220px;
+  max-width: 320px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--bg, #fff);
+  border: 1px solid var(--line, #ddd);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  color: var(--ink-1, #111);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: default;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 100ms ease-in;
+  pointer-events: none;
+}
+.tw-term:hover > .tw-tooltip,
+.tw-term:focus-within > .tw-tooltip,
+.tw-tooltip--open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tw-tooltip__kanji {
+  font-weight: 700;
+  color: var(--ink-2, #555);
+}
+.tw-tooltip__short {
+  font-weight: 700;
+}
+.tw-tooltip__body {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-2, #444);
+}
+
+@media (max-width: 480px) {
+  .tw-tooltip {
+    /* Anchor to the right side on narrow viewports to avoid clipping
+       past the screen edge for terms near the right margin. */
+    left: auto;
+    right: 0;
+    max-width: 280px;
+  }
+}
+
+/* /glossary viewer page. Lives inside the viewer shell (uses .viewer +
+   .section-title + .btn classes already defined above). */
+.glossary-tier {
+  margin-bottom: 24px;
+}
+.glossary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+.glossary-entry {
+  padding: 12px 14px;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 8px;
+  background: var(--bg, #fff);
+}
+.glossary-entry__head {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.glossary-entry__romaji {
+  font-weight: 700;
+  color: var(--ink-1, #111);
+}
+.glossary-entry__kanji {
+  color: var(--ink-2, #555);
+  font-weight: 600;
+}
+.glossary-entry__short {
+  color: var(--ink-3, #777);
+  font-style: italic;
+}
+.glossary-entry__tooltip {
+  margin: 6px 0 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2, #444);
+}
+.glossary-entry__see {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-3, #777);
+}
+.glossary-entry__see a {
+  color: var(--accent, #1d3557);
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+}
+.glossary-entry__see a:hover {
+  border-bottom-style: solid;
+}
+

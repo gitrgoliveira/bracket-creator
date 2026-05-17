@@ -284,7 +284,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
                 fires its history listeners (useQuery re-renders). */}
             {effectiveCourt && (
               <span className="bc-court-badge" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "4px 10px", borderRadius: 14, background: "var(--bg-2, #eef2f7)", fontSize: 12, fontWeight: 600 }}>
-                Showing Shiaijo {effectiveCourt}
+                Showing {window.Term ? React.createElement(window.Term, { name: "shiaijo" }, "Shiaijo") : "Shiaijo"} {effectiveCourt}
                 <button
                   className="btn btn--ghost btn--sm"
                   style={{ padding: "0 6px", fontSize: 11, fontWeight: 500 }}

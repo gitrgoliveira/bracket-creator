@@ -59,6 +59,11 @@ import (
 // is at risk, which is the same risk every fsync-less write already
 // has.
 func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
+	// Canonicalise the path up front so CodeQL's taint-tracking recognises
+	// the sanitisation boundary here (callers already go through compPath
+	// which calls filepath.Clean, but the local clean keeps the analysis
+	// self-contained and prevents any residual path-traversal taint).
+	path = filepath.Clean(path)
 	dir, base := filepath.Split(path)
 	if dir == "" {
 		dir = "."

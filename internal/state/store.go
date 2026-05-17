@@ -103,7 +103,7 @@ func (s *Store) init() error {
 	// shouldn't block startup if the rest are healthy. The
 	// alternative (refuse to start) would brick a tournament over
 	// a single bad intent file.
-	pending, err := wal.Scan(s.walDir, directWriteWAL)
+	pending, err := wal.Scan(s.walDir, s.directWriteWAL)
 	if err != nil {
 		// Scan only errors on broken ReadDir; treat as "no WAL to
 		// replay" but log so the operator notices.

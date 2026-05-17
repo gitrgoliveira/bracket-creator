@@ -172,7 +172,7 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	// Begin a fresh WAL for this transaction. The WAL has no on-disk
 	// footprint until Commit runs; if fn returns an error we just
 	// drop the in-memory intents and return.
-	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), directWriteWAL)
+	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), s.directWriteWAL)
 	if err != nil {
 		return fmt.Errorf("WithTransaction %q: BeginTx: %w", compID, err)
 	}
@@ -240,11 +240,16 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 
 // directWriteWAL is the WriteFn the WAL uses for both its OWN file
 // (during Commit) and the target files (during Apply). Both go
-// through atomicWriteFile so the same write-tmp + fsync + rename
-// dance the rest of the package uses applies to the intent log AND
-// to the final writes.
-func directWriteWAL(path string, data []byte, perm os.FileMode) error {
-	return atomicWriteFile(path, data, perm)
+// through Store.atomicWrite — which validates that the path stays
+// inside the store's data folder before delegating to
+// atomicWriteFile — so the WAL writes inherit the same write-tmp +
+// fsync + rename dance AND the same path-injection sanitiser the
+// rest of the package uses. Routing through s.atomicWrite (rather
+// than calling atomicWriteFile directly) keeps the CodeQL
+// path-injection analysis happy: the sanitiser is visible at every
+// caller boundary.
+func (s *Store) directWriteWAL(path string, data []byte, perm os.FileMode) error {
+	return s.atomicWrite(path, data, perm)
 }
 
 // invalidateCachesForWALIntents zeroes out the file caches the

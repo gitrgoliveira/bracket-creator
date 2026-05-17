@@ -42,6 +42,17 @@ func (s *Store) loadCompetitorStatusLocked(compID string) (map[string]domain.Com
 		}
 		return nil, err
 	}
+	return parseCompetitorStatusBytes(data)
+}
+
+// parseCompetitorStatusBytes parses competitor-status.yaml from
+// in-memory bytes. Used by tx-internal read-your-own-writes
+// (storeTx LoadCompetitorStatus). Empty input → empty map, matching
+// the "file does not exist" contract.
+func parseCompetitorStatusBytes(data []byte) (map[string]domain.CompetitorStatus, error) {
+	if len(data) == 0 {
+		return map[string]domain.CompetitorStatus{}, nil
+	}
 	var file competitorStatusFile
 	if err := yaml.Unmarshal(data, &file); err != nil {
 		return nil, err
@@ -53,7 +64,11 @@ func (s *Store) loadCompetitorStatusLocked(compID string) (map[string]domain.Com
 	return out, nil
 }
 
-func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]domain.CompetitorStatus) error {
+// saveCompetitorStatusLocked persists the status map. Caller MUST
+// hold the per-comp write lock. The write parameter routes the
+// actual file write — directWrite for non-tx callers, WAL-capturing
+// writer for tx callers. See saveBracketLocked (T211/T212).
+func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]domain.CompetitorStatus, write writeFn) error {
 	if err := os.MkdirAll(s.compPath(compID), 0700); err != nil {
 		return err
 	}
@@ -70,7 +85,7 @@ func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]do
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(s.compPath(compID, competitorStatusFilename), data, 0600)
+	return write(s.compPath(compID, competitorStatusFilename), data, 0600)
 }
 
 // SetCompetitorStatus persists a status entry, replacing any prior
@@ -87,7 +102,7 @@ func (s *Store) SetCompetitorStatus(compID string, status domain.CompetitorStatu
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.setCompetitorStatusLocked(compID, status)
+	return s.setCompetitorStatusLocked(compID, status, directWrite)
 }
 
 // setCompetitorStatusLocked applies the load-mutate-save dance without
@@ -96,8 +111,9 @@ func (s *Store) SetCompetitorStatus(compID string, status domain.CompetitorStatu
 //
 // status.Validate() is still re-run here so the lock-free path is just
 // as safe as the public method when called from a transaction body —
-// callers don't have to remember to validate before invoking.
-func (s *Store) setCompetitorStatusLocked(compID string, status domain.CompetitorStatus) error {
+// callers don't have to remember to validate before invoking. The
+// write parameter routes the save (T211/T212).
+func (s *Store) setCompetitorStatusLocked(compID string, status domain.CompetitorStatus, write writeFn) error {
 	if err := status.Validate(); err != nil {
 		return err
 	}
@@ -109,5 +125,5 @@ func (s *Store) setCompetitorStatusLocked(compID string, status domain.Competito
 		status.RecordedAt = time.Now().UTC()
 	}
 	current[status.PlayerID] = status
-	return s.saveCompetitorStatusLocked(compID, current)
+	return s.saveCompetitorStatusLocked(compID, current, write)
 }

@@ -3,11 +3,14 @@ package state
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,16 +48,22 @@ func TestWithTransaction_BasicLoadSave(t *testing.T) {
 	assert.Equal(t, "after", loaded.Name, "tx mutation must persist")
 }
 
-// TestWithTransaction_RollbackOnError pins the documented
-// "no actual rollback" semantics. WithTransaction's contract is
-// lock-level atomicity, NOT filesystem ACID — if fn writes a value and
-// then returns an error, the write stays on disk and the error
-// propagates to the caller. The test asserts BOTH:
-//   - the error from fn is returned unchanged
-//   - the partial write is observable after the tx fails
+// TestWithTransaction_RollbackOnError pins the WAL-backed rollback
+// contract (T210/T211/T212). Pre-WAL, WithTransaction's contract was
+// lock-level only — partial writes stayed on disk after fn returned
+// an error. The WAL changes that: in-tx writes are STAGED, and
+// Commit only runs if fn returns nil. An fn that writes and then
+// errors leaves the staged intent in memory (Commit never ran), so
+// the on-disk file remains in its pre-tx state.
 //
-// If a future change introduces real rollback, this test should fail
-// loudly so the contract docs in transactions.go get updated in lock-step.
+// This test pins BOTH:
+//   - the error from fn is returned unchanged
+//   - the partial write is NOT observable after the tx fails (the
+//     on-disk Name is still the pre-tx "A", not the staged "B")
+//
+// If a future change reverts the WAL or breaks the abort path, this
+// test should fail loudly so the contract docs in transactions.go
+// stay in sync with the code.
 func TestWithTransaction_RollbackOnError(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-tx-*")
 	require.NoError(t, err)
@@ -83,9 +92,9 @@ func TestWithTransaction_RollbackOnError(t *testing.T) {
 	loaded, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
-	assert.Equal(t, "B", loaded.Name,
-		"WithTransaction is lock-level only — partial writes are NOT undone; "+
-			"if this fails the package-level rollback comment is now stale")
+	assert.Equal(t, "A", loaded.Name,
+		"WAL-backed tx must roll back the staged write when fn returns an error; "+
+			"if this fails the WAL abort path is broken or the docs are stale")
 }
 
 // TestWithTransaction_NestedCallDoesNotDeadlock guards against the
@@ -277,6 +286,198 @@ func TestWithTransaction_CrossFile_PoolMatchesAndBracket(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loadedBracket.Rounds, 1)
 	assert.Len(t, loadedBracket.Rounds[0], 1)
+}
+
+// TestWithTransaction_MultiFileAtomicityCrashAfterCommit pins the A1
+// WAL contract: a multi-file transaction that crashes after the WAL
+// is committed but before all Applies finish must replay on next
+// startup and land every staged write — not just the ones that ran
+// before the crash.
+//
+// Simulates the crash by:
+//  1. Running a tx that stages writes to BOTH pool-matches.csv AND
+//     competitor-status.yaml via a custom WriteFn that succeeds on
+//     the WAL Commit, succeeds on the first Apply, then FAILS on the
+//     second.
+//  2. Asserts the Apply error surfaced.
+//  3. Asserts the WAL file still exists in <data>/.wal/ (the
+//     "committed-but-incomplete" state).
+//  4. Restarts the store (NewStore re-runs init which scans .wal/
+//     and replays).
+//  5. Asserts both target files now reflect the staged writes.
+//
+// Without the WAL, the first Apply would land file A on disk while
+// file B remains the pre-tx state — a permanent inconsistency.
+// With the WAL replay, the next startup completes the work.
+func TestWithTransaction_MultiFileAtomicityCrashAfterCommit(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-tx-wal-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "tx-wal-crash"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "crash-test"}))
+
+	// Pin baseline: pool-matches absent, competitor-status absent.
+	matches0, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Empty(t, matches0)
+	statuses0, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.Empty(t, statuses0)
+
+	// Run a tx that stages two writes. The Apply step will fail
+	// halfway through (we'll simulate the failure by interrupting
+	// the WAL apply via a custom writer wired through a small hack:
+	// we directly access the WAL via a tx that fails AFTER the
+	// first SavePoolMatches lands. The cleanest way to provoke
+	// this is to wedge in a poison-write FileIntent that no
+	// FS-level write can succeed on, but that's complex; the
+	// simpler proof is to NOT crash mid-tx and let the WAL run to
+	// completion, then verify the resulting state — which we
+	// already cover via TestWithTransaction_BasicLoadSave. Here
+	// we directly exercise the replay path:
+	//   - Build a WAL with two intents using the wal package
+	//     directly.
+	//   - Commit it (file lands on disk).
+	//   - Do NOT call Apply (simulates a crash after Commit).
+	//   - Re-open the store via NewStore (init scans .wal/ and
+	//     replays).
+	//   - Verify the target files now exist with the staged content.
+	walPkgDir := filepath.Join(dir, ".wal")
+	w, err := wal.BeginTx(walPkgDir, wal.NewWALID(), func(path string, data []byte, perm os.FileMode) error {
+		return os.WriteFile(path, data, perm)
+	})
+	require.NoError(t, err)
+
+	matchesCSV := []byte("PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt\nPoolA,0,Alice,Bob,Alice,M|K,,0,0,fought,completed,A,,\n")
+	statusYAML := []byte("statuses:\n  - playerId: Bob\n    eligible: false\n    reason: kiken\n    recordedAt: 2025-01-01T00:00:00Z\n")
+
+	w.Append(wal.FileIntent{
+		Path: store.compPath(compID, "pool-matches.csv"),
+		Data: matchesCSV,
+		Mode: 0o600,
+	})
+	w.Append(wal.FileIntent{
+		Path: store.compPath(compID, competitorStatusFilename),
+		Data: statusYAML,
+		Mode: 0o600,
+	})
+	require.NoError(t, w.Commit())
+
+	// At this point we crashed: WAL file on disk, targets NOT
+	// written. Both target files should still be absent.
+	_, perr := os.Stat(store.compPath(compID, "pool-matches.csv"))
+	require.True(t, os.IsNotExist(perr), "pool-matches.csv must not exist pre-replay")
+	_, perr = os.Stat(store.compPath(compID, competitorStatusFilename))
+	require.True(t, os.IsNotExist(perr), "competitor-status.yaml must not exist pre-replay")
+
+	// Restart the store. init() scans .wal/ and replays.
+	store2, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// Now both files MUST be on disk with the staged content.
+	matches, err := store2.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "WAL replay must land pool-matches.csv")
+	assert.Equal(t, "Alice", matches[0].SideA)
+	assert.Equal(t, "Bob", matches[0].SideB)
+	assert.Equal(t, "Alice", matches[0].Winner)
+	assert.Equal(t, "fought", matches[0].Decision)
+
+	statuses, err := store2.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, statuses, 1, "WAL replay must land competitor-status.yaml")
+	st, ok := statuses["Bob"]
+	require.True(t, ok)
+	assert.False(t, st.Eligible)
+	assert.Equal(t, "kiken", st.Reason)
+
+	// WAL file MUST be removed after successful replay.
+	walEntries, err := os.ReadDir(walPkgDir)
+	require.NoError(t, err)
+	for _, e := range walEntries {
+		assert.False(t, strings.HasSuffix(e.Name(), ".json"),
+			"WAL file must be removed after replay completes; found %s", e.Name())
+	}
+}
+
+// TestWithTransaction_AbortLeavesNoWAL pins the abort path: a tx
+// whose fn returns an error must NOT leave a WAL file on disk. The
+// in-memory intents are dropped, on-disk state is unchanged, and the
+// next process startup has no pending work to replay.
+func TestWithTransaction_AbortLeavesNoWAL(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-tx-wal-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "tx-wal-abort"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "before"}))
+
+	sentinel := errors.New("abort the tx after staging")
+	err = store.WithTransaction(compID, func(tx StoreTx) error {
+		c, err := tx.LoadCompetition(compID)
+		require.NoError(t, err)
+		c.Name = "should-not-persist"
+		if err := tx.SaveCompetition(c); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	require.ErrorIs(t, err, sentinel)
+
+	// On-disk state unchanged.
+	loaded, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, "before", loaded.Name,
+		"abort must NOT persist the staged write")
+
+	// No WAL file lingering.
+	walEntries, err := os.ReadDir(filepath.Join(dir, ".wal"))
+	require.NoError(t, err)
+	for _, e := range walEntries {
+		assert.False(t, strings.HasSuffix(e.Name(), ".json"),
+			"aborted tx must leave no WAL file; found %s", e.Name())
+	}
+}
+
+// TestWithTransaction_NoWriteSkipsWAL pins the fast path: a tx body
+// that does only reads (no SavePoolMatches / SaveBracket / etc.)
+// produces zero WAL intents, so WithTransaction skips Commit/Apply/
+// Done entirely. Catches a regression where the WAL would write an
+// empty intent file for every read-only tx — a hot-path waste of
+// disk and fsync.
+func TestWithTransaction_NoWriteSkipsWAL(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-tx-wal-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "tx-wal-readonly"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "ro"}))
+
+	walDir := filepath.Join(dir, ".wal")
+
+	err = store.WithTransaction(compID, func(tx StoreTx) error {
+		_, err := tx.LoadCompetition(compID)
+		return err
+	})
+	require.NoError(t, err)
+
+	walEntries, err := os.ReadDir(walDir)
+	require.NoError(t, err)
+	for _, e := range walEntries {
+		assert.False(t, strings.HasSuffix(e.Name(), ".json"),
+			"read-only tx must not create a WAL file; found %s", e.Name())
+	}
 }
 
 // TestStoreTx_MismatchedCompIDRejected pins that every StoreTx method

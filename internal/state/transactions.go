@@ -13,22 +13,40 @@
 // competition: three load+save pairs that should be serialised against
 // each other as one operation, not three).
 //
-// What "transaction" means here. Lock-level atomicity, NOT filesystem
-// ACID. The per-file write IS atomic + durable: every save in the
-// package goes through atomicWriteFile (atomic_write.go), so a single
-// file either contains the full new content or the full previous
-// content — never a half-written byte stream — and an fsync'd target
-// survives power loss. But there is NO cross-file rollback: if fn
-// writes file A successfully and then fails on file B, file A stays
-// written. The contract callers MUST honour is "do all your validation
-// first, then write at the END" — once you start saving inside fn,
-// finish saving inside fn. Implementing real per-transaction
-// cross-file rollback would require staging-area + commit/swap-on-
-// success machinery (or a write-ahead log) that none of the
-// live-tournament flows justify: the engine is the single source of
-// truth, an operator can always re-key a value, and the per-file
-// atomicity afforded by atomicWriteFile already covers the original
-// failure mode (partial bytes on disk after a crash).
+// What "transaction" means here. Lock-level atomicity AND cross-file
+// crash-atomicity via a write-ahead log (T210/T211/T212). Each save
+// invoked through tx is STAGED into a per-transaction WAL instead of
+// landing on disk; after fn returns nil, WithTransaction commits the
+// WAL (atomic-rename of the intent file into <data>/.wal/), applies
+// the staged writes to their target files, then deletes the WAL.
+//
+// Failure modes:
+//   - fn returns an error → no WAL on disk (Commit never ran);
+//     intents discarded; on-disk state unchanged.
+//   - Crash after fn returns but before Commit → same as fn-error:
+//     intents discarded; on-disk state unchanged.
+//   - Crash after Commit, before Apply completes → WAL on disk;
+//     Store.NewStore Scan replays on next start; targets land.
+//   - Apply returns an error mid-way → WAL stays on disk for the
+//     next-start replay to finish; caller sees the error.
+//
+// The contract callers MUST honour is "do your validation FIRST then
+// stage writes via tx" — once a tx method writes, that write enters
+// the WAL and will land (either at Apply time or at replay time). A
+// validation failure AFTER a write returns the error AND leaves the
+// staged-but-uncommitted intent to be discarded; the on-disk state
+// stays unchanged. There is still NO undo log: an already-committed
+// WAL can't be rolled back after Apply has partially run; the only
+// recovery is forward-completion via replay.
+//
+// Read-your-own-writes within a tx IS supported via the WAL's
+// in-memory intent map: tx-internal reads (tx.LoadCompetition,
+// tx.LoadBracket, etc.) check the pending intents BEFORE going to
+// disk, so a tx that saves pool-matches and then re-loads them sees
+// the just-saved data — not the stale on-disk version (which won't
+// update until Apply runs after fn returns). Without this, the
+// existing TestWithTransaction_NestedCallDoesNotDeadlock contract
+// (load-save-load round-trip) would silently see stale data.
 //
 // Lock ordering. The per-comp lock is a sync.RWMutex; WithTransaction
 // holds the WRITE lock for fn's entire duration. fn MUST call the
@@ -42,10 +60,14 @@ package state
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
 
 // ErrMismatchedTxCompID is returned by StoreTx methods when the
@@ -104,14 +126,42 @@ type StoreTx interface {
 // compID. fn receives a StoreTx that can call multiple load/save
 // methods without re-acquiring the lock — the lock is held for the
 // entire fn body and released exactly once on return (success OR
-// error). Per the package-level docs: "transaction" here is
-// lock-level atomicity, NOT filesystem rollback.
+// error).
+//
+// Crash-atomicity. Every save invoked through tx is STAGED into a
+// per-transaction write-ahead log (see internal/state/wal) instead
+// of going straight to disk. After fn returns nil, this method
+// Commits the WAL (atomic-renames the intent file into <data>/.wal/),
+// then Applies the staged writes one-by-one to their target files,
+// then deletes the WAL file. A crash after Commit but before all
+// Applies finish leaves the WAL on disk for replay on next start
+// (Store.NewStore scans the directory); a crash before Commit
+// leaves no on-disk trace and the partial in-memory work is dropped.
+// Multi-file transactions that previously could land file A but not
+// file B now either land both or replay both — cross-file atomicity
+// across a process crash (closing the v3 review A1 finding).
+//
+// Lock semantics. Per-comp lock is held for the entire fn body AND
+// across Commit + Apply, so other writers see the WAL transition
+// from "absent" → "applied" → "absent" as an atomic event.
 //
 // fn MUST call methods on tx, NOT on the underlying *Store directly.
 // The per-comp mutex is a non-recursive sync.RWMutex; a direct
 // s.Save* call from inside fn would re-acquire and deadlock.
 //
-// T155, NFR-010.
+// fn read-after-write within the same tx. Tx-internal reads
+// (tx.LoadCompetition, tx.LoadBracket, etc.) read from disk via the
+// *Locked helpers and DO NOT see the WAL-staged writes — the on-disk
+// file isn't updated until Apply runs after fn returns. The current
+// engine paths (RecordMatchResultWithIneligibilityTx,
+// RecordDecisionTx, K3 rollback) read BEFORE they write within a
+// single tx and never read-after-write the same file, so this
+// limitation is invisible to them. If a future tx body needs to
+// read its own pending write, the WAL exposes Intents() — but that's
+// a code-smell and probably indicates the load/save should be
+// re-ordered.
+//
+// T155, NFR-010, T210/T211/T212 (A1 WAL).
 func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
@@ -119,16 +169,180 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return fn(&storeTx{store: s, compID: compID})
+
+	// Begin a fresh WAL for this transaction. The WAL has no on-disk
+	// footprint until Commit runs; if fn returns an error we just
+	// drop the in-memory intents and return.
+	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), directWriteWAL)
+	if err != nil {
+		return fmt.Errorf("WithTransaction %q: BeginTx: %w", compID, err)
+	}
+
+	tx := &storeTx{store: s, compID: compID, wal: w}
+	if ferr := fn(tx); ferr != nil {
+		// Abort path: the WAL is in-memory only at this point
+		// (Commit was never called), so there's nothing to clean
+		// up on disk. But the savers DID update the file caches
+		// with the staged (uncommitted) data — those caches now
+		// hold a phantom value that didn't land on disk. Invalidate
+		// every cache the would-be intents touched so the next
+		// reader re-parses from the (untouched) on-disk file and
+		// sees the pre-tx state.
+		s.invalidateCachesForWALIntents(compID, w.Intents())
+		return ferr
+	}
+
+	// Fast path: a tx that called nothing through the WAL writer
+	// (e.g., pure read-only or a no-op save like
+	// SaveCompetitionChanged returning false-changed) has no
+	// intents. Skip Commit/Apply/Done — they'd just write and
+	// remove an empty WAL file for nothing.
+	if len(w.Intents()) == 0 {
+		return nil
+	}
+
+	if err := w.Commit(); err != nil {
+		return fmt.Errorf("WithTransaction %q: Commit: %w", compID, err)
+	}
+	if err := w.Apply(); err != nil {
+		// Apply failed mid-way. The WAL is committed and remains on
+		// disk; the next Store.NewStore startup will replay it.
+		// Surface the error so the caller can react (e.g., HTTP
+		// 500) — the next process startup is what guarantees
+		// completion.
+		return fmt.Errorf("WithTransaction %q: Apply: %w", compID, err)
+	}
+
+	// Cache reconciliation. In WAL mode, the savers populated the
+	// file caches with the in-memory result BEFORE Apply landed the
+	// bytes — so cache.mtime was captured from the OLD file (or 0
+	// if absent). After Apply the on-disk file has a NEW mtime, and
+	// the next reader would see mtime != cache.mtime and re-parse
+	// from disk — silently losing any in-memory-only fields the
+	// parser doesn't know about (e.g., MatchResult.DecisionBy and
+	// MatchResult.Encho, which pool-matches.csv doesn't serialize).
+	// Walk the WAL intents and refresh each touched cache's mtime
+	// to match the now-final file mtime so the in-memory snapshot
+	// continues to win cache hits.
+	s.refreshCachesAfterWALApply(compID, w.Intents())
+
+	if err := w.Done(); err != nil {
+		// Done failed but Apply succeeded — target files are in
+		// the right state, the WAL file is stale. Next startup
+		// will see the WAL, re-Apply (no-op for identical bytes),
+		// and re-attempt Done. The transaction is effectively
+		// complete; surface the error for observability but the
+		// caller can treat it as success.
+		slog.Warn("WithTransaction: WAL Done failed; will retry on restart",
+			"comp", compID, "wal", w.ID(), "err", err)
+	}
+	return nil
+}
+
+// directWriteWAL is the WriteFn the WAL uses for both its OWN file
+// (during Commit) and the target files (during Apply). Both go
+// through atomicWriteFile so the same write-tmp + fsync + rename
+// dance the rest of the package uses applies to the intent log AND
+// to the final writes.
+func directWriteWAL(path string, data []byte, perm os.FileMode) error {
+	return atomicWriteFile(path, data, perm)
+}
+
+// invalidateCachesForWALIntents zeroes out the file caches the
+// staged-but-aborted intents would have updated, so the next reader
+// re-parses from the (untouched) on-disk file. Used on the abort
+// path: the savers populated the caches optimistically when fn was
+// running, but Commit never happened, so the on-disk file still
+// holds the pre-tx state and the cache value is now phantom.
+func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileIntent) {
+	for _, in := range intents {
+		base := filepath.Base(in.Path)
+		switch base {
+		case "config.md",
+			"pool-matches.csv",
+			"bracket.json",
+			competitorStatusFilename,
+			teamLineupFilename:
+			cache := s.getFileCache(compID, base)
+			cache.mu.Lock()
+			cache.data = nil
+			cache.mtime = 0
+			cache.mu.Unlock()
+		}
+	}
+}
+
+// refreshCachesAfterWALApply walks each WAL intent and re-stamps the
+// matching file cache's mtime to the post-Apply on-disk mtime. Only
+// touches caches that already exist (the saver populated them during
+// the staged write) — never creates a new cache entry from scratch.
+//
+// Why this is necessary. The savers update the cache with the
+// in-memory struct immediately when they're called, capturing the
+// PRE-write mtime. In WAL mode the actual disk write happens later
+// (in Apply, after fn returns), so the recorded mtime is stale by
+// the time Apply finishes. Without this refresh, the next reader
+// sees cache.mtime ≠ file.mtime, re-parses from disk, and silently
+// loses fields the on-disk format doesn't carry (e.g.,
+// MatchResult.DecisionBy, MatchResult.Encho — pool-matches.csv
+// doesn't have columns for them, so the in-memory cache is the only
+// authoritative source for those fields after a save).
+func (s *Store) refreshCachesAfterWALApply(compID string, intents []wal.FileIntent) {
+	for _, in := range intents {
+		base := filepath.Base(in.Path)
+		// The cache keys we know how to refresh; if a WAL intent
+		// targets a path we don't recognize, skip it (no cache to
+		// refresh — the saver didn't populate one).
+		switch base {
+		case "config.md",
+			"pool-matches.csv",
+			"bracket.json",
+			competitorStatusFilename,
+			teamLineupFilename:
+			cache := s.getFileCache(compID, base)
+			cache.mu.Lock()
+			if cache.data != nil {
+				cache.mtime = s.FileMtime(compID, base)
+			}
+			cache.mu.Unlock()
+		}
+	}
 }
 
 // storeTx implements StoreTx by delegating to the store's *Locked
 // helpers — the ones that DO NOT acquire the per-comp lock. Caller
 // (WithTransaction) is responsible for the lock; this type just
 // dispatches.
+//
+// The wal field is the per-transaction intent log: every save method
+// passes wal.WriteFn() to the underlying *Locked saver, so the
+// staged bytes get captured instead of landing on disk. After fn
+// returns, WithTransaction Commits + Applies + Dones the WAL.
 type storeTx struct {
 	store  *Store
 	compID string
+	wal    *wal.WAL
+}
+
+// txWriteFn adapts the WAL package's WriteFn (which uses os.FileMode)
+// to the state package's writeFn (which uses fs.FileMode). The two
+// types are identical at the value level — fs.FileMode is an alias
+// of os.FileMode — but Go's strict named-function-type rule won't
+// let one pass directly where the other is expected. A trivial
+// shim closure converts.
+func (t *storeTx) txWriteFn() writeFn {
+	walWrite := t.wal.WriteFn()
+	return func(path string, data []byte, perm os.FileMode) error {
+		return walWrite(path, data, perm)
+	}
+}
+
+// pendingFor returns the WAL-staged bytes for the file `filename`
+// under this transaction's competition directory, and ok=true; if
+// no intent has been staged, ok=false. Used by the storeTx loaders
+// to support read-your-own-writes within a tx body.
+func (t *storeTx) pendingFor(filename string) ([]byte, bool) {
+	return t.wal.PendingBytes(t.store.compPath(t.compID, filename))
 }
 
 // checkCompID enforces the transaction-bound-compID invariant. Wraps
@@ -145,6 +359,16 @@ func (t *storeTx) LoadCompetition(compID string) (*Competition, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}
+	// Read-your-own-writes: if this tx has staged a config.md write,
+	// parse the staged bytes instead of reading from disk (which
+	// still holds the pre-Apply state).
+	if pending, ok := t.pendingFor("config.md"); ok {
+		var c Competition
+		if perr := parseFrontMatter(pending, &c); perr != nil {
+			return nil, perr
+		}
+		return t.store.copyCompetition(&c), nil
+	}
 	return t.store.loadCompetitionLocked(compID)
 }
 
@@ -152,12 +376,19 @@ func (t *storeTx) SaveCompetition(c *Competition) error {
 	if err := t.checkCompID(c.ID); err != nil {
 		return err
 	}
-	return t.store.saveCompetitionLocked(c)
+	return t.store.saveCompetitionLocked(c, t.txWriteFn())
 }
 
 func (t *storeTx) LoadPoolMatches(compID string) ([]MatchResult, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
+	}
+	if pending, ok := t.pendingFor("pool-matches.csv"); ok {
+		results, err := parsePoolMatchesBytes(pending)
+		if err != nil {
+			return nil, err
+		}
+		return t.store.copyMatchResults(results), nil
 	}
 	return t.store.LoadPoolMatchesLocked(compID)
 }
@@ -169,12 +400,19 @@ func (t *storeTx) SavePoolMatches(compID string, matches []MatchResult) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	return t.store.savePoolMatchesLocked(compID, matches)
+	return t.store.savePoolMatchesLocked(compID, matches, t.txWriteFn())
 }
 
 func (t *storeTx) LoadBracket(compID string) (*Bracket, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
+	}
+	if pending, ok := t.pendingFor("bracket.json"); ok {
+		b, err := parseBracketBytes(pending)
+		if err != nil {
+			return nil, err
+		}
+		return t.store.copyBracket(b), nil
 	}
 	return t.store.loadBracketLocked(compID)
 }
@@ -186,12 +424,15 @@ func (t *storeTx) SaveBracket(compID string, b *Bracket) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	return t.store.saveBracketLocked(compID, b)
+	return t.store.saveBracketLocked(compID, b, t.txWriteFn())
 }
 
 func (t *storeTx) LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
+	}
+	if pending, ok := t.pendingFor(competitorStatusFilename); ok {
+		return parseCompetitorStatusBytes(pending)
 	}
 	return t.store.loadCompetitorStatusLocked(compID)
 }
@@ -200,12 +441,34 @@ func (t *storeTx) SetCompetitorStatus(compID string, status domain.CompetitorSta
 	if err := t.checkCompID(compID); err != nil {
 		return err
 	}
-	return t.store.setCompetitorStatusLocked(compID, status)
+	// Read-your-own-writes: if competitor-status.yaml is already
+	// staged, merge into the staged map. Without this, two
+	// SetCompetitorStatus calls in the same tx would have the
+	// second one re-load the disk state (missing the first write)
+	// and effectively lose the first.
+	if pending, ok := t.pendingFor(competitorStatusFilename); ok {
+		if err := status.Validate(); err != nil {
+			return err
+		}
+		current, perr := parseCompetitorStatusBytes(pending)
+		if perr != nil {
+			return perr
+		}
+		if status.RecordedAt.IsZero() {
+			status.RecordedAt = time.Now().UTC()
+		}
+		current[status.PlayerID] = status
+		return t.store.saveCompetitorStatusLocked(compID, current, t.txWriteFn())
+	}
+	return t.store.setCompetitorStatusLocked(compID, status, t.txWriteFn())
 }
 
 func (t *storeTx) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
+	}
+	if pending, ok := t.pendingFor(teamLineupFilename); ok {
+		return parseTeamLineupsBytes(pending)
 	}
 	return t.store.loadTeamLineupsLocked(compID)
 }
@@ -217,7 +480,32 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	return t.store.setTeamLineupLocked(compID, l, teamSize)
+	// Read-your-own-writes: if lineups.yaml is already staged, merge
+	// into the staged map instead of the on-disk version. Otherwise
+	// the staged write would be discarded on the next save.
+	if pending, ok := t.pendingFor(teamLineupFilename); ok {
+		if err := l.Validate(teamSize); err != nil {
+			return err
+		}
+		current, perr := parseTeamLineupsBytes(pending)
+		if perr != nil {
+			return perr
+		}
+		key := teamLineupKey(l.TeamID, l.Round)
+		if existing, present := current[key]; present && existing.LockedAt != nil {
+			return ErrLineupLocked
+		}
+		// In-tx writers have already passed the round-live check
+		// upstream (handlers do that BEFORE entering the tx body
+		// in the live-tournament flows). Skipping
+		// roundHasLiveOrCompletedMatchLocked here mirrors the
+		// non-tx fast-path: the per-comp lock + the staged
+		// in-tx state are the consistency guarantees.
+		l.CompetitionID = compID
+		current[key] = l
+		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
+	}
+	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
 }
 
 func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]helper.Player, error) {
@@ -230,6 +518,11 @@ func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]helper
 // UpdatePoolMatchByID dispatches to a lock-free body that mirrors
 // Store.UpdatePoolMatchByID's load + find + mutate + save sequence.
 // Caller (WithTransaction) is responsible for the per-comp lock.
+//
+// Read-your-own-writes: if pool-matches.csv has been staged earlier
+// in this tx (e.g., the K3 rollback path that writes the new score,
+// fails eligibility, and rolls back), this load + mutate + save sees
+// the staged version, not the stale on-disk version.
 func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return false, err
@@ -237,12 +530,28 @@ func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*Match
 	if err := ValidateCompetitionID(compID); err != nil {
 		return false, err
 	}
-	return t.store.updatePoolMatchByIDLocked(compID, matchID, mutate)
+	if pending, ok := t.pendingFor("pool-matches.csv"); ok {
+		results, perr := parsePoolMatchesBytes(pending)
+		if perr != nil {
+			return false, perr
+		}
+		for i := range results {
+			if results[i].ID == matchID {
+				mutate(&results[i])
+				return true, t.store.savePoolMatchesLocked(compID, results, t.txWriteFn())
+			}
+		}
+		return false, nil
+	}
+	return t.store.updatePoolMatchByIDLocked(compID, matchID, mutate, t.txWriteFn())
 }
 
 // UpdateBracket dispatches to a lock-free body that mirrors
 // Store.UpdateBracket's load + mutate + save sequence. Caller
 // (WithTransaction) is responsible for the per-comp lock.
+//
+// Read-your-own-writes: see UpdatePoolMatchByID for the same
+// staged-vs-disk rationale.
 func (t *storeTx) UpdateBracket(compID string, mutate func(*Bracket) error) error {
 	if err := t.checkCompID(compID); err != nil {
 		return err
@@ -250,12 +559,26 @@ func (t *storeTx) UpdateBracket(compID string, mutate func(*Bracket) error) erro
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	return t.store.updateBracketLocked(compID, mutate)
+	if pending, ok := t.pendingFor("bracket.json"); ok {
+		b, perr := parseBracketBytes(pending)
+		if perr != nil {
+			return perr
+		}
+		if err := mutate(b); err != nil {
+			return err
+		}
+		return t.store.saveBracketLocked(compID, b, t.txWriteFn())
+	}
+	return t.store.updateBracketLocked(compID, mutate, t.txWriteFn())
 }
 
 // LockTeamLineupsForRound dispatches to the lock-free body of
 // Store.LockTeamLineupsForRound. Caller (WithTransaction) is
 // responsible for the per-comp lock.
+//
+// Read-your-own-writes: if lineups.yaml has been staged earlier in
+// this tx, this load + lock + save sees the staged version, not the
+// stale on-disk version.
 func (t *storeTx) LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error {
 	if err := t.checkCompID(compID); err != nil {
 		return err
@@ -263,5 +586,28 @@ func (t *storeTx) LockTeamLineupsForRound(compID string, round int, lockedAt tim
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	return t.store.lockTeamLineupsForRoundLocked(compID, round, lockedAt)
+	if pending, ok := t.pendingFor(teamLineupFilename); ok {
+		current, perr := parseTeamLineupsBytes(pending)
+		if perr != nil {
+			return perr
+		}
+		changed := false
+		for k, l := range current {
+			if l.Round != round {
+				continue
+			}
+			if l.LockedAt != nil {
+				continue
+			}
+			ts := lockedAt
+			l.LockedAt = &ts
+			current[k] = l
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
+	}
+	return t.store.lockTeamLineupsForRoundLocked(compID, round, lockedAt, t.txWriteFn())
 }

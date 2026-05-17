@@ -24,6 +24,22 @@ func parseBracketFile(path string) (any, error) {
 		}
 		return nil, err
 	}
+	b, err := parseBracketBytes(raw)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// parseBracketBytes parses a bracket.json blob from in-memory bytes.
+// Used by tx-internal read-your-own-writes: the storeTx loader peeks
+// at WAL-staged bytes (via wal.PendingBytes) and falls through to
+// this parser. Same never-nil contract as parseBracketFile: an empty
+// or absent slice deserializes to `&Bracket{Rounds: [][]BracketMatch{}}`.
+func parseBracketBytes(raw []byte) (*Bracket, error) {
+	if len(raw) == 0 {
+		return &Bracket{Rounds: [][]BracketMatch{}}, nil
+	}
 	var b Bracket
 	if err := json.Unmarshal(raw, &b); err != nil {
 		return nil, err
@@ -59,7 +75,7 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.saveBracketLocked(compID, b)
+	return s.saveBracketLocked(compID, b, directWrite)
 }
 
 // loadBracketLocked reads the bracket directly from disk WITHOUT
@@ -88,14 +104,24 @@ func (s *Store) loadBracketLocked(compID string) (*Bracket, error) {
 // (s.getCompLock(compID)). Used by both SaveBracket (which takes the
 // lock) and UpdateBracket (which holds the lock across
 // load + mutate + save).
-func (s *Store) saveBracketLocked(compID string, b *Bracket) error {
+//
+// The write parameter routes the actual file write: directWrite
+// (default) goes straight to atomicWriteFile, while a WAL-capturing
+// writer (from storeTx) stages the bytes in the transaction's
+// intent log for deferred commit. The cache refresh runs in BOTH
+// modes — readers within the same tx body need to see the staged
+// bytes via the cache because the on-disk file hasn't moved yet,
+// and the cache mtime is updated using the LOCAL file's mtime which
+// is unchanged in WAL mode (so a follow-up cache-aware Load will
+// re-parse from the cached copy without going to disk). T211/T212.
+func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) error {
 	path := s.compPath(compID, "bracket.json")
 	data, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	if err := atomicWriteFile(path, data, 0600); err != nil {
+	if err := write(path, data, 0600); err != nil {
 		return err
 	}
 
@@ -145,15 +171,16 @@ func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error 
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.updateBracketLocked(compID, mutate)
+	return s.updateBracketLocked(compID, mutate, directWrite)
 }
 
 // updateBracketLocked is the lock-free body of UpdateBracket. Caller
 // MUST already hold the per-comp write lock. Used by the tx-aware
 // path so the same load + mutate + save sequence runs without
 // re-acquiring the lock from inside a WithTransaction closure
-// (T156, NFR-010).
-func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error) error {
+// (T156, NFR-010). The write parameter selects direct-to-disk vs
+// WAL-capturing semantics (see saveBracketLocked).
+func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error, write writeFn) error {
 	// Load directly under the lock (see UpdatePoolMatchByID for why
 	// we bypass the cached path here).
 	path := s.compPath(compID, "bracket.json")
@@ -170,5 +197,5 @@ func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error) 
 	// bracket is always non-nil here — parseBracketFile returns an empty
 	// `&Bracket{...}` on missing file (never nil). The nil-check would be
 	// dead code; trust the contract from parseBracketFile.
-	return s.saveBracketLocked(compID, bracket)
+	return s.saveBracketLocked(compID, bracket, write)
 }

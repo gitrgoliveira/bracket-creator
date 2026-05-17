@@ -75,6 +75,16 @@ func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLine
 		}
 		return nil, err
 	}
+	return parseTeamLineupsBytes(data)
+}
+
+// parseTeamLineupsBytes parses lineups.yaml from in-memory bytes.
+// Used by tx-internal read-your-own-writes (storeTx LoadTeamLineups).
+// Empty input → empty map, matching the "file does not exist" contract.
+func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
+	if len(data) == 0 {
+		return map[string]domain.TeamLineup{}, nil
+	}
 	var file teamLineupFile
 	if err := yaml.Unmarshal(data, &file); err != nil {
 		return nil, err
@@ -86,7 +96,11 @@ func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLine
 	return out, nil
 }
 
-func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.TeamLineup) error {
+// saveTeamLineupsLocked persists the lineups map. Caller MUST hold
+// the per-comp write lock. The write parameter routes the actual
+// file write — directWrite for non-tx callers, WAL-capturing writer
+// for tx callers. See saveBracketLocked (T211/T212).
+func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.TeamLineup, write writeFn) error {
 	if err := os.MkdirAll(s.compPath(compID), 0700); err != nil {
 		return err
 	}
@@ -103,7 +117,7 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(s.compPath(compID, teamLineupFilename), data, 0600)
+	return write(s.compPath(compID, teamLineupFilename), data, 0600)
 }
 
 // SetTeamLineup validates and persists a lineup, replacing any prior
@@ -127,7 +141,7 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.setTeamLineupLocked(compID, lineup, teamSize)
+	return s.setTeamLineupLocked(compID, lineup, teamSize, directWrite)
 }
 
 // setTeamLineupLocked applies the freeze-check + load-mutate-save dance
@@ -136,8 +150,9 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 //
 // Validate() is re-run here so the lock-free path is as safe as the
 // public method — transaction bodies don't have to remember to
-// validate first.
-func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int) error {
+// validate first. The write parameter routes the final save
+// (T211/T212).
+func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int, write writeFn) error {
 	if err := lineup.Validate(teamSize); err != nil {
 		return err
 	}
@@ -165,7 +180,7 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 	// is self-describing even if the directory is moved.
 	lineup.CompetitionID = compID
 	current[key] = lineup
-	return s.saveTeamLineupsLocked(compID, current)
+	return s.saveTeamLineupsLocked(compID, current, write)
 }
 
 // roundHasLiveOrCompletedMatchLocked is the T128a in-lock check: are
@@ -243,7 +258,7 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 		return ErrLineupLocked
 	}
 	delete(current, key)
-	return s.saveTeamLineupsLocked(compID, current)
+	return s.saveTeamLineupsLocked(compID, current, directWrite)
 }
 
 // LockTeamLineupsForRound stamps LockedAt on every persisted lineup
@@ -262,7 +277,7 @@ func (s *Store) LockTeamLineupsForRound(compID string, round int, lockedAt time.
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.lockTeamLineupsForRoundLocked(compID, round, lockedAt)
+	return s.lockTeamLineupsForRoundLocked(compID, round, lockedAt, directWrite)
 }
 
 // lockTeamLineupsForRoundLocked is the lock-free body of
@@ -273,8 +288,8 @@ func (s *Store) LockTeamLineupsForRound(compID string, round int, lockedAt time.
 // freeze runs under the same lock acquire as the score write — without
 // this variant the public LockTeamLineupsForRound would deadlock when
 // called from inside a WithTransaction closure (sync.RWMutex is
-// non-recursive).
-func (s *Store) lockTeamLineupsForRoundLocked(compID string, round int, lockedAt time.Time) error {
+// non-recursive). The write parameter routes the save (T211/T212).
+func (s *Store) lockTeamLineupsForRoundLocked(compID string, round int, lockedAt time.Time, write writeFn) error {
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {
 		return err
@@ -295,5 +310,5 @@ func (s *Store) lockTeamLineupsForRoundLocked(compID string, round int, lockedAt
 	if !changed {
 		return nil
 	}
-	return s.saveTeamLineupsLocked(compID, current)
+	return s.saveTeamLineupsLocked(compID, current, write)
 }

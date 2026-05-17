@@ -126,6 +126,29 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	return nil
 }
 
+// writeFn is the signature shared by atomicWriteFile (the default,
+// direct-to-disk writer) and the WAL-capturing variant returned by
+// wal.WAL.WriteFn. Savers reachable from StoreTx accept a writeFn
+// parameter so the same code path serves both:
+//
+//   - Non-transactional callers pass directWrite, which forwards to
+//     atomicWriteFile and the saver behaves exactly as before.
+//   - Transactional callers (storeTx methods) pass the WAL's WriteFn,
+//     which captures the bytes into the transaction's intent log
+//     instead of touching the target. After fn returns nil, the
+//     enclosing WithTransaction commits the WAL and Applies it.
+//
+// The signature matches wal.WriteFn so the WAL package and the state
+// package can interop without a cross-package adapter.
+type writeFn func(path string, data []byte, perm fs.FileMode) error
+
+// directWrite is the default writeFn — straight-through delegate to
+// atomicWriteFile. Used by every non-transactional saver call site so
+// behaviour matches the pre-WAL world byte-for-byte.
+func directWrite(path string, data []byte, perm fs.FileMode) error {
+	return atomicWriteFile(path, data, perm)
+}
+
 // syncDir opens dirPath and calls Sync() on the resulting directory
 // handle. On Linux/macOS this forces the directory-entry update
 // (including the rename we just performed) to be durable across power

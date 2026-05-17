@@ -122,9 +122,12 @@ func TestAtomicWriteFile_CleansTmpOnError(t *testing.T) {
 
 	// Make the dir read-only on POSIX so the temp file create fails.
 	// On Windows the chmod is a no-op so the test of the cleanup path
-	// is best-effort there; skip.
+	// is best-effort there; skip. Root bypasses POSIX permissions too.
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 0500 isn't enforced on Windows the same way")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("Skipping permission test: root bypasses file permission restrictions")
 	}
 
 	require.NoError(t, os.Chmod(dir, 0500))

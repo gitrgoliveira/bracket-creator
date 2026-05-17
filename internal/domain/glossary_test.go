@@ -211,6 +211,6 @@ func findGlossarySpec(t *testing.T) string {
 		}
 		dir = parent
 	}
-	t.Fatalf("could not locate specs/003-tournament-gap-closure/glossary.md from %s", filepath.Dir(file))
+	t.Skipf("specs/003-tournament-gap-closure/glossary.md not found from %s (gitignored in checkout — run locally with full spec tree)", filepath.Dir(file))
 	return ""
 }

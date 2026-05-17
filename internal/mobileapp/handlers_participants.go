@@ -108,6 +108,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// Cross-file guard symmetry with handlers_import.go's seed
+		// validation: reject oversized names so seeds.csv can't grow
+		// unbounded.
+		for i, sa := range assignments {
+			if err := validateMaxLen(fmt.Sprintf("seeds[%d].name", i), sa.Name, MaxLenSeedAssignmentName); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
 
 		if err := store.SaveSeeds(id, assignments); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

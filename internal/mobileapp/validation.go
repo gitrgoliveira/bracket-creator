@@ -94,6 +94,9 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
 		return err
 	}
+	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
+		return err
+	}
 	for i := range r.SubResults {
 		sr := &r.SubResults[i]
 		prefix := fmt.Sprintf("subResults[%d].", i)
@@ -104,6 +107,9 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 			return err
 		}
 		if err := validateMaxLen(prefix+"winner", sr.Winner, MaxLenMatchSide); err != nil {
+			return err
+		}
+		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
 	}
@@ -241,6 +247,18 @@ func (r *ScoreRequest) Validate() error {
 			}
 		}
 	}
+	// Best-of-3 ippon invariants on the top-level scoreline.
+	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
+		return err
+	}
+	// Same invariants on each sub-bout (team-match positions).
+	for i := range r.SubResults {
+		sr := &r.SubResults[i]
+		prefix := fmt.Sprintf("subResults[%d].", i)
+		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
+			return err
+		}
+	}
 	return r.validateDecision()
 }
 
@@ -305,6 +323,44 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 	a := len(ipponsA)
 	b := len(ipponsB)
 	return (a == n && b == 0) || (a == 0 && b == n)
+}
+
+// maxIpponsPerSide is the kendo best-of-3 cap: each fighter can score
+// at most 2 ippons in regulation (the bout ends when one side reaches
+// 2). 2-2 is therefore an impossible scoreline — the match would have
+// ended at 2-1 before either side could score a third.
+const maxIpponsPerSide = 2
+
+// validateIpponCounts enforces the best-of-3 ippon invariants on a
+// single match (or sub-bout) tally. Rules:
+//
+//   - len(ipponsA) ≤ 2 and len(ipponsB) ≤ 2
+//   - NOT (len(ipponsA) == 2 && len(ipponsB) == 2)   — the 2-2 ban
+//
+// Field is the JSON-field prefix used in error messages (e.g. "" for a
+// top-level match, "subResults[i]." for a sub-bout). Kiken/fusenpai
+// scorelines are also bounded by these rules — their own n-0 check in
+// validateDecision is strictly tighter (n ≤ 2) so this passes through.
+func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
+	if len(ipponsA) > maxIpponsPerSide {
+		return &ValidationError{
+			Field:   field + "ipponsA",
+			Message: fmt.Sprintf("at most %d ippons per side (best-of-3), got %d", maxIpponsPerSide, len(ipponsA)),
+		}
+	}
+	if len(ipponsB) > maxIpponsPerSide {
+		return &ValidationError{
+			Field:   field + "ipponsB",
+			Message: fmt.Sprintf("at most %d ippons per side (best-of-3), got %d", maxIpponsPerSide, len(ipponsB)),
+		}
+	}
+	if len(ipponsA) == maxIpponsPerSide && len(ipponsB) == maxIpponsPerSide {
+		return &ValidationError{
+			Field:   field + "ippons",
+			Message: "both sides cannot have 2 ippons (best-of-3 ends at first to 2)",
+		}
+	}
+	return nil
 }
 
 // requireWinnerForDecision enforces that Winner is set when a kiken/

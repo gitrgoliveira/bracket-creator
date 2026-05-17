@@ -335,6 +335,94 @@ func TestTournamentHandlers(t *testing.T) {
 	}
 }
 
+// TestTournamentHandlers_MaxLengthCaps verifies the defense-in-depth
+// length caps from validation.go are enforced on POST and PUT
+// /tournament. These caps guard against unbounded YAML inflation
+// in tournament.md — a 1MB Name or Venue is silently accepted
+// pre-fix and bloats every subsequent load.
+func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed an initialized tournament so PUT (and not POST-bootstrap)
+	// is what runs the cap check.
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Seed",
+		Password: "secret",
+		Courts:   []string{"A"},
+	}))
+
+	type lengthCase struct {
+		field string
+		body  state.Tournament
+	}
+	overCap := []lengthCase{
+		{
+			field: "name",
+			body: state.Tournament{
+				Name:     strings.Repeat("n", 201),
+				Password: "secret",
+				Courts:   []string{"A"},
+			},
+		},
+		{
+			field: "venue",
+			body: state.Tournament{
+				Name:     "OK",
+				Venue:    strings.Repeat("v", 201),
+				Password: "secret",
+				Courts:   []string{"A"},
+			},
+		},
+		{
+			field: "password",
+			body: state.Tournament{
+				Name:     "OK",
+				Password: strings.Repeat("p", 257),
+				Courts:   []string{"A"},
+			},
+		},
+		{
+			field: "openingBlock",
+			body: state.Tournament{
+				Name:         "OK",
+				Password:     "secret",
+				Courts:       []string{"A"},
+				OpeningBlock: strings.Repeat("o", 17),
+			},
+		},
+	}
+	for _, method := range []string{"PUT", "POST"} {
+		for _, lc := range overCap {
+			body, _ := json.Marshal(lc.body)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"%s /api/tournament over-cap %s must return 400", method, lc.field)
+			assert.Contains(t, w.Body.String(), lc.field,
+				"%s /api/tournament rejection must name the field", method)
+		}
+	}
+
+	// Sanity: exactly-at-cap values pass (when the rest of the body is
+	// valid). Bounds inclusive so the cap is "<= N", not "< N".
+	atCap := state.Tournament{
+		Name:     strings.Repeat("n", 200),
+		Venue:    strings.Repeat("v", 200),
+		Password: "secret",
+		Courts:   []string{"A"},
+	}
+	body, _ := json.Marshal(atCap)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code,
+		"PUT /api/tournament with exactly-200-char Name/Venue must be accepted")
+}
+
 // TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost pins the
 // TOCTOU fix in store.UpdateTournamentChanged. Pre-atomic-primitive,
 // the PUT handler called LoadTournament + SaveTournamentChanged

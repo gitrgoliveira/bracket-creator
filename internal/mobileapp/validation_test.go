@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -89,6 +90,136 @@ func TestScoreRequestValidate(t *testing.T) {
 			assert.Equal(t, tt.wantField, verr.Field)
 		})
 	}
+}
+
+// TestScoreRequestValidate_IpponCounts covers the best-of-3 invariants
+// added by validateIpponCounts: max 2 ippons per side, and 2-2 is
+// rejected (impossible because the bout ends at first to 2). 1-1 and
+// 2-1 must remain valid (time-out draw / regulation winner).
+func TestScoreRequestValidate_IpponCounts(t *testing.T) {
+	tests := []struct {
+		name      string
+		req       ScoreRequest
+		wantErr   bool
+		wantField string
+	}{
+		{
+			name: "0-0 ok (no ippons, scheduled / drawn-with-no-score)",
+			req:  ScoreRequest{},
+		},
+		{
+			name: "1-0 ok (regulation winner)",
+			req:  ScoreRequest{IpponsA: []string{"M"}},
+		},
+		{
+			name: "1-1 ok (timeout draw)",
+			req:  ScoreRequest{IpponsA: []string{"M"}, IpponsB: []string{"K"}},
+		},
+		{
+			name: "2-0 ok (regulation winner)",
+			req:  ScoreRequest{IpponsA: []string{"M", "K"}},
+		},
+		{
+			name: "2-1 ok (regulation winner)",
+			req:  ScoreRequest{IpponsA: []string{"M", "K"}, IpponsB: []string{"D"}},
+		},
+		{
+			name:      "2-2 rejected (impossible — bout ends at first to 2)",
+			req:       ScoreRequest{IpponsA: []string{"M", "K"}, IpponsB: []string{"D", "T"}},
+			wantErr:   true,
+			wantField: "ippons",
+		},
+		{
+			name:      "3-0 rejected (exceeds best-of-3 cap)",
+			req:       ScoreRequest{IpponsA: []string{"M", "K", "D"}},
+			wantErr:   true,
+			wantField: "ipponsA",
+		},
+		{
+			name:      "0-3 rejected (exceeds best-of-3 cap)",
+			req:       ScoreRequest{IpponsB: []string{"M", "K", "D"}},
+			wantErr:   true,
+			wantField: "ipponsB",
+		},
+		{
+			name: "sub-bout 1-1 ok",
+			req: ScoreRequest{
+				SubResults: []state.SubMatchResult{
+					{Position: 0, IpponsA: []string{"M"}, IpponsB: []string{"K"}},
+				},
+			},
+		},
+		{
+			name: "sub-bout 2-2 rejected (impossible in best-of-3)",
+			req: ScoreRequest{
+				SubResults: []state.SubMatchResult{
+					{Position: 0, IpponsA: []string{"M", "K"}, IpponsB: []string{"D", "T"}},
+				},
+			},
+			wantErr:   true,
+			wantField: "subResults[0].ippons",
+		},
+		{
+			name: "second sub-bout violates (index reflected in field)",
+			req: ScoreRequest{
+				SubResults: []state.SubMatchResult{
+					{Position: 0, IpponsA: []string{"M"}},
+					{Position: 1, IpponsA: []string{"M", "K", "D"}},
+				},
+			},
+			wantErr:   true,
+			wantField: "subResults[1].ipponsA",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.req.Validate()
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
+}
+
+// TestValidateBulkScoreLengths_IpponCounts confirms the bulk-score path
+// rejects the same impossible 2-2 scoreline so the bulk endpoint
+// stays in lockstep with ScoreRequest.Validate.
+func TestValidateBulkScoreLengths_IpponCounts(t *testing.T) {
+	r := &state.MatchResult{
+		SideA:   "Alice",
+		SideB:   "Bob",
+		IpponsA: []string{"M", "K"},
+		IpponsB: []string{"D", "T"},
+	}
+	err := validateBulkScoreLengths(r)
+	require.Error(t, err, "bulk-score 2-2 must be rejected by validateBulkScoreLengths")
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "ippons", verr.Field)
+}
+
+// TestValidateBulkScoreLengths_SubResultIppons confirms sub-bout
+// invariants are also enforced on the bulk path.
+func TestValidateBulkScoreLengths_SubResultIppons(t *testing.T) {
+	r := &state.MatchResult{
+		SideA: "TeamA",
+		SideB: "TeamB",
+		SubResults: []state.SubMatchResult{
+			{Position: 0, IpponsA: []string{"M"}},
+			{Position: 1, IpponsA: []string{"M", "K"}, IpponsB: []string{"D", "T"}},
+		},
+	}
+	err := validateBulkScoreLengths(r)
+	require.Error(t, err)
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "subResults[1].ippons", verr.Field)
 }
 
 // TestScoreRequestAsMatchResult exercises the zero-cost conversion the
@@ -253,4 +384,238 @@ func TestValidateDecision_FusenpaiNoWinner(t *testing.T) {
 func TestValidateDecision_KachinukiExhaustionOk(t *testing.T) {
 	req := ScoreRequest{Decision: "kachinuki-exhaustion"}
 	assert.NoError(t, req.Validate())
+}
+
+// TestValidateMaxLen covers the persisted-string cap helper. Empty
+// strings always pass — presence is enforced separately.
+func TestValidateMaxLen(t *testing.T) {
+	tests := []struct {
+		name      string
+		val       string
+		max       int
+		wantField string
+	}{
+		{name: "empty under cap: ok", val: "", max: 10},
+		{name: "exactly at cap: ok", val: strings.Repeat("x", 10), max: 10},
+		{name: "one over cap: rejected", val: strings.Repeat("x", 11), max: 10, wantField: "field"},
+		{name: "wildly over cap: rejected", val: strings.Repeat("x", 100000), max: 10, wantField: "field"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateMaxLen("field", tt.val, tt.max)
+			if tt.wantField == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
+}
+
+// TestScoreRequestValidate_LengthCaps verifies the persisted-string
+// caps in ScoreRequest.Validate. decisionReason was previously
+// unbounded on the score endpoint (only DecisionRequest enforced
+// the 200-char contract) — this confirms the gap closure.
+func TestScoreRequestValidate_LengthCaps(t *testing.T) {
+	tests := []struct {
+		name      string
+		req       ScoreRequest
+		wantField string
+	}{
+		{
+			name:      "sideA over 100 chars",
+			req:       ScoreRequest{SideA: strings.Repeat("a", 101)},
+			wantField: "sideA",
+		},
+		{
+			name:      "sideB over 100 chars",
+			req:       ScoreRequest{SideB: strings.Repeat("b", 101)},
+			wantField: "sideB",
+		},
+		{
+			name:      "winner over 100 chars",
+			req:       ScoreRequest{Winner: strings.Repeat("w", 101)},
+			wantField: "winner",
+		},
+		{
+			name:      "scheduledAt over 32 chars",
+			req:       ScoreRequest{ScheduledAt: strings.Repeat("t", 33)},
+			wantField: "scheduledAt",
+		},
+		{
+			name:      "decisionReason over 200 chars: closes pre-existing gap",
+			req:       ScoreRequest{DecisionReason: strings.Repeat("r", 201)},
+			wantField: "decisionReason",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.req.Validate()
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
+}
+
+// TestValidateBulkScoreLengths covers the bulk-score helper. The
+// bulk-score endpoint bypasses ScoreRequest.Validate's caps because
+// it writes raw state.MatchResult through RecordMatchResult — without
+// this helper a 1MB sideA could land on disk via bulk-score even
+// after the score endpoint's caps were added.
+func TestValidateBulkScoreLengths(t *testing.T) {
+	tests := []struct {
+		name      string
+		mr        state.MatchResult
+		wantField string
+	}{
+		{
+			name: "valid result: ok",
+			mr: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			},
+		},
+		{
+			name:      "sideA over cap",
+			mr:        state.MatchResult{SideA: strings.Repeat("a", 101)},
+			wantField: "sideA",
+		},
+		{
+			name:      "scheduledAt over cap",
+			mr:        state.MatchResult{ScheduledAt: strings.Repeat("s", 33)},
+			wantField: "scheduledAt",
+		},
+		{
+			name:      "decisionReason over cap",
+			mr:        state.MatchResult{DecisionReason: strings.Repeat("r", 201)},
+			wantField: "decisionReason",
+		},
+		{
+			name: "subResult sideB over cap",
+			mr: state.MatchResult{
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideB: strings.Repeat("b", 101)},
+				},
+			},
+			wantField: "subResults[0].sideB",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateBulkScoreLengths(&tt.mr)
+			if tt.wantField == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
+}
+
+// TestValidatePlayerLengths covers the shared participant cap helper
+// used by handlers_participants.go, handlers_competition.go (roster
+// PUT), and handlers_import.go (manifest upload).
+func TestValidatePlayerLengths(t *testing.T) {
+	tests := []struct {
+		name        string
+		playerName  string
+		displayName string
+		dojo        string
+		tag         string
+		metadata    []string
+		wantField   string
+	}{
+		{name: "all valid: ok", playerName: "Alice", dojo: "Dojo A"},
+		{
+			name:       "name over 100 chars",
+			playerName: strings.Repeat("a", 101),
+			wantField:  "name",
+		},
+		{
+			name:        "displayName over 50 chars (physical zekken cap)",
+			displayName: strings.Repeat("z", 51),
+			wantField:   "displayName",
+		},
+		{
+			name:      "dojo over 100 chars",
+			dojo:      strings.Repeat("d", 101),
+			wantField: "dojo",
+		},
+		{
+			name:      "tag over 200 chars",
+			tag:       strings.Repeat("t", 201),
+			wantField: "tag",
+		},
+		{
+			name:      "metadata > 16 entries",
+			metadata:  make([]string, 17),
+			wantField: "metadata",
+		},
+		{
+			name:      "single metadata entry over 200 chars",
+			metadata:  []string{strings.Repeat("m", 201)},
+			wantField: "metadata[0]",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePlayerLengths(tt.playerName, tt.displayName, tt.dojo, tt.tag, tt.metadata)
+			if tt.wantField == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
+}
+
+// TestCompetitorStatusRequestValidate verifies the eligibility request
+// caps. domain.CompetitorStatus.Validate covers presence (PlayerID,
+// Reason on ineligible) but not length — this fills that gap.
+func TestCompetitorStatusRequestValidate(t *testing.T) {
+	tests := []struct {
+		name      string
+		req       CompetitorStatusRequest
+		wantField string
+	}{
+		{name: "valid: ok", req: CompetitorStatusRequest{PlayerID: "p1", Reason: "kiken"}},
+		{
+			name:      "playerId over 64 chars",
+			req:       CompetitorStatusRequest{PlayerID: strings.Repeat("p", 65)},
+			wantField: "playerId",
+		},
+		{
+			name:      "matchId over 64 chars",
+			req:       CompetitorStatusRequest{MatchID: strings.Repeat("m", 65)},
+			wantField: "matchId",
+		},
+		{
+			name:      "reason over 200 chars",
+			req:       CompetitorStatusRequest{Reason: strings.Repeat("r", 201)},
+			wantField: "reason",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.req.Validate()
+			if tt.wantField == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
 }

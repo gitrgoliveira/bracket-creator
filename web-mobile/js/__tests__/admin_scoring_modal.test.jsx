@@ -642,7 +642,23 @@ describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
     // maxIppons param is the same MAX_IPPONS_PER_SIDE default — pinned
     // here so a future refactor that lifts the cap doesn't silently let
     // 3+ H pile up in the opponent's slot.
-    expect(applyFoulIncrement(1, ['M'], 1)).toEqual({ fouls: 0, opponentPts: ['M'] });
+    expect(applyFoulIncrement(1, ['M'], [], 1)).toEqual({ fouls: 0, opponentPts: ['M'] });
+  });
+
+  it('second foul is a no-op when THIS side is already at maxIppons', () => {
+    // Bout-decided guard: if THIS side reached 2 ippons (bout already
+    // won by THIS side), the 2nd foul cannot auto-award an H to opp
+    // without producing an invalid 2-2 scoreline that the server's
+    // validateIpponCounts would reject. Counter still resets to 0;
+    // opponent's pts are left untouched.
+    expect(applyFoulIncrement(1, ['X'], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['X'] });
+    expect(applyFoulIncrement(1, [], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: [] });
+  });
+
+  it('second foul is a no-op when BOTH sides are at maxIppons (already 2-2 is impossible but defensive)', () => {
+    // Backstop for a hypothetical corrupted state — the function must
+    // not push a 3rd ippon onto opp regardless of how it was called.
+    expect(applyFoulIncrement(1, ['M', 'K'], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['M', 'K'] });
   });
 });
 

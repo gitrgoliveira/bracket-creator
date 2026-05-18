@@ -52,18 +52,20 @@ function applyFusenshoToggle(prev, side) {
 // side's counter to 0. The counter is "outstanding fouls not yet
 // discharged into an H" — discharged Hs live in the opponent's pts array.
 //
-// Edge case: when the opponent's pts slot is already full (best-of-3
-// cap), the bout is already decided — the counter still resets to 0
-// but no new H is awarded (the extra foul is consumed without effect).
+// Bout-decided guard: if EITHER side is already at maxIppons the bout is
+// over — the counter still resets to 0 on the 2nd foul but no new H is
+// awarded. This prevents an auto-award from creating an invalid 2-2
+// scoreline that the server's validateIpponCounts would reject. The UI
+// also disables the `+` button via isBoutDecided as a defense in depth.
 // To undo a previously awarded H, the operator removes it from the
 // opponent's slot directly.
-function applyFoulIncrement(fouls, opponentPts, maxIppons = MAX_IPPONS_PER_SIDE) {
+function applyFoulIncrement(fouls, opponentPts, thisSidePts = [], maxIppons = MAX_IPPONS_PER_SIDE) {
   const next = fouls + 1;
   if (next < 2) return { fouls: next, opponentPts };
-  const newOpp = opponentPts.length < maxIppons
-    ? [...opponentPts, "H"]
-    : opponentPts;
-  return { fouls: 0, opponentPts: newOpp };
+  if (opponentPts.length >= maxIppons || thisSidePts.length >= maxIppons) {
+    return { fouls: 0, opponentPts };
+  }
+  return { fouls: 0, opponentPts: [...opponentPts, "H"] };
 }
 
 // Term — kendo-glossary tooltip wrapper. Read lazily off window so the
@@ -307,9 +309,11 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
 // `setFouls` is kept for the `−` button (simple decrement). After the
 // 2-foul auto-award the awarded H lives in the opponent's pts array, so
 // the counter shows only "outstanding fouls not yet discharged."
-function FoulCounter({ label, fouls, setFouls, onIncrement, color }) {
+function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
   // color is "shiro" or "aka" — surface as data-testid so Playwright probes
   // (T023a) can target each side without depending on the className.
+  // `disabled` freezes the `+` button when the bout is already decided —
+  // a 2nd-foul auto-award in that state would create an invalid 2-2.
   return (
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
       <div className="foul-counter__label">{label} Fouls</div>
@@ -318,7 +322,7 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color }) {
         <div className="foul-counter__count">
           <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>
-        <button className="foul-counter__btn foul-counter__btn--inc" onClick={onIncrement}>+</button>
+        <button className="foul-counter__btn foul-counter__btn--inc" onClick={onIncrement} disabled={disabled}>+</button>
       </div>
     </div>
   );
@@ -516,7 +520,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     {
       key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls, setFouls: setBFouls,
       onIncrement: () => {
-        const r = applyFoulIncrement(bFouls, aPts);
+        const r = applyFoulIncrement(bFouls, aPts, bPts);
         setBFouls(r.fouls);
         setAPts(r.opponentPts);
       },
@@ -525,7 +529,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     {
       key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls, setFouls: setAFouls,
       onIncrement: () => {
-        const r = applyFoulIncrement(aFouls, bPts);
+        const r = applyFoulIncrement(aFouls, bPts, aPts);
         setAFouls(r.fouls);
         setBPts(r.opponentPts);
       },
@@ -737,6 +741,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                     setFouls={s.setFouls}
                     onIncrement={s.onIncrement}
                     color={s.color}
+                    disabled={boutDecided}
                   />
                 ))}
               </div>
@@ -1338,7 +1343,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts, fusensho: "", _preFusensho: undefined })),
                 setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f, fusensho: "", _preFusensho: undefined })),
                 onIncrement: () => updateSub(idx, prev => {
-                  const r = applyFoulIncrement(prev.bFouls, prev.aPts);
+                  const r = applyFoulIncrement(prev.bFouls, prev.aPts, prev.bPts);
                   return { ...prev, bFouls: r.fouls, aPts: r.opponentPts, fusensho: "", _preFusensho: undefined };
                 }),
                 color: "shiro", label: "SHIRO",
@@ -1348,7 +1353,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts, fusensho: "", _preFusensho: undefined })),
                 setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f, fusensho: "", _preFusensho: undefined })),
                 onIncrement: () => updateSub(idx, prev => {
-                  const r = applyFoulIncrement(prev.aFouls, prev.bPts);
+                  const r = applyFoulIncrement(prev.aFouls, prev.bPts, prev.aPts);
                   return { ...prev, aFouls: r.fouls, bPts: r.opponentPts, fusensho: "", _preFusensho: undefined };
                 }),
                 color: "aka", label: "AKA",
@@ -1413,7 +1418,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                           <div className="tsm-fouls__controls">
                             <button className="tsm-fouls__btn" onClick={() => rs.setFouls(f => Math.max(0, f - 1))} disabled={rs.fouls === 0}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                            <button className="tsm-fouls__btn" onClick={rs.onIncrement}>+</button>
+                            <button className="tsm-fouls__btn" onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
                           </div>
                         </div>
                         {/* T096/FR-031: per-bout Fusensho. Awards the bout

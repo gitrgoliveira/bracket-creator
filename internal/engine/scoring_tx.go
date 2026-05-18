@@ -194,6 +194,7 @@ func (e *Engine) maybeLockTeamLineupsForRoundTx(tx state.StoreTx, compID string,
 // T156.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchID
+	applyHansokuIppons(result)
 
 	// Capture the prior result so we can roll back the score on
 	// AlreadyIneligibleError. lookupExistingResultTx reads directly from
@@ -254,6 +255,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 // through the WithIneligibility variant.
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
+	applyHansokuIppons(result)
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
 		if result.SideA == "" {
 			result.SideA = r.SideA

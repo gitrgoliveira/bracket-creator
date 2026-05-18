@@ -370,3 +370,36 @@ func TestStoreTxUpdatePoolMatchByIDLockFree(t *testing.T) {
 	require.Len(t, matches, 1)
 	assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
 }
+
+// TestRecordMatchResultWithIneligibilityTx_HansokuAutoAward verifies
+// that the tx-aware scoring path also applies the FIK Article 20
+// hansoku→ippon auto-award.
+func TestRecordMatchResultWithIneligibilityTx_HansokuAutoAward(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "tx-hansoku"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	result := &state.MatchResult{
+		Winner:   "Alice",
+		HansokuA: 2,
+		IpponsA:  []string{"M"},
+		Status:   state.MatchStatusCompleted,
+	}
+	var engErr error
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, engErr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", result)
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.NoError(t, engErr)
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, []string{"H"}, stored[0].IpponsB)
+	assert.Equal(t, []string{"M"}, stored[0].IpponsA)
+}

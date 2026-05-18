@@ -22,7 +22,7 @@ make run               # Build and start web server (localhost:8080)
 PORT=8081 make run      # Use alternate port
 make run-mobile        # Build and start the mobile/live app (localhost:8080, ./tournament-data)
 PORT=8082 make run-mobile   # Use alternate port
-TOURNAMENT_DATA_DIR=/path make run-mobile  # Custom data folder
+TOURNAMENT_DATA_DIR=/path make run-mobile  # Custom data folder (also works without make: TOURNAMENT_DATA_DIR=/path ./bin/bracket-creator mobile-app)
 make examples          # Generate example Excel files from mock data
 
 # Run a single test

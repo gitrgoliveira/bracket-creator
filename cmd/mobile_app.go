@@ -28,7 +28,11 @@ func newMobileAppCmd() *cobra.Command {
 		RunE:         o.run,
 	}
 
-	cmd.Flags().StringVarP(&o.folder, "folder", "f", ".", "folder to store tournament state")
+	folder := os.Getenv("TOURNAMENT_DATA_DIR")
+	if folder == "" {
+		folder = "."
+	}
+	cmd.Flags().StringVarP(&o.folder, "folder", "f", folder, "folder to store tournament state (env: TOURNAMENT_DATA_DIR)")
 
 	bindAddress := os.Getenv("BIND_ADDRESS")
 	if bindAddress == "" {

@@ -130,13 +130,27 @@ class ErrorBoundary extends React.Component {
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
+  // Hydrate the route state from the URL synchronously, BEFORE the first
+  // render. The post-mount useEffect that previously did this ran AFTER
+  // the URL-sync effect, so a direct load of /reset (or any non-`/`
+  // path) saw the URL get overwritten back to `/` on first paint
+  // because pathFromState() read the default state. useState's lazy
+  // initializer runs once at mount and is the standard fix for this
+  // race.
+  const initialRoute = (() => {
+    try {
+      return parsePath(window.location.pathname);
+    } catch {
+      return { mode: "viewer", viewerScreen: "home" };
+    }
+  })();
   // mode: viewer | admin | display.
   // "display" is the public /display family — read-only TV / lobby /
   // OBS overlay surfaces. We track it here (rather than as a sub-state
   // of viewer) so App() can short-circuit the viewer/admin auth/render
   // logic entirely; the display surfaces require no auth and don't
   // touch viewerCompId / viewerScreen.
-  const [mode, setMode] = useS("viewer");
+  const [mode, setMode] = useS(initialRoute.mode || "viewer");
   const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
   // authedRef mirrors `authed` so the SSE handler — created once per
   // viewerCompId/mode change — observes the current auth state instead
@@ -148,9 +162,9 @@ function App() {
   const authedRef = useR(authed);
   const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
   const [authPrompt, setAuthPrompt] = useS(false);
-  const [viewerCompId, setViewerCompId] = useS(null);
-  const [viewerScreen, setViewerScreen] = useS("home"); // home | schedule
-  const [adminView, setAdminView] = useS({ kind: "dashboard" });
+  const [viewerCompId, setViewerCompId] = useS(initialRoute.viewerCompId || null);
+  const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset
+  const [adminView, setAdminView] = useS(initialRoute.admin || { kind: "dashboard" });
   const [toast, setToast] = useS(null);
   // T063: SSE connection status, surfaced to display surfaces so the
   // TV / lobby / overlay can render a reconnect indicator during the
@@ -187,22 +201,17 @@ function App() {
     setToast({ message, type });
   };
 
-  // Hydrate state from the current URL on first render. Without this,
-  // a deep-link page-load (e.g. /admin/schedule typed directly) would
-  // boot into the default viewer-home view until the user navigated.
+  // Route state was hydrated synchronously by the useState initializers
+  // above (see initialRoute). This effect now handles only the
+  // side-effects of the initial route — surfacing the AuthModal when
+  // the user deep-linked to /admin without being authenticated. State
+  // sync to/from the URL is owned by initialRoute + the URL-sync
+  // effect below.
   useE(() => {
-    const route = parsePath(window.location.pathname);
-    if (route.mode === "admin") {
-      setMode("admin");
-      if (route.admin) setAdminView(route.admin);
-      if (!authed) setAuthPrompt(true);
-    } else if (route.mode === "display") {
-      setMode("display");
-    } else {
-      setMode("viewer");
-      if (route.viewerCompId) setViewerCompId(route.viewerCompId);
-      if (route.viewerScreen) setViewerScreen(route.viewerScreen);
+    if (initialRoute.mode === "admin" && !authed) {
+      setAuthPrompt(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync state to URL whenever it changes. Uses the AppRouter.route()

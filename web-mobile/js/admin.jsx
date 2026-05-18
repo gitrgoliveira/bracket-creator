@@ -70,14 +70,27 @@ function mergeCompetitionsIntoTournament(currentT, mutator) {
 // top-level fields (name/date/venue/password) rather than the
 // competitions array.
 //
-// Session-password restore: the viewer API strips tournament.password
-// from server responses, so a tournament loaded via the viewer endpoint
-// has password="" locally even when the session still holds the real
-// password. When the patch doesn't carry a new password, we restore the
-// session password to the merged result so a subsequent re-save (or the
-// API body we build from it) doesn't silently wipe the on-disk password.
-function mergeTournamentPatch(currentT, patch, sessionPassword) {
+// Session-password restore (file mode only): the viewer API strips
+// tournament.password from server responses, so a tournament loaded via
+// the viewer endpoint has password="" locally even when the session
+// still holds the real password. When the patch doesn't carry a new
+// password, we restore the session password to the merged result so a
+// subsequent re-save (or the API body we build from it) doesn't silently
+// wipe the on-disk password.
+//
+// Locked mode: the backend now rejects PUT /api/tournament with a
+// non-empty password (the env-var bcrypt hash is authoritative; the
+// on-disk Password is irrelevant). Restoring the session password here
+// would cause every locked-mode admin edit (name/venue/courts) to
+// 400. When `locked` is true we explicitly send an empty password —
+// the backend's locked-mode transform preserves whatever's on disk
+// regardless.
+function mergeTournamentPatch(currentT, patch, sessionPassword, locked) {
   const next = { ...currentT, ...patch };
+  if (locked) {
+    next.password = "";
+    return next;
+  }
   if (!patch.password) next.password = sessionPassword;
   return next;
 }
@@ -338,7 +351,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // another comp) during the in-flight save, the closure-captured
       // `t` would be stale; using it for `onUpdate(next)` would clobber
       // the SSE-driven updates with pre-save state until the next refresh.
-      const sendBody = mergeTournamentPatch(tRef.current, patch, password);
+      const locked = !!(authConfig && authConfig.mode === "locked");
+      const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
       await window.API.updateTournament(sendBody, password);
       // Bail if the admin navigated away during the in-flight PUT —
       // mirrors startAllCompetitions / refreshCompsAfterCreate /
@@ -352,7 +366,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // Re-read tRef.current AFTER the await — additional SSE events may
       // have landed during the save. The patch we just persisted is
       // applied on top of the freshest snapshot.
-      onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password));
+      onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password, locked));
       showToast("Tournament updated");
     } catch (e) {
       if (!mountedRef.current) return;

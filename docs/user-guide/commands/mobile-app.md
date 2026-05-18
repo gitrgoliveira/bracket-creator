@@ -71,8 +71,12 @@ bracket-creator mobile-app -f ./tournament-data
 # Bind to all interfaces, custom port
 bracket-creator mobile-app -f ./tournament-data -b 0.0.0.0 -p 8082
 
-# Locked mode for a public deployment
-HASH=$(bracket-creator hash-password)   # interactive
+# Locked mode for a public deployment.
+# Note: `hash-password` reads ONE line from stdin without prompting or
+# disabling terminal echo — pipe the password in from a secrets manager
+# or a here-doc rather than typing it directly, so it never lands in
+# shell history or the terminal scrollback.
+HASH=$(printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password)
 TOURNAMENT_PASSWORD_HASH="$HASH" \
   bracket-creator mobile-app --lock-password -f /var/lib/bracket-creator -b 0.0.0.0
 ```

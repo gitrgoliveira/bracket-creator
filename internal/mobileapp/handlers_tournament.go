@@ -394,18 +394,16 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// contain whitespace; auth check is exact-string match).
 		//
 		// Locked mode: the on-disk Password is irrelevant — auth comes
-		// from the env-var bcrypt hash. An operator using the bootstrap
-		// form would naturally type a password into the field (the SPA
-		// doesn't yet hide it on locked deployments), but it will never
-		// be used to authenticate. Accept the submission either way;
-		// the stored value is read back as empty via GET /tournament so
-		// the admin doesn't see a stale credential.
+		// from the env-var bcrypt hash. The SPA's CreateTournament form
+		// detects locked mode via /api/auth-config and labels the
+		// password field as the env-var credential, sending it as
+		// X-Tournament-Password (the middleware verifies the header,
+		// the body's password is discarded here). The stored value is
+		// read back as empty via GET /tournament so the admin doesn't
+		// see a stale credential after bootstrap.
 		if verifier != nil && verifier.RedactStoredPassword() {
 			// Persist with empty Password so the stored record matches
-			// what the admin will see on subsequent GETs. Anything the
-			// operator typed in the bootstrap form is discarded —
-			// documented in the README, surfaced in the UI in a later
-			// pass.
+			// what the admin sees on subsequent GETs.
 			t.Password = ""
 		} else if t.Password == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})

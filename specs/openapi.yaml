@@ -251,15 +251,20 @@ paths:
       tags: [tournament]
       summary: Create tournament configuration
       description: |
-        Creates a new tournament. Allowed without the `X-Tournament-Password` header when no
-        tournament has been configured yet (bootstrap). Once a tournament with a password exists,
-        auth is required.
+        Creates a new tournament.
 
-        **File mode (default)**: `password` must be non-empty (`tournament password is required`) —
-        an empty Password on disk would let AuthMiddleware's `password != t.Password` check
-        vacuously pass for any client sending an empty header.
+        **File mode (default)**: allowed without the
+        `X-Tournament-Password` header when no tournament has been
+        configured yet (bootstrap). `password` must be non-empty
+        (`tournament password is required`) — an empty Password on
+        disk would let AuthMiddleware's `password != t.Password`
+        check vacuously pass for any client sending an empty header.
+        Once a tournament with a password exists, auth is required.
 
-        **Locked mode (`--lock-password`)**: the `password` field in the request body is
+        **Locked mode (`--lock-password`)**: there is NO bootstrap
+        exception — the bcrypt env-var hash is the credential from
+        the very first request. The `password` field in the request
+        body is
         accepted but **discarded** server-side — authentication uses the bcrypt hash from
         `TOURNAMENT_PASSWORD_HASH` env var, not the stored value. **Bootstrap requires
         `X-Tournament-Password` to match the env-var hash, even on a never-initialized
@@ -289,31 +294,52 @@ paths:
       tags: [tournament]
       summary: Update tournament configuration
       description: |
-        Updates tournament config. Also allowed without auth during bootstrap (same
-        condition as POST): `AuthMiddleware` skips the password check only when
-        `tournament.md` is missing OR when the on-disk record is the literal default
-        placeholder (`Name == "New Tournament" && Password == ""`). A real-named
-        record with an empty password is FAIL-CLOSED in file mode — rejected with 403
-        (`tournament misconfigured: password is not set`) BEFORE this handler runs;
-        operator can use `POST /api/tournament/reset` (file mode only) or repair
-        `tournament.md` out-of-band to recover. The empty-stored guard is disabled in
-        locked mode (the on-disk password is irrelevant). See
-        `internal/mobileapp/middleware.go` AuthMiddleware for the exact branches.
+        Updates tournament config.
+
+        **Authentication**:
+          - File mode: also allowed without auth during bootstrap.
+            `AuthMiddleware` skips the password check only when
+            `tournament.md` is missing OR when the on-disk record is
+            the literal default placeholder (`Name == "New Tournament"
+            && Password == ""`). A real-named record with an empty
+            password is FAIL-CLOSED — rejected with 403 (`tournament
+            misconfigured: password is not set`) before this handler
+            runs; operator can use `POST /api/tournament/reset` or
+            repair `tournament.md` out-of-band to recover. The
+            empty-stored guard is disabled in locked mode (the
+            on-disk password is irrelevant).
+          - Locked mode: `X-Tournament-Password` is REQUIRED — there
+            is no bootstrap exception. The middleware verifies the
+            header against the bcrypt hash from
+            `TOURNAMENT_PASSWORD_HASH`. See
+            `internal/mobileapp/middleware.go` AuthMiddleware for the
+            exact branches.
 
         Validation matches POST for `name` (rejected if empty after trim).
 
-        **File mode — Password preserve semantics**: when the request body omits
-        `password` or sends an empty string, the server preserves the currently-stored
-        password. This matches the admin UI's `password: pass || undefined` pattern
-        ("leave blank to keep current"). If after the preserve step the password is
-        STILL empty (operator manually edited `tournament.md`, or a fresh PUT against
-        a never-initialized tournament), the request is rejected with 400
-        (`tournament password is required`).
+        **File mode — Password preserve semantics**: when the request
+        body omits `password` or sends an empty string, the server
+        preserves the currently-stored password. This matches the
+        admin UI's `password: pass || undefined` pattern ("leave blank
+        to keep current"). If after the preserve step the password is
+        STILL empty (operator manually edited `tournament.md`, or a
+        fresh PUT against a never-initialized tournament), the
+        request is rejected with 400 (`tournament password is
+        required`). Successful rotations broadcast
+        `EventPasswordReset` over SSE so other logged-in admins clear
+        their stale localStorage credential and re-prompt; name-only
+        edits do not.
 
-        **Locked mode**: the `password` field in the request body is **silently
-        ignored** — the on-disk Password is preserved regardless of what the client
-        sends. The response body's `password` field is empty to avoid re-exposing the
-        preserved value to admin sessions.
+        **Locked mode — password rotation is disabled**: PUTs that
+        carry a non-empty `password` field are **rejected with 400**
+        (`password rotation is disabled in locked mode; restart with
+        a new TOURNAMENT_PASSWORD_HASH`). The auth credential lives
+        in the env-var hash and is rotated by restarting the server
+        with a new value, not via the API. Empty/omitted `password`
+        is accepted so admins can edit `name`/`venue`/`courts`/etc.;
+        the on-disk Password is preserved on disk regardless and
+        zeroed on the response so admin UIs don't surface a stale
+        credential.
       security:
         - TournamentPassword: []
       requestBody:

@@ -91,6 +91,10 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// existingPairs guard, so both goroutines generate identical content.
 	// SavePoolMatches is a full overwrite — the last write wins, but the
 	// data is the same, making concurrent injection idempotent.
+	// Pre-existing TOCTOU: if a score result is committed between two
+	// goroutines' loads inside InjectTiebreakerMatches, the later caller
+	// may compute different standings. This is a general pool-match-save
+	// TOCTOU issue tracked separately — not specific to injection.
 	if !hasCompleteTB {
 		injected, injErr := e.InjectTiebreakerMatches(compID)
 		if injErr != nil {

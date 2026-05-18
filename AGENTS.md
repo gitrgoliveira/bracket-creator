@@ -65,7 +65,7 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full 
 bd ready              # Find available work
 bd show <id>          # View issue details
 bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+bd close <id>         # Complete work (if in a branch, the PR must be merged to complete)
 ```
 
 ### Rules

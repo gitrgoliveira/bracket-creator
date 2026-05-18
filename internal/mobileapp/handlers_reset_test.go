@@ -208,6 +208,37 @@ func TestReset_SameOriginPost_Accepted(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, w.Code)
 }
 
+// A browser on an HTTPS origin that POSTs to an HTTP tournament server
+// with the same host is cross-origin per RFC 6454 (scheme differs).
+// The request must be rejected even though the host:port matches, so
+// an HTTPS page can't use a same-host HTTP server as a CSRF pivot.
+func TestReset_SchemeMismatch_Rejected(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), NewHub())
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "T",
+		Password: "old",
+	}))
+
+	// Origin says HTTPS; server is HTTP (req.TLS == nil → expectedScheme = "http").
+	body, _ := json.Marshal(map[string]string{"password": "attacker"})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://tournament.local:8080")
+	req.Host = "tournament.local:8080"
+	// req.TLS is nil by default (http) — scheme mismatch with https Origin
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, "https Origin against http server must be rejected")
+	loaded, _ := store.LoadTournament()
+	assert.Equal(t, "old", loaded.Password)
+}
+
 // Browsers send `Origin: null` for sandboxed iframes, file:// pages,
 // and data: URLs. None of these are legitimate operator contexts for
 // /reset — they all indicate a request smuggled in through a
@@ -360,7 +391,7 @@ func TestReset_BroadcastsPasswordResetEvent(t *testing.T) {
 // OriginatorId is opaque to the server but length-capped at 128 bytes
 // so an attacker can't pump arbitrary bytes through the SSE channel.
 // Oversized values are rejected at the reset endpoint with a 400.
-func TestReset_OriginatorIdOversized_Returns400(t *testing.T) {
+func TestReset_OriginatorIDOversized_Returns400(t *testing.T) {
 	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)
 	r := gin.New()
@@ -374,7 +405,7 @@ func TestReset_OriginatorIdOversized_Returns400(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"password":     "newpw",
-		"originatorId": strings.Repeat("x", MaxLenOriginatorId+1),
+		"originatorId": strings.Repeat("x", MaxLenOriginatorID+1),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

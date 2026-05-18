@@ -21,7 +21,7 @@ import (
 // the documented recovery path for a forgotten admin password.
 type resetPasswordRequest struct {
 	Password string `json:"password"`
-	// OriginatorId is an opaque per-tab identifier the SPA generates
+	// OriginatorID is an opaque per-tab identifier the SPA generates
 	// on mount and sends with the reset POST so the SSE broadcast
 	// (EventPasswordReset) can be ignored in the originating tab.
 	// Without it, the tab that just submitted /reset would receive
@@ -29,22 +29,22 @@ type resetPasswordRequest struct {
 	// credential ResetPasswordForm just wrote — kicking the operator
 	// who reset straight back to the AuthModal. The server treats
 	// the value as opaque: echo on the broadcast, never persist.
-	OriginatorId string `json:"originatorId,omitempty"`
+	OriginatorID string `json:"originatorId,omitempty"`
 }
 
 // passwordResetEventData is the payload of an EventPasswordReset SSE
-// broadcast. Carries only the OriginatorId so consumer tabs can
+// broadcast. Carries only the OriginatorID so consumer tabs can
 // suppress their own resets; everything else (mode, etc.) is fetched
 // fresh from /api/auth-config on demand.
 type passwordResetEventData struct {
-	OriginatorId string `json:"originatorId,omitempty"`
+	OriginatorID string `json:"originatorId,omitempty"`
 }
 
-// MaxLenOriginatorId caps the originatorId at 128 bytes — a UUID is
+// MaxLenOriginatorID caps the originatorId at 128 bytes — a UUID is
 // 36 bytes, a fallback random string is ~20; 128 leaves headroom for
 // future variants without letting an attacker pump arbitrary bytes
 // through the SSE channel.
-const MaxLenOriginatorId = 128
+const MaxLenOriginatorID = 128
 
 // errResetPasswordRequired is the sentinel the reset transform returns
 // when the new Password is empty after binding. Surfaced as a 400 by
@@ -62,27 +62,24 @@ var errResetPasswordRequired = errors.New("password is required")
 // Rules:
 //   - No Origin header → non-browser caller (curl, scripted client,
 //     mobile app over LAN that doesn't set Origin). Allowed.
-//   - Origin matches the request host → genuine same-origin browser
-//     request (the operator opened /reset in their browser tab).
-//     Allowed.
-//   - Origin set and doesn't match host (different host string,
-//     malformed URL, or Origin: null from a sandboxed iframe/file://) →
-//     Rejected.
+//   - Origin scheme AND host:port both match → genuine same-origin
+//     browser request (the operator opened /reset in their tab). Allowed.
+//   - Origin set but scheme or host doesn't match (different scheme,
+//     different host string, malformed URL, or Origin: null from a
+//     sandboxed iframe/file://) → Rejected.
 //
 // Known limitations:
-//   - The comparison is exact-string on host:port. An operator who
-//     navigates to `http://localhost:8089` and a colleague who reaches
-//     the same machine via `http://127.0.0.1:8089` are treated as
-//     different origins by this check — which is also the browser's
-//     behavior, so a cross-DNS-form attempt can't actually happen
-//     through a normal browser session anyway.
-//   - Behind a reverse proxy that rewrites Host (e.g., a TLS
-//     terminator that forwards `Host: localhost:8080` upstream while
-//     the browser sees `https://tournament.example.com`), the Origin
-//     check will reject the legitimate request. Such deployments
-//     should run with --lock-password (which 404s /reset entirely)
-//     and rotate credentials via env-var hash; the recovery endpoint
-//     is designed for direct same-host operator access.
+//   - The host comparison is exact-string on host:port. An operator at
+//     `http://localhost:8089` and a colleague reaching the same machine
+//     via `http://127.0.0.1:8089` are treated as different origins —
+//     which is also the browser's behavior, so a cross-DNS pivot can't
+//     happen through a normal browser session anyway.
+//   - Behind a TLS-terminating reverse proxy, c.Request.TLS is nil even
+//     when the browser sees HTTPS; the scheme check would reject the
+//     legitimate https Origin. Such deployments should run with
+//     --lock-password (which 404s /reset entirely) and rotate credentials
+//     via env-var hash; the recovery endpoint is designed for direct
+//     same-host operator access.
 //
 // We deliberately do NOT support an allowlist env var here: the
 // recovery path is for operators sitting at the tournament server.
@@ -96,10 +93,28 @@ func isSameOriginReset(c *gin.Context) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	// Compare host:port. c.Request.Host already includes the port if
-	// the client sent one (e.g. "localhost:8080"). Origin.Host follows
-	// the same convention, so direct comparison works.
-	return strings.EqualFold(u.Host, c.Request.Host)
+
+	// Derive the expected scheme from whether the connection uses TLS.
+	// Same-origin includes both scheme AND host:port (RFC 6454 §3.2), so
+	// an https Origin against an http server (or vice-versa) is
+	// cross-origin even when the host matches.
+	//
+	// For direct connections, c.Request.TLS is authoritative. Behind a
+	// TLS-terminating reverse proxy, c.Request.TLS is nil even when
+	// the browser sees HTTPS; such deployments should run with
+	// --lock-password (which 404s this endpoint entirely), so
+	// conservatively rejecting the scheme mismatch is still the right
+	// call here.
+	expectedScheme := "http"
+	if c.Request.TLS != nil {
+		expectedScheme = "https"
+	}
+
+	// Compare both scheme and host:port. c.Request.Host already includes
+	// the port if the client sent one (e.g. "localhost:8080"). Origin.Host
+	// follows the same convention, so direct comparison works.
+	return strings.EqualFold(u.Scheme, expectedScheme) &&
+		strings.EqualFold(u.Host, c.Request.Host)
 }
 
 // RegisterResetHandlers wires POST /api/tournament/reset. The route is
@@ -143,7 +158,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if err := validateMaxLen("originatorId", req.OriginatorId, MaxLenOriginatorId); err != nil {
+		if err := validateMaxLen("originatorId", req.OriginatorID, MaxLenOriginatorID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -205,7 +220,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			//     who just reset isn't immediately logged out.
 			hub.Broadcast(EventTournamentUpdated, nil)
 			hub.Broadcast(EventPasswordReset, passwordResetEventData{
-				OriginatorId: req.OriginatorId,
+				OriginatorID: req.OriginatorID,
 			})
 		}
 		c.Status(http.StatusNoContent)

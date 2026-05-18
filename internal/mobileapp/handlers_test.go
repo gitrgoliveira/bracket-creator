@@ -526,6 +526,129 @@ func TestTournamentHandlers_FileMode_PUTNoPasswordChange_NoResetEvent(t *testing
 	assert.False(t, sawPasswordReset, "name-only edit must NOT broadcast password_reset")
 }
 
+// TestTournamentHandlers_FileMode_POSTBootstrap_NoResetEvent pins the
+// fix for a real bug Copilot caught on PR #108: the POST handler used to
+// compare `t.Password != oldPass` where `oldPass = ""` on a fresh
+// bootstrap, so any non-empty new password broadcast EventPasswordReset.
+// The creating tab's SSE subscription (active from the
+// CreateTournament-screen mount) then received the empty-originator
+// event and immediately cleared the freshly cached password —
+// kicking the user back to AuthModal moments after they finished
+// bootstrap. POST must only emit password_reset when OVERWRITING an
+// existing record whose password actually changed.
+func TestTournamentHandlers_FileMode_POSTBootstrap_NoResetEvent(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "file-post-bootstrap-no-pwreset-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	hub := NewHub()
+	ch := hub.Subscribe()
+	t.Cleanup(func() { hub.Unsubscribe(ch) })
+
+	fileV := NewFileVerifier(store)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	api.Use(AuthMiddleware(fileV, store))
+	RegisterTournamentHandlers(api, store, hub, fileV)
+
+	// Fresh deploy: no tournament on disk yet. AuthMiddleware's
+	// uninitialized-bootstrap branch lets the unauthenticated POST through.
+	body, _ := json.Marshal(state.Tournament{
+		Name:     "Fresh Tournament",
+		Password: "alpha",
+		Courts:   []string{"A"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
+
+	sawPasswordReset := false
+	sawTournamentUpdated := false
+	for range 6 {
+		select {
+		case msg := <-ch:
+			if strings.Contains(msg, `"type":"password_reset"`) {
+				sawPasswordReset = true
+			}
+			if strings.Contains(msg, `"type":"tournament_updated"`) {
+				sawTournamentUpdated = true
+			}
+		default:
+		}
+	}
+	assert.True(t, sawTournamentUpdated, "tournament_updated event expected on bootstrap (so viewers refresh)")
+	assert.False(t, sawPasswordReset, "first-time bootstrap must NOT broadcast password_reset — the creating tab's own SSE would clear the credential it just persisted")
+}
+
+// TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsResetEvent
+// is the positive counterpart of the bootstrap test above: when a POST
+// OVERWRITES an existing tournament with a new password (a re-bootstrap
+// path, rare but possible), other logged-in admin sessions need to
+// clear their stale credentials. Same rationale as the PUT password-
+// change broadcast.
+func TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsResetEvent(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "file-post-overwrite-pwreset-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	hub := NewHub()
+	ch := hub.Subscribe()
+	t.Cleanup(func() { hub.Unsubscribe(ch) })
+
+	// Pre-seed an existing tournament with password "alpha".
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Existing Tournament",
+		Password: "alpha",
+		Courts:   []string{"A"},
+	}))
+	fileV := NewFileVerifier(store)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	api.Use(AuthMiddleware(fileV, store))
+	RegisterTournamentHandlers(api, store, hub, fileV)
+
+	// Re-bootstrap with a different password. AuthMiddleware no longer
+	// takes the uninitialized path (a real tournament exists), so we
+	// must authenticate with the current password to reach the POST
+	// handler.
+	body, _ := json.Marshal(state.Tournament{
+		Name:     "Existing Tournament",
+		Password: "beta",
+		Courts:   []string{"A"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "alpha")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
+
+	seen := map[string]bool{}
+	for range 6 {
+		select {
+		case msg := <-ch:
+			for _, ev := range []string{"tournament_updated", "password_reset"} {
+				if strings.Contains(msg, `"type":"`+ev+`"`) {
+					seen[ev] = true
+				}
+			}
+		default:
+		}
+	}
+	assert.True(t, seen["tournament_updated"], "tournament_updated event missing")
+	assert.True(t, seen["password_reset"], "password_reset event missing — overwriting an existing tournament's password must clear other admins' cached credentials")
+}
+
 // TestTournamentHandlers_ModeSwitchPreservesStoredPassword walks the
 // operator-facing scenario where a deployment migrates between auth
 // modes:

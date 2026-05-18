@@ -435,20 +435,28 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 
 		hub.Broadcast(EventTournamentUpdated, nil)
-		// In file mode, broadcast EventPasswordReset if the password
-		// changed so other logged-in admin sessions clear their stale
-		// cached credentials. Mirrors the PUT handler's behavior.
+		// In file mode, broadcast EventPasswordReset when an existing
+		// tournament's password is OVERWRITTEN (re-bootstrap with a new
+		// credential) so other logged-in admin sessions clear their
+		// stale cached credentials. Mirrors the PUT handler's behavior.
+		//
+		// We deliberately do NOT broadcast on the first-time bootstrap
+		// (`existingForPost == nil`). The creating tab already subscribed
+		// to SSE before submit, and the create-tournament flow calls
+		// `onCreated(t, pass)` to mark itself authenticated with the
+		// just-typed password. An empty-originator `password_reset`
+		// broadcast would race that, and the SPA's SSE handler — which
+		// has no originatorId to ignore (the POST body doesn't carry
+		// one) — would clear the freshly-cached credential and kick
+		// the user straight back to AuthModal.
+		//
 		// In locked mode, t.Password is always set to the pre-existing
 		// on-disk value above, so it never changes via POST and we skip
 		// the broadcast.
-		if verifier == nil || !verifier.RedactStoredPassword() {
-			var oldPass string
-			if existingForPost != nil {
-				oldPass = existingForPost.Password
-			}
-			if t.Password != oldPass {
-				hub.Broadcast(EventPasswordReset, passwordResetEventData{})
-			}
+		if (verifier == nil || !verifier.RedactStoredPassword()) &&
+			existingForPost != nil &&
+			t.Password != existingForPost.Password {
+			hub.Broadcast(EventPasswordReset, passwordResetEventData{})
 		}
 		// In locked mode the on-disk Password is not authoritative; strip it
 		// from the response so callers don't cache a stale file-mode credential

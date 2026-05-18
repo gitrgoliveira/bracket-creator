@@ -230,7 +230,7 @@ paths:
           updated, etc.). `data: null` — clients should refresh full state.
         - `schedule_updated` — a competition's schedule was saved.
         - `password_reset` — the admin password was changed. Emitted
-          from two sources (file mode only; never emitted in locked mode):
+          from three sources (file mode only; never emitted in locked mode):
           1. `POST /api/tournament/reset` — the public recovery endpoint.
              Payload includes `originatorId` so the submitting tab can
              suppress its own broadcast: `data: { originatorId: "<opaque>" }`.

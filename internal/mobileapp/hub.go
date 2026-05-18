@@ -23,12 +23,17 @@ const (
 	EventTournamentUpdated       EventType = "tournament_updated"
 	EventScheduleUpdated         EventType = "schedule_updated"
 	EventCompetitorStatusUpdated EventType = "competitor_status_updated"
-	// EventPasswordReset fires when the admin password is rotated. Two
-	// broadcast sites:
-	//   - POST /api/tournament/reset (file mode only) — the public
-	//     recovery endpoint for a forgotten password.
-	//   - PUT /api/tournament (file mode only) — when the PUT body
-	//     contains a non-empty password that differs from the stored one.
+	// EventPasswordReset fires when the admin password is rotated. Three
+	// broadcast sites (file mode only; never emitted in locked mode):
+	//   - POST /api/tournament/reset — the public recovery endpoint for
+	//     a forgotten password. Payload: {originatorId} so the submitting
+	//     tab can suppress its own broadcast and avoid clearing the
+	//     credential it just wrote.
+	//   - PUT /api/tournament — when the PUT body contains a non-empty
+	//     password that differs from the stored one. Payload: {} (all
+	//     sessions, including the editing tab, should re-authenticate).
+	//   - POST /api/tournament — when a bootstrap POST overwrites an
+	//     existing tournament with a different password. Payload: {}.
 	// Consumers in admin mode (app.jsx) clear their localStorage credential
 	// and re-show the AuthModal so a logged-in operator notices immediately
 	// instead of waiting for their next write to fail with 401. Viewers

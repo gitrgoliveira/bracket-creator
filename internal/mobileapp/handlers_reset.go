@@ -151,12 +151,19 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 
 		// Cap the request body before parsing so an attacker cannot
 		// send an arbitrarily large payload and force the server to
-		// allocate memory for it. The actual content is small:
-		// password ≤ 256 bytes + originatorId ≤ 128 bytes + JSON
-		// syntax ≈ 40 bytes → 512 bytes is a generous limit.
-		// MaxBytesReader wraps the body and causes ShouldBindJSON to
-		// return an error if the body exceeds the cap.
-		const maxResetBodyBytes = 512
+		// allocate memory for it.
+		//
+		// Worst-case JSON encoding (all characters become \uXXXX escapes):
+		//   password    256 bytes × 6 chars/escape = 1536 chars
+		//   originatorId 128 bytes × 6 chars/escape =  768 chars
+		//   JSON overhead (keys, braces, quotes)    =   ~40 chars
+		//   Total                                   = ~2344 chars
+		//
+		// 4096 bytes gives a ×1.7 safety margin while still forming a
+		// meaningful per-request limit. MaxBytesReader wraps the body
+		// and causes ShouldBindJSON to return an error if the body
+		// exceeds the cap.
+		const maxResetBodyBytes = 4096
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxResetBodyBytes)
 
 		var req resetPasswordRequest

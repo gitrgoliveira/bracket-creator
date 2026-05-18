@@ -1024,10 +1024,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const teamMatchType = m.teamMatchType || compMeta?.teamMatchType || "fixed";
   const isKachinuki = teamMatchType === "kachinuki";
   // Compact "Instrument Panel" mode fits the modal on one viewport page
-  // for ≤5-person teams. Kachinuki always renders the current bout
-  // only (see visiblePositions below), so it also fits even with a 9-
-  // person roster. Larger fixed-format teams keep the roomier layout
-  // and use .team-bouts-scroll for independent bout-list scrolling.
+  // for ≤5-person teams. Kachinuki renders only the current bout
+  // (see visiblePositions: positions.slice(kachinukiIdx, kachinukiIdx+1)),
+  // so it always fits even with a 9-person roster. Larger fixed-format
+  // teams keep the roomier layout and use .team-bouts-scroll for
+  // independent bout-list scrolling.
   const useCompact = teamSize <= 5 || isKachinuki;
   // T141: daihyosen is knockout-only — pool matches resolve ties via
   // the standings tiebreak, not a representative bout. Format comes
@@ -1307,15 +1308,15 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             ))}
           </div>
 
-          {/* Individual match rows. T136: in kachinuki mode only render
-              the CURRENT bout (the last sub result with a real score, or
-              the first row if nothing has been scored yet) — the server
-              appends new bouts via engine.MaybeAdvanceKachinuki after
-              each score record, so the operator only ever scores one
-              bout at a time. The .team-bouts-scroll wrapper gives the
-              roomy (non-compact) layout an independent scroll region
-              for the bout list so the team header / summary / decision
-              / footer stay anchored. */}
+          {/* Individual match rows. T136: in kachinuki mode only the
+              CURRENT bout is rendered (positions.slice(kachinukiIdx,
+              kachinukiIdx+1)) — the last row that has any data, or row 0
+              if nothing has been scored yet. The server appends new bouts
+              via engine.MaybeAdvanceKachinuki after each score record, so
+              the operator re-opens the modal to score the next bout.
+              The .team-bouts-scroll wrapper gives the roomy (non-compact)
+              layout an independent scroll region for the bout list so the
+              team header / summary / decision / footer stay anchored. */}
           <div className="team-bouts-scroll">
           {(() => {
             // T136: kachinuki "current bout" index — last row that has
@@ -1331,7 +1332,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             // banner instead of more bout rows when the backend has
             // already decided the match.
             const exhausted = isKachinuki && (m.decision === "kachinuki-exhaustion" || (m.subResults || []).some(s => s.decision === "kachinuki-exhaustion"));
-            const visiblePositions = isKachinuki ? positions.slice(0, kachinukiIdx + 1) : positions;
+            const visiblePositions = isKachinuki ? positions.slice(kachinukiIdx, kachinukiIdx + 1) : positions;
             return [
               isKachinuki && (
                 <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>

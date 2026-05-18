@@ -4757,12 +4757,12 @@ a:hover {
    board's VS column to 80px. */
 .editor-modal--compact.editor-modal--team .sb-match {
   grid-template-columns: 1fr 80px 1fr;
-  border-radius: 10px;
-  margin-bottom: 8px !important;
+  margin-bottom: 4px !important;
+  box-shadow: none;
+  border-radius: 8px;
 }
-.editor-modal--compact .editor-modal--team .sb-side,
 .editor-modal--compact.editor-modal--team .sb-side {
-  padding: 8px 14px;
+  padding: 6px 12px;
 }
 .editor-modal--compact.editor-modal--team .sb-name {
   font-size: 13px;
@@ -4777,14 +4777,6 @@ a:hover {
 .editor-modal--compact.editor-modal--team .sb-vs {
   font-size: 12px;
   letter-spacing: 0.2em;
-}
-.editor-modal--compact.editor-modal--team .sb-match {
-  margin-bottom: 4px !important;
-  box-shadow: none;
-  border-radius: 8px;
-}
-.editor-modal--compact.editor-modal--team .sb-side {
-  padding: 6px 12px;
 }
 
 /* --- Compact mode: team-sub-match 2-row layout --------------------------- */
@@ -5016,8 +5008,11 @@ a:hover {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  /* Sticky team-summary further down picks up its shadow naturally via
-     position: sticky; this scroll region is the parent for that sticky. */
+  /* The .team-summary is rendered *after* this region in the flex column
+     (not inside it), so it always stays visible below the bout list in the
+     roomy layout. The position:sticky on .team-summary is relative to the
+     .editor-modal__body scroll container, which is most useful if the
+     compact modal ever overflows on a very small screen. */
 }
 /* In compact mode the wrapper is layout-transparent — flow normally. */
 .editor-modal--compact .team-bouts-scroll {

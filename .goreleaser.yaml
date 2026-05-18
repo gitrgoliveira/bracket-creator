@@ -6,7 +6,13 @@ before:
     - go mod tidy
     - go generate ./...
     - mkdir -p web-mobile/dist
-    - npx --yes esbuild web-mobile/js/bracket.js web-mobile/js/viewer.js web-mobile/js/admin.js web-mobile/js/app.js --outdir=web-mobile/dist --loader:.js=jsx --jsx-factory=React.createElement --jsx-fragment=React.Fragment
+    # Mirror Makefile's esbuild-jsx target so release builds bundle every
+    # web-mobile/js/*.jsx entry — not just the four legacy names. The
+    # previous explicit list went stale as sources moved from .js to .jsx
+    # and per-screen modules (glossary.jsx, reset.jsx, admin_*.jsx) were
+    # added; release artifacts would 404 on /dist/reset.js (and others)
+    # at runtime while local `make go/build` worked fine.
+    - npx --yes esbuild web-mobile/js/*.jsx --outdir=web-mobile/dist --loader:.jsx=jsx --jsx-factory=React.createElement --jsx-fragment=React.Fragment
     - ./scripts/completions.sh
     - ./scripts/manpages.sh
 

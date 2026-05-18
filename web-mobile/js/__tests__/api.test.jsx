@@ -378,6 +378,174 @@ describe('API Utils', () => {
         await expect(API.swissStandings('c1')).rejects.toThrow('competition not found');
       });
     });
+
+    // POST /api/tournament — bootstrap. In file mode the call is
+    // unauthenticated (the AuthMiddleware uninitialized branch lets
+    // it through). In locked mode the server requires the env-var
+    // password and the SPA passes it via the new optional second
+    // arg, which the client attaches as X-Tournament-Password.
+    describe('createTournament', () => {
+      it('omits X-Tournament-Password when authPassword is undefined (file-mode bootstrap)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ name: 'X' }),
+        });
+        await API.createTournament({ name: 'X' });
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.method).toBe('POST');
+        expect(opts.headers['Content-Type']).toBe('application/json');
+        expect(opts.headers['X-Tournament-Password']).toBeUndefined();
+      });
+
+      it('attaches X-Tournament-Password when authPassword is supplied (locked-mode bootstrap)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ name: 'X' }),
+        });
+        await API.createTournament({ name: 'X' }, 'kotai-A');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBe('kotai-A');
+      });
+
+      it('falsy authPassword does not attach the header (avoid accidental empty string)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ name: 'X' }),
+        });
+        await API.createTournament({ name: 'X' }, '');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBeUndefined();
+      });
+
+      it('throws with server message on error', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'invalid tournament password' }),
+        });
+        await expect(API.createTournament({ name: 'X' }, 'wrong')).rejects.toThrow('invalid tournament password');
+      });
+    });
+
+    // GET /api/auth-config — public endpoint reporting the active
+    // auth mode (file vs locked). The SPA reads it on App() mount to
+    // decide whether to show the "Forgot password?" link in AuthModal
+    // and whether the /reset page renders a form vs an
+    // operator-disabled message. Failing-open (default to file +
+    // reset-enabled) on transport errors is intentional — never let a
+    // transient 5xx hide the recovery path from operators who need it.
+    describe('fetchAuthConfig', () => {
+      it('returns the parsed config on success', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ mode: 'locked', resetEnabled: false }),
+        });
+        await expect(API.fetchAuthConfig()).resolves.toEqual({
+          mode: 'locked',
+          resetEnabled: false,
+        });
+        expect(global.fetch).toHaveBeenCalledWith('/api/auth-config');
+      });
+
+      it('fails open on non-2xx (defaults to file + reset-enabled)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          json: async () => ({ error: 'oops' }),
+        });
+        await expect(API.fetchAuthConfig()).resolves.toEqual({
+          mode: 'file',
+          resetEnabled: true,
+        });
+      });
+    });
+
+    // POST /api/tournament/reset — the unauth'd password-recovery
+    // endpoint. The client must:
+    //   - send the new password in a JSON body
+    //   - return true on a 204 success (no res.json() — same empty-body
+    //     pattern as overridePoolRank above)
+    //   - throw an Error whose .status is the HTTP status, so the
+    //     ResetPasswordForm can branch on 404 ("disabled by operator")
+    //     vs other errors.
+    describe('resetPassword', () => {
+      it('POSTs JSON {password} to /api/tournament/reset', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+        await API.resetPassword('newpw');
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/tournament/reset',
+          expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({
+              'Content-Type': 'application/json',
+            }),
+            body: JSON.stringify({ password: 'newpw' }),
+          }),
+        );
+      });
+
+      it('does NOT send an X-Tournament-Password header', async () => {
+        // The whole point of /reset is that the caller doesn't know
+        // the current password. Sending the header anyway would be
+        // harmless server-side but would obscure intent and trip a
+        // future security scanner that flagged the header on the
+        // public endpoint.
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+        await API.resetPassword('newpw');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBeUndefined();
+      });
+
+      it('resolves to true on 204 No Content', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+        await expect(API.resetPassword('newpw')).resolves.toBe(true);
+      });
+
+      it('does not call res.json() on the success path', async () => {
+        // Empty 204 body — any call to .json() would throw
+        // SyntaxError per the Fetch spec. Mirrors the
+        // overridePoolRank regression coverage above.
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 204,
+          json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+        });
+        await expect(API.resetPassword('newpw')).resolves.toBe(true);
+      });
+
+      it('throws an Error with the server-reported message on failure', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'password is required' }),
+        });
+        await expect(API.resetPassword('')).rejects.toThrow('password is required');
+      });
+
+      it('propagates HTTP status on the thrown Error so the UI can branch on 404', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 404,
+          json: async () => ({ error: 'reset disabled' }),
+        });
+        try {
+          await API.resetPassword('whatever');
+          throw new Error('should have rejected');
+        } catch (e) {
+          expect(e.status).toBe(404);
+          expect(e.message).toBe('reset disabled');
+        }
+      });
+
+      it('throws with default message if response json parse fails', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          json: async () => { throw new Error('parse error'); },
+        });
+        await expect(API.resetPassword('newpw')).rejects.toThrow('Failed to reset password');
+      });
+    });
   });
 });
 

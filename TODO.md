@@ -19,10 +19,6 @@
 
 * In the scoring we can't say which side forfeits or is missing
 * In the scoring you can do an impossible results like 2-2
-* It needs a URL path called ./reset to reset the tournament password. Can be disabled by a config, so that the password comes from a hashed environment variable.
-
-
-
 
 
 Some match rules:

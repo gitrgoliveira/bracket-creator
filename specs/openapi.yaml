@@ -9,7 +9,17 @@ info:
     - **Mobile/Admin API** (`mobile-app` command): Stateful REST API for live tournament management.
 
     The Mobile/Admin API routes under `/api/` (excluding `/api/viewer/`) require the
-    `X-Tournament-Password` header for authentication.
+    `X-Tournament-Password` header for authentication, with several public exceptions:
+
+    - **`GET /api/events`** — SSE stream; always public so viewers and spectator screens
+      can receive live updates without an admin credential.
+    - **`GET /api/auth-config`** — always public; carries no secret material.
+    - **`POST /api/tournament/reset`** — public in file mode (the recovery path for a
+      forgotten password); returns `404` in locked mode (`--lock-password`).
+    - **`GET /api/schedule/estimate`** — stateless schedule calculator; always public.
+    - **`GET /api/competitions/{id}/competitor-status`** — public read; the `POST` write is protected.
+    - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`** — public read; `PUT`/`DELETE` are protected.
+    - **`GET /api/competitions/{id}/swiss/standings`** — public read; always public.
   version: 2.1.0
 
 servers:
@@ -22,7 +32,10 @@ tags:
   - name: bracket-generator
     description: Stateless bracket/pool Excel generation (serve command)
   - name: tournament
-    description: Tournament-level configuration (mobile-app command, requires auth)
+    description: |
+      Tournament-level configuration (mobile-app command).
+      Most endpoints require `X-Tournament-Password`. Exceptions: `GET /api/auth-config`
+      and `POST /api/tournament/reset` (see info description for the full public-exception list).
   - name: competitions
     description: Competition management (mobile-app command, requires auth)
   - name: participants
@@ -216,6 +229,20 @@ paths:
           was created/updated/deleted, reserved slots changed, participants
           updated, etc.). `data: null` — clients should refresh full state.
         - `schedule_updated` — a competition's schedule was saved.
+        - `password_reset` — the admin password was changed. Emitted
+          from three sources (file mode only; never emitted in locked mode):
+          1. `POST /api/tournament/reset` — the public recovery endpoint.
+             Payload includes `originatorId` so the submitting tab can
+             suppress its own broadcast: `data: { originatorId: "<opaque>" }`.
+          2. `PUT /api/tournament` — when an admin changes the password
+             via a tournament edit. Payload is `data: {}` (no originatorId;
+             all sessions including the editing tab should re-authenticate).
+          3. `POST /api/tournament` — when an existing tournament is
+             overwritten with a different password. Payload is `data: {}`.
+          Consumers must treat `originatorId` as optional and handle both
+          payload shapes. Non-originating sessions should clear their
+          cached credential from `localStorage` and re-show the
+          authentication modal.
       responses:
         '200':
           description: SSE stream of tournament events.
@@ -230,11 +257,17 @@ paths:
     get:
       tags: [tournament]
       summary: Get tournament configuration
+      description: |
+        Returns the tournament record. In **locked mode** (`--lock-password` startup flag) the
+        `password` field is stripped from the response — auth comes from the env-var bcrypt hash
+        and the on-disk value is irrelevant. The same redaction applies to the PUT and POST
+        responses below. Use `GET /api/auth-config` to discover which mode the server is in
+        without authenticating.
       security:
         - TournamentPassword: []
       responses:
         '200':
-          description: Tournament configuration.
+          description: Tournament configuration. `password` is empty in locked mode.
           content:
             application/json:
               schema:
@@ -245,15 +278,33 @@ paths:
       tags: [tournament]
       summary: Create tournament configuration
       description: |
-        Creates a new tournament. Allowed without the `X-Tournament-Password` header when no
-        tournament has been configured yet (bootstrap). Once a tournament with a password exists,
-        auth is required.
+        Creates a new tournament.
 
-        Validation: `name` is trimmed and must be non-empty after trim (`tournament name is
-        required`). `password` must be non-empty (`tournament password is required`) — empty
-        Password on disk would let AuthMiddleware's `password != t.Password` check vacuously
-        pass for any client sending an empty header. `venue` and `date` are also trimmed but
-        may be empty.
+        **File mode (default)**: allowed without the
+        `X-Tournament-Password` header when no tournament has been
+        configured yet (bootstrap). `password` must be non-empty
+        (`tournament password is required`) — an empty Password on
+        disk would let AuthMiddleware's `password != t.Password`
+        check vacuously pass for any client sending an empty header.
+        Once a tournament with a password exists, auth is required.
+
+        **Locked mode (`--lock-password`)**: there is NO bootstrap
+        exception — the bcrypt env-var hash is the credential from
+        the very first request. The `password` field in the request
+        body is
+        accepted but **discarded** server-side — authentication uses the bcrypt hash from
+        `TOURNAMENT_PASSWORD_HASH` env var, not the stored value. **Bootstrap requires
+        `X-Tournament-Password` to match the env-var hash, even on a never-initialized
+        deployment** — anonymous bootstrap would let any network-reachable client race-claim
+        the initial tournament record. The SPA's CreateTournament form detects locked mode
+        via `GET /api/auth-config` and sends the env-var password as the header on the
+        bootstrap POST. The response body's `password` field is empty.
+
+        `name` is trimmed and must be non-empty after trim (`tournament name is required`).
+        `venue` and `date` are also trimmed but may be empty.
+      security:
+        - TournamentPassword: []
+        - {}
       requestBody:
         required: true
         content:
@@ -273,25 +324,52 @@ paths:
       tags: [tournament]
       summary: Update tournament configuration
       description: |
-        Updates tournament config. Also allowed without auth during bootstrap (same
-        condition as POST): `AuthMiddleware` skips the password check only when
-        `tournament.md` is missing OR when the on-disk record is the literal default
-        placeholder (`Name == "New Tournament" && Password == ""`). A real-named
-        record with an empty password is FAIL-CLOSED — rejected with 403
-        (`tournament misconfigured: password is not set`) BEFORE this handler runs;
-        operator must repair `tournament.md` out-of-band to recover. See
-        `internal/mobileapp/middleware.go` AuthMiddleware for the exact branches.
+        Updates tournament config.
+
+        **Authentication**:
+          - File mode: also allowed without auth during bootstrap.
+            `AuthMiddleware` skips the password check only when
+            `tournament.md` is missing OR when the on-disk record is
+            the literal default placeholder (`Name == "New Tournament"
+            && Password == ""`). A real-named record with an empty
+            password is FAIL-CLOSED — rejected with 403 (`tournament
+            misconfigured: password is not set`) before this handler
+            runs; operator can use `POST /api/tournament/reset` or
+            repair `tournament.md` out-of-band to recover. The
+            empty-stored guard is disabled in locked mode (the
+            on-disk password is irrelevant).
+          - Locked mode: `X-Tournament-Password` is REQUIRED — there
+            is no bootstrap exception. The middleware verifies the
+            header against the bcrypt hash from
+            `TOURNAMENT_PASSWORD_HASH`. See
+            `internal/mobileapp/middleware.go` AuthMiddleware for the
+            exact branches.
 
         Validation matches POST for `name` (rejected if empty after trim).
 
-        **Password preserve semantics**: when the request body omits `password` or sends an
-        empty string, the server preserves the currently-stored password. This matches the
-        admin UI's `password: pass || undefined` pattern ("leave blank to keep current").
-        If after the preserve step the password is STILL empty (operator manually edited
-        `tournament.md`, or a fresh PUT against a never-initialized tournament), the
-        request is rejected with 400 (`tournament password is required`) to force the
-        admin to set a password rather than silently allow the empty-stored-password
-        vacuous-pass scenario.
+        **File mode — Password preserve semantics**: when the request
+        body omits `password` or sends an empty string, the server
+        preserves the currently-stored password. This matches the
+        admin UI's `password: pass || undefined` pattern ("leave blank
+        to keep current"). If after the preserve step the password is
+        STILL empty (operator manually edited `tournament.md`, or a
+        fresh PUT against a never-initialized tournament), the
+        request is rejected with 400 (`tournament password is
+        required`). Successful rotations broadcast
+        `EventPasswordReset` over SSE so other logged-in admins clear
+        their stale localStorage credential and re-prompt; name-only
+        edits do not.
+
+        **Locked mode — password rotation is disabled**: PUTs that
+        carry a non-empty `password` field are **rejected with 400**
+        (`password rotation is disabled in locked mode; restart with
+        a new TOURNAMENT_PASSWORD_HASH`). The auth credential lives
+        in the env-var hash and is rotated by restarting the server
+        with a new value, not via the API. Empty/omitted `password`
+        is accepted so admins can edit `name`/`venue`/`courts`/etc.;
+        the on-disk Password is preserved on disk regardless and
+        zeroed on the response so admin UIs don't surface a stale
+        credential.
       security:
         - TournamentPassword: []
       requestBody:
@@ -309,6 +387,91 @@ paths:
                 $ref: '#/components/schemas/Tournament'
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /api/tournament/reset:
+    post:
+      tags: [tournament]
+      summary: Reset the admin password (file mode only)
+      description: |
+        Replaces the stored admin password with the supplied value. Unauthenticated by
+        design — this is the documented recovery path for a forgotten admin password
+        on local / private deployments.
+
+        The endpoint is disabled in **locked mode** (`--lock-password` CLI flag, with
+        `TOURNAMENT_PASSWORD_HASH` env var supplying a bcrypt hash). In locked mode the
+        response is `404 reset disabled`. Clients can pre-check via
+        `GET /api/auth-config`.
+
+        For production deployments accessible over the network, operators are advised to
+        run with `--lock-password` so password rotation requires control of the server's
+        environment rather than network reachability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                  description: New admin password. Replaces the stored value. Matches the cap on `Tournament.password` (`components/schemas/Tournament`).
+                originatorId:
+                  type: string
+                  maxLength: 128
+                  description: |
+                    Optional opaque per-tab/client identifier. When supplied, the server echoes it
+                    on the `password_reset` SSE event payload so the originating client can ignore
+                    its own broadcast and avoid clobbering the just-written credential. The server
+                    treats this value as opaque (length-capped, never persisted, never logged).
+      responses:
+        '204':
+          description: Password rotated. All existing admin sessions become invalid on the next request.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: |
+            Cross-origin POST rejected. The handler requires both the Origin scheme and
+            host:port to match the server's effective scheme (http vs https) and `Host`
+            header (RFC 6454 §3.2). Rejected cases: scheme mismatch (e.g. HTTPS Origin
+            to a plain-HTTP server), host or port mismatch, malformed Origin URL, and
+            `Origin: null` (sandboxed iframes, file://, data: URLs).
+        '404':
+          description: Reset disabled (locked mode active).
+        '409':
+          description: Tournament not initialized; bootstrap via `POST /api/tournament` first.
+
+  /api/auth-config:
+    get:
+      tags: [tournament]
+      summary: Public auth-mode metadata
+      description: |
+        Reports the active authentication mode. Used by the SPA on first load to decide
+        whether to surface the password-reset UI. Public (no auth header required) —
+        the response carries no secret material, only the operator-visible toggle bits.
+
+        `mode` is one of:
+          * `file` — admin password lives in `tournament.md` (plaintext). Default.
+          * `locked` — admin password is a bcrypt hash read from `TOURNAMENT_PASSWORD_HASH`.
+            `POST /api/tournament/reset` returns 404 in this mode; the SPA `/reset`
+            page is still served but renders an operator-disabled message.
+      responses:
+        '200':
+          description: Auth-mode metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode, resetEnabled]
+                properties:
+                  mode:
+                    type: string
+                    enum: [file, locked]
+                  resetEnabled:
+                    type: boolean
+                    description: Whether POST /api/tournament/reset is honored.
 
   /api/tournament/import:
     post:
@@ -1152,8 +1315,7 @@ paths:
     get:
       tags: [competitions]
       summary: List competitor eligibility statuses
-      security:
-        - TournamentPassword: []
+      security: []
       responses:
         '200':
           description: Current competitor statuses.
@@ -1205,8 +1367,7 @@ paths:
     get:
       tags: [competitions]
       summary: Get team lineup for round
-      security:
-        - TournamentPassword: []
+      security: []
       responses:
         '200':
           description: Team lineup.
@@ -1250,6 +1411,29 @@ paths:
       responses:
         '204':
           description: Lineup deleted.
+
+  /api/competitions/{id}/swiss/standings:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: Get Swiss-format cumulative standings
+      description: >
+        Returns the cumulative standings for a Swiss-format competition,
+        ranked by wins then points. Always public (no auth required) — read-only
+        viewer data, same policy as pool standings.
+      security: []
+      responses:
+        '200':
+          description: Ranked standings list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlayerStanding'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/schedule/estimate:
     get:
@@ -1417,29 +1601,55 @@ components:
       in: header
       name: X-Tournament-Password
       description: |
-        Tournament admin password. Required for all `/api/` routes except
-        `/api/viewer/`, `/api/events`, and the bootstrap PUT/POST
-        `/api/tournament` while no tournament has been configured yet.
+        Tournament admin password. Required for all `/api/` routes
+        except `/api/viewer/`, `/api/events`, the unauthenticated
+        recovery endpoints `/api/auth-config` and `/api/tournament/reset`,
+        the public read endpoints `GET /api/schedule/estimate`,
+        `GET /api/competitions/{id}/competitor-status`,
+        `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`, and
+        `GET /api/competitions/{id}/swiss/standings`,
+        and (in file mode only) the bootstrap PUT/POST `/api/tournament`
+        while no tournament has been configured yet.
 
-        Header value must exactly equal the stored tournament password
-        (exact-string match; no trimming applied to either side).
+        ### Two authentication modes
+
+        **File mode (default).** The header is compared exact-string
+        against the `password` field stored in `tournament.md`
+        (no trimming on either side). Set during the initial bootstrap
+        via `POST /api/tournament`, rotated via `PUT /api/tournament`
+        with a non-empty `password`, or via the public
+        `POST /api/tournament/reset` recovery endpoint.
+
+        Bootstrap exception: when no tournament is configured yet,
+        `POST/PUT /api/tournament` is allowed without the header so
+        the SPA's CreateTournament flow can pick the admin password.
 
         Defense-in-depth: if the stored tournament password is somehow
         empty (e.g. operator manually edited `tournament.md` to land
         an empty `password:` field), AuthMiddleware returns 403
         (`tournament misconfigured: password is not set`) for ALL
         requests rather than letting the `header != stored` check
-        vacuously pass for empty header.
+        vacuously pass for empty header. Recovery: either edit
+        `tournament.md` out-of-band, or use `POST /api/tournament/reset`.
 
-        Recovery from this state requires **out-of-band repair**: the
-        bootstrap PUT/POST `/api/tournament` exception only applies
-        when the loaded record is `nil` or matches the literal
-        `Name == "New Tournament" && Password == ""` default — a
-        real-named record with empty Password is locked out by the 403
-        fail-closed branch. Operator must stop the server, edit
-        `tournament.md` to either delete it (forces fresh bootstrap)
-        or set a non-empty `password:` field in the YAML front-matter,
-        then restart.
+        **Locked mode (`--lock-password` server flag).** The header
+        is verified via bcrypt against the hash from the
+        `TOURNAMENT_PASSWORD_HASH` environment variable; the on-disk
+        `password` field in `tournament.md` is IGNORED for both auth
+        and the GET/PUT/POST response shape (the response always
+        returns `"password": ""`). The bootstrap exception above
+        does NOT apply — `POST /api/tournament` requires
+        X-Tournament-Password from the very first request so a
+        network-reachable attacker can't race-claim the initial
+        tournament record on a fresh deployment. The reset endpoint
+        returns 404. Password rotation requires restarting the
+        server with a new `TOURNAMENT_PASSWORD_HASH`; `PUT
+        /api/tournament` rejects any non-empty `password` field
+        with 400.
+
+        The active mode is exposed via the public
+        `GET /api/auth-config` endpoint so clients can branch their
+        UI without authenticating.
 
   parameters:
     CompetitionId:
@@ -1555,14 +1765,30 @@ components:
           type: string
           maxLength: 256
           description: >
-            Admin password. Required (non-empty) on POST /tournament — an
-            empty Password on disk would let AuthMiddleware's
-            `password != t.Password` check vacuously pass for any client
-            sending an empty `X-Tournament-Password` header.
+            Admin password. Behavior depends on the active auth mode
+            (see `GET /api/auth-config`); the shared schema's
+            "required" semantics below apply to **file mode** only.
 
-            On PUT /tournament: omitting the field or sending an empty
-            string preserves the currently-stored password ("leave blank
-            to keep current"). Sending a non-empty string updates it.
+            **File mode** (default — authoritative credential stored
+            plaintext in `tournament.md`): required (non-empty) on POST
+            /tournament — an empty Password on disk would let
+            AuthMiddleware's `password != t.Password` check vacuously
+            pass for any client sending an empty
+            `X-Tournament-Password` header. On PUT /tournament,
+            omitting the field or sending an empty string preserves the
+            currently-stored password ("leave blank to keep current");
+            sending a non-empty string updates it.
+
+            **Locked mode** (`--lock-password` — non-authoritative;
+            bcrypt hash in `TOURNAMENT_PASSWORD_HASH` is the credential):
+            POST /tournament accepts but **discards** the body's
+            `password` server-side (the on-disk value is preserved for
+            an existing record, or set to `""` for a fresh bootstrap);
+            non-empty passwords are NOT rejected as a backward-compat
+            convenience. PUT /tournament rejects any non-empty
+            `password` with 400 — rotation requires restarting the
+            server with a new hash. The response body's `password` is
+            always empty in locked mode.
 
             Omitted from viewer responses (`/api/viewer/tournament`).
         openingBlock:

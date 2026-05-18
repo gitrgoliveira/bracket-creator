@@ -59,6 +59,14 @@ function parsePath(path) {
     if (path === "/glossary") {
       return { mode: "viewer", viewerScreen: "glossary" };
     }
+    // /reset — public password-reset surface backed by
+    // POST /api/tournament/reset (handlers_reset.go). Available in
+    // file mode; renders an "operator-disabled" message in locked
+    // mode (the SPA learns the mode via GET /api/auth-config on App
+    // mount and the backing API also 404s defensively).
+    if (path === "/reset") {
+      return { mode: "viewer", viewerScreen: "reset" };
+    }
     return { mode: "viewer", viewerScreen: "home" };
 }
 
@@ -81,6 +89,7 @@ function pathFromState(m, vs, vcid, av) {
     if (vcid) return `/competition/${vcid}`;
     if (vs === "schedule") return "/schedule";
     if (vs === "glossary") return "/glossary";
+    if (vs === "reset") return "/reset";
     return "/";
 }
 
@@ -121,19 +130,54 @@ class ErrorBoundary extends React.Component {
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
+  // Hydrate the route state from the URL synchronously, BEFORE the first
+  // render. The post-mount useEffect that previously did this ran AFTER
+  // the URL-sync effect, so a direct load of /reset (or any non-`/`
+  // path) saw the URL get overwritten back to `/` on first paint
+  // because pathFromState() read the default state.
+  //
+  // The IIFE runs on EVERY render (JavaScript evaluates all arguments
+  // eagerly), but React only uses the return value on the FIRST render —
+  // subsequent renders use the current state value and ignore the
+  // initial-state argument entirely. So parsePath is called repeatedly
+  // but its result is only meaningful once. If this ever becomes a
+  // performance concern, convert to the lazy-initializer function form:
+  // useState(() => parsePath(window.location.pathname))
+  const initialRoute = (() => {
+    try {
+      return parsePath(window.location.pathname);
+    } catch {
+      return { mode: "viewer", viewerScreen: "home" };
+    }
+  })();
   // mode: viewer | admin | display.
   // "display" is the public /display family — read-only TV / lobby /
   // OBS overlay surfaces. We track it here (rather than as a sub-state
   // of viewer) so App() can short-circuit the viewer/admin auth/render
   // logic entirely; the display surfaces require no auth and don't
   // touch viewerCompId / viewerScreen.
-  const [mode, setMode] = useS("viewer");
-  const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
-  const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
+  const [mode, setMode] = useS(initialRoute.mode || "viewer");
+  // Wrap localStorage reads in try/catch so private-browsing / enterprise
+  // policy environments that throw on getItem don't crash the app on mount.
+  // The write path (persistence effect below) already has its own try/catch.
+  const [authed, setAuthed] = useS(() => {
+    try { return localStorage.getItem("bc_authed") === "true"; } catch { return false; }
+  });
+  // authedRef mirrors `authed` so the SSE handler — created once per
+  // viewerCompId/mode change — observes the current auth state instead
+  // of the closure-captured value from when it was attached. Without
+  // the ref, a user who lands on `/admin`, signs in, and stays in
+  // admin mode would keep the pre-login `authed=false` closure and
+  // ignore later password_reset events. authedRef is updated in the
+  // localStorage-persist effect below.
+  const authedRef = useR(authed);
+  const [password, setPassword] = useS(() => {
+    try { return localStorage.getItem("bc_password") || ""; } catch { return ""; }
+  });
   const [authPrompt, setAuthPrompt] = useS(false);
-  const [viewerCompId, setViewerCompId] = useS(null);
-  const [viewerScreen, setViewerScreen] = useS("home"); // home | schedule
-  const [adminView, setAdminView] = useS({ kind: "dashboard" });
+  const [viewerCompId, setViewerCompId] = useS(initialRoute.viewerCompId || null);
+  const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset
+  const [adminView, setAdminView] = useS(initialRoute.admin || { kind: "dashboard" });
   const [toast, setToast] = useS(null);
   // T063: SSE connection status, surfaced to display surfaces so the
   // TV / lobby / overlay can render a reconnect indicator during the
@@ -141,28 +185,50 @@ function App() {
   // EventSource itself lives inside subscribeToEvents; the second
   // callback hands status events up here.
   const [sseConnected, setSseConnected] = useS(true);
+  // Per-tab client ID, generated once on mount. Used as the originator
+  // identifier on password-reset POSTs so the SSE broadcast can be
+  // ignored in the originating tab. Without this, the tab that just
+  // submitted /reset receives its own password_reset event and the
+  // handler immediately clears the localStorage credential the
+  // ResetPasswordForm just wrote — kicking the operator who reset
+  // straight back to the AuthModal. Survives only the tab lifetime;
+  // each tab gets a fresh ID so two operators resetting from
+  // different tabs both see the other's reset and log out as they
+  // should.
+  const clientIdRef = useR(null);
+  if (!clientIdRef.current) {
+    clientIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+  // Auth-mode discovery (file vs. locked). Fetched once on App mount
+  // from GET /api/auth-config. Starts as null ("loading") so that
+  // CreateTournament can gate its submit until the mode is known —
+  // a locked-mode deployment would otherwise render as file-mode
+  // and omit X-Tournament-Password on the bootstrap POST. The
+  // useEffect below always resolves the null state (success or
+  // fail-open) within one HTTP round-trip.
+  const [authConfig, setAuthConfig] = useS(null);
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
   };
 
-  // Hydrate state from the current URL on first render. Without this,
-  // a deep-link page-load (e.g. /admin/schedule typed directly) would
-  // boot into the default viewer-home view until the user navigated.
+  // Route state was hydrated synchronously by the useState initializers
+  // above (see initialRoute). This effect now handles only the
+  // side-effects of the initial route — surfacing the AuthModal when
+  // the user deep-linked to /admin without being authenticated. State
+  // sync to/from the URL is owned by initialRoute + the URL-sync
+  // effect below.
   useE(() => {
-    const route = parsePath(window.location.pathname);
-    if (route.mode === "admin") {
-      setMode("admin");
-      if (route.admin) setAdminView(route.admin);
-      if (!authed) setAuthPrompt(true);
-    } else if (route.mode === "display") {
-      setMode("display");
-    } else {
-      setMode("viewer");
-      if (route.viewerCompId) setViewerCompId(route.viewerCompId);
-      if (route.viewerScreen) setViewerScreen(route.viewerScreen);
+    if (initialRoute.mode === "admin" && !authed) {
+      setAuthPrompt(true);
     }
+    // Mount-only side effect; intentional empty deps. The project's
+    // ESLint config doesn't include react-hooks/exhaustive-deps, so
+    // no disable directive is needed (and including one errored
+    // because the rule isn't defined).
   }, []);
 
   // Sync state to URL whenever it changes. Uses the AppRouter.route()
@@ -211,8 +277,22 @@ function App() {
   }, []);
 
   useE(() => {
-    localStorage.setItem("bc_authed", authed);
-    localStorage.setItem("bc_password", password);
+    // Guard localStorage writes with try/catch. In private-browsing
+    // and storage-denied contexts (Safari ITP, Firefox strict mode,
+    // certain enterprise policies) localStorage.setItem throws a
+    // SecurityError or QuotaExceededError. Without the guard, a storage
+    // failure here would propagate out of the effect and crash the React
+    // tree. The credential is lost on page reload in those contexts, but
+    // the session continues — the user just re-authenticates after
+    // closing the tab (same experience as if cookies were blocked).
+    try {
+      localStorage.setItem("bc_authed", authed);
+      localStorage.setItem("bc_password", password);
+    } catch { /* storage unavailable — session only, no persistent credential */ }
+    // Keep the ref in lockstep so the long-lived SSE handler below
+    // can read the current value without being recreated on every
+    // sign-in/sign-out.
+    authedRef.current = authed;
   }, [authed, password]);
 
   useE(() => { document.documentElement.style.setProperty("--accent", THEME.accentColor); }, []);
@@ -236,6 +316,22 @@ function App() {
 
   useE(() => { load(); }, []);
 
+  // Fetch the auth-config once on mount. Always resolves the null
+  // initial state — success sets the actual config; fail-open
+  // (5xx/timeout/parse-error) falls back to file mode so the
+  // historical UX is preserved for local deployments where /api/auth-config
+  // may be unreachable for a brief moment at startup.
+  useE(() => {
+    const fileDefault = { mode: 'file', resetEnabled: true };
+    window.API.fetchAuthConfig().then((cfg) => {
+      setAuthConfig((cfg && typeof cfg === 'object') ? cfg : fileDefault);
+    }).catch(() => {
+      // Fail-open: unknown server errors default to file mode so the
+      // recovery-via-/reset path stays accessible and sign-in works.
+      setAuthConfig(fileDefault);
+    });
+  }, []);
+
   useE(() => {
     // Track every jittered timer so the cleanup can cancel them when
     // viewerCompId / mode changes. Without this, a timer queued for
@@ -253,6 +349,46 @@ function App() {
         const jitter = Math.random() * 500;
         if (event.type === "tournament_updated") {
             if (!authPromptRef.current) jitteredTimeout(load, jitter);
+        } else if (event.type === "password_reset") {
+            // The admin password was rotated by someone hitting
+            // POST /api/tournament/reset. Any logged-in admin's
+            // localStorage credential is now stale — clear it so the
+            // next request doesn't silently 401, and re-show
+            // AuthModal so they notice immediately. The viewer flow
+            // doesn't need to react: it never sends the header.
+            //
+            // Originator suppression: the tab that just submitted /reset
+            // also receives this broadcast. If we react in that tab we'd
+            // immediately clobber the new credential ResetPasswordForm
+            // just wrote to localStorage. The form passes its clientId
+            // as `originatorId`, the server echoes it on the event
+            // payload, and we ignore matches here.
+            if (event.data && event.data.originatorId && event.data.originatorId === clientIdRef.current) {
+                return;
+            }
+            //
+            // Read via authedRef instead of the closure-captured
+            // `authed` so we see the CURRENT auth state. This effect's
+            // deps are [viewerCompId, mode]; an `/admin` deep-link
+            // where the user signs in without mode changing would
+            // otherwise leave the handler holding `authed=false` and
+            // miss the reset event entirely.
+            if (authedRef.current) {
+                setAuthed(false);
+                setPassword("");
+                try {
+                    localStorage.removeItem("bc_authed");
+                    localStorage.removeItem("bc_password");
+                } catch {
+                    // private-browsing modes can throw; the in-memory
+                    // state above is the load-bearing fix anyway.
+                }
+                if (mode === "admin") {
+                    setMode("viewer");
+                    setAuthPrompt(true);
+                    authPromptRef.current = true;
+                }
+            }
         } else if (event.type === "competitor_status_updated") {
             // T099: viewer doesn't need to mutate selectedCompData itself —
             // the eligibility change feeds back through the full
@@ -355,12 +491,15 @@ function App() {
 
   if (loading && !selectedCompData) return <div className="loading">Loading...</div>;
   if (!tournament) return (
-    <CreateTournament onCreated={(t, p) => {
-      setTournament(t);
-      setAuthed(true);
-      setMode("admin");
-      setPassword(p);
-    }} />
+    <CreateTournament
+      authConfig={authConfig}
+      onCreated={(t, p) => {
+        setTournament(t);
+        setAuthed(true);
+        setMode("admin");
+        setPassword(p);
+      }}
+    />
   );
 
   // T060: /display family — public, read-only TV / lobby / overlay
@@ -400,6 +539,7 @@ function App() {
           view={adminView}
           setView={setAdminView}
           showToast={showToast}
+          authConfig={authConfig}
         />
         {toast && <window.Toast {...toast} onClose={() => setToast(null)} />}
       </>
@@ -434,6 +574,25 @@ function App() {
         window.GlossaryPage
           ? <window.GlossaryPage onBack={() => setViewerScreen("home")} />
           : <div className="loading">Loading glossary…</div>
+      ) : viewerScreen === "reset" ? (
+        // Password reset surface. Lives in reset.jsx; mounted through
+        // window.ResetPasswordForm following the per-screen-file
+        // convention. On success the user is auto-logged-in with the
+        // new password (the form persists bc_password/bc_authed) and
+        // we navigate to admin.
+        window.ResetPasswordForm
+          ? <window.ResetPasswordForm
+              authConfig={authConfig}
+              originatorId={clientIdRef.current}
+              onBack={() => setViewerScreen("home")}
+              onSuccess={(pw) => {
+                setAuthed(true);
+                setPassword(pw);
+                setViewerScreen("home");
+                setMode("admin");
+              }}
+            />
+          : <div className="loading">Loading…</div>
       ) : (
         <window.ViewerHome
           tournament={tournament}
@@ -444,6 +603,27 @@ function App() {
       )}
       {authPrompt && (
         <AuthModal
+          // Treat null (authConfig still loading) as "reset not yet
+          // confirmed enabled" — show the link only after the server
+          // explicitly says resetEnabled === true. Defaulting to true
+          // would briefly expose the "Forgot password?" link on a
+          // locked deployment on a direct /admin deep-link, before
+          // /api/auth-config resolves; clicking through to /reset
+          // would then 404 on submit. fetchAuthConfig is fail-open to
+          // {resetEnabled: true} on any transport error, so this only
+          // adds a sub-second delay before the link appears on
+          // genuinely file-mode deployments.
+          resetEnabled={authConfig?.resetEnabled === true}
+          onForgotPassword={() => {
+            authPromptRef.current = false;
+            setAuthPrompt(false);
+            // Drop out of admin mode (we're heading to a public route)
+            // and navigate to /reset via the same state-machine path
+            // any other viewer route uses.
+            if (mode === "admin") setMode("viewer");
+            setViewerCompId(null);
+            setViewerScreen("reset");
+          }}
           onClose={() => {
             authPromptRef.current = false;
             setAuthPrompt(false);
@@ -463,7 +643,7 @@ function App() {
   );
 }
 
-function AuthModal({ onClose, onSuccess }) {
+function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
   const [pw, setPw] = useS("");
   const [err, setErr] = useS("");
   const [checking, setChecking] = useS(false);
@@ -525,12 +705,49 @@ function AuthModal({ onClose, onSuccess }) {
           </div>
           <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={checking}>{checking ? "Checking…" : "Sign in"}</button>
         </form>
+        {resetEnabled && onForgotPassword && (
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                // Confirm intent: reset is global (everyone's
+                // re-authenticated) — see resetPassword's tournament
+                // broadcast. Cheaper to ask twice than to surprise an
+                // operator who clicked the wrong link.
+                if (window.confirm("Reset the tournament password? This will sign out all other admins.")) {
+                  onForgotPassword();
+                }
+              }}
+              disabled={checking}
+            >
+              Forgot password?
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function CreateTournament({ onCreated }) {
+function CreateTournament({ onCreated, authConfig }) {
+  // In locked mode the server requires X-Tournament-Password on the
+  // bootstrap POST and discards the body's `password` field. The form's
+  // single password input is repurposed: in file mode it's the new
+  // admin password to set; in locked mode it's the env-var password
+  // the operator already supplied via TOURNAMENT_PASSWORD_HASH (now
+  // the live admin credential). After a successful bootstrap we cache
+  // that same value as the localStorage admin password — in locked
+  // mode the cached value IS what subsequent admin requests use to
+  // authenticate against the bcrypt hash. Pre-fix the form sent no
+  // header, the server discarded the typed password, and the SPA
+  // immediately tried to authenticate with a value the env-var hash
+  // didn't match → instant 401.
+  // authConfig starts as null ("loading") and resolves after the first
+  // fetchAuthConfig round-trip. While null, treat as unlocked (file mode
+  // rendering) — the submit button is disabled until null resolves so
+  // the operator can't accidentally omit X-Tournament-Password.
+  const locked = authConfig?.mode === "locked";
   const [name, setName] = useS("");
   // Initialize date in canonical DD-MM-YYYY format, not ISO YYYY-MM-DD.
   // toISOString() emits ISO; without this conversion the picker boundary
@@ -586,7 +803,12 @@ function CreateTournament({ onCreated }) {
         password: pass,
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
       };
-      const t = await window.API.createTournament(config);
+      // In locked mode, the typed password IS the env-var admin
+      // credential — pass it as authPassword so api_client sends
+      // X-Tournament-Password. In file mode authPassword is undefined
+      // and the header is omitted (the bootstrap branch in middleware
+      // lets it through unauthenticated).
+      const t = await window.API.createTournament(config, locked ? pass : undefined);
       if (!mountedRef.current) return;
       // Wait for backend to broadcast or just pass it up
       onCreated(t, pass);
@@ -636,12 +858,26 @@ function CreateTournament({ onCreated }) {
             <div className="field__hint">{`Enter a number (1-${window.MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
           <div className="field">
-            <label className="field__label">Admin Password</label>
-            <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Choose a password" required />
-            <div className="field__hint">This password will be required to manage the tournament.</div>
+            <label className="field__label">{locked ? "Admin Password (from TOURNAMENT_PASSWORD_HASH)" : "Admin Password"}</label>
+            <input
+              className="input"
+              type="password"
+              value={pass}
+              onChange={(e) => setPass(e.target.value)}
+              placeholder={locked ? "Enter the env-var password" : "Choose a password"}
+              required
+            />
+            <div className="field__hint">
+              {locked
+                ? "This server is running in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it's used both to authorize this bootstrap and as your admin credential afterwards."
+                : "This password will be required to manage the tournament."}
+            </div>
           </div>
-          <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={saving} style={{ marginTop: 16 }}>
-            {saving ? "Creating…" : "Create Tournament"}
+          {/* Disable submit until authConfig is known (null = loading) so a
+              locked-mode deployment doesn't submit without X-Tournament-Password.
+              The null window lasts at most one HTTP round-trip on startup. */}
+          <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={saving || authConfig === null} style={{ marginTop: 16 }}>
+            {saving ? "Creating…" : authConfig === null ? "Loading…" : "Create Tournament"}
           </button>
         </form>
       </div>

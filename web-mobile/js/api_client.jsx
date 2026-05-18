@@ -34,6 +34,56 @@ const API = {
         }
         return res.json();
     },
+    // Public endpoint — returns {mode: "file"|"locked", resetEnabled: bool}.
+    // Mounted on App() boot to decide whether to render the "Forgot
+    // password?" link in AuthModal and whether the /reset SPA route
+    // should show a form or an "operator-disabled" message. Always
+    // resolves (never rejects): non-2xx responses, network failures, and
+    // JSON parse errors all fall back to the file-mode default so a
+    // fresh-deploy SPA pointed at an older server without this endpoint
+    // still works, and any transport error doesn't break sign-in.
+    async fetchAuthConfig() {
+        try {
+            const res = await fetch('/api/auth-config');
+            if (!res.ok) {
+                return { mode: 'file', resetEnabled: true };
+            }
+            return await res.json();
+        } catch {
+            return { mode: 'file', resetEnabled: true };
+        }
+    },
+    // Reset the tournament password. Unauthenticated by design — the
+    // server enforces "is this endpoint enabled" via the verifier's
+    // ResetEnabled() (locked mode returns 404). Throws on non-2xx so
+    // the caller can surface the server's error message (including the
+    // 404 "reset disabled" case if the SPA's cached authConfig was
+    // stale).
+    //
+    // `originatorId` is a per-tab client ID echoed back on the SSE
+    // password_reset event payload so the originating tab can ignore
+    // its own broadcast and avoid clobbering the just-written
+    // localStorage credential. Optional — when absent the server
+    // broadcasts an empty originator and ALL tabs log out.
+    async resetPassword(newPassword, originatorId) {
+        const body = { password: newPassword };
+        if (originatorId) body.originatorId = originatorId;
+        const res = await fetch('/api/tournament/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to reset password (Status ${res.status})`);
+            e.status = res.status;
+            throw e;
+        }
+        // Backend returns 204 No Content — calling .json() on an empty
+        // body throws SyntaxError per the Fetch spec (same pattern as
+        // overridePoolRank etc. above).
+        return true;
+    },
     async fetchCompetitions() {
         const res = await fetch('/api/viewer/competitions');
         if (!res.ok) {
@@ -63,10 +113,23 @@ const API = {
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
-    async createTournament(config) {
+    // Bootstrap a fresh tournament. In file mode the call is
+    // unauthenticated (the AuthMiddleware's uninitialized-bootstrap
+    // branch lets it through). In locked mode the server requires the
+    // env-var password to authorize even the initial POST — pass
+    // `authPassword` (typed by the operator into the locked-mode
+    // CreateTournament form) so we can attach it as
+    // X-Tournament-Password. The handler discards the body's
+    // `password` field in locked mode but the header is what gets
+    // verified.
+    async createTournament(config, authPassword) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (authPassword) {
+            headers['X-Tournament-Password'] = authPassword;
+        }
         const res = await fetch('/api/tournament', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify(config)
         });
         if (!res.ok) {

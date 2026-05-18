@@ -13,9 +13,13 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources) *gin.Engine {
+func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+
+	if verifier == nil {
+		verifier = NewFileVerifier(store)
+	}
 
 	// Enable CORS
 	r.Use(func(c *gin.Context) {
@@ -68,11 +72,21 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources)
 	RegisterPublicLineupHandlers(api, store)
 	RegisterPublicSwissHandlers(api, store, eng)
 
+	// Public password-reset + auth-config endpoints. Both must live
+	// outside the admin group: /reset is the recovery path for a
+	// forgotten admin password (so requiring the password to use it
+	// would be useless), and /auth-config lets the SPA discover whether
+	// reset is enabled (locked mode disables it). Both 404 / return
+	// inert payloads when locked mode is active — see handlers_reset.go
+	// and handlers_auth_config.go.
+	RegisterResetHandlers(api, store, verifier, hub)
+	RegisterAuthConfigHandlers(api, verifier)
+
 	// Admin API endpoints (protected)
 	admin := r.Group("/api")
-	admin.Use(AuthMiddleware(store))
+	admin.Use(AuthMiddleware(verifier, store))
 	{
-		RegisterTournamentHandlers(admin, store, hub)
+		RegisterTournamentHandlers(admin, store, hub, verifier)
 		RegisterImportHandlers(admin, store, hub)
 		RegisterCompetitionHandlers(admin, store, eng, hub)
 		RegisterParticipantHandlers(admin, store)

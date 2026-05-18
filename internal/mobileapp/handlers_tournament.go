@@ -155,7 +155,7 @@ func validateTournamentLengths(t *state.Tournament) error {
 	return nil
 }
 
-func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
+func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, verifier PasswordVerifier) {
 	r.GET("/tournament", func(c *gin.Context) {
 		t, err := store.LoadTournament()
 		if err != nil {
@@ -164,6 +164,18 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if t == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "tournament not initialized"})
+			return
+		}
+		// In locked mode the on-disk Password is irrelevant (auth comes
+		// from the env-var bcrypt hash). Strip it from the response so
+		// the admin UI doesn't show a stored-but-unused value that
+		// would mislead the operator about what credential actually
+		// authenticates them. Mirrors the public viewer handler's
+		// password-strip step (handlers_viewer.go).
+		if verifier != nil && verifier.RedactStoredPassword() {
+			publicT := *t
+			publicT.Password = ""
+			c.JSON(http.StatusOK, publicT)
 			return
 		}
 		c.JSON(http.StatusOK, t)
@@ -241,7 +253,37 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// late save overwrote the change-password PUT's earlier save —
 		// silently losing the password change. The atomic primitive
 		// closes that window.
+		//
+		// Verifiers that mark the on-disk Password as non-authoritative
+		// (today: the bcrypt locked verifier) auth from the env-var hash;
+		// the on-disk Password field is irrelevant. If the admin sent a
+		// non-empty Password in locked mode it would silently never take
+		// effect — surface a 400 explaining the situation rather than
+		// pretending the rotation worked. Empty Password is fine
+		// (the SPA's `password: pass || undefined` pattern hits this
+		// path when the operator is just editing name/venue/courts).
+		locked := verifier != nil && verifier.RedactStoredPassword()
+		if locked && t.Password != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "password rotation is disabled in locked mode; restart with a new TOURNAMENT_PASSWORD_HASH"})
+			return
+		}
+		// Track whether the persisted password actually changed so we
+		// can fire EventPasswordReset (in addition to
+		// EventTournamentUpdated) and other admin sessions log out
+		// immediately instead of waiting for their next write to 401.
+		passwordChanged := false
 		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
+			if locked {
+				// Reset passwordChanged to false defensively — the
+				// non-empty case is already rejected above, but keep
+				// the bookkeeping consistent in case the guard is
+				// ever loosened.
+				passwordChanged = false
+				if current != nil {
+					desired.Password = current.Password
+				}
+				return nil
+			}
 			if desired.Password == "" && current != nil {
 				desired.Password = current.Password
 			}
@@ -255,6 +297,9 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			if desired.Password == "" {
 				return errPasswordRequired
 			}
+			if current == nil || current.Password != desired.Password {
+				passwordChanged = true
+			}
 			return nil
 		})
 		if errors.Is(err, errPasswordRequired) {
@@ -267,6 +312,33 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
+			if passwordChanged {
+				// Mirror the /reset endpoint: rotating the credential
+				// via the admin PUT path must also log other admin
+				// sessions out so their cached bc_password isn't
+				// silently stale. The originatorId field on the body
+				// would be welcome here too (and we'd echo it on the
+				// event), but the admin PUT body doesn't carry one —
+				// every admin tab including the originator will
+				// re-prompt, which is acceptable since the operator
+				// just typed the new credential and can type it again.
+				hub.Broadcast(EventPasswordReset, passwordResetEventData{})
+			}
+		}
+		// In locked mode the on-disk Password is irrelevant and must not
+		// leak through any response surface. GET strips it; apply the
+		// same redaction here so an admin GET-after-PUT can't differ
+		// from a plain GET. Copy `t` before mutating — the
+		// UpdateTournamentChanged transform stashed the same struct in
+		// the store's cache, so a direct `t.Password = ""` would also
+		// blank the cached password and cause subsequent LoadTournament
+		// calls (in tests OR in middleware) to see an empty password
+		// where the file on disk still has the real value.
+		if locked {
+			publicT := t
+			publicT.Password = ""
+			c.JSON(http.StatusOK, publicT)
+			return
 		}
 		c.JSON(http.StatusOK, t)
 	})
@@ -308,10 +380,10 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
-		// Reject empty Password on POST (initial setup). AuthMiddleware
-		// allows POST /api/tournament unauthenticated when the
-		// tournament is uninitialized — this is the bootstrap entry
-		// point. If Password == "" lands on disk, AuthMiddleware's
+		// Reject empty Password on POST (initial setup) in file mode.
+		// AuthMiddleware allows POST /api/tournament unauthenticated
+		// when the tournament is uninitialized — this is the bootstrap
+		// entry point. If Password == "" lands on disk, AuthMiddleware's
 		// `password != t.Password` check vacuously passes for any
 		// request with an empty `X-Tournament-Password` header (empty
 		// == empty), exposing every /api/* endpoint unauthenticated.
@@ -320,7 +392,39 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// state would land in the first place, so block it here.
 		// Note: Password is NOT trimmed (passwords may intentionally
 		// contain whitespace; auth check is exact-string match).
-		if t.Password == "" {
+		//
+		// Locked mode: the on-disk Password is irrelevant — auth comes
+		// from the env-var bcrypt hash. The SPA's CreateTournament form
+		// detects locked mode via /api/auth-config and labels the
+		// password field as the env-var credential, sending it as
+		// X-Tournament-Password (the middleware verifies the header,
+		// the body's password is discarded here). The stored value is
+		// read back as empty via GET /tournament so the admin doesn't
+		// see a stale credential after bootstrap.
+		// Load the existing tournament (if any) for two purposes:
+		//   1. Locked mode: preserve the on-disk password so a later
+		//      file-mode rollback can recover it.
+		//   2. File mode: detect a password change so we can broadcast
+		//      EventPasswordReset and clear stale admin sessions.
+		existingForPost, loadErrPost := store.LoadTournament()
+		if loadErrPost != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": loadErrPost.Error()})
+			return
+		}
+
+		if verifier != nil && verifier.RedactStoredPassword() {
+			// Locked mode: the on-disk Password is not authoritative.
+			// For a true first bootstrap (no tournament.md on disk yet),
+			// store "" so GET /tournament returns empty — no stale
+			// credential visible. For re-POSTs against an existing record,
+			// preserve whatever is currently stored so a later file-mode
+			// rollback can recover the original credential.
+			if existingForPost != nil {
+				t.Password = existingForPost.Password
+			} else {
+				t.Password = ""
+			}
+		} else if t.Password == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})
 			return
 		}
@@ -331,6 +435,40 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 
 		hub.Broadcast(EventTournamentUpdated, nil)
+		// In file mode, broadcast EventPasswordReset when an existing
+		// tournament's password is OVERWRITTEN (re-bootstrap with a new
+		// credential) so other logged-in admin sessions clear their
+		// stale cached credentials. Mirrors the PUT handler's behavior.
+		//
+		// We deliberately do NOT broadcast on the first-time bootstrap
+		// (`existingForPost == nil`). The creating tab already subscribed
+		// to SSE before submit, and the create-tournament flow calls
+		// `onCreated(t, pass)` to mark itself authenticated with the
+		// just-typed password. An empty-originator `password_reset`
+		// broadcast would race that, and the SPA's SSE handler — which
+		// has no originatorId to ignore (the POST body doesn't carry
+		// one) — would clear the freshly-cached credential and kick
+		// the user straight back to AuthModal.
+		//
+		// In locked mode, t.Password is always set to the pre-existing
+		// on-disk value above, so it never changes via POST and we skip
+		// the broadcast.
+		if (verifier == nil || !verifier.RedactStoredPassword()) &&
+			existingForPost != nil &&
+			t.Password != existingForPost.Password {
+			hub.Broadcast(EventPasswordReset, passwordResetEventData{})
+		}
+		// In locked mode the on-disk Password is not authoritative; strip it
+		// from the response so callers don't cache a stale file-mode credential
+		// that would never authenticate against the env-var bcrypt hash.
+		// Mirrors the GET and PUT redaction in the same verifier.RedactStoredPassword()
+		// branch above.
+		if verifier != nil && verifier.RedactStoredPassword() {
+			publicT := t
+			publicT.Password = ""
+			c.JSON(http.StatusCreated, publicT)
+			return
+		}
 		c.JSON(http.StatusCreated, t)
 	})
 }

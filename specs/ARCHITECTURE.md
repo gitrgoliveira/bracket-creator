@@ -328,7 +328,12 @@ The `Hub` broadcasts the following event types over `GET /api/events`:
 
 **Real-time**: `EventSource` on `/api/events` receives SSE messages. Match updates are merged into local state via `applyPatch()` in `patch.jsx`.
 
-**Auth**: Admin mode requires `X-Tournament-Password` header, stored in `localStorage`. Display surfaces (`/display`) are public.
+**Auth**: Admin mode requires `X-Tournament-Password` header, stored in `localStorage`. Two server-side modes selected at startup by `internal/mobileapp/auth_source.go`:
+
+- **File mode** (default): header is compared plaintext against `tournament.md`'s `password` field. A public `POST /api/tournament/reset` lets an operator who's forgotten the password set a new one without authenticating.
+- **Locked mode** (`--lock-password` flag + `TOURNAMENT_PASSWORD_HASH` env var): header is compared via bcrypt against the env-var hash; on-disk password is ignored; `POST /api/tournament/reset` returns 404 (the SPA `/reset` page is still served and renders an operator-disabled message). Recommended for internet-exposed deployments. Generate the hash with `bracket-creator hash-password`.
+
+The SPA discovers the active mode via the public `GET /api/auth-config` endpoint so it can hide the "Forgot password?" link in locked mode.
 
 **Component tree**:
 

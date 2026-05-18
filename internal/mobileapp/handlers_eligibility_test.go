@@ -39,7 +39,7 @@ func setupEligibilityTestRouter(t *testing.T) (*gin.Engine, *state.Store, string
 
 	// Admin group — AuthMiddleware gates all writes
 	admin := r.Group("/api")
-	admin.Use(AuthMiddleware(store))
+	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
 	RegisterEligibilityHandlers(admin, store, hub)
 
 	return r, store, dir

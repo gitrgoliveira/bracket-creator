@@ -266,6 +266,24 @@ describe('mergeTournamentPatch', () => {
     const result = mergeTournamentPatch(t, {}, 'X');
     expect(result).not.toBe(t);
   });
+
+  // Locked-mode tests: when locked=true, the function must send an empty
+  // password regardless of the session password or any patch value.
+  // The backend's locked-mode PUT transform preserves whatever is on disk,
+  // so an empty wire password is the correct signal ("don't touch it").
+  // Sending the session password (or any non-empty value) causes a 400.
+  it('locked mode: sends empty password even when session has one', () => {
+    const t = { id: 't1', name: 'Cup', password: '' };
+    const result = mergeTournamentPatch(t, { name: 'New' }, 'Y', true);
+    expect(result.password).toBe('');
+    expect(result.name).toBe('New');
+  });
+
+  it('locked mode: ignores an explicit patch password (prevents backend 400)', () => {
+    const t = { id: 't1', name: 'Cup', password: '' };
+    const result = mergeTournamentPatch(t, { name: 'New', password: 'Z' }, 'Y', true);
+    expect(result.password).toBe('');
+  });
 });
 
 // /deep-review round-12 finding (Copilot #6): the create-response from

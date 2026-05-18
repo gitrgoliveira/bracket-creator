@@ -49,10 +49,13 @@ nav:
       - Installation: user-guide/getting-started.md
       - Input format: user-guide/input-format.md
       - Web UI: user-guide/web-ui.md
+      - Mobile / live tournament app: user-guide/mobile-app.md
       - Commands:
           - create-pools: user-guide/commands/create-pools.md
           - create-playoffs: user-guide/commands/create-playoffs.md
           - serve: user-guide/commands/serve.md
+          - mobile-app: user-guide/commands/mobile-app.md
+          - hash-password: user-guide/commands/hash-password.md
           - version: user-guide/commands/version.md
   - Developer guide:
       - Code of conduct: dev-guide/code_of_conduct.md

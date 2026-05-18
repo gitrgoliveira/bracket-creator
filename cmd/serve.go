@@ -45,7 +45,7 @@ func newServeCmd() *cobra.Command {
 	if bindAddress == "" {
 		bindAddress = "localhost" // default value
 	}
-	cmd.Flags().StringVarP(&o.bindAddress, "bind", "b", bindAddress, "bind address")
+	cmd.Flags().StringVarP(&o.bindAddress, "bind", "b", bindAddress, "bind address (env: BIND_ADDRESS)")
 
 	portStr := os.Getenv("PORT")
 	port := 8080 // default value

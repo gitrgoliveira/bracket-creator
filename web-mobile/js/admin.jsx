@@ -351,7 +351,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // another comp) during the in-flight save, the closure-captured
       // `t` would be stale; using it for `onUpdate(next)` would clobber
       // the SSE-driven updates with pre-save state until the next refresh.
-      const locked = !!(authConfig && authConfig.mode === "locked");
+      // Treat an unknown (null) authConfig conservatively — same as locked.
+      // If the mode hasn't resolved yet, sending the session password in the
+      // PUT body would trigger a 400 "password rotation is disabled" on a
+      // locked-mode server. In file mode an empty body password is safe:
+      // the backend preserves the on-disk value rather than clearing it.
+      const locked = authConfig === null || authConfig.mode === "locked";
       const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
       await window.API.updateTournament(sendBody, password);
       // Bail if the admin navigated away during the in-flight PUT —

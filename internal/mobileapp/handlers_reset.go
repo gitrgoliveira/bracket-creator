@@ -172,7 +172,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 		// the tournament-has-a-name invariant on the next PUT.
 		//
 		// "Uninitialized" must match the middleware's sentinel exactly
-		// (middleware.go:52): no file on disk, OR the default record
+		// (middleware.go:69): no file on disk, OR the default record
 		// with name="New Tournament" AND empty password. Just checking
 		// `t.Name == "New Tournament"` would 409 a legitimately-named
 		// "New Tournament" record (rare but valid) and prevent its

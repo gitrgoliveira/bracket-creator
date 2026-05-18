@@ -1393,6 +1393,29 @@ paths:
         '204':
           description: Lineup deleted.
 
+  /api/competitions/{id}/swiss/standings:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: Get Swiss-format cumulative standings
+      description: >
+        Returns the cumulative standings for a Swiss-format competition,
+        ranked by wins then points. Always public (no auth required) — read-only
+        viewer data, same policy as pool standings.
+      security: []
+      responses:
+        '200':
+          description: Ranked standings list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlayerStanding'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/schedule/estimate:
     get:
       tags: [viewer]

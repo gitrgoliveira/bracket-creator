@@ -429,6 +429,17 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 
 		hub.Broadcast(EventTournamentUpdated, nil)
+		// In locked mode the on-disk Password is not authoritative; strip it
+		// from the response so callers don't cache a stale file-mode credential
+		// that would never authenticate against the env-var bcrypt hash.
+		// Mirrors the GET and PUT redaction in the same verifier.RedactStoredPassword()
+		// branch above.
+		if verifier != nil && verifier.RedactStoredPassword() {
+			publicT := t
+			publicT.Password = ""
+			c.JSON(http.StatusCreated, publicT)
+			return
+		}
 		c.JSON(http.StatusCreated, t)
 	})
 }

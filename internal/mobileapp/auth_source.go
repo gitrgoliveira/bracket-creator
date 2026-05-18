@@ -59,6 +59,16 @@ type PasswordVerifier interface {
 	// password is irrelevant, so the guard would 403 every request — it
 	// must be disabled.
 	EnforceEmptyStoredGuard() bool
+
+	// RedactStoredPassword reports whether the on-disk Tournament.Password
+	// field is non-authoritative for authentication and must therefore be
+	// stripped from API responses AND ignored on writes. True for any
+	// verifier whose authentication does not consult `tournament.md` —
+	// today that's the bcrypt locked verifier; tomorrow it might be an
+	// OIDC or LDAP variant. Centralizing the test here means handlers
+	// don't grow scattered `verifier.Mode() == "locked"` string compares
+	// that would silently break when a third mode is added.
+	RedactStoredPassword() bool
 }
 
 // filePasswordVerifier implements PasswordVerifier for the historical
@@ -69,10 +79,12 @@ type filePasswordVerifier struct {
 	store *state.Store
 }
 
-// NewFileVerifier constructs the default verifier. Returned as the
-// concrete type so callers using assertions can recover the underlying
-// store reference if needed; the interface is the canonical contract.
-func NewFileVerifier(store *state.Store) *filePasswordVerifier {
+// NewFileVerifier constructs the default verifier. Returns the
+// PasswordVerifier interface so callers cannot accidentally reach
+// into the concrete type — the interface is the canonical contract,
+// and any future verifier (LDAP, OIDC) can be wired in without
+// breaking signatures.
+func NewFileVerifier(store *state.Store) PasswordVerifier {
 	return &filePasswordVerifier{store: store}
 }
 
@@ -91,6 +103,10 @@ func (v *filePasswordVerifier) Mode() string                  { return "file" }
 func (v *filePasswordVerifier) ResetEnabled() bool            { return true }
 func (v *filePasswordVerifier) AllowsFileBootstrap() bool     { return true }
 func (v *filePasswordVerifier) EnforceEmptyStoredGuard() bool { return true }
+
+// RedactStoredPassword: in file mode the on-disk Password IS the
+// authoritative credential — never strip it.
+func (v *filePasswordVerifier) RedactStoredPassword() bool { return false }
 
 // bcryptPasswordVerifier implements PasswordVerifier for locked mode. The
 // hash is captured once at construction (process start) so a rotation
@@ -112,7 +128,7 @@ type bcryptPasswordVerifier struct {
 // An empty hash is rejected with a distinct error so the calling CLI can
 // distinguish "operator forgot to set TOURNAMENT_PASSWORD_HASH" from
 // "operator set a malformed hash."
-func NewBcryptVerifier(hash string) (*bcryptPasswordVerifier, error) {
+func NewBcryptVerifier(hash string) (PasswordVerifier, error) {
 	if hash == "" {
 		return nil, errors.New("TOURNAMENT_PASSWORD_HASH is empty (locked mode requires a bcrypt hash)")
 	}
@@ -176,3 +192,12 @@ func (v *bcryptPasswordVerifier) ResetEnabled() bool { return false }
 func (v *bcryptPasswordVerifier) AllowsFileBootstrap() bool { return true }
 
 func (v *bcryptPasswordVerifier) EnforceEmptyStoredGuard() bool { return false }
+
+// RedactStoredPassword: in locked mode the on-disk Password is
+// irrelevant to authentication, so it must be stripped from API
+// responses (to avoid leaking a stale or pre-migration credential)
+// and ignored on writes (PUT preserves the stored value but the
+// response redacts it). The on-disk value is preserved so an
+// operator who later switches back to file mode can recover —
+// documented in docs/user-guide/mobile-app.md.
+func (v *bcryptPasswordVerifier) RedactStoredPassword() bool { return true }

@@ -336,6 +336,136 @@ func TestTournamentHandlers(t *testing.T) {
 	}
 }
 
+// TestTournamentHandlers_ModeSwitchPreservesStoredPassword walks the
+// operator-facing scenario where a deployment migrates between auth
+// modes:
+//
+//  1. Start in file mode, set the admin password to "alpha".
+//  2. Switch to locked mode. The on-disk Password is now non-
+//     authoritative (auth uses the env-var bcrypt hash), but the
+//     stored value MUST be preserved on disk so that a future flip
+//     back to file mode is recoverable — the operator might be
+//     experimenting with locked mode and need to roll back.
+//  3. Confirm that locked-mode PUTs preserve the stored value
+//     without leaking it through responses.
+//  4. Switch back to file mode. The originally-set "alpha" password
+//     authenticates again, proving the on-disk record was never
+//     clobbered.
+//
+// This is the integration test for the "mode-switching leaks the
+// original file-mode password" caveat documented in
+// docs/user-guide/mobile-app.md. Pinning the contract here means a
+// future change that decides to scrub the stored password on lock
+// will break this test and force a deliberate update to the docs.
+func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "mode-switch-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	hub := NewHub()
+
+	// --- Phase 1: file mode, set password "alpha".
+	fileV := NewFileVerifier(store)
+
+	gin.SetMode(gin.TestMode)
+	fileR := gin.New()
+	fileAPI := fileR.Group("/api")
+	fileAPI.Use(AuthMiddleware(fileV, store))
+	RegisterTournamentHandlers(fileAPI, store, hub, fileV)
+
+	bootstrapBody, _ := json.Marshal(state.Tournament{
+		Name: "Migration Test", Password: "alpha", Courts: []string{"A"},
+	})
+	bootReq := httptest.NewRequest(http.MethodPost, "/api/tournament", bytes.NewReader(bootstrapBody))
+	bootReq.Header.Set("Content-Type", "application/json")
+	bootW := httptest.NewRecorder()
+	fileR.ServeHTTP(bootW, bootReq)
+	require.Equal(t, http.StatusCreated, bootW.Code, "phase 1 bootstrap failed: %s", bootW.Body.String())
+
+	// Confirm "alpha" authenticates in file mode.
+	authReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	authReq.Header.Set("X-Tournament-Password", "alpha")
+	authW := httptest.NewRecorder()
+	fileR.ServeHTTP(authW, authReq)
+	require.Equal(t, http.StatusOK, authW.Code, "phase 1 'alpha' must authenticate in file mode")
+
+	// --- Phase 2: switch to locked mode (operator restarts with
+	// --lock-password). The on-disk record still has Password="alpha".
+	hash, err := bcrypt.GenerateFromPassword([]byte("envpass"), bcrypt.MinCost)
+	require.NoError(t, err)
+	bcryptV, err := NewBcryptVerifier(string(hash))
+	require.NoError(t, err)
+
+	lockedR := gin.New()
+	lockedAPI := lockedR.Group("/api")
+	lockedAPI.Use(AuthMiddleware(bcryptV, store))
+	RegisterTournamentHandlers(lockedAPI, store, hub, bcryptV)
+
+	// "alpha" no longer authenticates (auth uses env-var hash).
+	alphaReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	alphaReq.Header.Set("X-Tournament-Password", "alpha")
+	alphaW := httptest.NewRecorder()
+	lockedR.ServeHTTP(alphaW, alphaReq)
+	require.Equal(t, http.StatusUnauthorized, alphaW.Code, "phase 2 'alpha' must NOT authenticate under env-var hash")
+
+	// "envpass" does authenticate, and the response strips the stored
+	// "alpha" so the admin UI doesn't see a stale credential.
+	envReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	envReq.Header.Set("X-Tournament-Password", "envpass")
+	envW := httptest.NewRecorder()
+	lockedR.ServeHTTP(envW, envReq)
+	require.Equal(t, http.StatusOK, envW.Code)
+	var lockedT state.Tournament
+	require.NoError(t, json.Unmarshal(envW.Body.Bytes(), &lockedT))
+	assert.Empty(t, lockedT.Password, "phase 2 GET response must redact stored password")
+
+	// --- Phase 3: PUT a rename under locked mode. The stored password
+	// MUST stay intact so phase 4 can recover.
+	putBody, _ := json.Marshal(state.Tournament{
+		Name: "Renamed", Courts: []string{"A"},
+	})
+	putReq := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(putBody))
+	putReq.Header.Set("X-Tournament-Password", "envpass")
+	putReq.Header.Set("Content-Type", "application/json")
+	putW := httptest.NewRecorder()
+	lockedR.ServeHTTP(putW, putReq)
+	require.Equal(t, http.StatusOK, putW.Code, "phase 3 PUT failed: %s", putW.Body.String())
+
+	// Inspect the on-disk record directly: name should be the new value
+	// AND the original password should still be there (just not visible
+	// via the API).
+	loadedT, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed", loadedT.Name)
+	assert.Equal(t, "alpha", loadedT.Password,
+		"phase 3 locked-mode PUT must preserve the original file-mode password on disk")
+
+	// --- Phase 4: switch back to file mode (operator drops
+	// --lock-password). The originally-set "alpha" authenticates again,
+	// proving the rollback path works.
+	fileV2 := NewFileVerifier(store)
+	fileR2 := gin.New()
+	fileAPI2 := fileR2.Group("/api")
+	fileAPI2.Use(AuthMiddleware(fileV2, store))
+	RegisterTournamentHandlers(fileAPI2, store, hub, fileV2)
+
+	recoveryReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	recoveryReq.Header.Set("X-Tournament-Password", "alpha")
+	recoveryW := httptest.NewRecorder()
+	fileR2.ServeHTTP(recoveryW, recoveryReq)
+	assert.Equal(t, http.StatusOK, recoveryW.Code,
+		"phase 4 rollback to file mode must accept the original 'alpha' password")
+
+	// And the GET response in file mode reveals the password (not
+	// redacted), since file mode treats it as the live credential.
+	var recoveredT state.Tournament
+	require.NoError(t, json.Unmarshal(recoveryW.Body.Bytes(), &recoveredT))
+	assert.Equal(t, "alpha", recoveredT.Password,
+		"phase 4 file-mode GET must surface the recovered password (not redacted)")
+}
+
 // TestTournamentHandlers_LockedMode_StripPasswordOnResponses pins the
 // locked-mode redaction contract: GET, PUT, and POST responses must
 // NOT leak any stored password value to the client. The on-disk

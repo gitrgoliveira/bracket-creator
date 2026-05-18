@@ -72,6 +72,11 @@ In locked mode:
 
 The public `GET /api/auth-config` endpoint reports `{mode: "file"|"locked", resetEnabled: bool}` so SPAs and external monitoring can see the active mode without authenticating.
 
+### Operational notes
+
+- **No rate limiting on `/reset`.** The reset endpoint is unauthenticated by design and the server does not throttle calls to it. On a trusted LAN this is fine (the legitimate operator is the only person at the keyboard); on any network where untrusted clients can reach the server, an attacker can grief the deployment by repeatedly POSTing new passwords and locking the operator out. **Always run with `--lock-password` for internet-exposed deployments**, or front the server with a reverse proxy that rate-limits `/api/tournament/reset`.
+- **Mode switching preserves the stored password.** When you switch from file mode to locked mode, the password on disk in `tournament.md` is **not** erased — it's just ignored at auth time. If you later switch back to file mode (drop `--lock-password`), the original password authenticates again. Treat this as a feature for rollback experimentation, but be aware that the on-disk credential remains discoverable by anyone with filesystem access. If you want to fully retire a file-mode password, run `POST /api/tournament/reset` to a value you don't intend to use before switching to locked mode.
+
 ### Dashboard
 
 The dashboard lists all competitions. Each card shows the competition type, number of participants, format, and current status. Click a card to manage that competition.

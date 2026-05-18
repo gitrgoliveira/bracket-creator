@@ -42,8 +42,24 @@ var errResetPasswordRequired = errors.New("password is required")
 //   - Origin matches the request host → genuine same-origin browser
 //     request (the operator opened /reset in their browser tab).
 //     Allowed.
-//   - Origin set and doesn't match host → cross-origin from another
-//     site. Rejected.
+//   - Origin set and doesn't match host (different host string,
+//     malformed URL, or Origin: null from a sandboxed iframe/file://) →
+//     Rejected.
+//
+// Known limitations:
+//   - The comparison is exact-string on host:port. An operator who
+//     navigates to `http://localhost:8089` and a colleague who reaches
+//     the same machine via `http://127.0.0.1:8089` are treated as
+//     different origins by this check — which is also the browser's
+//     behavior, so a cross-DNS-form attempt can't actually happen
+//     through a normal browser session anyway.
+//   - Behind a reverse proxy that rewrites Host (e.g., a TLS
+//     terminator that forwards `Host: localhost:8080` upstream while
+//     the browser sees `https://tournament.example.com`), the Origin
+//     check will reject the legitimate request. Such deployments
+//     should run with --lock-password (which 404s /reset entirely)
+//     and rotate credentials via env-var hash; the recovery endpoint
+//     is designed for direct same-host operator access.
 //
 // We deliberately do NOT support an allowlist env var here: the
 // recovery path is for operators sitting at the tournament server.

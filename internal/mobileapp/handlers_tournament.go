@@ -172,7 +172,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// would mislead the operator about what credential actually
 		// authenticates them. Mirrors the public viewer handler's
 		// password-strip step (handlers_viewer.go).
-		if verifier != nil && verifier.Mode() == "locked" {
+		if verifier != nil && verifier.RedactStoredPassword() {
 			publicT := *t
 			publicT.Password = ""
 			c.JSON(http.StatusOK, publicT)
@@ -254,15 +254,16 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// silently losing the password change. The atomic primitive
 		// closes that window.
 		//
-		// Locked mode (verifier.Mode() == "locked"): the on-disk Password
-		// is irrelevant — auth comes from the env-var bcrypt hash. We
-		// silently preserve whatever's already stored (which the SPA
-		// reads back as empty via GET /tournament) so the admin can
-		// edit name/venue/courts/etc. without thinking about a password
-		// they no longer set. Rejecting the request would be hostile,
-		// since the SPA's edit form may not even surface a password
-		// field in locked mode.
-		locked := verifier != nil && verifier.Mode() == "locked"
+		// Verifiers that mark the on-disk Password as non-authoritative
+		// (today: the bcrypt locked verifier) silently preserve whatever's
+		// already stored — auth comes from the env-var hash, the on-disk
+		// value is just an inert relic from a previous file-mode session
+		// (or a never-set field). The SPA reads it back as empty via
+		// GET /tournament, so the admin can edit name/venue/courts/etc.
+		// without thinking about a password they no longer set.
+		// Rejecting these writes would be hostile (the SPA may not even
+		// surface a password field in locked mode).
+		locked := verifier != nil && verifier.RedactStoredPassword()
 		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
 			if locked {
 				if current != nil {
@@ -371,7 +372,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// be used to authenticate. Accept the submission either way;
 		// the stored value is read back as empty via GET /tournament so
 		// the admin doesn't see a stale credential.
-		if verifier != nil && verifier.Mode() == "locked" {
+		if verifier != nil && verifier.RedactStoredPassword() {
 			// Persist with empty Password so the stored record matches
 			// what the admin will see on subsequent GETs. Anything the
 			// operator typed in the bootstrap form is discarded —

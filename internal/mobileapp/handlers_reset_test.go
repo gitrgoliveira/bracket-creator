@@ -208,6 +208,70 @@ func TestReset_SameOriginPost_Accepted(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, w.Code)
 }
 
+// Browsers send `Origin: null` for sandboxed iframes, file:// pages,
+// and data: URLs. None of these are legitimate operator contexts for
+// /reset — they all indicate a request smuggled in through a
+// non-conventional security boundary. Treat the same as cross-origin
+// (reject) rather than accepting an empty host string.
+func TestReset_OriginNull_Rejected(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), NewHub())
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "T",
+		Password: "old",
+	}))
+
+	body, _ := json.Marshal(map[string]string{"password": "attacker"})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "null")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, "Origin: null must not pass the same-origin check")
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "old", loaded.Password)
+}
+
+// Malformed Origin (not a valid URL, or no host component) should be
+// rejected. Defense-in-depth against a malicious caller sending
+// garbage hoping to slip past url.Parse with an empty u.Host that
+// then string-equals the empty Host on some misconfigured deployment.
+func TestReset_OriginMalformed_Rejected(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), NewHub())
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "T",
+		Password: "old",
+	}))
+
+	cases := []string{
+		"not a url",
+		"http://", // valid parse, but u.Host == ""
+		"://noscheme",
+	}
+	for _, origin := range cases {
+		t.Run(origin, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]string{"password": "attacker"})
+			req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Origin", origin)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code, "malformed Origin %q must be rejected", origin)
+		})
+	}
+}
+
 // Non-browser caller (no Origin header — curl, scripted clients) is
 // accepted. Browsers automatically set Origin on cross-origin POSTs
 // but not all clients do, and we don't want to lock out legitimate
@@ -264,7 +328,7 @@ func TestReset_BroadcastsPasswordResetEvent(t *testing.T) {
 	// Drain the channel and assert both event types fired. The hub
 	// uses a buffered channel; reads here are non-blocking via select.
 	seen := map[string]bool{}
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		select {
 		case msg := <-ch:
 			for _, ev := range []string{"tournament_updated", "password_reset"} {
@@ -365,3 +429,4 @@ func (f *fakeVerifier) Mode() string                  { return f.mode }
 func (f *fakeVerifier) ResetEnabled() bool            { return f.reset }
 func (f *fakeVerifier) AllowsFileBootstrap() bool     { return true }
 func (f *fakeVerifier) EnforceEmptyStoredGuard() bool { return true }
+func (f *fakeVerifier) RedactStoredPassword() bool    { return f.mode == "locked" }

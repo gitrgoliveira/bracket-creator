@@ -57,6 +57,11 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
 
 **Recommended for any deployment reachable over the internet.** The plaintext-in-file pattern of file mode is intended for trusted-network use only.
 
+#### Operational caveats
+
+- **`/reset` has no rate limiting.** The reset endpoint is unauthenticated and the server does not throttle calls. For internet-exposed deployments, run with `--lock-password` (which 404s the route entirely) OR front the server with a reverse proxy that rate-limits `POST /api/tournament/reset`.
+- **Mode switching preserves the stored password.** Switching from file mode to locked mode does NOT erase `tournament.md`'s `password` field — auth just stops consulting it. A later switch back to file mode resurrects the original password. This is a deliberate rollback feature, but anyone with filesystem access can still read the value. To fully retire a file-mode credential before going locked, `POST /api/tournament/reset` it to a one-time throwaway first.
+
 ## Examples
 
 ```bash

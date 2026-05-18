@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,12 +13,9 @@ func TestNewMobileAppCmd(t *testing.T) {
 }
 
 func TestMobileAppOptions_EnvVars(t *testing.T) {
-	os.Setenv("BIND_ADDRESS", "1.2.3.4")
-	os.Setenv("PORT", "9999")
-	os.Setenv("TOURNAMENT_DATA_DIR", "/tmp/td-env-test")
-	defer os.Unsetenv("BIND_ADDRESS")
-	defer os.Unsetenv("PORT")
-	defer os.Unsetenv("TOURNAMENT_DATA_DIR")
+	t.Setenv("BIND_ADDRESS", "1.2.3.4")
+	t.Setenv("PORT", "9999")
+	t.Setenv("TOURNAMENT_DATA_DIR", "/tmp/td-env-test")
 
 	cmd := newMobileAppCmd()
 	bind, _ := cmd.Flags().GetString("bind")
@@ -32,7 +28,7 @@ func TestMobileAppOptions_EnvVars(t *testing.T) {
 }
 
 func TestMobileAppOptions_FolderDefault(t *testing.T) {
-	os.Unsetenv("TOURNAMENT_DATA_DIR")
+	t.Setenv("TOURNAMENT_DATA_DIR", "")
 
 	cmd := newMobileAppCmd()
 	folder, _ := cmd.Flags().GetString("folder")
@@ -41,7 +37,7 @@ func TestMobileAppOptions_FolderDefault(t *testing.T) {
 }
 
 func TestMobileAppOptions_PortDefault(t *testing.T) {
-	os.Unsetenv("PORT")
+	t.Setenv("PORT", "")
 
 	cmd := newMobileAppCmd()
 	port, _ := cmd.Flags().GetInt("port")
@@ -50,8 +46,7 @@ func TestMobileAppOptions_PortDefault(t *testing.T) {
 }
 
 func TestMobileAppOptions_PortInvalid(t *testing.T) {
-	os.Setenv("PORT", "not-a-number")
-	defer os.Unsetenv("PORT")
+	t.Setenv("PORT", "not-a-number")
 
 	cmd := newMobileAppCmd()
 	port, _ := cmd.Flags().GetInt("port")

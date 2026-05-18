@@ -4528,6 +4528,7 @@ a:hover {
 
 /* --- Shared modal chrome refresh (Instrument Panel typography + tone) -- */
 .editor-modal {
+  background: var(--surface); /* fallback for browsers without color-mix() */
   background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 96%, var(--ink) 4%) 100%);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, var(--shadow-lg);
 }
@@ -4661,11 +4662,13 @@ a:hover {
   /* Soft 4–6% tonal wash instead of the candy-coloured corner gradient. */
 }
 .editor-modal--compact .sb-side--aka {
+  background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%); /* fallback */
   background: linear-gradient(135deg,
     color-mix(in srgb, var(--red) 5%, var(--surface)) 0%,
     color-mix(in srgb, var(--red) 3%, var(--surface)) 100%);
 }
 .editor-modal--compact .sb-side--shiro {
+  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%); /* fallback */
   background: linear-gradient(135deg,
     color-mix(in srgb, var(--accent) 5%, var(--surface)) 0%,
     color-mix(in srgb, var(--accent) 3%, var(--surface)) 100%);
@@ -4748,7 +4751,11 @@ a:hover {
   /* Slightly wider in compact mode to keep the two-row tsm__side comfy. */
   width: min(720px, calc(100vw - 32px));
 }
-.editor-modal--compact .sb-match {
+/* Scope to the team modal only — the individual modal has its own .sb-match
+   rule above (line ~4652) with a wider 120px centre column. Without this
+   scoping the team override would win the cascade and shrink the individual
+   board's VS column to 80px. */
+.editor-modal--compact.editor-modal--team .sb-match {
   grid-template-columns: 1fr 80px 1fr;
   border-radius: 10px;
   margin-bottom: 8px !important;
@@ -4783,6 +4790,7 @@ a:hover {
 /* --- Compact mode: team-sub-match 2-row layout --------------------------- */
 .editor-modal--compact .team-sub-match {
   padding: 3px 8px;
+  border-bottom: 1px solid var(--line); /* fallback */
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   border-radius: 0;
   background: transparent;
@@ -4819,6 +4827,13 @@ a:hover {
 }
 .editor-modal--compact .team-sub-match__side--right {
   align-items: stretch;
+}
+/* In roomy (non-compact) mode the tsm-row-* divs are layout-invisible so the
+   legacy column stack is preserved exactly. Compact mode then overrides to
+   display: flex to get the 2-row strip layout. */
+.tsm-row-1,
+.tsm-row-2 {
+  display: contents;
 }
 .editor-modal--compact .tsm-row-1 {
   display: flex;
@@ -4930,6 +4945,7 @@ a:hover {
   padding: 5px 12px !important;
   margin-top: 4px !important;
   border-radius: 8px;
+  background: #1e2a3a; /* fallback — approximate ink-92%+accent-8% */
   background: color-mix(in srgb, var(--ink) 92%, var(--accent) 8%);
   color: white;
 }

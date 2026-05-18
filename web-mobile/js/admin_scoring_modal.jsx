@@ -178,7 +178,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount, maxEnchoPeriods }
           className="encho-pill"
           data-testid="scoring-modal-encho-toggle"
           onClick={() => setShowCounter(true)}
-          aria-label="Mark overtime started (encho)"
+          aria-label="Show overtime (encho) controls"
         >
           <span aria-hidden="true">⏱</span>
           <TermAS name="encho">Overtime</TermAS>

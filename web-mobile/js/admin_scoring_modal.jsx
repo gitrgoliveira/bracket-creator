@@ -79,13 +79,22 @@ function applyFoulIncrement(fouls, opponentPts, thisSidePts = [], maxIppons = MA
 // returning the outstanding remainder. Idempotent: when the H's are
 // already present it leaves opponentPts unchanged.
 function reconcileFoulsAtOpen(rawFouls, opponentPts, maxIppons = MAX_IPPONS_PER_SIDE) {
-  const safe = rawFouls > 0 ? rawFouls : 0;
+  const safe = Math.max(0, rawFouls);
   const expectedH = Math.floor(safe / 2);
   const haveH = opponentPts.filter(x => x === "H").length;
   const missing = Math.max(0, expectedH - haveH);
   const topUp = Math.min(missing, Math.max(0, maxIppons - opponentPts.length));
   const newOpp = topUp > 0 ? [...opponentPts, ...Array(topUp).fill("H")] : opponentPts;
   return { outstandingFouls: safe % 2, opponentPts: newOpp };
+}
+
+// nextFoulOnDecrement — pure helper for the `−` button. Returns the new
+// foul value (a NUMBER, not a React-style functional updater), suitable
+// for setters like the team sub-match `rs.setFouls(value)` shape that
+// doesn't accept fn-updaters. Extracted so the team-modal `−` regression
+// (a fn-updater silently storing as state) is unit-testable.
+function nextFoulOnDecrement(currentFouls) {
+  return Math.max(0, currentFouls - 1);
 }
 
 // Term — kendo-glossary tooltip wrapper. Read lazily off window so the
@@ -1445,7 +1454,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                         <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                           <span className="tsm-fouls__label">{rs.label} Fouls</span>
                           <div className="tsm-fouls__controls">
-                            <button className="tsm-fouls__btn" onClick={() => rs.setFouls(Math.max(0, rs.fouls - 1))} disabled={rs.fouls === 0}>−</button>
+                            <button className="tsm-fouls__btn" onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
                             <button className="tsm-fouls__btn" onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
                           </div>
@@ -1647,5 +1656,6 @@ export {
   isBoutDecided,
   applyFoulIncrement,
   reconcileFoulsAtOpen,
+  nextFoulOnDecrement,
   applyFusenshoToggle,
 };

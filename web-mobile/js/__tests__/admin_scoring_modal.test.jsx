@@ -11,6 +11,7 @@ import {
   isBoutDecided,
   applyFoulIncrement,
   reconcileFoulsAtOpen,
+  nextFoulOnDecrement,
   applyFusenshoToggle,
 } from '../admin_scoring_modal.jsx';
 
@@ -721,6 +722,31 @@ describe('reconcileFoulsAtOpen (correction-flow normalization)', () => {
 
   it('defensive: clamps negative rawFouls to 0', () => {
     expect(reconcileFoulsAtOpen(-1, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M'] });
+  });
+});
+
+describe('nextFoulOnDecrement (team `−` button regression)', () => {
+  // Pre-existing bug: the team sub-match `−` button passed a React-style
+  // functional updater (`f => Math.max(0, f - 1)`) to `rs.setFouls`, but
+  // rs.setFouls is a plain setter that wrote the function itself into
+  // bFouls — breaking comparisons and rendering. Extracted to a pure
+  // helper so the contract (returns a NUMBER, not a function) is
+  // directly testable.
+
+  it('returns a number, not a function (regression guard)', () => {
+    expect(typeof nextFoulOnDecrement(2)).toBe('number');
+    expect(typeof nextFoulOnDecrement(0)).toBe('number');
+  });
+
+  it('decrements by 1', () => {
+    expect(nextFoulOnDecrement(1)).toBe(0);
+    expect(nextFoulOnDecrement(2)).toBe(1);
+    expect(nextFoulOnDecrement(3)).toBe(2);
+  });
+
+  it('clamps at 0 (never returns negative)', () => {
+    expect(nextFoulOnDecrement(0)).toBe(0);
+    expect(nextFoulOnDecrement(-1)).toBe(0);
   });
 });
 

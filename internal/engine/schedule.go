@@ -125,7 +125,7 @@ func (e *Engine) GenerateSchedule(compID string) error {
 
 	var entries []state.ScheduleEntry
 
-	if comp.Format == state.CompFormatPools {
+	if comp.Format == state.CompFormatPools || comp.Format == state.CompFormatLeague {
 		matches, err := e.store.LoadPoolMatches(compID)
 		if err != nil {
 			return err

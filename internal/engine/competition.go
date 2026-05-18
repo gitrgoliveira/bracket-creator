@@ -97,7 +97,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 
 	// No ties (or ties already resolved). Transition to complete.
 	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
-		if comp == nil || comp.Format != state.CompFormatPools || comp.Status != state.CompStatusPools {
+		if comp == nil || (comp.Format != state.CompFormatPools && comp.Format != state.CompFormatLeague) || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
 		// Re-check under the lock.
@@ -256,7 +256,7 @@ func (e *Engine) StartCompetition(id string) error {
 	// (pools.csv / bracket.json) via their own per-comp lock
 	// acquisitions, so they run OUTSIDE the UpdateCompetitionChanged
 	// transform below (re-entering the lock would deadlock).
-	if comp.Format == state.CompFormatPools {
+	if comp.Format == state.CompFormatPools || comp.Format == state.CompFormatLeague {
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}

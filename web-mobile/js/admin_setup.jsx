@@ -98,7 +98,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // let an operator type a new password, click Save, and (depending
   // on the backend version) either see a 400 or silently believe
   // rotation succeeded. Hide it.
-  const locked = authConfig && authConfig.mode === "locked";
+  const locked = authConfig === null || authConfig.mode === "locked";
   const [name, setName] = useStateA(tournament.name);
   const [venue, setVenue] = useStateA(tournament.venue);
   const [date, setDate] = useStateA(tournament.date);

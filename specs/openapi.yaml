@@ -229,6 +229,15 @@ paths:
           was created/updated/deleted, reserved slots changed, participants
           updated, etc.). `data: null` — clients should refresh full state.
         - `schedule_updated` — a competition's schedule was saved.
+        - `password_reset` — the admin password was changed via
+          `POST /api/tournament/reset`. Non-originating admin sessions
+          should clear their cached credential from `localStorage` and
+          re-show the authentication modal. The event payload includes
+          `originatorId` so the tab that submitted the reset can
+          suppress its own broadcast and stay logged in.
+          `data: { originatorId: "<opaque string>" }`.
+          Only emitted in file mode; never emitted in locked mode (the
+          reset endpoint is disabled there).
       responses:
         '200':
           description: SSE stream of tournament events.
@@ -288,6 +297,9 @@ paths:
 
         `name` is trimmed and must be non-empty after trim (`tournament name is required`).
         `venue` and `date` are also trimmed but may be empty.
+      security:
+        - TournamentPassword: []
+        - {}
       requestBody:
         required: true
         content:

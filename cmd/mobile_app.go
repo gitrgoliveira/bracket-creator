@@ -100,7 +100,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--lock-password set but TOURNAMENT_PASSWORD_HASH invalid: %w", err)
 		}
 		verifier = v
-		log.Printf("Starting mobile-app server in LOCKED mode (auth from TOURNAMENT_PASSWORD_HASH; /reset disabled)")
+		log.Printf("Starting mobile-app server in LOCKED mode (auth from TOURNAMENT_PASSWORD_HASH; POST /api/tournament/reset disabled)")
 	} else {
 		verifier = mobileapp.NewFileVerifier(store)
 	}

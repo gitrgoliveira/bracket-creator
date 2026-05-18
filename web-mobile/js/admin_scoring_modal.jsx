@@ -176,7 +176,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount, maxEnchoPeriods }
         <button
           type="button"
           className="encho-pill"
-          data-testid="scoring-modal-encho-toggle"
+          data-testid="scoring-modal-encho-pill"
           onClick={() => setShowCounter(true)}
           aria-label="Show overtime (encho) controls"
         >
@@ -190,7 +190,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount, maxEnchoPeriods }
     <div className="encho-row encho-row--expanded">
       <label className="encho-row__label">
         <input
-          data-testid="scoring-modal-encho-toggle"
+          data-testid="scoring-modal-encho-checkbox"
           type="checkbox"
           checked={enchoPeriodCount > 0}
           onChange={(e) => {

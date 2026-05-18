@@ -5004,7 +5004,7 @@ a:hover {
   display: flex;
   flex-direction: column;
 }
-.editor-modal:not(.editor-modal--compact) .team-bouts-scroll {
+.editor-modal--team:not(.editor-modal--compact) .team-bouts-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;

@@ -53,11 +53,11 @@ function applyFusenshoToggle(prev, side) {
 // discharged into an H" — discharged Hs live in the opponent's pts array.
 //
 // Edge case: when the opponent's pts slot is already full (best-of-3
-// cap), the bout is decided and further `+` presses are swallowed
-// (counter stays at the pre-increment value, no new H awarded). The
-// operator must remove an H from the opponent's slot first if they
-// want to undo the awarded point.
-export function applyFoulIncrement(fouls, opponentPts, maxIppons = MAX_IPPONS_PER_SIDE) {
+// cap), the bout is already decided — the counter still resets to 0
+// but no new H is awarded (the extra foul is consumed without effect).
+// To undo a previously awarded H, the operator removes it from the
+// opponent's slot directly.
+function applyFoulIncrement(fouls, opponentPts, maxIppons = MAX_IPPONS_PER_SIDE) {
   const next = fouls + 1;
   if (next < 2) return { fouls: next, opponentPts };
   const newOpp = opponentPts.length < maxIppons
@@ -489,8 +489,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     // additional H fold is needed here.
     const aLetters = aPts.filter(x => x !== "•");
     const bLetters = bPts.filter(x => x !== "•");
-    const aFinal = aLetters.slice(0, 2);
-    const bFinal = bLetters.slice(0, 2);
+    const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
+    const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
     if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
@@ -1073,8 +1073,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     const subResults = subs.map((s, idx) => {
       const t = subTotals[idx];
       // Hansoku Hs already in pts arrays via applyFoulIncrement — no fold.
-      const aAll = s.aPts.slice(0, 2);
-      const bAll = s.bPts.slice(0, 2);
+      const aAll = s.aPts.slice(0, MAX_IPPONS_PER_SIDE);
+      const bAll = s.bPts.slice(0, MAX_IPPONS_PER_SIDE);
       const w = t.winner === "a" ? m.sideA : t.winner === "b" ? m.sideB : null;
       // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought
       // mapping. The bout was awarded as a default win — backend tally treats
@@ -1601,8 +1601,6 @@ window.ScoreEditorModal = ScoreEditorModal;
 
 // ES exports for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-// applyFoulIncrement is also exported inline (above the FoulCounter) via
-// `export function`; it is re-listed here for grep discoverability.
 export {
   resolveDecisionPassword,
   buildDecisionBody,
@@ -1613,5 +1611,6 @@ export {
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
+  applyFoulIncrement,
   applyFusenshoToggle,
 };

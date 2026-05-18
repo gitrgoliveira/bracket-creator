@@ -101,3 +101,47 @@ func TestMobileAppOptions_LockPasswordRejectsBadHash(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "valid bcrypt hash")
 }
+
+// LOCK_PASSWORD env var is parsed via strconv.ParseBool so that values
+// like "TRUE", "True", "1", "t" all activate locked mode (not just "true").
+// Invalid values (e.g. "yes", "enabled") must produce a clear startup
+// error rather than being silently treated as false — an operator who
+// typo'd the env var should get a loud rejection, not a server that
+// quietly starts in the wrong mode.
+func TestMobileAppOptions_LockPasswordEnvVarFormats(t *testing.T) {
+	tests := []struct {
+		name    string
+		envVal  string
+		wantMsg string // substring expected in the error message
+	}{
+		// Valid truthy values: run() proceeds to the TOURNAMENT_PASSWORD_HASH
+		// check (which fails because we leave the hash empty), not the parse step.
+		{"uppercase TRUE", "TRUE", "TOURNAMENT_PASSWORD_HASH"},
+		{"mixed-case True", "True", "TOURNAMENT_PASSWORD_HASH"},
+		{"numeric 1", "1", "TOURNAMENT_PASSWORD_HASH"},
+		{"lowercase t", "t", "TOURNAMENT_PASSWORD_HASH"},
+		// Invalid values: must be caught before the hash check.
+		{"word yes", "yes", "unrecognised boolean value"},
+		{"word enabled", "enabled", "unrecognised boolean value"},
+		{"word on", "on", "unrecognised boolean value"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("LOCK_PASSWORD", tt.envVal)
+			t.Setenv("TOURNAMENT_PASSWORD_HASH", "")
+			o := &mobileAppOptions{
+				folder:      dir,
+				bindAddress: "127.0.0.1",
+				port:        0,
+			}
+			// Pass the real command so cmd.Flags().Changed("lock-password")
+			// returns false (flag was not set on the command line) and the
+			// env-var parsing branch executes.
+			c := newMobileAppCmd()
+			err := o.run(c, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantMsg)
+		})
+	}
+}

@@ -9,13 +9,17 @@ info:
     - **Mobile/Admin API** (`mobile-app` command): Stateful REST API for live tournament management.
 
     The Mobile/Admin API routes under `/api/` (excluding `/api/viewer/`) require the
-    `X-Tournament-Password` header for authentication, with three public exceptions:
+    `X-Tournament-Password` header for authentication, with several public exceptions:
 
     - **`GET /api/events`** — SSE stream; always public so viewers and spectator screens
       can receive live updates without an admin credential.
     - **`GET /api/auth-config`** — always public; carries no secret material.
     - **`POST /api/tournament/reset`** — public in file mode (the recovery path for a
       forgotten password); returns `404` in locked mode (`--lock-password`).
+    - **`GET /api/schedule/estimate`** — stateless schedule calculator; always public.
+    - **`GET /api/competitions/{id}/competitor-status`** — public read; the `POST` write is protected.
+    - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`** — public read; `PUT`/`DELETE` are protected.
+    - **`GET /api/competitions/{id}/swiss/standings`** — public read; always public.
   version: 2.1.0
 
 servers:
@@ -1292,8 +1296,7 @@ paths:
     get:
       tags: [competitions]
       summary: List competitor eligibility statuses
-      security:
-        - TournamentPassword: []
+      security: []
       responses:
         '200':
           description: Current competitor statuses.
@@ -1345,8 +1348,7 @@ paths:
     get:
       tags: [competitions]
       summary: Get team lineup for round
-      security:
-        - TournamentPassword: []
+      security: []
       responses:
         '200':
           description: Team lineup.
@@ -1560,6 +1562,10 @@ components:
         Tournament admin password. Required for all `/api/` routes
         except `/api/viewer/`, `/api/events`, the unauthenticated
         recovery endpoints `/api/auth-config` and `/api/tournament/reset`,
+        the public read endpoints `GET /api/schedule/estimate`,
+        `GET /api/competitions/{id}/competitor-status`,
+        `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`, and
+        `GET /api/competitions/{id}/swiss/standings`,
         and (in file mode only) the bootstrap PUT/POST `/api/tournament`
         while no tournament has been configured yet.
 

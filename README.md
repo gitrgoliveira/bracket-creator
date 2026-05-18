@@ -276,7 +276,7 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 | **Seeds** | Import a seeds CSV to control bracket placement, or type seed numbers per participant. |
 | **Live updates** | Results broadcast to all connected viewers in real time via Server-Sent Events (SSE). |
 | **Password reset** | Visit `/reset` to set a new admin password if you've forgotten it (file mode only — see *Admin authentication* below). |
-| **Locked-password mode** | For internet-exposed deployments. `--lock-password` reads a bcrypt hash from `TOURNAMENT_PASSWORD_HASH` and disables `/reset`. |
+| **Locked-password mode** | For internet-exposed deployments. `--lock-password` reads a bcrypt hash from `TOURNAMENT_PASSWORD_HASH` and disables `POST /api/tournament/reset` (the SPA `/reset` page still renders an operator-disabled message). |
 
 ### Admin authentication
 

@@ -59,13 +59,29 @@ func newMobileAppCmd() *cobra.Command {
 	// The flag is recommended for any internet-exposed deployment; for
 	// local/private use the default (unlocked) behavior keeps the
 	// recovery-via-/reset path available.
-	cmd.Flags().BoolVar(&o.lockPassword, "lock-password", os.Getenv("LOCK_PASSWORD") == "true",
+	cmd.Flags().BoolVar(&o.lockPassword, "lock-password", false,
 		"disable /reset and authenticate via bcrypt hash from TOURNAMENT_PASSWORD_HASH")
 
 	return cmd
 }
 
 func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
+	// Resolve LOCK_PASSWORD env var when the flag was not explicitly set
+	// on the command line. strconv.ParseBool accepts the same set of values
+	// as Go's strconv package (1/t/T/TRUE/true/True/0/f/F/FALSE/false/False)
+	// and returns an error for anything else, so LOCK_PASSWORD=True or
+	// LOCK_PASSWORD=1 work, while LOCK_PASSWORD=yes or LOCK_PASSWORD=enabled
+	// are rejected with a clear message rather than silently ignored.
+	if cmd != nil && !cmd.Flags().Changed("lock-password") {
+		if raw := os.Getenv("LOCK_PASSWORD"); raw != "" {
+			v, err := strconv.ParseBool(raw)
+			if err != nil {
+				return fmt.Errorf("LOCK_PASSWORD=%q: unrecognised boolean value (accepted: 1/t/T/TRUE/true/True or 0/f/F/FALSE/false/False)", raw)
+			}
+			o.lockPassword = v
+		}
+	}
+
 	store, err := state.NewStore(o.folder)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)

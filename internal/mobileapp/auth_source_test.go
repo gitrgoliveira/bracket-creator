@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -73,7 +74,11 @@ func TestBcryptVerifier_Mode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "locked", v.Mode())
 	assert.False(t, v.ResetEnabled())
-	assert.False(t, v.AllowsFileBootstrap())
+	// AllowsFileBootstrap is true in both modes so the SPA's
+	// CreateTournament flow can bootstrap a fresh locked deployment
+	// without sending X-Tournament-Password. See auth_source.go for
+	// the security rationale.
+	assert.True(t, v.AllowsFileBootstrap())
 	assert.False(t, v.EnforceEmptyStoredGuard())
 }
 
@@ -113,6 +118,21 @@ func TestBcryptVerifier_Verify(t *testing.T) {
 
 	t.Run("empty presented → false (short-circuit)", func(t *testing.T) {
 		ok, err := v.Verify("")
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	// Oversized header: bcrypt.CompareHashAndPassword returns
+	// ErrPasswordTooLong for inputs > 72 bytes. Pre-fix this propagated
+	// as an error and the middleware emitted a 500; the verifier now
+	// pre-checks length and short-circuits to (false, nil) so an
+	// unauth'd client sending a giant header gets the normal 401 path.
+	// This also closes a side-channel where the operator could tell
+	// locked mode apart from file mode by submitting a 100-byte header
+	// (locked → 500, file → 401).
+	t.Run("oversize presented (>72 bytes) → false (no 500)", func(t *testing.T) {
+		oversize := strings.Repeat("x", 100)
+		ok, err := v.Verify(oversize)
 		require.NoError(t, err)
 		assert.False(t, ok)
 	})

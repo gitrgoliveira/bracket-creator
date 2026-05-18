@@ -18,6 +18,7 @@
 * Adding the team line up should be optional. If added, then there should be a button to copy the names to the next match. There is usually someone else doing this work, different from someone doing the score registration.
 
 * In the scoring we can't say which side forfeits or is missing
+* In the scoring you can do an impossible results like 2-2
 
 
 Does the extra match in teams show up ?

@@ -278,6 +278,29 @@ function App() {
         const jitter = Math.random() * 500;
         if (event.type === "tournament_updated") {
             if (!authPromptRef.current) jitteredTimeout(load, jitter);
+        } else if (event.type === "password_reset") {
+            // The admin password was rotated by someone hitting
+            // POST /api/tournament/reset. Any logged-in admin's
+            // localStorage credential is now stale — clear it so the
+            // next request doesn't silently 401, and re-show
+            // AuthModal so they notice immediately. The viewer flow
+            // doesn't need to react: it never sends the header.
+            if (authed) {
+                setAuthed(false);
+                setPassword("");
+                try {
+                    localStorage.removeItem("bc_authed");
+                    localStorage.removeItem("bc_password");
+                } catch {
+                    // private-browsing modes can throw; the in-memory
+                    // state above is the load-bearing fix anyway.
+                }
+                if (mode === "admin") {
+                    setMode("viewer");
+                    setAuthPrompt(true);
+                    authPromptRef.current = true;
+                }
+            }
         } else if (event.type === "competitor_status_updated") {
             // T099: viewer doesn't need to mutate selectedCompData itself —
             // the eligibility change feeds back through the full

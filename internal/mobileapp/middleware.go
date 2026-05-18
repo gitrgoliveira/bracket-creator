@@ -45,9 +45,11 @@ func requireValidCompID(c *gin.Context) (string, bool) {
 //
 // The store reference is still needed for the "uninitialized tournament"
 // bootstrap branch — that gate fires when no tournament.md exists and we
-// must let through the very first POST /api/tournament. file mode permits
-// this so the CreateTournament UI works on a fresh install; locked mode
-// disables it (the env-var hash IS the auth source from the first request).
+// must let through the very first POST /api/tournament. Both verifiers
+// allow file-bootstrap (the SPA's CreateTournament flow doesn't send a
+// password header); in locked mode the stored Password is discarded by
+// the handler anyway, so the bootstrap window doesn't create any
+// credential-injection surface beyond what already exists in file mode.
 func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		t, err := store.LoadTournament()
@@ -61,23 +63,6 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		if t == nil || (t.Name == "New Tournament" && t.Password == "") {
 			if verifier.AllowsFileBootstrap() && (c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPost) && c.FullPath() == "/api/tournament" {
 				c.Next()
-				return
-			}
-			// In locked mode the env-var hash is the auth source even
-			// during bootstrap. Fall through to the verifier check below
-			// so a POST /api/tournament with a correct header creates the
-			// record (and any other endpoint without a header still 401s).
-			if !verifier.AllowsFileBootstrap() {
-				if ok, verr := verifier.Verify(c.GetHeader("X-Tournament-Password")); verr != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
-					c.Abort()
-					return
-				} else if ok {
-					c.Next()
-					return
-				}
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})
-				c.Abort()
 				return
 			}
 			c.JSON(http.StatusForbidden, gin.H{"error": "tournament not configured yet"})

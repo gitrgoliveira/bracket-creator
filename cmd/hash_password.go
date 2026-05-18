@@ -54,7 +54,13 @@ func newHashPasswordCmd() *cobra.Command {
 				if err != nil && !errors.Is(err, io.EOF) {
 					return fmt.Errorf("failed to read password from stdin: %w", err)
 				}
-				plaintext = strings.TrimRight(line, "\n")
+				// Trim both \n (Unix) and \r\n (Windows CRLF / piped from
+				// PowerShell). Without the \r trim, the hash is generated
+				// for "<password>\r" — the browser then sends "<password>"
+				// at runtime and authentication fails. Don't TrimSpace —
+				// passwords may legitimately contain leading/trailing
+				// whitespace and the runtime auth is exact-string match.
+				plaintext = strings.TrimRight(line, "\r\n")
 			}
 			if plaintext == "" {
 				return errors.New("password is empty (pass as arg or pipe via stdin)")
@@ -71,7 +77,13 @@ func newHashPasswordCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to hash password: %w", err)
 			}
-			fmt.Println(string(hash))
+			// Write to cmd.OutOrStdout() (cobra's writer abstraction)
+			// rather than fmt.Println so callers (including tests) can
+			// redirect output. Production behavior is unchanged because
+			// cobra's default writer is os.Stdout.
+			if _, werr := fmt.Fprintln(cmd.OutOrStdout(), string(hash)); werr != nil {
+				return fmt.Errorf("failed to write hash: %w", werr)
+			}
 			return nil
 		},
 	}

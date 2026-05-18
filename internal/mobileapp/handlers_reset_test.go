@@ -120,6 +120,166 @@ func TestReset_NoTournament_Returns409(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "bootstrap")
 }
 
+// Tournament legitimately named "New Tournament" (with a non-empty
+// password) must be eligible for reset. Pre-fix the check at
+// handlers_reset.go was `t.Name == "New Tournament"` which 409'd this
+// case forever; the middleware's sentinel is "default record" =
+// (name="New Tournament" AND password=""), and the reset endpoint
+// must match it exactly so a real tournament with that name isn't
+// locked out of recovery.
+func TestReset_NamedNewTournamentWithPassword_AllowsReset(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), NewHub())
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "New Tournament",
+		Password: "real-password",
+	}))
+
+	body, _ := json.Marshal(map[string]string{"password": "fresh"})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code, "real tournament named 'New Tournament' must allow reset")
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "fresh", loaded.Password)
+}
+
+// Cross-origin defense: a malicious site that an operator visits must
+// not be able to POST to /api/tournament/reset and rotate the password.
+// The global CORS policy is `*` (for the viewer routes), so the reset
+// handler enforces same-origin / no-Origin itself.
+func TestReset_CrossOriginPost_Rejected(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), NewHub())
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "T",
+		Password: "old",
+	}))
+
+	body, _ := json.Marshal(map[string]string{"password": "attacker-set"})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example")
+	req.Host = "tournament.local:8080"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, "cross-origin POST must be rejected")
+	assert.Contains(t, w.Body.String(), "cross-origin")
+	// Stored password must be untouched.
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "old", loaded.Password, "stored password must not change on rejected request")
+}
+
+// Same-origin browser POST (Origin matches Host) is accepted — the
+// legitimate path when the operator opens /reset in their browser tab.
+func TestReset_SameOriginPost_Accepted(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), NewHub())
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "T",
+		Password: "old",
+	}))
+
+	body, _ := json.Marshal(map[string]string{"password": "newpw"})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://tournament.local:8080")
+	req.Host = "tournament.local:8080"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+// Non-browser caller (no Origin header — curl, scripted clients) is
+// accepted. Browsers automatically set Origin on cross-origin POSTs
+// but not all clients do, and we don't want to lock out legitimate
+// operator-shell access.
+func TestReset_NoOriginHeader_Accepted(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), NewHub())
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "T",
+		Password: "old",
+	}))
+
+	body, _ := json.Marshal(map[string]string{"password": "newpw"})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+// On successful reset the server broadcasts both EventTournamentUpdated
+// (for viewer refresh) AND EventPasswordReset (so admin sessions clear
+// their stale localStorage credential and re-show AuthModal). Without
+// the second event, other admins remain in admin mode with a cached
+// password until a write fails with 401.
+func TestReset_BroadcastsPasswordResetEvent(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	hub := NewHub()
+	ch := hub.Subscribe()
+	t.Cleanup(func() { hub.Unsubscribe(ch) })
+
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), hub)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "T",
+		Password: "old",
+	}))
+
+	body, _ := json.Marshal(map[string]string{"password": "newpw"})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNoContent, w.Code)
+
+	// Drain the channel and assert both event types fired. The hub
+	// uses a buffered channel; reads here are non-blocking via select.
+	seen := map[string]bool{}
+	for i := 0; i < 4; i++ {
+		select {
+		case msg := <-ch:
+			for _, ev := range []string{"tournament_updated", "password_reset"} {
+				if strings.Contains(msg, `"type":"`+ev+`"`) {
+					seen[ev] = true
+				}
+			}
+		default:
+			// channel drained
+		}
+	}
+	assert.True(t, seen["tournament_updated"], "tournament_updated event missing")
+	assert.True(t, seen["password_reset"], "password_reset event missing (admins won't auto-logout)")
+}
+
 func TestReset_EmptyPassword_Returns400(t *testing.T) {
 	store, _, _ := setupResetTest(t, NewFileVerifier(nil))
 	r := gin.New()

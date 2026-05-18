@@ -18,6 +18,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
@@ -333,6 +334,85 @@ func TestTournamentHandlers(t *testing.T) {
 			"PUT with empty Password against legacy empty-password tournament must reject")
 		assert.Contains(t, w.Body.String(), "tournament password is required")
 	}
+}
+
+// TestTournamentHandlers_LockedMode_StripPasswordOnResponses pins the
+// locked-mode redaction contract: GET, PUT, and POST responses must
+// NOT leak any stored password value to the client. The on-disk
+// Password is irrelevant in locked mode (auth comes from the env-var
+// bcrypt hash) but the handler still preserves it on PUT to avoid
+// clobbering a value that might be carried back if locked mode is
+// later disabled. Pre-fix, that preserved value flowed through the
+// PUT response body — re-exposing an old file-mode credential to any
+// authenticated admin who happened to PUT a name/venue change.
+func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "locked-mode-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	hub := NewHub()
+
+	// Seed a tournament with a known stored password — simulating the
+	// case where an operator originally ran file mode then re-deployed
+	// in locked mode without scrubbing tournament.md.
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Locked Tournament",
+		Password: "stored-secret-that-must-not-leak",
+		Courts:   []string{"A"},
+	}))
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("envpass"), bcrypt.MinCost)
+	require.NoError(t, err)
+	bcryptV, err := NewBcryptVerifier(string(hash))
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	// AuthMiddleware delegates verification to bcryptV; tests below
+	// send the matching env password.
+	api.Use(AuthMiddleware(bcryptV, store))
+	RegisterTournamentHandlers(api, store, hub, bcryptV)
+
+	// GET /tournament — password must be stripped.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	getReq.Header.Set("X-Tournament-Password", "envpass")
+	getW := httptest.NewRecorder()
+	r.ServeHTTP(getW, getReq)
+	require.Equal(t, http.StatusOK, getW.Code)
+	var getT state.Tournament
+	require.NoError(t, json.Unmarshal(getW.Body.Bytes(), &getT))
+	assert.Empty(t, getT.Password, "GET response must not leak stored password in locked mode")
+	assert.NotContains(t, getW.Body.String(), "stored-secret-that-must-not-leak")
+
+	// PUT /tournament — admin changes the name; response must redact
+	// the password that was preserved via the transform.
+	putBody, _ := json.Marshal(state.Tournament{
+		Name:   "Renamed Tournament",
+		Courts: []string{"A"},
+		// No Password field; even if the SPA sent one, the locked-mode
+		// transform ignores it and preserves the stored value.
+	})
+	putReq := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(putBody))
+	putReq.Header.Set("X-Tournament-Password", "envpass")
+	putReq.Header.Set("Content-Type", "application/json")
+	putW := httptest.NewRecorder()
+	r.ServeHTTP(putW, putReq)
+	require.Equal(t, http.StatusOK, putW.Code, "body=%s", putW.Body.String())
+	var putT state.Tournament
+	require.NoError(t, json.Unmarshal(putW.Body.Bytes(), &putT))
+	assert.Empty(t, putT.Password, "PUT response must not leak stored password in locked mode (regression for handlers_tournament.go:270)")
+	assert.NotContains(t, putW.Body.String(), "stored-secret-that-must-not-leak")
+
+	// And the stored record on disk should still hold the original
+	// password — locked-mode redaction is response-only, not a destructive
+	// rewrite (the operator can flip back to file mode and recover).
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "stored-secret-that-must-not-leak", loaded.Password,
+		"locked-mode response redaction must not clobber the on-disk value")
 }
 
 // TestTournamentHandlers_MaxLengthCaps verifies the defense-in-depth

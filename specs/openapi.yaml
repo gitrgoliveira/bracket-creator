@@ -230,11 +230,17 @@ paths:
     get:
       tags: [tournament]
       summary: Get tournament configuration
+      description: |
+        Returns the tournament record. In **locked mode** (`--lock-password` startup flag) the
+        `password` field is stripped from the response — auth comes from the env-var bcrypt hash
+        and the on-disk value is irrelevant. The same redaction applies to the PUT and POST
+        responses below. Use `GET /api/auth-config` to discover which mode the server is in
+        without authenticating.
       security:
         - TournamentPassword: []
       responses:
         '200':
-          description: Tournament configuration.
+          description: Tournament configuration. `password` is empty in locked mode.
           content:
             application/json:
               schema:
@@ -249,11 +255,19 @@ paths:
         tournament has been configured yet (bootstrap). Once a tournament with a password exists,
         auth is required.
 
-        Validation: `name` is trimmed and must be non-empty after trim (`tournament name is
-        required`). `password` must be non-empty (`tournament password is required`) — empty
-        Password on disk would let AuthMiddleware's `password != t.Password` check vacuously
-        pass for any client sending an empty header. `venue` and `date` are also trimmed but
-        may be empty.
+        **File mode (default)**: `password` must be non-empty (`tournament password is required`) —
+        an empty Password on disk would let AuthMiddleware's `password != t.Password` check
+        vacuously pass for any client sending an empty header.
+
+        **Locked mode (`--lock-password`)**: the `password` field in the request body is
+        accepted but **discarded** server-side — authentication uses the bcrypt hash from
+        `TOURNAMENT_PASSWORD_HASH` env var, not the stored value. The bootstrap-without-auth
+        window is preserved so the SPA's CreateTournament flow works on a fresh install (the
+        operator was going to authenticate with the env-var hash on their next request anyway).
+        The response body's `password` field is empty in this mode.
+
+        `name` is trimmed and must be non-empty after trim (`tournament name is required`).
+        `venue` and `date` are also trimmed but may be empty.
       requestBody:
         required: true
         content:
@@ -277,21 +291,27 @@ paths:
         condition as POST): `AuthMiddleware` skips the password check only when
         `tournament.md` is missing OR when the on-disk record is the literal default
         placeholder (`Name == "New Tournament" && Password == ""`). A real-named
-        record with an empty password is FAIL-CLOSED — rejected with 403
+        record with an empty password is FAIL-CLOSED in file mode — rejected with 403
         (`tournament misconfigured: password is not set`) BEFORE this handler runs;
-        operator must repair `tournament.md` out-of-band to recover. See
+        operator can use `POST /api/tournament/reset` (file mode only) or repair
+        `tournament.md` out-of-band to recover. The empty-stored guard is disabled in
+        locked mode (the on-disk password is irrelevant). See
         `internal/mobileapp/middleware.go` AuthMiddleware for the exact branches.
 
         Validation matches POST for `name` (rejected if empty after trim).
 
-        **Password preserve semantics**: when the request body omits `password` or sends an
-        empty string, the server preserves the currently-stored password. This matches the
-        admin UI's `password: pass || undefined` pattern ("leave blank to keep current").
-        If after the preserve step the password is STILL empty (operator manually edited
-        `tournament.md`, or a fresh PUT against a never-initialized tournament), the
-        request is rejected with 400 (`tournament password is required`) to force the
-        admin to set a password rather than silently allow the empty-stored-password
-        vacuous-pass scenario.
+        **File mode — Password preserve semantics**: when the request body omits
+        `password` or sends an empty string, the server preserves the currently-stored
+        password. This matches the admin UI's `password: pass || undefined` pattern
+        ("leave blank to keep current"). If after the preserve step the password is
+        STILL empty (operator manually edited `tournament.md`, or a fresh PUT against
+        a never-initialized tournament), the request is rejected with 400
+        (`tournament password is required`).
+
+        **Locked mode**: the `password` field in the request body is **silently
+        ignored** — the on-disk Password is preserved regardless of what the client
+        sends. The response body's `password` field is empty to avoid re-exposing the
+        preserved value to admin sessions.
       security:
         - TournamentPassword: []
       requestBody:

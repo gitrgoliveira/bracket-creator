@@ -118,21 +118,56 @@ func NewBcryptVerifier(hash string) (*bcryptPasswordVerifier, error) {
 	return &bcryptPasswordVerifier{hash: b}, nil
 }
 
+// bcryptMaxInputBytes is bcrypt's hard limit on the plaintext input.
+// Longer inputs cause CompareHashAndPassword to return ErrPasswordTooLong
+// rather than a mismatch. We pre-check the length so an unauthenticated
+// client cannot trip a 500 from the middleware by sending an oversized
+// header — that would also let them probe whether locked mode is active
+// by distinguishing 500 (locked, length-exceeded) from 401 (file mode
+// or short-input mismatch). Treat oversize as a normal auth failure.
+const bcryptMaxInputBytes = 72
+
 func (v *bcryptPasswordVerifier) Verify(presented string) (bool, error) {
 	if presented == "" {
+		return false, nil
+	}
+	if len(presented) > bcryptMaxInputBytes {
+		// Oversized header — same outcome as a wrong password. No 500,
+		// no information leak via differential error codes.
 		return false, nil
 	}
 	err := bcrypt.CompareHashAndPassword(v.hash, []byte(presented))
 	if err == nil {
 		return true, nil
 	}
-	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+	// ErrMismatchedHashAndPassword and ErrPasswordTooLong both mean
+	// "wrong credential" from the operator's perspective. ErrPasswordTooLong
+	// shouldn't be reachable here (we pre-checked length) but the
+	// defense-in-depth match keeps a future bcrypt-internals change from
+	// turning long inputs into 500s.
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) || errors.Is(err, bcrypt.ErrPasswordTooLong) {
 		return false, nil
 	}
 	return false, err
 }
 
-func (v *bcryptPasswordVerifier) Mode() string                  { return "locked" }
-func (v *bcryptPasswordVerifier) ResetEnabled() bool            { return false }
-func (v *bcryptPasswordVerifier) AllowsFileBootstrap() bool     { return false }
+func (v *bcryptPasswordVerifier) Mode() string       { return "locked" }
+func (v *bcryptPasswordVerifier) ResetEnabled() bool { return false }
+
+// AllowsFileBootstrap returns true even in locked mode. Rationale: the
+// security model already requires the env-var hash for every subsequent
+// request, and on a fresh install there is nothing on disk to protect.
+// Returning false would break the SPA's CreateTournament flow (it does
+// not send X-Tournament-Password on the bootstrap POST), forcing
+// operators to bootstrap via curl on first run. The window where an
+// unauth'd caller could land an arbitrary tournament record exists in
+// file mode too; locked mode does not change that surface.
+//
+// The handler at POST /api/tournament discards the supplied Password
+// field when in locked mode, so an attacker who wins the bootstrap race
+// only persists a name/date/venue/courts record — they cannot insert a
+// password that would later authenticate them, because authentication
+// reads the env-var hash exclusively.
+func (v *bcryptPasswordVerifier) AllowsFileBootstrap() bool { return true }
+
 func (v *bcryptPasswordVerifier) EnforceEmptyStoredGuard() bool { return false }

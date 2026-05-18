@@ -296,6 +296,21 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
+		// In locked mode the on-disk Password is irrelevant and must not
+		// leak through any response surface. GET strips it; apply the
+		// same redaction here so an admin GET-after-PUT can't differ
+		// from a plain GET. Copy `t` before mutating — the
+		// UpdateTournamentChanged transform stashed the same struct in
+		// the store's cache, so a direct `t.Password = ""` would also
+		// blank the cached password and cause subsequent LoadTournament
+		// calls (in tests OR in middleware) to see an empty password
+		// where the file on disk still has the real value.
+		if locked {
+			publicT := t
+			publicT.Password = ""
+			c.JSON(http.StatusOK, publicT)
+			return
+		}
 		c.JSON(http.StatusOK, t)
 	})
 

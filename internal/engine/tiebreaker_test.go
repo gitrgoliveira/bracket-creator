@@ -89,7 +89,7 @@ func TestGenerateTiebreakerMatches_TwoWay(t *testing.T) {
 	require.Len(t, matches, 1)
 	m := matches[0]
 	assert.Equal(t, "Pool A-TB-0", m.ID)
-	assert.Equal(t, string(domain.DecisionIpponShobu), m.Decision)
+	assert.Empty(t, m.Decision, "injected TB match must have empty Decision — ID convention identifies it")
 	assert.Equal(t, state.MatchStatusScheduled, m.Status)
 	assert.Equal(t, "A", m.Court)
 	assert.ElementsMatch(t, []string{m.SideA, m.SideB}, []string{"Alice", "Bob"})
@@ -189,7 +189,7 @@ func TestInjectTiebreakerMatches_TwoWayTie(t *testing.T) {
 
 	m := injected[0]
 	assert.True(t, IsTiebreakerMatchID(m.ID), "injected match must have a TB ID")
-	assert.Equal(t, string(domain.DecisionIpponShobu), m.Decision)
+	assert.Empty(t, m.Decision, "injected TB match must have empty Decision — ID convention identifies it")
 	assert.Equal(t, state.MatchStatusScheduled, m.Status)
 	assert.Equal(t, "A", m.Court)
 }

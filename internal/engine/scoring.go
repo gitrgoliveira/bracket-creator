@@ -389,17 +389,10 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 		})
 
 		// Apply tiebreaker results as a secondary sort within tied groups.
-		// Build a head-to-head map from completed TB matches in this pool.
-		tbWins := map[string]int{} // player name → TB match wins
-		for _, m := range matches {
-			if !IsTiebreakerMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-				continue
-			}
-			tbWins[m.Winner]++
-		}
-		if len(tbWins) > 0 {
-			// Re-sort within each tied group: higher tbWins ranks first.
-			// Only re-order within groups that share the same Points value.
+		// Win counts are scoped per group: only TB matches between the two players
+		// in the same tied group influence that group's ordering, preventing wins
+		// from an unrelated tied group from bleeding into another.
+		{
 			i := 0
 			for i < len(sorted) {
 				j := i + 1
@@ -407,9 +400,24 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 					j++
 				}
 				if j-i >= 2 {
-					sort.SliceStable(sorted[i:j], func(a, b int) bool {
-						return tbWins[sorted[i+a].Player.Name] > tbWins[sorted[i+b].Player.Name]
-					})
+					groupNames := make(map[string]bool, j-i)
+					for k := i; k < j; k++ {
+						groupNames[sorted[k].Player.Name] = true
+					}
+					groupTBWins := map[string]int{}
+					for _, m := range matches {
+						if !IsTiebreakerMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+							continue
+						}
+						if groupNames[m.SideA] && groupNames[m.SideB] {
+							groupTBWins[m.Winner]++
+						}
+					}
+					if len(groupTBWins) > 0 {
+						sort.SliceStable(sorted[i:j], func(a, b int) bool {
+							return groupTBWins[sorted[i+a].Player.Name] > groupTBWins[sorted[i+b].Player.Name]
+						})
+					}
 				}
 				i = j
 			}

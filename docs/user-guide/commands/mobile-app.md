@@ -42,8 +42,9 @@ The admin password is stored plaintext in `tournament-data/tournament.md` and co
 The on-disk password is ignored. Authentication compares the `X-Tournament-Password` header against a bcrypt hash supplied via the `TOURNAMENT_PASSWORD_HASH` environment variable.
 
 ```bash
-# Generate the hash once (stdin or arg)
-bracket-creator hash-password
+# Generate the hash (pipe the secret — bare invocation waits for stdin with no
+# prompt or echo-off, so always use printf/pipe to avoid shell history leakage)
+printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
 
 # Start the server
 TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
@@ -59,8 +60,8 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
 
 #### Operational caveats
 
-- **`/reset` has no rate limiting.** The reset endpoint is unauthenticated and the server does not throttle calls. For internet-exposed deployments, run with `--lock-password` (which 404s the route entirely) OR front the server with a reverse proxy that rate-limits `POST /api/tournament/reset`.
-- **Locked mode has no bcrypt brute-force protection.** The server runs a full bcrypt comparison (`bcrypt.DefaultCost` ≈ 50–100 ms) on every `X-Tournament-Password` header, but does not throttle repeated failed attempts. For internet-exposed locked-mode deployments, add a reverse proxy that rate-limits authenticated routes (e.g. nginx's `limit_req`) in addition to `/reset`.
+- **`POST /api/tournament/reset` has no rate limiting.** The endpoint is unauthenticated and the server does not throttle calls. For internet-exposed deployments, run with `--lock-password` (which 404s `POST /api/tournament/reset`) OR front the server with a reverse proxy that rate-limits that path.
+- **Locked mode has no bcrypt brute-force protection.** The server runs a full bcrypt comparison (`bcrypt.DefaultCost` ≈ 50–100 ms) on every `X-Tournament-Password` header, but does not throttle repeated failed attempts. For internet-exposed locked-mode deployments, add a reverse proxy that rate-limits authenticated routes (e.g. nginx's `limit_req`) in addition to `POST /api/tournament/reset`.
 - **Mode switching preserves the stored password.** Switching from file mode to locked mode does NOT erase `tournament.md`'s `password` field — auth just stops consulting it. A later switch back to file mode resurrects the original password. This is a deliberate rollback feature, but anyone with filesystem access can still read the value. To fully retire a file-mode credential before going locked, `POST /api/tournament/reset` it to a one-time throwaway first.
 
 ## Examples

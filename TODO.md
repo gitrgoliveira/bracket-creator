@@ -21,9 +21,5 @@
 * In the scoring you can do an impossible results like 2-2
 
 
-Does the extra match in teams show up?
-
-
-
 Some match rules:
 https://www.kendo-guide.com/match-in-kendo-shiai.html

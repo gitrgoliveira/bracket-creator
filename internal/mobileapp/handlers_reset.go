@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,18 +73,43 @@ var errResetPasswordRequired = errors.New("password is required")
 //   - The host comparison is exact-string on host:port. An operator at
 //     `http://localhost:8089` and a colleague reaching the same machine
 //     via `http://127.0.0.1:8089` are treated as different origins —
-//     which is also the browser's behavior, so a cross-DNS pivot can't
-//     happen through a normal browser session anyway.
+//     which is also the browser's behavior.
 //   - Behind a TLS-terminating reverse proxy, c.Request.TLS is nil even
 //     when the browser sees HTTPS; the scheme check would reject the
 //     legitimate https Origin. Such deployments should run with
-//     --lock-password (which 404s /reset entirely) and rotate credentials
-//     via env-var hash; the recovery endpoint is designed for direct
-//     same-host operator access.
+//     --lock-password (which 404s POST /api/tournament/reset; the SPA
+//     /reset page still renders a disabled-state message) and rotate
+//     credentials via env-var hash; the recovery endpoint is designed
+//     for direct same-host operator access.
+//   - DNS rebinding: a malicious page can rebind its domain to the
+//     tournament server's IP so that both Origin.Host and c.Request.Host
+//     equal the attacker's domain — passing the Origin == Host check even
+//     though the request reaches this server. To mitigate, we additionally
+//     require c.Request.Host to be a loopback interface (localhost /
+//     127.0.0.1 / ::1) when Origin is present. Non-browser callers (curl,
+//     scripts — no Origin header) are unaffected. Browser-based /reset
+//     from a remote LAN machine is intentionally rejected; those operators
+//     should use curl locally or run with --lock-password.
 //
 // We deliberately do NOT support an allowlist env var here: the
 // recovery path is for operators sitting at the tournament server.
 // Anyone reaching it cross-origin is either misconfigured or hostile.
+// isLoopbackHost reports whether the host component of hostport is a
+// loopback interface (localhost, 127.0.0.1, or ::1). Used by
+// isSameOriginReset to guard against DNS-rebinding attacks: loopback
+// addresses are not route-able from external networks, so a request whose
+// Host is loopback cannot have originated from an outside page.
+func isLoopbackHost(hostport string) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport // bare host with no port
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(host, "localhost")
+}
+
 func isSameOriginReset(c *gin.Context) bool {
 	origin := strings.TrimSpace(c.GetHeader("Origin"))
 	if origin == "" {
@@ -91,6 +117,14 @@ func isSameOriginReset(c *gin.Context) bool {
 	}
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
+		return false
+	}
+
+	// DNS-rebinding guard — see Known Limitations in the function comment.
+	// When a browser Origin is present, require the effective server address
+	// to be loopback so that an attacker cannot rebind their domain to this
+	// server's IP and pass the Origin == Host comparison below.
+	if !isLoopbackHost(c.Request.Host) {
 		return false
 	}
 
@@ -102,9 +136,8 @@ func isSameOriginReset(c *gin.Context) bool {
 	// For direct connections, c.Request.TLS is authoritative. Behind a
 	// TLS-terminating reverse proxy, c.Request.TLS is nil even when
 	// the browser sees HTTPS; such deployments should run with
-	// --lock-password (which 404s this endpoint entirely), so
-	// conservatively rejecting the scheme mismatch is still the right
-	// call here.
+	// --lock-password (which 404s this endpoint), so conservatively
+	// rejecting the scheme mismatch is still the right call here.
 	expectedScheme := "http"
 	if c.Request.TLS != nil {
 		expectedScheme = "https"

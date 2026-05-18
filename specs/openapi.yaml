@@ -428,10 +428,13 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           description: |
-            Cross-origin POST rejected. The handler enforces same-origin / no-Origin via
-            an Origin/Host match; any browser request with an Origin that doesn't match the
-            server's Host (including the special `Origin: null` value sent by sandboxed
-            iframes, file://, and data: URLs) is rejected here.
+            Cross-origin POST rejected. The handler requires both the Origin scheme and
+            host:port to match the server's effective scheme (http vs https) and `Host`
+            header (RFC 6454 §3.2). Rejected cases include: scheme mismatch (e.g. HTTPS
+            Origin to a plain-HTTP server), host or port mismatch, malformed Origin URL,
+            and `Origin: null` (sandboxed iframes, file://, data: URLs). When the server
+            host is not a loopback address (localhost/127.0.0.1/::1) and a browser Origin
+            is present, the request is also rejected to prevent DNS-rebinding attacks.
         '404':
           description: Reset disabled (locked mode active).
         '409':
@@ -449,7 +452,8 @@ paths:
         `mode` is one of:
           * `file` — admin password lives in `tournament.md` (plaintext). Default.
           * `locked` — admin password is a bcrypt hash read from `TOURNAMENT_PASSWORD_HASH`.
-            `/reset` is disabled in this mode.
+            `POST /api/tournament/reset` returns 404 in this mode; the SPA `/reset`
+            page is still served but renders an operator-disabled message.
       responses:
         '200':
           description: Auth-mode metadata.

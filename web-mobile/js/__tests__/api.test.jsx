@@ -379,6 +379,54 @@ describe('API Utils', () => {
       });
     });
 
+    // POST /api/tournament — bootstrap. In file mode the call is
+    // unauthenticated (the AuthMiddleware uninitialized branch lets
+    // it through). In locked mode the server requires the env-var
+    // password and the SPA passes it via the new optional second
+    // arg, which the client attaches as X-Tournament-Password.
+    describe('createTournament', () => {
+      it('omits X-Tournament-Password when authPassword is undefined (file-mode bootstrap)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ name: 'X' }),
+        });
+        await API.createTournament({ name: 'X' });
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.method).toBe('POST');
+        expect(opts.headers['Content-Type']).toBe('application/json');
+        expect(opts.headers['X-Tournament-Password']).toBeUndefined();
+      });
+
+      it('attaches X-Tournament-Password when authPassword is supplied (locked-mode bootstrap)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ name: 'X' }),
+        });
+        await API.createTournament({ name: 'X' }, 'kotai-A');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBe('kotai-A');
+      });
+
+      it('falsy authPassword does not attach the header (avoid accidental empty string)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ name: 'X' }),
+        });
+        await API.createTournament({ name: 'X' }, '');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBeUndefined();
+      });
+
+      it('throws with server message on error', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'invalid tournament password' }),
+        });
+        await expect(API.createTournament({ name: 'X' }, 'wrong')).rejects.toThrow('invalid tournament password');
+      });
+    });
+
     // GET /api/auth-config — public endpoint reporting the active
     // auth mode (file vs locked). The SPA reads it on App() mount to
     // decide whether to show the "Forgot password?" link in AuthModal

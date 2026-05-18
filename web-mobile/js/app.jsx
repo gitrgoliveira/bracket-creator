@@ -496,6 +496,7 @@ function App() {
           view={adminView}
           setView={setAdminView}
           showToast={showToast}
+          authConfig={authConfig}
         />
         {toast && <window.Toast {...toast} onClose={() => setToast(null)} />}
       </>

@@ -91,7 +91,14 @@ function validateSwissSettings(format, swissRounds) {
   return { ok: true, error: null };
 }
 
-function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode }) {
+function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig }) {
+  // In locked mode the on-disk Password is irrelevant — auth comes
+  // from TOURNAMENT_PASSWORD_HASH and the backend rejects PUTs that
+  // try to set a non-empty password. Surfacing the field anyway would
+  // let an operator type a new password, click Save, and (depending
+  // on the backend version) either see a 400 or silently believe
+  // rotation succeeded. Hide it.
+  const locked = authConfig && authConfig.mode === "locked";
   const [name, setName] = useStateA(tournament.name);
   const [venue, setVenue] = useStateA(tournament.venue);
   const [date, setDate] = useStateA(tournament.date);
@@ -165,11 +172,20 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             />
             <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
-          <div className="field">
-            <label className="field__label">Admin Password</label>
-            <input className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
-            <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
-          </div>
+          {locked ? (
+            <div className="field">
+              <label className="field__label">Admin Password</label>
+              <div className="field__hint" style={{ marginTop: 4 }}>
+                This server is in locked mode. The admin password comes from <code>TOURNAMENT_PASSWORD_HASH</code> and can only be rotated by restarting the server with a new hash.
+              </div>
+            </div>
+          ) : (
+            <div className="field">
+              <label className="field__label">Admin Password</label>
+              <input className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
+              <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button className="btn" onClick={onCancel}>Cancel</button>
             <button className="btn btn--primary" onClick={handleSave}>Save changes</button>

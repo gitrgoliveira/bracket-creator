@@ -255,17 +255,30 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// closes that window.
 		//
 		// Verifiers that mark the on-disk Password as non-authoritative
-		// (today: the bcrypt locked verifier) silently preserve whatever's
-		// already stored — auth comes from the env-var hash, the on-disk
-		// value is just an inert relic from a previous file-mode session
-		// (or a never-set field). The SPA reads it back as empty via
-		// GET /tournament, so the admin can edit name/venue/courts/etc.
-		// without thinking about a password they no longer set.
-		// Rejecting these writes would be hostile (the SPA may not even
-		// surface a password field in locked mode).
+		// (today: the bcrypt locked verifier) auth from the env-var hash;
+		// the on-disk Password field is irrelevant. If the admin sent a
+		// non-empty Password in locked mode it would silently never take
+		// effect — surface a 400 explaining the situation rather than
+		// pretending the rotation worked. Empty Password is fine
+		// (the SPA's `password: pass || undefined` pattern hits this
+		// path when the operator is just editing name/venue/courts).
 		locked := verifier != nil && verifier.RedactStoredPassword()
+		if locked && t.Password != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "password rotation is disabled in locked mode; restart with a new TOURNAMENT_PASSWORD_HASH"})
+			return
+		}
+		// Track whether the persisted password actually changed so we
+		// can fire EventPasswordReset (in addition to
+		// EventTournamentUpdated) and other admin sessions log out
+		// immediately instead of waiting for their next write to 401.
+		passwordChanged := false
 		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
 			if locked {
+				// Reset passwordChanged to false defensively — the
+				// non-empty case is already rejected above, but keep
+				// the bookkeeping consistent in case the guard is
+				// ever loosened.
+				passwordChanged = false
 				if current != nil {
 					desired.Password = current.Password
 				}
@@ -284,6 +297,9 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			if desired.Password == "" {
 				return errPasswordRequired
 			}
+			if current == nil || current.Password != desired.Password {
+				passwordChanged = true
+			}
 			return nil
 		})
 		if errors.Is(err, errPasswordRequired) {
@@ -296,6 +312,18 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
+			if passwordChanged {
+				// Mirror the /reset endpoint: rotating the credential
+				// via the admin PUT path must also log other admin
+				// sessions out so their cached bc_password isn't
+				// silently stale. The originatorId field on the body
+				// would be welcome here too (and we'd echo it on the
+				// event), but the admin PUT body doesn't carry one —
+				// every admin tab including the originator will
+				// re-prompt, which is acceptable since the operator
+				// just typed the new credential and can type it again.
+				hub.Broadcast(EventPasswordReset, passwordResetEventData{})
+			}
 		}
 		// In locked mode the on-disk Password is irrelevant and must not
 		// leak through any response surface. GET strips it; apply the

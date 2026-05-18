@@ -362,11 +362,25 @@ paths:
                   minLength: 1
                   maxLength: 256
                   description: New admin password. Replaces the stored value. Matches the cap on `Tournament.password` (`components/schemas/Tournament`).
+                originatorId:
+                  type: string
+                  maxLength: 128
+                  description: |
+                    Optional opaque per-tab/client identifier. When supplied, the server echoes it
+                    on the `password_reset` SSE event payload so the originating client can ignore
+                    its own broadcast and avoid clobbering the just-written credential. The server
+                    treats this value as opaque (length-capped, never persisted, never logged).
       responses:
         '204':
           description: Password rotated. All existing admin sessions become invalid on the next request.
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          description: |
+            Cross-origin POST rejected. The handler enforces same-origin / no-Origin via
+            an Origin/Host match; any browser request with an Origin that doesn't match the
+            server's Host (including the special `Origin: null` value sent by sandboxed
+            iframes, file://, and data: URLs) is rejected here.
         '404':
           description: Reset disabled (locked mode active).
         '409':
@@ -1508,29 +1522,51 @@ components:
       in: header
       name: X-Tournament-Password
       description: |
-        Tournament admin password. Required for all `/api/` routes except
-        `/api/viewer/`, `/api/events`, and the bootstrap PUT/POST
-        `/api/tournament` while no tournament has been configured yet.
+        Tournament admin password. Required for all `/api/` routes
+        except `/api/viewer/`, `/api/events`, the unauthenticated
+        recovery endpoints `/api/auth-config` and `/api/tournament/reset`,
+        and (in file mode only) the bootstrap PUT/POST `/api/tournament`
+        while no tournament has been configured yet.
 
-        Header value must exactly equal the stored tournament password
-        (exact-string match; no trimming applied to either side).
+        ### Two authentication modes
+
+        **File mode (default).** The header is compared exact-string
+        against the `password` field stored in `tournament.md`
+        (no trimming on either side). Set during the initial bootstrap
+        via `POST /api/tournament`, rotated via `PUT /api/tournament`
+        with a non-empty `password`, or via the public
+        `POST /api/tournament/reset` recovery endpoint.
+
+        Bootstrap exception: when no tournament is configured yet,
+        `POST/PUT /api/tournament` is allowed without the header so
+        the SPA's CreateTournament flow can pick the admin password.
 
         Defense-in-depth: if the stored tournament password is somehow
         empty (e.g. operator manually edited `tournament.md` to land
         an empty `password:` field), AuthMiddleware returns 403
         (`tournament misconfigured: password is not set`) for ALL
         requests rather than letting the `header != stored` check
-        vacuously pass for empty header.
+        vacuously pass for empty header. Recovery: either edit
+        `tournament.md` out-of-band, or use `POST /api/tournament/reset`.
 
-        Recovery from this state requires **out-of-band repair**: the
-        bootstrap PUT/POST `/api/tournament` exception only applies
-        when the loaded record is `nil` or matches the literal
-        `Name == "New Tournament" && Password == ""` default — a
-        real-named record with empty Password is locked out by the 403
-        fail-closed branch. Operator must stop the server, edit
-        `tournament.md` to either delete it (forces fresh bootstrap)
-        or set a non-empty `password:` field in the YAML front-matter,
-        then restart.
+        **Locked mode (`--lock-password` server flag).** The header
+        is verified via bcrypt against the hash from the
+        `TOURNAMENT_PASSWORD_HASH` environment variable; the on-disk
+        `password` field in `tournament.md` is IGNORED for both auth
+        and the GET/PUT/POST response shape (the response always
+        returns `"password": ""`). The bootstrap exception above
+        does NOT apply — `POST /api/tournament` requires
+        X-Tournament-Password from the very first request so a
+        network-reachable attacker can't race-claim the initial
+        tournament record on a fresh deployment. The reset endpoint
+        returns 404. Password rotation requires restarting the
+        server with a new `TOURNAMENT_PASSWORD_HASH`; `PUT
+        /api/tournament` rejects any non-empty `password` field
+        with 400.
+
+        The active mode is exposed via the public
+        `GET /api/auth-config` endpoint so clients can branch their
+        UI without authenticating.
 
   parameters:
     CompetitionId:

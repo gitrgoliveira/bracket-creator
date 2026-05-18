@@ -336,6 +336,196 @@ func TestTournamentHandlers(t *testing.T) {
 	}
 }
 
+// TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange pins the
+// rule that locked-mode admins cannot rotate the credential via the
+// normal admin edit form. The on-disk Password is non-authoritative
+// (auth uses the env-var bcrypt hash), so silently accepting a PUT
+// with a new password would mislead the operator into believing
+// rotation worked when it didn't. Reject with a 400 explaining the
+// situation.
+//
+// Empty password remains acceptable (the SPA's
+// `password: pass || undefined` pattern is the common shape when an
+// operator is editing name/venue/courts without touching the password
+// field).
+func TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "locked-put-reject-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	hub := NewHub()
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Locked",
+		Password: "preserved-canary-Aa",
+		Courts:   []string{"A"},
+	}))
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("kotai-A"), bcrypt.MinCost)
+	require.NoError(t, err)
+	bcryptV, err := NewBcryptVerifier(string(hash))
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	api.Use(AuthMiddleware(bcryptV, store))
+	RegisterTournamentHandlers(api, store, hub, bcryptV)
+
+	t.Run("non-empty password rejected with 400", func(t *testing.T) {
+		body, _ := json.Marshal(state.Tournament{
+			Name:     "Locked Renamed",
+			Password: "operator-tried-to-rotate",
+			Courts:   []string{"A"},
+		})
+		req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(body))
+		req.Header.Set("X-Tournament-Password", "kotai-A")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "locked mode")
+		// On-disk record must NOT have been touched.
+		loaded, err := store.LoadTournament()
+		require.NoError(t, err)
+		assert.Equal(t, "Locked", loaded.Name, "PUT must not partially apply when password change is rejected")
+		assert.Equal(t, "preserved-canary-Aa", loaded.Password)
+	})
+
+	t.Run("empty password is allowed (admin editing other fields)", func(t *testing.T) {
+		body, _ := json.Marshal(state.Tournament{
+			Name:   "Locked Renamed",
+			Courts: []string{"A"},
+		})
+		req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(body))
+		req.Header.Set("X-Tournament-Password", "kotai-A")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		loaded, err := store.LoadTournament()
+		require.NoError(t, err)
+		assert.Equal(t, "Locked Renamed", loaded.Name)
+		assert.Equal(t, "preserved-canary-Aa", loaded.Password)
+	})
+}
+
+// TestTournamentHandlers_FileMode_PUTPasswordChange_BroadcastsResetEvent
+// pins that rotating the admin password via PUT /api/tournament (the
+// admin edit form) broadcasts EventPasswordReset alongside
+// EventTournamentUpdated. Without the second event, other logged-in
+// admins keep the stale `bc_password` in localStorage and only
+// notice on their next write that 401s — surprising UX. The /reset
+// endpoint already does this; mirroring it here closes the gap for
+// the in-admin rotation path.
+func TestTournamentHandlers_FileMode_PUTPasswordChange_BroadcastsResetEvent(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "file-put-pwreset-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	hub := NewHub()
+	ch := hub.Subscribe()
+	t.Cleanup(func() { hub.Unsubscribe(ch) })
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "File Tournament",
+		Password: "alpha",
+		Courts:   []string{"A"},
+	}))
+	fileV := NewFileVerifier(store)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	api.Use(AuthMiddleware(fileV, store))
+	RegisterTournamentHandlers(api, store, hub, fileV)
+
+	body, _ := json.Marshal(state.Tournament{
+		Name:     "File Tournament",
+		Password: "beta",
+		Courts:   []string{"A"},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "alpha")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "PUT body=%s", w.Body.String())
+
+	seen := map[string]bool{}
+	for range 4 {
+		select {
+		case msg := <-ch:
+			for _, ev := range []string{"tournament_updated", "password_reset"} {
+				if strings.Contains(msg, `"type":"`+ev+`"`) {
+					seen[ev] = true
+				}
+			}
+		default:
+		}
+	}
+	assert.True(t, seen["tournament_updated"], "tournament_updated event missing")
+	assert.True(t, seen["password_reset"], "password_reset event missing — other admins keep stale credential until next write 401s")
+}
+
+// Negative: a PUT that does NOT change the password (e.g. admin
+// editing the venue with `password: pass || undefined`) must NOT
+// fire EventPasswordReset, otherwise every admin gets kicked out on
+// every name edit.
+func TestTournamentHandlers_FileMode_PUTNoPasswordChange_NoResetEvent(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "file-put-no-pwreset-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	hub := NewHub()
+	ch := hub.Subscribe()
+	t.Cleanup(func() { hub.Unsubscribe(ch) })
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Original",
+		Password: "alpha",
+		Courts:   []string{"A"},
+	}))
+	fileV := NewFileVerifier(store)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	api.Use(AuthMiddleware(fileV, store))
+	RegisterTournamentHandlers(api, store, hub, fileV)
+
+	body, _ := json.Marshal(state.Tournament{
+		Name:   "Renamed",
+		Courts: []string{"A"},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "alpha")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	sawPasswordReset := false
+	for range 4 {
+		select {
+		case msg := <-ch:
+			if strings.Contains(msg, `"type":"password_reset"`) {
+				sawPasswordReset = true
+			}
+		default:
+		}
+	}
+	assert.False(t, sawPasswordReset, "name-only edit must NOT broadcast password_reset")
+}
+
 // TestTournamentHandlers_ModeSwitchPreservesStoredPassword walks the
 // operator-facing scenario where a deployment migrates between auth
 // modes:

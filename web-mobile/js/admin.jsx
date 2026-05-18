@@ -82,7 +82,7 @@ function mergeTournamentPatch(currentT, patch, sessionPassword) {
   return next;
 }
 
-function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast }) {
+function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast, authConfig }) {
   const [internalView, setInternalView] = useStateA({ kind: "dashboard" });
   const view = propView || internalView;
   const setView = propSetView || setInternalView;
@@ -531,6 +531,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onSave={(patch) => { updateTournament(patch); setView({ kind: "dashboard" }); }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
+      authConfig={authConfig}
     />;
   }
 

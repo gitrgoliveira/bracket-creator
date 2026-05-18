@@ -189,12 +189,13 @@ function App() {
       : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
   // Auth-mode discovery (file vs. locked). Fetched once on App mount
-  // from GET /api/auth-config so the AuthModal can hide the "Forgot
-  // password?" link in locked mode and the /reset page can render an
-  // "operator-disabled" message rather than a useless form. Defaults
-  // to file mode + reset-enabled so the initial render before the
-  // fetch lands matches the historical UX.
-  const [authConfig, setAuthConfig] = useS({ mode: 'file', resetEnabled: true });
+  // from GET /api/auth-config. Starts as null ("loading") so that
+  // CreateTournament can gate its submit until the mode is known —
+  // a locked-mode deployment would otherwise render as file-mode
+  // and omit X-Tournament-Password on the bootstrap POST. The
+  // useEffect below always resolves the null state (success or
+  // fail-open) within one HTTP round-trip.
+  const [authConfig, setAuthConfig] = useS(null);
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
@@ -289,13 +290,20 @@ function App() {
 
   useE(() => { load(); }, []);
 
-  // Fetch the auth-config once on mount. Failing open inside
-  // fetchAuthConfig means a 5xx/timeout doesn't break sign-in — we
-  // keep the default {mode: 'file', resetEnabled: true} state.
+  // Fetch the auth-config once on mount. Always resolves the null
+  // initial state — success sets the actual config; fail-open
+  // (5xx/timeout/parse-error) falls back to file mode so the
+  // historical UX is preserved for local deployments where /api/auth-config
+  // may be unreachable for a brief moment at startup.
   useE(() => {
+    const fileDefault = { mode: 'file', resetEnabled: true };
     window.API.fetchAuthConfig().then((cfg) => {
-      if (cfg && typeof cfg === 'object') setAuthConfig(cfg);
-    }).catch(() => { /* fail-open */ });
+      setAuthConfig((cfg && typeof cfg === 'object') ? cfg : fileDefault);
+    }).catch(() => {
+      // Fail-open: unknown server errors default to file mode so the
+      // recovery-via-/reset path stays accessible and sign-in works.
+      setAuthConfig(fileDefault);
+    });
   }, []);
 
   useE(() => {
@@ -569,7 +577,7 @@ function App() {
       )}
       {authPrompt && (
         <AuthModal
-          resetEnabled={authConfig.resetEnabled}
+          resetEnabled={authConfig?.resetEnabled ?? true}
           onForgotPassword={() => {
             authPromptRef.current = false;
             setAuthPrompt(false);
@@ -699,7 +707,11 @@ function CreateTournament({ onCreated, authConfig }) {
   // header, the server discarded the typed password, and the SPA
   // immediately tried to authenticate with a value the env-var hash
   // didn't match → instant 401.
-  const locked = authConfig && authConfig.mode === "locked";
+  // authConfig starts as null ("loading") and resolves after the first
+  // fetchAuthConfig round-trip. While null, treat as unlocked (file mode
+  // rendering) — the submit button is disabled until null resolves so
+  // the operator can't accidentally omit X-Tournament-Password.
+  const locked = authConfig?.mode === "locked";
   const [name, setName] = useS("");
   // Initialize date in canonical DD-MM-YYYY format, not ISO YYYY-MM-DD.
   // toISOString() emits ISO; without this conversion the picker boundary
@@ -825,8 +837,11 @@ function CreateTournament({ onCreated, authConfig }) {
                 : "This password will be required to manage the tournament."}
             </div>
           </div>
-          <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={saving} style={{ marginTop: 16 }}>
-            {saving ? "Creating…" : "Create Tournament"}
+          {/* Disable submit until authConfig is known (null = loading) so a
+              locked-mode deployment doesn't submit without X-Tournament-Password.
+              The null window lasts at most one HTTP round-trip on startup. */}
+          <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={saving || authConfig === null} style={{ marginTop: 16 }}>
+            {saving ? "Creating…" : authConfig === null ? "Loading…" : "Create Tournament"}
           </button>
         </form>
       </div>

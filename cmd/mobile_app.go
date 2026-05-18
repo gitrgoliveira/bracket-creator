@@ -47,7 +47,7 @@ func newMobileAppCmd() *cobra.Command {
 			port = p
 		}
 	}
-	cmd.Flags().IntVarP(&o.port, "port", "p", port, "port number")
+	cmd.Flags().IntVarP(&o.port, "port", "p", port, "port number (env: PORT)")
 
 	return cmd
 }

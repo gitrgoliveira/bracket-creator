@@ -40,6 +40,25 @@ func TestMobileAppOptions_FolderDefault(t *testing.T) {
 	assert.Equal(t, ".", folder)
 }
 
+func TestMobileAppOptions_PortDefault(t *testing.T) {
+	os.Unsetenv("PORT")
+
+	cmd := newMobileAppCmd()
+	port, _ := cmd.Flags().GetInt("port")
+
+	assert.Equal(t, 8080, port)
+}
+
+func TestMobileAppOptions_PortInvalid(t *testing.T) {
+	os.Setenv("PORT", "not-a-number")
+	defer os.Unsetenv("PORT")
+
+	cmd := newMobileAppCmd()
+	port, _ := cmd.Flags().GetInt("port")
+
+	assert.Equal(t, 8080, port)
+}
+
 func TestMobileAppOptions_RunError(t *testing.T) {
 	o := &mobileAppOptions{
 		folder: "/non/existent/dir",

@@ -57,7 +57,7 @@ func newServeCmd() *cobra.Command {
 			port = 8080
 		}
 	}
-	cmd.Flags().IntVarP(&o.port, "port", "p", port, "port number")
+	cmd.Flags().IntVarP(&o.port, "port", "p", port, "port number (env: PORT)")
 
 	return cmd
 }

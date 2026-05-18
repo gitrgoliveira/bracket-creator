@@ -285,6 +285,20 @@ const API = {
         const data = await res.json();
         return data.statuses || [];
     },
+    async reinstateCompetitor(compID, playerID, password) {
+        const res = await fetch(`/api/competitions/${compID}/competitors/${playerID}/reinstate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to reinstate competitor");
+        }
+        return res.json();
+    },
     async overridePoolRank(compID, poolID, playerName, rank, password) {
         const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
             method: 'PUT',

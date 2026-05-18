@@ -45,7 +45,9 @@ type DecisionRequest struct {
 //   - decisionReason ≤ 200 chars (contract).
 func (r *DecisionRequest) Validate() error {
 	switch r.Decision {
-	case "kiken", "fusenpai", "fusensho", "daihyosen":
+	case "kiken":
+		r.Decision = "kiken-voluntary"
+	case "kiken-voluntary", "kiken-injury", "fusenpai", "fusensho", "daihyosen":
 		// ok — these are the decision types this endpoint creates.
 	case "":
 		return &ValidationError{Field: "decision", Message: "required"}

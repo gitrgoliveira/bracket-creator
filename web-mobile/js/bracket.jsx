@@ -48,7 +48,7 @@ function decisionSuffix(match) {
   const d = match.decision || "";
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
   let suffix = "";
-  if (d === "kiken") suffix = "Kiken";
+  if (d === "kiken" || d === "kiken-voluntary" || d === "kiken-injury") suffix = "Kiken";
   else if (d === "fusenpai") suffix = "Fus.";
   else if (d === "daihyosen") suffix = "DH";
   if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";

@@ -12,6 +12,8 @@ const (
 	DecisionFought              Decision = "fought"
 	DecisionHikiwake            Decision = "hikiwake"
 	DecisionKiken               Decision = "kiken"
+	DecisionKikenVoluntary      Decision = "kiken-voluntary"
+	DecisionKikenInjury         Decision = "kiken-injury"
 	DecisionFusenpai            Decision = "fusenpai"
 	DecisionFusensho            Decision = "fusensho"
 	DecisionDaihyosen           Decision = "daihyosen"
@@ -25,11 +27,27 @@ const (
 func (d Decision) Valid() bool {
 	switch d {
 	case DecisionNone, DecisionFought, DecisionHikiwake, DecisionKiken,
+		DecisionKikenVoluntary, DecisionKikenInjury,
 		DecisionFusenpai, DecisionFusensho, DecisionDaihyosen, DecisionKachinukiExhaustion,
 		DecisionIpponShobu:
 		return true
 	}
 	return false
+}
+
+// IsKikenDecision reports whether d is any kiken variant (legacy,
+// voluntary, or injury). Use this instead of comparing against
+// DecisionKiken alone — the legacy value is kept for backward
+// compatibility but new code should use the specific sub-types.
+func IsKikenDecision(d Decision) bool {
+	return d == DecisionKiken || d == DecisionKikenVoluntary || d == DecisionKikenInjury
+}
+
+// IsKikenDecisionStr is the string-argument twin of IsKikenDecision,
+// for call sites that hold the wire value as a string (e.g.
+// MatchResult.Decision).
+func IsKikenDecisionStr(s string) bool {
+	return IsKikenDecision(Decision(s))
 }
 
 // UnmarshalYAML migrates legacy `decision` values (NFR-025, R6):
@@ -50,6 +68,10 @@ func (d *Decision) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	}
 	candidate := Decision(node.Value)
+	if candidate == DecisionKiken {
+		*d = DecisionKikenVoluntary
+		return nil
+	}
 	if candidate.Valid() {
 		*d = candidate
 	} else {

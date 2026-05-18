@@ -23,6 +23,8 @@ func TestDecisionConstants(t *testing.T) {
 		{"fought", domain.DecisionFought, "fought"},
 		{"hikiwake", domain.DecisionHikiwake, "hikiwake"},
 		{"kiken", domain.DecisionKiken, "kiken"},
+		{"kiken-voluntary", domain.DecisionKikenVoluntary, "kiken-voluntary"},
+		{"kiken-injury", domain.DecisionKikenInjury, "kiken-injury"},
 		{"fusenpai", domain.DecisionFusenpai, "fusenpai"},
 		{"fusensho", domain.DecisionFusensho, "fusensho"},
 		{"daihyosen", domain.DecisionDaihyosen, "daihyosen"},
@@ -37,4 +39,21 @@ func TestDecisionConstants(t *testing.T) {
 	}
 
 	assert.False(t, domain.Decision("bogus").Valid(), "Valid() must reject unknown values")
+}
+
+func TestIsKikenDecision(t *testing.T) {
+	assert.True(t, domain.IsKikenDecision(domain.DecisionKiken))
+	assert.True(t, domain.IsKikenDecision(domain.DecisionKikenVoluntary))
+	assert.True(t, domain.IsKikenDecision(domain.DecisionKikenInjury))
+	assert.False(t, domain.IsKikenDecision(domain.DecisionFusenpai))
+	assert.False(t, domain.IsKikenDecision(domain.DecisionFought))
+	assert.False(t, domain.IsKikenDecision(domain.DecisionNone))
+}
+
+func TestIsKikenDecisionStr(t *testing.T) {
+	assert.True(t, domain.IsKikenDecisionStr("kiken"))
+	assert.True(t, domain.IsKikenDecisionStr("kiken-voluntary"))
+	assert.True(t, domain.IsKikenDecisionStr("kiken-injury"))
+	assert.False(t, domain.IsKikenDecisionStr("fusenpai"))
+	assert.False(t, domain.IsKikenDecisionStr("bogus"))
 }

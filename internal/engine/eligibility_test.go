@@ -687,3 +687,116 @@ func TestCheckEligibilityExcludingMatch_EmptyPlayerID(t *testing.T) {
 	err := eng.checkEligibilityExcludingMatch(compID, []string{"", ""}, "M1")
 	assert.NoError(t, err, "empty player IDs must be skipped silently")
 }
+
+// TestRecordDecision_KikenInjury_SetsReinstateable verifies that a
+// kiken-injury decision sets CompetitorStatus.Reinstateable=true,
+// while kiken-voluntary does not.
+func TestRecordDecision_KikenInjury_SetsReinstateable(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "reinstateable-test"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	t.Run("kiken-injury sets reinstateable=true", func(t *testing.T) {
+		_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "knee injury", nil, false)
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		assert.False(t, status.Eligible)
+		assert.True(t, status.Reinstateable)
+
+		statuses, err := store.LoadCompetitorStatus(compID)
+		require.NoError(t, err)
+		assert.True(t, statuses[aliceID].Reinstateable)
+	})
+}
+
+func TestRecordDecision_KikenVoluntary_NotReinstateable(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "not-reinstateable"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "personal reasons", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.False(t, status.Eligible)
+	assert.False(t, status.Reinstateable)
+}
+
+// TestReinstateCompetitor verifies the ReinstateCompetitor engine method.
+func TestReinstateCompetitor(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "reinstate-test"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	playerID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: playerID, Name: "Alice", Dojo: "A"},
+	}))
+
+	t.Run("reinstate kiken-injury succeeds", func(t *testing.T) {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID:      playerID,
+			Eligible:      false,
+			Reinstateable: true,
+			Reason:        "kiken-injury at Pool A-0",
+			MatchID:       "Pool A-0",
+		}))
+
+		status, err := eng.ReinstateCompetitor(compID, playerID)
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		assert.True(t, status.Eligible)
+		assert.Equal(t, playerID, status.PlayerID)
+	})
+
+	t.Run("reinstate kiken-voluntary rejected", func(t *testing.T) {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID:      playerID,
+			Eligible:      false,
+			Reinstateable: false,
+			Reason:        "kiken-voluntary at Pool A-0",
+			MatchID:       "Pool A-0",
+		}))
+
+		_, err := eng.ReinstateCompetitor(compID, playerID)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not reinstateable")
+	})
+
+	t.Run("reinstate already eligible rejected", func(t *testing.T) {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID: playerID,
+			Eligible: true,
+			MatchID:  "Pool A-0",
+		}))
+
+		_, err := eng.ReinstateCompetitor(compID, playerID)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not ineligible")
+	})
+
+	t.Run("reinstate empty playerID rejected", func(t *testing.T) {
+		_, err := eng.ReinstateCompetitor(compID, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "playerID is required")
+	})
+}

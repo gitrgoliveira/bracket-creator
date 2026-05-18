@@ -241,9 +241,13 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
   // We keep "Decision" untouched (it's already plain English) and
   // wrap the kendo terms so a volunteer hovering/tapping the title
   // gets the full tooltip.
-  const title = (kind === "kiken" || kind === "fusenpai")
-    ? React.createElement(TermAS, { name: kind }, kind === "kiken" ? "Kiken" : "Fusenpai")
-    : "Decision";
+  const isKiken = kind === "kiken-voluntary" || kind === "kiken-injury" || kind === "kiken";
+  const kikenLabel = kind === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
+  const title = isKiken
+    ? React.createElement(TermAS, { name: kind }, kikenLabel)
+    : kind === "fusenpai"
+      ? React.createElement(TermAS, { name: kind }, "Fusenpai")
+      : "Decision";
 
   const submit = (e) => {
     e?.preventDefault?.();
@@ -255,7 +259,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
     <form className="decision-prompt" onSubmit={submit} style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2, #fafafa)" }}>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
-        <div style={{ fontWeight: 600 }}>{kind === "kiken" ? "Which side withdrew?" : "Which side did not show up?"}</div>
+        <div style={{ fontWeight: 600 }}>{isKiken ? "Which side withdrew?" : "Which side did not show up?"}</div>
         <div style={{ display: "flex", gap: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <input type="radio" name="decision-side" value="shiro" checked={side === "shiro"} onChange={() => setSide("shiro")} />
@@ -467,7 +471,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // operator submits (the server validates the same cap on PUT /score).
   const [maxEnchoPeriods, setMaxEnchoPeriods] = useStateA(0);
   // T093–T098: decision (kiken/fusenpai) prompt state. promptKind is
-  // "" | "kiken" | "fusenpai"; when non-empty the inline prompt replaces the
+  // "" | "kiken-voluntary" | "kiken-injury" | "fusenpai"; when non-empty the inline prompt replaces the
   // bottom controls. After the POST /decision succeeds, withdrawnPlayer holds
   // the side that lost so the "Remaining matches" panel can render below.
   const [decisionPromptKind, setDecisionPromptKind] = useStateA("");
@@ -508,7 +512,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
       const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
-      if (kind === "kiken") {
+      if (kind === "kiken-voluntary" || kind === "kiken-injury" || kind === "kiken") {
         // The loser is the side != Winner. SideA/SideB on MatchResult are
         // names; resolve back to {id, name} via the original match for the
         // remaining-matches lookup.
@@ -825,8 +829,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           {!withdrawnPlayer && !decisionPromptKind && (
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
-              <button data-testid="scoring-modal-kiken-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
-                <TermAS name="kiken">Kiken</TermAS>
+              <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
+                <TermAS name="kiken-voluntary">Kiken – Voluntary</TermAS>
+              </button>
+              <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
+                <TermAS name="kiken-injury">Kiken – Injury</TermAS>
               </button>
               <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
                 <TermAS name="fusenpai">Fusenpai</TermAS>
@@ -848,7 +855,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               sideA={m.sideA}
               sideB={m.sideB}
               defaultSide="shiro"
-              askReason={decisionPromptKind === "kiken"}
+              askReason={decisionPromptKind === "kiken-voluntary" || decisionPromptKind === "kiken-injury"}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
@@ -1050,7 +1057,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
       const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
-      if (kind === "kiken") {
+      if (kind === "kiken-voluntary" || kind === "kiken-injury" || kind === "kiken") {
         const winnerName = (updated?.winner || "").trim();
         const loserName = winnerName === (updated?.sideA || "") ? (updated?.sideB || "") : (updated?.sideA || "");
         const loser =
@@ -1599,8 +1606,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           {!withdrawnPlayer && !decisionPromptKind && (
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Team decision:</span>
-              <button data-testid="scoring-modal-kiken-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
-                <TermAS name="kiken">Kiken</TermAS>
+              <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
+                <TermAS name="kiken-voluntary">Kiken – Voluntary</TermAS>
+              </button>
+              <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
+                <TermAS name="kiken-injury">Kiken – Injury</TermAS>
               </button>
               <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
                 <TermAS name="fusenpai">Fusenpai</TermAS>
@@ -1619,7 +1629,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               sideA={{ name: m.sideA?.name || m.sideA }}
               sideB={{ name: m.sideB?.name || m.sideB }}
               defaultSide="shiro"
-              askReason={decisionPromptKind === "kiken"}
+              askReason={decisionPromptKind === "kiken-voluntary" || decisionPromptKind === "kiken-injury"}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}

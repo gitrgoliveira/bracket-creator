@@ -59,8 +59,14 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 			return
 		}
 
-		// If no tournament config exists yet (or it's the default blank one), only allow creating one
-		if t == nil || (t.Name == "New Tournament" && t.Password == "") {
+		// If no tournament config exists yet (or it's the default blank one in file mode),
+		// only allow creating one. In locked mode the stored Password is always empty
+		// (auth is bcrypt from env) so the name+password sentinel must be suppressed —
+		// otherwise a legitimately-named "New Tournament" record written during locked
+		// bootstrap would permanently appear uninitialized (Password == "" matches).
+		// EnforceEmptyStoredGuard() is true only in file mode, so the compound check
+		// is safe in all cases: in locked mode only t == nil triggers bootstrap.
+		if t == nil || (verifier.EnforceEmptyStoredGuard() && t.Name == "New Tournament" && t.Password == "") {
 			isBootstrapWrite := (c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPost) && c.FullPath() == "/api/tournament"
 			if !isBootstrapWrite {
 				c.JSON(http.StatusForbidden, gin.H{"error": "tournament not configured yet"})

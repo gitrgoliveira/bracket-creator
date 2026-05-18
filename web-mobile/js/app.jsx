@@ -134,9 +134,10 @@ function App() {
   // render. The post-mount useEffect that previously did this ran AFTER
   // the URL-sync effect, so a direct load of /reset (or any non-`/`
   // path) saw the URL get overwritten back to `/` on first paint
-  // because pathFromState() read the default state. useState's lazy
-  // initializer runs once at mount and is the standard fix for this
-  // race.
+  // because pathFromState() read the default state. The IIFE evaluates
+  // once synchronously; its result is passed as the initial value to the
+  // useState calls below. React ignores subsequent initial values on
+  // re-renders so the URL is only parsed once.
   const initialRoute = (() => {
     try {
       return parsePath(window.location.pathname);
@@ -151,7 +152,12 @@ function App() {
   // logic entirely; the display surfaces require no auth and don't
   // touch viewerCompId / viewerScreen.
   const [mode, setMode] = useS(initialRoute.mode || "viewer");
-  const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
+  // Wrap localStorage reads in try/catch so private-browsing / enterprise
+  // policy environments that throw on getItem don't crash the app on mount.
+  // The write path (persistence effect below) already has its own try/catch.
+  const [authed, setAuthed] = useS(() => {
+    try { return localStorage.getItem("bc_authed") === "true"; } catch { return false; }
+  });
   // authedRef mirrors `authed` so the SSE handler — created once per
   // viewerCompId/mode change — observes the current auth state instead
   // of the closure-captured value from when it was attached. Without
@@ -160,7 +166,9 @@ function App() {
   // ignore later password_reset events. authedRef is updated in the
   // localStorage-persist effect below.
   const authedRef = useR(authed);
-  const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
+  const [password, setPassword] = useS(() => {
+    try { return localStorage.getItem("bc_password") || ""; } catch { return ""; }
+  });
   const [authPrompt, setAuthPrompt] = useS(false);
   const [viewerCompId, setViewerCompId] = useS(initialRoute.viewerCompId || null);
   const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset

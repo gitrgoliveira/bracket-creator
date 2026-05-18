@@ -402,9 +402,22 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// read back as empty via GET /tournament so the admin doesn't
 		// see a stale credential after bootstrap.
 		if verifier != nil && verifier.RedactStoredPassword() {
-			// Persist with empty Password so the stored record matches
-			// what the admin sees on subsequent GETs.
-			t.Password = ""
+			// Locked mode: the on-disk Password is not authoritative.
+			// For a true first bootstrap (no tournament.md on disk yet),
+			// store "" so GET /tournament returns empty — no stale
+			// credential visible. For re-POSTs against an existing record,
+			// preserve whatever is currently stored so a later file-mode
+			// rollback can recover the original credential.
+			existingForPost, loadErrPost := store.LoadTournament()
+			if loadErrPost != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": loadErrPost.Error()})
+				return
+			}
+			if existingForPost != nil {
+				t.Password = existingForPost.Password
+			} else {
+				t.Password = ""
+			}
 		} else if t.Password == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})
 			return

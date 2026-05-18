@@ -291,9 +291,11 @@ The server runs in one of two modes, selected at startup:
 **Locked mode** (recommended for any deployment reachable over the internet):
 
 ```bash
-# 1. Generate a bcrypt hash for your chosen password
-bracket-creator hash-password
-# (type the password; the hash is printed)
+# 1. Generate a bcrypt hash for your chosen password.
+# hash-password reads one line from stdin without a prompt or echo masking —
+# pipe from a secrets manager or here-doc rather than typing interactively.
+printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
+# (the hash is printed on stdout)
 
 # 2. Start the server in locked mode
 TOURNAMENT_PASSWORD_HASH='$2a$10$...' \

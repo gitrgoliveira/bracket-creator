@@ -60,7 +60,7 @@ func newMobileAppCmd() *cobra.Command {
 	// local/private use the default (unlocked) behavior keeps the
 	// recovery-via-/reset path available.
 	cmd.Flags().BoolVar(&o.lockPassword, "lock-password", false,
-		"disable /reset and authenticate via bcrypt hash from TOURNAMENT_PASSWORD_HASH")
+		"disable POST /api/tournament/reset (SPA /reset page still shows a disabled message) and authenticate via bcrypt hash from TOURNAMENT_PASSWORD_HASH")
 
 	return cmd
 }

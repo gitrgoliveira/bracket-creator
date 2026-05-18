@@ -35,8 +35,9 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
           <h2 style={{ marginBottom: 8 }}>Password reset disabled</h2>
           <p style={{ color: "var(--ink-3)", marginBottom: 16 }}>
             This deployment has password reset disabled by the operator. The
-            admin password is supplied via an environment variable and can
-            only be rotated by restarting the server with a new value.
+            admin password's bcrypt hash is supplied via an environment
+            variable and can only be rotated by restarting the server with a
+            new hash.
           </p>
           <p style={{ color: "var(--ink-3)", marginBottom: 24 }}>
             Contact your tournament administrator for the credential.

@@ -53,9 +53,11 @@ The admin password lives plaintext in `tournament-data/tournament.md`. Set it du
 **Locked mode** (recommended for any deployment reachable over the internet):
 
 ```bash
-# 1) generate a bcrypt hash for your chosen password
-bracket-creator hash-password
-# (type the password; the hash is printed — copy it)
+# 1) generate a bcrypt hash for your chosen password.
+# hash-password reads from stdin without a prompt or echo masking —
+# pipe from a secrets manager or here-doc rather than typing interactively.
+printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
+# (the hash is printed on stdout — copy it)
 
 # 2) start the server with --lock-password and the hash in the env
 TOURNAMENT_PASSWORD_HASH='$2a$10$...' \

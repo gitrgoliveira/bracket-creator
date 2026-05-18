@@ -66,11 +66,12 @@ func newHashPasswordCmd() *cobra.Command {
 			if plaintext == "" {
 				return errors.New("password is empty (pass as arg or pipe via stdin)")
 			}
-			// bcrypt has a hard 72-byte limit on the input; longer
-			// passwords are silently truncated by the C reference impl
-			// and the Go port follows that behavior. Reject up front so
-			// the operator doesn't get a hash that authenticates against
-			// a value they didn't intend.
+			// bcrypt has a hard 72-byte limit on the plaintext input.
+			// Unlike the C reference implementation (which silently
+			// truncated to 72 bytes), Go's bcrypt.GenerateFromPassword
+			// returns ErrPasswordTooLong for longer inputs. Reject up
+			// front with a clear message rather than surfacing a
+			// bcrypt-internal error.
 			if len(plaintext) > 72 {
 				return errors.New("password exceeds bcrypt's 72-byte limit; pick a shorter passphrase or use a derived key")
 			}

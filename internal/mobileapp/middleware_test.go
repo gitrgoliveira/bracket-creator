@@ -236,6 +236,54 @@ func TestAuthMiddleware_LockedMode_BootstrapRequiresAuth(t *testing.T) {
 	})
 }
 
+// In locked mode the stored password is always empty (auth comes from the
+// env-var hash). A tournament legitimately named "New Tournament" must NOT
+// be treated as uninitialized — the uninitialized sentinel
+// (Name == "New Tournament" && Password == "") only applies in file mode.
+func TestAuthMiddleware_LockedMode_NewTournamentNameNotSentinel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir, err := os.MkdirTemp("", "middleware-test-locked-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("kotai-A"), bcrypt.MinCost)
+	require.NoError(t, err)
+	bcryptV, err := NewBcryptVerifier(string(hash))
+	require.NoError(t, err)
+
+	// Simulate a locked-mode bootstrap: tournament named "New Tournament"
+	// with empty Password (as the POST handler stores in locked mode).
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "New Tournament",
+		Password: "",
+	}))
+
+	r := gin.New()
+	r.Use(AuthMiddleware(bcryptV, store))
+	r.GET("/api/tournament", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	t.Run("authenticated GET must succeed (not be blocked as uninitialized)", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+		req.Header.Set("X-Tournament-Password", "kotai-A")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code,
+			"locked-mode tournament named 'New Tournament' should not collide with uninitialized sentinel")
+	})
+
+	t.Run("unauthenticated GET must 401 (not 403 tournament-not-configured)", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"locked-mode requests without header should 401, not 403 tournament-not-configured")
+	})
+}
+
 func TestAuthMiddleware_LoadError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("Skipping permission test: root bypasses file permission restrictions")

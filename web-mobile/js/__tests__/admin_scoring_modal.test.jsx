@@ -10,6 +10,7 @@ import {
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
   applyFoulIncrement,
+  reconcileFoulsAtOpen,
   applyFusenshoToggle,
 } from '../admin_scoring_modal.jsx';
 
@@ -659,6 +660,67 @@ describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
     // Backstop for a hypothetical corrupted state — the function must
     // not push a 3rd ippon onto opp regardless of how it was called.
     expect(applyFoulIncrement(1, ['M', 'K'], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['M', 'K'] });
+  });
+});
+
+describe('reconcileFoulsAtOpen (correction-flow normalization)', () => {
+  // Reopen/correction flow: pre-fix builds stored hansoku as a cumulative
+  // raw count (0..N) and folded floor(N/2) "H" entries into the opponent's
+  // ippon array at submit. The post-fix counter is "outstanding fouls not
+  // yet discharged" (0 or 1). Naively stripping rawFouls % 2 is correct
+  // when the H's are already in opp's pts; it silently loses points when
+  // they're not (legacy/imported data). reconcileFoulsAtOpen tops up the
+  // missing H's before returning the remainder.
+
+  it('passes through when no fouls', () => {
+    expect(reconcileFoulsAtOpen(0, [])).toEqual({ outstandingFouls: 0, opponentPts: [] });
+    expect(reconcileFoulsAtOpen(0, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M'] });
+  });
+
+  it('rawFouls=1 has no discharged H, just 1 outstanding', () => {
+    expect(reconcileFoulsAtOpen(1, [])).toEqual({ outstandingFouls: 1, opponentPts: [] });
+    expect(reconcileFoulsAtOpen(1, ['M'])).toEqual({ outstandingFouls: 1, opponentPts: ['M'] });
+  });
+
+  it('idempotent when the discharged H is already present (consistent prior data)', () => {
+    // rawFouls=2 → expected 1 H. Opp already has it from the old buildPatch fold.
+    expect(reconcileFoulsAtOpen(2, ['H'])).toEqual({ outstandingFouls: 0, opponentPts: ['H'] });
+    // Mixed manual + derived: opp already has 1 manual + 1 derived = 2 total.
+    expect(reconcileFoulsAtOpen(2, ['M', 'H'])).toEqual({ outstandingFouls: 0, opponentPts: ['M', 'H'] });
+  });
+
+  it('tops up missing H when legacy/imported data has fouls but no fold', () => {
+    // rawFouls=2 with empty opp pts (corrupted/imported) — top up 1 H.
+    expect(reconcileFoulsAtOpen(2, [])).toEqual({ outstandingFouls: 0, opponentPts: ['H'] });
+    // Manual ippon exists but the foul-derived H was never folded in.
+    expect(reconcileFoulsAtOpen(2, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M', 'H'] });
+  });
+
+  it('handles odd cumulative counts: floor pair discharges, remainder outstanding', () => {
+    // rawFouls=3 → 1 H discharged, 1 outstanding.
+    expect(reconcileFoulsAtOpen(3, [])).toEqual({ outstandingFouls: 1, opponentPts: ['H'] });
+    expect(reconcileFoulsAtOpen(3, ['H'])).toEqual({ outstandingFouls: 1, opponentPts: ['H'] });
+  });
+
+  it('caps the top-up at maxIppons (bout would have ended)', () => {
+    // rawFouls=4 → expected 2 H. Opp slot capped at 2 — top up fills the slot.
+    expect(reconcileFoulsAtOpen(4, [])).toEqual({ outstandingFouls: 0, opponentPts: ['H', 'H'] });
+    // Opp already has 1 ippon, so only room for 1 H top-up despite expecting 2.
+    expect(reconcileFoulsAtOpen(4, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M', 'H'] });
+  });
+
+  it('does not duplicate when opp already has more H than expected', () => {
+    // expected 1 H from fouls, but opp has 2 H's (e.g., two manual H awards).
+    // Don't add — opp's count exceeds the expected fold count.
+    expect(reconcileFoulsAtOpen(2, ['H', 'H'])).toEqual({ outstandingFouls: 0, opponentPts: ['H', 'H'] });
+  });
+
+  it('respects custom maxIppons cap', () => {
+    expect(reconcileFoulsAtOpen(4, [], 1)).toEqual({ outstandingFouls: 0, opponentPts: ['H'] });
+  });
+
+  it('defensive: clamps negative rawFouls to 0', () => {
+    expect(reconcileFoulsAtOpen(-1, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M'] });
   });
 });
 

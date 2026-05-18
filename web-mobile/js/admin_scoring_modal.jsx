@@ -68,6 +68,26 @@ function applyFoulIncrement(fouls, opponentPts, thisSidePts = [], maxIppons = MA
   return { fouls: 0, opponentPts: [...opponentPts, "H"] };
 }
 
+// reconcileFoulsAtOpen — pure helper for the reopen/correction flow.
+// Pre-fix builds stored hansoku as a cumulative raw count (0..N) alongside
+// the already-discharged "H" entries in the opponent's pts array. The new
+// counter is "outstanding fouls not yet discharged" (0 or 1). Naively
+// taking `rawFouls % 2` strips full pairs — but if the opponent's pts is
+// MISSING the expected H entries (older data, partial save, imported
+// match), the strip silently loses points. This helper tops up the
+// opponent's pts with the missing H's (capped at maxIppons) before
+// returning the outstanding remainder. Idempotent: when the H's are
+// already present it leaves opponentPts unchanged.
+function reconcileFoulsAtOpen(rawFouls, opponentPts, maxIppons = MAX_IPPONS_PER_SIDE) {
+  const safe = rawFouls > 0 ? rawFouls : 0;
+  const expectedH = Math.floor(safe / 2);
+  const haveH = opponentPts.filter(x => x === "H").length;
+  const missing = Math.max(0, expectedH - haveH);
+  const topUp = Math.min(missing, Math.max(0, maxIppons - opponentPts.length));
+  const newOpp = topUp > 0 ? [...opponentPts, ...Array(topUp).fill("H")] : opponentPts;
+  return { outstandingFouls: safe % 2, opponentPts: newOpp };
+}
+
 // Term — kendo-glossary tooltip wrapper. Read lazily off window so the
 // load order between glossary.js and this module doesn't matter (both
 // are type="module" scripts and may execute in any order). Falls back
@@ -335,19 +355,23 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const teamSize = m.teamSize || 5;
   if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} />;
 
-  const initialAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
-  const initialBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
+  const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
+  const seedBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
 
   // Use ?? not || so an explicit 0 isn't treated as "unset".
-  // Mod-2 strip: pre-fix builds stored the cumulative raw count (e.g. 2)
-  // alongside the already-awarded H in the opponent's ippon array. With
-  // applyFoulIncrement, the counter is now "outstanding fouls not yet
-  // discharged" so we drop the discharged portion at init. The H ippons
-  // remain in ipponsA/ipponsB.
+  // reconcileFoulsAtOpen turns the pre-fix cumulative raw count into the
+  // post-fix "outstanding fouls" semantics AND tops up the opponent's pts
+  // with any missing discharged H ippons (legacy/imported data that has
+  // hansokuA >= 2 without matching H's in ipponsB would otherwise silently
+  // lose points on resubmit). A's fouls discharge into B's pts; B's into A's.
   const rawAFouls = m.hansokuA ?? m.score?.fouls?.a ?? 0;
   const rawBFouls = m.hansokuB ?? m.score?.fouls?.b ?? 0;
-  const initialAFouls = rawAFouls % 2;
-  const initialBFouls = rawBFouls % 2;
+  const reconA = reconcileFoulsAtOpen(rawAFouls, seedBPts);
+  const reconB = reconcileFoulsAtOpen(rawBFouls, seedAPts);
+  const initialAPts = reconB.opponentPts;
+  const initialBPts = reconA.opponentPts;
+  const initialAFouls = reconA.outstandingFouls;
+  const initialBFouls = reconB.outstandingFouls;
   // FR-033: encho (overtime) counter rides alongside the score. Initialized
   // from the existing match.encho?.periodCount so re-opens of completed
   // matches retain the toggle. Slice 1 ships the operator-visible toggle and
@@ -1027,17 +1051,22 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       if (existing.winner === sideAName) fusensho = "a";
       else if (existing.winner === sideBName) fusensho = "b";
     }
-    // Mod-2 strip mirrors ScoreEditorModal: pre-fix builds stored the
-    // cumulative raw foul count alongside the already-awarded H in the
-    // opponent's ippon array. The counter now means "outstanding fouls
-    // not yet discharged" so drop the discharged portion at init.
+    // reconcileFoulsAtOpen mirrors ScoreEditorModal: pre-fix builds
+    // stored the cumulative raw foul count alongside the already-awarded
+    // H in the opponent's ippon array. The counter now means "outstanding
+    // fouls not yet discharged" and any missing discharged H's in the
+    // opponent's pts are topped up (defensive against legacy/imported data).
     const rawAFouls = existing ? existing.hansokuA || 0 : 0;
     const rawBFouls = existing ? existing.hansokuB || 0 : 0;
+    const seedAPts = existing ? (existing.ipponsA || []).filter(x => x !== "•") : [];
+    const seedBPts = existing ? (existing.ipponsB || []).filter(x => x !== "•") : [];
+    const reconA = reconcileFoulsAtOpen(rawAFouls, seedBPts);
+    const reconB = reconcileFoulsAtOpen(rawBFouls, seedAPts);
     return {
-      aPts: existing ? (existing.ipponsA || []).filter(x => x !== "•") : [],
-      bPts: existing ? (existing.ipponsB || []).filter(x => x !== "•") : [],
-      aFouls: rawAFouls % 2,
-      bFouls: rawBFouls % 2,
+      aPts: reconB.opponentPts,
+      bPts: reconA.opponentPts,
+      aFouls: reconA.outstandingFouls,
+      bFouls: reconB.outstandingFouls,
       fusensho,
     };
   });
@@ -1416,7 +1445,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                         <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                           <span className="tsm-fouls__label">{rs.label} Fouls</span>
                           <div className="tsm-fouls__controls">
-                            <button className="tsm-fouls__btn" onClick={() => rs.setFouls(f => Math.max(0, f - 1))} disabled={rs.fouls === 0}>−</button>
+                            <button className="tsm-fouls__btn" onClick={() => rs.setFouls(Math.max(0, rs.fouls - 1))} disabled={rs.fouls === 0}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
                             <button className="tsm-fouls__btn" onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
                           </div>
@@ -1617,5 +1646,6 @@ export {
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
   applyFoulIncrement,
+  reconcileFoulsAtOpen,
   applyFusenshoToggle,
 };

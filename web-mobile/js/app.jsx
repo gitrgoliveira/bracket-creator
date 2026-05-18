@@ -600,7 +600,17 @@ function App() {
       )}
       {authPrompt && (
         <AuthModal
-          resetEnabled={authConfig?.resetEnabled ?? true}
+          // Treat null (authConfig still loading) as "reset not yet
+          // confirmed enabled" — show the link only after the server
+          // explicitly says resetEnabled === true. Defaulting to true
+          // would briefly expose the "Forgot password?" link on a
+          // locked deployment on a direct /admin deep-link, before
+          // /api/auth-config resolves; clicking through to /reset
+          // would then 404 on submit. fetchAuthConfig is fail-open to
+          // {resetEnabled: true} on any transport error, so this only
+          // adds a sub-second delay before the link appears on
+          // genuinely file-mode deployments.
+          resetEnabled={authConfig?.resetEnabled === true}
           onForgotPassword={() => {
             authPromptRef.current = false;
             setAuthPrompt(false);

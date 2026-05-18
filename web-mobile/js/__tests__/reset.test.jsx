@@ -176,10 +176,30 @@ describe('ResetPasswordForm', () => {
       expect(submit).toBeTruthy();
     });
 
-    it('renders even when authConfig is undefined (fail-open default)', () => {
+    it('renders a loading state when authConfig is null (still loading)', () => {
+      // Regression guard against the previous behavior where a missing /
+      // null authConfig defaulted to "form visible" — on a direct /reset
+      // deep-link against a locked-mode deployment that would expose the
+      // form for the sub-second window before /api/auth-config resolves
+      // and the user could submit a password that 404s. The form must
+      // wait for authConfig to resolve.
+      const tree = runtime.mount(ResetPasswordForm, {
+        authConfig: null,
+        onBack: vi.fn(),
+        onSuccess: vi.fn(),
+      });
+      const text = collectText(tree);
+      expect(text).toContain('Loading');
+      expect(text).not.toContain('Reset tournament password');
+      expect(text).not.toContain('Password reset disabled');
+    });
+
+    it('renders a loading state when authConfig is undefined (prop omitted)', () => {
+      // Same loading branch as the null case — `== null` matches both.
       const tree = runtime.mount(ResetPasswordForm, { onBack: vi.fn(), onSuccess: vi.fn() });
       const text = collectText(tree);
-      expect(text).toContain('Reset tournament password');
+      expect(text).toContain('Loading');
+      expect(text).not.toContain('Reset tournament password');
     });
   });
 

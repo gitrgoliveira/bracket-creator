@@ -25,10 +25,28 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
   const mountedRef = useRefR(true);
   useEffectR(() => () => { mountedRef.current = false; }, []);
 
+  // authConfig is still loading (null at App mount, undefined if a
+  // direct caller omitted the prop). Don't render the active reset
+  // form yet — a direct /reset deep-link on a locked-mode deployment
+  // would otherwise expose the form for the sub-second window before
+  // /api/auth-config resolves and the user could submit a password
+  // that 404s. fetchAuthConfig always resolves (fail-open to file
+  // mode on transport errors), so this loading branch is short-lived
+  // in production. `== null` matches both null and undefined.
+  if (authConfig == null) {
+    return (
+      <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
+        <div className="card card--pad-lg">
+          <p style={{ color: "var(--ink-3)" }}>Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
   // Locked mode: the operator has explicitly disabled reset and the
   // server will 404 the POST. Show a clear message rather than letting
   // the user type, submit, and be confused by a 404.
-  if (authConfig && authConfig.resetEnabled === false) {
+  if (authConfig.resetEnabled === false) {
     return (
       <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
         <div className="card card--pad-lg">

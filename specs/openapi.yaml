@@ -1765,14 +1765,30 @@ components:
           type: string
           maxLength: 256
           description: >
-            Admin password. Required (non-empty) on POST /tournament — an
-            empty Password on disk would let AuthMiddleware's
-            `password != t.Password` check vacuously pass for any client
-            sending an empty `X-Tournament-Password` header.
+            Admin password. Behavior depends on the active auth mode
+            (see `GET /api/auth-config`); the shared schema's
+            "required" semantics below apply to **file mode** only.
 
-            On PUT /tournament: omitting the field or sending an empty
-            string preserves the currently-stored password ("leave blank
-            to keep current"). Sending a non-empty string updates it.
+            **File mode** (default — authoritative credential stored
+            plaintext in `tournament.md`): required (non-empty) on POST
+            /tournament — an empty Password on disk would let
+            AuthMiddleware's `password != t.Password` check vacuously
+            pass for any client sending an empty
+            `X-Tournament-Password` header. On PUT /tournament,
+            omitting the field or sending an empty string preserves the
+            currently-stored password ("leave blank to keep current");
+            sending a non-empty string updates it.
+
+            **Locked mode** (`--lock-password` — non-authoritative;
+            bcrypt hash in `TOURNAMENT_PASSWORD_HASH` is the credential):
+            POST /tournament accepts but **discards** the body's
+            `password` server-side (the on-disk value is preserved for
+            an existing record, or set to `""` for a fresh bootstrap);
+            non-empty passwords are NOT rejected as a backward-compat
+            convenience. PUT /tournament rejects any non-empty
+            `password` with 400 — rotation requires restarting the
+            server with a new hash. The response body's `password` is
+            always empty in locked mode.
 
             Omitted from viewer responses (`/api/viewer/tournament`).
         openingBlock:

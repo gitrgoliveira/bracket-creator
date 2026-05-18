@@ -34,6 +34,44 @@ const API = {
         }
         return res.json();
     },
+    // Public endpoint — returns {mode: "file"|"locked", resetEnabled: bool}.
+    // Mounted on App() boot to decide whether to render the "Forgot
+    // password?" link in AuthModal and whether the /reset SPA route
+    // should show a form or an "operator-disabled" message. Failing
+    // open here is intentional: if the call errors, the SPA falls back
+    // to the legacy behavior (reset visible) — a fresh-deploy SPA
+    // pointed at an older server without this endpoint still works,
+    // and any 5xx during fetch doesn't break sign-in.
+    async fetchAuthConfig() {
+        const res = await fetch('/api/auth-config');
+        if (!res.ok) {
+            return { mode: 'file', resetEnabled: true };
+        }
+        return res.json();
+    },
+    // Reset the tournament password. Unauthenticated by design — the
+    // server enforces "is this endpoint enabled" via the verifier's
+    // ResetEnabled() (locked mode returns 404). Throws on non-2xx so
+    // the caller can surface the server's error message (including the
+    // 404 "reset disabled" case if the SPA's cached authConfig was
+    // stale).
+    async resetPassword(newPassword) {
+        const res = await fetch('/api/tournament/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: newPassword })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to reset password (Status ${res.status})`);
+            e.status = res.status;
+            throw e;
+        }
+        // Backend returns 204 No Content — calling .json() on an empty
+        // body throws SyntaxError per the Fetch spec (same pattern as
+        // overridePoolRank etc. above).
+        return true;
+    },
     async fetchCompetitions() {
         const res = await fetch('/api/viewer/competitions');
         if (!res.ok) {

@@ -310,6 +310,73 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
+  /api/tournament/reset:
+    post:
+      tags: [tournament]
+      summary: Reset the admin password (file mode only)
+      description: |
+        Replaces the stored admin password with the supplied value. Unauthenticated by
+        design — this is the documented recovery path for a forgotten admin password
+        on local / private deployments.
+
+        The endpoint is disabled in **locked mode** (`--lock-password` CLI flag, with
+        `TOURNAMENT_PASSWORD_HASH` env var supplying a bcrypt hash). In locked mode the
+        response is `404 reset disabled`. Clients can pre-check via
+        `GET /api/auth-config`.
+
+        For production deployments accessible over the network, operators are advised to
+        run with `--lock-password` so password rotation requires control of the server's
+        environment rather than network reachability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  description: New admin password (≤ 256 chars). Replaces the stored value.
+      responses:
+        '204':
+          description: Password rotated. All existing admin sessions become invalid on the next request.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Reset disabled (locked mode active).
+        '409':
+          description: Tournament not initialized; bootstrap via `POST /api/tournament` first.
+
+  /api/auth-config:
+    get:
+      tags: [tournament]
+      summary: Public auth-mode metadata
+      description: |
+        Reports the active authentication mode. Used by the SPA on first load to decide
+        whether to surface the password-reset UI. Public (no auth header required) —
+        the response carries no secret material, only the operator-visible toggle bits.
+
+        `mode` is one of:
+          * `file` — admin password lives in `tournament.md` (plaintext). Default.
+          * `locked` — admin password is a bcrypt hash read from `TOURNAMENT_PASSWORD_HASH`.
+            `/reset` is disabled in this mode.
+      responses:
+        '200':
+          description: Auth-mode metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode, resetEnabled]
+                properties:
+                  mode:
+                    type: string
+                    enum: [file, locked]
+                  resetEnabled:
+                    type: boolean
+                    description: Whether POST /api/tournament/reset is honored.
+
   /api/tournament/import:
     post:
       tags: [tournament]

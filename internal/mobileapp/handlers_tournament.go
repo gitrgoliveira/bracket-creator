@@ -155,7 +155,7 @@ func validateTournamentLengths(t *state.Tournament) error {
 	return nil
 }
 
-func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
+func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, verifier PasswordVerifier) {
 	r.GET("/tournament", func(c *gin.Context) {
 		t, err := store.LoadTournament()
 		if err != nil {
@@ -164,6 +164,18 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if t == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "tournament not initialized"})
+			return
+		}
+		// In locked mode the on-disk Password is irrelevant (auth comes
+		// from the env-var bcrypt hash). Strip it from the response so
+		// the admin UI doesn't show a stored-but-unused value that
+		// would mislead the operator about what credential actually
+		// authenticates them. Mirrors the public viewer handler's
+		// password-strip step (handlers_viewer.go).
+		if verifier != nil && verifier.Mode() == "locked" {
+			publicT := *t
+			publicT.Password = ""
+			c.JSON(http.StatusOK, publicT)
 			return
 		}
 		c.JSON(http.StatusOK, t)
@@ -241,7 +253,23 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// late save overwrote the change-password PUT's earlier save —
 		// silently losing the password change. The atomic primitive
 		// closes that window.
+		//
+		// Locked mode (verifier.Mode() == "locked"): the on-disk Password
+		// is irrelevant — auth comes from the env-var bcrypt hash. We
+		// silently preserve whatever's already stored (which the SPA
+		// reads back as empty via GET /tournament) so the admin can
+		// edit name/venue/courts/etc. without thinking about a password
+		// they no longer set. Rejecting the request would be hostile,
+		// since the SPA's edit form may not even surface a password
+		// field in locked mode.
+		locked := verifier != nil && verifier.Mode() == "locked"
 		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
+			if locked {
+				if current != nil {
+					desired.Password = current.Password
+				}
+				return nil
+			}
 			if desired.Password == "" && current != nil {
 				desired.Password = current.Password
 			}
@@ -308,10 +336,10 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
-		// Reject empty Password on POST (initial setup). AuthMiddleware
-		// allows POST /api/tournament unauthenticated when the
-		// tournament is uninitialized — this is the bootstrap entry
-		// point. If Password == "" lands on disk, AuthMiddleware's
+		// Reject empty Password on POST (initial setup) in file mode.
+		// AuthMiddleware allows POST /api/tournament unauthenticated
+		// when the tournament is uninitialized — this is the bootstrap
+		// entry point. If Password == "" lands on disk, AuthMiddleware's
 		// `password != t.Password` check vacuously passes for any
 		// request with an empty `X-Tournament-Password` header (empty
 		// == empty), exposing every /api/* endpoint unauthenticated.
@@ -320,7 +348,22 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// state would land in the first place, so block it here.
 		// Note: Password is NOT trimmed (passwords may intentionally
 		// contain whitespace; auth check is exact-string match).
-		if t.Password == "" {
+		//
+		// Locked mode: the on-disk Password is irrelevant — auth comes
+		// from the env-var bcrypt hash. An operator using the bootstrap
+		// form would naturally type a password into the field (the SPA
+		// doesn't yet hide it on locked deployments), but it will never
+		// be used to authenticate. Accept the submission either way;
+		// the stored value is read back as empty via GET /tournament so
+		// the admin doesn't see a stale credential.
+		if verifier != nil && verifier.Mode() == "locked" {
+			// Persist with empty Password so the stored record matches
+			// what the admin will see on subsequent GETs. Anything the
+			// operator typed in the bootstrap form is discarded —
+			// documented in the README, surfaced in the UI in a later
+			// pass.
+			t.Password = ""
+		} else if t.Password == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})
 			return
 		}

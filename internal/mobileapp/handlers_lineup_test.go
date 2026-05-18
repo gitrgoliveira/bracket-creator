@@ -37,7 +37,7 @@ func setupLineupTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 
 	// Admin group — AuthMiddleware gates all writes
 	admin := r.Group("/api")
-	admin.Use(AuthMiddleware(store))
+	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
 	RegisterLineupHandlers(admin, store, store, store)
 
 	return r, store, dir

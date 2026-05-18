@@ -24,7 +24,7 @@ func setupMiddlewareTest(t *testing.T) (*state.Store, *gin.Engine) {
 	require.NoError(t, err)
 
 	r := gin.New()
-	r.Use(AuthMiddleware(store))
+	r.Use(AuthMiddleware(NewFileVerifier(store), store))
 	r.PUT("/api/tournament", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})

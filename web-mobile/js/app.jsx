@@ -59,6 +59,14 @@ function parsePath(path) {
     if (path === "/glossary") {
       return { mode: "viewer", viewerScreen: "glossary" };
     }
+    // /reset — public password-reset surface backed by
+    // POST /api/tournament/reset (handlers_reset.go). Available in
+    // file mode; renders an "operator-disabled" message in locked
+    // mode (the SPA learns the mode via GET /api/auth-config on App
+    // mount and the backing API also 404s defensively).
+    if (path === "/reset") {
+      return { mode: "viewer", viewerScreen: "reset" };
+    }
     return { mode: "viewer", viewerScreen: "home" };
 }
 
@@ -81,6 +89,7 @@ function pathFromState(m, vs, vcid, av) {
     if (vcid) return `/competition/${vcid}`;
     if (vs === "schedule") return "/schedule";
     if (vs === "glossary") return "/glossary";
+    if (vs === "reset") return "/reset";
     return "/";
 }
 
@@ -141,6 +150,13 @@ function App() {
   // EventSource itself lives inside subscribeToEvents; the second
   // callback hands status events up here.
   const [sseConnected, setSseConnected] = useS(true);
+  // Auth-mode discovery (file vs. locked). Fetched once on App mount
+  // from GET /api/auth-config so the AuthModal can hide the "Forgot
+  // password?" link in locked mode and the /reset page can render an
+  // "operator-disabled" message rather than a useless form. Defaults
+  // to file mode + reset-enabled so the initial render before the
+  // fetch lands matches the historical UX.
+  const [authConfig, setAuthConfig] = useS({ mode: 'file', resetEnabled: true });
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
@@ -235,6 +251,15 @@ function App() {
   };
 
   useE(() => { load(); }, []);
+
+  // Fetch the auth-config once on mount. Failing open inside
+  // fetchAuthConfig means a 5xx/timeout doesn't break sign-in — we
+  // keep the default {mode: 'file', resetEnabled: true} state.
+  useE(() => {
+    window.API.fetchAuthConfig().then((cfg) => {
+      if (cfg && typeof cfg === 'object') setAuthConfig(cfg);
+    }).catch(() => { /* fail-open */ });
+  }, []);
 
   useE(() => {
     // Track every jittered timer so the cleanup can cancel them when
@@ -434,6 +459,24 @@ function App() {
         window.GlossaryPage
           ? <window.GlossaryPage onBack={() => setViewerScreen("home")} />
           : <div className="loading">Loading glossary…</div>
+      ) : viewerScreen === "reset" ? (
+        // Password reset surface. Lives in reset.jsx; mounted through
+        // window.ResetPasswordForm following the per-screen-file
+        // convention. On success the user is auto-logged-in with the
+        // new password (the form persists bc_password/bc_authed) and
+        // we navigate to admin.
+        window.ResetPasswordForm
+          ? <window.ResetPasswordForm
+              authConfig={authConfig}
+              onBack={() => setViewerScreen("home")}
+              onSuccess={(pw) => {
+                setAuthed(true);
+                setPassword(pw);
+                setViewerScreen("home");
+                setMode("admin");
+              }}
+            />
+          : <div className="loading">Loading…</div>
       ) : (
         <window.ViewerHome
           tournament={tournament}
@@ -444,6 +487,17 @@ function App() {
       )}
       {authPrompt && (
         <AuthModal
+          resetEnabled={authConfig.resetEnabled}
+          onForgotPassword={() => {
+            authPromptRef.current = false;
+            setAuthPrompt(false);
+            // Drop out of admin mode (we're heading to a public route)
+            // and navigate to /reset via the same state-machine path
+            // any other viewer route uses.
+            if (mode === "admin") setMode("viewer");
+            setViewerCompId(null);
+            setViewerScreen("reset");
+          }}
           onClose={() => {
             authPromptRef.current = false;
             setAuthPrompt(false);
@@ -463,7 +517,7 @@ function App() {
   );
 }
 
-function AuthModal({ onClose, onSuccess }) {
+function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
   const [pw, setPw] = useS("");
   const [err, setErr] = useS("");
   const [checking, setChecking] = useS(false);
@@ -525,6 +579,26 @@ function AuthModal({ onClose, onSuccess }) {
           </div>
           <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={checking}>{checking ? "Checking…" : "Sign in"}</button>
         </form>
+        {resetEnabled && onForgotPassword && (
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                // Confirm intent: reset is global (everyone's
+                // re-authenticated) — see resetPassword's tournament
+                // broadcast. Cheaper to ask twice than to surprise an
+                // operator who clicked the wrong link.
+                if (window.confirm("Reset the tournament password? This will sign out all other admins.")) {
+                  onForgotPassword();
+                }
+              }}
+              disabled={checking}
+            >
+              Forgot password?
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -39,7 +39,16 @@ func requireValidCompID(c *gin.Context) (string, bool) {
 	return id, true
 }
 
-func AuthMiddleware(store *state.Store) gin.HandlerFunc {
+// AuthMiddleware gates admin endpoints behind the X-Tournament-Password
+// header. The actual credential check is delegated to the PasswordVerifier
+// so file-based and locked (bcrypt-env-var) modes share a single middleware.
+//
+// The store reference is still needed for the "uninitialized tournament"
+// bootstrap branch — that gate fires when no tournament.md exists and we
+// must let through the very first POST /api/tournament. file mode permits
+// this so the CreateTournament UI works on a fresh install; locked mode
+// disables it (the env-var hash IS the auth source from the first request).
+func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		t, err := store.LoadTournament()
 		if err != nil {
@@ -50,8 +59,25 @@ func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 
 		// If no tournament config exists yet (or it's the default blank one), only allow creating one
 		if t == nil || (t.Name == "New Tournament" && t.Password == "") {
-			if (c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPost) && c.FullPath() == "/api/tournament" {
+			if verifier.AllowsFileBootstrap() && (c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPost) && c.FullPath() == "/api/tournament" {
 				c.Next()
+				return
+			}
+			// In locked mode the env-var hash is the auth source even
+			// during bootstrap. Fall through to the verifier check below
+			// so a POST /api/tournament with a correct header creates the
+			// record (and any other endpoint without a header still 401s).
+			if !verifier.AllowsFileBootstrap() {
+				if ok, verr := verifier.Verify(c.GetHeader("X-Tournament-Password")); verr != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
+					c.Abort()
+					return
+				} else if ok {
+					c.Next()
+					return
+				}
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})
+				c.Abort()
 				return
 			}
 			c.JSON(http.StatusForbidden, gin.H{"error": "tournament not configured yet"})
@@ -59,40 +85,50 @@ func AuthMiddleware(store *state.Store) gin.HandlerFunc {
 			return
 		}
 
-		// Defense-in-depth for the F4 sentinel-into-auth-field scenario.
-		// The password comparison below (`password != t.Password`) is
-		// satisfied vacuously when both sides are "" — an unauthenticated
-		// client sending no `X-Tournament-Password` header (or an empty
-		// one) would match an empty stored password, exposing every
-		// /api/* endpoint anonymously. The POST + PUT handlers in
-		// handlers_tournament.go block writes that would land an empty
-		// Password through the API, but an operator who manually edits
-		// tournament.md (or any out-of-band write bypassing the handlers)
-		// could still land an empty Password on disk. The uninitialized
-		// branch above only covers the literal "New Tournament" + empty
-		// case — a real-named tournament with empty Password is a
-		// misconfiguration, and refusing to authorize is the safer
-		// fail-closed choice. The 403 message tells the operator to fix
-		// the password rather than the misleading 401 ("invalid
-		// tournament password" — which would imply the request is wrong,
-		// not the server state).
+		// Defense-in-depth for the F4 sentinel-into-auth-field scenario
+		// (file mode only). The plaintext comparison done by the file
+		// verifier is satisfied vacuously when both sides are "" — an
+		// unauthenticated client sending no `X-Tournament-Password`
+		// header would match an empty stored password and reach c.Next().
+		// The POST + PUT handlers in handlers_tournament.go block writes
+		// that would land an empty Password through the API, but an
+		// operator who manually edits tournament.md (or any out-of-band
+		// write bypassing the handlers) could still land an empty
+		// Password on disk. The uninitialized branch above only covers
+		// the literal "New Tournament" + empty case — a real-named
+		// tournament with empty Password is a misconfiguration, and
+		// refusing to authorize is the safer fail-closed choice. The
+		// 403 message tells the operator to fix the password rather than
+		// the misleading 401 ("invalid tournament password" — which
+		// would imply the request is wrong, not the server state).
 		//
-		// Recovery: since this branch returns 403 BEFORE the password
-		// check OR the uninitialized-bootstrap branch can run, there's
-		// no API path to fix the password (the bootstrap exception only
-		// matches the literal "New Tournament" default name). Operator
-		// must repair the file out-of-band: stop the server, edit
-		// tournament.md to either delete it (forces fresh bootstrap) or
-		// add a non-empty `password:` field, then restart. Documented in
-		// specs/openapi.yaml under the security scheme description.
-		if t.Password == "" {
+		// In locked mode the stored Password is irrelevant (auth comes
+		// from the bcrypt env-var hash), so this guard is suppressed via
+		// verifier.EnforceEmptyStoredGuard() — otherwise it would 403
+		// every request whenever the operator leaves the on-disk
+		// password empty (or migrates from a fresh install).
+		//
+		// Recovery (file mode): since this branch returns 403 BEFORE
+		// the password check OR the uninitialized-bootstrap branch can
+		// run, there's no API path to fix the password (the bootstrap
+		// exception only matches the literal "New Tournament" default
+		// name). Operator can either repair the file out-of-band, OR
+		// use the new POST /api/tournament/reset endpoint (added with
+		// the locked-password mode work) which is unauthenticated by
+		// design and writes a new Password to the existing record.
+		if verifier.EnforceEmptyStoredGuard() && t.Password == "" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "tournament misconfigured: password is not set"})
 			c.Abort()
 			return
 		}
 
-		password := c.GetHeader("X-Tournament-Password")
-		if password != t.Password {
+		ok, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
+		if verr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
+			c.Abort()
+			return
+		}
+		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})
 			c.Abort()
 			return

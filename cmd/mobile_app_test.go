@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewMobileAppCmd(t *testing.T) {
@@ -63,4 +64,40 @@ func TestMobileAppOptions_RunError(t *testing.T) {
 	// It will likely fail at r.Run because it can't bind or something,
 	// but NewStore might also fail.
 	assert.NotNil(t, err)
+}
+
+// Fail-closed: --lock-password without TOURNAMENT_PASSWORD_HASH must
+// refuse to start. The alternative (silent fall-through to file mode)
+// would let an operator believe they were running in locked mode while
+// the server actually serves the tournament.md plaintext password —
+// exactly the misconfiguration the flag was added to prevent.
+func TestMobileAppOptions_LockPasswordRequiresHash(t *testing.T) {
+	t.Setenv("TOURNAMENT_PASSWORD_HASH", "")
+	dir := t.TempDir()
+	o := &mobileAppOptions{
+		folder:       dir,
+		bindAddress:  "127.0.0.1",
+		port:         0,
+		lockPassword: true,
+	}
+	err := o.run(nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TOURNAMENT_PASSWORD_HASH")
+}
+
+// Locked mode also rejects a malformed hash at startup (caught by
+// bcrypt.Cost). The operator gets a clear error rather than a 401-on-
+// every-request runtime puzzle.
+func TestMobileAppOptions_LockPasswordRejectsBadHash(t *testing.T) {
+	t.Setenv("TOURNAMENT_PASSWORD_HASH", "not-a-bcrypt-hash")
+	dir := t.TempDir()
+	o := &mobileAppOptions{
+		folder:       dir,
+		bindAddress:  "127.0.0.1",
+		port:         0,
+		lockPassword: true,
+	}
+	err := o.run(nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "valid bcrypt hash")
 }

@@ -23,12 +23,16 @@ const (
 	EventTournamentUpdated       EventType = "tournament_updated"
 	EventScheduleUpdated         EventType = "schedule_updated"
 	EventCompetitorStatusUpdated EventType = "competitor_status_updated"
-	// EventPasswordReset fires when POST /api/tournament/reset rotates the
-	// admin password. Consumers in admin mode (app.jsx) clear their
-	// localStorage credential and re-show the AuthModal so a logged-in
-	// operator notices immediately instead of waiting for their next
-	// write to fail with 401. Viewers ignore the event — their flow
-	// doesn't depend on the admin password.
+	// EventPasswordReset fires when the admin password is rotated. Two
+	// broadcast sites:
+	//   - POST /api/tournament/reset (file mode only) — the public
+	//     recovery endpoint for a forgotten password.
+	//   - PUT /api/tournament (file mode only) — when the PUT body
+	//     contains a non-empty password that differs from the stored one.
+	// Consumers in admin mode (app.jsx) clear their localStorage credential
+	// and re-show the AuthModal so a logged-in operator notices immediately
+	// instead of waiting for their next write to fail with 401. Viewers
+	// ignore the event — their flow doesn't depend on the admin password.
 	EventPasswordReset EventType = "password_reset"
 )
 

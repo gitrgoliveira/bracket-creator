@@ -261,8 +261,18 @@ function App() {
   }, []);
 
   useE(() => {
-    localStorage.setItem("bc_authed", authed);
-    localStorage.setItem("bc_password", password);
+    // Guard localStorage writes with try/catch. In private-browsing
+    // and storage-denied contexts (Safari ITP, Firefox strict mode,
+    // certain enterprise policies) localStorage.setItem throws a
+    // SecurityError or QuotaExceededError. Without the guard, a storage
+    // failure here would propagate out of the effect and crash the React
+    // tree. The credential is lost on page reload in those contexts, but
+    // the session continues — the user just re-authenticates after
+    // closing the tab (same experience as if cookies were blocked).
+    try {
+      localStorage.setItem("bc_authed", authed);
+      localStorage.setItem("bc_password", password);
+    } catch { /* storage unavailable — session only, no persistent credential */ }
     // Keep the ref in lockstep so the long-lived SSE handler below
     // can read the current value without being recreated on every
     // sign-in/sign-out.

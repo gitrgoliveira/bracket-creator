@@ -48,7 +48,13 @@ Click **Admin** and enter the tournament password to access the admin console. T
 
 **File mode** (default — local / private LAN use):
 
-The admin password lives plaintext in `tournament-data/tournament.md`. Set it during the **Create tournament** flow, or edit the file directly. If you forget the password, browse to `http://<host>/reset` and choose a new one — no old password required. The reset endpoint is intentionally unauthenticated and is the documented recovery path; for trusted networks this is convenient, and for internet-exposed deployments use locked mode below.
+The admin password lives plaintext in `tournament-data/tournament.md`. Set it during the **Create tournament** flow, or edit the file directly. If you forget the password, **from the tournament server itself** browse to `http://localhost:<port>/reset` and choose a new one — no old password required. The browser reset form is intentionally unauthenticated and only works from a loopback address (DNS-rebinding protection blocks browser form submissions from LAN IPs). If you're on a different machine, use curl directly on the server:
+
+```bash
+curl -s -X POST http://localhost:8080/api/tournament/reset \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"newpass"}'
+```
 
 **Locked mode** (recommended for any deployment reachable over the internet):
 

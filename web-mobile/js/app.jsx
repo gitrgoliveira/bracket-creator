@@ -134,10 +134,15 @@ function App() {
   // render. The post-mount useEffect that previously did this ran AFTER
   // the URL-sync effect, so a direct load of /reset (or any non-`/`
   // path) saw the URL get overwritten back to `/` on first paint
-  // because pathFromState() read the default state. The IIFE evaluates
-  // once synchronously; its result is passed as the initial value to the
-  // useState calls below. React ignores subsequent initial values on
-  // re-renders so the URL is only parsed once.
+  // because pathFromState() read the default state.
+  //
+  // The IIFE runs on EVERY render (JavaScript evaluates all arguments
+  // eagerly), but React only uses the return value on the FIRST render —
+  // subsequent renders use the current state value and ignore the
+  // initial-state argument entirely. So parsePath is called repeatedly
+  // but its result is only meaningful once. If this ever becomes a
+  // performance concern, convert to the lazy-initializer function form:
+  // useState(() => parsePath(window.location.pathname))
   const initialRoute = (() => {
     try {
       return parsePath(window.location.pathname);

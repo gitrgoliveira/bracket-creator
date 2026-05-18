@@ -34,7 +34,7 @@ The server has two authentication modes for the admin console; viewer routes are
 
 The admin password is stored plaintext in `tournament-data/tournament.md` and compared by exact-string match. Set the password during the in-app **Create tournament** flow, or edit `tournament.md` directly.
 
-- `POST /api/tournament/reset` is enabled and unauthenticated — visit `/reset` in a browser to set a new password if you've forgotten the current one.
+- `POST /api/tournament/reset` is enabled and unauthenticated — **from the server machine itself** browse to `http://localhost:<port>/reset` to set a new password. The browser form only works from a loopback address (localhost/127.0.0.1/::1); a DNS-rebinding guard blocks browser submissions from non-loopback hosts. LAN operators on a different machine should use curl on the server: `curl -s -X POST http://localhost:<port>/api/tournament/reset -H 'Content-Type: application/json' -d '{"password":"newpass"}'`
 - `GET /api/auth-config` returns `{"mode": "file", "resetEnabled": true}`.
 
 ### Locked mode (`--lock-password`)

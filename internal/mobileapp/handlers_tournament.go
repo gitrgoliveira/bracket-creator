@@ -401,6 +401,17 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// the body's password is discarded here). The stored value is
 		// read back as empty via GET /tournament so the admin doesn't
 		// see a stale credential after bootstrap.
+		// Load the existing tournament (if any) for two purposes:
+		//   1. Locked mode: preserve the on-disk password so a later
+		//      file-mode rollback can recover it.
+		//   2. File mode: detect a password change so we can broadcast
+		//      EventPasswordReset and clear stale admin sessions.
+		existingForPost, loadErrPost := store.LoadTournament()
+		if loadErrPost != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": loadErrPost.Error()})
+			return
+		}
+
 		if verifier != nil && verifier.RedactStoredPassword() {
 			// Locked mode: the on-disk Password is not authoritative.
 			// For a true first bootstrap (no tournament.md on disk yet),
@@ -408,11 +419,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// credential visible. For re-POSTs against an existing record,
 			// preserve whatever is currently stored so a later file-mode
 			// rollback can recover the original credential.
-			existingForPost, loadErrPost := store.LoadTournament()
-			if loadErrPost != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": loadErrPost.Error()})
-				return
-			}
 			if existingForPost != nil {
 				t.Password = existingForPost.Password
 			} else {
@@ -429,6 +435,21 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 
 		hub.Broadcast(EventTournamentUpdated, nil)
+		// In file mode, broadcast EventPasswordReset if the password
+		// changed so other logged-in admin sessions clear their stale
+		// cached credentials. Mirrors the PUT handler's behavior.
+		// In locked mode, t.Password is always set to the pre-existing
+		// on-disk value above, so it never changes via POST and we skip
+		// the broadcast.
+		if verifier == nil || !verifier.RedactStoredPassword() {
+			var oldPass string
+			if existingForPost != nil {
+				oldPass = existingForPost.Password
+			}
+			if t.Password != oldPass {
+				hub.Broadcast(EventPasswordReset, passwordResetEventData{})
+			}
+		}
 		// In locked mode the on-disk Password is not authoritative; strip it
 		// from the response so callers don't cache a stale file-mode credential
 		// that would never authenticate against the env-var bcrypt hash.

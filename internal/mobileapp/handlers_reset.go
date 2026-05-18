@@ -52,6 +52,22 @@ const MaxLenOriginatorID = 128
 // the handler. Mirrors errPasswordRequired in handlers_tournament.go.
 var errResetPasswordRequired = errors.New("password is required")
 
+// isLoopbackHost reports whether the host component of hostport is a
+// loopback interface (localhost, 127.0.0.1, or ::1). Used by
+// isSameOriginReset to guard against DNS-rebinding attacks: loopback
+// addresses are not route-able from external networks, so a request whose
+// Host is loopback cannot have originated from an outside page.
+func isLoopbackHost(hostport string) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport // bare host with no port
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(host, "localhost")
+}
+
 // isSameOriginReset reports whether the request's Origin header is
 // safe to treat as a same-origin / non-browser caller for the reset
 // endpoint. The global CORS policy is `Access-Control-Allow-Origin: *`
@@ -94,22 +110,6 @@ var errResetPasswordRequired = errors.New("password is required")
 // We deliberately do NOT support an allowlist env var here: the
 // recovery path is for operators sitting at the tournament server.
 // Anyone reaching it cross-origin is either misconfigured or hostile.
-// isLoopbackHost reports whether the host component of hostport is a
-// loopback interface (localhost, 127.0.0.1, or ::1). Used by
-// isSameOriginReset to guard against DNS-rebinding attacks: loopback
-// addresses are not route-able from external networks, so a request whose
-// Host is loopback cannot have originated from an outside page.
-func isLoopbackHost(hostport string) bool {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport // bare host with no port
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return strings.EqualFold(host, "localhost")
-}
-
 func isSameOriginReset(c *gin.Context) bool {
 	origin := strings.TrimSpace(c.GetHeader("Origin"))
 	if origin == "" {
@@ -173,6 +173,16 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			c.JSON(http.StatusForbidden, gin.H{"error": "cross-origin reset not permitted"})
 			return
 		}
+
+		// Cap the request body before parsing so an attacker cannot
+		// send an arbitrarily large payload and force the server to
+		// allocate memory for it. The actual content is small:
+		// password ≤ 256 bytes + originatorId ≤ 128 bytes + JSON
+		// syntax ≈ 40 bytes → 512 bytes is a generous limit.
+		// MaxBytesReader wraps the body and causes ShouldBindJSON to
+		// return an error if the body exceeds the cap.
+		const maxResetBodyBytes = 512
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxResetBodyBytes)
 
 		var req resetPasswordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

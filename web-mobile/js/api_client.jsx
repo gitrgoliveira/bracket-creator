@@ -37,17 +37,21 @@ const API = {
     // Public endpoint — returns {mode: "file"|"locked", resetEnabled: bool}.
     // Mounted on App() boot to decide whether to render the "Forgot
     // password?" link in AuthModal and whether the /reset SPA route
-    // should show a form or an "operator-disabled" message. Failing
-    // open here is intentional: if the call errors, the SPA falls back
-    // to the legacy behavior (reset visible) — a fresh-deploy SPA
-    // pointed at an older server without this endpoint still works,
-    // and any 5xx during fetch doesn't break sign-in.
+    // should show a form or an "operator-disabled" message. Always
+    // resolves (never rejects): non-2xx responses, network failures, and
+    // JSON parse errors all fall back to the file-mode default so a
+    // fresh-deploy SPA pointed at an older server without this endpoint
+    // still works, and any transport error doesn't break sign-in.
     async fetchAuthConfig() {
-        const res = await fetch('/api/auth-config');
-        if (!res.ok) {
+        try {
+            const res = await fetch('/api/auth-config');
+            if (!res.ok) {
+                return { mode: 'file', resetEnabled: true };
+            }
+            return await res.json();
+        } catch {
             return { mode: 'file', resetEnabled: true };
         }
-        return res.json();
     },
     // Reset the tournament password. Unauthenticated by design — the
     // server enforces "is this endpoint enabled" via the verifier's

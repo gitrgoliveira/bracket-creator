@@ -36,7 +36,7 @@ func TestCourtsEqual(t *testing.T) {
 
 // TestMaybeAutoCompletePools_AllComplete verifies that calling
 // MaybeAutoCompletePools on a pools competition whose every match is
-// completed transitions Status to "completed" and returns true.
+// completed transitions Status to "completed" and returns AutoCompleteTransitioned.
 func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "auto-complete-all"
@@ -55,9 +55,9 @@ func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
-	changed, err := eng.MaybeAutoCompletePools(compID)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.True(t, changed, "all matches completed should trigger status transition")
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "all matches completed should trigger status transition")
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
@@ -84,9 +84,9 @@ func TestMaybeAutoCompletePools_OnePending(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
-	changed, err := eng.MaybeAutoCompletePools(compID)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.False(t, changed, "a pending match must prevent auto-complete")
+	assert.Equal(t, AutoCompleteNoChange, outcome, "a pending match must prevent auto-complete")
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
@@ -108,11 +108,11 @@ func TestMaybeAutoCompletePools_NonPoolsFormat(t *testing.T) {
 	}))
 	// No pool matches on disk — all pool match loads return empty.
 
-	changed, err := eng.MaybeAutoCompletePools(compID)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
 	// No matches at all → outer fast-path sees "all complete" (vacuously true),
 	// but the inner transform guard rejects CompFormatPlayoffs → no transition.
-	assert.False(t, changed, "non-pools format must not trigger auto-complete")
+	assert.Equal(t, AutoCompleteNoChange, outcome, "non-pools format must not trigger auto-complete")
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestMaybeAutoCompletePools_NonPoolsFormat(t *testing.T) {
 
 // TestMaybeAutoCompletePools_AlreadyComplete verifies idempotency:
 // calling the function on an already-completed competition must return
-// false (no change), not error.
+// AutoCompleteNoChange, not error.
 func TestMaybeAutoCompletePools_AlreadyComplete(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "auto-complete-idempotent"
@@ -139,7 +139,7 @@ func TestMaybeAutoCompletePools_AlreadyComplete(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
-	changed, err := eng.MaybeAutoCompletePools(compID)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.False(t, changed, "already-completed competition must return changed=false")
+	assert.Equal(t, AutoCompleteNoChange, outcome, "already-completed competition must return AutoCompleteNoChange")
 }

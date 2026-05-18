@@ -42,7 +42,7 @@ import (
 type DaihyosenEngine interface {
 	AddDaihyosen(compID, matchID string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
 	RecordMatchResultWithIneligibility(compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
-	MaybeAutoCompletePools(compID string) (bool, error)
+	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 }
 
 // DaihyosenStore is the consumer-boundary view of *state.Store used by
@@ -136,15 +136,17 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			"result":        &updated,
 		})
 
-		// Inline auto-complete check (same pattern as tryAutoCompletePools
-		// but without forcing a ScoringEngine adapter for one call site).
-		autoCompleted, err := eng.MaybeAutoCompletePools(id)
+		// Inline auto-complete check (same pattern as tryAutoCompletePools).
+		outcome, autoErr := eng.MaybeAutoCompletePools(id)
 		switch {
-		case err != nil:
-			log.Printf("MaybeAutoCompletePools(%s) after daihyosen: %v", id, err)
+		case autoErr != nil:
+			log.Printf("MaybeAutoCompletePools(%s) after daihyosen: %v", id, autoErr)
 			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
-		case autoCompleted:
+		case outcome == engine.AutoCompleteTransitioned:
 			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
+		case outcome == engine.AutoCompleteTiebreakInjected:
+			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
+			hub.Broadcast(EventScheduleUpdated, nil)
 		}
 
 		c.JSON(http.StatusOK, gin.H{"subResult": sub, "result": &updated})

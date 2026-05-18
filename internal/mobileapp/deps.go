@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -82,10 +83,10 @@ type ScoringEngine interface {
 	// as RecordDecision; calls flow through the supplied StoreTx.
 	RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
-	// "complete" when every pool match is done. Returns whether the
-	// transition actually happened (so callers know whether to broadcast
-	// EventCompetitionCompleted). Mirrors engine.Engine.MaybeAutoCompletePools.
-	MaybeAutoCompletePools(compID string) (bool, error)
+	// "complete" when every pool match is done, or injects supplementary
+	// ippon-shobu tiebreaker matches when ties are detected. Mirrors
+	// engine.Engine.MaybeAutoCompletePools.
+	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 	// UpdateMatchCourt reassigns a match to a different court. Mirrors
 	// engine.Engine.UpdateMatchCourt.
 	UpdateMatchCourt(compID string, matchID string, newCourt string) error

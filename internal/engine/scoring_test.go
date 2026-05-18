@@ -233,9 +233,9 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
 			{ID: "P1-2", Status: state.MatchStatusScheduled, SideA: "Alice", SideB: "Charlie"},
 		}))
-		done, err := eng.MaybeAutoCompletePools(compID)
+		outcome, err := eng.MaybeAutoCompletePools(compID)
 		require.NoError(t, err)
-		assert.False(t, done)
+		assert.Equal(t, AutoCompleteNoChange, outcome)
 		comp, _ := store.LoadCompetition(compID)
 		assert.Equal(t, state.CompStatusPools, comp.Status)
 	})
@@ -245,17 +245,17 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
 			{ID: "P1-2", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Charlie"},
 		}))
-		done, err := eng.MaybeAutoCompletePools(compID)
+		outcome, err := eng.MaybeAutoCompletePools(compID)
 		require.NoError(t, err)
-		assert.True(t, done)
+		assert.Equal(t, AutoCompleteTransitioned, outcome)
 		comp, _ := store.LoadCompetition(compID)
 		assert.Equal(t, state.CompStatusComplete, comp.Status)
 	})
 
 	t.Run("is a no-op once already complete (idempotent)", func(t *testing.T) {
-		done, err := eng.MaybeAutoCompletePools(compID)
+		outcome, err := eng.MaybeAutoCompletePools(compID)
 		require.NoError(t, err)
-		assert.False(t, done)
+		assert.Equal(t, AutoCompleteNoChange, outcome)
 	})
 
 	t.Run("ignored for playoffs-format competitions", func(t *testing.T) {
@@ -266,9 +266,9 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		require.NoError(t, store.SavePoolMatches(koID, []state.MatchResult{
 			{ID: "M1", Status: state.MatchStatusCompleted, Winner: "X", SideA: "X", SideB: "Y"},
 		}))
-		done, err := eng.MaybeAutoCompletePools(koID)
+		outcome, err := eng.MaybeAutoCompletePools(koID)
 		require.NoError(t, err)
-		assert.False(t, done)
+		assert.Equal(t, AutoCompleteNoChange, outcome)
 		comp, _ := store.LoadCompetition(koID)
 		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
 	})
@@ -281,9 +281,9 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 			ID: emptyID, Name: "Empty", Format: state.CompFormatPools, Status: state.CompStatusPools,
 		}))
 		require.NoError(t, store.SavePoolMatches(emptyID, []state.MatchResult{}))
-		done, err := eng.MaybeAutoCompletePools(emptyID)
+		outcome, err := eng.MaybeAutoCompletePools(emptyID)
 		require.NoError(t, err)
-		assert.True(t, done)
+		assert.Equal(t, AutoCompleteTransitioned, outcome)
 		comp, _ := store.LoadCompetition(emptyID)
 		assert.Equal(t, state.CompStatusComplete, comp.Status)
 	})
@@ -581,14 +581,15 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		//     flagged. Linking final status to the winner's return value
 		//     forces the test to fail if auto-complete overwrites a
 		//     committed invalidate.
-		var autoCompleted, invalidated bool
+		var autoCompleted bool
+		var invalidated bool
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			c, err := eng.MaybeAutoCompletePools(compID)
+			outcome, err := eng.MaybeAutoCompletePools(compID)
 			assert.NoError(t, err, "iter %d: MaybeAutoCompletePools error", i)
-			autoCompleted = c
+			autoCompleted = outcome == AutoCompleteTransitioned
 		}()
 		go func() {
 			defer wg.Done()

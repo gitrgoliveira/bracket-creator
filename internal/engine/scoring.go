@@ -309,6 +309,10 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 			if m.Status != state.MatchStatusCompleted {
 				continue
 			}
+			// Tiebreaker matches don't count toward regular pool stats.
+			if IsTiebreakerMatchID(m.ID) {
+				continue
+			}
 			sA := playerStandings[m.SideA]
 			sB := playerStandings[m.SideB]
 			if sA == nil || sB == nil {
@@ -383,6 +387,33 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 		sort.Slice(sorted, func(i, j int) bool {
 			return sorted[i].Points > sorted[j].Points
 		})
+
+		// Apply tiebreaker results as a secondary sort within tied groups.
+		// Build a head-to-head map from completed TB matches in this pool.
+		tbWins := map[string]int{} // player name → TB match wins
+		for _, m := range matches {
+			if !IsTiebreakerMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+				continue
+			}
+			tbWins[m.Winner]++
+		}
+		if len(tbWins) > 0 {
+			// Re-sort within each tied group: higher tbWins ranks first.
+			// Only re-order within groups that share the same Points value.
+			i := 0
+			for i < len(sorted) {
+				j := i + 1
+				for j < len(sorted) && sorted[j].Points == sorted[i].Points {
+					j++
+				}
+				if j-i >= 2 {
+					sort.SliceStable(sorted[i:j], func(a, b int) bool {
+						return tbWins[sorted[i+a].Player.Name] > tbWins[sorted[i+b].Player.Name]
+					})
+				}
+				i = j
+			}
+		}
 
 		// Apply manual rank overrides
 		overrides, _ := e.store.LoadOverrides(compId)

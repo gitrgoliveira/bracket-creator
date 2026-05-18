@@ -470,8 +470,9 @@ func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	assert.Equal(t, 0, countCompletedEvents(t, partial, "qs1"),
 		"partial quick-score must not broadcast competition_completed")
 
-	// Final match — exactly one completion
-	quickScore("PoolA-2", "TeamA", "TeamC", 2, 1, 0)
+	// Final match — TeamA wins 3-0 so TeamC gets 0 IV (vs TeamB's 1 IV),
+	// avoiding a tie that would defer completion via tiebreaker injection.
+	quickScore("PoolA-2", "TeamA", "TeamC", 3, 0, 0)
 	final := drainHubEvents(t, ch, 100*time.Millisecond)
 	assert.Equal(t, 1, countCompletedEvents(t, final, "qs1"),
 		"final quick-score must emit competition_completed exactly once")

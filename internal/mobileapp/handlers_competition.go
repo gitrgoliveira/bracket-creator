@@ -920,10 +920,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// at start time. The non-zero case will trip via score handlers.
 		// Same sanitized-header contract as tryAutoCompletePools — see
 		// AutoCompleteErrorHeader/Value in hub.go.
-		if autoCompleted, err := eng.MaybeAutoCompletePools(id); err != nil {
+		if outcome, err := eng.MaybeAutoCompletePools(id); err != nil {
 			log.Printf("MaybeAutoCompletePools(%s) after start: %v", id, err)
 			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
-		} else if autoCompleted {
+		} else if outcome == engine.AutoCompleteTransitioned {
 			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
 			// Reflect the auto-complete in the response body so the caller doesn't
 			// see a stale "pools" status. The persisted file is already updated.

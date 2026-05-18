@@ -22,58 +22,85 @@ func courtsEqual(a, b []string) bool {
 	return true
 }
 
+// AutoCompleteOutcome is the result of a MaybeAutoCompletePools call.
+type AutoCompleteOutcome int
+
+const (
+	// AutoCompleteNoChange means no transition occurred (matches still pending).
+	AutoCompleteNoChange AutoCompleteOutcome = 0
+	// AutoCompleteTransitioned means all matches finished and the competition
+	// moved to CompStatusComplete. Callers should broadcast EventCompetitionCompleted.
+	AutoCompleteTransitioned AutoCompleteOutcome = 1
+	// AutoCompleteTiebreakInjected means all regular pool matches finished but
+	// tied competitors were found. Supplementary ippon-shobu matches were injected
+	// and the competition remains in CompStatusPools. Callers should broadcast
+	// EventMatchUpdated and EventScheduleUpdated.
+	AutoCompleteTiebreakInjected AutoCompleteOutcome = 2
+)
+
 // MaybeAutoCompletePools transitions a pools-format competition from
 // CompStatusPools to CompStatusComplete when every pool match has been
 // recorded as completed. It is a no-op for any other format or status,
 // or when at least one pool match is still scheduled/running.
 //
-// Returns true if the transition was performed. Callers should broadcast
-// EventCompetitionCompleted when true.
+// When all regular pool matches are done but tied competitors remain,
+// supplementary ippon-shobu tiebreaker matches are injected and
+// AutoCompleteTiebreakInjected is returned instead of transitioning.
 //
 // Atomic: the status check and the save run inside
 // state.Store.UpdateCompetitionChanged so a concurrent
-// invalidate-vs-auto-complete pair can't lose either mutation. Pre-
-// atomic-primitive, LoadCompetition + SaveCompetitionChanged ran
-// sequentially without a shared lock — a concurrent admin invalidate
-// could land between Load and Save, and our late save would clobber
-// the "invalid" status back to "complete" (or vice versa). Even
-// though SaveCompetitionChanged's content-equality check prevented
-// duplicate broadcasts for the "two concurrent auto-completes" case,
-// it offered no protection against admin-action interference.
-func (e *Engine) MaybeAutoCompletePools(compID string) (bool, error) {
+// invalidate-vs-auto-complete pair can't lose either mutation.
+func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, error) {
 	// Optional fast-path outside the lock — avoids taking the
 	// per-comp write lock for the common "still in progress" case.
-	// The authoritative re-check happens inside the transform; we
-	// only use this snapshot to skip when it's already obviously
-	// false.
 	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
-		return false, err
+		return AutoCompleteNoChange, err
 	}
+
+	// Partition matches into regular vs tiebreaker.
+	allComplete := true
+	hasIncompleteTB := false
+	hasCompleteTB := false
 	for _, m := range matches {
-		if m.Status != state.MatchStatusCompleted {
-			return false, nil
+		if IsTiebreakerMatchID(m.ID) {
+			if m.Status != state.MatchStatusCompleted {
+				hasIncompleteTB = true
+			} else {
+				hasCompleteTB = true
+			}
+		} else {
+			if m.Status != state.MatchStatusCompleted {
+				allComplete = false
+			}
 		}
 	}
 
+	if !allComplete {
+		return AutoCompleteNoChange, nil
+	}
+	if hasIncompleteTB {
+		return AutoCompleteNoChange, nil
+	}
+
+	// All regular matches (and any existing TB matches) are complete.
+	// If there are no TB matches yet, check for ties and inject if needed.
+	if !hasCompleteTB {
+		injected, injErr := e.InjectTiebreakerMatches(compID)
+		if injErr != nil {
+			return AutoCompleteNoChange, injErr
+		}
+		if len(injected) > 0 {
+			return AutoCompleteTiebreakInjected, nil
+		}
+	}
+
+	// No ties (or ties already resolved). Transition to complete.
 	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
-		// Re-check preconditions INSIDE the lock. A concurrent
-		// invalidate could have moved Status off Pools between our
-		// outer match-load and acquiring the comp lock.
 		if comp == nil || comp.Format != state.CompFormatPools || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
-		// Re-check pool-matches completion under the lock, NOT against
-		// the outer-snapshot `matches`. The outer snapshot was taken
-		// before we acquired the per-comp write lock, so a concurrent
-		// score-save could have:
-		//   - reverted a completed match back to scheduled (admin fix)
-		//   - inserted a new scheduled match (rare but possible if
-		//     the pool gen ran between our outer Load and this point)
-		// In either case we'd otherwise mark the competition complete
-		// based on stale data. LoadPoolMatchesLocked is the lock-free
-		// read primitive — we already hold the per-comp lock, so the
-		// disk state is stable under us.
+		// Re-check under the lock.
 		freshMatches, ferr := e.store.LoadPoolMatchesLocked(compID)
 		if ferr != nil {
 			return nil, ferr
@@ -86,7 +113,13 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (bool, error) {
 		comp.Status = state.CompStatusComplete
 		return comp, nil
 	})
-	return changed, err
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
+	if changed {
+		return AutoCompleteTransitioned, nil
+	}
+	return AutoCompleteNoChange, nil
 }
 
 // StartCompetition runs the competition-start pipeline: validate

@@ -16,6 +16,7 @@ const (
 	DecisionFusensho            Decision = "fusensho"
 	DecisionDaihyosen           Decision = "daihyosen"
 	DecisionKachinukiExhaustion Decision = "kachinuki-exhaustion"
+	DecisionIpponShobu          Decision = "ippon-shobu"
 )
 
 // Valid reports whether d is one of the defined Decision constants
@@ -24,7 +25,8 @@ const (
 func (d Decision) Valid() bool {
 	switch d {
 	case DecisionNone, DecisionFought, DecisionHikiwake, DecisionKiken,
-		DecisionFusenpai, DecisionFusensho, DecisionDaihyosen, DecisionKachinukiExhaustion:
+		DecisionFusenpai, DecisionFusensho, DecisionDaihyosen, DecisionKachinukiExhaustion,
+		DecisionIpponShobu:
 		return true
 	}
 	return false

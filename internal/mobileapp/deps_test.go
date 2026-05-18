@@ -47,8 +47,8 @@ func (stubScoringEngine) RecordDecisionTx(state.StoreTx, string, string, string,
 	return nil, nil, nil
 }
 
-func (stubScoringEngine) MaybeAutoCompletePools(string) (bool, error) {
-	return false, nil
+func (stubScoringEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
+	return engine.AutoCompleteNoChange, nil
 }
 
 func (stubScoringEngine) UpdateMatchCourt(string, string, string) error {

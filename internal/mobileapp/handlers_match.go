@@ -84,14 +84,18 @@ func enforceEnchoCap(c *gin.Context, store CompetitionStore, id string, encho *s
 // stack. Production code passes `*engine.Engine` and `*Hub` which
 // satisfy the interfaces by structural match.
 func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, compID string) {
-	autoCompleted, err := eng.MaybeAutoCompletePools(compID)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
 	if err != nil {
 		log.Printf("MaybeAutoCompletePools(%s): %v", compID, err)
 		c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
 		return
 	}
-	if autoCompleted {
+	switch outcome {
+	case engine.AutoCompleteTransitioned:
 		hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": compID})
+	case engine.AutoCompleteTiebreakInjected:
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
+		hub.Broadcast(EventScheduleUpdated, nil)
 	}
 }
 

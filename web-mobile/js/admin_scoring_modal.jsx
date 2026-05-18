@@ -160,6 +160,75 @@ function prevEnchoPeriod(current) {
   return Math.max(1, current - 1);
 }
 
+// EnchoControl — collapsed by default to a small "⏱ Overtime" pill so
+// it occupies <24px of vertical space in the live scoring modal. The
+// full counter UI mounts only when overtime is active (enchoPeriodCount
+// > 0) OR the operator clicks the pill (local showCounter state). The
+// counter is the existing −/×N/+ stepper plus the "Maximum encho
+// periods reached" warning, preserved verbatim. Used by both
+// ScoreEditorModal and TeamScoreEditorModal.
+function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount, maxEnchoPeriods }) {
+  const [showCounter, setShowCounter] = useStateA(enchoPeriodCount > 0);
+  const expanded = showCounter || enchoPeriodCount > 0;
+  if (!expanded) {
+    return (
+      <div className="encho-row encho-row--collapsed">
+        <button
+          type="button"
+          className="encho-pill"
+          data-testid="scoring-modal-encho-toggle"
+          onClick={() => setShowCounter(true)}
+          aria-label="Mark overtime started (encho)"
+        >
+          <span aria-hidden="true">⏱</span>
+          <TermAS name="encho">Overtime</TermAS>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="encho-row encho-row--expanded">
+      <label className="encho-row__label">
+        <input
+          data-testid="scoring-modal-encho-toggle"
+          type="checkbox"
+          checked={enchoPeriodCount > 0}
+          onChange={(e) => {
+            const next = e.target.checked ? Math.max(1, enchoPeriodCount) : 0;
+            setEnchoPeriodCount(next);
+            if (!e.target.checked) setShowCounter(false);
+          }}
+        />
+        <TermAS name="encho">Encho</TermAS> started (overtime)
+      </label>
+      {enchoPeriodCount > 0 && (
+        <div className="encho-row__stepper">
+          <button
+            type="button"
+            className="btn btn--sm encho-row__btn"
+            onClick={() => setEnchoPeriodCount(c => prevEnchoPeriod(c))}
+            disabled={enchoPeriodCount <= 1}
+            aria-label="Decrease overtime period count"
+          >−</button>
+          <span className="encho-row__count">×{enchoPeriodCount}</span>
+          <button
+            type="button"
+            className="btn btn--sm encho-row__btn"
+            onClick={() => setEnchoPeriodCount(c => nextEnchoPeriod(c, maxEnchoPeriods))}
+            disabled={!canIncrementEncho(enchoPeriodCount, maxEnchoPeriods)}
+            aria-label="Increase overtime period count"
+          >+</button>
+        </div>
+      )}
+      {shouldShowEnchoMaxBanner(enchoPeriodCount, maxEnchoPeriods) && (
+        <span role="alert" className="encho-row__max-banner">
+          Maximum encho periods reached
+        </span>
+      )}
+    </div>
+  );
+}
+
 // Render the inline kiken/fusenpai prompt that replaces the score controls
 // while open. Side picker uses radio inputs labelled "SHIRO (White)" / "AKA
 // (Red)" to stay consistent with the score board legend; the value submitted
@@ -661,14 +730,14 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 
   return (
     <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className="editor-modal editor-modal--lg" onClick={(e) => e.stopPropagation()}>
+      <div className="editor-modal editor-modal--lg editor-modal--compact" onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+            <div className="editor-modal__eyebrow">
               {m.compName} · {m.phase === "pool" ? m.poolName : m.round}
-              {enchoPeriodCount > 0 && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· (E) Overtime ×{enchoPeriodCount}</span>}
+              {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
-            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, letterSpacing: "-0.01em" }}>
+            <div className="editor-modal__title">
               <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Live"}
             </div>
           </div>
@@ -681,46 +750,15 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
         </div>
 
         <div className="editor-modal__body">
-          {/* FR-033 encho toggle: small counter that lets the operator
-              mark an overtime period and increment it for subsequent
-              periods. Slice 3 will wire decision/kiken; Slice 1 only
-              persists the count via toBackendMatchResult so the (E)
-              suffix survives re-opens and shows in the match list. */}
-          <div className="encho-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-              <input
-                data-testid="scoring-modal-encho-toggle"
-                type="checkbox"
-                checked={enchoPeriodCount > 0}
-                onChange={(e) => setEnchoPeriodCount(e.target.checked ? Math.max(1, enchoPeriodCount) : 0)}
-              />
-              <TermAS name="encho">Encho</TermAS> started (overtime)
-            </label>
-            {enchoPeriodCount > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  onClick={() => setEnchoPeriodCount(c => prevEnchoPeriod(c))}
-                  disabled={enchoPeriodCount <= 1}
-                  aria-label="Decrease overtime period count"
-                >−</button>
-                <span style={{ minWidth: 24, textAlign: "center", fontFamily: "var(--font-mono)", fontWeight: 700 }}>×{enchoPeriodCount}</span>
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  onClick={() => setEnchoPeriodCount(c => nextEnchoPeriod(c, maxEnchoPeriods))}
-                  disabled={!canIncrementEncho(enchoPeriodCount, maxEnchoPeriods)}
-                  aria-label="Increase overtime period count"
-                >+</button>
-              </div>
-            )}
-            {shouldShowEnchoMaxBanner(enchoPeriodCount, maxEnchoPeriods) && (
-              <span role="alert" style={{ color: "var(--danger, #d32f2f)", fontSize: "0.8em", marginTop: 4, display: "block" }}>
-                Maximum encho periods reached
-              </span>
-            )}
-          </div>
+          {/* FR-033 encho toggle: collapses to a small "⏱ Overtime" pill
+              when no overtime is active. Click the pill (or set the
+              counter through the existing flow) to mount the full
+              counter UI. Saves ~32px of vertical space pre-overtime. */}
+          <EnchoControl
+            enchoPeriodCount={enchoPeriodCount}
+            setEnchoPeriodCount={setEnchoPeriodCount}
+            maxEnchoPeriods={maxEnchoPeriods}
+          />
           <div className="scoring-board">
               {/* Score slots + point buttons */}
               <div className="sb-match">
@@ -985,6 +1023,12 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // grid behaviour.
   const teamMatchType = m.teamMatchType || compMeta?.teamMatchType || "fixed";
   const isKachinuki = teamMatchType === "kachinuki";
+  // Compact "Instrument Panel" mode fits the modal on one viewport page
+  // for ≤5-person teams. Kachinuki always renders the current bout
+  // only (see visiblePositions below), so it also fits even with a 9-
+  // person roster. Larger fixed-format teams keep the roomier layout
+  // and use .team-bouts-scroll for independent bout-list scrolling.
+  const useCompact = teamSize <= 5 || isKachinuki;
   // T141: daihyosen is knockout-only — pool matches resolve ties via
   // the standings tiebreak, not a representative bout. Format comes
   // from match-level compFormat (when set by compMatches) or the comp
@@ -1219,14 +1263,14 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 
   return (
     <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className="editor-modal editor-modal--team" onClick={(e) => e.stopPropagation()}>
+      <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+            <div className="editor-modal__eyebrow">
               {m.compName} · {m.phase === "pool" ? m.poolName : m.round}
-              {enchoPeriodCount > 0 && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· (E) Overtime ×{enchoPeriodCount}</span>}
+              {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
-            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, letterSpacing: "-0.01em" }}>
+            <div className="editor-modal__title">
               <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Live"}
             </div>
           </div>
@@ -1239,42 +1283,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         </div>
 
         <div className="editor-modal__body">
-          {/* FR-033 encho toggle: see ScoreEditorModal for the contract. */}
-          <div className="encho-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-              <input
-                data-testid="scoring-modal-encho-toggle"
-                type="checkbox"
-                checked={enchoPeriodCount > 0}
-                onChange={(e) => setEnchoPeriodCount(e.target.checked ? Math.max(1, enchoPeriodCount) : 0)}
-              />
-              <TermAS name="encho">Encho</TermAS> started (overtime)
-            </label>
-            {enchoPeriodCount > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  onClick={() => setEnchoPeriodCount(c => prevEnchoPeriod(c))}
-                  disabled={enchoPeriodCount <= 1}
-                  aria-label="Decrease overtime period count"
-                >−</button>
-                <span style={{ minWidth: 24, textAlign: "center", fontFamily: "var(--font-mono)", fontWeight: 700 }}>×{enchoPeriodCount}</span>
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  onClick={() => setEnchoPeriodCount(c => nextEnchoPeriod(c, maxEnchoPeriods))}
-                  disabled={!canIncrementEncho(enchoPeriodCount, maxEnchoPeriods)}
-                  aria-label="Increase overtime period count"
-                >+</button>
-              </div>
-            )}
-            {shouldShowEnchoMaxBanner(enchoPeriodCount, maxEnchoPeriods) && (
-              <span role="alert" style={{ color: "var(--danger, #d32f2f)", fontSize: "0.8em", marginTop: 4, display: "block" }}>
-                Maximum encho periods reached
-              </span>
-            )}
-          </div>
+          {/* FR-033 encho toggle: see ScoreEditorModal for the contract.
+              EnchoControl collapses to a pill when no overtime is active. */}
+          <EnchoControl
+            enchoPeriodCount={enchoPeriodCount}
+            setEnchoPeriodCount={setEnchoPeriodCount}
+            maxEnchoPeriods={maxEnchoPeriods}
+          />
           {/* Team header */}
           <div className="sb-match" style={{ marginBottom: 16 }}>
             {teamSides.map((s, idx) => (
@@ -1297,7 +1312,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               the first row if nothing has been scored yet) — the server
               appends new bouts via engine.MaybeAdvanceKachinuki after
               each score record, so the operator only ever scores one
-              bout at a time. */}
+              bout at a time. The .team-bouts-scroll wrapper gives the
+              roomy (non-compact) layout an independent scroll region
+              for the bout list so the team header / summary / decision
+              / footer stay anchored. */}
+          <div className="team-bouts-scroll">
           {(() => {
             // T136: kachinuki "current bout" index — last row that has
             // any data, or 0 if nothing scored yet.
@@ -1427,58 +1446,65 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                   {rowSides.map((rs, rsIdx) => (
                     <React.Fragment key={rs.key}>
                       <div className={`team-sub-match__side ${rsIdx === 1 ? "team-sub-match__side--right" : ""}`}>
-                        <div className="tsm-side-label">{rs.label}</div>
-                        {/* Point slots */}
-                        <div className="team-sub-match__pts">
-                          {[0, 1].map(i => (
-                            <button key={i} className={`editor-side__pt ${rs.pts[i] ? "editor-side__pt--filled" : ""}`}
-                              onClick={() => rs.setPts(rs.pts.filter((_, j) => j !== i))} title="Click to remove">
-                              {rs.pts[i] || "·"}
-                            </button>
-                          ))}
+                        {/* Row 1: side label + point slots + M/K/D/T/H buttons.
+                            In compact mode these align on one horizontal
+                            channel-strip; in roomy mode the wrapper is
+                            display:contents so the legacy column stack is
+                            preserved without rewriting CSS. */}
+                        <div className="tsm-row-1">
+                          <div className="tsm-side-label">{rs.label}</div>
+                          {/* Point slots */}
+                          <div className="team-sub-match__pts">
+                            {[0, 1].map(i => (
+                              <button key={i} className={`editor-side__pt ${rs.pts[i] ? "editor-side__pt--filled" : ""}`}
+                                onClick={() => rs.setPts(rs.pts.filter((_, j) => j !== i))} title="Click to remove">
+                                {rs.pts[i] || "·"}
+                              </button>
+                            ))}
+                          </div>
+                          {/* Point buttons incl. H */}
+                          <div className="team-sub-match__btns">
+                            {["M", "K", "D", "T", "H"].map(cc => (
+                              <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
+                                onClick={() => rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts)}
+                                disabled={subBoutDecided}>{cc}</button>
+                            ))}
+                          </div>
                         </div>
-                        {/* Point buttons incl. H */}
-                        <div className="team-sub-match__btns">
-                          {["M", "K", "D", "T", "H"].map(cc => (
-                            <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
-                              onClick={() => rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts)}
-                              disabled={subBoutDecided}>{cc}</button>
-                          ))}
-                        </div>
-                        {/* Independent foul counter. The `+` button calls
+                        {/* Row 2: foul stepper + per-bout Fusensho button.
+                            Independent foul counter. The `+` button calls
                             onIncrement which applies the FIK 2-foul rule via
                             applyFoulIncrement (auto-award H to opponent, reset
                             counter to 0). The discharged H is physically in
-                            the opponent's pts array — no derived display. */}
-                        <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
-                          <span className="tsm-fouls__label">{rs.label} Fouls</span>
-                          <div className="tsm-fouls__controls">
-                            <button className="tsm-fouls__btn" onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
-                            <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                            <button className="tsm-fouls__btn" onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
+                            the opponent's pts array — no derived display.
+                            T096/FR-031: per-bout Fusensho — awards the bout
+                            2-0 to this side. Re-clicking the active side
+                            undoes the fusensho; manual pts/fouls edits while
+                            active clear the flag and discard the snapshot. */}
+                        <div className="tsm-row-2">
+                          <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
+                            <span className="tsm-fouls__label">{rs.label} Fouls</span>
+                            <div className="tsm-fouls__controls">
+                              <button className="tsm-fouls__btn" onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
+                              <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
+                              <button className="tsm-fouls__btn" onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
+                            </div>
                           </div>
-                        </div>
-                        {/* T096/FR-031: per-bout Fusensho. Awards the bout
-                            2-0 to this side as a default win (opponent
-                            forfeited the bout). Re-clicking the active
-                            side undoes the fusensho and restores the
-                            score that existed before it was applied; a
-                            manual pts/fouls edit while active clears the
-                            flag and discards the snapshot. */}
-                        <div className="tsm-fusensho" style={{ marginTop: 4 }}>
-                          <button
-                            data-testid="scoring-modal-fusensho-button"
-                            type="button"
-                            className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
-                            onClick={() => setFusenshoFor(idx, rs.key)}
-                            title={s.fusensho === rs.key
-                              ? `Click to undo fusensho — restores the previous score`
-                              : `Mark bout as fusensho — default win 2-0 to ${rs.label}`}
-                          >
-                            {s.fusensho === rs.key
-                              ? <>✓ <TermAS name="fusensho">Fusensho</TermAS></>
-                              : <TermAS name="fusensho">Fusensho</TermAS>}
-                          </button>
+                          <div className="tsm-fusensho">
+                            <button
+                              data-testid="scoring-modal-fusensho-button"
+                              type="button"
+                              className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
+                              onClick={() => setFusenshoFor(idx, rs.key)}
+                              title={s.fusensho === rs.key
+                                ? `Click to undo fusensho — restores the previous score`
+                                : `Mark bout as fusensho — default win 2-0 to ${rs.label}`}
+                            >
+                              {s.fusensho === rs.key
+                                ? <>✓ <TermAS name="fusensho">Fusensho</TermAS></>
+                                : <TermAS name="fusensho">Fusensho</TermAS>}
+                            </button>
+                          </div>
                         </div>
                       </div>
                       {rsIdx === 0 && (
@@ -1492,6 +1518,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               </div>
             );
           })}
+          </div>
 
           {/* Team summary — T138: sticky to the top of the modal body so
               the IV/PW totals stay visible as the operator scrolls through

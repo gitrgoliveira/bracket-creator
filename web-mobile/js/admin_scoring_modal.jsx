@@ -1067,8 +1067,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     // opponent's pts are topped up (defensive against legacy/imported data).
     const rawAFouls = existing ? existing.hansokuA || 0 : 0;
     const rawBFouls = existing ? existing.hansokuB || 0 : 0;
-    const seedAPts = existing ? (existing.ipponsA || []).filter(x => x !== "•") : [];
-    const seedBPts = existing ? (existing.ipponsB || []).filter(x => x !== "•") : [];
+    const seedAPts = existing ? (existing.ipponsA || []).filter(x => x && x !== "•") : [];
+    const seedBPts = existing ? (existing.ipponsB || []).filter(x => x && x !== "•") : [];
     const reconA = reconcileFoulsAtOpen(rawAFouls, seedBPts);
     const reconB = reconcileFoulsAtOpen(rawBFouls, seedAPts);
     return {
@@ -1094,13 +1094,12 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 
   // Hansoku Hs are already in the pts arrays (folded in by
   // applyFoulIncrement at the 2-foul boundary), so totals are just the
-  // pts length. aHansoku/bHansoku stay at 0 because nothing is
-  // outstanding-and-undischarged in the live view.
+  // pts length. No separate hansoku tally is needed in the live view.
   const subTotals = subs.map(s => {
     const aT = s.aPts.length;
     const bT = s.bPts.length;
     const winner = aT > bT ? "a" : bT > aT ? "b" : null;
-    return { aTotal: aT, bTotal: bT, aHansoku: 0, bHansoku: 0, winner };
+    return { aTotal: aT, bTotal: bT, winner };
   });
 
   const ivA = subTotals.filter(s => s.winner === "a").length;

@@ -45,6 +45,27 @@ function applyFusenshoToggle(prev, side) {
   return { aPts: [], bPts: ["M", "M"], aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
 }
 
+// applyFoulIncrement — pure helper modelling a single `+` press on a
+// side's foul counter. Per FIK rules (and internal/domain/glossary.go):
+// "Two hansoku awarded to a competitor give the opponent one free point."
+// The 2nd foul auto-awards an "H" ippon to the opponent and resets this
+// side's counter to 0. The counter is "outstanding fouls not yet
+// discharged into an H" — discharged Hs live in the opponent's pts array.
+//
+// Edge case: when the opponent's pts slot is already full (best-of-3
+// cap), the bout is decided and further `+` presses are swallowed
+// (counter stays at the pre-increment value, no new H awarded). The
+// operator must remove an H from the opponent's slot first if they
+// want to undo the awarded point.
+export function applyFoulIncrement(fouls, opponentPts, maxIppons = MAX_IPPONS_PER_SIDE) {
+  const next = fouls + 1;
+  if (next < 2) return { fouls: next, opponentPts };
+  const newOpp = opponentPts.length < maxIppons
+    ? [...opponentPts, "H"]
+    : opponentPts;
+  return { fouls: 0, opponentPts: newOpp };
+}
+
 // Term — kendo-glossary tooltip wrapper. Read lazily off window so the
 // load order between glossary.js and this module doesn't matter (both
 // are type="module" scripts and may execute in any order). Falls back
@@ -280,8 +301,13 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   );
 }
 
-// Reusable foul counter: independent +/- buttons per side with clear labeling
-function FoulCounter({ label, fouls, setFouls, color, hansokuPts }) {
+// Reusable foul counter: independent +/- buttons per side with clear labeling.
+// The `+` button delegates to `onIncrement` which applies the
+// applyFoulIncrement rule (auto-award H + reset at the 2-foul boundary);
+// `setFouls` is kept for the `−` button (simple decrement). After the
+// 2-foul auto-award the awarded H lives in the opponent's pts array, so
+// the counter shows only "outstanding fouls not yet discharged."
+function FoulCounter({ label, fouls, setFouls, onIncrement, color }) {
   // color is "shiro" or "aka" — surface as data-testid so Playwright probes
   // (T023a) can target each side without depending on the className.
   return (
@@ -290,10 +316,9 @@ function FoulCounter({ label, fouls, setFouls, color, hansokuPts }) {
       <div className="foul-counter__controls">
         <button className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(f => Math.max(0, f - 1))} disabled={fouls === 0}>−</button>
         <div className="foul-counter__count">
-          <span className={`foul-counter__num ${fouls >= 2 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
-          {hansokuPts > 0 && <span className="foul-counter__h">→ +{hansokuPts}H to opp.</span>}
+          <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>
-        <button className="foul-counter__btn foul-counter__btn--inc" onClick={() => setFouls(f => Math.min(4, f + 1))} disabled={fouls >= 4}>+</button>
+        <button className="foul-counter__btn foul-counter__btn--inc" onClick={onIncrement}>+</button>
       </div>
     </div>
   );
@@ -309,9 +334,16 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const initialAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const initialBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
 
-  // Use ?? not || so an explicit 0 isn't treated as "unset"
-  const initialAFouls = m.hansokuA ?? m.score?.fouls?.a ?? 0;
-  const initialBFouls = m.hansokuB ?? m.score?.fouls?.b ?? 0;
+  // Use ?? not || so an explicit 0 isn't treated as "unset".
+  // Mod-2 strip: pre-fix builds stored the cumulative raw count (e.g. 2)
+  // alongside the already-awarded H in the opponent's ippon array. With
+  // applyFoulIncrement, the counter is now "outstanding fouls not yet
+  // discharged" so we drop the discharged portion at init. The H ippons
+  // remain in ipponsA/ipponsB.
+  const rawAFouls = m.hansokuA ?? m.score?.fouls?.a ?? 0;
+  const rawBFouls = m.hansokuB ?? m.score?.fouls?.b ?? 0;
+  const initialAFouls = rawAFouls % 2;
+  const initialBFouls = rawBFouls % 2;
   // FR-033: encho (overtime) counter rides alongside the score. Initialized
   // from the existing match.encho?.periodCount so re-opens of completed
   // matches retain the toggle. Slice 1 ships the operator-visible toggle and
@@ -421,11 +453,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     }
   };
 
-  // Hansoku → ippon awarded to opponent on every 2nd foul
-  const aHansokuPts = Math.floor(bFouls / 2);
-  const bHansokuPts = Math.floor(aFouls / 2);
-  const aTotal = aPts.filter((x) => x !== "•").length + aHansokuPts;
-  const bTotal = bPts.filter((x) => x !== "•").length + bHansokuPts;
+  // Hansoku Hs are now physically present in the opponent's pts array
+  // (folded in at the 2-foul boundary by applyFoulIncrement). The counter
+  // is "outstanding fouls" — no derived addends needed.
+  const aTotal = aPts.filter((x) => x !== "•").length;
+  const bTotal = bPts.filter((x) => x !== "•").length;
 
   const addPt = (side, letter) => {
     if (side === "a") setAPts((p) => p.length < 2 ? [...p, letter] : p);
@@ -452,11 +484,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       ...enchoBlock(),
     };
     if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
-    // ippon
+    // ippon. Hansoku Hs are already physically present in the pts arrays
+    // (folded in by applyFoulIncrement at the 2-foul boundary), so no
+    // additional H fold is needed here.
     const aLetters = aPts.filter(x => x !== "•");
     const bLetters = bPts.filter(x => x !== "•");
-    const aFinal = [...aLetters, ...Array(aHansokuPts).fill("H")].slice(0, 2);
-    const bFinal = [...bLetters, ...Array(bHansokuPts).fill("H")].slice(0, 2);
+    const aFinal = aLetters.slice(0, 2);
+    const bFinal = bLetters.slice(0, 2);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
     if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
@@ -474,10 +508,29 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const initialIsDrawToggled = window.isHikiwake(m.score?.type) || window.isHikiwake(m.decision);
   const [isDrawToggled, setIsDrawToggled] = useStateA(initialIsDrawToggled);
 
-  // Arranged as [left, right] — left is always SHIRO (White), right is always AKA (Red)
+  // Arranged as [left, right] — left is always SHIRO (White), right is always AKA (Red).
+  // onIncrement applies the FIK 2-foul auto-award rule via applyFoulIncrement:
+  // every 2nd foul on this side discharges into a hansoku ippon ("H") for
+  // the OPPONENT and resets this side's counter to 0.
   const sides = [
-    { key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls, setFouls: setBFouls, hansokuPts: bHansokuPts, color: "shiro", label: "SHIRO (White)" },
-    { key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls, setFouls: setAFouls, hansokuPts: aHansokuPts, color: "aka", label: "AKA (Red)" },
+    {
+      key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls, setFouls: setBFouls,
+      onIncrement: () => {
+        const r = applyFoulIncrement(bFouls, aPts);
+        setBFouls(r.fouls);
+        setAPts(r.opponentPts);
+      },
+      color: "shiro", label: "SHIRO (White)",
+    },
+    {
+      key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls, setFouls: setAFouls,
+      onIncrement: () => {
+        const r = applyFoulIncrement(aFouls, bPts);
+        setAFouls(r.fouls);
+        setBPts(r.opponentPts);
+      },
+      color: "aka", label: "AKA (Red)",
+    },
   ];
 
   // Bout is decided once either side reaches 2 ippons — disable add-ippon
@@ -512,7 +565,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Scoring shortcuts (Enter/M/K/D/T/H/X) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, canFinish, isDrawToggled, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
+  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -554,8 +607,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       if (k === "x" || k === "X") {
         ev.preventDefault();
         if (s.isDrawToggled) {
+          // Cancel-draw is always allowed (mirrors the active-state X button).
           setIsDrawToggled(false);
-        } else {
+        } else if (s.aTotal === 0 && s.bTotal === 0) {
+          // Toggle-on guarded: any existing score would be silently wiped by
+          // the setAPts([])/setBPts([]) below. The clickable X button has
+          // disabled={aTotal > 0 || bTotal > 0} for the same reason.
           setIsDrawToggled(true);
           setAPts([]); setBPts([]);
         }
@@ -658,7 +715,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                             <button
                               className="sb-draw-toggle"
                               onClick={() => { setIsDrawToggled(true); setAPts([]); setBPts([]); }}
-                              title="Mark as draw (hikiwake)"
+                              disabled={aTotal > 0 || bTotal > 0}
+                              title={aTotal > 0 || bTotal > 0 ? "Clear scores before marking a draw" : "Mark as draw (hikiwake)"}
                               aria-label="Mark as draw (hikiwake)"
                             >{aTotal === 0 && bTotal === 0 ? "vs" : "X"}</button>
                           </>
@@ -677,8 +735,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                     label={s.label}
                     fouls={s.fouls}
                     setFouls={s.setFouls}
+                    onIncrement={s.onIncrement}
                     color={s.color}
-                    hansokuPts={s.hansokuPts}
                   />
                 ))}
               </div>
@@ -964,11 +1022,17 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       if (existing.winner === sideAName) fusensho = "a";
       else if (existing.winner === sideBName) fusensho = "b";
     }
+    // Mod-2 strip mirrors ScoreEditorModal: pre-fix builds stored the
+    // cumulative raw foul count alongside the already-awarded H in the
+    // opponent's ippon array. The counter now means "outstanding fouls
+    // not yet discharged" so drop the discharged portion at init.
+    const rawAFouls = existing ? existing.hansokuA || 0 : 0;
+    const rawBFouls = existing ? existing.hansokuB || 0 : 0;
     return {
       aPts: existing ? (existing.ipponsA || []).filter(x => x !== "•") : [],
       bPts: existing ? (existing.ipponsB || []).filter(x => x !== "•") : [],
-      aFouls: existing ? existing.hansokuA || 0 : 0,
-      bFouls: existing ? existing.hansokuB || 0 : 0,
+      aFouls: rawAFouls % 2,
+      bFouls: rawBFouls % 2,
       fusensho,
     };
   });
@@ -985,13 +1049,15 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // still restores the genuine prior state, not the intermediate 2-0.
   const setFusenshoFor = (idx, side) => updateSub(idx, prev => applyFusenshoToggle(prev, side));
 
+  // Hansoku Hs are already in the pts arrays (folded in by
+  // applyFoulIncrement at the 2-foul boundary), so totals are just the
+  // pts length. aHansoku/bHansoku stay at 0 because nothing is
+  // outstanding-and-undischarged in the live view.
   const subTotals = subs.map(s => {
-    const aH = Math.floor(s.bFouls / 2);
-    const bH = Math.floor(s.aFouls / 2);
-    const aT = s.aPts.length + aH;
-    const bT = s.bPts.length + bH;
+    const aT = s.aPts.length;
+    const bT = s.bPts.length;
     const winner = aT > bT ? "a" : bT > aT ? "b" : null;
-    return { aTotal: aT, bTotal: bT, aHansoku: aH, bHansoku: bH, winner };
+    return { aTotal: aT, bTotal: bT, aHansoku: 0, bHansoku: 0, winner };
   });
 
   const ivA = subTotals.filter(s => s.winner === "a").length;
@@ -1006,8 +1072,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
     const subResults = subs.map((s, idx) => {
       const t = subTotals[idx];
-      const aAll = [...s.aPts, ...Array(t.aHansoku).fill("H")].slice(0, 2);
-      const bAll = [...s.bPts, ...Array(t.bHansoku).fill("H")].slice(0, 2);
+      // Hansoku Hs already in pts arrays via applyFoulIncrement — no fold.
+      const aAll = s.aPts.slice(0, 2);
+      const bAll = s.bPts.slice(0, 2);
       const w = t.winner === "a" ? m.sideA : t.winner === "b" ? m.sideB : null;
       // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought
       // mapping. The bout was awarded as a default win — backend tally treats
@@ -1260,15 +1327,32 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             // a regular fought score once the operator intervenes. Re-applying
             // via the Fusensho button captures a fresh snapshot from the
             // current (manually-edited) state.
+            // onIncrement applies the FIK 2-foul rule via applyFoulIncrement:
+            // the 2nd foul auto-awards an H to the OPPONENT and resets this
+            // side's foul counter. The auto-award also invalidates the
+            // _preFusensho snapshot — once an H lands in the slot the prior
+            // pre-fusensho state is stale.
             const rowSides = [
-              { key: "b", pts: s.bPts, fouls: s.bFouls, hansokuPts: t.bHansoku,
+              {
+                key: "b", pts: s.bPts, fouls: s.bFouls,
                 setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts, fusensho: "", _preFusensho: undefined })),
                 setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f, fusensho: "", _preFusensho: undefined })),
-                color: "shiro", label: "SHIRO" },
-              { key: "a", pts: s.aPts, fouls: s.aFouls, hansokuPts: t.aHansoku,
+                onIncrement: () => updateSub(idx, prev => {
+                  const r = applyFoulIncrement(prev.bFouls, prev.aPts);
+                  return { ...prev, bFouls: r.fouls, aPts: r.opponentPts, fusensho: "", _preFusensho: undefined };
+                }),
+                color: "shiro", label: "SHIRO",
+              },
+              {
+                key: "a", pts: s.aPts, fouls: s.aFouls,
                 setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts, fusensho: "", _preFusensho: undefined })),
                 setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f, fusensho: "", _preFusensho: undefined })),
-                color: "aka", label: "AKA" },
+                onIncrement: () => updateSub(idx, prev => {
+                  const r = applyFoulIncrement(prev.aFouls, prev.bPts);
+                  return { ...prev, aFouls: r.fouls, bPts: r.opponentPts, fusensho: "", _preFusensho: undefined };
+                }),
+                color: "aka", label: "AKA",
+              },
             ];
 
             // Sub-bout is decided once either side reaches 2 ippons — disable
@@ -1319,15 +1403,18 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                               disabled={subBoutDecided}>{cc}</button>
                           ))}
                         </div>
-                        {/* Independent foul counter */}
+                        {/* Independent foul counter. The `+` button calls
+                            onIncrement which applies the FIK 2-foul rule via
+                            applyFoulIncrement (auto-award H to opponent, reset
+                            counter to 0). The discharged H is physically in
+                            the opponent's pts array — no derived display. */}
                         <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                           <span className="tsm-fouls__label">{rs.label} Fouls</span>
                           <div className="tsm-fouls__controls">
                             <button className="tsm-fouls__btn" onClick={() => rs.setFouls(f => Math.max(0, f - 1))} disabled={rs.fouls === 0}>−</button>
-                            <span className={`tsm-fouls__count ${rs.fouls >= 2 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                            <button className="tsm-fouls__btn" onClick={() => rs.setFouls(f => Math.min(4, f + 1))} disabled={rs.fouls >= 4}>+</button>
+                            <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
+                            <button className="tsm-fouls__btn" onClick={rs.onIncrement}>+</button>
                           </div>
-                          {rs.hansokuPts > 0 && <span className="tsm-fouls__h">→ +{rs.hansokuPts}H</span>}
                         </div>
                         {/* T096/FR-031: per-bout Fusensho. Awards the bout
                             2-0 to this side as a default win (opponent
@@ -1514,6 +1601,8 @@ window.ScoreEditorModal = ScoreEditorModal;
 
 // ES exports for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
+// applyFoulIncrement is also exported inline (above the FoulCounter) via
+// `export function`; it is re-listed here for grep discoverability.
 export {
   resolveDecisionPassword,
   buildDecisionBody,

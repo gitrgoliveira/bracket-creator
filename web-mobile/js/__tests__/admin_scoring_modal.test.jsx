@@ -9,6 +9,7 @@ import {
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
+  applyFoulIncrement,
   applyFusenshoToggle,
 } from '../admin_scoring_modal.jsx';
 
@@ -591,6 +592,57 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
     // boutDecided re-evaluates on next render with the shorter array.
     const after = ['M']; // was ['M','K'], operator removed 'K'
     expect(isBoutDecided(after, ['D'])).toBe(false); // back to 1-1, not decided
+  });
+});
+
+describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
+  // Per FIK rules and the project's own glossary (`internal/domain/glossary.go`):
+  // "Two hansoku awarded to a competitor give the opponent one free point."
+  // applyFoulIncrement models a single `+` press on a side's foul counter:
+  // the 2nd press discharges into a hansoku ippon ("H") for the OPPONENT and
+  // resets this side's counter to 0. The 1st press just increments by 1.
+
+  it('first foul increments to 1, opponent untouched', () => {
+    expect(applyFoulIncrement(0, [])).toEqual({ fouls: 1, opponentPts: [] });
+  });
+
+  it('second foul auto-awards H to opponent and resets counter', () => {
+    expect(applyFoulIncrement(1, [])).toEqual({ fouls: 0, opponentPts: ['H'] });
+  });
+
+  it('second foul appends H to existing opponent ippons', () => {
+    // Opponent already has 1 ippon — H is appended into the second slot.
+    expect(applyFoulIncrement(1, ['M'])).toEqual({ fouls: 0, opponentPts: ['M', 'H'] });
+  });
+
+  it('second foul is a no-op when opponent slot is already full', () => {
+    // Best-of-3 cap: with 2 ippons the bout is already decided. Swallow
+    // the extra foul rather than crash. The counter still resets to 0.
+    expect(applyFoulIncrement(1, ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['M', 'K'] });
+  });
+
+  it('four sequential presses produce 2 H in opponent slots, fouls=0', () => {
+    // Simulate the operator clicking `+` four times in a row. After:
+    //   press 1: fouls=1, opp=[]
+    //   press 2: fouls=0, opp=['H']
+    //   press 3: fouls=1, opp=['H']
+    //   press 4: fouls=0, opp=['H','H']   ← bout now decided
+    let state = { fouls: 0, opponentPts: [] };
+    state = applyFoulIncrement(state.fouls, state.opponentPts);
+    expect(state).toEqual({ fouls: 1, opponentPts: [] });
+    state = applyFoulIncrement(state.fouls, state.opponentPts);
+    expect(state).toEqual({ fouls: 0, opponentPts: ['H'] });
+    state = applyFoulIncrement(state.fouls, state.opponentPts);
+    expect(state).toEqual({ fouls: 1, opponentPts: ['H'] });
+    state = applyFoulIncrement(state.fouls, state.opponentPts);
+    expect(state).toEqual({ fouls: 0, opponentPts: ['H', 'H'] });
+  });
+
+  it('respects custom maxIppons cap (defensive)', () => {
+    // maxIppons param is the same MAX_IPPONS_PER_SIDE default — pinned
+    // here so a future refactor that lifts the cap doesn't silently let
+    // 3+ H pile up in the opponent's slot.
+    expect(applyFoulIncrement(1, ['M'], 1)).toEqual({ fouls: 0, opponentPts: ['M'] });
   });
 });
 

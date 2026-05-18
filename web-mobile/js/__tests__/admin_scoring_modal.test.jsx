@@ -9,6 +9,9 @@ import {
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
+  applyFoulIncrement,
+  reconcileFoulsAtOpen,
+  nextFoulOnDecrement,
   applyFusenshoToggle,
 } from '../admin_scoring_modal.jsx';
 
@@ -591,6 +594,159 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
     // boutDecided re-evaluates on next render with the shorter array.
     const after = ['M']; // was ['M','K'], operator removed 'K'
     expect(isBoutDecided(after, ['D'])).toBe(false); // back to 1-1, not decided
+  });
+});
+
+describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
+  // Per FIK rules and the project's own glossary (`internal/domain/glossary.go`):
+  // "Two hansoku awarded to a competitor give the opponent one free point."
+  // applyFoulIncrement models a single `+` press on a side's foul counter:
+  // the 2nd press discharges into a hansoku ippon ("H") for the OPPONENT and
+  // resets this side's counter to 0. The 1st press just increments by 1.
+
+  it('first foul increments to 1, opponent untouched', () => {
+    expect(applyFoulIncrement(0, [])).toEqual({ fouls: 1, opponentPts: [] });
+  });
+
+  it('second foul auto-awards H to opponent and resets counter', () => {
+    expect(applyFoulIncrement(1, [])).toEqual({ fouls: 0, opponentPts: ['H'] });
+  });
+
+  it('second foul appends H to existing opponent ippons', () => {
+    // Opponent already has 1 ippon — H is appended into the second slot.
+    expect(applyFoulIncrement(1, ['M'])).toEqual({ fouls: 0, opponentPts: ['M', 'H'] });
+  });
+
+  it('second foul is a no-op when opponent slot is already full', () => {
+    // Best-of-3 cap: with 2 ippons the bout is already decided. Swallow
+    // the extra foul rather than crash. The counter still resets to 0.
+    expect(applyFoulIncrement(1, ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['M', 'K'] });
+  });
+
+  it('four sequential presses produce 2 H in opponent slots, fouls=0', () => {
+    // Simulate the operator clicking `+` four times in a row. After:
+    //   press 1: fouls=1, opp=[]
+    //   press 2: fouls=0, opp=['H']
+    //   press 3: fouls=1, opp=['H']
+    //   press 4: fouls=0, opp=['H','H']   ← bout now decided
+    let state = { fouls: 0, opponentPts: [] };
+    state = applyFoulIncrement(state.fouls, state.opponentPts);
+    expect(state).toEqual({ fouls: 1, opponentPts: [] });
+    state = applyFoulIncrement(state.fouls, state.opponentPts);
+    expect(state).toEqual({ fouls: 0, opponentPts: ['H'] });
+    state = applyFoulIncrement(state.fouls, state.opponentPts);
+    expect(state).toEqual({ fouls: 1, opponentPts: ['H'] });
+    state = applyFoulIncrement(state.fouls, state.opponentPts);
+    expect(state).toEqual({ fouls: 0, opponentPts: ['H', 'H'] });
+  });
+
+  it('respects custom maxIppons cap (defensive)', () => {
+    // maxIppons param is the same MAX_IPPONS_PER_SIDE default — pinned
+    // here so a future refactor that lifts the cap doesn't silently let
+    // 3+ H pile up in the opponent's slot.
+    expect(applyFoulIncrement(1, ['M'], [], 1)).toEqual({ fouls: 0, opponentPts: ['M'] });
+  });
+
+  it('second foul is a no-op when THIS side is already at maxIppons', () => {
+    // Bout-decided guard: if THIS side reached 2 ippons (bout already
+    // won by THIS side), the 2nd foul cannot auto-award an H to opp
+    // without producing an invalid 2-2 scoreline that the server's
+    // validateIpponCounts would reject. Counter still resets to 0;
+    // opponent's pts are left untouched.
+    expect(applyFoulIncrement(1, ['X'], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['X'] });
+    expect(applyFoulIncrement(1, [], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: [] });
+  });
+
+  it('second foul is a no-op when BOTH sides are at maxIppons (already 2-2 is impossible but defensive)', () => {
+    // Backstop for a hypothetical corrupted state — the function must
+    // not push a 3rd ippon onto opp regardless of how it was called.
+    expect(applyFoulIncrement(1, ['M', 'K'], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['M', 'K'] });
+  });
+});
+
+describe('reconcileFoulsAtOpen (correction-flow normalization)', () => {
+  // Reopen/correction flow: pre-fix builds stored hansoku as a cumulative
+  // raw count (0..N) and folded floor(N/2) "H" entries into the opponent's
+  // ippon array at submit. The post-fix counter is "outstanding fouls not
+  // yet discharged" (0 or 1). Naively stripping rawFouls % 2 is correct
+  // when the H's are already in opp's pts; it silently loses points when
+  // they're not (legacy/imported data). reconcileFoulsAtOpen tops up the
+  // missing H's before returning the remainder.
+
+  it('passes through when no fouls', () => {
+    expect(reconcileFoulsAtOpen(0, [])).toEqual({ outstandingFouls: 0, opponentPts: [] });
+    expect(reconcileFoulsAtOpen(0, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M'] });
+  });
+
+  it('rawFouls=1 has no discharged H, just 1 outstanding', () => {
+    expect(reconcileFoulsAtOpen(1, [])).toEqual({ outstandingFouls: 1, opponentPts: [] });
+    expect(reconcileFoulsAtOpen(1, ['M'])).toEqual({ outstandingFouls: 1, opponentPts: ['M'] });
+  });
+
+  it('idempotent when the discharged H is already present (consistent prior data)', () => {
+    // rawFouls=2 → expected 1 H. Opp already has it from the old buildPatch fold.
+    expect(reconcileFoulsAtOpen(2, ['H'])).toEqual({ outstandingFouls: 0, opponentPts: ['H'] });
+    // Mixed manual + derived: opp already has 1 manual + 1 derived = 2 total.
+    expect(reconcileFoulsAtOpen(2, ['M', 'H'])).toEqual({ outstandingFouls: 0, opponentPts: ['M', 'H'] });
+  });
+
+  it('tops up missing H when legacy/imported data has fouls but no fold', () => {
+    // rawFouls=2 with empty opp pts (corrupted/imported) — top up 1 H.
+    expect(reconcileFoulsAtOpen(2, [])).toEqual({ outstandingFouls: 0, opponentPts: ['H'] });
+    // Manual ippon exists but the foul-derived H was never folded in.
+    expect(reconcileFoulsAtOpen(2, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M', 'H'] });
+  });
+
+  it('handles odd cumulative counts: floor pair discharges, remainder outstanding', () => {
+    // rawFouls=3 → 1 H discharged, 1 outstanding.
+    expect(reconcileFoulsAtOpen(3, [])).toEqual({ outstandingFouls: 1, opponentPts: ['H'] });
+    expect(reconcileFoulsAtOpen(3, ['H'])).toEqual({ outstandingFouls: 1, opponentPts: ['H'] });
+  });
+
+  it('caps the top-up at maxIppons (bout would have ended)', () => {
+    // rawFouls=4 → expected 2 H. Opp slot capped at 2 — top up fills the slot.
+    expect(reconcileFoulsAtOpen(4, [])).toEqual({ outstandingFouls: 0, opponentPts: ['H', 'H'] });
+    // Opp already has 1 ippon, so only room for 1 H top-up despite expecting 2.
+    expect(reconcileFoulsAtOpen(4, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M', 'H'] });
+  });
+
+  it('does not duplicate when opp already has more H than expected', () => {
+    // expected 1 H from fouls, but opp has 2 H's (e.g., two manual H awards).
+    // Don't add — opp's count exceeds the expected fold count.
+    expect(reconcileFoulsAtOpen(2, ['H', 'H'])).toEqual({ outstandingFouls: 0, opponentPts: ['H', 'H'] });
+  });
+
+  it('respects custom maxIppons cap', () => {
+    expect(reconcileFoulsAtOpen(4, [], 1)).toEqual({ outstandingFouls: 0, opponentPts: ['H'] });
+  });
+
+  it('defensive: clamps negative rawFouls to 0', () => {
+    expect(reconcileFoulsAtOpen(-1, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M'] });
+  });
+});
+
+describe('nextFoulOnDecrement (team `−` button regression)', () => {
+  // Pre-existing bug: the team sub-match `−` button passed a React-style
+  // functional updater (`f => Math.max(0, f - 1)`) to `rs.setFouls`, but
+  // rs.setFouls is a plain setter that wrote the function itself into
+  // bFouls — breaking comparisons and rendering. Extracted to a pure
+  // helper so the contract (returns a NUMBER, not a function) is
+  // directly testable.
+
+  it('returns a number, not a function (regression guard)', () => {
+    expect(typeof nextFoulOnDecrement(2)).toBe('number');
+    expect(typeof nextFoulOnDecrement(0)).toBe('number');
+  });
+
+  it('decrements by 1', () => {
+    expect(nextFoulOnDecrement(1)).toBe(0);
+    expect(nextFoulOnDecrement(2)).toBe(1);
+    expect(nextFoulOnDecrement(3)).toBe(2);
+  });
+
+  it('clamps at 0 (never returns negative)', () => {
+    expect(nextFoulOnDecrement(0)).toBe(0);
+    expect(nextFoulOnDecrement(-1)).toBe(0);
   });
 });
 

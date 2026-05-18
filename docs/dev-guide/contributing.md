@@ -65,6 +65,14 @@ PORT=8082 make run-mobile                           # custom port
 TOURNAMENT_DATA_DIR=/path/to/data make run-mobile  # custom data dir
 ```
 
+`PORT`, `BIND_ADDRESS`, and `TOURNAMENT_DATA_DIR` are read by the binary directly, so they also work without `make`:
+
+```sh
+TOURNAMENT_DATA_DIR=/path PORT=8082 ./bin/bracket-creator mobile-app
+```
+
+An explicit `--folder`, `--port`, or `--bind` flag still overrides the env var.
+
 **Important:** `web-mobile/` is a Preact/JSX frontend compiled by esbuild into `web-mobile/dist/` and then embedded into the Go binary at build time. Any change to `web-mobile/js/*.js` or `web-mobile/css/*.css` requires:
 
 1. Rebuild the JS bundle: `cd web-mobile && npm run build` (or `npx esbuild ...` — see the project `Makefile`)

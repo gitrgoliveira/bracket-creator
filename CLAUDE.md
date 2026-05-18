@@ -19,10 +19,10 @@ make go/test           # Lint + security scan + tests with coverage
 make go/test-race      # Lint + tests with race detection (slow)
 make go/lint           # golangci-lint only
 make run               # Build and start web server (localhost:8080)
-PORT=8081 make run      # Use alternate port
+PORT=8081 make run      # Use alternate port (also works direct: PORT=8081 ./bin/bracket-creator serve)
 make run-mobile        # Build and start the mobile/live app (localhost:8080, ./tournament-data)
-PORT=8082 make run-mobile   # Use alternate port
-TOURNAMENT_DATA_DIR=/path make run-mobile  # Custom data folder
+PORT=8082 make run-mobile   # Use alternate port (also works direct: PORT=8082 ./bin/bracket-creator mobile-app)
+TOURNAMENT_DATA_DIR=/path make run-mobile  # Custom data folder (also works without make: TOURNAMENT_DATA_DIR=/path ./bin/bracket-creator mobile-app)
 make examples          # Generate example Excel files from mock data
 
 # Run a single test

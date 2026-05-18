@@ -93,6 +93,7 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 - **Run the mobile/live app:** `make run-mobile` (default: `./tournament-data`, port 8080)
   - Override port: `PORT=8082 make run-mobile`
   - Override data dir: `TOURNAMENT_DATA_DIR=/path make run-mobile`
+  - The binary reads `PORT`, `BIND_ADDRESS`, and `TOURNAMENT_DATA_DIR` directly, so the env vars also apply when running without `make` (e.g. `TOURNAMENT_DATA_DIR=/path bracket-creator mobile-app`). Explicit `--port`/`--bind`/`--folder` flags win.
 - **Run Tests (fast):** `make go/test`
 - **Run Tests (with race detection):** `make go/test-race`
 - **Run Linters:** `make go/lint`

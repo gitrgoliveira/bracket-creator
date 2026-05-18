@@ -28,13 +28,17 @@ func newMobileAppCmd() *cobra.Command {
 		RunE:         o.run,
 	}
 
-	cmd.Flags().StringVarP(&o.folder, "folder", "f", ".", "folder to store tournament state")
+	folder := os.Getenv("TOURNAMENT_DATA_DIR")
+	if folder == "" {
+		folder = "."
+	}
+	cmd.Flags().StringVarP(&o.folder, "folder", "f", folder, "folder to store tournament state (env: TOURNAMENT_DATA_DIR)")
 
 	bindAddress := os.Getenv("BIND_ADDRESS")
 	if bindAddress == "" {
 		bindAddress = "localhost"
 	}
-	cmd.Flags().StringVarP(&o.bindAddress, "bind", "b", bindAddress, "bind address")
+	cmd.Flags().StringVarP(&o.bindAddress, "bind", "b", bindAddress, "bind address (env: BIND_ADDRESS)")
 
 	portStr := os.Getenv("PORT")
 	port := 8080
@@ -43,7 +47,7 @@ func newMobileAppCmd() *cobra.Command {
 			port = p
 		}
 	}
-	cmd.Flags().IntVarP(&o.port, "port", "p", port, "port number")
+	cmd.Flags().IntVarP(&o.port, "port", "p", port, "port number (env: PORT)")
 
 	return cmd
 }

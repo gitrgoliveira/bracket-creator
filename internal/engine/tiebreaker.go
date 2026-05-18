@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -62,12 +61,11 @@ func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding
 				continue
 			}
 			results = append(results, state.MatchResult{
-				ID:       fmt.Sprintf("%s-TB-%d", poolName, idx),
-				SideA:    a.Player.Name,
-				SideB:    b.Player.Name,
-				Status:   state.MatchStatusScheduled,
-				Decision: string(domain.DecisionIpponShobu),
-				Court:    court,
+				ID:     fmt.Sprintf("%s-TB-%d", poolName, idx),
+				SideA:  a.Player.Name,
+				SideB:  b.Player.Name,
+				Status: state.MatchStatusScheduled,
+				Court:  court,
 			})
 			existingPairs[key] = true
 			idx++
@@ -148,7 +146,15 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 
 	allMatches = append(allMatches, injected...)
 
-	// Reassign all slots so the new TB matches get ScheduledAt values.
+	// Reassign slots so the new TB matches get ScheduledAt values.
+	// Snapshot operator-adjusted times first so they survive the reassignment;
+	// only newly injected matches (ScheduledAt == "") should receive new slots.
+	existingTimes := make(map[string]string, len(allMatches))
+	for _, m := range allMatches {
+		if m.ScheduledAt != "" {
+			existingTimes[m.ID] = m.ScheduledAt
+		}
+	}
 	tournament, err := e.store.LoadTournament()
 	if err != nil {
 		return nil, err
@@ -156,6 +162,11 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	state.ApplyTournamentDefaults(tournament)
 	state.ApplyCompetitionDefaults(comp)
 	allMatches = assignPoolMatchSlots(allMatches, comp, tournament)
+	for i := range allMatches {
+		if t, ok := existingTimes[allMatches[i].ID]; ok {
+			allMatches[i].ScheduledAt = t
+		}
+	}
 
 	if err := e.store.SavePoolMatches(compID, allMatches); err != nil {
 		return nil, err

@@ -69,8 +69,33 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 	})
 }
 
+// applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
+// FIK Article 20: every 2 hansoku on one side grants 1 ippon to the opponent.
+// Uses 'H' as the ippon marker, consistent with IpponsA/IpponsB conventions.
+// Never removes existing entries — only appends what's missing.
+func applyHansokuIppons(result *state.MatchResult) {
+	if result == nil {
+		return
+	}
+	applyOneSide := func(hansoku int, ippons *[]string) {
+		expected := hansoku / 2
+		existing := 0
+		for _, v := range *ippons {
+			if v == "H" {
+				existing++
+			}
+		}
+		for range expected - existing {
+			*ippons = append(*ippons, "H")
+		}
+	}
+	applyOneSide(result.HansokuA, &result.IpponsB)
+	applyOneSide(result.HansokuB, &result.IpponsA)
+}
+
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
+	applyHansokuIppons(result)
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
 		// Preserve scheduling and side fields if missing in the update payload.
 		// The scoring UI only sends scoring-related fields; without this guard,
@@ -129,6 +154,7 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 // T085/T092.
 func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchId
+	applyHansokuIppons(result)
 
 	// T105/CHK047: capture the prior result so we can rollback if the atomic
 	// ineligibility write below fails with AlreadyIneligibleError.

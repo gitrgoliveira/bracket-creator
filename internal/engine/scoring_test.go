@@ -680,3 +680,84 @@ func TestMaybeLockTeamLineupsForRound_TeamComp(t *testing.T) {
 	err := eng.RecordMatchResult(compID, "P1-0", result)
 	assert.NoError(t, err)
 }
+
+func TestApplyHansokuIppons(t *testing.T) {
+	cases := []struct {
+		name        string
+		hansokuA    int
+		hansokuB    int
+		ipponsA     []string
+		ipponsB     []string
+		wantIpponsA []string
+		wantIpponsB []string
+	}{
+		{
+			name:        "HansokuA=1 no award",
+			hansokuA:    1,
+			wantIpponsB: nil,
+		},
+		{
+			name:        "HansokuA=2 awards 1 H to IpponsB",
+			hansokuA:    2,
+			wantIpponsB: []string{"H"},
+		},
+		{
+			name:        "HansokuA=4 awards 2 H to IpponsB",
+			hansokuA:    4,
+			wantIpponsB: []string{"H", "H"},
+		},
+		{
+			name:        "HansokuA=2 with existing H — no duplicate",
+			hansokuA:    2,
+			ipponsB:     []string{"H"},
+			wantIpponsB: []string{"H"},
+		},
+		{
+			name:        "HansokuA=2 existing non-H ippons preserved",
+			hansokuA:    2,
+			ipponsB:     []string{"M"},
+			wantIpponsB: []string{"M", "H"},
+		},
+		{
+			name:        "HansokuB=2 awards 1 H to IpponsA",
+			hansokuB:    2,
+			wantIpponsA: []string{"H"},
+		},
+		{
+			name:        "HansokuB=4 awards 2 H to IpponsA",
+			hansokuB:    4,
+			wantIpponsA: []string{"H", "H"},
+		},
+		{
+			name:        "HansokuB=2 with existing H — no duplicate",
+			hansokuB:    2,
+			ipponsA:     []string{"H"},
+			wantIpponsA: []string{"H"},
+		},
+		{
+			name:        "nil result is a no-op",
+			hansokuA:    2,
+			hansokuB:    2,
+			wantIpponsA: nil,
+			wantIpponsB: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "nil result is a no-op" {
+				applyHansokuIppons(nil) // must not panic
+				return
+			}
+			r := &state.MatchResult{
+				HansokuA: tc.hansokuA,
+				HansokuB: tc.hansokuB,
+				IpponsA:  tc.ipponsA,
+				IpponsB:  tc.ipponsB,
+			}
+			applyHansokuIppons(r)
+			assert.Equal(t, tc.wantIpponsA, r.IpponsA)
+			assert.Equal(t, tc.wantIpponsB, r.IpponsB)
+		})
+	}
+}

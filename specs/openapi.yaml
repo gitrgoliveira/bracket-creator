@@ -357,7 +357,9 @@ paths:
               properties:
                 password:
                   type: string
-                  description: New admin password (≤ 256 chars). Replaces the stored value.
+                  minLength: 1
+                  maxLength: 256
+                  description: New admin password. Replaces the stored value. Matches the cap on `Tournament.password` (`components/schemas/Tournament`).
       responses:
         '204':
           description: Password rotated. All existing admin sessions become invalid on the next request.

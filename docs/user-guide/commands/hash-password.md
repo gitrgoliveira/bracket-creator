@@ -11,7 +11,7 @@ bracket-creator hash-password [plaintext]
 The command reads the plaintext from one of two sources, in this order:
 
 1. **Positional argument** — `bracket-creator hash-password mysecret`. Convenient for ad-hoc use, but the password is recorded in shell history. Suitable for development.
-2. **Standard input** (when no argument is supplied) — type the password and press Return. The terminal echoes it (no `-s`-style hiding); pair with a here-doc or piped secret manager for production rotation. Recommended path because it avoids shell-history leakage.
+2. **Standard input** (when no argument is supplied) — read one line of stdin. The terminal echoes what the operator types (the command does **not** disable echo or print a prompt). For production rotation, pipe from a secrets manager or here-doc rather than typing the password interactively. Recommended path because it avoids shell-history leakage.
 
 Bcrypt has a hard 72-byte limit on the input. Passwords longer than that are rejected up-front rather than silently truncated.
 
@@ -25,9 +25,8 @@ Single line on stdout: the bcrypt hash (e.g. `$2a$10$tq9jkGYsf1ttx0ZM.UUrxezVBcO
 # Quick generation via argument (leaves password in shell history)
 bracket-creator hash-password mysecret
 
-# Stdin path — type the password, press Return
-bracket-creator hash-password
-# (prompt is silent; type and Enter)
+# Stdin path — pipe from another command
+echo -n "$MY_SECRET" | bracket-creator hash-password
 
 # Capture into a shell variable for the mobile-app server
 HASH=$(printf '%s' "$MY_SECRET" | bracket-creator hash-password)

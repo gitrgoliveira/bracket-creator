@@ -21,7 +21,7 @@
 * In the scoring you can do an impossible results like 2-2
 
 
-Does the extra match in teams show up ?
+Does the extra match in teams show up?
 
 
 

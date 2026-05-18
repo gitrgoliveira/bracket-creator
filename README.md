@@ -300,7 +300,7 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-In this mode the on-disk password is ignored, `/reset` returns 404, and authentication compares the `X-Tournament-Password` header against the env-var hash. Rotate the credential by restarting with a new hash. The public `GET /api/auth-config` endpoint surfaces the mode so the UI hides the reset link when locked.
+In this mode the on-disk password is ignored, `POST /api/tournament/reset` returns 404 (the SPA's `/reset` page still loads but shows an "operator-disabled" message), and authentication compares the `X-Tournament-Password` header against the env-var hash. Rotate the credential by restarting with a new hash. The public `GET /api/auth-config` endpoint surfaces the mode so the UI hides the reset link when locked.
 
 ### Display and operator URLs
 

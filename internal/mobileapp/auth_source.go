@@ -39,11 +39,16 @@ type PasswordVerifier interface {
 
 	// AllowsFileBootstrap reports whether the middleware should let an
 	// unauthenticated POST/PUT to /api/tournament through when no
-	// tournament has been bootstrapped yet. file mode = true (preserves
-	// the historical first-run UX where the operator submits the
-	// CreateTournament form before having anything to authenticate
-	// against). locked mode = false (the env-var hash IS the auth
-	// source from the first request — there is no chicken-and-egg).
+	// tournament has been bootstrapped yet. Both implementations return
+	// true — the SPA's CreateTournament flow does not send
+	// X-Tournament-Password on the bootstrap POST, and we don't want a
+	// fresh locked deployment to require curl-on-first-run. The
+	// bootstrap window doesn't widen the credential surface: in file
+	// mode the operator picks the password they then have to use, and
+	// in locked mode the handler discards the submitted Password field
+	// because authentication uses the env-var bcrypt hash. The hook
+	// stays on the interface so a future verifier (e.g. an OIDC mode)
+	// can opt out if its security model requires it.
 	AllowsFileBootstrap() bool
 
 	// EnforceEmptyStoredGuard reports whether the middleware should

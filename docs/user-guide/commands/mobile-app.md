@@ -50,7 +50,7 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-- `/reset` is disabled (returns 404). The SPA hides the "Forgot password?" link.
+- `POST /api/tournament/reset` returns 404. The `/reset` SPA route still serves the embedded page but renders an "operator-disabled" message instead of the form, and the AuthModal hides the "Forgot password?" link.
 - `GET /api/auth-config` returns `{"mode": "locked", "resetEnabled": false}`.
 - The server **refuses to start** if the env var is empty or malformed (fail-closed; no silent fallback to file mode).
 - Rotation requires restarting with a new hash. The hash is read once at startup.

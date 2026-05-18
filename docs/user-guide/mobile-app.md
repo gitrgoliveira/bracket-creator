@@ -65,7 +65,7 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
 In locked mode:
 
 - The on-disk password in `tournament.md` is ignored.
-- `/reset` returns 404 — the AuthModal hides the "Forgot password?" link, and the `/reset` page shows an "operator-disabled" message.
+- `POST /api/tournament/reset` returns 404. The SPA's `/reset` page still loads (it's part of the embedded SPA bundle) but renders an "operator-disabled" message instead of the form, and the AuthModal hides the "Forgot password?" link.
 - Authentication compares the `X-Tournament-Password` header against the env-var bcrypt hash.
 - Rotating the credential requires restarting the server with a new hash; the runtime never reads the env var twice.
 - If `--lock-password` is set but `TOURNAMENT_PASSWORD_HASH` is empty or malformed, the server **refuses to start** — fail-closed, so a misconfigured deployment can't silently fall through to file mode.

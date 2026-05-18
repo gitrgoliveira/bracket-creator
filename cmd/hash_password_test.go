@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"io"
-	"os"
 	"strings"
 	"testing"
 
@@ -13,8 +12,11 @@ import (
 )
 
 // runHashPassword executes the hash-password subcommand with the given
-// args and optional stdin string. Returns stdout and the command error.
-// Internal helper used by every test case below.
+// args and stdin string. Always injects stdin via cmd.SetIn (even for
+// the empty-string case) so the empty-stdin test exercises a deliberate
+// EOF rather than the real process stdin — without the always-swap, the
+// test could block in environments where stdin is open. Internal helper
+// used by every test case below.
 func runHashPassword(t *testing.T, stdin string, args []string) (string, error) {
 	t.Helper()
 
@@ -22,25 +24,8 @@ func runHashPassword(t *testing.T, stdin string, args []string) (string, error) 
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(stdin))
 	cmd.SetArgs(args)
-
-	if stdin != "" {
-		// Swap os.Stdin for a pipe seeded with `stdin`. cobra reads from
-		// os.Stdin directly inside the RunE (no injection point), so we
-		// replace the global for the duration of this run and restore
-		// afterwards.
-		orig := os.Stdin
-		r, w, err := os.Pipe()
-		require.NoError(t, err)
-		_, err = w.WriteString(stdin)
-		require.NoError(t, err)
-		require.NoError(t, w.Close())
-		os.Stdin = r
-		t.Cleanup(func() {
-			os.Stdin = orig
-			_ = r.Close()
-		})
-	}
 
 	err := cmd.Execute()
 	return stdout.String(), err

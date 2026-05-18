@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -25,10 +24,12 @@ import (
 //  1. Positional argument (`bracket-creator hash-password mysecret`).
 //     Convenient for ad-hoc generation, but leaves the secret in shell
 //     history. Suitable for one-shot dev/test use.
-//  2. Stdin (no positional arg). Read one line, trim trailing newline.
-//     Avoids shell-history leakage; the recommended path for production
-//     hash generation. Pair with a here-doc / pipe to prevent the secret
-//     from echoing.
+//  2. Stdin (no positional arg). Read one line. Stdin is NOT echo-disabled,
+//     so the terminal will display what the operator types; for production
+//     rotation, pipe from a secrets manager or here-doc rather than typing
+//     interactively. We read via cmd.InOrStdin() (cobra's input
+//     abstraction) so embedded callers and tests can inject input without
+//     mutating the process-global os.Stdin.
 //
 // Output is the bcrypt hash on stdout (single line, no trailing newline
 // beyond what the println adds). Operator can `export TOURNAMENT_PASSWORD_HASH="$(...)"`
@@ -49,7 +50,7 @@ func newHashPasswordCmd() *cobra.Command {
 				// elsewhere; the runtime auth check is exact-string match
 				// on the X-Tournament-Password header, so don't strip
 				// anything else here).
-				reader := bufio.NewReader(os.Stdin)
+				reader := bufio.NewReader(cmd.InOrStdin())
 				line, err := reader.ReadString('\n')
 				if err != nil && !errors.Is(err, io.EOF) {
 					return fmt.Errorf("failed to read password from stdin: %w", err)

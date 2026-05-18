@@ -138,6 +138,14 @@ function App() {
   // touch viewerCompId / viewerScreen.
   const [mode, setMode] = useS("viewer");
   const [authed, setAuthed] = useS(() => localStorage.getItem("bc_authed") === "true");
+  // authedRef mirrors `authed` so the SSE handler — created once per
+  // viewerCompId/mode change — observes the current auth state instead
+  // of the closure-captured value from when it was attached. Without
+  // the ref, a user who lands on `/admin`, signs in, and stays in
+  // admin mode would keep the pre-login `authed=false` closure and
+  // ignore later password_reset events. authedRef is updated in the
+  // localStorage-persist effect below.
+  const authedRef = useR(authed);
   const [password, setPassword] = useS(() => localStorage.getItem("bc_password") || "");
   const [authPrompt, setAuthPrompt] = useS(false);
   const [viewerCompId, setViewerCompId] = useS(null);
@@ -229,6 +237,10 @@ function App() {
   useE(() => {
     localStorage.setItem("bc_authed", authed);
     localStorage.setItem("bc_password", password);
+    // Keep the ref in lockstep so the long-lived SSE handler below
+    // can read the current value without being recreated on every
+    // sign-in/sign-out.
+    authedRef.current = authed;
   }, [authed, password]);
 
   useE(() => { document.documentElement.style.setProperty("--accent", THEME.accentColor); }, []);
@@ -285,7 +297,14 @@ function App() {
             // next request doesn't silently 401, and re-show
             // AuthModal so they notice immediately. The viewer flow
             // doesn't need to react: it never sends the header.
-            if (authed) {
+            //
+            // Read via authedRef instead of the closure-captured
+            // `authed` so we see the CURRENT auth state. This effect's
+            // deps are [viewerCompId, mode]; an `/admin` deep-link
+            // where the user signs in without mode changing would
+            // otherwise leave the handler holding `authed=false` and
+            // miss the reset event entirely.
+            if (authedRef.current) {
                 setAuthed(false);
                 setPassword("");
                 try {

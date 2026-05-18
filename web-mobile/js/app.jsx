@@ -225,7 +225,10 @@ function App() {
     if (initialRoute.mode === "admin" && !authed) {
       setAuthPrompt(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Mount-only side effect; intentional empty deps. The project's
+    // ESLint config doesn't include react-hooks/exhaustive-deps, so
+    // no disable directive is needed (and including one errored
+    // because the rule isn't defined).
   }, []);
 
   // Sync state to URL whenever it changes. Uses the AppRouter.route()

@@ -8,6 +8,20 @@ The `mobile-app` command starts a live tournament management server for use **on
 bracket-creator mobile-app --folder ./tournament-data
 ```
 
+The `--folder` and `--port` flags can also be supplied via environment variables — useful for systemd units, Docker, or any deploy that doesn't run via `make`:
+
+```bash
+TOURNAMENT_DATA_DIR=/path/to/data PORT=8082 bracket-creator mobile-app
+```
+
+| Flag | Env var | Default |
+|------|---------|---------|
+| `--folder` / `-f` | `TOURNAMENT_DATA_DIR` | `.` |
+| `--port` / `-p` | `PORT` | `8080` |
+| `--bind` / `-b` | `BIND_ADDRESS` | `localhost` |
+
+An explicit flag always wins over the env var.
+
 Or with the Makefile:
 
 ```bash

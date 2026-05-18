@@ -2,7 +2,6 @@ package mobileapp
 
 import (
 	"errors"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -52,22 +51,6 @@ const MaxLenOriginatorID = 128
 // the handler. Mirrors errPasswordRequired in handlers_tournament.go.
 var errResetPasswordRequired = errors.New("password is required")
 
-// isLoopbackHost reports whether the host component of hostport is a
-// loopback interface (localhost, 127.0.0.1, or ::1). Used by
-// isSameOriginReset to guard against DNS-rebinding attacks: loopback
-// addresses are not route-able from external networks, so a request whose
-// Host is loopback cannot have originated from an outside page.
-func isLoopbackHost(hostport string) bool {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport // bare host with no port
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return strings.EqualFold(host, "localhost")
-}
-
 // isSameOriginReset reports whether the request's Origin header is
 // safe to treat as a same-origin / non-browser caller for the reset
 // endpoint. The global CORS policy is `Access-Control-Allow-Origin: *`
@@ -79,8 +62,9 @@ func isLoopbackHost(hostport string) bool {
 // Rules:
 //   - No Origin header → non-browser caller (curl, scripted client,
 //     mobile app over LAN that doesn't set Origin). Allowed.
-//   - Origin scheme AND host:port both match → genuine same-origin
-//     browser request (the operator opened /reset in their tab). Allowed.
+//   - Origin scheme AND host:port both match the server's own scheme and
+//     Host → genuine same-origin browser request (the operator opened
+//     /reset in their own tab). Allowed.
 //   - Origin set but scheme or host doesn't match (different scheme,
 //     different host string, malformed URL, or Origin: null from a
 //     sandboxed iframe/file://) → Rejected.
@@ -100,16 +84,15 @@ func isLoopbackHost(hostport string) bool {
 //   - DNS rebinding: a malicious page can rebind its domain to the
 //     tournament server's IP so that both Origin.Host and c.Request.Host
 //     equal the attacker's domain — passing the Origin == Host check even
-//     though the request reaches this server. To mitigate, we additionally
-//     require c.Request.Host to be a loopback interface (localhost /
-//     127.0.0.1 / ::1) when Origin is present. Non-browser callers (curl,
-//     scripts — no Origin header) are unaffected. Browser-based /reset
-//     from a remote LAN machine is intentionally rejected; those operators
-//     should use curl locally or run with --lock-password.
+//     though the request reaches this server. This endpoint is intended
+//     for trusted networks (local / private LAN); for any
+//     internet-exposed deployment use --lock-password instead, which
+//     disables this endpoint entirely.
 //
-// We deliberately do NOT support an allowlist env var here: the
-// recovery path is for operators sitting at the tournament server.
-// Anyone reaching it cross-origin is either misconfigured or hostile.
+// We deliberately do NOT restrict to loopback-only: the recovery path
+// must be reachable from any browser tab on the same network so
+// operators at a scoring table on the far side of the venue can reset
+// without SSH access to the server.
 func isSameOriginReset(c *gin.Context) bool {
 	origin := strings.TrimSpace(c.GetHeader("Origin"))
 	if origin == "" {
@@ -117,14 +100,6 @@ func isSameOriginReset(c *gin.Context) bool {
 	}
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
-		return false
-	}
-
-	// DNS-rebinding guard — see Known Limitations in the function comment.
-	// When a browser Origin is present, require the effective server address
-	// to be loopback so that an attacker cannot rebind their domain to this
-	// server's IP and pass the Origin == Host comparison below.
-	if !isLoopbackHost(c.Request.Host) {
 		return false
 	}
 

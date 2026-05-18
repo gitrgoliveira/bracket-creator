@@ -435,11 +435,9 @@ paths:
           description: |
             Cross-origin POST rejected. The handler requires both the Origin scheme and
             host:port to match the server's effective scheme (http vs https) and `Host`
-            header (RFC 6454 §3.2). Rejected cases include: scheme mismatch (e.g. HTTPS
-            Origin to a plain-HTTP server), host or port mismatch, malformed Origin URL,
-            and `Origin: null` (sandboxed iframes, file://, data: URLs). When the server
-            host is not a loopback address (localhost/127.0.0.1/::1) and a browser Origin
-            is present, the request is also rejected to prevent DNS-rebinding attacks.
+            header (RFC 6454 §3.2). Rejected cases: scheme mismatch (e.g. HTTPS Origin
+            to a plain-HTTP server), host or port mismatch, malformed Origin URL, and
+            `Origin: null` (sandboxed iframes, file://, data: URLs).
         '404':
           description: Reset disabled (locked mode active).
         '409':

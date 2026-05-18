@@ -200,21 +200,18 @@ func TestReset_SameOriginPost_Accepted(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"password": "newpw"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	// Use localhost — non-loopback hosts (e.g. LAN IPs) are rejected by
-	// the DNS-rebinding guard even when Origin matches Host.
-	req.Header.Set("Origin", "http://localhost:8080")
-	req.Host = "localhost:8080"
+	req.Header.Set("Origin", "http://tournament.local:8080")
+	req.Host = "tournament.local:8080"
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 }
 
-// Non-loopback host with matching Origin/Host is rejected regardless of the
-// Origin == Host match. An attacker performing a DNS-rebinding attack would
-// produce exactly this request shape: both Origin and Host equal their domain,
-// but the server's effective address is not loopback.
-func TestReset_NonLoopbackHost_Rejected(t *testing.T) {
+// A browser on a LAN IP (non-loopback) with matching Origin/Host is accepted.
+// Operators access the server from other devices on the same network; the
+// same-origin check (Origin == Host) is sufficient protection here.
+func TestReset_LanIPSameOrigin_Accepted(t *testing.T) {
 	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)
 	r := gin.New()
@@ -226,19 +223,16 @@ func TestReset_NonLoopbackHost_Rejected(t *testing.T) {
 		Password: "old",
 	}))
 
-	body, _ := json.Marshal(map[string]string{"password": "attacker"})
+	body, _ := json.Marshal(map[string]string{"password": "newpw"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	// Origin and Host match — but neither is loopback (simulates DNS rebinding).
+	// LAN IP — Origin matches Host, so same-origin check passes.
 	req.Header.Set("Origin", "http://192.168.1.100:8080")
 	req.Host = "192.168.1.100:8080"
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusForbidden, w.Code, "non-loopback host must be rejected even when Origin matches Host")
-	loaded, err := store.LoadTournament()
-	require.NoError(t, err)
-	assert.Equal(t, "old", loaded.Password)
+	assert.Equal(t, http.StatusNoContent, w.Code)
 }
 
 // A browser on an HTTPS origin that POSTs to an HTTP tournament server
@@ -258,12 +252,11 @@ func TestReset_SchemeMismatch_Rejected(t *testing.T) {
 	}))
 
 	// Origin says HTTPS; server is HTTP (req.TLS == nil → expectedScheme = "http").
-	// Use localhost so the loopback guard passes and only the scheme check fires.
 	body, _ := json.Marshal(map[string]string{"password": "attacker"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", "https://localhost:8080")
-	req.Host = "localhost:8080"
+	req.Header.Set("Origin", "https://tournament.local:8080")
+	req.Host = "tournament.local:8080"
 	// req.TLS is nil by default (http) — scheme mismatch with https Origin
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

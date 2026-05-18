@@ -285,7 +285,7 @@ The server runs in one of two modes, selected at startup:
 **File mode** (default — for local / private LAN deployments):
 
 - The admin password lives plaintext in `tournament-data/tournament.md`.
-- Forgot the password? **From the tournament server itself**, browse to `http://localhost:<port>/reset` and set a new one (no old password required). The browser form only works from a loopback address — DNS-rebinding protection blocks browser POSTs from LAN IPs. From another machine on the LAN, use curl instead: `curl -s -X POST http://<host>:<port>/api/tournament/reset -H 'Content-Type: application/json' -d '{"password":"newpass"}'`
+- Forgot the password? Browse to `http://<host>/reset` from any device on the same network and set a new one. No old password required — this is the documented recovery path.
 - Set during initial **Create tournament** flow in the UI, or edit `tournament.md` directly.
 
 **Locked mode** (recommended for any deployment reachable over the internet):

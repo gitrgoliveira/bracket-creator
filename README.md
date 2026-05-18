@@ -123,13 +123,14 @@ When using the CSV formatted style, `Dojo` is only used to try to ensure players
 ### Customizing the web server
 To set the listen address and port run:
 ```bash
-bracket-creator serve --listen-address 0.0.0.0 --listen-port 8080
+bracket-creator serve --bind 0.0.0.0 --port 8080
 ```
 
-You can also use the environment variables:
+You can also use the environment variables (the flags above take precedence):
 ```bash
 export BIND_ADDRESS=0.0.0.0
 export PORT=8080
+bracket-creator serve
 ```
 
 
@@ -246,6 +247,12 @@ The `mobile-app` command starts a live tournament management server you can use 
 
 ```bash
 bracket-creator mobile-app --folder ./tournament-data
+```
+
+The `--folder`, `--port`, and `--bind` flags are also read from `TOURNAMENT_DATA_DIR`, `PORT`, and `BIND_ADDRESS` respectively (flag takes precedence):
+
+```bash
+TOURNAMENT_DATA_DIR=/path PORT=8082 bracket-creator mobile-app
 ```
 
 Or with the Makefile:

@@ -51,7 +51,7 @@ Before implementing features or making architectural decisions, read the project
 - **Single test:** `go test -v -run <TestName> ./internal/helper/...`
 - **Generate examples:** `make examples`
 - **Mobile app (local):** `make run-mobile` (default data dir `./tournament-data`, port 8080)
-- **Mobile app (custom port/dir):** `PORT=8082 TOURNAMENT_DATA_DIR=/path make run-mobile`
+- **Mobile app (custom port/dir):** `PORT=8082 TOURNAMENT_DATA_DIR=/path make run-mobile` — env vars (`PORT`, `BIND_ADDRESS`, `TOURNAMENT_DATA_DIR`) are also honored when invoking the binary directly without `make`. Explicit flags (`--port`, `--bind`, `--folder`) win over the env vars.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker

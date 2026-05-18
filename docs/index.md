@@ -43,6 +43,7 @@ bracket-creator serve
 
 # Or run the live tournament app (for use on the day)
 bracket-creator mobile-app --folder ./tournament-data
+# (or set TOURNAMENT_DATA_DIR / PORT in the environment instead of flags)
 ```
 
 Open `tournament.xlsx` in Excel or LibreOffice and print.

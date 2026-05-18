@@ -74,12 +74,16 @@ func TestBcryptVerifier_Mode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "locked", v.Mode())
 	assert.False(t, v.ResetEnabled())
-	// AllowsFileBootstrap is true in both modes so the SPA's
-	// CreateTournament flow can bootstrap a fresh locked deployment
-	// without sending X-Tournament-Password. See auth_source.go for
-	// the security rationale.
-	assert.True(t, v.AllowsFileBootstrap())
+	// AllowsFileBootstrap is FALSE in locked mode: the env-var hash
+	// IS the credential from request 1, and anonymous bootstrap on
+	// an internet-exposed fresh deployment would let any network
+	// client race-claim the initial tournament record with garbage
+	// data. The SPA's CreateTournament form sends the env-var
+	// password in X-Tournament-Password on locked-mode bootstraps;
+	// the middleware accepts the POST when that header verifies.
+	assert.False(t, v.AllowsFileBootstrap())
 	assert.False(t, v.EnforceEmptyStoredGuard())
+	assert.True(t, v.RedactStoredPassword())
 }
 
 func TestNewBcryptVerifier_EmptyHash(t *testing.T) {

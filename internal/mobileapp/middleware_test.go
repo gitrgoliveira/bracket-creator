@@ -10,6 +10,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func setupMiddlewareTest(t *testing.T) (*state.Store, *gin.Engine) {
@@ -182,6 +183,56 @@ func TestAuthMiddleware_LegacyEmptyStoredPassword_NoBypass(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusForbidden, w.Code,
 			"any header + empty stored password must fail closed")
+	})
+}
+
+// Locked-mode bootstrap (no tournament yet, bcrypt verifier active)
+// must require X-Tournament-Password — anonymous bootstrap on a fresh
+// locked deployment would let any network client race-claim the
+// initial tournament record. file-mode bootstrap stays anonymous
+// (existing behavior, covered by TestAuthMiddleware_NoTournament_AllowsCreateTournament).
+func TestAuthMiddleware_LockedMode_BootstrapRequiresAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir, err := os.MkdirTemp("", "middleware-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("envpass"), bcrypt.MinCost)
+	require.NoError(t, err)
+	bcryptV, err := NewBcryptVerifier(string(hash))
+	require.NoError(t, err)
+
+	r := gin.New()
+	r.Use(AuthMiddleware(bcryptV, store))
+	r.POST("/api/tournament", func(c *gin.Context) {
+		c.JSON(http.StatusCreated, gin.H{"ok": true})
+	})
+
+	t.Run("no header → 401", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/tournament", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"locked-mode bootstrap without X-Tournament-Password must 401")
+	})
+
+	t.Run("wrong header → 401", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/tournament", nil)
+		req.Header.Set("X-Tournament-Password", "wrong")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("correct env-var password → 201", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/tournament", nil)
+		req.Header.Set("X-Tournament-Password", "envpass")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusCreated, w.Code,
+			"locked-mode bootstrap with the env-var password must succeed")
 	})
 }
 

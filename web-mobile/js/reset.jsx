@@ -12,7 +12,7 @@
 
 const { useState: useStateR, useEffect: useEffectR, useRef: useRefR } = React;
 
-function ResetPasswordForm({ authConfig, onBack, onSuccess }) {
+function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
   const [pw, setPw] = useStateR("");
   const [confirm, setConfirm] = useStateR("");
   const [err, setErr] = useStateR("");
@@ -56,7 +56,11 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess }) {
     setSaving(true);
     setErr("");
     try {
-      await window.API.resetPassword(pw);
+      // Pass the per-tab originatorId so the server can echo it on
+      // the SSE password_reset broadcast — without that, the
+      // originator tab receives its own event and clears the
+      // localStorage credential we're about to write below.
+      await window.API.resetPassword(pw, originatorId);
       if (!mountedRef.current) return;
       // Success path: persist the new password into localStorage so
       // the user is logged straight into admin without a second sign-in

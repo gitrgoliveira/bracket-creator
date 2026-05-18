@@ -21,7 +21,30 @@ import (
 // the documented recovery path for a forgotten admin password.
 type resetPasswordRequest struct {
 	Password string `json:"password"`
+	// OriginatorId is an opaque per-tab identifier the SPA generates
+	// on mount and sends with the reset POST so the SSE broadcast
+	// (EventPasswordReset) can be ignored in the originating tab.
+	// Without it, the tab that just submitted /reset would receive
+	// its own broadcast and immediately clear the localStorage
+	// credential ResetPasswordForm just wrote — kicking the operator
+	// who reset straight back to the AuthModal. The server treats
+	// the value as opaque: echo on the broadcast, never persist.
+	OriginatorId string `json:"originatorId,omitempty"`
 }
+
+// passwordResetEventData is the payload of an EventPasswordReset SSE
+// broadcast. Carries only the OriginatorId so consumer tabs can
+// suppress their own resets; everything else (mode, etc.) is fetched
+// fresh from /api/auth-config on demand.
+type passwordResetEventData struct {
+	OriginatorId string `json:"originatorId,omitempty"`
+}
+
+// MaxLenOriginatorId caps the originatorId at 128 bytes — a UUID is
+// 36 bytes, a fallback random string is ~20; 128 leaves headroom for
+// future variants without letting an attacker pump arbitrary bytes
+// through the SSE channel.
+const MaxLenOriginatorId = 128
 
 // errResetPasswordRequired is the sentinel the reset transform returns
 // when the new Password is empty after binding. Surfaced as a 400 by
@@ -120,6 +143,10 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if err := validateMaxLen("originatorId", req.OriginatorId, MaxLenOriginatorId); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		// Load the current tournament under the same atomic primitive
 		// the PUT handler uses so a concurrent PUT/POST can't race the
@@ -173,8 +200,13 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			//     and re-show AuthModal. Without this, other admins'
 			//     cached password stays in localStorage until their next
 			//     write fails with 401 — surprising UX.
+			//     The OriginatorId echoed here lets the submitting tab
+			//     identify and ignore its own broadcast so the operator
+			//     who just reset isn't immediately logged out.
 			hub.Broadcast(EventTournamentUpdated, nil)
-			hub.Broadcast(EventPasswordReset, nil)
+			hub.Broadcast(EventPasswordReset, passwordResetEventData{
+				OriginatorId: req.OriginatorId,
+			})
 		}
 		c.Status(http.StatusNoContent)
 	})

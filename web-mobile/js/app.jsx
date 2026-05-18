@@ -158,6 +158,22 @@ function App() {
   // EventSource itself lives inside subscribeToEvents; the second
   // callback hands status events up here.
   const [sseConnected, setSseConnected] = useS(true);
+  // Per-tab client ID, generated once on mount. Used as the originator
+  // identifier on password-reset POSTs so the SSE broadcast can be
+  // ignored in the originating tab. Without this, the tab that just
+  // submitted /reset receives its own password_reset event and the
+  // handler immediately clears the localStorage credential the
+  // ResetPasswordForm just wrote — kicking the operator who reset
+  // straight back to the AuthModal. Survives only the tab lifetime;
+  // each tab gets a fresh ID so two operators resetting from
+  // different tabs both see the other's reset and log out as they
+  // should.
+  const clientIdRef = useR(null);
+  if (!clientIdRef.current) {
+    clientIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
   // Auth-mode discovery (file vs. locked). Fetched once on App mount
   // from GET /api/auth-config so the AuthModal can hide the "Forgot
   // password?" link in locked mode and the /reset page can render an
@@ -298,6 +314,16 @@ function App() {
             // AuthModal so they notice immediately. The viewer flow
             // doesn't need to react: it never sends the header.
             //
+            // Originator suppression: the tab that just submitted /reset
+            // also receives this broadcast. If we react in that tab we'd
+            // immediately clobber the new credential ResetPasswordForm
+            // just wrote to localStorage. The form passes its clientId
+            // as `originatorId`, the server echoes it on the event
+            // payload, and we ignore matches here.
+            if (event.data && event.data.originatorId && event.data.originatorId === clientIdRef.current) {
+                return;
+            }
+            //
             // Read via authedRef instead of the closure-captured
             // `authed` so we see the CURRENT auth state. This effect's
             // deps are [viewerCompId, mode]; an `/admin` deep-link
@@ -422,12 +448,15 @@ function App() {
 
   if (loading && !selectedCompData) return <div className="loading">Loading...</div>;
   if (!tournament) return (
-    <CreateTournament onCreated={(t, p) => {
-      setTournament(t);
-      setAuthed(true);
-      setMode("admin");
-      setPassword(p);
-    }} />
+    <CreateTournament
+      authConfig={authConfig}
+      onCreated={(t, p) => {
+        setTournament(t);
+        setAuthed(true);
+        setMode("admin");
+        setPassword(p);
+      }}
+    />
   );
 
   // T060: /display family — public, read-only TV / lobby / overlay
@@ -510,6 +539,7 @@ function App() {
         window.ResetPasswordForm
           ? <window.ResetPasswordForm
               authConfig={authConfig}
+              originatorId={clientIdRef.current}
               onBack={() => setViewerScreen("home")}
               onSuccess={(pw) => {
                 setAuthed(true);
@@ -646,7 +676,20 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
   );
 }
 
-function CreateTournament({ onCreated }) {
+function CreateTournament({ onCreated, authConfig }) {
+  // In locked mode the server requires X-Tournament-Password on the
+  // bootstrap POST and discards the body's `password` field. The form's
+  // single password input is repurposed: in file mode it's the new
+  // admin password to set; in locked mode it's the env-var password
+  // the operator already supplied via TOURNAMENT_PASSWORD_HASH (now
+  // the live admin credential). After a successful bootstrap we cache
+  // that same value as the localStorage admin password — in locked
+  // mode the cached value IS what subsequent admin requests use to
+  // authenticate against the bcrypt hash. Pre-fix the form sent no
+  // header, the server discarded the typed password, and the SPA
+  // immediately tried to authenticate with a value the env-var hash
+  // didn't match → instant 401.
+  const locked = authConfig && authConfig.mode === "locked";
   const [name, setName] = useS("");
   // Initialize date in canonical DD-MM-YYYY format, not ISO YYYY-MM-DD.
   // toISOString() emits ISO; without this conversion the picker boundary
@@ -702,7 +745,12 @@ function CreateTournament({ onCreated }) {
         password: pass,
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
       };
-      const t = await window.API.createTournament(config);
+      // In locked mode, the typed password IS the env-var admin
+      // credential — pass it as authPassword so api_client sends
+      // X-Tournament-Password. In file mode authPassword is undefined
+      // and the header is omitted (the bootstrap branch in middleware
+      // lets it through unauthenticated).
+      const t = await window.API.createTournament(config, locked ? pass : undefined);
       if (!mountedRef.current) return;
       // Wait for backend to broadcast or just pass it up
       onCreated(t, pass);
@@ -752,9 +800,20 @@ function CreateTournament({ onCreated }) {
             <div className="field__hint">{`Enter a number (1-${window.MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
           <div className="field">
-            <label className="field__label">Admin Password</label>
-            <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Choose a password" required />
-            <div className="field__hint">This password will be required to manage the tournament.</div>
+            <label className="field__label">{locked ? "Admin Password (from TOURNAMENT_PASSWORD_HASH)" : "Admin Password"}</label>
+            <input
+              className="input"
+              type="password"
+              value={pass}
+              onChange={(e) => setPass(e.target.value)}
+              placeholder={locked ? "Enter the env-var password" : "Choose a password"}
+              required
+            />
+            <div className="field__hint">
+              {locked
+                ? "This server is running in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it's used both to authorize this bootstrap and as your admin credential afterwards."
+                : "This password will be required to manage the tournament."}
+            </div>
           </div>
           <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={saving} style={{ marginTop: 16 }}>
             {saving ? "Creating…" : "Create Tournament"}

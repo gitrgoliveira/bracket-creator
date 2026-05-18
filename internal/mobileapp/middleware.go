@@ -43,13 +43,13 @@ func requireValidCompID(c *gin.Context) (string, bool) {
 // header. The actual credential check is delegated to the PasswordVerifier
 // so file-based and locked (bcrypt-env-var) modes share a single middleware.
 //
-// The store reference is still needed for the "uninitialized tournament"
+// The store reference is needed for the "uninitialized tournament"
 // bootstrap branch — that gate fires when no tournament.md exists and we
-// must let through the very first POST /api/tournament. Both verifiers
-// allow file-bootstrap (the SPA's CreateTournament flow doesn't send a
-// password header); in locked mode the stored Password is discarded by
-// the handler anyway, so the bootstrap window doesn't create any
-// credential-injection surface beyond what already exists in file mode.
+// must let through the very first POST /api/tournament. The verifier
+// owns the policy: file verifier allows anonymous bootstrap (no
+// credential exists yet); bcrypt verifier requires the env-var password
+// even at bootstrap so an internet-exposed fresh deployment can't be
+// race-claimed by a network-reachable attacker.
 func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		t, err := store.LoadTournament()
@@ -61,12 +61,35 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 
 		// If no tournament config exists yet (or it's the default blank one), only allow creating one
 		if t == nil || (t.Name == "New Tournament" && t.Password == "") {
-			if verifier.AllowsFileBootstrap() && (c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPost) && c.FullPath() == "/api/tournament" {
+			isBootstrapWrite := (c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPost) && c.FullPath() == "/api/tournament"
+			if !isBootstrapWrite {
+				c.JSON(http.StatusForbidden, gin.H{"error": "tournament not configured yet"})
+				c.Abort()
+				return
+			}
+			if verifier.AllowsFileBootstrap() {
+				// File mode: no credential exists on disk yet; let the
+				// CreateTournament POST through unauthenticated and the
+				// operator picks the password as part of the body.
 				c.Next()
 				return
 			}
-			c.JSON(http.StatusForbidden, gin.H{"error": "tournament not configured yet"})
-			c.Abort()
+			// Locked mode: the env-var hash IS the credential from
+			// request 1. Require the header even at bootstrap so a
+			// network-reachable attacker can't race-claim the initial
+			// tournament record on a fresh deployment.
+			ok, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
+			if verr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
+				c.Abort()
+				return
+			}
+			if !ok {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})
+				c.Abort()
+				return
+			}
+			c.Next()
 			return
 		}
 

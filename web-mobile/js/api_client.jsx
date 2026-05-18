@@ -55,11 +55,19 @@ const API = {
     // the caller can surface the server's error message (including the
     // 404 "reset disabled" case if the SPA's cached authConfig was
     // stale).
-    async resetPassword(newPassword) {
+    //
+    // `originatorId` is a per-tab client ID echoed back on the SSE
+    // password_reset event payload so the originating tab can ignore
+    // its own broadcast and avoid clobbering the just-written
+    // localStorage credential. Optional — when absent the server
+    // broadcasts an empty originator and ALL tabs log out.
+    async resetPassword(newPassword, originatorId) {
+        const body = { password: newPassword };
+        if (originatorId) body.originatorId = originatorId;
         const res = await fetch('/api/tournament/reset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: newPassword })
+            body: JSON.stringify(body)
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -101,10 +109,23 @@ const API = {
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
-    async createTournament(config) {
+    // Bootstrap a fresh tournament. In file mode the call is
+    // unauthenticated (the AuthMiddleware's uninitialized-bootstrap
+    // branch lets it through). In locked mode the server requires the
+    // env-var password to authorize even the initial POST — pass
+    // `authPassword` (typed by the operator into the locked-mode
+    // CreateTournament form) so we can attach it as
+    // X-Tournament-Password. The handler discards the body's
+    // `password` field in locked mode but the header is what gets
+    // verified.
+    async createTournament(config, authPassword) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (authPassword) {
+            headers['X-Tournament-Password'] = authPassword;
+        }
         const res = await fetch('/api/tournament', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify(config)
         });
         if (!res.ok) {

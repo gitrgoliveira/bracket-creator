@@ -38,17 +38,21 @@ type PasswordVerifier interface {
 	ResetEnabled() bool
 
 	// AllowsFileBootstrap reports whether the middleware should let an
-	// unauthenticated POST/PUT to /api/tournament through when no
-	// tournament has been bootstrapped yet. Both implementations return
-	// true — the SPA's CreateTournament flow does not send
-	// X-Tournament-Password on the bootstrap POST, and we don't want a
-	// fresh locked deployment to require curl-on-first-run. The
-	// bootstrap window doesn't widen the credential surface: in file
-	// mode the operator picks the password they then have to use, and
-	// in locked mode the handler discards the submitted Password field
-	// because authentication uses the env-var bcrypt hash. The hook
-	// stays on the interface so a future verifier (e.g. an OIDC mode)
-	// can opt out if its security model requires it.
+	// UNAUTHENTICATED POST/PUT to /api/tournament through when no
+	// tournament has been bootstrapped yet.
+	//
+	//   - file mode: true. The operator picks the admin password during
+	//     CreateTournament; before that, there's nothing to authenticate
+	//     against. This is the historical UX.
+	//   - locked mode: false. The env-var bcrypt hash IS the admin
+	//     credential from the very first request; allowing anonymous
+	//     bootstrap on an internet-exposed fresh deployment would let
+	//     any network client race-claim the initial tournament record
+	//     with garbage data before the operator finishes deploying.
+	//     The SPA's CreateTournament form sends the env-var password
+	//     in the X-Tournament-Password header when authConfig.mode ==
+	//     "locked"; the middleware accepts the bootstrap if that header
+	//     verifies.
 	AllowsFileBootstrap() bool
 
 	// EnforceEmptyStoredGuard reports whether the middleware should
@@ -175,21 +179,17 @@ func (v *bcryptPasswordVerifier) Verify(presented string) (bool, error) {
 func (v *bcryptPasswordVerifier) Mode() string       { return "locked" }
 func (v *bcryptPasswordVerifier) ResetEnabled() bool { return false }
 
-// AllowsFileBootstrap returns true even in locked mode. Rationale: the
-// security model already requires the env-var hash for every subsequent
-// request, and on a fresh install there is nothing on disk to protect.
-// Returning false would break the SPA's CreateTournament flow (it does
-// not send X-Tournament-Password on the bootstrap POST), forcing
-// operators to bootstrap via curl on first run. The window where an
-// unauth'd caller could land an arbitrary tournament record exists in
-// file mode too; locked mode does not change that surface.
-//
-// The handler at POST /api/tournament discards the supplied Password
-// field when in locked mode, so an attacker who wins the bootstrap race
-// only persists a name/date/venue/courts record — they cannot insert a
-// password that would later authenticate them, because authentication
-// reads the env-var hash exclusively.
-func (v *bcryptPasswordVerifier) AllowsFileBootstrap() bool { return true }
+// AllowsFileBootstrap returns false. Anonymous bootstrap on an
+// internet-exposed locked deployment would let a network-reachable
+// attacker race-claim the initial tournament record before the
+// operator does — even though the submitted password is discarded
+// (so the attacker can't inject a credential), they could fill the
+// store with garbage Name/Date/Venue/Courts data the operator then
+// has to clean up out-of-band. The SPA's CreateTournament form
+// detects locked mode via /api/auth-config and sends the env-var
+// password in the X-Tournament-Password header so the middleware
+// can verify it; curl-style bootstrap requires the same header.
+func (v *bcryptPasswordVerifier) AllowsFileBootstrap() bool { return false }
 
 func (v *bcryptPasswordVerifier) EnforceEmptyStoredGuard() bool { return false }
 

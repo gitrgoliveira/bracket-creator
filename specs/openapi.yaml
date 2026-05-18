@@ -261,10 +261,12 @@ paths:
 
         **Locked mode (`--lock-password`)**: the `password` field in the request body is
         accepted but **discarded** server-side — authentication uses the bcrypt hash from
-        `TOURNAMENT_PASSWORD_HASH` env var, not the stored value. The bootstrap-without-auth
-        window is preserved so the SPA's CreateTournament flow works on a fresh install (the
-        operator was going to authenticate with the env-var hash on their next request anyway).
-        The response body's `password` field is empty in this mode.
+        `TOURNAMENT_PASSWORD_HASH` env var, not the stored value. **Bootstrap requires
+        `X-Tournament-Password` to match the env-var hash, even on a never-initialized
+        deployment** — anonymous bootstrap would let any network-reachable client race-claim
+        the initial tournament record. The SPA's CreateTournament form detects locked mode
+        via `GET /api/auth-config` and sends the env-var password as the header on the
+        bootstrap POST. The response body's `password` field is empty.
 
         `name` is trimmed and must be non-empty after trim (`tournament name is required`).
         `venue` and `date` are also trimmed but may be empty.

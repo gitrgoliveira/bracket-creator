@@ -301,7 +301,9 @@ func TestReset_NoOriginHeader_Accepted(t *testing.T) {
 // (for viewer refresh) AND EventPasswordReset (so admin sessions clear
 // their stale localStorage credential and re-show AuthModal). Without
 // the second event, other admins remain in admin mode with a cached
-// password until a write fails with 401.
+// password until a write fails with 401. The password_reset event
+// payload includes the OriginatorId echoed from the request so the
+// submitting tab can suppress its own broadcast.
 func TestReset_BroadcastsPasswordResetEvent(t *testing.T) {
 	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)
@@ -318,16 +320,22 @@ func TestReset_BroadcastsPasswordResetEvent(t *testing.T) {
 		Password: "old",
 	}))
 
-	body, _ := json.Marshal(map[string]string{"password": "newpw"})
+	body, _ := json.Marshal(map[string]string{
+		"password":     "newpw",
+		"originatorId": "client-abc-123",
+	})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusNoContent, w.Code)
 
-	// Drain the channel and assert both event types fired. The hub
-	// uses a buffered channel; reads here are non-blocking via select.
+	// Drain the channel and assert both event types fired AND the
+	// password_reset event echoes the originatorId from the request.
+	// The hub uses a buffered channel; reads here are non-blocking
+	// via select.
 	seen := map[string]bool{}
+	originatorEchoed := false
 	for range 4 {
 		select {
 		case msg := <-ch:
@@ -336,12 +344,45 @@ func TestReset_BroadcastsPasswordResetEvent(t *testing.T) {
 					seen[ev] = true
 				}
 			}
+			if strings.Contains(msg, `"type":"password_reset"`) &&
+				strings.Contains(msg, `"originatorId":"client-abc-123"`) {
+				originatorEchoed = true
+			}
 		default:
 			// channel drained
 		}
 	}
 	assert.True(t, seen["tournament_updated"], "tournament_updated event missing")
 	assert.True(t, seen["password_reset"], "password_reset event missing (admins won't auto-logout)")
+	assert.True(t, originatorEchoed, "password_reset event must echo the request's originatorId so the submitting tab can suppress its own broadcast")
+}
+
+// OriginatorId is opaque to the server but length-capped at 128 bytes
+// so an attacker can't pump arbitrary bytes through the SSE channel.
+// Oversized values are rejected at the reset endpoint with a 400.
+func TestReset_OriginatorIdOversized_Returns400(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterResetHandlers(api, store, NewFileVerifier(store), NewHub())
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "T",
+		Password: "old",
+	}))
+
+	body, _ := json.Marshal(map[string]string{
+		"password":     "newpw",
+		"originatorId": strings.Repeat("x", MaxLenOriginatorId+1),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "originatorId")
 }
 
 func TestReset_EmptyPassword_Returns400(t *testing.T) {

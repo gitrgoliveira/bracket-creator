@@ -199,7 +199,7 @@ func TestAuthMiddleware_LockedMode_BootstrapRequiresAuth(t *testing.T) {
 	store, err := state.NewStore(dir)
 	require.NoError(t, err)
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("envpass"), bcrypt.MinCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("kotai-A"), bcrypt.MinCost)
 	require.NoError(t, err)
 	bcryptV, err := NewBcryptVerifier(string(hash))
 	require.NoError(t, err)
@@ -228,7 +228,7 @@ func TestAuthMiddleware_LockedMode_BootstrapRequiresAuth(t *testing.T) {
 
 	t.Run("correct env-var password → 201", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/tournament", nil)
-		req.Header.Set("X-Tournament-Password", "envpass")
+		req.Header.Set("X-Tournament-Password", "kotai-A")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusCreated, w.Code,

@@ -393,7 +393,7 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 
 	// --- Phase 2: switch to locked mode (operator restarts with
 	// --lock-password). The on-disk record still has Password="alpha".
-	hash, err := bcrypt.GenerateFromPassword([]byte("envpass"), bcrypt.MinCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("kotai-A"), bcrypt.MinCost)
 	require.NoError(t, err)
 	bcryptV, err := NewBcryptVerifier(string(hash))
 	require.NoError(t, err)
@@ -410,10 +410,10 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 	lockedR.ServeHTTP(alphaW, alphaReq)
 	require.Equal(t, http.StatusUnauthorized, alphaW.Code, "phase 2 'alpha' must NOT authenticate under env-var hash")
 
-	// "envpass" does authenticate, and the response strips the stored
+	// "kotai-A" does authenticate, and the response strips the stored
 	// "alpha" so the admin UI doesn't see a stale credential.
 	envReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
-	envReq.Header.Set("X-Tournament-Password", "envpass")
+	envReq.Header.Set("X-Tournament-Password", "kotai-A")
 	envW := httptest.NewRecorder()
 	lockedR.ServeHTTP(envW, envReq)
 	require.Equal(t, http.StatusOK, envW.Code)
@@ -427,7 +427,7 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 		Name: "Renamed", Courts: []string{"A"},
 	})
 	putReq := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(putBody))
-	putReq.Header.Set("X-Tournament-Password", "envpass")
+	putReq.Header.Set("X-Tournament-Password", "kotai-A")
 	putReq.Header.Set("Content-Type", "application/json")
 	putW := httptest.NewRecorder()
 	lockedR.ServeHTTP(putW, putReq)
@@ -489,11 +489,11 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	// in locked mode without scrubbing tournament.md.
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name:     "Locked Tournament",
-		Password: "stored-secret-that-must-not-leak",
+		Password: "preserved-canary-Aa",
 		Courts:   []string{"A"},
 	}))
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("envpass"), bcrypt.MinCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("kotai-A"), bcrypt.MinCost)
 	require.NoError(t, err)
 	bcryptV, err := NewBcryptVerifier(string(hash))
 	require.NoError(t, err)
@@ -508,14 +508,14 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 
 	// GET /tournament — password must be stripped.
 	getReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
-	getReq.Header.Set("X-Tournament-Password", "envpass")
+	getReq.Header.Set("X-Tournament-Password", "kotai-A")
 	getW := httptest.NewRecorder()
 	r.ServeHTTP(getW, getReq)
 	require.Equal(t, http.StatusOK, getW.Code)
 	var getT state.Tournament
 	require.NoError(t, json.Unmarshal(getW.Body.Bytes(), &getT))
 	assert.Empty(t, getT.Password, "GET response must not leak stored password in locked mode")
-	assert.NotContains(t, getW.Body.String(), "stored-secret-that-must-not-leak")
+	assert.NotContains(t, getW.Body.String(), "preserved-canary-Aa")
 
 	// PUT /tournament — admin changes the name; response must redact
 	// the password that was preserved via the transform.
@@ -526,7 +526,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 		// transform ignores it and preserves the stored value.
 	})
 	putReq := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(putBody))
-	putReq.Header.Set("X-Tournament-Password", "envpass")
+	putReq.Header.Set("X-Tournament-Password", "kotai-A")
 	putReq.Header.Set("Content-Type", "application/json")
 	putW := httptest.NewRecorder()
 	r.ServeHTTP(putW, putReq)
@@ -534,14 +534,14 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	var putT state.Tournament
 	require.NoError(t, json.Unmarshal(putW.Body.Bytes(), &putT))
 	assert.Empty(t, putT.Password, "PUT response must not leak stored password in locked mode (regression for handlers_tournament.go:270)")
-	assert.NotContains(t, putW.Body.String(), "stored-secret-that-must-not-leak")
+	assert.NotContains(t, putW.Body.String(), "preserved-canary-Aa")
 
 	// And the stored record on disk should still hold the original
 	// password — locked-mode redaction is response-only, not a destructive
 	// rewrite (the operator can flip back to file mode and recover).
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
-	assert.Equal(t, "stored-secret-that-must-not-leak", loaded.Password,
+	assert.Equal(t, "preserved-canary-Aa", loaded.Password,
 		"locked-mode response redaction must not clobber the on-disk value")
 }
 

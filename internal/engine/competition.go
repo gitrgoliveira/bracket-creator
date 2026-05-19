@@ -106,7 +106,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// and use existingPairs guards, so parallel goroutines produce identical
 	// content. SavePoolMatches is a full overwrite — last write wins but the
 	// data is the same, making concurrent injection idempotent.
-	if !hasCompleteTB && !hasCompleteDH {
+	if (isTeamComp && !hasCompleteDH) || (!isTeamComp && !hasCompleteTB) {
 		if isTeamComp {
 			injected, injErr := e.InjectPoolDaihyosenMatches(compID)
 			if injErr != nil {

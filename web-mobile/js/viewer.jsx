@@ -40,6 +40,7 @@ function competitionKindLabel(c) {
 }
 
 const pluralize = window.pluralize;
+const isPoolDaihyosenID = id => { const i = id.indexOf('-'); return i >= 0 && id.slice(i + 1).startsWith('DH-'); };
 
 function compMatches(c) {
   const out = [];
@@ -52,8 +53,7 @@ function compMatches(c) {
   // individual matches even in team competitions — override compKind so they
   // route to the individual ScoreEditorModal rather than TeamScoreEditorModal.
   poolMatches.forEach(m => {
-    const isDH = (() => { const i = (m.id || "").indexOf('-'); return i >= 0 && (m.id || "").slice(i + 1).startsWith('DH-'); })();
-    out.push({ ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: c.teamSize });
+    out.push({ ...m, compId: c.id, compName: c.name, compKind: isPoolDaihyosenID(m.id || "") ? "" : c.kind, teamSize: c.teamSize });
   });
 
   const rounds = (c.bracket && c.bracket.rounds) ? c.bracket.rounds : (c.bracket || []);

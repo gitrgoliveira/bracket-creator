@@ -7,6 +7,7 @@ const pluralize = window.pluralize;
 // on the Go side. The override-rank handler ALSO validates against the
 // actual pool size; this cap is the absolute overflow guard.
 const MAX_RANK = window.MAX_RANK;
+const isPoolDaihyosenID = id => { const i = id.indexOf('-'); return i >= 0 && id.slice(i + 1).startsWith('DH-'); };
 
 // Pure decision logic for what RankInput.handleBlur should do, given the
 // state of its refs and props at blur time. Returned as a tagged action so
@@ -226,14 +227,10 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
           {/* Pool-daihyosen banner: shown when the backend has injected DH matches
               for this pool (all regular matches complete but teams still tied). */}
           {(() => {
-            const dhMatches = (c.poolMatches || []).filter(m => {
-              const i = (m.id || "").indexOf('-');
-              if (i < 0) return false;
-              const isDH = (m.id || "").slice(i + 1).startsWith('DH-');
-              if (!isDH) return false;
-              // Pool name = prefix before the first dash in the match ID (e.g. "Pool A")
-              return (m.id || "").slice(0, i) === selectedPool.poolName;
-            });
+            const poolPrefix = selectedPool.poolName + '-';
+            const dhMatches = (c.poolMatches || []).filter(m =>
+              isPoolDaihyosenID(m.id || "") && (m.id || "").startsWith(poolPrefix)
+            );
             if (dhMatches.length === 0) return null;
             const pending = dhMatches.filter(m => m.status !== "completed");
             const label = pending.length > 0
@@ -247,7 +244,7 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                 {pending.length > 0 && (
                   <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
                     {pending.map(m => (
-                      <li key={m.id}>{m.sideA || m.sideB ? `${m.sideB || "?"} vs ${m.sideA || "?"}` : m.id}</li>
+                      <li key={m.id}>{m.sideA && m.sideB ? `${m.sideB} vs ${m.sideA}` : m.id}</li>
                     ))}
                   </ul>
                 )}

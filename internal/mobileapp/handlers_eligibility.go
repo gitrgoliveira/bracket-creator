@@ -139,7 +139,7 @@ func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore
 	})
 }
 
-// RegisterReinstateHandler wires POST /competitions/:cid/competitors/:pid/reinstate
+// RegisterReinstateHandler wires POST /competitions/:id/competitors/:pid/reinstate
 // on the admin (auth-protected) router group. Restores eligibility for
 // a competitor who was withdrawn via kiken-injury (FIK Art. 30).
 // Voluntary kiken (Art. 31) and fusenpai statuses are not reinstateable.

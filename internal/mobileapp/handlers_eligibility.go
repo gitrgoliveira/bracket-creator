@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 )
 
 // CompetitorStatusRequest is the body for POST /competitor-status.
@@ -130,6 +131,41 @@ func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore
 				status = st
 			}
 		}
+		hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
+			"competitionId": id,
+			"status":        status,
+		})
+		c.JSON(http.StatusOK, status)
+	})
+}
+
+// RegisterReinstateHandler wires POST /competitions/:id/competitors/:pid/reinstate
+// on the admin (auth-protected) router group. Restores eligibility for
+// a competitor who was withdrawn via kiken-injury (FIK Art. 30).
+// Voluntary kiken (Art. 31) and fusenpai statuses are not reinstateable.
+func RegisterReinstateHandler(r *gin.RouterGroup, eng EligibilityEngine, hub Broadcaster) {
+	r.POST("/competitions/:id/competitors/:pid/reinstate", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		pid := c.Param("pid")
+		if pid == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "playerId is required"})
+			return
+		}
+
+		status, err := eng.ReinstateCompetitor(id, pid)
+		if err != nil {
+			var engValErr *engine.ValidationError
+			if errors.As(err, &engValErr) {
+				c.JSON(http.StatusConflict, gin.H{"error": engValErr.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
 		hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
 			"competitionId": id,
 			"status":        status,

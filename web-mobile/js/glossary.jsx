@@ -196,7 +196,7 @@ function GlossaryPage({ onBack }) {
   const tiers = [
     {
       label: 'Tier 1 — Every operator sees these',
-      ids: ['hikiwake', 'encho', 'kiken', 'fusenpai', 'fusensho', 'daihyosen', 'hansoku', 'shiro', 'aka', 'shiaijo', 'ippon'],
+      ids: ['hikiwake', 'encho', 'kiken', 'kiken-voluntary', 'kiken-injury', 'fusenpai', 'fusensho', 'daihyosen', 'hansoku', 'shiro', 'aka', 'shiaijo', 'ippon'],
     },
     {
       label: 'Tier 2 — Team competitions and overtime',

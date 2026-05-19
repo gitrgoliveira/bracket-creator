@@ -266,7 +266,9 @@ func (r *ScoreRequest) Validate() error {
 // rules. Splitting it out keeps Validate() at a glance.
 func (r *ScoreRequest) validateDecision() error {
 	switch r.Decision {
-	case "", "fought", "hikiwake", "kiken", "fusenpai", "fusensho", "daihyosen", "kachinuki-exhaustion":
+	case "kiken":
+		r.Decision = "kiken-voluntary"
+	case "", "fought", "hikiwake", "kiken-voluntary", "kiken-injury", "fusenpai", "fusensho", "daihyosen", "kachinuki-exhaustion":
 		// ok
 	default:
 		return &ValidationError{
@@ -281,9 +283,9 @@ func (r *ScoreRequest) validateDecision() error {
 		}
 	}
 	switch r.Decision {
-	case "kiken":
+	case "kiken-voluntary", "kiken-injury":
 		if r.DecisionBy == "" {
-			return &ValidationError{Field: "decisionBy", Message: "required when decision is kiken"}
+			return &ValidationError{Field: "decisionBy", Message: fmt.Sprintf("required when decision is %s", r.Decision)}
 		}
 		need := 2
 		if r.Encho != nil {
@@ -292,10 +294,10 @@ func (r *ScoreRequest) validateDecision() error {
 		if !winningScoreline(r.IpponsA, r.IpponsB, need) {
 			return &ValidationError{
 				Field:   "scoreline",
-				Message: fmt.Sprintf("kiken requires %d-0 scoreline", need),
+				Message: fmt.Sprintf("%s requires %d-0 scoreline", r.Decision, need),
 			}
 		}
-		if err := r.requireWinnerForDecision("kiken"); err != nil {
+		if err := r.requireWinnerForDecision(r.Decision); err != nil {
 			return err
 		}
 	case "fusenpai":

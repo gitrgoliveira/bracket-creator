@@ -1230,7 +1230,7 @@ paths:
   /api/competitions/{id}/matches/{mid}/decision:
     post:
       tags: [matches]
-      summary: Record decision outcome (kiken/fusenpai/fusensho/daihyosen)
+      summary: Record decision outcome (kiken-voluntary/kiken-injury/fusenpai/fusensho/daihyosen)
       description: >
         Records a non-scored decision for a match. Use this instead of
         `/score` when the outcome is determined by walkover, withdrawal,
@@ -1250,7 +1250,7 @@ paths:
               properties:
                 decision:
                   type: string
-                  enum: [kiken, fusenpai, fusensho, daihyosen]
+                  enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, daihyosen]
                 decisionBy:
                   type: string
                   enum: [shiro, aka]
@@ -1348,6 +1348,43 @@ paths:
                 $ref: '#/components/schemas/CompetitorStatus'
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /api/competitions/{id}/competitors/{pid}/reinstate:
+    post:
+      tags: [competitions]
+      summary: Reinstate an injured competitor
+      description: >
+        Restores eligibility for a competitor who was withdrawn via
+        kiken-injury (FIK Art. 30). Only works when the competitor's
+        status has `reinstateable: true`. Voluntary kiken (Art. 31)
+        and fusenpai are not reinstateable.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - in: path
+          name: pid
+          required: true
+          schema:
+            type: string
+          description: Player ID of the competitor to reinstate.
+      responses:
+        '200':
+          description: Competitor reinstated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompetitorStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: >
+            Competitor is not reinstateable (voluntary kiken or fusenpai)
+            or is not currently ineligible.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/competitions/{id}/teams/{tid}/lineups/{round}:
     parameters:
@@ -2014,10 +2051,13 @@ components:
           description: >
             Decision code for the match outcome. Extended set:
             `none`/`""` — no decision recorded; `fought` — resolved by scoring;
-            `hikiwake` — draw/tie; `kiken` — withdrawal; `fusenpai` — forfeit loss;
-            `fusensho` — forfeit win; `daihyosen` — resolved by representative bout;
+            `hikiwake` — draw/tie; `kiken` — withdrawal (legacy, maps to kiken-voluntary);
+            `kiken-voluntary` — voluntary withdrawal (FIK Art. 31, permanent);
+            `kiken-injury` — injury withdrawal (FIK Art. 30, reinstateable);
+            `fusenpai` — forfeit loss; `fusensho` — forfeit win;
+            `daihyosen` — resolved by representative bout;
             `kachinuki-exhaustion` — kachinuki team match ended with one side exhausted.
-          enum: [none, fought, hikiwake, kiken, fusenpai, fusensho, daihyosen, kachinuki-exhaustion]
+          enum: [none, fought, hikiwake, kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, daihyosen, kachinuki-exhaustion]
         decisionBy:
           type: string
           description: Which side the decision favours (shiro = white = left, aka = red = right).
@@ -2248,6 +2288,11 @@ components:
           maxLength: 64
         eligible:
           type: boolean
+        reinstateable:
+          type: boolean
+          description: >
+            True when the competitor can be reinstated (kiken-injury / FIK Art. 30).
+            False or absent for voluntary kiken (Art. 31) and fusenpai.
         reason:
           type: string
           maxLength: 200

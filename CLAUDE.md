@@ -83,8 +83,8 @@ go test -cover ./internal/helper/...
 - **Excel Layout**: Uses an **8-column per court** layout. Columns A and G (and their court-shifted counterparts) are 30 units wide; others are 5 units wide. A blank row separates pools vertically.
 - **Team Match Labels**: Summaries use **"IV"** (Individual Victories) and **"PW"** (Points Won).
 - **Court limit**: courts are labelled A–Z, so `--courts` is hard-capped at 26 and any value over that returns an error rather than silently truncating.
-- **Match Decision Types** (`internal/domain/decision.go`): 8 canonical wire values — `""` (none), `"fought"`, `"hikiwake"` (draw), `"kiken"` (withdrawal), `"fusenpai"` (no-show), `"fusensho"` (per-bout default win), `"daihyosen"` (rep bout), `"kachinuki-exhaustion"`. Legacy YAML `decision: true` migrates to `"hikiwake"`, `false` to `"fought"` (Decision.UnmarshalYAML). Visual suffixes in the UI: `Kiken`, `Fus.`, `DH`, `(E)` for encho.
-- **Competitor Eligibility** (`internal/state/competitor_status.go`, `internal/engine/eligibility.go`): a kiken/fusenpai decision auto-writes a `CompetitorStatus{Eligible: false}` for the loser; `engine.StartMatch(compID, matchID)` is the pre-flight gate that returns `*IneligibleCompetitorError` (matches `errors.Is(err, ErrIneligibleCompetitor)`). Maps to HTTP 409.
+- **Match Decision Types** (`internal/domain/decision.go`): 10 canonical wire values — `""` (none), `"fought"`, `"hikiwake"` (draw), `"kiken"` (legacy withdrawal, maps to kiken-voluntary on YAML load), `"kiken-voluntary"` (FIK Art. 31, permanent), `"kiken-injury"` (FIK Art. 30, reinstateable), `"fusenpai"` (no-show), `"fusensho"` (per-bout default win), `"daihyosen"` (rep bout), `"kachinuki-exhaustion"`. Use `domain.IsKikenDecision(d)` / `domain.IsKikenDecisionStr(s)` to check any kiken variant. Legacy YAML `decision: true` migrates to `"hikiwake"`, `false` to `"fought"`, `"kiken"` to `"kiken-voluntary"` (Decision.UnmarshalYAML). Visual suffixes in the UI: `Kiken`, `Fus.`, `DH`, `(E)` for encho.
+- **Competitor Eligibility** (`internal/state/competitor_status.go`, `internal/engine/eligibility.go`): a kiken/fusenpai decision auto-writes a `CompetitorStatus{Eligible: false}` for the loser; `engine.StartMatch(compID, matchID)` is the pre-flight gate that returns `*IneligibleCompetitorError` (matches `errors.Is(err, ErrIneligibleCompetitor)`). Maps to HTTP 409. Kiken-injury (FIK Art. 30) sets `CompetitorStatus.Reinstateable: true`; the admin can call `POST /api/competitions/:cid/competitors/:pid/reinstate` to restore eligibility. Kiken-voluntary (Art. 31) and fusenpai are not reinstateable.
 - **Team Lineups & Kachinuki** (`internal/domain/team_lineup.go`, `internal/engine/kachinuki.go`): TeamLineup pins position→player for a round. FIK 5-person rule: Senpo + Taisho mandatory; 1 vacancy must be Jiho, 2 must be Jiho+Fukusho, 3+ disqualifies. Kachinuki ("winner-stays-on") dynamically appends bouts via `engine.AdvanceKachinuki` until one team is exhausted (`DecisionKachinukiExhaustion`).
 - **Schedule Estimator** (`internal/engine/schedule.go`): `EstimateSchedule(EstimateInput) ScheduleEstimate` produces total/per-court minutes from match duration × multiplier × slowest-court buffer. Exposed via stateless `GET /api/schedule/estimate` on both the CLI web server and the mobile app.
 - **Store Transactions** (`internal/state/transactions.go`): `Store.WithTransaction(compID, fn)` holds the per-comp lock once across multiple load/save operations. Use the `StoreTx` handle inside `fn` — do NOT call public Store methods (they would deadlock the non-reentrant mutex).
@@ -158,7 +158,7 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full 
 bd ready              # Find available work
 bd show <id>          # View issue details
 bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+bd close <id>         # Complete work (if in a branch, the PR must be merged to complete)
 ```
 
 ### Rules

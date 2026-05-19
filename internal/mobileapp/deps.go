@@ -112,6 +112,13 @@ type CompetitorStatusStore interface {
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 }
 
+// EligibilityEngine is the consumer-boundary view of engine.Engine
+// used by the reinstate handler. Separated from ScoringEngine because
+// reinstatement is an eligibility concern, not a scoring concern.
+type EligibilityEngine interface {
+	ReinstateCompetitor(compID, playerID string) (*domain.CompetitorStatus, error)
+}
+
 // TeamLineupStore is the consumer-boundary view of state.Store used by
 // handlers_lineup.go (Slice 7.B / T127). Mirrors the LoadTeamLineups /
 // SetTeamLineup / DeleteTeamLineup / LockTeamLineupsForRound methods

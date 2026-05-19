@@ -67,6 +67,17 @@ func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, error) {
 	return false, nil
 }
 
+// stubEligibilityEngine is a controllable implementation of EligibilityEngine
+// for handler tests. Set Err to return an error; Status to return a status.
+type stubEligibilityEngine struct {
+	Status *domain.CompetitorStatus
+	Err    error
+}
+
+func (s *stubEligibilityEngine) ReinstateCompetitor(string, string) (*domain.CompetitorStatus, error) {
+	return s.Status, s.Err
+}
+
 // stubBroadcaster is a no-op implementation of Broadcaster. Same
 // rationale as the other stubs.
 type stubBroadcaster struct{}
@@ -119,6 +130,7 @@ func TestDepsInterfacesCompile(t *testing.T) {
 	var (
 		_ CompetitionStore      = stubCompetitionStore{}
 		_ ScoringEngine         = stubScoringEngine{}
+		_ EligibilityEngine     = &stubEligibilityEngine{}
 		_ Broadcaster           = stubBroadcaster{}
 		_ TeamLineupStore       = stubTeamLineupStore{}
 		_ CompetitionTransactor = stubCompetitionTransactor{}
@@ -131,6 +143,7 @@ func TestDepsInterfacesCompile(t *testing.T) {
 	var (
 		_ CompetitionStore      = (*state.Store)(nil)
 		_ ScoringEngine         = (*engine.Engine)(nil)
+		_ EligibilityEngine     = (*engine.Engine)(nil)
 		_ Broadcaster           = (*Hub)(nil)
 		_ CompetitorStatusStore = (*state.Store)(nil)
 		_ TeamLineupStore       = (*state.Store)(nil)

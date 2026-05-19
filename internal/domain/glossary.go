@@ -64,7 +64,19 @@ var Glossary = map[string]Term{
 		ID:      "kiken",
 		Kanji:   "棄権",
 		Short:   "Withdrawal",
-		Tooltip: "The competitor can't continue (injury, illness, or voluntary). They forfeit this match — opponent wins 2–0 — and are blocked from any later matches in this competition.",
+		Tooltip: "The competitor withdraws. Two sub-types: Voluntary (FIK Art. 31) — permanent disqualification from the competition; Injury (FIK Art. 30) — can be reinstated if a doctor and shinpan permit it. The opponent wins 2–0 by default.",
+	},
+	"kiken-voluntary": {
+		ID:      "kiken-voluntary",
+		Kanji:   "棄権",
+		Short:   "Voluntary withdrawal",
+		Tooltip: "FIK Article 31 — the competitor voluntarily withdraws. They forfeit this match (opponent wins 2–0) and are permanently barred from all later matches in this competition.",
+	},
+	"kiken-injury": {
+		ID:      "kiken-injury",
+		Kanji:   "棄権",
+		Short:   "Injury withdrawal",
+		Tooltip: "FIK Article 30 — the competitor withdraws due to injury or illness. They forfeit this match (opponent wins 2–0) and are blocked from later matches, but can be reinstated if a doctor and shinpan-in approve.",
 	},
 	"fusenpai": {
 		ID:      "fusenpai",
@@ -228,6 +240,20 @@ var reasonHumanPatterns = []struct {
 		re: regexp.MustCompile(`^kiken at (\S+)$`),
 		rewrite: func(m []string) string {
 			return "withdrew from match " + m[1]
+		},
+	},
+	// "kiken-voluntary at <matchID>" → "withdrew voluntarily from match <matchID>"
+	{
+		re: regexp.MustCompile(`^kiken-voluntary at (\S+)$`),
+		rewrite: func(m []string) string {
+			return "withdrew voluntarily from match " + m[1]
+		},
+	},
+	// "kiken-injury at <matchID>" → "withdrew due to injury from match <matchID>"
+	{
+		re: regexp.MustCompile(`^kiken-injury at (\S+)$`),
+		rewrite: func(m []string) string {
+			return "withdrew due to injury from match " + m[1]
 		},
 	},
 	// "fusenpai at <matchID>" → "no-show forfeit at match <matchID>"

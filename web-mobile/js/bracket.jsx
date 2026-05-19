@@ -16,6 +16,7 @@ function TermBC(props) {
 // Local hikiwake check — bracket.jsx is tested in isolation, so we don't rely
 // on window.isHikiwake here. See specs/openapi.yaml.
 function isHikiwakeBC(v) { return v === "hikiwake"; }
+function isKikenDecisionBC(v) { return v === "kiken" || v === "kiken-voluntary" || v === "kiken-injury"; }
 
 function roundLabel(roundIdx, total) {
   const fromEnd = total - 1 - roundIdx;
@@ -30,7 +31,6 @@ function roundLabel(roundIdx, total) {
 // Score rows print ippon counts but lose the decision type; chips keep operators
 // and viewers oriented when scanning a wall of bracket cards.
 const DECISION_CHIPS = {
-  kiken:     { term: "kiken",      label: "Kiken" },
   fusenpai:  { term: "fusenpai",   label: "Fus."  },
   daihyosen: { term: "daihyosen",  label: "DH"    },
 };
@@ -56,7 +56,7 @@ function decisionSuffix(match) {
   const d = match.decision || "";
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
   let suffix = "";
-  if (d === "kiken") suffix = "Kiken";
+  if (isKikenDecisionBC(d)) suffix = "Kiken";
   else if (d === "fusenpai") suffix = "Fus.";
   else if (d === "daihyosen") suffix = "DH";
   if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
@@ -157,6 +157,9 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
+        {isKikenDecisionBC(match.decision) ? (
+          <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>
+        ) : null}
         {DECISION_CHIPS[match.decision] ? (
           <span className="bc-decision-chip">
             <TermBC name={DECISION_CHIPS[match.decision].term}>{DECISION_CHIPS[match.decision].label}</TermBC>

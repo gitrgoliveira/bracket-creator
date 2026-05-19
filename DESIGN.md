@@ -61,14 +61,16 @@ All tokens are defined in [styles.css#L3-L31](web-mobile/css/styles.css#L3). Ref
 | `--white-side` | `#f6f7fb` | Shiro (White) side background — **not** pure white, to keep both sides visually weighted |
 | `--ink` | `#1a1d24` | Body text |
 | `--ink-2` | `#3a414e` | Secondary text, labels |
-| `--ink-3` | `#6b7280` | Meta text, hints |
-| `--ink-4` | `#6c7480` | Tertiary text — picked to hold **4.7:1 contrast on white (WCAG AA)**. Do not lighten. |
+| `--ink-3` | `#6b7280` | Tertiary text (meta, hints) |
+| `--ink-4` | `#6c7480` | **Contrast floor for fine print** — picked to hold **4.7:1 on white (WCAG AA)**. Do not lighten. AA only — there is no AAA-grade ink token yet. |
 | `--line` | `#e4e6eb` | Default borders, dividers |
 | `--line-2` | `#eef0f4` | Subtle dividers, alt rows, hover backgrounds |
 | `--bg` | `#f7f8fa` | Page background |
 | `--surface` | `#ffffff` | Cards, modals, inputs |
 
 **No dark mode.** The mobile app is light-only by design — tournaments run under venue lighting and the contrast targets are tuned for that. The legacy `web/` surface has a dark-mode block, but it is not part of the shared system.
+
+> **Known drift:** `var(--ink-5)` and `var(--ink-1)` are referenced in `styles.css` (e.g. inside `.sb-draw-toggle--active`) but never defined in `:root`. Tracked in `bd show bracket-creator-3ch` — those usages fall back to browser defaults today. Don't introduce new ones; reach for `--ink` or `--ink-4` until the scale is extended.
 
 **Status palette** (badges only — don't pull these into other components):
 
@@ -88,7 +90,7 @@ All tokens are defined in [styles.css#L3-L31](web-mobile/css/styles.css#L3). Ref
 | `--font-mono` | SFMono-Regular → Menlo → Consolas |
 | `--font-display` | SF Pro Display (hero titles only) |
 
-Base: 15px / 1.4. Use the scale below — don't introduce in-between sizes.
+Base: 15px / 1.4. Use the documented sizes below — don't introduce new in-between values. The CSS today contains a few stragglers (11, 11.5, 12.5, 14, 17, 24, 28); treat them as drift to fold back, not as license to invent more.
 
 | Size | Use |
 |---|---|
@@ -97,14 +99,16 @@ Base: 15px / 1.4. Use the scale below — don't introduce in-between sizes.
 | 13–13.5px | Buttons, inputs, badges, bracket sides |
 | 15px | Body text |
 | 16–18px | Card titles, modal titles |
-| 22px | Hero player name (My Match) |
+| 22px | Player-viewer hero (`.my-match__name`), large scoreboard numbers (`.sb-name`, `.match-detail-card__ippons-val`, `.stat-box .v`) |
 | 26px | Page-head titles |
+
+The 26px page-head title sits visually above the 22px hero — that's intentional in admin surfaces (the page chrome dominates) but reads as inverted on the player viewer's "My Match" screen. If the viewer's hero ever loses prominence in real use, bump it past the page-head rather than dragging the page-head down (tracked in `bd show bracket-creator-3ch`).
 
 Common weights: 500 (default UI), 600 (titles, active state), 700 (badges, scores). 800 appears in localized emphasis (podium step numbers, live strip); 400 in de-emphasis. Prefer the common three unless matching an existing emphasis pattern.
 
 ### Spacing
 
-There is no formal scale — use 4 / 6 / 8 / 10 / 12 / 14 / 16 / 20 / 24 / 32 px. Round to these. The page container is `24px 32px` (collapses to `16px` under 720px).
+There is no formal scale; the conventions are honest rather than aspirational. Round to **4 / 6 / 8 / 10 / 12 / 14 / 16 / 20 / 24 / 32 px** for new work. The CSS also contains a long tail of `5 / 7 / 9 / 18 / 22 / 28` px values (mostly inside specific component blocks). Those are drift, not exemplars — match the documented set when adding new rules, and don't lean on the strays to justify new ones. The page container is `24px 32px` (collapses to `16px` under 720px).
 
 ### Radius
 
@@ -133,15 +137,16 @@ Never combine shadow with a solid border on the same side — pick one elevation
 |---|---|
 | `120ms` | Color/border transitions on buttons, chips, badges |
 | `140ms` | Card hovers (tcard, pool, sched-row) |
+| `160ms` | Match-decision modal entrance (`decision-prompt-in`) |
 | `300ms` | Progress bars, toast slide-in |
 
-Keyframes ([672](web-mobile/css/styles.css#L672), [3790](web-mobile/css/styles.css#L3790), [3914](web-mobile/css/styles.css#L3914), [4983](web-mobile/css/styles.css#L4983) in `styles.css`):
+Keyframes (find each `@keyframes` block in [styles.css](web-mobile/css/styles.css)):
 - `pulse` (1.6s infinite) — `.dot--live` only
 - `spin` (0.6s linear infinite) — loading spinners
 - `toast-in` (300ms) — toast entrance
-- `decision-prompt-in` — match-decision modal entrance
+- `decision-prompt-in` (160ms, cubic-bezier(0.2, 0.8, 0.2, 1)) — match-decision modal entrance
 
-The CSS has **no `prefers-reduced-motion` block.** When adding non-essential animation, gate it behind that media query.
+The CSS has **no `prefers-reduced-motion` block.** This is a tracked gap (`bd show bracket-creator-3ch`), not a design choice. Until it's stubbed, gate any non-essential animation you add behind the media query yourself.
 
 ### Breakpoints
 
@@ -166,13 +171,15 @@ Only three media queries exist; match them rather than inventing new ones:
 | Sticky action rows | 60 | Admin tab/action sticky bar |
 | Modal | 100 | `.modal-backdrop` |
 | Popover dropdowns | 200 | Court popover dropdown |
-| Toast | 10000 | Above everything |
+| Toast | 10000 | Above everything — known anomaly (`bd show bracket-creator-3ch`); should compress to ~500, currently jumps two orders of magnitude past the rest of the system |
 
-If a new overlay doesn't fit one of these, lift the layer for the entire band rather than slotting in a one-off value.
+If a new overlay doesn't fit one of these, lift the layer for the entire band rather than slotting in a one-off value. Don't follow the toast example.
 
 ## 4. Components
 
 Each component lives in `web-mobile/css/styles.css` and is composed in [web-mobile/js/](web-mobile/js/) via Preact's `React.createElement` (after esbuild). Class naming is loosely BEM with `--` for variants and `is-active` / `.is-` for boolean states.
+
+> **On the line numbers below:** they're accurate at time of writing but `styles.css` is ~5,000 lines and edits shift them. If a link points to the wrong rule, **grep the class name in `styles.css`** — that's the durable lookup. New entries should prefer class-name references over line numbers.
 
 ### Index
 
@@ -262,7 +269,9 @@ Decision types ([CLAUDE.md](CLAUDE.md) "Match Decision Types") map to short tags
 
 Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for liveness, not outcome.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
 
-Note: the `kiken/fusenpai/daihyosen` chips currently apply their visual styling inline rather than via the `.bc-decision-chip` class — the class is a stable hook but the color/size live on the JSX element. If you consolidate that into CSS, keep the class name.
+Note: the `kiken/fusenpai/daihyosen` chips currently apply their visual styling inline rather than via the `.bc-decision-chip` class — the class is a stable hook but the color/size live on the JSX element. Consolidating that into CSS is tracked in `bd show bracket-creator-3ch`; keep the class name when you do.
+
+`bc-match--done` is also an unstyled hook today: JSX applies it when `match.status === "completed"` but there's no CSS rule. Either give it a visual treatment or drop the modifier (tracked in the same issue).
 
 ### Pools — `.pool`, `.pools-grid`
 
@@ -342,11 +351,11 @@ Match-decision visual suffixes are documented in [§4 Match cards](#match-cards-
 
 ## 6. Accessibility
 
-- **Contrast**: `--ink-4` is the floor at 4.7:1 on `--surface`. Don't introduce new gray tokens without re-checking.
+- **Contrast**: `--ink-4` is the floor at 4.7:1 on `--surface` — that's WCAG **AA only** (AAA wants 7:1). The system has no AAA-grade ink token yet; if you have text that must survive venue glare on a tablet, raise the issue rather than darkening `--ink-4` in place. Don't introduce new gray tokens without re-checking contrast.
 - **Keyboard**: every modal honors Escape via `useEscapeToClose`. The admin score editor supports `←` / `→` to navigate between matches **on the same shiaijo** — see [CLAUDE.md](CLAUDE.md) and the note in [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx). When adding keyboard shortcuts, gate them on `!isTextEntry(e.target)` (defined in [ui.jsx#L151](web-mobile/js/ui.jsx#L151)) so they don't clobber inputs.
-- **Touch**: `@media (pointer: coarse)` blocks bump padding on dense controls. Test any new dense surface on a tablet before merging.
+- **Touch**: `@media (pointer: coarse)` blocks bump padding on dense controls. The internal floor is ≥ 36px on shared surfaces and ≥ 44px under coarse pointers — note that platform guidance (Apple HIG, WCAG 2.5.5 AAA) wants 44px universally; the 36px floor is a pragmatic choice for laptop-mouse admin surfaces, not a target to aim for. Test any new dense surface on a tablet before merging.
 - **Focus rings**: inputs use a 3px `--accent-soft` ring. Don't suppress `:focus-visible` — operators tab through forms.
-- **Motion**: there's no global `prefers-reduced-motion` opt-out yet. Pulse, spin, and toast-in are the only ambient animations; if you add more, gate them.
+- **Motion**: there's no global `prefers-reduced-motion` opt-out yet — tracked in `bd show bracket-creator-3ch`. Pulse, spin, toast-in, and decision-prompt-in are the only ambient animations; if you add more, gate them yourself until the global block lands.
 
 ## 7. Frontend conventions
 
@@ -405,7 +414,7 @@ Before introducing a new component, color, or pattern:
 
 1. **Reuse first.** Check the component list in §4 — there is almost always a match (especially for status badges, cards, table rows).
 2. **Extend, don't fork.** A new button shape is a `.btn--<modifier>`, not a new `.action-button`.
-3. **Token-only colors.** If you need a hex literal in a CSS rule, you probably need a new token in `:root` — add it there and reference it.
+3. **Token-only colors, with two carve-outs.** If you need a hex literal in a CSS rule, you probably need a new token in `:root` — add it there and reference it. Two existing exceptions: (a) the **status palette** in §3 (badge-only colors that live inside `.badge--*` blocks, never lifted into other components), and (b) the **podium gold/silver/bronze gradients** in `.podium-step--*`. New exceptions need to be argued for, not assumed — and the decision-chip inline styles ([§4 Match cards](#match-cards--bc-match)) are debt, not a precedent.
 4. **Domain-specific is fine.** Match-side colors and podium gradients live inside their component blocks intentionally. Don't generalize them.
 5. **Verify visually.** UI changes are validated in a running browser via `make run-mobile`, not by diff inspection — see [CLAUDE.md](CLAUDE.md) "Common Pitfalls".
 6. **Match the prefix.** Pick the existing prefix that covers your concept (`bc-`, `pool-`, `sched-`, `vsched-`, `tcard-`, `viewer-`, `score-`, `live-`, `my-match-`) before inventing a new one.

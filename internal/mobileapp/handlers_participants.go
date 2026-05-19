@@ -139,32 +139,19 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		players, err := store.LoadParticipants(id, comp.WithZekkenName)
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+			p.CheckedIn = true
+			now := time.Now()
+			p.CheckedInAt = &now
+			return nil
+		})
+
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		found := false
-		var updatedPlayer domain.Player
-		for i := range players {
-			if players[i].ID == pid {
-				players[i].CheckedIn = true
-				now := time.Now()
-				players[i].CheckedInAt = &now
-				updatedPlayer = players[i]
-				found = true
-				break
+			status := http.StatusInternalServerError
+			if err.Error() == "participant not found" {
+				status = http.StatusNotFound
 			}
-		}
-
-		if !found {
-			c.JSON(http.StatusNotFound, gin.H{"error": "participant not found"})
-			return
-		}
-
-		if err := store.SaveParticipants(id, players); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -185,31 +172,18 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		players, err := store.LoadParticipants(id, comp.WithZekkenName)
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+			p.CheckedIn = false
+			p.CheckedInAt = nil
+			return nil
+		})
+
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		found := false
-		var updatedPlayer domain.Player
-		for i := range players {
-			if players[i].ID == pid {
-				players[i].CheckedIn = false
-				players[i].CheckedInAt = nil
-				updatedPlayer = players[i]
-				found = true
-				break
+			status := http.StatusInternalServerError
+			if err.Error() == "participant not found" {
+				status = http.StatusNotFound
 			}
-		}
-
-		if !found {
-			c.JSON(http.StatusNotFound, gin.H{"error": "participant not found"})
-			return
-		}
-
-		if err := store.SaveParticipants(id, players); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 

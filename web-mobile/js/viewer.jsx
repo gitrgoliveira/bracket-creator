@@ -563,7 +563,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   }
 
   // Followed-player state: header indicator + next-match details.
-  const pRecord = roster.find(p => p.id === followedPlayer.id);
+  const pRecord = useMemo(() => roster.find(p => p.id === followedPlayer.id), [roster, followedPlayer.id]);
   const header = (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Following:</span>

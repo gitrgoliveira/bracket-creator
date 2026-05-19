@@ -29,7 +29,10 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
+	return s.loadParticipantsNoLock(compID, withZekkenName, opts)
+}
 
+func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
 	// Use a virtual filename for cache to distinguish between with/without seeds.
 	cacheKey := "participants.csv"
 	if opts.WithSeeds {
@@ -87,10 +90,18 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 
 	for _, line := range lines {
 		isCheckedIn := false
-		if strings.HasSuffix(strings.TrimSpace(line), ", checked_in") {
-			isCheckedIn = true
-			line = strings.TrimSpace(line)
-			line = line[:len(line)-len(", checked_in")]
+
+		// Robust column-based detection: only treat as checked_in if the
+		// LAST column is exactly that string. This prevents accidental
+		// suffix matches on dojo names or metadata.
+		line = strings.TrimSpace(line)
+		parts := strings.Split(line, ",")
+		if len(parts) > 2 { // Min 3 columns (ID, Name, Dojo)
+			last := strings.TrimSpace(parts[len(parts)-1])
+			if strings.ToLower(last) == "checked_in" {
+				isCheckedIn = true
+				line = strings.Join(parts[:len(parts)-1], ",")
+			}
 		}
 
 		if hasIDs {
@@ -153,7 +164,46 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
+	return s.saveParticipantsNoLock(compID, players)
+}
 
+// UpdateParticipant atomically loads the participant list, applies transform
+// to the target player, and persists the result. Used to avoid TOCTOU races
+// on concurrent check-ins.
+func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{})
+	if err != nil {
+		return nil, err
+	}
+
+	foundIdx := -1
+	for i := range players {
+		if players[i].ID == pid {
+			foundIdx = i
+			break
+		}
+	}
+
+	if foundIdx == -1 {
+		return nil, fmt.Errorf("participant not found")
+	}
+
+	if err := transform(&players[foundIdx]); err != nil {
+		return nil, err
+	}
+
+	if err := s.saveParticipantsNoLock(compID, players); err != nil {
+		return nil, err
+	}
+
+	return &players[foundIdx], nil
+}
+
+func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) error {
 	path := s.compPath(compID, "participants.csv")
 
 	var sb strings.Builder

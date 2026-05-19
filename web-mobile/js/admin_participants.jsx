@@ -137,6 +137,50 @@ function levenshtein(a, b) {
   return prev[n];
 }
 
+function CheckInBanner({ tournament, players }) {
+  const [nowStr, setNowStr] = useStateA(() => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  });
+
+  useEffectA(() => {
+    const timer = setInterval(() => {
+      const d = new Date();
+      setNowStr(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!tournament?.checkInWindowStart || !tournament?.checkInWindowEnd) return null;
+  const start = tournament.checkInWindowStart;
+  const end = tournament.checkInWindowEnd;
+
+  const diffStart = window.diffMinutes(start, nowStr);
+  const diffEnd = window.diffMinutes(end, nowStr);
+
+  if (diffStart > 0) {
+    return (
+      <div className="alert alert--info" style={{ marginBottom: 12 }}>
+        🕒 Check-in window starts at {start} (in {diffStart}m)
+      </div>
+    );
+  }
+  if (diffEnd > 0) {
+    return (
+      <div className="alert alert--success" style={{ marginBottom: 12 }}>
+        ✅ Check-in window is OPEN: {start}–{end} (closes in {diffEnd}m)
+      </div>
+    );
+  }
+
+  const uncheckeds = (players || []).filter(p => !p.checkedIn).length;
+  return (
+    <div className="alert alert--warn" style={{ marginBottom: 12 }}>
+      ⌛ Check-in CLOSED — {uncheckeds > 0 ? `${uncheckeds} participants did not check in` : "all participants checked in"}
+    </div>
+  );
+}
+
 function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, showToast, onSection }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [showAllPreview, setShowAllPreview] = useStateA(false);
@@ -401,11 +445,8 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     if (!confirm(`Mark all ${targets.length} participants from ${dojo} as checked-in?`)) return;
 
     try {
-      // We do these in sequence to avoid overwhelming the server or hit rate limits
-      // though for a dojo it's usually small.
-      for (const p of targets) {
-        await window.API.toggleCheckIn(c.id, p.id, true, password);
-      }
+      // Parallel execution for better UX and performance
+      await Promise.all(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
       showToast(`Checked in ${targets.length} participants from ${dojo}`);
     } catch (err) {
       console.error("AdminParticipants: bulkCheckInDojo failed", err);
@@ -562,53 +603,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
   const isStarted = c.status !== "setup";
 
-  const [nowStr, setNowStr] = useStateA(() => {
-    const d = new Date();
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  });
-
-  useEffectA(() => {
-    const timer = setInterval(() => {
-      const d = new Date();
-      setNowStr(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
-    }, 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const checkInBanner = useMemoA(() => {
-    if (!tournament?.checkInWindowStart || !tournament?.checkInWindowEnd) return null;
-    const start = tournament.checkInWindowStart;
-    const end = tournament.checkInWindowEnd;
-    
-    const diffStart = window.diffMinutes(start, nowStr);
-    const diffEnd = window.diffMinutes(end, nowStr);
-
-    if (diffStart > 0) {
-      return (
-        <div className="alert alert--info" style={{ marginBottom: 12 }}>
-          🕒 Check-in window starts at {start} (in {diffStart}m)
-        </div>
-      );
-    }
-    if (diffEnd > 0) {
-      return (
-        <div className="alert alert--success" style={{ marginBottom: 12 }}>
-          ✅ Check-in window is OPEN: {start}–{end} (closes in {diffEnd}m)
-        </div>
-      );
-    }
-    
-    const uncheckeds = players.filter(p => !p.checkedIn).length;
-    return (
-      <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-        ⌛ Check-in CLOSED — {uncheckeds > 0 ? `${uncheckeds} participants did not check in` : "all participants checked in"}
-      </div>
-    );
-  }, [tournament?.checkInWindowStart, tournament?.checkInWindowEnd, nowStr, players]);
-
   return (
     <>
-      {checkInBanner}
+      <CheckInBanner tournament={tournament} players={players} />
       {isStarted && (
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
           <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>

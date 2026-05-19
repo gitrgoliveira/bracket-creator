@@ -325,8 +325,9 @@ function parseParticipantLines(lines, withZekken) {
     let displayName = "", dojo = "", danGrade = "", tag = "";
     let checkedIn = false;
 
-    // Detect trailing checked_in column
-    if (parts[parts.length - 1]?.toLowerCase() === "checked_in") {
+    // Detect trailing checked_in column — mirrors Go's column-based check (len > 2).
+    // Requires at least 3 parts so a bare "Name, Dojo" row is never affected.
+    if (parts.length > 2 && parts[parts.length - 1]?.toLowerCase() === "checked_in") {
       checkedIn = true;
       parts.pop();
     }

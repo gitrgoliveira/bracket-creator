@@ -28,6 +28,11 @@ function roundLabel(roundIdx, total) {
   return `Round ${roundIdx + 1}`;
 }
 
+const DECISION_CHIPS = {
+  fusenpai:  { term: "fusenpai",   label: "Fus."  },
+  daihyosen: { term: "daihyosen",  label: "DH"    },
+};
+
 // sideA = top = Aka (Red), sideB = bottom = Shiro (White)
 function sideLabel(side) {
   return side === "a" ? "AKA" : "SHIRO";
@@ -50,8 +55,7 @@ function decisionSuffix(match) {
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
   let suffix = "";
   if (isKikenDecisionBC(d)) suffix = "Kiken";
-  else if (d === "fusenpai") suffix = "Fus.";
-  else if (d === "daihyosen") suffix = "DH";
+  else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;
   if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
   return suffix;
 }
@@ -149,16 +153,15 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
-        {match.encho?.periodCount > 0 ? <span className="bc-encho" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="encho">(E)</TermBC></span> : null}
-        {/* T097: decision chip on bracket nodes. The score-line suffix already
-            renders "Kiken/Fus./DH" via formatIpponsScore, but bracket cards
-            print the score on the player rows (aScore/bScore) rather than in
-            the meta row, so the bare ippon count there loses the decision.
-            A chip in the meta keeps the operator and viewers oriented when
-            scanning a wall of bracket cards. */}
-        {isKikenDecisionBC(match.decision) ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="kiken">Kiken</TermBC></span> : null}
-        {match.decision === "fusenpai" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="fusenpai">Fus.</TermBC></span> : null}
-        {match.decision === "daihyosen" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="daihyosen">DH</TermBC></span> : null}
+        {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
+        {isKikenDecisionBC(match.decision) ? (
+          <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>
+        ) : null}
+        {DECISION_CHIPS[match.decision] ? (
+          <span className="bc-decision-chip">
+            <TermBC name={DECISION_CHIPS[match.decision].term}>{DECISION_CHIPS[match.decision].label}</TermBC>
+          </span>
+        ) : null}
       </div>
       <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} />
       <div className="bc-divider"></div>

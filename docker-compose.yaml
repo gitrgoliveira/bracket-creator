@@ -1,24 +1,39 @@
 version: '3.8'
 
 services:
+  # Stateless bracket creator generator web GUI
   bracket-creator:
     build: .
-    image: ghcr.io/gitrgoliveira/bracket-creator:v0.16.0
+    image: ghcr.io/gitrgoliveira/bracket-creator:${VERSION:-latest}
     environment:
       - BIND_ADDRESS=0.0.0.0
       - PORT=8080
     ports:
+      # Exposes the stateless bracket generator on host port 8080.
+      # Note: This container binds internally to port 8080 inside its own container network,
+      # which does not conflict with bracket-creator-mobile binding to port 8080 inside its namespace.
       - "8080:8080"
     restart: unless-stopped
 
+  # Stateful live tournament management mobile/web app
   bracket-creator-mobile:
     build:
       context: .
       dockerfile: Dockerfile.mobile
-    image: ghcr.io/gitrgoliveira/bracket-creator-mobile:v0.16.0
+    image: ghcr.io/gitrgoliveira/bracket-creator-mobile:${VERSION:-latest}
     environment:
       - BIND_ADDRESS=0.0.0.0
       - PORT=8080
+      - TOURNAMENT_DATA_DIR=/tournament-data
+      # Set to 'true' to enable locked password mode in production/staging environments
+      - LOCK_PASSWORD=false
+      # When LOCK_PASSWORD=true, supply a bcrypt hash of the password here:
+      - TOURNAMENT_PASSWORD_HASH=
     ports:
+      # Exposes the live tournament manager on host port 8081.
       - "8081:8080"
+    volumes:
+      # Mounts the tournament-data folder to the host to persist live tournament state
+      # across container restarts/recreations, preventing data loss.
+      - ./tournament-data:/tournament-data
     restart: unless-stopped

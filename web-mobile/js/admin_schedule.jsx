@@ -97,14 +97,6 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   const [estResult, setEstResult] = useStateA(null);
   const [estLoading, setEstLoading] = useStateA(false);
 
-  const estNumMatchesRef = useRefA(false);
-  useEffectA(() => {
-    if (!estNumMatchesRef.current && allMatches.length > 0) {
-      setEstNumMatches(allMatches.length);
-      estNumMatchesRef.current = true;
-    }
-  }, [allMatches.length]);
-
   useEffectA(() => {
     if (estTeamSize > 0) {
       setEstBoutsPerTeamMatch(2 * estTeamSize - 1);
@@ -177,6 +169,15 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
     () => window.tournamentMatches(tournament).filter(hasBothSides),
     [tournament]
   );
+
+  const estNumMatchesRef = useRefA(false);
+  useEffectA(() => {
+    if (!estNumMatchesRef.current && allMatches.length > 0) {
+      setEstNumMatches(allMatches.length);
+      estNumMatchesRef.current = true;
+    }
+  }, [allMatches.length]);
+
 
   const filtered = window.applyFilters(allMatches, picked, dojoText, compFilter);
   // T040 (US1, FR-001): apply the court scope AFTER the user-driven

@@ -338,8 +338,8 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const dojoFirstRowSet = useMemoA(() => {
     const seen = new Set();
     const first = new Set();
-    visiblePlayers.forEach((p, i) => {
-      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(i); }
+    visiblePlayers.forEach((p) => {
+      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(p.id); }
     });
     return first;
   }, [visiblePlayers]);
@@ -845,13 +845,13 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                         title={p.checkedIn ? "Undo check-in" : "Mark as checked-in"}
                       />
                     </div>
-                    <span className="seed-row__handle" title={reorderDisabled ? "Clear the tag filter to reorder" : "Drag to reorder"}>⠿</span>
+                    <span className="seed-row__handle" title={reorderDisabled ? "Clear all filters to reorder" : "Drag to reorder"}>⠿</span>
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div style={{ flex: 1 }}>
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                       <div className="seed-row__dojo">
                         {p.dojo}
-                        {dojoFirstRowSet.has(i) && players.filter(px => px.dojo === p.dojo && !px.checkedIn).length > 0 && (
+                        {dojoFirstRowSet.has(p.id) && players.filter(px => px.dojo === p.dojo && !px.checkedIn).length > 0 && (
                           <button
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}

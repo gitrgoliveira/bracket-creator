@@ -442,6 +442,9 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // and during play; the next "Generate next round" call respects
     // the latest value.
     'swissRounds',
+    // Naginata support: round-trips the flag so a settings save doesn't
+    // clobber a previously-set naginata: true with Go's zero-value false.
+    'naginata',
   ]);
   // Fields that MUST NOT appear in the PUT body — pinning the
   // negative invariant explicitly so a careless re-add is caught.

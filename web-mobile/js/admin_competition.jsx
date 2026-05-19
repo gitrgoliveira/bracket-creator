@@ -343,7 +343,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -497,6 +497,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       // cleared (so the cleared display doesn't clobber the disk
       // value before the user types a valid replacement).
       swissRounds: safeInt(effective.swissRounds, latestC.swissRounds || 0),
+      naginata: !!effective.naginata,
     };
     // Capture the snapshot of edited fields we're about to persist. On
     // success we clear ONLY those fields from the edited set — preserving

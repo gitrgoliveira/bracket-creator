@@ -338,8 +338,8 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 			if m.Status != state.MatchStatusCompleted {
 				continue
 			}
-			// Tiebreaker matches don't count toward regular pool stats.
-			if IsTiebreakerMatchID(m.ID) {
+			// Tiebreaker and pool-daihyosen matches don't count toward regular pool stats.
+			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
 			sA := playerStandings[m.SideA]
@@ -447,6 +447,39 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 				}
 			}
 			i = j
+		}
+
+		// Apply pool-daihyosen results as a secondary sort within tied groups
+		// for team competitions. Mirrors the TB block above: DH wins are scoped
+		// per tied group to prevent cross-group bleed.
+		if isTeam {
+			for i := 0; i < len(sorted); {
+				j := i + 1
+				for j < len(sorted) && sorted[j].Points == sorted[i].Points {
+					j++
+				}
+				if j-i >= 2 {
+					groupNames := make(map[string]bool, j-i)
+					for k := i; k < j; k++ {
+						groupNames[sorted[k].Player.Name] = true
+					}
+					groupDHWins := map[string]int{}
+					for _, m := range matches {
+						if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+							continue
+						}
+						if groupNames[m.SideA] && groupNames[m.SideB] {
+							groupDHWins[m.Winner]++
+						}
+					}
+					if len(groupDHWins) > 0 {
+						sort.SliceStable(sorted[i:j], func(a, b int) bool {
+							return groupDHWins[sorted[i+a].Player.Name] > groupDHWins[sorted[i+b].Player.Name]
+						})
+					}
+				}
+				i = j
+			}
 		}
 
 		// Apply manual rank overrides

@@ -48,7 +48,13 @@ function compMatches(c) {
   if (c.status === "setup") return out;
 
   const poolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
-  poolMatches.forEach(m => out.push({ ...m, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize }));
+  // Pool-daihyosen matches ("Pool X-DH-N") are representative bouts scored as
+  // individual matches even in team competitions — override compKind so they
+  // route to the individual ScoreEditorModal rather than TeamScoreEditorModal.
+  poolMatches.forEach(m => {
+    const isDH = (() => { const i = (m.id || "").indexOf('-'); return i >= 0 && (m.id || "").slice(i + 1).startsWith('DH-'); })();
+    out.push({ ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: c.teamSize });
+  });
 
   const rounds = (c.bracket && c.bracket.rounds) ? c.bracket.rounds : (c.bracket || []);
   rounds.forEach((round, ri) => round.forEach((m) => out.push({

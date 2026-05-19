@@ -223,6 +223,38 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
             </tbody>
           </table>
 
+          {/* Pool-daihyosen banner: shown when the backend has injected DH matches
+              for this pool (all regular matches complete but teams still tied). */}
+          {(() => {
+            const dhMatches = (c.poolMatches || []).filter(m => {
+              const i = (m.id || "").indexOf('-');
+              if (i < 0) return false;
+              const isDH = (m.id || "").slice(i + 1).startsWith('DH-');
+              if (!isDH) return false;
+              // Pool name = prefix before the first dash in the match ID (e.g. "Pool A")
+              return (m.id || "").slice(0, i) === selectedPool.poolName;
+            });
+            if (dhMatches.length === 0) return null;
+            const pending = dhMatches.filter(m => m.status !== "completed");
+            const label = pending.length > 0
+              ? `${pending.length} daihyosen bout${pending.length > 1 ? "s" : ""} pending — teams tied on all 8 criteria`
+              : "Daihyosen complete — standings updated";
+            const color = pending.length > 0 ? "var(--warn-bg, #fffbe6)" : "var(--ok-bg, #e8f5e9)";
+            const border = pending.length > 0 ? "1px solid var(--warn, #e6a817)" : "1px solid var(--ok, #4caf50)";
+            return (
+              <div style={{ marginTop: 16, padding: "10px 14px", background: color, border, borderRadius: 6, fontSize: 13 }}>
+                <strong>Representative bout (daihyosen):</strong> {label}
+                {pending.length > 0 && (
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+                    {pending.map(m => (
+                      <li key={m.id}>{m.sideA || m.sideB ? `${m.sideB || "?"} vs ${m.sideA || "?"}` : m.id}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })()}
+
           <div style={{ marginTop: 24 }}>
             <h3 className="section-title">Match Results</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

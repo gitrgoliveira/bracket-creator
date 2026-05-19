@@ -1,0 +1,298 @@
+package engine
+
+import (
+	"testing"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// TestIsPoolDaihyosenMatchID covers the ID-recognition helper.
+func TestIsPoolDaihyosenMatchID(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"Pool A-DH-0", true},
+		{"Pool A-DH-1", true},
+		{"Pool B-DH-42", true},
+		{"Pool A-0", false},
+		{"Pool A-TB-0", false},
+		{"Pool A-DH", false},    // no index after DH
+		{"Pool A-D-0", false},   // different prefix
+		{"Pool A-DHx-0", false}, // wrong prefix
+		{"DH-0", false},         // no pool separator
+		{"", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.id, func(t *testing.T) {
+			assert.Equal(t, tc.want, IsPoolDaihyosenMatchID(tc.id))
+		})
+	}
+}
+
+// TestGeneratePoolDaihyosenMatches_TwoWayTie verifies that two tied teams
+// produce one DH match.
+func TestGeneratePoolDaihyosenMatches_TwoWayTie(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{Name: "TeamA"}},
+		{Player: domain.Player{Name: "TeamB"}},
+	}
+	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "A", map[string]bool{})
+	require.Len(t, matches, 1)
+	m := matches[0]
+	assert.Equal(t, "Pool X-DH-0", m.ID)
+	assert.True(t, IsPoolDaihyosenMatchID(m.ID))
+	assert.Equal(t, state.MatchStatusScheduled, m.Status)
+	assert.Equal(t, "A", m.Court)
+}
+
+// TestGeneratePoolDaihyosenMatches_ThreeWayTie verifies round-robin for 3 teams.
+func TestGeneratePoolDaihyosenMatches_ThreeWayTie(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{Name: "TeamA"}},
+		{Player: domain.Player{Name: "TeamB"}},
+		{Player: domain.Player{Name: "TeamC"}},
+	}
+	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "B", map[string]bool{})
+	require.Len(t, matches, 3)
+	assert.Equal(t, "Pool X-DH-0", matches[0].ID)
+	assert.Equal(t, "Pool X-DH-1", matches[1].ID)
+	assert.Equal(t, "Pool X-DH-2", matches[2].ID)
+}
+
+// TestGeneratePoolDaihyosenMatches_SkipsExistingPairs ensures idempotency.
+func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{Name: "TeamA"}},
+		{Player: domain.Player{Name: "TeamB"}},
+		{Player: domain.Player{Name: "TeamC"}},
+	}
+	existing := map[string]bool{tiebreakerPairKey("TeamA", "TeamB"): true}
+	matches := generatePoolDaihyosenMatches("Pool X", group, 1, "A", existing)
+	require.Len(t, matches, 2, "TeamA-TeamB already exists; only other 2 pairs generated")
+}
+
+// setupTeamPoolComp creates a team-pool competition with three teams in Pool A,
+// all matches completed. If tieAll is true all teams share identical statistics
+// (full 3-way 8-criteria tie). If tieAll is false Alpha has a clear lead.
+//
+// SubMatchResult.SideA/SideB are always set to avoid the "" == "" false-positive
+// in computeStandings (sub.Winner == sub.SideA when both are "").
+func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *state.Store) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Team Pool Test",
+		Format:   state.CompFormatPools,
+		Status:   state.CompStatusPools,
+		Courts:   []string{"A"},
+		TeamSize: 2, // 2-person teams keeps the SubResults simple
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"},
+		}},
+	}))
+
+	var matches []state.MatchResult
+	if tieAll {
+		// All three matches drawn at match level and sub-match level →
+		// W=0, L=0, T=2, IV=0, IL=0, IT=4, PW=0, PL=0 for every team.
+		matches = []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta",
+				Status: state.MatchStatusCompleted,
+				Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Alpha", SideB: "Beta", Winner: "", Decision: string(domain.DecisionHikiwake)},
+					{Position: 2, SideA: "Alpha", SideB: "Beta", Winner: "", Decision: string(domain.DecisionHikiwake)},
+				}},
+			{ID: "Pool A-1", SideA: "Alpha", SideB: "Gamma",
+				Status: state.MatchStatusCompleted,
+				Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Alpha", SideB: "Gamma", Winner: "", Decision: string(domain.DecisionHikiwake)},
+					{Position: 2, SideA: "Alpha", SideB: "Gamma", Winner: "", Decision: string(domain.DecisionHikiwake)},
+				}},
+			{ID: "Pool A-2", SideA: "Beta", SideB: "Gamma",
+				Status: state.MatchStatusCompleted,
+				Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Beta", SideB: "Gamma", Winner: "", Decision: string(domain.DecisionHikiwake)},
+					{Position: 2, SideA: "Beta", SideB: "Gamma", Winner: "", Decision: string(domain.DecisionHikiwake)},
+				}},
+		}
+	} else {
+		// Alpha wins both matches (W=2); Beta and Gamma each win one (W=1, L=1) and
+		// then face each other with Beta winning — distinct standings, no tie.
+		matches = []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta",
+				Status: state.MatchStatusCompleted, Winner: "Alpha", Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Alpha", SideB: "Beta", Winner: "Alpha"},
+					{Position: 2, SideA: "Alpha", SideB: "Beta", Winner: "Alpha"},
+				}},
+			{ID: "Pool A-1", SideA: "Alpha", SideB: "Gamma",
+				Status: state.MatchStatusCompleted, Winner: "Alpha", Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Alpha", SideB: "Gamma", Winner: "Alpha"},
+					{Position: 2, SideA: "Alpha", SideB: "Gamma", Winner: "Alpha"},
+				}},
+			{ID: "Pool A-2", SideA: "Beta", SideB: "Gamma",
+				Status: state.MatchStatusCompleted, Winner: "Beta", Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Beta", SideB: "Gamma", Winner: "Beta"},
+					{Position: 2, SideA: "Beta", SideB: "Gamma", Winner: "Beta"},
+				}},
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	return eng, store
+}
+
+// TestInjectPoolDaihyosenMatches_NoTie verifies no DH matches are injected
+// when team standings are distinct.
+func TestInjectPoolDaihyosenMatches_NoTie(t *testing.T) {
+	eng, _ := setupTeamPoolComp(t, "dh-no-tie", false)
+	injected, err := eng.InjectPoolDaihyosenMatches("dh-no-tie")
+	require.NoError(t, err)
+	assert.Empty(t, injected)
+}
+
+// TestInjectPoolDaihyosenMatches_TwoWayTie verifies that a two-way team tie
+// produces one DH match.
+func TestInjectPoolDaihyosenMatches_TwoWayTie(t *testing.T) {
+	eng, store := setupTeamPoolComp(t, "dh-two-tie", true)
+	// Override with a 2-way tie: Alpha/Beta both win one, draw one (same record),
+	// Gamma loses both — Alpha vs Beta draw decides the 2-way tie.
+	// Crucially, SubMatchResult.SideA/SideB are set to prevent "" == "" false-positives.
+	require.NoError(t, store.SavePoolMatches("dh-two-tie", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta",
+			Status: state.MatchStatusCompleted,
+			Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Alpha", SideB: "Beta", Winner: "", Decision: string(domain.DecisionHikiwake)},
+				{Position: 2, SideA: "Alpha", SideB: "Beta", Winner: "", Decision: string(domain.DecisionHikiwake)},
+			}},
+		{ID: "Pool A-1", SideA: "Alpha", SideB: "Gamma",
+			Status: state.MatchStatusCompleted, Winner: "Alpha", Court: "A",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Alpha", SideB: "Gamma", Winner: "Alpha"},
+				{Position: 2, SideA: "Alpha", SideB: "Gamma", Winner: "Alpha"},
+			}},
+		{ID: "Pool A-2", SideA: "Beta", SideB: "Gamma",
+			Status: state.MatchStatusCompleted, Winner: "Beta", Court: "A",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Beta", SideB: "Gamma", Winner: "Beta"},
+				{Position: 2, SideA: "Beta", SideB: "Gamma", Winner: "Beta"},
+			}},
+	}))
+
+	injected, err := eng.InjectPoolDaihyosenMatches("dh-two-tie")
+	require.NoError(t, err)
+	require.Len(t, injected, 1, "one DH match expected for a two-way team tie")
+	m := injected[0]
+	assert.True(t, IsPoolDaihyosenMatchID(m.ID))
+	assert.Equal(t, state.MatchStatusScheduled, m.Status)
+	assert.Equal(t, "A", m.Court)
+	assert.ElementsMatch(t, []string{"Alpha", "Beta"}, []string{m.SideA, m.SideB})
+}
+
+// TestInjectPoolDaihyosenMatches_Idempotent verifies that calling inject twice
+// does not create duplicate DH matches.
+func TestInjectPoolDaihyosenMatches_Idempotent(t *testing.T) {
+	eng, _ := setupTeamPoolComp(t, "dh-idempotent", true)
+
+	first, err := eng.InjectPoolDaihyosenMatches("dh-idempotent")
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+
+	second, err := eng.InjectPoolDaihyosenMatches("dh-idempotent")
+	require.NoError(t, err)
+	assert.Empty(t, second, "second inject must produce no new matches")
+}
+
+// TestMaybeAutoCompletePools_TeamTieInjectsDH verifies that MaybeAutoCompletePools
+// returns AutoCompleteTiebreakInjected and injects DH matches for a team
+// competition with tied pools.
+func TestMaybeAutoCompletePools_TeamTieInjectsDH(t *testing.T) {
+	eng, _ := setupTeamPoolComp(t, "autocomplete-team-tie", true)
+
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-tie")
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTiebreakInjected, outcome)
+}
+
+// TestMaybeAutoCompletePools_TeamNoTieTransitions verifies that a team pool
+// with no ties transitions to complete.
+func TestMaybeAutoCompletePools_TeamNoTieTransitions(t *testing.T) {
+	eng, _ := setupTeamPoolComp(t, "autocomplete-team-notie", false)
+
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-notie")
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome)
+}
+
+// TestMaybeAutoCompletePools_TeamDHCompleteTransitions verifies that after all
+// DH matches are completed, the competition transitions to complete.
+func TestMaybeAutoCompletePools_TeamDHCompleteTransitions(t *testing.T) {
+	eng, store := setupTeamPoolComp(t, "autocomplete-team-dhcomplete", true)
+
+	// First pass: inject DH.
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dhcomplete")
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+
+	// Mark all pool matches (including the injected DH) as completed.
+	allMatches, err := store.LoadPoolMatches("autocomplete-team-dhcomplete")
+	require.NoError(t, err)
+	for i := range allMatches {
+		allMatches[i].Status = state.MatchStatusCompleted
+		if allMatches[i].Winner == "" {
+			allMatches[i].Winner = allMatches[i].SideA // assign a winner to DH match
+		}
+	}
+	require.NoError(t, store.SavePoolMatches("autocomplete-team-dhcomplete", allMatches))
+
+	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dhcomplete")
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome)
+}
+
+// TestDHStandingsApplied verifies that a completed pool-DH match result is
+// applied as a secondary sort to break a tie in team pool standings.
+func TestDHStandingsApplied(t *testing.T) {
+	eng, store := setupTeamPoolComp(t, "dh-standings", true)
+
+	// Inject DH matches.
+	_, err := eng.InjectPoolDaihyosenMatches("dh-standings")
+	require.NoError(t, err)
+
+	// Find the injected DH match and mark Alpha as the winner.
+	allMatches, err := store.LoadPoolMatches("dh-standings")
+	require.NoError(t, err)
+	for i := range allMatches {
+		if IsPoolDaihyosenMatchID(allMatches[i].ID) {
+			allMatches[i].Status = state.MatchStatusCompleted
+			// Determine which team is "Alpha" (SideA or SideB).
+			if allMatches[i].SideA == "Alpha" || allMatches[i].SideB == "Alpha" {
+				allMatches[i].Winner = "Alpha"
+			}
+		}
+	}
+	require.NoError(t, store.SavePoolMatches("dh-standings", allMatches))
+	eng.standingsCache.Delete("dh-standings")
+	eng.standingsFlight.Delete("dh-standings")
+
+	standings, err := eng.CalculatePoolStandings("dh-standings")
+	require.NoError(t, err)
+	poolA := standings["Pool A"]
+	require.NotEmpty(t, poolA)
+	// Alpha should rank first after winning the DH (all three teams were tied).
+	assert.Equal(t, "Alpha", poolA[0].Player.Name, "Alpha should rank first after winning DH")
+}

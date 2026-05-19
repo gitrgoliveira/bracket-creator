@@ -72,6 +72,17 @@ func IsPoolMatchID(matchID string) bool {
 	return strings.HasPrefix(matchID, "Pool ")
 }
 
+// IsPoolDaihyosenMatchID reports whether a match ID is a pool-stage
+// daihyosen bout (IDs of the form "Pool X-DH-N"). These are generated
+// by InjectPoolDaihyosenMatches when all team-pool matches complete with
+// a tie on all 8 ranking criteria. They are structurally pool matches
+// but scored as individual (one representative per side) rather than as
+// full team bouts.
+func IsPoolDaihyosenMatchID(matchID string) bool {
+	_, suffix, ok := strings.Cut(matchID, "-")
+	return ok && strings.HasPrefix(suffix, "DH-")
+}
+
 // ComputeTeamSummary aggregates SubMatchResult entries into TeamSummary
 // values for the two named sides. Sub-results whose Winner is empty
 // (drawn bouts / hikiwake) contribute nothing to IV but their ippons

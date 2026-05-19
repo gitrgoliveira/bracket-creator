@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -67,6 +66,16 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			}
 		}
 
+		// Load existing participants so we can preserve check-in state for
+		// players that survive the edit (matched by name). A full roster
+		// replacement via this endpoint must not silently clear check-ins
+		// that were already recorded.
+		existing, _ := store.LoadParticipants(id, comp.WithZekkenName)
+		checkedInByName := make(map[string]bool, len(existing))
+		for _, ep := range existing {
+			checkedInByName[ep.Name] = ep.CheckedIn
+		}
+
 		players := make([]domain.Player, 0, len(req.Players))
 		for i, p := range req.Players {
 			players = append(players, domain.Player{
@@ -76,6 +85,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				Metadata:     p.Metadata,
 				Tag:          p.Tag,
 				PoolPosition: int64(i),
+				CheckedIn:    checkedInByName[p.Name],
 			})
 		}
 
@@ -142,8 +152,6 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
 			p.CheckedIn = true
-			now := time.Now()
-			p.CheckedInAt = &now
 			return nil
 		})
 
@@ -175,7 +183,6 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
 			p.CheckedIn = false
-			p.CheckedInAt = nil
 			return nil
 		})
 

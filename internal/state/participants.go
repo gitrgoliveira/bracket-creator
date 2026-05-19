@@ -98,9 +98,17 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		// Robust column-based detection: only treat as checked_in if the
 		// LAST column is exactly that string. This prevents accidental
 		// suffix matches on dojo names or metadata.
+		// For UUID rows the minimum valid row is "uuid,Name,Dojo", so we
+		// need at least 4 parts before checked_in is a valid trailing token.
+		// For non-UUID rows "Name,Dojo" is the minimum (2 parts), so 3+ is
+		// sufficient. Using hasIDs to pick the right threshold.
 		line = strings.TrimSpace(line)
 		parts := strings.Split(line, ",")
-		if len(parts) > 2 { // Min 3 columns (ID, Name, Dojo)
+		minParts := 2
+		if hasIDs {
+			minParts = 3
+		}
+		if len(parts) > minParts {
 			last := strings.TrimSpace(parts[len(parts)-1])
 			if strings.ToLower(last) == "checked_in" {
 				isCheckedIn = true

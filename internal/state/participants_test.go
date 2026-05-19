@@ -348,3 +348,34 @@ func TestUpdateParticipant(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, ErrParticipantNotFound)
 }
+
+func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
+	// Regression (Copilot review): UUID rows have format "uuid,Name,Dojo[,tag][,checked_in]".
+	// A 3-part UUID row "uuid,Alice,checked_in" must NOT be misclassified: "checked_in" is the Dojo.
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "checkin-uuid"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	path := filepath.Join(dir, "competitions", compID, "participants.csv")
+
+	// 3-col UUID row: uuid, Name, Dojo — "checked_in" is the Dojo value, not a marker.
+	require.NoError(t, os.WriteFile(path,
+		[]byte("550e8400-e29b-41d4-a716-446655440000, Alice, checked_in\n"), 0600))
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.False(t, loaded[0].CheckedIn, "3-part UUID row must NOT be misclassified as checked-in")
+	assert.Equal(t, "checked_in", loaded[0].Dojo, "dojo value must be preserved for 3-part UUID row")
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
+
+	// 4-col UUID row: uuid, Name, Dojo, checked_in — trailing checked_in IS a valid marker.
+	require.NoError(t, os.WriteFile(path,
+		[]byte("550e8400-e29b-41d4-a716-446655440001, Bob, Kenshikan, checked_in\n"), 0600))
+	loaded2, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded2, 1)
+	assert.True(t, loaded2[0].CheckedIn, "4-part UUID row must be detected as checked-in")
+	assert.Equal(t, "Kenshikan", loaded2[0].Dojo, "Dojo must survive after checked_in token is stripped")
+}

@@ -452,13 +452,14 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
     if (!confirm(`Mark all ${targets.length} participants from ${dojo} as checked-in?`)) return;
 
-    try {
-      // Parallel execution for better UX and performance
-      await Promise.all(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
-      showToast(`Checked in ${targets.length} participants from ${dojo}`);
-    } catch (err) {
-      console.error("AdminParticipants: bulkCheckInDojo failed", err);
-      showToast(err.message, "error");
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
+    const failed = results.filter(r => r.status === "rejected").length;
+    const succeeded = results.length - failed;
+    if (failed > 0) {
+      console.error("AdminParticipants: bulkCheckInDojo partial failure", results.filter(r => r.status === "rejected").map(r => r.reason));
+      showToast(`${succeeded}/${results.length} checked in from ${dojo} (${failed} failed)`, "error");
+    } else {
+      showToast(`Checked in ${succeeded} participants from ${dojo}`);
     }
   };
 

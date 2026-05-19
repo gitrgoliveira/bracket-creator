@@ -1,21 +1,18 @@
 // Package domain defines the core domain models for the bracket creator
 package domain
 
-import "time"
-
 // Player represents a tournament participant. It is the canonical
 // participant type across state, engine, mobileapp, and helper
 // packages; internal/helper re-exports it under helper.Player as a
 // type alias for rendering-side ergonomics (NFR-007).
 type Player struct {
-	ID          string     `json:"id,omitempty"` // stable UUID assigned at first persist
-	Name        string     `json:"name"`
-	DisplayName string     `json:"displayName"`
-	Dojo        string     `json:"dojo"`
-	Metadata    []string   `json:"metadata,omitempty"`
-	Tag         string     `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer", "reserved"
-	CheckedIn   bool       `json:"checkedIn"`
-	CheckedInAt *time.Time `json:"checkedInAt,omitempty"`
+	ID          string   `json:"id,omitempty"` // stable UUID assigned at first persist
+	Name        string   `json:"name"`
+	DisplayName string   `json:"displayName"`
+	Dojo        string   `json:"dojo"`
+	Metadata    []string `json:"metadata,omitempty"`
+	Tag         string   `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer", "reserved"
+	CheckedIn   bool     `json:"checkedIn"`
 
 	PoolPosition int64  `json:"-"`
 	Seed         int    `json:"seed"`

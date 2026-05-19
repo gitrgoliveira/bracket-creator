@@ -6,7 +6,9 @@ import (
 )
 
 // ValidationError represents a client-caused precondition or input failure.
-// Handlers should return HTTP 400 for these.
+// Handlers typically return HTTP 400, but may return HTTP 409 when the
+// failure is a state conflict (e.g. reinstatement of a non-reinstateable
+// competitor).
 type ValidationError struct {
 	Msg string
 }

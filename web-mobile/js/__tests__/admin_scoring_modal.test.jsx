@@ -70,6 +70,11 @@ describe('buildDecisionBody', () => {
     expect(body).toEqual({ decision: 'kiken-voluntary', decisionBy: 'shiro' });
   });
 
+  it('builds the minimal body for kiken-injury without reason or encho', () => {
+    const body = buildDecisionBody('kiken-injury', { decisionBy: 'aka', decisionReason: '' }, 0);
+    expect(body).toEqual({ decision: 'kiken-injury', decisionBy: 'aka' });
+  });
+
   it('includes decisionReason when present', () => {
     const body = buildDecisionBody('kiken-voluntary', { decisionBy: 'aka', decisionReason: 'injury' }, 0);
     expect(body).toEqual({

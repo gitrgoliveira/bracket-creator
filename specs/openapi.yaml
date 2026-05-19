@@ -1377,6 +1377,14 @@ paths:
                 $ref: '#/components/schemas/CompetitorStatus'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          description: >
+            Competitor is not reinstateable (voluntary kiken or fusenpai)
+            or is not currently ineligible.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/competitions/{id}/teams/{tid}/lineups/{round}:
     parameters:

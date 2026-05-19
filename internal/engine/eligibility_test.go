@@ -692,9 +692,9 @@ func TestCheckEligibilityExcludingMatch_EmptyPlayerID(t *testing.T) {
 // Reinstateable=true and kiken-voluntary does not.
 func TestRecordDecision_KikenReinstateable(t *testing.T) {
 	tests := []struct {
-		name          string
-		decision      string
-		wantReinstall bool
+		name             string
+		decision         string
+		wantReinstateable bool
 	}{
 		{"kiken-injury sets reinstateable=true", "kiken-injury", true},
 		{"kiken-voluntary leaves reinstateable=false", "kiken-voluntary", false},
@@ -718,11 +718,11 @@ func TestRecordDecision_KikenReinstateable(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, status)
 			assert.False(t, status.Eligible)
-			assert.Equal(t, tc.wantReinstall, status.Reinstateable)
+			assert.Equal(t, tc.wantReinstateable, status.Reinstateable)
 
 			statuses, err := store.LoadCompetitorStatus(compID)
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantReinstall, statuses[aliceID].Reinstateable)
+			assert.Equal(t, tc.wantReinstateable, statuses[aliceID].Reinstateable)
 		})
 	}
 }

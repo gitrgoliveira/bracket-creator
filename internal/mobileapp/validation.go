@@ -285,7 +285,7 @@ func (r *ScoreRequest) validateDecision() error {
 	switch r.Decision {
 	case "kiken-voluntary", "kiken-injury":
 		if r.DecisionBy == "" {
-			return &ValidationError{Field: "decisionBy", Message: "required when decision is kiken"}
+			return &ValidationError{Field: "decisionBy", Message: fmt.Sprintf("required when decision is %s", r.Decision)}
 		}
 		need := 2
 		if r.Encho != nil {

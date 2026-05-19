@@ -166,6 +166,8 @@ func TestResolveReasonHuman(t *testing.T) {
 		want   string
 	}{
 		{"kiken at match", "kiken at m_12", "withdrew from match m_12"},
+		{"kiken-voluntary at match", "kiken-voluntary at m_12", "withdrew voluntarily from match m_12"},
+		{"kiken-injury at match", "kiken-injury at m_12", "withdrew due to injury from match m_12"},
 		{"fusenpai at match", "fusenpai at m_007", "no-show forfeit at match m_007"},
 		{"fusensho at match", "fusensho at pool-A-1", "bye-win at match pool-A-1"},
 		{"daihyosen at match", "daihyosen at r3-m1", "representative bout at match r3-m1"},

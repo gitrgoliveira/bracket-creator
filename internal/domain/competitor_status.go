@@ -10,11 +10,12 @@ import (
 //
 // FR-034, data-model §3.
 type CompetitorStatus struct {
-	PlayerID   string    `json:"playerId" yaml:"playerId"`
-	Eligible   bool      `json:"eligible" yaml:"eligible"`
-	Reason     string    `json:"reason,omitempty" yaml:"reason,omitempty"`
-	MatchID    string    `json:"matchId,omitempty" yaml:"matchId,omitempty"`
-	RecordedAt time.Time `json:"recordedAt" yaml:"recordedAt"`
+	PlayerID      string    `json:"playerId" yaml:"playerId"`
+	Eligible      bool      `json:"eligible" yaml:"eligible"`
+	Reinstateable bool      `json:"reinstateable,omitempty" yaml:"reinstateable,omitempty"`
+	Reason        string    `json:"reason,omitempty" yaml:"reason,omitempty"`
+	MatchID       string    `json:"matchId,omitempty" yaml:"matchId,omitempty"`
+	RecordedAt    time.Time `json:"recordedAt" yaml:"recordedAt"`
 }
 
 // Sentinel errors so callers can switch on the validation failure

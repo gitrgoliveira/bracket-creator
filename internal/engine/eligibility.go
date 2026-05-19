@@ -191,7 +191,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	if decisionBy == "aka" {
 		loserName = sideA
 	}
-	if decision == string(domain.DecisionKiken) || decision == string(domain.DecisionFusenpai) {
+	if domain.IsKikenDecisionStr(decision) || decision == string(domain.DecisionFusenpai) {
 		if cerr := e.checkConcurrentIneligibility(compID, matchID, loserName); cerr != nil {
 			return nil, nil, cerr
 		}
@@ -203,7 +203,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 		return nil, nil, err
 	}
 	priorLoser := ""
-	if prior != nil && (prior.Decision == string(domain.DecisionKiken) || prior.Decision == string(domain.DecisionFusenpai)) {
+	if prior != nil && (domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai)) {
 		priorLoser = loserSideName(prior)
 	}
 	// T103: downstream-match check. The contract scope is "either
@@ -484,7 +484,7 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 	if result == nil {
 		return nil, nil
 	}
-	if result.Decision != string(domain.DecisionKiken) && result.Decision != string(domain.DecisionFusenpai) {
+	if !domain.IsKikenDecisionStr(result.Decision) && result.Decision != string(domain.DecisionFusenpai) {
 		return nil, nil
 	}
 	loser := loserSideName(result)
@@ -505,11 +505,12 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 		return nil, nil
 	}
 	status := domain.CompetitorStatus{
-		PlayerID:   playerID,
-		Eligible:   false,
-		Reason:     fmt.Sprintf("%s at %s", result.Decision, matchID),
-		MatchID:    matchID,
-		RecordedAt: time.Now().UTC(),
+		PlayerID:      playerID,
+		Eligible:      false,
+		Reinstateable: result.Decision == string(domain.DecisionKikenInjury),
+		Reason:        fmt.Sprintf("%s at %s", result.Decision, matchID),
+		MatchID:       matchID,
+		RecordedAt:    time.Now().UTC(),
 	}
 	// K2/CHK047: atomic check-and-set under WithTransaction closes the
 	// TOCTOU window between the pre-RecordDecision check and this write.
@@ -562,4 +563,46 @@ func loserSideName(result *state.MatchResult) string {
 		return result.SideB
 	}
 	return ""
+}
+
+// ReinstateCompetitor restores eligibility for a competitor who was
+// withdrawn via kiken-injury (FIK Art. 30). The status must exist,
+// be Eligible: false, and have Reinstateable: true (set by
+// kiken-injury). Voluntary kiken (Art. 31) and fusenpai statuses
+// are not reinstateable — the endpoint returns an error.
+//
+// The check-and-set runs under WithTransaction (K2/CHK047) to close
+// the TOCTOU window between reading the Reinstateable flag and writing
+// the reinstated status.
+func (e *Engine) ReinstateCompetitor(compID, playerID string) (*domain.CompetitorStatus, error) {
+	if playerID == "" {
+		return nil, validationErrorf("playerID is required")
+	}
+	var out *domain.CompetitorStatus
+	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		statuses, err := tx.LoadCompetitorStatus(compID)
+		if err != nil {
+			return err
+		}
+		st, ok := statuses[playerID]
+		if !ok || st.Eligible {
+			return validationErrorf("competitor %q is not ineligible", playerID)
+		}
+		if !st.Reinstateable {
+			return validationErrorf("competitor %q is not reinstateable (voluntary kiken or fusenpai)", playerID)
+		}
+		status := domain.CompetitorStatus{
+			PlayerID:   playerID,
+			Eligible:   true,
+			MatchID:    st.MatchID,
+			Reason:     fmt.Sprintf("reinstated (was: %s)", st.Reason),
+			RecordedAt: time.Now().UTC(),
+		}
+		if err := tx.SetCompetitorStatus(compID, status); err != nil {
+			return err
+		}
+		out = &status
+		return nil
+	})
+	return out, err
 }

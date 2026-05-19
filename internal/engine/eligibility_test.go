@@ -687,3 +687,104 @@ func TestCheckEligibilityExcludingMatch_EmptyPlayerID(t *testing.T) {
 	err := eng.checkEligibilityExcludingMatch(compID, []string{"", ""}, "M1")
 	assert.NoError(t, err, "empty player IDs must be skipped silently")
 }
+
+// TestRecordDecision_KikenReinstateable verifies that kiken-injury sets
+// Reinstateable=true and kiken-voluntary does not.
+func TestRecordDecision_KikenReinstateable(t *testing.T) {
+	tests := []struct {
+		name              string
+		decision          string
+		wantReinstateable bool
+	}{
+		{"kiken-injury sets reinstateable=true", "kiken-injury", true},
+		{"kiken-voluntary leaves reinstateable=false", "kiken-voluntary", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "reinstateable-test-" + tc.decision
+			createTestCompetition(t, store, compID, "pools", 2)
+
+			aliceID := helper.NewUUID4()
+			require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+				{ID: aliceID, Name: "Alice", Dojo: "A"},
+				{ID: helper.NewUUID4(), Name: "Bob", Dojo: "B"},
+			}))
+			require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+				{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+			}))
+
+			_, status, err := eng.RecordDecision(compID, "Pool A-0", tc.decision, "aka", "reason", nil, false)
+			require.NoError(t, err)
+			require.NotNil(t, status)
+			assert.False(t, status.Eligible)
+			assert.Equal(t, tc.wantReinstateable, status.Reinstateable)
+
+			statuses, err := store.LoadCompetitorStatus(compID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantReinstateable, statuses[aliceID].Reinstateable)
+		})
+	}
+}
+
+// TestReinstateCompetitor verifies the ReinstateCompetitor engine method.
+func TestReinstateCompetitor(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "reinstate-test"
+	createTestCompetition(t, store, compID, "pools", 2)
+
+	playerID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: playerID, Name: "Alice", Dojo: "A"},
+	}))
+
+	t.Run("reinstate kiken-injury succeeds", func(t *testing.T) {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID:      playerID,
+			Eligible:      false,
+			Reinstateable: true,
+			Reason:        "kiken-injury at Pool A-0",
+			MatchID:       "Pool A-0",
+		}))
+
+		status, err := eng.ReinstateCompetitor(compID, playerID)
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		assert.True(t, status.Eligible)
+		assert.Equal(t, playerID, status.PlayerID)
+		assert.Contains(t, status.Reason, "reinstated")
+		assert.Contains(t, status.Reason, "kiken-injury at Pool A-0")
+	})
+
+	t.Run("reinstate kiken-voluntary rejected", func(t *testing.T) {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID:      playerID,
+			Eligible:      false,
+			Reinstateable: false,
+			Reason:        "kiken-voluntary at Pool A-0",
+			MatchID:       "Pool A-0",
+		}))
+
+		_, err := eng.ReinstateCompetitor(compID, playerID)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not reinstateable")
+	})
+
+	t.Run("reinstate already eligible rejected", func(t *testing.T) {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID: playerID,
+			Eligible: true,
+			MatchID:  "Pool A-0",
+		}))
+
+		_, err := eng.ReinstateCompetitor(compID, playerID)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not ineligible")
+	})
+
+	t.Run("reinstate empty playerID rejected", func(t *testing.T) {
+		_, err := eng.ReinstateCompetitor(compID, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "playerID is required")
+	})
+}

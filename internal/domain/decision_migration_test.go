@@ -36,9 +36,19 @@ func TestLegacyBoolMigrates(t *testing.T) {
 			expected: domain.DecisionFought,
 		},
 		{
-			name:     "new-format string decision round-trips",
+			name:     "legacy kiken migrates to kiken-voluntary",
 			yaml:     "decision: \"kiken\"\n",
-			expected: domain.DecisionKiken,
+			expected: domain.DecisionKikenVoluntary,
+		},
+		{
+			name:     "kiken-voluntary round-trips",
+			yaml:     "decision: \"kiken-voluntary\"\n",
+			expected: domain.DecisionKikenVoluntary,
+		},
+		{
+			name:     "kiken-injury round-trips",
+			yaml:     "decision: \"kiken-injury\"\n",
+			expected: domain.DecisionKikenInjury,
 		},
 	}
 

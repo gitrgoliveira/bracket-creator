@@ -541,7 +541,7 @@ func TestPostScoreKikenAutoFillsRegulation(t *testing.T) {
 	stored, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
-	assert.Equal(t, "kiken", stored[0].Decision)
+	assert.Equal(t, "kiken-voluntary", stored[0].Decision)
 	assert.Equal(t, "shiro", stored[0].DecisionBy)
 	assert.Equal(t, "Alice", stored[0].Winner)
 }

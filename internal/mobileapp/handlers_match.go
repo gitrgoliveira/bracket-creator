@@ -452,7 +452,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			engErr    error
 		)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
-			isWithdrawal := result.Decision == "kiken" || result.Decision == "fusenpai"
+			isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 			if !isWithdrawal {
 				if err := eng.StartMatchTx(stx, id, mid); err != nil {
 					engErr = err

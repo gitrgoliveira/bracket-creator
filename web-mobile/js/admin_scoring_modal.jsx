@@ -509,8 +509,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     if (!m.compId) return;
     let cancelled = false;
     window.API.fetchCompetitionDetails(m.compId).then(d => {
-      if (!cancelled && d?.maxEnchoPeriods > 0) setMaxEnchoPeriods(d.maxEnchoPeriods);
-      if (!cancelled) setIsNaginata(!!d?.naginata);
+      if (!cancelled && d?.config?.maxEnchoPeriods > 0) setMaxEnchoPeriods(d.config.maxEnchoPeriods);
+      if (!cancelled) setIsNaginata(!!d?.config?.naginata);
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [m.compId]);
@@ -1057,7 +1057,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // viewer.compMatches in a sibling slice) is preferred; competition
   // fetch is the fallback. Default "fixed" preserves the legacy N×1
   // grid behaviour.
-  const teamMatchType = m.teamMatchType || compMeta?.teamMatchType || "fixed";
+  const teamMatchType = m.teamMatchType || compMeta?.config?.teamMatchType || "fixed";
   const isKachinuki = teamMatchType === "kachinuki";
   // Compact "Instrument Panel" mode fits the modal on one viewport page
   // for ≤5-person teams. Kachinuki renders only the current bout
@@ -1070,9 +1070,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // the standings tiebreak, not a representative bout. Format comes
   // from match-level compFormat (when set by compMatches) or the comp
   // fetch fallback. Phase === "bracket" is the in-modal signal.
-  const compFormat = m.compFormat || compMeta?.format || "";
-  const maxEnchoPeriods = compMeta?.maxEnchoPeriods || 0;
-  const isNaginataTeam = !!compMeta?.naginata;
+  const compFormat = m.compFormat || compMeta?.config?.format || "";
+  const maxEnchoPeriods = compMeta?.config?.maxEnchoPeriods || 0;
+  const isNaginataTeam = !!compMeta?.config?.naginata;
   const isKnockoutPhase = m.phase === "bracket" || compFormat === "playoffs" || compFormat === "mixed";
 
   // Mirror of submitDecision in ScoreEditorModal — kept inline rather than

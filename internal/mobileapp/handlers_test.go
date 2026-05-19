@@ -1882,6 +1882,73 @@ func TestParticipantHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestCheckInHandlers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	comp := state.Competition{ID: "ci-comp"}
+	store.SaveCompetition(&comp)
+
+	// PUT on unknown competition → 404
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/nonexistent/participants/any-pid/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// DELETE on unknown competition → 404
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/competitions/nonexistent/participants/any-pid/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// Seed a participant.
+	require.NoError(t, store.SaveParticipants("ci-comp", []domain.Player{{Name: "Alice", Dojo: "Kenshikan"}}))
+	existing, err := store.LoadParticipants("ci-comp", false)
+	require.NoError(t, err)
+	aliceID := existing[0].ID
+
+	// PUT on unknown participant → 404
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-comp/participants/nonexistent-pid/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// PUT (check in) known participant → 200, checkedIn=true in response
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-comp/participants/"+aliceID+"/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.True(t, resp.CheckedIn, "PUT response must have checkedIn=true")
+
+	// Verify check-in persists to disk.
+	reloaded, err := store.LoadParticipants("ci-comp", false)
+	require.NoError(t, err)
+	require.Len(t, reloaded, 1)
+	assert.True(t, reloaded[0].CheckedIn, "check-in must persist to disk")
+
+	// DELETE (undo check-in) known participant → 200, checkedIn=false in response
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/competitions/ci-comp/participants/"+aliceID+"/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.False(t, resp.CheckedIn, "DELETE response must have checkedIn=false")
+
+	// Verify undo persists to disk.
+	reloaded, err = store.LoadParticipants("ci-comp", false)
+	require.NoError(t, err)
+	require.Len(t, reloaded, 1)
+	assert.False(t, reloaded[0].CheckedIn, "undo check-in must persist to disk")
+
+	// DELETE on unknown participant → 404
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/competitions/ci-comp/participants/nonexistent-pid/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func TestMatchHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

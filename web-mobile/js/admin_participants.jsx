@@ -106,18 +106,20 @@ function mintParticipantIds(compID, existingPlayers, parsed) {
   });
   let nextSlot = 1;
   let added = 0, updatedCount = 0;
-  const np = parsed.map(({ name, displayName, dojo, danGrade, tag }) => {
+  const np = parsed.map(({ name, displayName, dojo, danGrade, tag, checkedIn: parsedCheckedIn }) => {
     const existing = existingMap.get(name.toLowerCase());
     if (existing) {
       updatedCount++;
-      return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null };
+      // Preserve existing check-in state; CSV token takes precedence if explicitly set.
+      const checkedIn = parsedCheckedIn || existing.checkedIn || false;
+      return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null, checkedIn };
     }
     added++;
     while (usedIds.has(`${compID}-p${nextSlot}`)) nextSlot++;
     const id = `${compID}-p${nextSlot}`;
     usedIds.add(id);
     nextSlot++;
-    return { id, name, displayName, dojo, danGrade, tag, seed: null };
+    return { id, name, displayName, dojo, danGrade, tag, seed: null, checkedIn: parsedCheckedIn || false };
   });
   return { np, added, updatedCount };
 }
@@ -343,6 +345,13 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     });
     return first;
   }, [visiblePlayers]);
+  const dojoUncheckedCount = useMemoA(() => {
+    const counts = new Map();
+    players.forEach(p => {
+      if (!p.checkedIn) counts.set(p.dojo, (counts.get(p.dojo) || 0) + 1);
+    });
+    return counts;
+  }, [players]);
   const { gaps, hasGaps } = useMemoA(() => {
     const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
     const gaps = [];
@@ -843,7 +852,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                         checked={p.checkedIn}
                         onChange={(e) => toggleCheckIn(p.id, e.target.checked)}
                         style={{ width: 18, height: 18, cursor: "pointer" }}
-                        title={p.checkedIn ? "Undo check-in" : "Mark as checked-in"}
+                        aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
                       />
                     </div>
                     <span className="seed-row__handle" title={reorderDisabled ? "Clear all filters to reorder" : "Drag to reorder"}>⠿</span>
@@ -852,7 +861,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                       <div className="seed-row__dojo">
                         {p.dojo}
-                        {dojoFirstRowSet.has(p.id) && players.filter(px => px.dojo === p.dojo && !px.checkedIn).length > 0 && (
+                        {dojoFirstRowSet.has(p.id) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}

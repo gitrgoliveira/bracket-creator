@@ -864,6 +864,7 @@ a:hover {
 
 .bc-match--done {
   opacity: 0.75;
+  transition: opacity 140ms;
 }
 
 .bc-match-meta {

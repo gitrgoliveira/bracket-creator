@@ -27,7 +27,6 @@ function roundLabel(roundIdx, total) {
   return `Round ${roundIdx + 1}`;
 }
 
-// T097: decision chips shown in the bracket meta row.
 // Score rows print ippon counts but lose the decision type; chips keep operators
 // and viewers oriented when scanning a wall of bracket cards.
 const DECISION_CHIPS = {

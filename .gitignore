@@ -68,3 +68,5 @@ bracket-creator-webapp*
 .github/agents
 .github/prompts
 .gemini*
+# bd worktree
+bracket-creator-*

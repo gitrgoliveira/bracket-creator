@@ -107,13 +107,17 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   }, [estTeamSize]);
 
   useEffectA(() => {
-    if (!estOpen) return;
+    if (!estOpen) {
+      setEstLoading(false);
+      return;
+    }
     // Guard: required params must be valid numbers > 0 to avoid 400s
     if (!Number.isFinite(estMatchDuration) || estMatchDuration <= 0 ||
         !Number.isFinite(estMultiplier) || estMultiplier <= 0 ||
         !Number.isFinite(estCourts) || estCourts <= 0 ||
         !Number.isFinite(estNumMatches) || estNumMatches <= 0) {
       setEstResult(null);
+      setEstLoading(false);
       return;
     }
 
@@ -137,9 +141,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
           console.error("Estimation failed", e);
         }
       } finally {
-        if (!controller.signal.aborted) {
-          setEstLoading(false);
-        }
+        setEstLoading(false);
       }
     }, 300);
     return () => { clearTimeout(timer); controller.abort(); };
@@ -834,7 +836,7 @@ function PerCourtBreakdown({ perCourtMinutes }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8 }}>
         {perCourtMinutes.map((m, i) => (
           <div key={i} style={{ fontSize: 12, padding: "4px 8px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
-            <span style={{ color: "var(--ink-3)" }}>Court {String.fromCharCode(65 + i)}:</span>
+            <span style={{ color: "var(--ink-3)" }}>Court {i < 26 ? String.fromCharCode(65 + i) : i + 1}:</span>
             <strong style={{ marginLeft: 4 }}>{formatMinutes(m)}</strong>
           </div>
         ))}

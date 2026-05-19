@@ -135,6 +135,12 @@ function scheduleRound(matches, startTime, perMatchMin, courtNames) {
 }
 function addMinutes(t, mins) { const [h, m] = t.split(":").map(Number); const total = h * 60 + m + mins; const hh = Math.floor(total / 60) % 24; const mm = total % 60; return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`; }
 
+function diffMinutes(t1, t2) {
+  const [h1, m1] = t1.split(":").map(Number);
+  const [h2, m2] = t2.split(":").map(Number);
+  return (h1 * 60 + m1) - (h2 * 60 + m2);
+}
+
 // ---------- Pools ----------
 // poolMode: "max" => poolSize is a maximum (never more than N per pool — flex pool count to fit)
 //           "min" => poolSize is a minimum (try to keep at least N per pool — fewer, larger pools)
@@ -317,6 +323,13 @@ function parseParticipantLines(lines, withZekken) {
     const parts = line.split(",").map((s) => s.trim());
     const name = parts[0] || "";
     let displayName = "", dojo = "", danGrade = "", tag = "";
+    let checkedIn = false;
+
+    // Detect trailing checked_in column
+    if (parts[parts.length - 1]?.toLowerCase() === "checked_in") {
+      checkedIn = true;
+      parts.pop();
+    }
 
     // Detect trailing tag column (must be a known tag string, not a number)
     const last = parts[parts.length - 1]?.toLowerCase();
@@ -333,7 +346,7 @@ function parseParticipantLines(lines, withZekken) {
       dojo = parts[1] || "";
       danGrade = parts[2] || "";
     }
-    return { name, displayName, dojo, danGrade, tag };
+    return { name, displayName, dojo, danGrade, tag, checkedIn };
   });
 }
 
@@ -345,7 +358,7 @@ function arraysEqual(a, b) {
 
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
-  buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes,
+  buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, diffMinutes,
   buildPools, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,

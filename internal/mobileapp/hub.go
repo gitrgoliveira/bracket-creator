@@ -23,6 +23,7 @@ const (
 	EventTournamentUpdated       EventType = "tournament_updated"
 	EventScheduleUpdated         EventType = "schedule_updated"
 	EventCompetitorStatusUpdated EventType = "competitor_status_updated"
+	EventParticipantsUpdated     EventType = "participants_updated"
 	// EventPasswordReset fires when the admin password is rotated. Three
 	// broadcast sites (file mode only; never emitted in locked mode):
 	//   - POST /api/tournament/reset — the public recovery endpoint for

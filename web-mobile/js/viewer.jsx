@@ -523,13 +523,15 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
               className="pmf__option"
               onClick={() => { onPick(p); setQuery(""); setOpen(false); }}
             >
-              <span className="pmf__check"></span>
+              <span className="pmf__check">{p.checkedIn ? "✓" : ""}</span>
               <span className="pmf__opt-body">
-                <span className="pmf__opt-name">{p.name}</span>
+                <span className="pmf__opt-name">
+                  {p.name}
+                  {p.checkedIn && <span className="tag-badge" style={{ marginLeft: 8, fontSize: 9 }}>Checked in</span>}
+                </span>
                 <span className="pmf__opt-dojo">{p.dojo || ""}</span>
               </span>
-            </button>
-          ))}
+            </button>          ))}
         </div>
       )}
     </div>
@@ -561,10 +563,12 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   }
 
   // Followed-player state: header indicator + next-match details.
+  const pRecord = roster.find(p => p.id === followedPlayer.id);
   const header = (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Following:</span>
       <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
+      {pRecord && pRecord.checkedIn && <span className="tag-badge" style={{ fontSize: 9 }}>✓ Checked in</span>}
       <button
         className="btn btn--ghost btn--sm"
         onClick={() => setFollowedPlayer(null)}
@@ -658,14 +662,17 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
         </div>
       ) : (
         <div className="pmf__bar" style={{ marginBottom: 8 }}>
-          {watchlist.map((w) => (
-            <span key={w.id} className="pmf__chip">
-              {w.name}
-              <button onClick={() => removeOne(w.id)} aria-label={`Remove ${w.name}`}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
+          {watchlist.map((w) => {
+            const pRecord = roster.find(p => p.id === w.id);
+            return (
+              <span key={w.id} className={`pmf__chip ${pRecord && pRecord.checkedIn ? "is-checked-in" : ""}`} title={pRecord && pRecord.checkedIn ? "Checked in" : undefined}>
+                {w.name}
+                {pRecord && pRecord.checkedIn && <span style={{ marginLeft: 4, fontSize: 10 }}>✓</span>}
+                <button onClick={() => removeOne(w.id)} aria-label={`Remove ${w.name}`}>×</button>
+              </span>
+            );
+          })}
+        </div>      )}
       <SinglePlayerPicker
         roster={roster}
         onPick={addOne}

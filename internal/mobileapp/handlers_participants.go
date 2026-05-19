@@ -3,13 +3,14 @@ package mobileapp
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
+func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -123,5 +124,96 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 		c.JSON(http.StatusOK, assignments)
+	})
+
+	r.PUT("/competitions/:id/participants/:pid/checkin", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		pid := c.Param("pid")
+
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		players, err := store.LoadParticipants(id, comp.WithZekkenName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		found := false
+		var updatedPlayer domain.Player
+		for i := range players {
+			if players[i].ID == pid {
+				players[i].CheckedIn = true
+				now := time.Now()
+				players[i].CheckedInAt = &now
+				updatedPlayer = players[i]
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "participant not found"})
+			return
+		}
+
+		if err := store.SaveParticipants(id, players); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		c.JSON(http.StatusOK, updatedPlayer)
+	})
+
+	r.DELETE("/competitions/:id/participants/:pid/checkin", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		pid := c.Param("pid")
+
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		players, err := store.LoadParticipants(id, comp.WithZekkenName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		found := false
+		var updatedPlayer domain.Player
+		for i := range players {
+			if players[i].ID == pid {
+				players[i].CheckedIn = false
+				players[i].CheckedInAt = nil
+				updatedPlayer = players[i]
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "participant not found"})
+			return
+		}
+
+		if err := store.SaveParticipants(id, players); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		c.JSON(http.StatusOK, updatedPlayer)
 	})
 }

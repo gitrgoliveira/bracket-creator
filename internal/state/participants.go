@@ -82,20 +82,32 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	}
 
 	var ids []string
+	var checkedInFlags []bool
 	var plainLines []string
-	if hasIDs {
-		for _, line := range lines {
+
+	for _, line := range lines {
+		isCheckedIn := false
+		if strings.HasSuffix(strings.TrimSpace(line), ", checked_in") {
+			isCheckedIn = true
+			line = strings.TrimSpace(line)
+			line = line[:len(line)-len(", checked_in")]
+		}
+
+		if hasIDs {
 			id, rest, ok := strings.Cut(line, ",")
 			if !ok {
 				plainLines = append(plainLines, line)
 				ids = append(ids, "")
+				checkedInFlags = append(checkedInFlags, isCheckedIn)
 				continue
 			}
 			ids = append(ids, strings.TrimSpace(id))
 			plainLines = append(plainLines, rest)
+			checkedInFlags = append(checkedInFlags, isCheckedIn)
+		} else {
+			plainLines = append(plainLines, line)
+			checkedInFlags = append(checkedInFlags, isCheckedIn)
 		}
-	} else {
-		plainLines = lines
 	}
 
 	players, err := helper.CreatePlayers(plainLines, withZekkenName)
@@ -103,11 +115,12 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 		return nil, err
 	}
 
-	if hasIDs {
-		for i := range players {
-			if i < len(ids) {
-				players[i].ID = ids[i]
-			}
+	for i := range players {
+		if hasIDs && i < len(ids) {
+			players[i].ID = ids[i]
+		}
+		if i < len(checkedInFlags) {
+			players[i].CheckedIn = checkedInFlags[i]
 		}
 	}
 
@@ -163,6 +176,9 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 		}
 		if p.Tag != "" {
 			row += ", " + p.Tag
+		}
+		if p.CheckedIn {
+			row += ", checked_in"
 		}
 		sb.WriteString(id + ", " + row + "\n")
 	}

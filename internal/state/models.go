@@ -33,6 +33,12 @@ type Tournament struct {
 	// runs longer than the mean. Defaults to 10 via ApplyTournamentDefaults
 	// when zero. FR-057, R9.
 	SlowestCourtBufferPct int `yaml:"slowest_court_buffer_pct,omitempty" json:"slowestCourtBufferPct,omitempty"`
+
+	// Check-in window configuration (ISO time strings or HH:MM relative
+	// to the tournament day). Informational only; the head table can
+	// still manually toggle check-ins after the window closes.
+	CheckInWindowStart string `yaml:"check_in_window_start,omitempty" json:"checkInWindowStart,omitempty"`
+	CheckInWindowEnd   string `yaml:"check_in_window_end,omitempty" json:"checkInWindowEnd,omitempty"`
 }
 
 // ApplyTournamentDefaults fills zero-valued schedule-estimator tuning

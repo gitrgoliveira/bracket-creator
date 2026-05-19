@@ -29,13 +29,13 @@ FROM scratch
 
 LABEL maintainer="Ricardo Oliveira @gitrgoliveira"
 
-# Copy only the necessary files
-COPY --from=builder /bracket-creator .
+# Copy only the compiled binary and password file
+COPY --from=builder /bracket-creator/bin/bracket-creator /bin/bracket-creator
 COPY --from=builder /etc_passwd /etc/passwd
 
 # Use numeric user ID
 USER 65534
 
 EXPOSE 8080
-ENTRYPOINT [ "bracket-creator" ]
+ENTRYPOINT [ "/bin/bracket-creator" ]
 CMD [ "mobile-app", "--port=8080" ]

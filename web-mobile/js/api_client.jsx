@@ -360,6 +360,22 @@ const API = {
         }
         return true;
     },
+    async estimateSchedule(args, password) {
+        const params = new URLSearchParams();
+        Object.entries(args).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== "") {
+                params.append(k, v);
+            }
+        });
+        const res = await fetch(`/api/schedule/estimate?${params.toString()}`, {
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to estimate schedule");
+        }
+        return res.json();
+    },
     async moveMatchCourt(compID, matchID, court, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/court`, {
             method: 'PUT',

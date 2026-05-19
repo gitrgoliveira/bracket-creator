@@ -746,15 +746,21 @@ func TestApplyHansokuIppons(t *testing.T) {
 			wantIpponsB: []string{"H"},
 		},
 		{
-			name:        "hansoku reduced from 4 to 2 strips stale H",
+			name:        "hansoku reduced from 4 to 2 strips excess H",
 			hansokuA:    2,
-			ipponsB:     []string{"H", "H"},
-			wantIpponsB: []string{"H"},
+			ipponsB:     []string{"M", "H", "H"},
+			wantIpponsB: []string{"M", "H"},
 		},
 		{
 			name:        "hansoku reduced to 0 strips all H entries",
 			hansokuA:    0,
-			ipponsB:     []string{"M", "H"},
+			ipponsB:     []string{"M", "H", "H"},
+			wantIpponsB: []string{"M"},
+		},
+		{
+			name:        "hansoku reduced to 1 strips interleaved H entries",
+			hansokuA:    1,
+			ipponsB:     []string{"H", "M", "H"},
 			wantIpponsB: []string{"M"},
 		},
 	}

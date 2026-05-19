@@ -642,6 +642,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// gates StartCompetition on Status=setup). After start,
 				// the field is read-only via the same Status gate.
 				current.SwissRounds = comp.SwissRounds
+				current.Naginata = comp.Naginata
 				return current, nil
 			})
 			return updateErr

@@ -104,6 +104,11 @@ type Competition struct {
 	// gate to refuse re-generation of an in-progress round.
 	SwissCurrentRound int `yaml:"swiss_current_round,omitempty" json:"swissCurrentRound,omitempty"`
 
+	// Naginata selects the Naginata ippon set for this competition.
+	// When true, the score editor offers an extra "S" (Sune) button
+	// in addition to the standard M/K/D/T/H set. Default false = Kendo.
+	Naginata bool `yaml:"naginata,omitempty" json:"naginata,omitempty"`
+
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 

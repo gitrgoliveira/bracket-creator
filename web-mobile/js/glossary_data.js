@@ -26,6 +26,7 @@ export const GLOSSARY = {
   "senpo": {"id":"senpo","kanji":"先鋒","short":"First player","tooltip":"The team's first player — fights bout 1 in a 5-person team. Senpo must be filled; this position cannot be left vacant, even when a teammate is withdrawn."},
   "shiaijo": {"id":"shiaijo","kanji":"試合場","short":"Court","tooltip":"The marked floor area where matches are fought. Labelled A, B, C, etc."},
   "shiro": {"id":"shiro","kanji":"白","short":"White","tooltip":"The competitor wearing a white ribbon at the back. Always shown on the left in this app."},
+  "sune": {"id":"sune","kanji":"すね","short":"Shin strike","tooltip":"A strike to the shin. Scores a point in Naginata competitions. Not a valid scoring technique in Kendo."},
   "taisho": {"id":"taisho","kanji":"大将","short":"Captain","tooltip":"The team's captain — fights the final bout (bout 5). Like senpo, Taisho must be filled; this position cannot be left vacant.","seeAlso":["senpo"]},
   "waza": {"id":"waza","kanji":"技","short":"Technique","tooltip":"The specific type of strike scored — for example, men, kote, or do. Recorded with each ippon for the match record.","seeAlso":["ippon"]},
   "zekken": {"id":"zekken","kanji":"ゼッケン","short":"Back name-tag","tooltip":"The cloth name-tag worn on the competitor's back. The display can show this name (instead of the registered name) so spectators see what's physically visible."}

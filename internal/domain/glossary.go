@@ -198,6 +198,15 @@ var Glossary = map[string]Term{
 		Tooltip: "A kachinuki match ended because one team has no remaining players to send. The opposing team wins.",
 		SeeAlso: []string{"kachinuki"},
 	},
+
+	// --- Naginata ---
+
+	"sune": {
+		ID:      "sune",
+		Kanji:   "すね",
+		Short:   "Shin strike",
+		Tooltip: "A strike to the shin. Scores a point in Naginata competitions. Not a valid scoring technique in Kendo.",
+	},
 }
 
 // Lookup returns the Term for an ID (case-insensitive) and a found

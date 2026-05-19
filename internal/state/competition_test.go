@@ -244,6 +244,45 @@ func TestSaveCompetitionChanged_NoChange(t *testing.T) {
 	assert.False(t, changed2, "second identical save must report changed=false")
 }
 
+// TestNaginataFieldPersists verifies that the Naginata bool field
+// round-trips correctly through YAML front-matter. When naginata: true
+// is present the field is set; when absent (kendo competitions) it stays
+// false.
+func TestNaginataFieldPersists(t *testing.T) {
+	t.Run("naginata true round-trips", func(t *testing.T) {
+		original := Competition{
+			ID:       "naginata-comp",
+			Name:     "Naginata Test",
+			Naginata: true,
+		}
+		data, err := yaml.Marshal(&original)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "naginata: true", "YAML must contain naginata: true")
+
+		var loaded Competition
+		require.NoError(t, yaml.Unmarshal(data, &loaded))
+		assert.True(t, loaded.Naginata, "Naginata should round-trip to true")
+	})
+
+	t.Run("naginata absent defaults to false", func(t *testing.T) {
+		yamlText := []byte("---\nid: kendo-comp\nname: Kendo Comp\n---\n")
+		var c Competition
+		require.NoError(t, parseFrontMatter(yamlText, &c))
+		assert.False(t, c.Naginata, "Naginata should default to false when absent from YAML")
+	})
+
+	t.Run("naginata false omitted from YAML", func(t *testing.T) {
+		original := Competition{
+			ID:       "kendo-comp",
+			Name:     "Kendo Comp",
+			Naginata: false,
+		}
+		data, err := yaml.Marshal(&original)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "naginata", "omitempty: naginata=false must not appear in YAML")
+	})
+}
+
 // TestLoadReservedSlots_InvalidCompID covers the ValidateCompetitionID
 // error branch in LoadReservedSlots.
 func TestLoadReservedSlots_InvalidCompID(t *testing.T) {

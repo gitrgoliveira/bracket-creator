@@ -243,9 +243,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                 <strong>Representative bout (daihyosen):</strong> {label}
                 {pending.length > 0 && (
                   <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
-                    {pending.map(m => (
-                      <li key={m.id}>{m.sideA && m.sideB ? `${m.sideB} vs ${m.sideA}` : m.id}</li>
-                    ))}
+                    {pending.map(m => {
+                      const a = m.sideA?.name || m.sideA || "";
+                      const b = m.sideB?.name || m.sideB || "";
+                      return <li key={m.id}>{a && b ? `${b} vs ${a}` : m.id}</li>;
+                    })}
                   </ul>
                 )}
               </div>
@@ -257,7 +259,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {selectedPool.matches.map(m => (
                 <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
-                  <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id.split('-').pop()}</div>
+                  <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id ? m.id.split('-').pop() : ""}</div>
                   <div className="sched-row__players">
                     {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
                     <div className="sched-row__side" style={{ textAlign: "right" }}>
@@ -370,7 +372,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {pool.matches.map(m => (
                       <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center", padding: "2px 0" }}>
-                        <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id.split('-').pop()}</div>
+                        <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id ? m.id.split('-').pop() : ""}</div>
                         {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
                         <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideB?.name || m.sideB}</span>

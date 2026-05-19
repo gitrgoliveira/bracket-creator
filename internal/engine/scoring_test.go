@@ -795,13 +795,7 @@ func TestApplyHansokuIppons(t *testing.T) {
 // TestRecordMatchResult_HansokuAutoAward verifies that saving a pool match
 // with HansokuA=2 via RecordMatchResult persists IpponsB=["H"] to the store.
 func TestRecordMatchResult_HansokuAutoAward(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-hansoku-award-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	eng := New(store)
+	eng, store, _ := setupTestEngine(t)
 
 	compID := "hansoku-award"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Hansoku"}))

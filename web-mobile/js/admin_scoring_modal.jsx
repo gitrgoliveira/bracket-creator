@@ -19,6 +19,18 @@ function isBoutDecided(aPts, bPts) {
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
 }
 
+// getIpponButtons — returns the ordered array of scoring button labels for a
+// bout. Naginata adds "S" (Sune, shin strike) between "T" and "H".
+function getIpponButtons(isNaginata) {
+  return isNaginata ? ["M", "K", "D", "T", "S", "H"] : ["M", "K", "D", "T", "H"];
+}
+
+// getValidPointKeys — returns the string of valid single-character keyboard
+// shortcuts for scoring. Keyboard handler checks `validKeys.includes(upper)`.
+function getValidPointKeys(isNaginata) {
+  return isNaginata ? "MKDTSH" : "MKDTH";
+}
+
 // applyFusenshoToggle — pure reducer for the per-bout Fusensho button in
 // TeamScoreEditorModal. Implements three behaviours on top of the sub
 // state {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?}:
@@ -479,6 +491,9 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Fetched once on open so the warning banner can fire before the
   // operator submits (the server validates the same cap on PUT /score).
   const [maxEnchoPeriods, setMaxEnchoPeriods] = useStateA(0);
+  // Naginata competitions add an extra "S" (Sune) ippon button.
+  // Fetched from the competition config alongside maxEnchoPeriods.
+  const [isNaginata, setIsNaginata] = useStateA(false);
   // T093–T098: decision (kiken/fusenpai) prompt state. promptKind is
   // "" | "kiken-voluntary" | "kiken-injury" | "fusenpai"; when non-empty the inline prompt replaces the
   // bottom controls. After the POST /decision succeeds, withdrawnPlayer holds
@@ -498,7 +513,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     if (!m.compId) return;
     let cancelled = false;
     window.API.fetchCompetitionDetails(m.compId).then(d => {
-      if (!cancelled && d?.maxEnchoPeriods > 0) setMaxEnchoPeriods(d.maxEnchoPeriods);
+      if (!cancelled) {
+        setMaxEnchoPeriods(d?.config?.maxEnchoPeriods || 0);
+        setIsNaginata(!!d?.config?.naginata);
+      }
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [m.compId]);
@@ -677,14 +695,15 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Keyboard shortcuts:
   //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
   //   m/k/d/t/h        → award point to SHIRO (white, sideB)
+  //   Shift+S / s      → award Sune to AKA / SHIRO (naginata competitions only)
   //   x / X            → toggle hikiwake (draw)
   //   ←/→              → previous / next match (skipped inside text-entry elements)
   //   Enter            → finish (or finish + start next when available)
   //   Esc              → close the modal (respects dirty-state confirm)
-  // Scoring shortcuts (Enter/M/K/D/T/H/X) are skipped when any interactive
+  // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit };
+  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -714,7 +733,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 
       const k = ev.key;
       const upper = k.toUpperCase();
-      if ("MKDTH".includes(upper) && k.length === 1) {
+      const validKeys = getValidPointKeys(s.isNaginata);
+      if (validKeys.includes(upper) && k.length === 1) {
         ev.preventDefault();
         // Pressing a point key exits draw mode first
         if (s.isDrawToggled) setIsDrawToggled(false);
@@ -788,7 +808,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                         ))}
                       </div>
                       <div className="sb-points-grid">
-                        {["M", "K", "D", "T", "H"].map((cc) => (
+                        {getIpponButtons(isNaginata).map((cc) => (
                           <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided}>{cc}</button>
                         ))}
                       </div>
@@ -1049,7 +1069,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // viewer.compMatches in a sibling slice) is preferred; competition
   // fetch is the fallback. Default "fixed" preserves the legacy N×1
   // grid behaviour.
-  const teamMatchType = m.teamMatchType || compMeta?.teamMatchType || "fixed";
+  const teamMatchType = m.teamMatchType || compMeta?.config?.teamMatchType || "fixed";
   const isKachinuki = teamMatchType === "kachinuki";
   // Compact "Instrument Panel" mode fits the modal on one viewport page
   // for ≤5-person teams. Kachinuki renders only the current bout
@@ -1062,8 +1082,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // the standings tiebreak, not a representative bout. Format comes
   // from match-level compFormat (when set by compMatches) or the comp
   // fetch fallback. Phase === "bracket" is the in-modal signal.
-  const compFormat = m.compFormat || compMeta?.format || "";
-  const maxEnchoPeriods = compMeta?.maxEnchoPeriods || 0;
+  const compFormat = m.compFormat || compMeta?.config?.format || "";
+  const maxEnchoPeriods = compMeta?.config?.maxEnchoPeriods || 0;
+  const isNaginataTeam = !!compMeta?.config?.naginata;
   const isKnockoutPhase = m.phase === "bracket" || compFormat === "playoffs" || compFormat === "mixed";
 
   // Mirror of submitDecision in ScoreEditorModal — kept inline rather than
@@ -1493,7 +1514,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                           </div>
                           {/* Point buttons incl. H */}
                           <div className="team-sub-match__btns">
-                            {["M", "K", "D", "T", "H"].map(cc => (
+                            {getIpponButtons(isNaginataTeam).map(cc => (
                               <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
                                 onClick={() => rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts)}
                                 disabled={subBoutDecided}>{cc}</button>
@@ -1725,4 +1746,6 @@ export {
   reconcileFoulsAtOpen,
   nextFoulOnDecrement,
   applyFusenshoToggle,
+  getIpponButtons,
+  getValidPointKeys,
 };

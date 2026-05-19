@@ -3,6 +3,8 @@ import {
   resolveDecisionPassword,
   buildDecisionBody,
   shouldShowEnchoMaxBanner,
+  getIpponButtons,
+  getValidPointKeys,
   canIncrementEncho,
   nextEnchoPeriod,
   prevEnchoPeriod,
@@ -867,5 +869,83 @@ describe('applyFusenshoToggle', () => {
       fusensho: "",
       _preFusensho: undefined,
     });
+  });
+});
+
+describe('getIpponButtons', () => {
+  it('returns Kendo set (no S) when isNaginata is false', () => {
+    expect(getIpponButtons(false)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+
+  it('returns Kendo set when isNaginata is falsy (undefined)', () => {
+    expect(getIpponButtons(undefined)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+
+  it('returns Naginata set (with S before H) when isNaginata is true', () => {
+    expect(getIpponButtons(true)).toEqual(["M", "K", "D", "T", "S", "H"]);
+  });
+
+  it('Naginata set has exactly one extra entry vs Kendo set', () => {
+    expect(getIpponButtons(true)).toHaveLength(getIpponButtons(false).length + 1);
+  });
+
+  it('S appears between T and H in the Naginata set', () => {
+    const btns = getIpponButtons(true);
+    const tIdx = btns.indexOf("T");
+    const sIdx = btns.indexOf("S");
+    const hIdx = btns.indexOf("H");
+    expect(tIdx).toBeLessThan(sIdx);
+    expect(sIdx).toBeLessThan(hIdx);
+  });
+});
+
+describe('getValidPointKeys', () => {
+  it('returns MKDTH (no S) for Kendo', () => {
+    expect(getValidPointKeys(false)).toBe("MKDTH");
+  });
+
+  it('returns MKDTH for falsy isNaginata', () => {
+    expect(getValidPointKeys(undefined)).toBe("MKDTH");
+  });
+
+  it('returns MKDTSH (with S) for Naginata', () => {
+    expect(getValidPointKeys(true)).toBe("MKDTSH");
+  });
+
+  it('all button labels from getIpponButtons (including H) match a key in getValidPointKeys', () => {
+    // H is a valid scoring key (Hansoku transfers a point) and IS a button —
+    const kendoKeys = getValidPointKeys(false);
+    getIpponButtons(false).forEach(btn => {
+      expect(kendoKeys).toContain(btn);
+    });
+    const naginataKeys = getValidPointKeys(true);
+    getIpponButtons(true).forEach(btn => {
+      expect(naginataKeys).toContain(btn);
+    });
+  });
+});
+
+// TeamScoreEditorModal derives isNaginataTeam = !!compMeta?.config?.naginata.
+// Component rendering isn't feasible (hooks are stubbed in vitest.setup.js),
+// so we pin the derivation expression directly via getIpponButtons.
+describe('isNaginataTeam derivation (TeamScoreEditorModal)', () => {
+  it('uses Naginata button set when compMeta.config.naginata is true', () => {
+    const compMeta = { config: { naginata: true } };
+    expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "S", "H"]);
+  });
+
+  it('uses Kendo button set when compMeta.config.naginata is false', () => {
+    const compMeta = { config: { naginata: false } };
+    expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+
+  it('uses Kendo button set when compMeta is null (no competition loaded)', () => {
+    const compMeta = null;
+    expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+
+  it('uses Kendo button set when compMeta.config is missing', () => {
+    const compMeta = {};
+    expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "H"]);
   });
 });

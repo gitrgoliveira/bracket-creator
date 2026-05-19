@@ -619,3 +619,42 @@ func TestCompetitorStatusRequestValidate(t *testing.T) {
 		})
 	}
 }
+
+// TestSuneIpponRoundTrips confirms that "S" (Sune — shin strike, valid in
+// Naginata) is accepted by validateIpponCounts and ScoreRequest.Validate.
+// The server's ippon-count validator is letter-agnostic (counts only — it
+// does not filter by allowed letter), so "S" must not cause a validation
+// error regardless of competition type.
+func TestSuneIpponRoundTrips(t *testing.T) {
+	t.Run("S in ipponsA passes validateIpponCounts", func(t *testing.T) {
+		err := validateIpponCounts("", []string{"S"}, []string{})
+		assert.NoError(t, err, "Sune ippon must pass the count-only validator")
+	})
+
+	t.Run("S-K scoreline passes ScoreRequest.Validate", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Alice",
+			IpponsA: []string{"S", "K"},
+		}
+		assert.NoError(t, req.Validate(), "S-K scoreline must validate correctly")
+	})
+
+	t.Run("S in sub-result passes ScoreRequest.Validate", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{Position: 0, IpponsA: []string{"S"}, IpponsB: []string{}},
+			},
+		}
+		assert.NoError(t, req.Validate(), "S in sub-result must validate correctly")
+	})
+
+	t.Run("three S ippons still exceeds best-of-3 cap", func(t *testing.T) {
+		err := validateIpponCounts("", []string{"S", "S", "S"}, []string{})
+		require.Error(t, err, "three ippons must be rejected")
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "ipponsA", verr.Field)
+	})
+}

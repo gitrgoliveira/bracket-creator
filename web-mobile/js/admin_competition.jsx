@@ -108,7 +108,7 @@ function loadScoreboardPoints(match) {
   };
 }
 
-const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecord, onOverride }) => {
+const LiveMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCourt, onRecord, onOverride }) => {
   const [mode, setMode] = useStateA("tap");
   const [aPoints, setAPoints] = useStateA([]);
   const [bPoints, setBPoints] = useStateA([]);
@@ -186,13 +186,13 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
           <div className="score-side score-side--white">
             <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div></div>
             <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--shiro ${bPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{bPoints[i] || "·"}</span>))}</div>
-            <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setBPoints([])}>↺</button></div>
+            <div className="score-side__buttons">{(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setBPoints([])}>↺</button></div>
           </div>
           <div className="score-vs">VS</div>
           <div className="score-side score-side--red">
             <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div></div>
             <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--aka ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</div>
-            <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
+            <div className="score-side__buttons">{(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
           </div>
         </div>
       )}
@@ -343,7 +343,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -497,6 +497,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
       // cleared (so the cleared display doesn't clobber the disk
       // value before the user types a valid replacement).
       swissRounds: safeInt(effective.swissRounds, latestC.swissRounds || 0),
+      naginata: !!effective.naginata,
     };
     // Capture the snapshot of edited fields we're about to persist. On
     // success we clear ONLY those fields from the edited set — preserving
@@ -760,6 +761,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
           <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={local.kind === "team"} /> Use Zekken display name</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => updateNow("naginata", e.target.checked)} /> Naginata competition</label>
+          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
+        </div>
       </div>
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)" }}>
         <button className="btn btn--danger btn--ghost" disabled={deleting} onClick={async () => {
@@ -877,6 +882,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
             match={selectedMatch}
             compId={c.id}
             courts={t?.courts || []}
+            isNaginata={!!c.naginata}
             onMoveCourt={onMoveCourt}
             onRecord={recordWinner}
             onOverride={overrideWinner}

@@ -277,7 +277,7 @@ func TestNaginataFieldPersists(t *testing.T) {
 			Name:     "Kendo Comp",
 			Naginata: false,
 		}
-		data, err := yaml.Marshal(&original)
+		data, err := writeFrontMatter(&original)
 		require.NoError(t, err)
 		assert.NotContains(t, string(data), "naginata", "omitempty: naginata=false must not appear in YAML")
 	})

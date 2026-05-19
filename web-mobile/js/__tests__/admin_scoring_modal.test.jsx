@@ -924,3 +924,28 @@ describe('getValidPointKeys', () => {
     });
   });
 });
+
+// TeamScoreEditorModal derives isNaginataTeam = !!compMeta?.config?.naginata.
+// Component rendering isn't feasible (hooks are stubbed in vitest.setup.js),
+// so we pin the derivation expression directly via getIpponButtons.
+describe('isNaginataTeam derivation (TeamScoreEditorModal)', () => {
+  it('uses Naginata button set when compMeta.config.naginata is true', () => {
+    const compMeta = { config: { naginata: true } };
+    expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "S", "H"]);
+  });
+
+  it('uses Kendo button set when compMeta.config.naginata is false', () => {
+    const compMeta = { config: { naginata: false } };
+    expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+
+  it('uses Kendo button set when compMeta is null (no competition loaded)', () => {
+    const compMeta = null;
+    expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+
+  it('uses Kendo button set when compMeta.config is missing', () => {
+    const compMeta = {};
+    expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+});

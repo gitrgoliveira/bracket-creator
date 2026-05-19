@@ -761,6 +761,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
           <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={local.kind === "team"} /> Use Zekken display name</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => updateNow("naginata", e.target.checked)} /> Naginata competition</label>
+          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
+        </div>
       </div>
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)" }}>
         <button className="btn btn--danger btn--ghost" disabled={deleting} onClick={async () => {

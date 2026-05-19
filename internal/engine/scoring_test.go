@@ -987,7 +987,7 @@ func TestDeriveDaihyosenWinner(t *testing.T) {
 		r := &state.MatchResult{
 			SideA: "TeamA", SideB: "TeamB",
 			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "P-A1", SideB: "P-B1", Winner: "P-A1"}, // regular bout
+				{Position: 1, SideA: "P-A1", SideB: "P-B1", Winner: "P-A1"},  // regular bout
 				{Position: -1, SideA: "P-A2", SideB: "P-B2", Winner: "P-A2"}, // daihyosen
 			},
 		}

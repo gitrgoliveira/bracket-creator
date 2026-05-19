@@ -10,7 +10,7 @@ The repo ships two frontends, both embedded into the Go binary at build time:
 
 | Surface | Path | Purpose | Stack |
 |---|---|---|---|
-| **Mobile/live app** | [web-mobile/](web-mobile/) | Live tournament admin + spectator/player viewer for the `mobile-app` command. **Primary surface.** | Preact (no JSX runtime — `React.createElement` compiled by esbuild via `make go/build`), single `styles.css` (~5,000 lines) |
+| **Mobile/live app** | [web-mobile/](web-mobile/) | Live tournament admin + spectator/player viewer for the `mobile-app` command. **Primary surface.** | Preact, with JSX compiled to `React.createElement` via esbuild's classic transform (see [Makefile:esbuild-jsx](Makefile#L110)). Single ~5,000-line `styles.css`. |
 | **Bracket generator** | [web/](web/) | One-shot Excel-bracket generator served by the `serve` command. | Bootstrap 5.3 + plain JS, ~350 lines of overrides |
 
 When extending the design system, **mobile-app is the canonical surface**. The bracket generator is a form; keep it functional and visually simple, don't import mobile-app patterns.
@@ -18,15 +18,15 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 ## 2. Principles
 
 1. **Clarity over decoration.** Operators run tournaments under time pressure; a glanceable card beats a beautiful one. No gratuitous animation, no decorative shadows.
-2. **Kendo first.** Red (Aka) is always the left/upper position, White (Shiro) is always right/lower. This is fixed in the rules (see [CLAUDE.md](CLAUDE.md) — "Match Colors") and must hold across every match-rendering component.
+2. **Kendo first.** In the **web bracket card**, side A (Aka/Red) renders first/top and side B (Shiro/White) follows — see `PlayerLine` in [bracket.jsx#L96](web-mobile/js/bracket.jsx#L96). The **Excel** layout is the inverse: White is the left column, Red the right ([CLAUDE.md](CLAUDE.md) "Match Colors"). Both orderings are fixed; don't swap either.
 3. **Live state is loud.** Anything currently happening on a court gets the red treatment (`--red` border, soft red ring, pulsing dot). Anything else stays neutral. Don't dilute the signal.
-4. **Touch targets ≥ 36px.** Operators score on tablets; players check brackets on phones. Buttons and tap zones must clear that threshold even in dense bracket views.
+4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)` — see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
 5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → playoffs → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
 6. **Domain coupling is allowed.** Class names like `.bc-tree`, `.pool__table`, `.podium-step` exist because they map 1:1 to bracket concepts. Don't generalize a `.match-card` into a `.list-row` — readability wins.
 
 ## 3. Design tokens
 
-All tokens are defined in [web-mobile/css/styles.css:3-31](web-mobile/css/styles.css). Reference them via `var(--name)` — never hardcode hex or px scales.
+All tokens are defined in [styles.css#L3-L31](web-mobile/css/styles.css#L3). Reference them via `var(--name)` — never hardcode hex or px scales. The file is ~5,000 lines on purpose; search before adding, but file growth is not a budget.
 
 ### Color
 
@@ -79,7 +79,7 @@ Base: 15px / 1.4. Use the scale below — don't introduce in-between sizes.
 | 22px | Hero player name (My Match) |
 | 26px | Page-head titles |
 
-Weights: 500 (default UI), 600 (titles, active state, score), 700 (badges, bold scores). No 400 / 800.
+Common weights: 500 (default UI), 600 (titles, active state), 700 (badges, scores). 800 appears in localized emphasis (podium step numbers, live strip); 400 in de-emphasis. Prefer the common three unless matching an existing emphasis pattern.
 
 ### Spacing
 
@@ -114,7 +114,7 @@ Never combine shadow with a solid border on the same side — pick one elevation
 | `140ms` | Card hovers (tcard, pool, sched-row) |
 | `300ms` | Progress bars, toast slide-in |
 
-Keyframes ([web-mobile/css/styles.css:672](web-mobile/css/styles.css), 3790, 3914, 4983):
+Keyframes ([672](web-mobile/css/styles.css#L672), [3790](web-mobile/css/styles.css#L3790), [3914](web-mobile/css/styles.css#L3914), [4983](web-mobile/css/styles.css#L4983) in `styles.css`):
 - `pulse` (1.6s infinite) — `.dot--live` only
 - `spin` (0.6s linear infinite) — loading spinners
 - `toast-in` (300ms) — toast entrance
@@ -141,8 +141,13 @@ Only three media queries exist; match them rather than inventing new ones:
 | Body tabs | 9 | Sticky secondary nav |
 | Viewer tabs | 10 | Sticky primary nav |
 | Top bar | 30 | `.topbar-stack` |
+| Popovers | 50 | `.court-popover` |
+| Sticky action rows | 60 | Admin tab/action sticky bar |
 | Modal | 100 | `.modal-backdrop` |
+| Popover dropdowns | 200 | Court popover dropdown |
 | Toast | 10000 | Above everything |
+
+If a new overlay doesn't fit one of these, lift the layer for the entire band rather than slotting in a one-off value.
 
 ## 4. Components
 
@@ -150,7 +155,7 @@ Each component lives in `web-mobile/css/styles.css` and is composed in [web-mobi
 
 ### Buttons — `.btn`
 
-[styles.css:325](web-mobile/css/styles.css)
+[styles.css#L325](web-mobile/css/styles.css#L325)
 
 | Modifier | Use |
 |---|---|
@@ -165,7 +170,7 @@ States: `:hover` brightens border to `--ink-4`; `:disabled` drops to 0.5 opacity
 
 ### Cards — `.card`
 
-[styles.css:388](web-mobile/css/styles.css)
+[styles.css#L388](web-mobile/css/styles.css#L388)
 
 `.card` + `.card__head` / `.card__title` / `.card__sub` / `.card__body`. Variants: `.card--pad-lg` (28px), `.card--flat` (no shadow). Tournament-list items use `.tcard` instead (grid item with hover elevation).
 
@@ -179,18 +184,22 @@ Uppercase 12px column headers, 13px body, `--line-2` row separators, hover row t
 
 ### Badges — `.badge`
 
-Variant maps to tournament status, **not** to severity. Use `<StatusBadge status={...}/>` from [ui.jsx:3](web-mobile/js/ui.jsx) — don't write the class manually unless adding a new status type. Live dot via `<span className="dot dot--live"/>`.
+Variant maps to tournament status, **not** to severity. Use `<StatusBadge status={...}/>` from [ui.jsx#L3](web-mobile/js/ui.jsx#L3) — don't write the class manually unless adding a new status type. Live dot via `<span className="dot dot--live"/>`.
 
 ### Match cards — `.bc-match`
 
-[styles.css:828](web-mobile/css/styles.css)
+[styles.css#L828](web-mobile/css/styles.css#L828)
 
-Three layout variants:
-- `bc-match--v1` — line bracket (default)
-- `bc-match--v2` — filled sides, used in the viewer's "now playing" surface
-- `bc-match--v3` — compact, used in dense round columns
+Layout variants (composed by [bracket.jsx#L140](web-mobile/js/bracket.jsx#L140) as `bc-match--v${variant}`):
+- **Default** — plain `.bc-match` (variant `1` carries no extra rules, so passing `variant=1` is equivalent to the default)
+- `bc-match--v2` — filled sides, used in the viewer's "now playing" surface ([styles.css#L979](web-mobile/css/styles.css#L979))
+- `bc-match--v3` — compact, used in dense round columns ([styles.css#L1048](web-mobile/css/styles.css#L1048))
 
-State modifiers stack: `bc-match--live`, `bc-match--highlight`, `bc-match--done`, `bc-match--bye`. Sides are `bc-side--a` (Aka, always left/top) and `bc-side--b` (Shiro, always right/bottom). Winner side gets `bc-side--winner` plus a fill swap to `--red` or `--accent`. **Never swap the side order based on seeding** — the geometry is the rule.
+State modifiers (applied unconditionally in JSX): `bc-match--live` and `bc-match--highlight` have CSS rules; `bc-match--done` is applied when `match.status === "completed"` but currently has no CSS rule — treat it as a stable hook for future styling, not a guaranteed visual change.
+
+Side composition (via `PlayerLine` in [bracket.jsx#L96](web-mobile/js/bracket.jsx#L96)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Winner side gets `bc-side--winner` plus a fill swap to `--red` (Aka) or `--accent` (Shiro). **Never swap side order based on seeding** — the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
+
+Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-live` (red, 700-weight "● LIVE"), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, inline `--accent`), `.bc-encho` ((E), inline `--accent`).
 
 ### Pools — `.pool`, `.pools-grid`
 
@@ -198,11 +207,31 @@ Auto-fill grid (320px min). Each pool is a card with `.pool__table` inside. `.po
 
 ### Modals — `.modal-backdrop > .modal`
 
-`.modal--lg` widens to 720px (default 460). Always wire `useEscapeToClose(onClose)` from [ui.jsx:133](web-mobile/js/ui.jsx) — every modal in the app supports Escape, and operators rely on it.
+`.modal--lg` widens to 720px (default 460). Always wire `useEscapeToClose(onClose)` from [ui.jsx#L133](web-mobile/js/ui.jsx#L133) — every modal in the app supports Escape, and operators rely on it.
 
 ### Toasts — `.toast`
 
-Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. Don't stack toasts; the latest replaces the previous one.
+Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. The host component (see `app.jsx:181`/`214`) keeps a single toast in state, so a new `showToast` call replaces the previous one — toasts never stack.
+
+### Mode tabs — `.mode-tabs`
+
+[styles.css#L1560](web-mobile/css/styles.css#L1560). Pill-group tab control used for view switches (e.g., pools vs. playoffs in the admin schedule). `.mode-tabs button.is-active` lifts to `--surface` background + `--shadow-sm` — the active button is a tile on a tinted track. Use this rather than inventing a new tab pattern.
+
+### Viewer head & tabs — `.viewer__head`, `.viewer__tabs`
+
+[styles.css#L1601](web-mobile/css/styles.css#L1601), [#L1654](web-mobile/css/styles.css#L1654). Two distinct sticky elements: `.viewer__head` is the title/breadcrumb row (z-10), `.viewer__tabs` is the secondary nav below it (z-9). `.viewer__head--hero` swaps to `--accent` background for the player's "My Match" landing.
+
+### Score input — `.score-card`
+
+[styles.css#L1439](web-mobile/css/styles.css#L1439). Operator-critical widget for entering ippon. Layout: `.score-card` wraps two `.score-side` columns (`--white` / `--red`) split by a vs-cell. Each side carries `.score-side__lbl`, `.score-side__name`, `.score-side__dojo`, `.score-side__points`. Individual ippon buttons are `.score-pt` with `--filled` / `--empty` and `--aka` / `--shiro` modifiers ([#L3671](web-mobile/css/styles.css#L3671)). Match the `.score-pt--aka` color hooks if you add new score-entry surfaces.
+
+### Live strip chip — `.live-strip__chip`
+
+[styles.css#L216](web-mobile/css/styles.css#L216). Red-bordered pill rendered inside `.live-strip__chips`. Each chip represents one live court and is clickable to jump to the corresponding match. When adding a live-surface entry-point, surface it here rather than introducing a parallel chip strip.
+
+### Tournament-card add — `.tcard--add`
+
+[styles.css#L2034](web-mobile/css/styles.css#L2034). The dashed-border "create new tournament" tile that lives in the tournament-list grid. Use this pattern when adding a "create" CTA inline with a list of cards.
 
 ### Schedule rows — `.sched-row` (admin), `.vsched-item` (viewer)
 
@@ -248,23 +277,26 @@ If only one or two surface the signal, it's a bug.
 
 ### Match-decision visual suffixes
 
-Decision types ([CLAUDE.md](CLAUDE.md) — "Match Decision Types") map to short tags rendered inside or beside the match card:
+Decision types ([CLAUDE.md](CLAUDE.md) — "Match Decision Types") map to short tags rendered inside `.bc-match-meta`. Source: [bracket.jsx#L149-L160](web-mobile/js/bracket.jsx#L149).
 
-| Decision | Tag | Color |
-|---|---|---|
-| `hikiwake` | `△` | `--ink-2` |
-| `kiken` | `Kiken` | `--accent` |
-| `fusenpai` | `Fus.` | `--accent` |
-| `daihyosen` | `DH` | `--accent` |
-| Encho (overtime) | `(E)` | `--accent` |
-| `kachinuki-exhaustion` | inherits | — |
+| Decision | Tag | Class | Color |
+|---|---|---|---|
+| `hikiwake` | `△` | `.bc-draw` | `--ink-3` |
+| `hantei` | `H` | `.bc-draw` | `--ink-3` |
+| `kiken` | `Kiken` | `.bc-decision-chip` (inline style) | `--accent` |
+| `fusenpai` | `Fus.` | `.bc-decision-chip` (inline style) | `--accent` |
+| `daihyosen` | `DH` | `.bc-decision-chip` (inline style) | `--accent` |
+| Encho (overtime) | `(E)` | `.bc-encho` (inline style) | `--accent` |
+| `kachinuki-exhaustion` | rendered via score-line suffix only | — | inherits |
 
-All decision tags use the accent (navy) family, not red — red is reserved for liveness, not outcome.
+Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for liveness, not outcome.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
+
+Note: the `kiken/fusenpai/daihyosen` chips currently apply their visual styling inline rather than via the `.bc-decision-chip` class — the class is a stable hook but the color/size live on the JSX element. If you consolidate that into CSS, keep the class name.
 
 ## 6. Accessibility
 
 - **Contrast**: `--ink-4` is the floor at 4.7:1 on `--surface`. Don't introduce new gray tokens without re-checking.
-- **Keyboard**: every modal honors Escape via `useEscapeToClose`. The admin score editor supports `←` / `→` to navigate between matches **on the same shiaijo** — see [CLAUDE.md](CLAUDE.md) and the note in [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx). When adding keyboard shortcuts, gate them on `!isTextEntry(e.target)` (also in [ui.jsx:151](web-mobile/js/ui.jsx)) so they don't clobber inputs.
+- **Keyboard**: every modal honors Escape via `useEscapeToClose`. The admin score editor supports `←` / `→` to navigate between matches **on the same shiaijo** — see [CLAUDE.md](CLAUDE.md) and the note in [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx). When adding keyboard shortcuts, gate them on `!isTextEntry(e.target)` (defined in [ui.jsx#L151](web-mobile/js/ui.jsx#L151)) so they don't clobber inputs.
 - **Touch**: `@media (pointer: coarse)` blocks bump padding on dense controls. Test any new dense surface on a tablet before merging.
 - **Focus rings**: inputs use a 3px `--accent-soft` ring. Don't suppress `:focus-visible` — operators tab through forms.
 - **Motion**: there's no global `prefers-reduced-motion` opt-out yet. Pulse, spin, and toast-in are the only ambient animations; if you add more, gate them.
@@ -277,6 +309,23 @@ All decision tags use the accent (navy) family, not red — red is reserved for 
 - Domain blocks: keep the short prefix (`bc-` = bracket, `pool-`, `sched-`, `vsched-` = viewer schedule, `tcard-` = tournament card). New domain concepts get their own short prefix.
 - Don't reach for utility classes (no `.mt-4`, no `.flex-1`) — add semantic class names instead.
 
+### Which JSX owns which surface
+
+When a screenshot lands on your desk, this is where to start reading:
+
+| Surface | File |
+|---|---|
+| App shell, routing, toast host | [app.jsx](web-mobile/js/app.jsx) |
+| Admin tournament list & landing | [admin.jsx](web-mobile/js/admin.jsx) |
+| Admin competition CRUD (config, participants, pools setup) | [admin_competition.jsx](web-mobile/js/admin_competition.jsx), [admin_setup.jsx](web-mobile/js/admin_setup.jsx), [admin_participants.jsx](web-mobile/js/admin_participants.jsx), [admin_pools.jsx](web-mobile/js/admin_pools.jsx) |
+| Admin live scoring & schedule | [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx), [admin_scoring_modal.jsx](web-mobile/js/admin_scoring_modal.jsx), [admin_lineup.jsx](web-mobile/js/admin_lineup.jsx) |
+| Admin chrome (nav, side-nav, breadcrumbs) | [admin_shell.jsx](web-mobile/js/admin_shell.jsx) |
+| Spectator/player viewer | [viewer.jsx](web-mobile/js/viewer.jsx) |
+| Bracket tree rendering | [bracket.jsx](web-mobile/js/bracket.jsx) |
+| Read-only display components (cards, podiums) | [display.jsx](web-mobile/js/display.jsx) |
+| Glossary popover (kendo terms) | [glossary.jsx](web-mobile/js/glossary.jsx) |
+| Auth/reset page | [reset.jsx](web-mobile/js/reset.jsx) |
+
 ### Preact primitives
 
 Shared primitives live in [web-mobile/js/ui.jsx](web-mobile/js/ui.jsx) and are also exposed on `window` for legacy callers:
@@ -284,7 +333,7 @@ Shared primitives live in [web-mobile/js/ui.jsx](web-mobile/js/ui.jsx) and are a
 | Primitive | Purpose |
 |---|---|
 | `StatusBadge` | Render `.badge--<status>` with optional live dot. Use for any tournament-status pill. |
-| `StableInput` | Debounced controlled input — prevents character drops when the parent re-renders the whole tree during typing. Mandatory for any input that lives inside a tree that re-renders on SSE. |
+| `StableInput` | Debounced controlled input — keeps a local value during typing and pushes to the parent on debounce/blur. Reach for it when an input lives inside a tree that re-renders on SSE; the parent's setState can otherwise drop characters. |
 | `Toast` | Auto-dismissing notification. |
 | `useEscapeToClose` | Hook every modal needs. |
 | `isTextEntry`, `isInteractiveTarget` | Guards for global keyboard shortcuts. |

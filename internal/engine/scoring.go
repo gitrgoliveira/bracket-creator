@@ -95,6 +95,10 @@ func applyHansokuIppons(result *state.MatchResult) {
 	}
 	applyOneSide(result.HansokuA, &result.IpponsB)
 	applyOneSide(result.HansokuB, &result.IpponsA)
+	for i := range result.SubResults {
+		applyOneSide(result.SubResults[i].HansokuA, &result.SubResults[i].IpponsB)
+		applyOneSide(result.SubResults[i].HansokuB, &result.SubResults[i].IpponsA)
+	}
 }
 
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {

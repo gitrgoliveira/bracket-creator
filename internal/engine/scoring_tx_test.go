@@ -389,13 +389,11 @@ func TestRecordMatchResultWithIneligibilityTx_HansokuAutoAward(t *testing.T) {
 		IpponsA:  []string{"M"},
 		Status:   state.MatchStatusCompleted,
 	}
-	var engErr error
 	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, engErr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", result)
-		return nil
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", result)
+		return err
 	})
 	require.NoError(t, txErr)
-	require.NoError(t, engErr)
 
 	stored, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)

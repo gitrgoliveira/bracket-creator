@@ -778,6 +778,18 @@ func TestApplyHansokuIppons(t *testing.T) {
 			assert.Equal(t, tc.wantIpponsB, r.IpponsB)
 		})
 	}
+
+	t.Run("sub-results also get hansoku auto-award", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{HansokuA: 2, IpponsB: []string{"M"}},
+				{HansokuB: 4, IpponsA: []string{"K"}},
+			},
+		}
+		applyHansokuIppons(r)
+		assert.Equal(t, []string{"M", "H"}, r.SubResults[0].IpponsB)
+		assert.Equal(t, []string{"K", "H", "H"}, r.SubResults[1].IpponsA)
+	})
 }
 
 // TestRecordMatchResult_HansokuAutoAward verifies that saving a pool match

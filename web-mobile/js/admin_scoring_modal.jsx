@@ -513,8 +513,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     if (!m.compId) return;
     let cancelled = false;
     window.API.fetchCompetitionDetails(m.compId).then(d => {
-      if (!cancelled && d?.config?.maxEnchoPeriods > 0) setMaxEnchoPeriods(d.config.maxEnchoPeriods);
-      if (!cancelled) setIsNaginata(!!d?.config?.naginata);
+      if (!cancelled) {
+        setMaxEnchoPeriods(d?.config?.maxEnchoPeriods || 0);
+        setIsNaginata(!!d?.config?.naginata);
+      }
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [m.compId]);

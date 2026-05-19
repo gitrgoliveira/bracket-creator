@@ -363,7 +363,7 @@ const API = {
     async estimateSchedule(args, password, signal) {
         const params = new URLSearchParams();
         Object.entries(args).forEach(([k, v]) => {
-            if (v !== undefined && v !== null && v !== "") {
+            if (v !== undefined && v !== null && v !== "" && !Number.isNaN(v)) {
                 params.append(k, v);
             }
         });

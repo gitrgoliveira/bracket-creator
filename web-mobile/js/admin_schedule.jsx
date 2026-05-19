@@ -180,7 +180,6 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
     }
   }, [allMatches.length]);
 
-
   const filtered = window.applyFilters(allMatches, picked, dojoText, compFilter);
   // T040 (US1, FR-001): apply the court scope AFTER the user-driven
   // player/dojo/competition filters but BEFORE the byCourt bucket split.
@@ -755,7 +754,6 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
     </div>
   );
 }
-
 
 function AdminExport({ c, t, password }) {
   const url = `${window.location.origin}/viewer.html?id=${t.id}#comp-${c.id}`;

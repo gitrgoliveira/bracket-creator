@@ -563,7 +563,7 @@ describe('API Utils', () => {
         expect(params.get('numMatches')).toBe('10');
       });
 
-      it('filters out undefined, null, and empty-string arg values', async () => {
+      it('filters out undefined, null, empty-string, and NaN arg values', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
           json: async () => ({ totalDurationMinutes: 60, perCourtMinutes: [60], ceremonyMinutes: 0 }),
@@ -575,12 +575,14 @@ describe('API Utils', () => {
           teamSize: undefined,
           boutsPerTeamMatch: null,
           buffer: '',
+          ceremonyMinutes: NaN,
         }, 'pw');
         const [url] = global.fetch.mock.calls[0];
         const params = new URLSearchParams(url.split('?')[1]);
         expect(params.has('teamSize')).toBe(false);
         expect(params.has('boutsPerTeamMatch')).toBe(false);
         expect(params.has('buffer')).toBe(false);
+        expect(params.has('ceremonyMinutes')).toBe(false);
       });
 
       it('sends X-Tournament-Password header', async () => {

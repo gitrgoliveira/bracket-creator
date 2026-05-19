@@ -108,7 +108,7 @@ function loadScoreboardPoints(match) {
   };
 }
 
-const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecord, onOverride }) => {
+const LiveMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCourt, onRecord, onOverride }) => {
   const [mode, setMode] = useStateA("tap");
   const [aPoints, setAPoints] = useStateA([]);
   const [bPoints, setBPoints] = useStateA([]);
@@ -186,13 +186,13 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecor
           <div className="score-side score-side--white">
             <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div></div>
             <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--shiro ${bPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{bPoints[i] || "·"}</span>))}</div>
-            <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setBPoints([])}>↺</button></div>
+            <div className="score-side__buttons">{(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setBPoints([])}>↺</button></div>
           </div>
           <div className="score-vs">VS</div>
           <div className="score-side score-side--red">
             <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div></div>
             <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--aka ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</div>
-            <div className="score-side__buttons">{["M", "K", "D", "T"].map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
+            <div className="score-side__buttons">{(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
           </div>
         </div>
       )}
@@ -882,6 +882,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
             match={selectedMatch}
             compId={c.id}
             courts={t?.courts || []}
+            isNaginata={!!c.naginata}
             onMoveCourt={onMoveCourt}
             onRecord={recordWinner}
             onOverride={overrideWinner}

@@ -107,7 +107,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 
 	// No ties (or ties already resolved). Transition to complete.
 	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
-		if comp == nil || comp.Format != state.CompFormatPools || comp.Status != state.CompStatusPools {
+		if comp == nil || (comp.Format != state.CompFormatPools && comp.Format != state.CompFormatLeague) || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
 		// Re-check under the lock.
@@ -262,11 +262,22 @@ func (e *Engine) StartCompetition(id string) error {
 		return err
 	}
 
+	// League format: enforce the single-pool invariant so that
+	// generatePools always produces exactly one pool containing all
+	// participants, and round-robin is guaranteed. The viewer surface
+	// relies on pools[0] being the only pool. PoolSize and RoundRobin
+	// may hold any admin-configured value at this point; override them
+	// here so the pipeline and the atomic commit below agree.
+	if comp.Format == state.CompFormatLeague {
+		comp.PoolSize = len(players)
+		comp.RoundRobin = true
+	}
+
 	// Generate Pools or Bracket. These calls write to other files
 	// (pools.csv / bracket.json) via their own per-comp lock
 	// acquisitions, so they run OUTSIDE the UpdateCompetitionChanged
 	// transform below (re-entering the lock would deadlock).
-	if comp.Format == state.CompFormatPools {
+	if comp.Format == state.CompFormatPools || comp.Format == state.CompFormatLeague {
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
@@ -385,6 +396,21 @@ func (e *Engine) StartCompetition(id string) error {
 		// default in the no-drift direction only.
 		if current.TeamSize == loadedTeamSize {
 			current.TeamSize = comp.TeamSize
+		}
+		// League format: mirror the single-pool invariant applied above
+		// (comp.PoolSize = len(players), comp.RoundRobin = true) into the
+		// persisted config. Same merge logic as TeamSize: if admin didn't
+		// concurrently change the field (current == loaded), apply our
+		// pipeline's overridden value; if they did, the conflict check
+		// above already returned an error before we reach this block, so
+		// the guard is always true here — it's kept for symmetry.
+		if comp.Format == state.CompFormatLeague {
+			if current.PoolSize == loadedPoolSize {
+				current.PoolSize = comp.PoolSize
+			}
+			if current.RoundRobin == loadedRoundRobin {
+				current.RoundRobin = true
+			}
 		}
 		current.Status = comp.Status
 		// HasParticipantIDs is auto-managed (saveCompetitionWithPlayers

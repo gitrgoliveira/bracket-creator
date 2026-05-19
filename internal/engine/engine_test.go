@@ -260,6 +260,61 @@ func TestStartCompetition_PoolsFormat_NonRoundRobin(t *testing.T) {
 	assert.NotEmpty(t, matches)
 }
 
+// TestStartCompetition_LeagueFormat verifies that a league-format competition
+// generates pool matches (not a bracket) and reaches CompStatusPools, and
+// that all matches complete transitions it to CompStatusComplete without
+// requiring a separate playoff phase.
+func TestStartCompetition_LeagueFormat(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "league-test"
+
+	// League: single pool, full round-robin, no playoffs.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:         compID,
+		Name:       "League Test",
+		Kind:       "individual",
+		Format:     state.CompFormatLeague,
+		PoolSize:   5, // all 5 participants in one pool
+		RoundRobin: true,
+		Courts:     []string{"A"},
+		StartTime:  "09:00",
+		Status:     "setup",
+	}))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve"})
+
+	err := eng.StartCompetition(compID)
+	require.NoError(t, err)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status, "league must enter pools status")
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	assert.Len(t, pools, 1, "league must produce exactly one pool")
+	assert.Len(t, pools[0].Players, 5)
+
+	// 5-player round-robin: n*(n-1)/2 = 10 matches.
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.Len(t, matches, 10, "5-player round-robin must produce 10 matches")
+
+	// Mark all matches completed; MaybeAutoCompletePools should transition to complete.
+	for i := range matches {
+		matches[i].Status = state.MatchStatusCompleted
+		matches[i].Winner = matches[i].SideA
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome)
+
+	comp, err = store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusComplete, comp.Status, "league must complete after all pool matches done, without a playoff phase")
+}
+
 // --- Bracket/Playoffs Generation Tests ---
 
 func TestStartCompetition_PlayoffsFormat_Basic(t *testing.T) {

@@ -908,6 +908,12 @@ func TestHansokuCarriesIntoEncho(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Snapshot Encho fields before the call to detect field mutation.
+			var enchoSnap *state.EnchoMetadata
+			if tc.encho != nil {
+				snap := *tc.encho
+				enchoSnap = &snap
+			}
 			r := &state.MatchResult{
 				HansokuA: tc.hansokuA,
 				HansokuB: tc.hansokuB,
@@ -920,12 +926,33 @@ func TestHansokuCarriesIntoEncho(t *testing.T) {
 			assert.Equal(t, tc.wantIpponsB, r.IpponsB)
 			assert.Equal(t, tc.hansokuA, r.HansokuA)
 			assert.Equal(t, tc.hansokuB, r.HansokuB)
-			// Encho metadata must not be mutated by hansoku processing.
-			assert.Equal(t, tc.encho, r.Encho)
+			// Pointer identity: applyHansokuIppons must not replace the Encho pointer.
+			assert.True(t, tc.encho == r.Encho, "Encho pointer identity must be preserved")
+			// Field immutability: applyHansokuIppons must not mutate EnchoMetadata fields.
+			if enchoSnap != nil {
+				assert.Equal(t, *enchoSnap, *r.Encho, "Encho fields must not be mutated")
+			}
 		})
 	}
 
+	// Verify the actual regulation→encho boundary: same MatchResult receives a
+	// 2nd hansoku after Encho is set; the 1st hansoku from regulation is retained.
+	t.Run("regulation→encho transition: same struct retains hansoku count", func(t *testing.T) {
+		r := &state.MatchResult{HansokuA: 1, Encho: nil}
+		applyHansokuIppons(r)
+		require.Nil(t, r.IpponsB) // 1 hansoku in regulation — no ippon yet
+
+		r.HansokuA = 2
+		r.Encho = encho1
+		enchoSnap := *encho1
+		applyHansokuIppons(r)
+		assert.Equal(t, []string{"H"}, r.IpponsB) // cumulative 2nd hansoku fires in encho
+		assert.True(t, r.Encho == encho1, "Encho pointer identity must be preserved")
+		assert.Equal(t, enchoSnap, *r.Encho, "Encho fields must not be mutated")
+	})
+
 	t.Run("team match sub-results carry hansoku through encho", func(t *testing.T) {
+		enchoSnap := *encho1
 		r := &state.MatchResult{
 			Encho: encho1,
 			SubResults: []state.SubMatchResult{
@@ -936,6 +963,7 @@ func TestHansokuCarriesIntoEncho(t *testing.T) {
 		applyHansokuIppons(r)
 		assert.Equal(t, []string{"M", "H"}, r.SubResults[0].IpponsB)
 		assert.Equal(t, []string{"K", "H"}, r.SubResults[1].IpponsA)
-		assert.Equal(t, encho1, r.Encho)
+		assert.True(t, r.Encho == encho1, "Encho pointer identity must be preserved")
+		assert.Equal(t, enchoSnap, *r.Encho, "Encho fields must not be mutated")
 	})
 }

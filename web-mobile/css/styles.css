@@ -5058,5 +5058,8 @@ a:hover {
   .decision-prompt {
     animation: none;
   }
+  .bc-match {
+    transition: none;
+  }
 }
 

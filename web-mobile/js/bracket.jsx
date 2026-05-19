@@ -28,8 +28,6 @@ function roundLabel(roundIdx, total) {
   return `Round ${roundIdx + 1}`;
 }
 
-// Score rows print ippon counts but lose the decision type; chips keep operators
-// and viewers oriented when scanning a wall of bracket cards.
 const DECISION_CHIPS = {
   fusenpai:  { term: "fusenpai",   label: "Fus."  },
   daihyosen: { term: "daihyosen",  label: "DH"    },
@@ -57,8 +55,7 @@ function decisionSuffix(match) {
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
   let suffix = "";
   if (isKikenDecisionBC(d)) suffix = "Kiken";
-  else if (d === "fusenpai") suffix = "Fus.";
-  else if (d === "daihyosen") suffix = "DH";
+  else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;
   if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
   return suffix;
 }

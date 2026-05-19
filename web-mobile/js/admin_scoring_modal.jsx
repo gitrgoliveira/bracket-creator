@@ -19,6 +19,18 @@ function isBoutDecided(aPts, bPts) {
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
 }
 
+// getIpponButtons — returns the ordered array of scoring button labels for a
+// bout. Naginata adds "S" (Sune, shin strike) between "T" and "H".
+function getIpponButtons(isNaginata) {
+  return isNaginata ? ["M", "K", "D", "T", "S", "H"] : ["M", "K", "D", "T", "H"];
+}
+
+// getValidPointKeys — returns the string of valid single-character keyboard
+// shortcuts for scoring. Keyboard handler checks `validKeys.includes(upper)`.
+function getValidPointKeys(isNaginata) {
+  return isNaginata ? "MKDTSH" : "MKDTH";
+}
+
 // applyFusenshoToggle — pure reducer for the per-bout Fusensho button in
 // TeamScoreEditorModal. Implements three behaviours on top of the sub
 // state {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?}:
@@ -706,7 +718,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 
       const k = ev.key;
       const upper = k.toUpperCase();
-      const validKeys = s.isNaginata ? "MKDTSH" : "MKDTH";
+      const validKeys = getValidPointKeys(s.isNaginata);
       if (validKeys.includes(upper) && k.length === 1) {
         ev.preventDefault();
         // Pressing a point key exits draw mode first
@@ -781,7 +793,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                         ))}
                       </div>
                       <div className="sb-points-grid">
-                        {(isNaginata ? ["M", "K", "D", "T", "S", "H"] : ["M", "K", "D", "T", "H"]).map((cc) => (
+                        {getIpponButtons(isNaginata).map((cc) => (
                           <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided}>{cc}</button>
                         ))}
                       </div>
@@ -1472,7 +1484,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                           </div>
                           {/* Point buttons incl. H */}
                           <div className="team-sub-match__btns">
-                            {(isNaginataTeam ? ["M", "K", "D", "T", "S", "H"] : ["M", "K", "D", "T", "H"]).map(cc => (
+                            {getIpponButtons(isNaginataTeam).map(cc => (
                               <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
                                 onClick={() => rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts)}
                                 disabled={subBoutDecided}>{cc}</button>
@@ -1692,4 +1704,6 @@ export {
   reconcileFoulsAtOpen,
   nextFoulOnDecrement,
   applyFusenshoToggle,
+  getIpponButtons,
+  getValidPointKeys,
 };

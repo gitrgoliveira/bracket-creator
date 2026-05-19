@@ -3,6 +3,8 @@ import {
   resolveDecisionPassword,
   buildDecisionBody,
   shouldShowEnchoMaxBanner,
+  getIpponButtons,
+  getValidPointKeys,
   canIncrementEncho,
   nextEnchoPeriod,
   prevEnchoPeriod,
@@ -858,6 +860,59 @@ describe('applyFusenshoToggle', () => {
       bFouls: 0,
       fusensho: "",
       _preFusensho: undefined,
+    });
+  });
+});
+
+describe('getIpponButtons', () => {
+  it('returns Kendo set (no S) when isNaginata is false', () => {
+    expect(getIpponButtons(false)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+
+  it('returns Kendo set when isNaginata is falsy (undefined)', () => {
+    expect(getIpponButtons(undefined)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+
+  it('returns Naginata set (with S before H) when isNaginata is true', () => {
+    expect(getIpponButtons(true)).toEqual(["M", "K", "D", "T", "S", "H"]);
+  });
+
+  it('Naginata set has exactly one extra entry vs Kendo set', () => {
+    expect(getIpponButtons(true)).toHaveLength(getIpponButtons(false).length + 1);
+  });
+
+  it('S appears between T and H in the Naginata set', () => {
+    const btns = getIpponButtons(true);
+    const tIdx = btns.indexOf("T");
+    const sIdx = btns.indexOf("S");
+    const hIdx = btns.indexOf("H");
+    expect(tIdx).toBeLessThan(sIdx);
+    expect(sIdx).toBeLessThan(hIdx);
+  });
+});
+
+describe('getValidPointKeys', () => {
+  it('returns MKDTH (no S) for Kendo', () => {
+    expect(getValidPointKeys(false)).toBe("MKDTH");
+  });
+
+  it('returns MKDTH for falsy isNaginata', () => {
+    expect(getValidPointKeys(undefined)).toBe("MKDTH");
+  });
+
+  it('returns MKDTSH (with S) for Naginata', () => {
+    expect(getValidPointKeys(true)).toBe("MKDTSH");
+  });
+
+  it('all button labels from getIpponButtons match a key in getValidPointKeys (excluding H=hansoku)', () => {
+    // H is a valid key but also the Hansoku button — include it in the check.
+    const kendoKeys = getValidPointKeys(false);
+    getIpponButtons(false).forEach(btn => {
+      expect(kendoKeys).toContain(btn);
+    });
+    const naginataKeys = getValidPointKeys(true);
+    getIpponButtons(true).forEach(btn => {
+      expect(naginataKeys).toContain(btn);
     });
   });
 });

@@ -152,6 +152,12 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
 		return err
 	}
+	if err := validateCheckInWindow("checkInWindowStart", t.CheckInWindowStart); err != nil {
+		return err
+	}
+	if err := validateCheckInWindow("checkInWindowEnd", t.CheckInWindowEnd); err != nil {
+		return err
+	}
 	return nil
 }
 

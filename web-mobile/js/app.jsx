@@ -445,6 +445,15 @@ function App() {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
             }
             jitteredTimeout(load, jitter);
+        } else if (event.type === "participants_updated") {
+            // Check-in toggle: viewer-side badges (checked-in indicator) need
+            // the updated player list. Refetch the selected competition when the
+            // event targets it; also refresh the tournament list so participant
+            // counts stay accurate.
+            if (viewerCompId === event.data?.competitionId) {
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            }
+            jitteredTimeout(load, jitter);
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can

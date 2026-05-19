@@ -95,24 +95,39 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	for _, line := range lines {
 		isCheckedIn := false
 
-		// Robust column-based detection: only treat as checked_in if the
-		// LAST column is exactly that string. This prevents accidental
-		// suffix matches on dojo names or metadata.
-		// For UUID rows the minimum valid row is "uuid,Name,Dojo", so we
-		// need at least 4 parts before checked_in is a valid trailing token.
-		// For non-UUID rows "Name,Dojo" is the minimum (2 parts), so 3+ is
-		// sufficient. Using hasIDs to pick the right threshold.
+		// Robust column-based detection: strip the UUID prefix first so
+		// the threshold is applied to the data columns only (per Copilot
+		// review). After stripping the ID the minimum valid data row is
+		// "Name,Dojo" (2 parts), so checked_in is only treated as a
+		// marker when at least 3 data parts are present (Name, Dojo,
+		// checked_in).
+		//
+		// Known limitation: a dojo literally named "checked_in" in a
+		// zekken competition that also has a distinct DisplayName column
+		// produces "Name, DisplayName, checked_in" (3 data parts) after
+		// UUID strip, which the threshold cannot distinguish from the
+		// legitimate "Name, Dojo, checked_in" row. Resolving this
+		// ambiguity without a format version or column header is not
+		// possible; in practice no real dojo uses this name.
 		line = strings.TrimSpace(line)
-		parts := strings.Split(line, ",")
-		minParts := 2
+
+		// Strip UUID prefix for threshold calculation only (idLine is
+		// what remains after the ID field).
+		idLine := line
 		if hasIDs {
-			minParts = 3
+			if _, rest, ok := strings.Cut(line, ","); ok {
+				idLine = strings.TrimSpace(rest)
+			}
 		}
-		if len(parts) > minParts {
-			last := strings.TrimSpace(parts[len(parts)-1])
+		dataParts := strings.Split(idLine, ",")
+		if len(dataParts) > 2 {
+			last := strings.TrimSpace(dataParts[len(dataParts)-1])
 			if strings.ToLower(last) == "checked_in" {
 				isCheckedIn = true
-				line = strings.Join(parts[:len(parts)-1], ",")
+				// Strip from the full original line (preserves UUID prefix).
+				if li := strings.LastIndex(line, ","); li >= 0 {
+					line = strings.TrimRight(line[:li], " ")
+				}
 			}
 		}
 

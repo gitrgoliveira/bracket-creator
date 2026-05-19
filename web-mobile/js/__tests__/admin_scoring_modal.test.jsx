@@ -14,6 +14,9 @@ import {
   nextFoulOnDecrement,
   applyFusenshoToggle,
 } from '../admin_scoring_modal.jsx';
+import { isKikenDecision } from '../api_serializers.jsx';
+
+window.isKikenDecision = isKikenDecision;
 
 // admin_scoring_modal.jsx ships seven module-private helpers that together
 // implement the FR-033 encho-period flow (T104 cap + banner) and the
@@ -65,15 +68,20 @@ describe('buildDecisionBody', () => {
   // server contract in handlers_decision.go: { decision, decisionBy,
   // decisionReason?, encho?: { periodCount }, force? }.
 
-  it('builds the minimal body for kiken without reason or encho', () => {
-    const body = buildDecisionBody('kiken', { decisionBy: 'shiro', decisionReason: '' }, 0);
-    expect(body).toEqual({ decision: 'kiken', decisionBy: 'shiro' });
+  it('builds the minimal body for kiken-voluntary without reason or encho', () => {
+    const body = buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro', decisionReason: '' }, 0);
+    expect(body).toEqual({ decision: 'kiken-voluntary', decisionBy: 'shiro' });
+  });
+
+  it('builds the minimal body for kiken-injury without reason or encho', () => {
+    const body = buildDecisionBody('kiken-injury', { decisionBy: 'aka', decisionReason: '' }, 0);
+    expect(body).toEqual({ decision: 'kiken-injury', decisionBy: 'aka' });
   });
 
   it('includes decisionReason when present', () => {
-    const body = buildDecisionBody('kiken', { decisionBy: 'aka', decisionReason: 'injury' }, 0);
+    const body = buildDecisionBody('kiken-voluntary', { decisionBy: 'aka', decisionReason: 'injury' }, 0);
     expect(body).toEqual({
-      decision: 'kiken',
+      decision: 'kiken-voluntary',
       decisionBy: 'aka',
       decisionReason: 'injury',
     });
@@ -93,7 +101,7 @@ describe('buildDecisionBody', () => {
   });
 
   it('omits encho when periodCount is 0', () => {
-    const body = buildDecisionBody('kiken', { decisionBy: 'shiro' }, 0);
+    const body = buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0);
     expect(body).not.toHaveProperty('encho');
   });
 
@@ -101,8 +109,8 @@ describe('buildDecisionBody', () => {
     // Shouldn't happen in practice (the UI clamps at 0), but pinning
     // the > 0 check so a future refactor that uses `!= 0` doesn't
     // silently re-introduce negative counts.
-    expect(buildDecisionBody('kiken', { decisionBy: 'shiro' }, -1)).not.toHaveProperty('encho');
-    expect(buildDecisionBody('kiken', { decisionBy: 'shiro' }, NaN)).not.toHaveProperty('encho');
+    expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, -1)).not.toHaveProperty('encho');
+    expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, NaN)).not.toHaveProperty('encho');
   });
 
   it('passes kind through verbatim (no validation here)', () => {
@@ -119,25 +127,25 @@ describe('buildDecisionBody', () => {
     // re-implementing the body shape.
 
     it('attaches force=true when opts.force is set', () => {
-      const body = buildDecisionBody('kiken', { decisionBy: 'shiro' }, 0, { force: true });
+      const body = buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: true });
       expect(body.force).toBe(true);
     });
 
     it('omits force when opts.force is missing or false', () => {
-      expect(buildDecisionBody('kiken', { decisionBy: 'shiro' }, 0)).not.toHaveProperty('force');
-      expect(buildDecisionBody('kiken', { decisionBy: 'shiro' }, 0, {})).not.toHaveProperty('force');
-      expect(buildDecisionBody('kiken', { decisionBy: 'shiro' }, 0, { force: false })).not.toHaveProperty('force');
+      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0)).not.toHaveProperty('force');
+      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, {})).not.toHaveProperty('force');
+      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: false })).not.toHaveProperty('force');
     });
 
     it('force combines with reason + encho cleanly', () => {
       const body = buildDecisionBody(
-        'kiken',
+        'kiken-voluntary',
         { decisionBy: 'aka', decisionReason: 'no-show' },
         3,
         { force: true },
       );
       expect(body).toEqual({
-        decision: 'kiken',
+        decision: 'kiken-voluntary',
         decisionBy: 'aka',
         decisionReason: 'no-show',
         encho: { periodCount: 3 },
@@ -348,7 +356,7 @@ describe('DecisionPrompt → /decision POST integration', () => {
     // after DecisionPrompt fires. This is the surface flagged by PR #105
     // as untested: the password must reach window.API.recordDecision.
     const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('kiken', payload, 0);
+      const body = buildDecisionBody('kiken-voluntary', payload, 0);
       const password = resolveDecisionPassword('explicit-pw');
       return window.API.recordDecision('comp-1', 'match-1', body, password);
     });
@@ -369,7 +377,7 @@ describe('DecisionPrompt → /decision POST integration', () => {
     expect(window.API.recordDecision).toHaveBeenCalledWith(
       'comp-1',
       'match-1',
-      { decision: 'kiken', decisionBy: 'aka' },
+      { decision: 'kiken-voluntary', decisionBy: 'aka' },
       'explicit-pw',
     );
   });
@@ -442,7 +450,7 @@ describe('DecisionPrompt → /decision POST integration', () => {
     // that flag through to the server so the second attempt isn't
     // also rejected.
     const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('kiken', payload, 0, { force: true });
+      const body = buildDecisionBody('kiken-voluntary', payload, 0, { force: true });
       const password = resolveDecisionPassword('pw');
       return window.API.recordDecision('comp-1', 'match-1', body, password);
     });
@@ -460,7 +468,7 @@ describe('DecisionPrompt → /decision POST integration', () => {
     expect(window.API.recordDecision).toHaveBeenCalledWith(
       'comp-1',
       'match-1',
-      { decision: 'kiken', decisionBy: 'shiro', force: true },
+      { decision: 'kiken-voluntary', decisionBy: 'shiro', force: true },
       'pw',
     );
   });

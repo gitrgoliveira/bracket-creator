@@ -109,7 +109,7 @@ func (e *Engine) recordIneligibilityFromDecisionTx(tx state.StoreTx, compID, mat
 	if result == nil {
 		return nil, nil
 	}
-	if result.Decision != string(domain.DecisionKiken) && result.Decision != string(domain.DecisionFusenpai) {
+	if !domain.IsKikenDecisionStr(result.Decision) && result.Decision != string(domain.DecisionFusenpai) {
 		return nil, nil
 	}
 	loser := loserSideName(result)
@@ -133,11 +133,12 @@ func (e *Engine) recordIneligibilityFromDecisionTx(tx state.StoreTx, compID, mat
 		return nil, nil
 	}
 	status := domain.CompetitorStatus{
-		PlayerID:   playerID,
-		Eligible:   false,
-		Reason:     fmt.Sprintf("%s at %s", result.Decision, matchID),
-		MatchID:    matchID,
-		RecordedAt: time.Now().UTC(),
+		PlayerID:      playerID,
+		Eligible:      false,
+		Reinstateable: result.Decision == string(domain.DecisionKikenInjury),
+		Reason:        fmt.Sprintf("%s at %s", result.Decision, matchID),
+		MatchID:       matchID,
+		RecordedAt:    time.Now().UTC(),
 	}
 	// K2/CHK047: check-and-set under the existing lock. Pre-T156 this
 	// reached for a fresh WithTransaction; under T156 the surrounding
@@ -529,7 +530,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if decisionBy == "aka" {
 		loserName = sideA
 	}
-	if decision == string(domain.DecisionKiken) || decision == string(domain.DecisionFusenpai) {
+	if domain.IsKikenDecisionStr(decision) || decision == string(domain.DecisionFusenpai) {
 		if cerr := e.checkConcurrentIneligibilityTx(tx, compID, matchID, loserName); cerr != nil {
 			return nil, nil, cerr
 		}
@@ -539,7 +540,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		return nil, nil, err
 	}
 	priorLoser := ""
-	if prior != nil && (prior.Decision == string(domain.DecisionKiken) || prior.Decision == string(domain.DecisionFusenpai)) {
+	if prior != nil && (domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai)) {
 		priorLoser = loserSideName(prior)
 	}
 	if priorLoser != "" && !force {

@@ -26,6 +26,7 @@ function toBackendStatus(s) { return STATUS_MAP[s] || s; }
 
 // Canonical draw value is "hikiwake". See specs/openapi.yaml for details.
 function isHikiwake(v) { return v === "hikiwake"; }
+function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" || v === "kiken-injury"; }
 
 // Translate UI score patch into backend MatchResult shape.
 // UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }
@@ -186,11 +187,12 @@ function normalizeCompetitionDetail(data) {
     return result;
 }
 
-export { toBackendStatus, isHikiwake, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail };
+export { toBackendStatus, isHikiwake, isKikenDecision, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail };
 
 if (typeof window !== 'undefined') {
     window.toBackendStatus = toBackendStatus;
     window.isHikiwake = isHikiwake;
+    window.isKikenDecision = isKikenDecision;
     window.normalizeMatch = normalizeMatch;
     window.normalizeCompetitionDetail = normalizeCompetitionDetail;
     window.buildPlayerMap = buildPlayerMap;

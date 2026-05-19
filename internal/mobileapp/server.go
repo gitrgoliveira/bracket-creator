@@ -93,6 +93,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 		RegisterMatchHandlers(admin, eng, store, store, hub)
 		RegisterDecisionHandlers(admin, eng, store, store, hub)
 		RegisterEligibilityHandlers(admin, store, hub)
+		RegisterReinstateHandler(admin, eng, hub)
 		RegisterLineupHandlers(admin, store, store, store)
 		RegisterDaihyosenHandlers(admin, eng, store, hub)
 		RegisterSwissHandlers(admin, store, eng, hub)

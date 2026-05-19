@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,4 +174,77 @@ func TestEligibilityPOST_MissingReason(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// setupReinstateTestRouter builds a minimal auth-protected router for
+// RegisterReinstateHandler tests. The EligibilityEngine is a stub so
+// callers control what ReinstateCompetitor returns.
+func setupReinstateTestRouter(t *testing.T, eng EligibilityEngine) (*gin.Engine, *state.Store) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	dir, err := os.MkdirTemp("", "reinstate-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	r := gin.New()
+	hub := NewHub()
+	admin := r.Group("/api")
+	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
+	RegisterReinstateHandler(admin, eng, hub)
+	return r, store
+}
+
+// TestReinstateHandler covers the HTTP layer of RegisterReinstateHandler:
+// auth gating, happy path 200, 409 for not-ineligible / not-reinstateable.
+func TestReinstateHandler(t *testing.T) {
+	const pw = "pass"
+
+	t.Run("no password returns 401", func(t *testing.T) {
+		eng := &stubEligibilityEngine{Status: &domain.CompetitorStatus{PlayerID: "p1", Eligible: true}}
+		r, store := setupReinstateTestRouter(t, eng)
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: pw}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+
+		req := httptest.NewRequest(http.MethodPost, "/api/competitions/c1/competitors/p1/reinstate", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("happy path returns 200 with eligible status", func(t *testing.T) {
+		reinstated := &domain.CompetitorStatus{PlayerID: "p1", Eligible: true}
+		eng := &stubEligibilityEngine{Status: reinstated}
+		r, store := setupReinstateTestRouter(t, eng)
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: pw}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+
+		req := httptest.NewRequest(http.MethodPost, "/api/competitions/c1/competitors/p1/reinstate", nil)
+		req.Header.Set("X-Tournament-Password", pw)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp domain.CompetitorStatus
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.True(t, resp.Eligible)
+		assert.Equal(t, "p1", resp.PlayerID)
+	})
+
+	t.Run("engine validation error returns 409", func(t *testing.T) {
+		eng := &stubEligibilityEngine{Err: &engine.ValidationError{Msg: "not reinstateable"}}
+		r, store := setupReinstateTestRouter(t, eng)
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: pw}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+
+		req := httptest.NewRequest(http.MethodPost, "/api/competitions/c1/competitors/p1/reinstate", nil)
+		req.Header.Set("X-Tournament-Password", pw)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+	})
 }

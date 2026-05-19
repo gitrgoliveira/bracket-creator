@@ -98,9 +98,12 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   const [estResult, setEstResult] = useStateA(null);
   const [estLoading, setEstLoading] = useStateA(false);
 
-  // Sync estNumMatches once on load
+  const estNumMatchesRef = useRefA(false);
   useEffectA(() => {
-    setEstNumMatches(allMatches.length);
+    if (!estNumMatchesRef.current && allMatches.length > 0) {
+      setEstNumMatches(allMatches.length);
+      estNumMatchesRef.current = true;
+    }
   }, [allMatches.length]);
 
   // Auto-derive bouts per team match when team size changes
@@ -115,6 +118,14 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   // Debounced estimator fetch
   useEffectA(() => {
     if (!estOpen) return;
+    // Guard: required params must be valid numbers > 0 to avoid 400s
+    if (!Number.isFinite(estMatchDuration) || estMatchDuration <= 0 ||
+        !Number.isFinite(estMultiplier) || estMultiplier <= 0 ||
+        !Number.isFinite(estCourts) || estCourts <= 0) {
+      setEstResult(null);
+      return;
+    }
+
     const timer = setTimeout(async () => {
       setEstLoading(true);
       try {
@@ -334,35 +345,112 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
                 <div className="form-group">
                   <label className="label">Match duration (min)</label>
-                  <input type="number" className="input" value={estMatchDuration} min="1" max="60" onChange={e => setEstMatchDuration(+e.target.value)} />
+                  <input
+                    type="number"
+                    className="input"
+                    value={Number.isFinite(estMatchDuration) ? estMatchDuration : ""}
+                    min="1"
+                    max="60"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEstMatchDuration(val === "" ? NaN : +val);
+                    }}
+                  />
                 </div>
                 <div className="form-group">
                   <label className="label">Multiplier</label>
-                  <input type="number" step="0.1" className="input" value={estMultiplier} min="1" max="3" onChange={e => setEstMultiplier(+e.target.value)} />
+                  <input
+                    type="number"
+                    step="0.1"
+                    className="input"
+                    value={Number.isFinite(estMultiplier) ? estMultiplier : ""}
+                    min="1"
+                    max="3"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEstMultiplier(val === "" ? NaN : +val);
+                    }}
+                  />
                 </div>
                 <div className="form-group">
                   <label className="label">Courts</label>
-                  <input type="number" className="input" value={estCourts} min="1" max="26" onChange={e => setEstCourts(+e.target.value)} />
+                  <input
+                    type="number"
+                    className="input"
+                    value={Number.isFinite(estCourts) ? estCourts : ""}
+                    min="1"
+                    max="26"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEstCourts(val === "" ? NaN : +val);
+                    }}
+                  />
                 </div>
                 <div className="form-group">
                   <label className="label">Matches</label>
-                  <input type="number" className="input" value={estNumMatches} min="1" onChange={e => setEstNumMatches(+e.target.value)} />
+                  <input
+                    type="number"
+                    className="input"
+                    value={Number.isFinite(estNumMatches) ? estNumMatches : ""}
+                    min="1"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEstNumMatches(val === "" ? NaN : +val);
+                    }}
+                  />
                 </div>
                 <div className="form-group">
                   <label className="label">Team size (0=indiv)</label>
-                  <input type="number" className="input" value={estTeamSize} min="0" onChange={e => setEstTeamSize(+e.target.value)} />
+                  <input
+                    type="number"
+                    className="input"
+                    value={Number.isFinite(estTeamSize) ? estTeamSize : ""}
+                    min="0"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEstTeamSize(val === "" ? NaN : +val);
+                    }}
+                  />
                 </div>
                 <div className="form-group">
                   <label className="label">Bouts per team match</label>
-                  <input type="number" className="input" value={estBoutsPerTeamMatch} min="0" onChange={e => setEstBoutsPerTeamMatch(+e.target.value)} />
+                  <input
+                    type="number"
+                    className="input"
+                    value={Number.isFinite(estBoutsPerTeamMatch) ? estBoutsPerTeamMatch : ""}
+                    min="0"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEstBoutsPerTeamMatch(val === "" ? NaN : +val);
+                    }}
+                  />
                 </div>
                 <div className="form-group">
                   <label className="label">Buffer %</label>
-                  <input type="number" className="input" value={estBuffer} min="0" max="100" onChange={e => setEstBuffer(+e.target.value)} />
+                  <input
+                    type="number"
+                    className="input"
+                    value={Number.isFinite(estBuffer) ? estBuffer : ""}
+                    min="0"
+                    max="100"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEstBuffer(val === "" ? NaN : +val);
+                    }}
+                  />
                 </div>
                 <div className="form-group">
                   <label className="label">Ceremony min</label>
-                  <input type="number" className="input" value={estCeremony} min="0" onChange={e => setEstCeremony(+e.target.value)} />
+                  <input
+                    type="number"
+                    className="input"
+                    value={Number.isFinite(estCeremony) ? estCeremony : ""}
+                    min="0"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEstCeremony(val === "" ? NaN : +val);
+                    }}
+                  />
                 </div>
               </div>
 

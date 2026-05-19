@@ -89,7 +89,7 @@ func TestGenerateTiebreakerMatches_TwoWay(t *testing.T) {
 	require.Len(t, matches, 1)
 	m := matches[0]
 	assert.Equal(t, "Pool A-TB-0", m.ID)
-	assert.Equal(t, string(domain.DecisionIpponShobu), m.Decision)
+	assert.Empty(t, m.Decision, "injected TB match must have empty Decision — ID convention identifies it")
 	assert.Equal(t, state.MatchStatusScheduled, m.Status)
 	assert.Equal(t, "A", m.Court)
 	assert.ElementsMatch(t, []string{m.SideA, m.SideB}, []string{"Alice", "Bob"})
@@ -189,7 +189,7 @@ func TestInjectTiebreakerMatches_TwoWayTie(t *testing.T) {
 
 	m := injected[0]
 	assert.True(t, IsTiebreakerMatchID(m.ID), "injected match must have a TB ID")
-	assert.Equal(t, string(domain.DecisionIpponShobu), m.Decision)
+	assert.Empty(t, m.Decision, "injected TB match must have empty Decision — ID convention identifies it")
 	assert.Equal(t, state.MatchStatusScheduled, m.Status)
 	assert.Equal(t, "A", m.Court)
 }
@@ -369,6 +369,162 @@ func TestComputeStandings_TBExcludedFromStats(t *testing.T) {
 		assert.Equal(t, 0, s.Losses, "%s: must have no regular losses", s.Player.Name)
 		assert.Equal(t, 1, s.Draws, "%s: draw from regular match must be counted", s.Player.Name)
 	}
+}
+
+// TestInjectTiebreakerMatches_PreservesExistingScheduledAt is the
+// regression guard for the 🔴 bug fix: assignPoolMatchSlots must not
+// overwrite operator-adjusted ScheduledAt values on pre-existing matches.
+// Only newly injected TB matches (empty ScheduledAt) should receive fresh
+// slot assignments.
+func TestInjectTiebreakerMatches_PreservesExistingScheduledAt(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "inject-preserves-time"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:        compID,
+		Name:      "Preserves Time",
+		Format:    state.CompFormatPools,
+		Status:    state.CompStatusPools,
+		Courts:    []string{"A"},
+		StartTime: "09:00",
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice"}, {Name: "Bob"},
+		}},
+	}))
+
+	// Simulate an operator adjusting the match time well outside the
+	// auto-assigned window (~09:00) so the assertion is unambiguous.
+	const operatorTime = "14:30"
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusCompleted, Winner: "",
+			Decision: string(domain.DecisionHikiwake),
+			Court:    "A", ScheduledAt: operatorTime},
+	}))
+
+	injected, err := eng.InjectTiebreakerMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, injected, 1, "one TB match expected")
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	for _, m := range all {
+		if IsTiebreakerMatchID(m.ID) {
+			assert.NotEmpty(t, m.ScheduledAt,
+				"TB match must receive an auto-assigned slot")
+		} else {
+			assert.Equal(t, operatorTime, m.ScheduledAt,
+				"existing match %s must retain its operator-adjusted ScheduledAt", m.ID)
+		}
+	}
+}
+
+// TestMaybeAutoCompletePools_NoTies verifies the backward-compatible
+// path: when all regular matches are complete with no ties, the
+// competition transitions directly to CompStatusComplete without
+// injecting any tiebreaker matches.
+func TestMaybeAutoCompletePools_NoTies(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "auto-no-ties"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "No Ties",
+		Format: state.CompFormatPools,
+		Status: state.CompStatusPools,
+		Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice"}, {Name: "Bob"}, {Name: "Charlie"},
+		}},
+	}))
+	// Alice wins all → distinct standings (no tie)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
+		{ID: "Pool A-1", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Alice"},
+		{ID: "Pool A-2", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Bob"},
+	}))
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome,
+		"no ties → must transition directly to completed without TB injection")
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusComplete, comp.Status)
+
+	// Confirm no TB matches were injected
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range all {
+		assert.False(t, IsTiebreakerMatchID(m.ID),
+			"no TB matches expected when standings are distinct")
+	}
+}
+
+// TestComputeStandings_MultiGroupTBSortIsolation verifies that when a
+// pool has two separate tied groups each with their own TB match, the
+// per-group win-count scoping correctly ranks each group's TB winner
+// above their opponent — independently of the other group's results.
+func TestComputeStandings_MultiGroupTBSortIsolation(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "multi-group-isolation"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Multi-Group Isolation",
+		Format: state.CompFormatPools,
+		Status: state.CompStatusPools,
+		Courts: []string{"A"},
+	}))
+	// 5-player pool: Alpha first, then {Beta,Gamma} tied, then {Delta,Epsilon} tied.
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"},
+			{Name: "Delta"}, {Name: "Epsilon"},
+		}},
+	}))
+	// Alpha beats everyone. Beta and Gamma both beat Delta and Epsilon and
+	// draw each other → same Points. Delta and Epsilon draw each other and
+	// both lose the same matches → same (lower) Points.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		// Alpha wins all regular matches
+		{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta", Status: state.MatchStatusCompleted, Winner: "Alpha"},
+		{ID: "Pool A-1", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Alpha"},
+		{ID: "Pool A-2", SideA: "Alpha", SideB: "Delta", Status: state.MatchStatusCompleted, Winner: "Alpha"},
+		{ID: "Pool A-3", SideA: "Alpha", SideB: "Epsilon", Status: state.MatchStatusCompleted, Winner: "Alpha"},
+		// Group 1: Beta and Gamma draw → tied
+		{ID: "Pool A-4", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "",
+			Decision: string(domain.DecisionHikiwake)},
+		// Beta and Gamma both beat Delta and Epsilon
+		{ID: "Pool A-5", SideA: "Beta", SideB: "Delta", Status: state.MatchStatusCompleted, Winner: "Beta"},
+		{ID: "Pool A-6", SideA: "Beta", SideB: "Epsilon", Status: state.MatchStatusCompleted, Winner: "Beta"},
+		{ID: "Pool A-7", SideA: "Gamma", SideB: "Delta", Status: state.MatchStatusCompleted, Winner: "Gamma"},
+		{ID: "Pool A-8", SideA: "Gamma", SideB: "Epsilon", Status: state.MatchStatusCompleted, Winner: "Gamma"},
+		// Group 2: Delta and Epsilon draw → tied at lower Points
+		{ID: "Pool A-9", SideA: "Delta", SideB: "Epsilon", Status: state.MatchStatusCompleted, Winner: "",
+			Decision: string(domain.DecisionHikiwake)},
+		// TB match for group 1: Beta beats Gamma
+		{ID: "Pool A-TB-0", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
+		// TB match for group 2: Epsilon beats Delta
+		{ID: "Pool A-TB-1", SideA: "Delta", SideB: "Epsilon", Status: state.MatchStatusCompleted, Winner: "Epsilon"},
+	}))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	poolA := standings["Pool A"]
+	require.Len(t, poolA, 5)
+
+	assert.Equal(t, "Alpha", poolA[0].Player.Name, "Alpha: wins all regular matches")
+	assert.Equal(t, "Beta", poolA[1].Player.Name, "Beta: group-1 TB winner → rank 2")
+	assert.Equal(t, "Gamma", poolA[2].Player.Name, "Gamma: group-1 TB loser → rank 3")
+	assert.Equal(t, "Epsilon", poolA[3].Player.Name, "Epsilon: group-2 TB winner → rank 4")
+	assert.Equal(t, "Delta", poolA[4].Player.Name, "Delta: group-2 TB loser → rank 5")
 }
 
 func TestComputeStandings_TBSecondarySort(t *testing.T) {

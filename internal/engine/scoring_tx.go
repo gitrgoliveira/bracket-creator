@@ -62,6 +62,13 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, m := range round {
 				if m.ID == matchID {
+					if result.SideA == "" {
+						result.SideA = m.SideA
+					}
+					if result.SideB == "" {
+						result.SideB = m.SideB
+					}
+					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
 					status := result.Status
 					if status == "" {

@@ -567,6 +567,18 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, m := range round {
 				if m.ID == matchId {
+					// Merge stored sides into result when the payload omitted
+					// them so that deriveDaihyosenWinner can map a
+					// representative player name back to the canonical team
+					// name. Must happen before deriveDaihyosenWinner and
+					// before writing result.Winner back to the bracket.
+					if result.SideA == "" {
+						result.SideA = m.SideA
+					}
+					if result.SideB == "" {
+						result.SideB = m.SideB
+					}
+					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
 					// Preserve incoming Status — pre-fix this was
 					// unconditionally set to Completed, so the scoring

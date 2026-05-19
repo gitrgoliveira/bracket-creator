@@ -303,7 +303,7 @@ func TestDHCycleExists_NoCycle(t *testing.T) {
 		{ID: "Pool A-DH-0", SideA: "Alpha", SideB: "Beta",
 			Status: state.MatchStatusCompleted, Winner: "Alpha"},
 	}
-	assert.False(t, dhCycleExists(standings, matches))
+	assert.False(t, dhCycleExists(standings, matches, nil))
 }
 
 // TestDHCycleExists_Cycle verifies that dhCycleExists returns true for a
@@ -321,7 +321,29 @@ func TestDHCycleExists_Cycle(t *testing.T) {
 		{ID: "Pool A-DH-1", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
 		{ID: "Pool A-DH-2", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Gamma"},
 	}
-	assert.True(t, dhCycleExists(standings, matches))
+	assert.True(t, dhCycleExists(standings, matches, nil))
+}
+
+// TestDHCycleExists_CycleResolvedByOverrides verifies that a cyclic DH result
+// is NOT flagged when the operator has manually ranked all tied members.
+func TestDHCycleExists_CycleResolvedByOverrides(t *testing.T) {
+	standings := map[string][]state.PlayerStanding{
+		"Pool A": {
+			{Player: helper.Player{Name: "Alpha"}, Points: 0},
+			{Player: helper.Player{Name: "Beta"}, Points: 0},
+			{Player: helper.Player{Name: "Gamma"}, Points: 0},
+		},
+	}
+	matches := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Alpha", SideB: "Beta", Status: state.MatchStatusCompleted, Winner: "Alpha"},
+		{ID: "Pool A-DH-1", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
+		{ID: "Pool A-DH-2", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Gamma"},
+	}
+	// Operator manually resolved the cycle by assigning explicit ranks.
+	poolRanks := map[string]map[string]int{
+		"Pool A": {"Alpha": 1, "Beta": 2, "Gamma": 3},
+	}
+	assert.False(t, dhCycleExists(standings, matches, poolRanks))
 }
 
 // TestMaybeAutoCompletePools_TeamDHCycleBlocks verifies that auto-completion

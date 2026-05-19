@@ -142,7 +142,12 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		if standErr != nil {
 			return AutoCompleteNoChange, standErr
 		}
-		if dhCycleExists(standings, matches) {
+		overridesObj, _ := e.store.LoadOverrides(compID)
+		var poolRanks map[string]map[string]int
+		if overridesObj != nil {
+			poolRanks = overridesObj.PoolRanks
+		}
+		if dhCycleExists(standings, matches, poolRanks) {
 			return AutoCompleteNoChange, nil
 		}
 	}
@@ -182,9 +187,28 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 // C>A) where every team ends up with the same DH win count inside the
 // group. When true, auto-completion is blocked; the operator must use
 // manual rank overrides (or physically replay the pool).
-func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult) bool {
-	for _, poolStandings := range standings {
+//
+// poolRanks is the operator's manual rank override map (keyed by pool
+// name → team name → rank). A tied group whose every member has a
+// manual rank override is considered resolved — the operator has
+// explicitly ranked them, so the cycle no longer blocks completion.
+func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
+	for poolName, poolStandings := range standings {
 		for _, group := range detectPoolTies(poolStandings) {
+			// If the operator has manually ranked every member of this
+			// tied group, treat the cycle as resolved.
+			if overrides := poolRanks[poolName]; len(overrides) > 0 {
+				allOverridden := true
+				for _, s := range group {
+					if _, ok := overrides[s.Player.Name]; !ok {
+						allOverridden = false
+						break
+					}
+				}
+				if allOverridden {
+					continue
+				}
+			}
 			groupNames := make(map[string]bool, len(group))
 			for _, s := range group {
 				groupNames[s.Player.Name] = true

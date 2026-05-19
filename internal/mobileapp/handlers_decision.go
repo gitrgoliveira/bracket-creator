@@ -40,7 +40,8 @@ type DecisionRequest struct {
 // Validate enforces request-shape invariants on a decision payload
 // before the engine touches it.
 //
-//   - decision MUST be one of kiken/fusenpai/fusensho/daihyosen.
+//   - decision MUST be one of kiken-voluntary/kiken-injury/fusenpai/fusensho/daihyosen
+//     (legacy "kiken" is remapped to "kiken-voluntary").
 //   - decisionBy is required and MUST be "shiro" or "aka".
 //   - decisionReason ≤ 200 chars (contract).
 func (r *DecisionRequest) Validate() error {

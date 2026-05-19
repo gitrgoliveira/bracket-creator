@@ -14,6 +14,9 @@ import {
   nextFoulOnDecrement,
   applyFusenshoToggle,
 } from '../admin_scoring_modal.jsx';
+import { isKikenDecision } from '../api_serializers.jsx';
+
+window.isKikenDecision = isKikenDecision;
 
 // admin_scoring_modal.jsx ships seven module-private helpers that together
 // implement the FR-033 encho-period flow (T104 cap + banner) and the

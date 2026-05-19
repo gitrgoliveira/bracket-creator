@@ -595,6 +595,7 @@ func (e *Engine) ReinstateCompetitor(compID, playerID string) (*domain.Competito
 			PlayerID:   playerID,
 			Eligible:   true,
 			MatchID:    st.MatchID,
+			Reason:     fmt.Sprintf("reinstated (was: %s)", st.Reason),
 			RecordedAt: time.Now().UTC(),
 		}
 		if err := tx.SetCompetitorStatus(compID, status); err != nil {

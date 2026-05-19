@@ -16,6 +16,7 @@ function TermBC(props) {
 // Local hikiwake check — bracket.jsx is tested in isolation, so we don't rely
 // on window.isHikiwake here. See specs/openapi.yaml.
 function isHikiwakeBC(v) { return v === "hikiwake"; }
+function isKikenDecisionBC(v) { return v === "kiken" || v === "kiken-voluntary" || v === "kiken-injury"; }
 
 function roundLabel(roundIdx, total) {
   const fromEnd = total - 1 - roundIdx;
@@ -48,7 +49,7 @@ function decisionSuffix(match) {
   const d = match.decision || "";
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
   let suffix = "";
-  if (d === "kiken" || d === "kiken-voluntary" || d === "kiken-injury") suffix = "Kiken";
+  if (isKikenDecisionBC(d)) suffix = "Kiken";
   else if (d === "fusenpai") suffix = "Fus.";
   else if (d === "daihyosen") suffix = "DH";
   if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
@@ -155,7 +156,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
             the meta row, so the bare ippon count there loses the decision.
             A chip in the meta keeps the operator and viewers oriented when
             scanning a wall of bracket cards. */}
-        {(match.decision === "kiken" || match.decision === "kiken-voluntary" || match.decision === "kiken-injury") ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="kiken">Kiken</TermBC></span> : null}
+        {isKikenDecisionBC(match.decision) ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="kiken">Kiken</TermBC></span> : null}
         {match.decision === "fusenpai" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="fusenpai">Fus.</TermBC></span> : null}
         {match.decision === "daihyosen" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="daihyosen">DH</TermBC></span> : null}
       </div>

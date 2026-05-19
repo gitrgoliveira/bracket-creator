@@ -294,7 +294,7 @@ func (r *ScoreRequest) validateDecision() error {
 		if !winningScoreline(r.IpponsA, r.IpponsB, need) {
 			return &ValidationError{
 				Field:   "scoreline",
-				Message: fmt.Sprintf("kiken requires %d-0 scoreline", need),
+				Message: fmt.Sprintf("%s requires %d-0 scoreline", r.Decision, need),
 			}
 		}
 		if err := r.requireWinnerForDecision("kiken"); err != nil {

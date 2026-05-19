@@ -752,6 +752,8 @@ func TestReinstateCompetitor(t *testing.T) {
 		require.NotNil(t, status)
 		assert.True(t, status.Eligible)
 		assert.Equal(t, playerID, status.PlayerID)
+		assert.Contains(t, status.Reason, "reinstated")
+		assert.Contains(t, status.Reason, "kiken-injury at Pool A-0")
 	})
 
 	t.Run("reinstate kiken-voluntary rejected", func(t *testing.T) {

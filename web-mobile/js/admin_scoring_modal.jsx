@@ -241,7 +241,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
   // We keep "Decision" untouched (it's already plain English) and
   // wrap the kendo terms so a volunteer hovering/tapping the title
   // gets the full tooltip.
-  const isKiken = kind === "kiken-voluntary" || kind === "kiken-injury" || kind === "kiken";
+  const isKiken = window.isKikenDecision(kind);
   const kikenLabel = kind === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
   const title = isKiken
     ? React.createElement(TermAS, { name: kind }, kikenLabel)
@@ -512,7 +512,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
       const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
-      if (kind === "kiken-voluntary" || kind === "kiken-injury" || kind === "kiken") {
+      if (window.isKikenDecision(kind)) {
         // The loser is the side != Winner. SideA/SideB on MatchResult are
         // names; resolve back to {id, name} via the original match for the
         // remaining-matches lookup.
@@ -855,7 +855,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               sideA={m.sideA}
               sideB={m.sideB}
               defaultSide="shiro"
-              askReason={decisionPromptKind === "kiken-voluntary" || decisionPromptKind === "kiken-injury"}
+              askReason={window.isKikenDecision(decisionPromptKind)}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
@@ -1057,7 +1057,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
       const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
-      if (kind === "kiken-voluntary" || kind === "kiken-injury" || kind === "kiken") {
+      if (window.isKikenDecision(kind)) {
         const winnerName = (updated?.winner || "").trim();
         const loserName = winnerName === (updated?.sideA || "") ? (updated?.sideB || "") : (updated?.sideA || "");
         const loser =
@@ -1629,7 +1629,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               sideA={{ name: m.sideA?.name || m.sideA }}
               sideB={{ name: m.sideB?.name || m.sideB }}
               defaultSide="shiro"
-              askReason={decisionPromptKind === "kiken-voluntary" || decisionPromptKind === "kiken-injury"}
+              askReason={window.isKikenDecision(decisionPromptKind)}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}

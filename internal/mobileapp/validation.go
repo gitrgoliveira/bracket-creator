@@ -297,7 +297,7 @@ func (r *ScoreRequest) validateDecision() error {
 				Message: fmt.Sprintf("%s requires %d-0 scoreline", r.Decision, need),
 			}
 		}
-		if err := r.requireWinnerForDecision("kiken"); err != nil {
+		if err := r.requireWinnerForDecision(r.Decision); err != nil {
 			return err
 		}
 	case "fusenpai":

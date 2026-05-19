@@ -107,7 +107,7 @@ type Competition struct {
 	// Naginata selects the Naginata ippon set for this competition.
 	// When true, the score editor offers an extra "S" (Sune) button
 	// in addition to the standard M/K/D/T/H set. Default false = Kendo.
-	Naginata bool `yaml:"naginata,omitempty" json:"naginata,omitempty"`
+	Naginata bool `yaml:"naginata,omitempty" json:"naginata"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
 }

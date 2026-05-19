@@ -4962,6 +4962,24 @@ a:hover {
   letter-spacing: 0.08em;
   margin-top: 2px !important;
 }
+.decision-btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ？ icon that carries the glossary tooltip for a decision button. */
+.glossary-hint .tw-term {
+  border-bottom: none;
+  color: var(--ink-3, #888);
+  font-size: 13px;
+  line-height: 1;
+}
+.glossary-hint .tw-term:hover,
+.glossary-hint .tw-term:focus-visible {
+  color: var(--ink-2, #555);
+}
+
 .editor-modal--compact .decision-controls {
   margin-top: 8px !important;
   font-size: 11px !important;

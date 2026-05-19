@@ -50,10 +50,12 @@ function compMatches(c) {
 
   const poolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
   // Pool-daihyosen matches ("Pool X-DH-N") are representative bouts scored as
-  // individual matches even in team competitions — override compKind so they
-  // route to the individual ScoreEditorModal rather than TeamScoreEditorModal.
+  // individual matches even in team competitions — override compKind and teamSize
+  // so all isTeam checks (compKind === "team" || teamSize > 0) evaluate false,
+  // routing to the individual ScoreEditorModal and rendering individual match UI.
   poolMatches.forEach(m => {
-    out.push({ ...m, compId: c.id, compName: c.name, compKind: isPoolDaihyosenID(m.id || "") ? "" : c.kind, teamSize: c.teamSize });
+    const isDH = isPoolDaihyosenID(m.id || "");
+    out.push({ ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
   });
 
   const rounds = (c.bracket && c.bracket.rounds) ? c.bracket.rounds : (c.bracket || []);

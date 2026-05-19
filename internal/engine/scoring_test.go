@@ -745,6 +745,18 @@ func TestApplyHansokuIppons(t *testing.T) {
 			wantIpponsA: []string{"H"},
 			wantIpponsB: []string{"H"},
 		},
+		{
+			name:        "hansoku reduced from 4 to 2 strips stale H",
+			hansokuA:    2,
+			ipponsB:     []string{"H", "H"},
+			wantIpponsB: []string{"H"},
+		},
+		{
+			name:        "hansoku reduced to 0 strips all H entries",
+			hansokuA:    0,
+			ipponsB:     []string{"M", "H"},
+			wantIpponsB: []string{"M"},
+		},
 	}
 
 	for _, tc := range cases {

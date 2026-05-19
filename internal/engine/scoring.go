@@ -71,23 +71,27 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
 // FIK Article 20: every 2 hansoku on one side grants 1 ippon to the opponent.
-// Uses 'H' as the ippon marker, consistent with IpponsA/IpponsB conventions.
-// Never removes existing entries — only appends what's missing.
+// Strips any prior 'H' entries and re-appends the correct count so that both
+// increases and decreases in hansoku are handled correctly on re-scores.
 func applyHansokuIppons(result *state.MatchResult) {
 	if result == nil {
 		return
 	}
 	applyOneSide := func(hansoku int, ippons *[]string) {
 		expected := hansoku / 2
-		existing := 0
+		if *ippons == nil && expected == 0 {
+			return
+		}
+		filtered := make([]string, 0, len(*ippons))
 		for _, v := range *ippons {
-			if v == "H" {
-				existing++
+			if v != "H" {
+				filtered = append(filtered, v)
 			}
 		}
-		for range expected - existing {
-			*ippons = append(*ippons, "H")
+		for range expected {
+			filtered = append(filtered, "H")
 		}
+		*ippons = filtered
 	}
 	applyOneSide(result.HansokuA, &result.IpponsB)
 	applyOneSide(result.HansokuB, &result.IpponsA)
@@ -96,10 +100,14 @@ func applyHansokuIppons(result *state.MatchResult) {
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	applyHansokuIppons(result)
+	return e.writeMatchResult(compId, matchId, result)
+}
+
+// writeMatchResult persists the result without applying hansoku auto-award.
+// RecordMatchResult calls this after applyHansokuIppons; the K3 rollback
+// path calls it directly to restore the prior result byte-for-byte.
+func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		// Preserve scheduling and side fields if missing in the update payload.
-		// The scoring UI only sends scoring-related fields; without this guard,
-		// `*r = *result` would zero Court/ScheduledAt/SideA/SideB.
 		if result.SideA == "" {
 			result.SideA = r.SideA
 		}
@@ -122,20 +130,9 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 			return err
 		}
 	}
-	// T085 — persist the loser's competitor-status when this update
-	// recorded a kiken or fusenpai decision. Failure to write the
-	// status is non-fatal to the score-recording itself: the match
-	// score is already on disk, so propagating an error here would
-	// give the operator a 500 response that they would retry,
-	// double-recording the score. Log and swallow — the next-match
-	// eligibility gate is the safety net that surfaces a missed
-	// status write (FR-035).
 	if _, err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 	}
-	// T128 — freeze any team lineups for this round when the match
-	// transitions to running/completed. Side-effect only; failures are
-	// non-fatal for the same reason as the ineligibility write above.
 	e.maybeLockTeamLineupsForRound(compId, result)
 	return nil
 }
@@ -198,7 +195,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 			// to its prior state before returning 409 so the operator
 			// sees a clean rejection rather than a mutated match.
 			if prior != nil {
-				_ = e.RecordMatchResult(compId, matchId, prior)
+				_ = e.writeMatchResult(compId, matchId, prior)
 			}
 			return nil, err
 		}

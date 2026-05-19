@@ -240,22 +240,22 @@ Variant maps to tournament status, **not** to severity. Use `<StatusBadge status
 
 ### Match cards — `.bc-match`
 
-[styles.css#L828](web-mobile/css/styles.css#L828)
+[styles.css#L830](web-mobile/css/styles.css#L830)
 
-Layout variants (composed by [bracket.jsx#L140](web-mobile/js/bracket.jsx#L140) as `bc-match--v${variant}`):
+Layout variants (composed by [bracket.jsx#L148](web-mobile/js/bracket.jsx#L148) as `bc-match--v${variant}`):
 - **Default** — plain `.bc-match` (variant `1` carries no extra rules, so passing `variant=1` is equivalent to the default)
-- `bc-match--v2` — filled sides, used in the viewer's "now playing" surface ([styles.css#L979](web-mobile/css/styles.css#L979))
-- `bc-match--v3` — compact, used in dense round columns ([styles.css#L1048](web-mobile/css/styles.css#L1048))
+- `bc-match--v2` — filled sides, used in the viewer's "now playing" surface ([styles.css#L986](web-mobile/css/styles.css#L986))
+- `bc-match--v3` — compact, used in dense round columns ([styles.css#L1055](web-mobile/css/styles.css#L1055))
 
 State modifiers: `bc-match--live` (red ring), `bc-match--highlight` (accent ring), and `bc-match--done` (0.75 opacity — completed matches fade back so active ones stand out) all have CSS rules.
 
-Side composition (via `PlayerLine` in [bracket.jsx#L96](web-mobile/js/bracket.jsx#L96)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Winner side gets `bc-side--winner` plus a fill swap to `--red` (Aka) or `--accent` (Shiro). **Never swap side order based on seeding** — the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
+Side composition (via `PlayerLine` in [bracket.jsx#L104](web-mobile/js/bracket.jsx#L104)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Winner side gets `bc-side--winner` plus a fill swap to `--red` (Aka) or `--accent` (Shiro). **Never swap side order based on seeding** — the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
 
 Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-live` (red, 700-weight "● LIVE"), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, `--accent`, 10px 700), `.bc-encho` ((E), `--accent`, 10px 700).
 
 #### Match-decision visual suffixes
 
-Decision types ([CLAUDE.md](CLAUDE.md) "Match Decision Types") map to short tags rendered inside `.bc-match-meta`. Source: [bracket.jsx#L149-L160](web-mobile/js/bracket.jsx#L149).
+Decision types ([CLAUDE.md](CLAUDE.md) "Match Decision Types") map to short tags rendered inside `.bc-match-meta`. Source: [bracket.jsx#L159-L165](web-mobile/js/bracket.jsx#L159).
 
 | Decision | Tag | Class | Color |
 |---|---|---|---|

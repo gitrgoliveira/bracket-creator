@@ -27,6 +27,15 @@ function roundLabel(roundIdx, total) {
   return `Round ${roundIdx + 1}`;
 }
 
+// T097: decision chips shown in the bracket meta row.
+// Score rows print ippon counts but lose the decision type; chips keep operators
+// and viewers oriented when scanning a wall of bracket cards.
+const DECISION_CHIPS = {
+  kiken:     { term: "kiken",      label: "Kiken" },
+  fusenpai:  { term: "fusenpai",   label: "Fus."  },
+  daihyosen: { term: "daihyosen",  label: "DH"    },
+};
+
 // sideA = top = Aka (Red), sideB = bottom = Shiro (White)
 function sideLabel(side) {
   return side === "a" ? "AKA" : "SHIRO";
@@ -149,15 +158,11 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
-        {/* T097: decision chip on bracket nodes. The score-line suffix already
-            renders "Kiken/Fus./DH" via formatIpponsScore, but bracket cards
-            print the score on the player rows (aScore/bScore) rather than in
-            the meta row, so the bare ippon count there loses the decision.
-            A chip in the meta keeps the operator and viewers oriented when
-            scanning a wall of bracket cards. */}
-        {match.decision === "kiken" ? <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span> : null}
-        {match.decision === "fusenpai" ? <span className="bc-decision-chip"><TermBC name="fusenpai">Fus.</TermBC></span> : null}
-        {match.decision === "daihyosen" ? <span className="bc-decision-chip"><TermBC name="daihyosen">DH</TermBC></span> : null}
+        {DECISION_CHIPS[match.decision] ? (
+          <span className="bc-decision-chip">
+            <TermBC name={DECISION_CHIPS[match.decision].term}>{DECISION_CHIPS[match.decision].label}</TermBC>
+          </span>
+        ) : null}
       </div>
       <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} />
       <div className="bc-divider"></div>

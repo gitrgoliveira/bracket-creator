@@ -12,6 +12,4 @@ web-mobile/node_modules
 bin/
 *.xlsx
 *.out
-coverage.out
-c.out
 *.log

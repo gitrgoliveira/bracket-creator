@@ -3,6 +3,10 @@
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
+function formatMinutes(m) {
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -98,11 +102,8 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   const [estLoading, setEstLoading] = useStateA(false);
 
   useEffectA(() => {
-    if (estTeamSize > 0) {
-      setEstBoutsPerTeamMatch(2 * estTeamSize - 1);
-    } else {
-      setEstBoutsPerTeamMatch(0);
-    }
+    const newBouts = estTeamSize > 0 ? 2 * estTeamSize - 1 : 0;
+    setEstBoutsPerTeamMatch(prev => prev === newBouts ? prev : newBouts);
   }, [estTeamSize]);
 
   useEffectA(() => {
@@ -225,7 +226,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
     const b = timeToMinutes(lastTime);
     if (a === null || b === null) return null;
     const diff = b - a + safeMatchDuration;
-    return `${Math.floor(diff / 60)}h ${diff % 60}m`;
+    return formatMinutes(diff);
   })() : null;
 
   const saveMatchTime = async (m, newTime) => {
@@ -346,128 +347,20 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
           {estOpen && (
             <div className="est-form">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
-                <div className="form-group">
-                  <label className="label">Match duration (min)</label>
-                  <input
-                    type="number"
-                    className="input"
-                    value={Number.isFinite(estMatchDuration) ? estMatchDuration : ""}
-                    min="1"
-                    max="60"
-                    step="1"
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEstMatchDuration(val === "" ? NaN : +val);
-                    }}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label">Multiplier</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    className="input"
-                    value={Number.isFinite(estMultiplier) ? estMultiplier : ""}
-                    min="1"
-                    max="3"
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEstMultiplier(val === "" ? NaN : +val);
-                    }}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label">Courts</label>
-                  <input
-                    type="number"
-                    className="input"
-                    value={Number.isFinite(estCourts) ? estCourts : ""}
-                    min="1"
-                    max="26"
-                    step="1"
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEstCourts(val === "" ? NaN : +val);
-                    }}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label">Matches</label>
-                  <input
-                    type="number"
-                    className="input"
-                    value={Number.isFinite(estNumMatches) ? estNumMatches : ""}
-                    min="1"
-                    step="1"
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEstNumMatches(val === "" ? NaN : +val);
-                    }}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label">Team size (0=indiv)</label>
-                  <input
-                    type="number"
-                    className="input"
-                    value={Number.isFinite(estTeamSize) ? estTeamSize : ""}
-                    min="0"
-                    step="1"
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEstTeamSize(val === "" ? NaN : +val);
-                    }}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label">Bouts per team match</label>
-                  <input
-                    type="number"
-                    className="input"
-                    value={Number.isFinite(estBoutsPerTeamMatch) ? estBoutsPerTeamMatch : ""}
-                    min="0"
-                    step="1"
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEstBoutsPerTeamMatch(val === "" ? NaN : +val);
-                    }}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label">Buffer %</label>
-                  <input
-                    type="number"
-                    className="input"
-                    value={Number.isFinite(estBuffer) ? estBuffer : ""}
-                    min="0"
-                    max="100"
-                    step="1"
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEstBuffer(val === "" ? NaN : +val);
-                    }}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label">Ceremony (min)</label>
-                  <input
-                    type="number"
-                    className="input"
-                    value={Number.isFinite(estCeremony) ? estCeremony : ""}
-                    min="0"
-                    step="1"
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEstCeremony(val === "" ? NaN : +val);
-                    }}
-                  />
-                </div>
+                <EstInput label="Match duration (min)" value={estMatchDuration} setter={setEstMatchDuration} min="1" max="60" />
+                <EstInput label="Multiplier" value={estMultiplier} setter={setEstMultiplier} min="1" max="3" step="0.1" />
+                <EstInput label="Courts" value={estCourts} setter={setEstCourts} min="1" max="26" />
+                <EstInput label="Matches" value={estNumMatches} setter={setEstNumMatches} min="1" />
+                <EstInput label="Team size (0=indiv)" value={estTeamSize} setter={setEstTeamSize} min="0" />
+                <EstInput label="Bouts per team match" value={estBoutsPerTeamMatch} setter={setEstBoutsPerTeamMatch} min="0" />
+                <EstInput label="Buffer %" value={estBuffer} setter={setEstBuffer} min="0" max="100" />
+                <EstInput label="Ceremony (min)" value={estCeremony} setter={setEstCeremony} min="0" />
               </div>
 
               {estResult && (
                 <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid var(--bg-3)" }}>
                   <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 12 }}>
-                    <div style={{ fontSize: 24, fontWeight: 700 }}>Total: {Math.floor(estResult.totalDurationMinutes / 60)}h {estResult.totalDurationMinutes % 60}m</div>
+                    <div style={{ fontSize: 24, fontWeight: 700 }}>Total: {formatMinutes(estResult.totalDurationMinutes)}</div>
                     {autoStart && (
                       <div style={{ fontSize: 16, color: "var(--ink-2)" }}>
                         Projected finish: <strong>{window.addMinutes(autoStart, estResult.totalDurationMinutes)}</strong>
@@ -918,6 +811,23 @@ function AdminExport({ c, t, password }) {
   );
 }
 
+function EstInput({ label, value, setter, min, max, step = "1" }) {
+  return (
+    <div className="form-group">
+      <label className="label">{label}</label>
+      <input
+        type="number"
+        className="input"
+        value={Number.isFinite(value) ? value : ""}
+        min={min}
+        max={max}
+        step={step}
+        onChange={e => { const val = e.target.value; setter(val === "" ? NaN : +val); }}
+      />
+    </div>
+  );
+}
+
 function PerCourtBreakdown({ perCourtMinutes }) {
   if (!perCourtMinutes || perCourtMinutes.length === 0) return null;
   return (
@@ -927,7 +837,7 @@ function PerCourtBreakdown({ perCourtMinutes }) {
         {perCourtMinutes.map((m, i) => (
           <div key={i} style={{ fontSize: 12, padding: "4px 8px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
             <span style={{ color: "var(--ink-3)" }}>Court {String.fromCharCode(65 + i)}:</span>
-            <strong style={{ marginLeft: 4 }}>{Math.floor(m / 60)}h {m % 60}m</strong>
+            <strong style={{ marginLeft: 4 }}>{formatMinutes(m)}</strong>
           </div>
         ))}
       </div>

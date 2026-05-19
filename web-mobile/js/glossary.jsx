@@ -278,10 +278,23 @@ function capitalise(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// GlossaryHint — a standalone ？ icon that carries the glossary tooltip
+// for a given term. Renders as a sibling next to a button so the tooltip
+// is accessible without wrapping (and potentially blocking) the button's
+// click target.
+function GlossaryHint({ name }) {
+  return React.createElement(
+    'span',
+    { className: 'glossary-hint' },
+    React.createElement(Term, { name }, '？'),
+  );
+}
+
 if (typeof window !== 'undefined') {
   window.Term = Term;
+  window.GlossaryHint = GlossaryHint;
   window.GlossaryPage = GlossaryPage;
   window.renderTooltipBody = renderTooltipBody;
 }
 
-export { Term, GlossaryPage, renderTooltipBody, GLOSSARY, lookupTerm };
+export { Term, GlossaryHint, GlossaryPage, renderTooltipBody, GLOSSARY, lookupTerm };

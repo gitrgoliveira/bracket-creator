@@ -335,6 +335,14 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
     return out;
   }, [players, tagFilter, showOnlyUnchecked]);
+  const dojoFirstRowSet = useMemoA(() => {
+    const seen = new Set();
+    const first = new Set();
+    visiblePlayers.forEach((p, i) => {
+      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(i); }
+    });
+    return first;
+  }, [visiblePlayers]);
   const { gaps, hasGaps } = useMemoA(() => {
     const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
     const gaps = [];
@@ -843,7 +851,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                       <div className="seed-row__dojo">
                         {p.dojo}
-                        {players.filter(px => px.dojo === p.dojo && !px.checkedIn).length > 0 && (
+                        {dojoFirstRowSet.has(i) && players.filter(px => px.dojo === p.dojo && !px.checkedIn).length > 0 && (
                           <button
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}

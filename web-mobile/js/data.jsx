@@ -380,5 +380,6 @@ if (typeof window !== 'undefined') {
   window.parseParticipantLines = parseParticipantLines;
   window.mergeMatchPatch = mergeMatchPatch;
   window.addMinutes = addMinutes;
+  window.diffMinutes = diffMinutes;
   window.arraysEqual = arraysEqual;
 }

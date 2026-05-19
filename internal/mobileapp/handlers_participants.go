@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -148,7 +149,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 		if err != nil {
 			status := http.StatusInternalServerError
-			if err.Error() == "participant not found" {
+			if errors.Is(err, state.ErrParticipantNotFound) {
 				status = http.StatusNotFound
 			}
 			c.JSON(status, gin.H{"error": err.Error()})
@@ -180,7 +181,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 		if err != nil {
 			status := http.StatusInternalServerError
-			if err.Error() == "participant not found" {
+			if errors.Is(err, state.ErrParticipantNotFound) {
 				status = http.StatusNotFound
 			}
 			c.JSON(status, gin.H{"error": err.Error()})

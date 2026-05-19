@@ -531,7 +531,8 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
                 </span>
                 <span className="pmf__opt-dojo">{p.dojo || ""}</span>
               </span>
-            </button>          ))}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -645,6 +646,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
     });
     return Array.from(map.values());
   }, [tournament]);
+  const rosterById = useMemo(() => new Map(roster.map(p => [p.id, p])), [roster]);
 
   return (
     <div className="card" data-testid="viewer-home-watchlist" style={{ marginBottom: 16, padding: 14 }}>
@@ -663,7 +665,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
       ) : (
         <div className="pmf__bar" style={{ marginBottom: 8 }}>
           {watchlist.map((w) => {
-            const pRecord = roster.find(p => p.id === w.id);
+            const pRecord = rosterById.get(w.id);
             return (
               <span key={w.id} className={`pmf__chip ${pRecord && pRecord.checkedIn ? "is-checked-in" : ""}`} title={pRecord && pRecord.checkedIn ? "Checked in" : undefined}>
                 {w.name}
@@ -672,7 +674,8 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
               </span>
             );
           })}
-        </div>      )}
+        </div>
+      )}
       <SinglePlayerPicker
         roster={roster}
         onPick={addOne}

@@ -294,6 +294,15 @@ func TestCheckedInColumnBasedDetection(t *testing.T) {
 	assert.True(t, loaded[0].CheckedIn, "Alice must be detected as checked-in from 3-column row")
 	assert.Equal(t, "Kenshikan", loaded[0].Dojo, "Dojo must not be consumed by checked_in detection")
 	assert.False(t, loaded[1].CheckedIn, "Bob must not be checked-in")
+
+	// Negative: dojo literally named "checked_in" must NOT be consumed.
+	content2 := "Carol, checked_in\n"
+	require.NoError(t, os.WriteFile(path, []byte(content2), 0600))
+	loaded2, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded2, 1)
+	assert.False(t, loaded2[0].CheckedIn, "2-column row must never trigger checked_in detection")
+	assert.Equal(t, "checked_in", loaded2[0].Dojo, "dojo named checked_in must be preserved")
 }
 
 func TestUpdateParticipant(t *testing.T) {

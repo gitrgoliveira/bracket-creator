@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -8,6 +9,9 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
+
+// ErrParticipantNotFound is returned by UpdateParticipant when the pid is not in the roster.
+var ErrParticipantNotFound = errors.New("participant not found")
 
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
@@ -189,7 +193,7 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 	}
 
 	if foundIdx == -1 {
-		return nil, fmt.Errorf("participant not found")
+		return nil, ErrParticipantNotFound
 	}
 
 	if err := transform(&players[foundIdx]); err != nil {

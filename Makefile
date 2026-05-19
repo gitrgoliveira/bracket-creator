@@ -26,7 +26,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/security js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -70,9 +70,15 @@ js/lint: ## Run Javascript linters
 	@echo "Running Javascript linters..."
 	@cd web-mobile && npm run lint
 
-js/sec: ## Run Javascript security scans
+js/sec: ## Run Javascript security scans (npm audit)
 	@echo "Running Javascript security scans..."
 	@cd web-mobile && npm audit --audit-level=high
+	@cd web && npm audit --audit-level=high
+
+js/outdated: ## Check for outdated npm packages
+	@echo "Checking for outdated npm packages..."
+	@echo "=== web-mobile ===" && cd web-mobile && npm outdated || true
+	@echo "=== web ===" && cd web && npm outdated || true
 
 js/security: js/sec ## Run all Javascript security checks
 

@@ -360,7 +360,7 @@ const API = {
         }
         return true;
     },
-    async estimateSchedule(args, password) {
+    async estimateSchedule(args, password, signal) {
         const params = new URLSearchParams();
         Object.entries(args).forEach(([k, v]) => {
             if (v !== undefined && v !== null && v !== "") {
@@ -368,7 +368,8 @@ const API = {
             }
         });
         const res = await fetch(`/api/schedule/estimate?${params.toString()}`, {
-            headers: { 'X-Tournament-Password': password }
+            headers: { 'X-Tournament-Password': password },
+            signal,
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

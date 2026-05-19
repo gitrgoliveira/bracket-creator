@@ -116,6 +116,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
       return;
     }
 
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       setEstLoading(true);
       try {
@@ -128,19 +129,19 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
           boutsPerTeamMatch: estBoutsPerTeamMatch,
           buffer: estBuffer,
           ceremonyMinutes: estCeremony
-        }, password);
-        if (estOpen) {
-          setEstResult(res);
-        }
+        }, password, controller.signal);
+        setEstResult(res);
       } catch (e) {
-        console.error("Estimation failed", e);
+        if (!controller.signal.aborted) {
+          console.error("Estimation failed", e);
+        }
       } finally {
-        if (estOpen) {
+        if (!controller.signal.aborted) {
           setEstLoading(false);
         }
       }
     }, 300);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [estOpen, estMatchDuration, estMultiplier, estCourts, estNumMatches, estTeamSize, estBoutsPerTeamMatch, estBuffer, estCeremony, password]);
 
   // T040/T041: read ?court= from the URL; useQuery re-renders on history

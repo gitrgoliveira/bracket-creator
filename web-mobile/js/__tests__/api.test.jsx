@@ -546,6 +546,91 @@ describe('API Utils', () => {
         await expect(API.resetPassword('newpw')).rejects.toThrow('Failed to reset password');
       });
     });
+
+    describe('estimateSchedule', () => {
+      it('GETs /api/schedule/estimate with required params in query string', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 120, perCourtMinutes: [120], ceremonyMinutes: 0 }),
+        });
+        await API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 2, numMatches: 10 }, 'pw');
+        const [url] = global.fetch.mock.calls[0];
+        expect(url).toMatch(/^\/api\/schedule\/estimate\?/);
+        const params = new URLSearchParams(url.split('?')[1]);
+        expect(params.get('matchDuration')).toBe('3');
+        expect(params.get('multiplier')).toBe('1.5');
+        expect(params.get('courts')).toBe('2');
+        expect(params.get('numMatches')).toBe('10');
+      });
+
+      it('filters out undefined, null, and empty-string arg values', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 60, perCourtMinutes: [60], ceremonyMinutes: 0 }),
+        });
+        await API.estimateSchedule({
+          matchDuration: 3,
+          multiplier: 1.5,
+          courts: 1,
+          teamSize: undefined,
+          boutsPerTeamMatch: null,
+          buffer: '',
+        }, 'pw');
+        const [url] = global.fetch.mock.calls[0];
+        const params = new URLSearchParams(url.split('?')[1]);
+        expect(params.has('teamSize')).toBe(false);
+        expect(params.has('boutsPerTeamMatch')).toBe(false);
+        expect(params.has('buffer')).toBe(false);
+      });
+
+      it('sends X-Tournament-Password header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 90, perCourtMinutes: [90], ceremonyMinutes: 0 }),
+        });
+        await API.estimateSchedule({ matchDuration: 5, multiplier: 1, courts: 1 }, 'secret-pw');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      });
+
+      it('forwards the AbortSignal to fetch', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 45, perCourtMinutes: [45], ceremonyMinutes: 0 }),
+        });
+        const controller = new AbortController();
+        await API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 1 }, 'pw', controller.signal);
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.signal).toBe(controller.signal);
+      });
+
+      it('returns parsed JSON on success', async () => {
+        const payload = { totalDurationMinutes: 180, perCourtMinutes: [90, 90], ceremonyMinutes: 30 };
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
+        const result = await API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 2 }, 'pw');
+        expect(result).toEqual(payload);
+      });
+
+      it('throws with server error message on non-ok response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'matchDuration must be a positive finite number' }),
+        });
+        await expect(
+          API.estimateSchedule({ matchDuration: -1, multiplier: 1.5, courts: 1 }, 'pw')
+        ).rejects.toThrow('matchDuration must be a positive finite number');
+      });
+
+      it('throws default message if json parse fails on error response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error('parse error'); },
+        });
+        await expect(
+          API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 1 }, 'pw')
+        ).rejects.toThrow('Failed to estimate schedule');
+      });
+    });
   });
 });
 

@@ -17,6 +17,12 @@ func validationErrorf(format string, args ...any) *ValidationError {
 	return &ValidationError{msg: fmt.Sprintf(format, args...)}
 }
 
+// NewValidationError creates a ValidationError with the given message.
+// Exported for use in tests outside the engine package.
+func NewValidationError(msg string) *ValidationError {
+	return &ValidationError{msg: msg}
+}
+
 // NotFoundError represents a missing resource. Handlers should return HTTP 404.
 type NotFoundError struct {
 	msg string

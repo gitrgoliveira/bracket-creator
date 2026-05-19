@@ -289,7 +289,6 @@ const API = {
         const res = await fetch(`/api/competitions/${compID}/competitors/${playerID}/reinstate`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             }
         });

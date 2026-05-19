@@ -570,29 +570,38 @@ func loserSideName(result *state.MatchResult) string {
 // be Eligible: false, and have Reinstateable: true (set by
 // kiken-injury). Voluntary kiken (Art. 31) and fusenpai statuses
 // are not reinstateable — the endpoint returns an error.
+//
+// The check-and-set runs under WithTransaction (K2/CHK047) to close
+// the TOCTOU window between reading the Reinstateable flag and writing
+// the reinstated status.
 func (e *Engine) ReinstateCompetitor(compID, playerID string) (*domain.CompetitorStatus, error) {
 	if playerID == "" {
 		return nil, validationErrorf("playerID is required")
 	}
-	statuses, err := e.store.LoadCompetitorStatus(compID)
-	if err != nil {
-		return nil, err
-	}
-	st, ok := statuses[playerID]
-	if !ok || st.Eligible {
-		return nil, validationErrorf("competitor %q is not ineligible", playerID)
-	}
-	if !st.Reinstateable {
-		return nil, validationErrorf("competitor %q is not reinstateable (voluntary kiken or fusenpai)", playerID)
-	}
-	status := domain.CompetitorStatus{
-		PlayerID:   playerID,
-		Eligible:   true,
-		MatchID:    st.MatchID,
-		RecordedAt: time.Now().UTC(),
-	}
-	if err := e.store.SetCompetitorStatus(compID, status); err != nil {
-		return nil, err
-	}
-	return &status, nil
+	var out *domain.CompetitorStatus
+	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		statuses, err := tx.LoadCompetitorStatus(compID)
+		if err != nil {
+			return err
+		}
+		st, ok := statuses[playerID]
+		if !ok || st.Eligible {
+			return validationErrorf("competitor %q is not ineligible", playerID)
+		}
+		if !st.Reinstateable {
+			return validationErrorf("competitor %q is not reinstateable (voluntary kiken or fusenpai)", playerID)
+		}
+		status := domain.CompetitorStatus{
+			PlayerID:   playerID,
+			Eligible:   true,
+			MatchID:    st.MatchID,
+			RecordedAt: time.Now().UTC(),
+		}
+		if err := tx.SetCompetitorStatus(compID, status); err != nil {
+			return err
+		}
+		out = &status
+		return nil
+	})
+	return out, err
 }

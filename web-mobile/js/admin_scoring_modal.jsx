@@ -109,6 +109,16 @@ function TermAS(props) {
   return React.createElement('span', null, props.children);
 }
 
+// GlossaryHintAS — renders a ？ icon that shows the glossary tooltip for
+// `name` on hover/tap. Placed as a sibling outside a <button> so the
+// tooltip doesn't intercept clicks on the button itself.
+function GlossaryHintAS({ name }) {
+  if (typeof window !== 'undefined' && window.GlossaryHint) {
+    return React.createElement(window.GlossaryHint, { name });
+  }
+  return null;
+}
+
 // T093–T098: shared helpers for the decision (kiken/fusenpai/fusensho) flow.
 //
 // Resolve the password to use for the /decision POST. The modal historically
@@ -825,18 +835,27 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           {!withdrawnPlayer && !decisionPromptKind && (
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
-              <button data-testid="scoring-modal-kiken-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
-                <TermAS name="kiken">Kiken</TermAS>
-              </button>
-              <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
-                <TermAS name="fusenpai">Fusenpai</TermAS>
-              </button>
+              <div className="decision-btn-group">
+                <button data-testid="scoring-modal-kiken-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken"); }} disabled={submitting || decisionSubmitting}>
+                  Kiken
+                </button>
+                <GlossaryHintAS name="kiken" />
+              </div>
+              <div className="decision-btn-group">
+                <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
+                  Fusenpai
+                </button>
+                <GlossaryHintAS name="fusenpai" />
+              </div>
               {/* Per-bout fusensho is a sub-match concept — implemented inside
                   TeamScoreEditorModal. This placeholder explains the affordance
                   to operators who open the individual-match editor. */}
-              <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
-                <TermAS name="fusensho">Fusensho</TermAS> (team only)
-              </button>
+              <div className="decision-btn-group">
+                <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
+                  Fusensho (team only)
+                </button>
+                <GlossaryHintAS name="fusensho" />
+              </div>
             </div>
           )}
           {decisionErr && (

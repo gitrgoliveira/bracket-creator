@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -287,6 +288,106 @@ func TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner(t *testing.T) {
 	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-nowinner")
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteNoChange, outcome, "DH with no winner should block auto-completion")
+}
+
+// TestDHCycleExists_NoCycle verifies that dhCycleExists returns false when
+// DH results unambiguously break all ties (A wins DH against B).
+func TestDHCycleExists_NoCycle(t *testing.T) {
+	standings := map[string][]state.PlayerStanding{
+		"Pool A": {
+			{Player: helper.Player{Name: "Alpha"}, Points: 0},
+			{Player: helper.Player{Name: "Beta"}, Points: 0},
+		},
+	}
+	matches := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Alpha", SideB: "Beta",
+			Status: state.MatchStatusCompleted, Winner: "Alpha"},
+	}
+	assert.False(t, dhCycleExists(standings, matches))
+}
+
+// TestDHCycleExists_Cycle verifies that dhCycleExists returns true for a
+// three-way cyclic result (A>B, B>C, C>A).
+func TestDHCycleExists_Cycle(t *testing.T) {
+	standings := map[string][]state.PlayerStanding{
+		"Pool A": {
+			{Player: helper.Player{Name: "Alpha"}, Points: 0},
+			{Player: helper.Player{Name: "Beta"}, Points: 0},
+			{Player: helper.Player{Name: "Gamma"}, Points: 0},
+		},
+	}
+	matches := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Alpha", SideB: "Beta", Status: state.MatchStatusCompleted, Winner: "Alpha"},
+		{ID: "Pool A-DH-1", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
+		{ID: "Pool A-DH-2", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Gamma"},
+	}
+	assert.True(t, dhCycleExists(standings, matches))
+}
+
+// TestMaybeAutoCompletePools_TeamDHCycleBlocks verifies that auto-completion
+// is blocked when DH results form a cycle and standings remain tied.
+func TestMaybeAutoCompletePools_TeamDHCycleBlocks(t *testing.T) {
+	eng, store := setupTeamPoolComp(t, "autocomplete-team-dh-cycle", true)
+
+	// Inject DH matches (3-way tie → 3 DH bouts injected).
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle")
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+
+	allMatches, err := store.LoadPoolMatches("autocomplete-team-dh-cycle")
+	require.NoError(t, err)
+
+	// Score DH matches in a cycle: first DH bout Alpha beats whoever is SideB,
+	// second DH bout Beta wins, third DH bout the remaining team wins —
+	// producing a 1-win-each cycle.
+	dhCount := 0
+	sides := [][2]string{}
+	for _, m := range allMatches {
+		if IsPoolDaihyosenMatchID(m.ID) {
+			sides = append(sides, [2]string{m.SideA, m.SideB})
+			dhCount++
+		}
+	}
+	require.Equal(t, 3, dhCount, "expected 3 DH matches for 3-way tie")
+
+	// Build a deterministic 3-way cycle from the actual team names rather
+	// than positional indices — DH match order is non-deterministic because
+	// standings are assembled from a map.  Sort all unique names, then apply
+	// the cycle names[0]>names[1], names[1]>names[2], names[2]>names[0].
+	nameSet := map[string]bool{}
+	for _, pair := range sides {
+		nameSet[pair[0]] = true
+		nameSet[pair[1]] = true
+	}
+	sortedNames := make([]string, 0, len(nameSet))
+	for n := range nameSet {
+		sortedNames = append(sortedNames, n)
+	}
+	sort.Strings(sortedNames) // deterministic: Alpha < Beta < Gamma
+	// cycle: sortedNames[0] beats [1], [1] beats [2], [2] beats [0]
+	cycleBeats := map[string]string{
+		sortedNames[0]: sortedNames[1],
+		sortedNames[1]: sortedNames[2],
+		sortedNames[2]: sortedNames[0],
+	}
+	for i := range allMatches {
+		allMatches[i].Status = state.MatchStatusCompleted
+		if IsPoolDaihyosenMatchID(allMatches[i].ID) {
+			sA, sB := allMatches[i].SideA, allMatches[i].SideB
+			if cycleBeats[sA] == sB {
+				allMatches[i].Winner = sA
+			} else {
+				allMatches[i].Winner = sB
+			}
+		}
+		// Leave regular match Winners unchanged — they were drawn (hikiwake)
+		// and must stay that way to keep the three-way tie intact.
+	}
+	require.NoError(t, store.SavePoolMatches("autocomplete-team-dh-cycle", allMatches))
+
+	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle")
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteNoChange, outcome, "cyclic DH results should block auto-completion")
 }
 
 // TestDHStandingsApplied verifies that a completed pool-DH match result is

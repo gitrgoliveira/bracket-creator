@@ -128,6 +128,25 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		}
 	}
 
+	// For team competitions where DH matches have been played: verify that
+	// the DH results actually broke all ties before transitioning.  In the
+	// rare event that DH bouts produce a cycle (A>B, B>C, C>A — only
+	// possible in a 3+ team pool with a full round-robin DH), every team in
+	// that group still has equal DH win counts and standings remain
+	// unresolved.  Per tournament practice the pool would normally be
+	// replayed; here we block auto-completion so the operator can apply
+	// manual rank overrides via the admin UI rather than seeding playoffs
+	// from an arbitrary order.
+	if isTeamComp && hasCompleteDH {
+		standings, standErr := e.CalculatePoolStandings(compID)
+		if standErr != nil {
+			return AutoCompleteNoChange, standErr
+		}
+		if dhCycleExists(standings, matches) {
+			return AutoCompleteNoChange, nil
+		}
+	}
+
 	// No ties (or ties already resolved). Transition to complete.
 	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
 		if comp == nil || (comp.Format != state.CompFormatPools && comp.Format != state.CompFormatLeague) || comp.Status != state.CompStatusPools {
@@ -156,6 +175,45 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		return AutoCompleteTransitioned, nil
 	}
 	return AutoCompleteNoChange, nil
+}
+
+// dhCycleExists reports whether any pool still has a tied group that DH
+// results did not fully resolve. This catches the cyclic case (A>B, B>C,
+// C>A) where every team ends up with the same DH win count inside the
+// group. When true, auto-completion is blocked; the operator must use
+// manual rank overrides (or physically replay the pool).
+func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult) bool {
+	for _, poolStandings := range standings {
+		for _, group := range detectPoolTies(poolStandings) {
+			groupNames := make(map[string]bool, len(group))
+			for _, s := range group {
+				groupNames[s.Player.Name] = true
+			}
+			dhWins := make(map[string]int, len(group))
+			dhPlayed := false
+			for _, m := range allMatches {
+				if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+					continue
+				}
+				if groupNames[m.SideA] && groupNames[m.SideB] {
+					dhWins[m.Winner]++
+					dhPlayed = true
+				}
+			}
+			if !dhPlayed {
+				continue
+			}
+			seen := make(map[int]bool, len(group))
+			for _, s := range group {
+				count := dhWins[s.Player.Name]
+				if seen[count] {
+					return true
+				}
+				seen[count] = true
+			}
+		}
+	}
+	return false
 }
 
 // StartCompetition runs the competition-start pipeline: validate

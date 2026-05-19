@@ -194,6 +194,7 @@ func (e *Engine) maybeLockTeamLineupsForRoundTx(tx state.StoreTx, compID string,
 // T156.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchID
+	applyHansokuIppons(result)
 
 	// Capture the prior result so we can roll back the score on
 	// AlreadyIneligibleError. lookupExistingResultTx reads directly from
@@ -247,11 +248,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 }
 
 // recordMatchResultTx is the tx-aware twin of RecordMatchResult. Used
-// by the K3 partial-write rollback inside
-// RecordMatchResultWithIneligibilityTx so the rollback also runs
-// under the same tx. The full RecordMatchResult path is NOT exposed as
-// a handler entrypoint via tx because the score handler always goes
-// through the WithIneligibility variant.
+// exclusively by the K3 partial-write rollback inside
+// RecordMatchResultWithIneligibilityTx — the prior result is restored
+// byte-for-byte, so applyHansokuIppons is intentionally skipped here.
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {

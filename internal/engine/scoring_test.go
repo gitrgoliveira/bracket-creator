@@ -680,3 +680,158 @@ func TestMaybeLockTeamLineupsForRound_TeamComp(t *testing.T) {
 	err := eng.RecordMatchResult(compID, "P1-0", result)
 	assert.NoError(t, err)
 }
+
+func TestApplyHansokuIppons(t *testing.T) {
+	t.Run("nil result is a no-op", func(t *testing.T) {
+		applyHansokuIppons(nil) // must not panic
+	})
+
+	cases := []struct {
+		name        string
+		hansokuA    int
+		hansokuB    int
+		ipponsA     []string
+		ipponsB     []string
+		wantIpponsA []string
+		wantIpponsB []string
+	}{
+		{
+			name:        "HansokuA=1 no award",
+			hansokuA:    1,
+			wantIpponsB: nil,
+		},
+		{
+			name:        "HansokuA=2 awards 1 H to IpponsB",
+			hansokuA:    2,
+			wantIpponsB: []string{"H"},
+		},
+		{
+			name:        "HansokuA=4 awards 2 H to IpponsB",
+			hansokuA:    4,
+			wantIpponsB: []string{"H", "H"},
+		},
+		{
+			name:        "HansokuA=2 with existing H — no duplicate",
+			hansokuA:    2,
+			ipponsB:     []string{"H"},
+			wantIpponsB: []string{"H"},
+		},
+		{
+			name:        "HansokuA=2 existing non-H ippons preserved",
+			hansokuA:    2,
+			ipponsB:     []string{"M"},
+			wantIpponsB: []string{"M", "H"},
+		},
+		{
+			name:        "HansokuB=2 awards 1 H to IpponsA",
+			hansokuB:    2,
+			wantIpponsA: []string{"H"},
+		},
+		{
+			name:        "HansokuB=4 awards 2 H to IpponsA",
+			hansokuB:    4,
+			wantIpponsA: []string{"H", "H"},
+		},
+		{
+			name:        "HansokuB=2 with existing H — no duplicate",
+			hansokuB:    2,
+			ipponsA:     []string{"H"},
+			wantIpponsA: []string{"H"},
+		},
+		{
+			name:        "both sides accumulate a pair simultaneously",
+			hansokuA:    2,
+			hansokuB:    2,
+			wantIpponsA: []string{"H"},
+			wantIpponsB: []string{"H"},
+		},
+		{
+			name:        "hansoku reduced from 4 to 2 strips excess H",
+			hansokuA:    2,
+			ipponsB:     []string{"M", "H", "H"},
+			wantIpponsB: []string{"M", "H"},
+		},
+		{
+			name:        "hansoku reduced to 0 strips all H entries",
+			hansokuA:    0,
+			ipponsB:     []string{"M", "H", "H"},
+			wantIpponsB: []string{"M"},
+		},
+		{
+			name:        "hansoku reduced to 1 strips interleaved H entries",
+			hansokuA:    1,
+			ipponsB:     []string{"H", "M", "H"},
+			wantIpponsB: []string{"M"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &state.MatchResult{
+				HansokuA: tc.hansokuA,
+				HansokuB: tc.hansokuB,
+				IpponsA:  tc.ipponsA,
+				IpponsB:  tc.ipponsB,
+			}
+			applyHansokuIppons(r)
+			assert.Equal(t, tc.wantIpponsA, r.IpponsA)
+			assert.Equal(t, tc.wantIpponsB, r.IpponsB)
+		})
+	}
+
+	t.Run("sub-results also get hansoku auto-award", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{HansokuA: 2, IpponsB: []string{"M"}},
+				{HansokuB: 4, IpponsA: []string{"K"}},
+			},
+		}
+		applyHansokuIppons(r)
+		assert.Equal(t, []string{"M", "H"}, r.SubResults[0].IpponsB)
+		assert.Equal(t, []string{"K", "H", "H"}, r.SubResults[1].IpponsA)
+	})
+}
+
+// TestRecordMatchResult_HansokuAutoAward verifies that saving a pool match
+// with HansokuA=2 via RecordMatchResult persists IpponsB=["H"] to the store.
+func TestRecordMatchResult_HansokuAutoAward(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	compID := "hansoku-award"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Hansoku"}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	t.Run("HansokuA=2 persists H ippon in IpponsB", func(t *testing.T) {
+		patch := &state.MatchResult{
+			Winner:   "Alice",
+			HansokuA: 2,
+			IpponsA:  []string{"M"},
+			Status:   state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, "P1-1", patch))
+
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.Equal(t, []string{"H"}, stored[0].IpponsB)
+		assert.Equal(t, []string{"M"}, stored[0].IpponsA)
+	})
+
+	t.Run("HansokuB=2 persists H ippon in IpponsA", func(t *testing.T) {
+		patch := &state.MatchResult{
+			Winner:   "Bob",
+			HansokuB: 2,
+			IpponsB:  []string{"K"},
+			Status:   state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, "P1-1", patch))
+
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.Equal(t, []string{"H"}, stored[0].IpponsA)
+		assert.Equal(t, []string{"K"}, stored[0].IpponsB)
+	})
+}

@@ -348,6 +348,77 @@ func TestGetPoolRanking_OutOfRange(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestResolveReservedSlots_LeagueSource verifies that when the source
+// competition has format "league", resolveReservedSlots resolves the
+// placeholder via GetPoolRanking (pool standings) rather than
+// GetBracketRanking. A league source has no bracket.json, so calling
+// GetBracketRanking would return an error; the test confirms the happy
+// path succeeds and the placeholder is replaced with the pool winner.
+func TestResolveReservedSlots_LeagueSource(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	// League source competition: complete, all players in one pool.
+	srcID := "league-source"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     srcID,
+		Name:   "League Source",
+		Format: state.CompFormatLeague,
+		Status: state.CompStatusComplete,
+	}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+		{Name: "Charlie", Dojo: "DojoC"},
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{
+			PoolName: "Pool A",
+			Players: []helper.Player{
+				{Name: "Alice"},
+				{Name: "Bob"},
+				{Name: "Charlie"},
+			},
+		},
+	}))
+	// Alice beats Bob and Charlie — rank 1.
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{
+			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,
+		},
+		{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Charlie",
+			Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,
+		},
+		{
+			ID: "Pool A-2", SideA: "Bob", SideB: "Charlie",
+			Winner: "Bob", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,
+		},
+	}))
+
+	// Target competition with one reserved slot pointing at rank 1 of the league source.
+	targetID := "league-target"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: targetID, Name: "Target"}))
+	players := []domain.Player{
+		{ID: "placeholder-1", Name: "Reserved: league-source rank 1", Tag: "reserved"},
+		{ID: "real-1", Name: "Dave", Dojo: "DojoD"},
+	}
+	require.NoError(t, store.SaveReservedSlots(targetID, []state.ReservedSlot{
+		{ParticipantID: "placeholder-1", SourceCompID: srcID, SourceRank: 1},
+	}))
+
+	resolved, mutated, err := eng.resolveReservedSlots(targetID, players)
+	require.NoError(t, err)
+	assert.True(t, mutated)
+	require.Len(t, resolved, 2)
+
+	// Placeholder should now hold Alice's name (pool ranking doesn't
+	// re-resolve full participant data, so Dojo is not checked here).
+	assert.Equal(t, "Alice", resolved[0].Name)
+	assert.Equal(t, "", resolved[0].Tag, "resolved placeholder must not retain 'reserved' tag")
+	assert.Equal(t, "Dave", resolved[1].Name)
+}
+
 // TestCalculatePoolStandings_TeamSubDraw covers the sub.Winner=="" branch in
 // computeStandings (lines 341-343). In a best-of-3 team kendo match each
 // position fights individually; a position where both fighters score 2 ippons

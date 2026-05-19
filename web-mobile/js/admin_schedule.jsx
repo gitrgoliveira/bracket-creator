@@ -118,7 +118,8 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
     // Guard: required params must be valid numbers > 0 to avoid 400s
     if (!Number.isFinite(estMatchDuration) || estMatchDuration <= 0 ||
         !Number.isFinite(estMultiplier) || estMultiplier <= 0 ||
-        !Number.isFinite(estCourts) || estCourts <= 0) {
+        !Number.isFinite(estCourts) || estCourts <= 0 ||
+        !Number.isFinite(estNumMatches) || estNumMatches <= 0) {
       setEstResult(null);
       return;
     }
@@ -438,6 +439,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
                     value={Number.isFinite(estBuffer) ? estBuffer : ""}
                     min="0"
                     max="100"
+                    step="1"
                     onChange={e => {
                       const val = e.target.value;
                       setEstBuffer(val === "" ? NaN : +val);
@@ -445,12 +447,13 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
                   />
                 </div>
                 <div className="form-group">
-                  <label className="label">Ceremony min</label>
+                  <label className="label">Ceremony (min)</label>
                   <input
                     type="number"
                     className="input"
                     value={Number.isFinite(estCeremony) ? estCeremony : ""}
                     min="0"
+                    step="1"
                     onChange={e => {
                       const val = e.target.value;
                       setEstCeremony(val === "" ? NaN : +val);

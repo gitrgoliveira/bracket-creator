@@ -812,14 +812,14 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               {/* When a tag filter is active, reorder controls would operate on */}
               {/* full-list indices but rows are filtered — so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
-              {tagFilter && (
+              {(tagFilter || showOnlyUnchecked) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
-                  Reordering disabled while filtered by tag. Clear the filter to drag rows or use the arrows.
+                  Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
                 </div>
               )}
               {visiblePlayers.map((p) => {
                 const i = players.indexOf(p);
-                const reorderDisabled = !!tagFilter;
+                const reorderDisabled = !!tagFilter || showOnlyUnchecked;
                 return (
                   <div
                     key={p.id}

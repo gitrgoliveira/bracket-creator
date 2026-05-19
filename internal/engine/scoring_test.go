@@ -918,6 +918,8 @@ func TestHansokuCarriesIntoEncho(t *testing.T) {
 			applyHansokuIppons(r)
 			assert.Equal(t, tc.wantIpponsA, r.IpponsA)
 			assert.Equal(t, tc.wantIpponsB, r.IpponsB)
+			assert.Equal(t, tc.hansokuA, r.HansokuA)
+			assert.Equal(t, tc.hansokuB, r.HansokuB)
 			// Encho metadata must not be mutated by hansoku processing.
 			assert.Equal(t, tc.encho, r.Encho)
 		})

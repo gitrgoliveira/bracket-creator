@@ -346,5 +346,5 @@ func TestUpdateParticipant(t *testing.T) {
 	_, err = store.UpdateParticipant(compID, "nonexistent-id", false, func(p *domain.Player) error {
 		return nil
 	})
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrParticipantNotFound)
 }

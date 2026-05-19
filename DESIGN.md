@@ -4,6 +4,25 @@ Design system reference for the bracket-creator web frontends.
 
 Use this doc when adding UI, naming a new class, picking a color, or reviewing a screen for consistency. It is the source of truth for the visual language; the CSS file is the source of truth for exact values.
 
+## Contents
+
+1. [Surfaces](#1-surfaces) — what frontends ship in this repo
+2. [Principles](#2-principles) — six rules that shape every decision
+3. [Design tokens](#3-design-tokens) — colors, typography, spacing, radius, shadows, motion, breakpoints, z-index
+4. [Components](#4-components) — buttons, cards, badges, modals, match cards, pools, score input, …
+5. [Patterns](#5-patterns) — page shell, admin workspace, viewer shell, live signal
+6. [Accessibility](#6-accessibility)
+7. [Frontend conventions](#7-frontend-conventions) — naming, JSX→surface map, Preact primitives, build pipeline
+8. [Bracket generator (`web/`)](#8-bracket-generator-web) — legacy form-only surface
+9. [Adding to the system](#9-adding-to-the-system) — **start here** when introducing new patterns
+
+**Quick start by goal:**
+- *Picking a color* → §3
+- *Naming a class or finding the right component* → §4 (component index, then drill in)
+- *Adding a new component or pattern* → §9 first, then §4 for the closest existing example
+- *Touching the live-tournament UI* → §4 Match cards, then §5 Live signal
+- *Writing an admin screen* → §7 JSX→surface map, then §4 component index
+
 ## 1. Surfaces
 
 The repo ships two frontends, both embedded into the Go binary at build time:
@@ -15,10 +34,12 @@ The repo ships two frontends, both embedded into the Go binary at build time:
 
 When extending the design system, **mobile-app is the canonical surface**. The bracket generator is a form; keep it functional and visually simple, don't import mobile-app patterns.
 
+> Adding a new component, color, or pattern? Read [§9 Adding to the system](#9-adding-to-the-system) first — it's a 6-step checklist that prevents most consistency drift.
+
 ## 2. Principles
 
 1. **Clarity over decoration.** Operators run tournaments under time pressure; a glanceable card beats a beautiful one. No gratuitous animation, no decorative shadows.
-2. **Kendo first.** In the **web bracket card**, side A (Aka/Red) renders first/top and side B (Shiro/White) follows — see `PlayerLine` in [bracket.jsx#L96](web-mobile/js/bracket.jsx#L96). The **Excel** layout is the inverse: White is the left column, Red the right ([CLAUDE.md](CLAUDE.md) "Match Colors"). Both orderings are fixed; don't swap either.
+2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; Excel puts White in the left column. See [§4 Match cards](#match-cards--bc-match) and [CLAUDE.md](CLAUDE.md) "Match Colors" for the full rule.
 3. **Live state is loud.** Anything currently happening on a court gets the red treatment (`--red` border, soft red ring, pulsing dot). Anything else stays neutral. Don't dilute the signal.
 4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)` — see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
 5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → playoffs → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
@@ -61,11 +82,11 @@ All tokens are defined in [styles.css#L3-L31](web-mobile/css/styles.css#L3). Ref
 
 ### Typography
 
-```
---font          system UI (Apple → Segoe → Roboto fallback)
---font-mono     SFMono-Regular → Menlo → Consolas
---font-display  SF Pro Display (used sparingly on hero titles)
-```
+| Token | Stack |
+|---|---|
+| `--font` | System UI: Apple → Segoe → Roboto fallback |
+| `--font-mono` | SFMono-Regular → Menlo → Consolas |
+| `--font-display` | SF Pro Display (hero titles only) |
 
 Base: 15px / 1.4. Use the scale below — don't introduce in-between sizes.
 
@@ -87,22 +108,22 @@ There is no formal scale — use 4 / 6 / 8 / 10 / 12 / 14 / 16 / 20 / 24 / 32 px
 
 ### Radius
 
-```
---r-sm  6px    small buttons, badges
---r     10px   match cards, pool wrappers, modals
---r-lg  14px   tournament cards, large cards, full modals
-999px          pills, chips, the live dot
-```
+| Token | Value | Use |
+|---|---|---|
+| `--r-sm` | 6px | Small buttons, badges |
+| `--r` | 10px | Match cards, pool wrappers, modals |
+| `--r-lg` | 14px | Tournament cards, large cards, full modals |
+| (literal) | 999px | Pills, chips, the live dot |
 
 ### Shadows
 
 Three levels only:
 
-```
---shadow-sm   subtle (pressed-tab indication, mode-tabs)
---shadow      card-on-hover, toast
---shadow-lg   modal
-```
+| Token | Use |
+|---|---|
+| `--shadow-sm` | Subtle (pressed-tab indication, mode-tabs) |
+| `--shadow` | Card-on-hover, toast |
+| `--shadow-lg` | Modal |
 
 Never combine shadow with a solid border on the same side — pick one elevation language per component.
 
@@ -153,6 +174,30 @@ If a new overlay doesn't fit one of these, lift the layer for the entire band ra
 
 Each component lives in `web-mobile/css/styles.css` and is composed in [web-mobile/js/](web-mobile/js/) via Preact's `React.createElement` (after esbuild). Class naming is loosely BEM with `--` for variants and `is-active` / `.is-` for boolean states.
 
+### Index
+
+Quick lookup — scan, then `Ctrl+F` the class name to jump to its subsection.
+
+| Component | Class | Use |
+|---|---|---|
+| Buttons | `.btn` + variants | All CTAs and inline actions |
+| Cards | `.card`, `.tcard` | Generic + tournament-list containers |
+| Form fields | `.field`, `.input` | Labeled inputs (debounced via `StableInput` when in SSE trees) |
+| Tables | `.table`, `.pool__table` | Generic + pool tabular data |
+| Badges | `.badge--{status}` | Status pills (setup / pools / playoffs / completed / archive) |
+| Match cards | `.bc-match` | Bracket-tree card with two sides (Aka top / Shiro bottom) |
+| Pools | `.pool`, `.pools-grid` | Pool standings + matchups |
+| Modals | `.modal-backdrop`, `.modal` | Overlay dialogs (always wire `useEscapeToClose`) |
+| Toasts | `.toast` | Auto-dismissing notifications (single-slot, no stacking) |
+| Mode tabs | `.mode-tabs` | Pill-group tab switcher |
+| Viewer head & tabs | `.viewer__head`, `.viewer__tabs` | Sticky viewer chrome |
+| Score input | `.score-card`, `.score-pt` | Operator ippon entry widget |
+| Live strip chip | `.live-strip__chip` | Court chips in the live banner |
+| Tournament-card add | `.tcard--add` | Dashed "create tournament" tile |
+| Schedule rows | `.sched-row` (admin), `.vsched-item` (viewer) | Schedule list items |
+| Podium | `.podium-step--{1,2,3}` | Final-standings podium |
+| "My Match" hero | `.my-match` | Player-viewer hero card |
+
 ### Buttons — `.btn`
 
 [styles.css#L325](web-mobile/css/styles.css#L325)
@@ -200,6 +245,24 @@ State modifiers (applied unconditionally in JSX): `bc-match--live` and `bc-match
 Side composition (via `PlayerLine` in [bracket.jsx#L96](web-mobile/js/bracket.jsx#L96)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Winner side gets `bc-side--winner` plus a fill swap to `--red` (Aka) or `--accent` (Shiro). **Never swap side order based on seeding** — the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
 
 Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-live` (red, 700-weight "● LIVE"), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, inline `--accent`), `.bc-encho` ((E), inline `--accent`).
+
+#### Match-decision visual suffixes
+
+Decision types ([CLAUDE.md](CLAUDE.md) "Match Decision Types") map to short tags rendered inside `.bc-match-meta`. Source: [bracket.jsx#L149-L160](web-mobile/js/bracket.jsx#L149).
+
+| Decision | Tag | Class | Color |
+|---|---|---|---|
+| `hikiwake` | `△` | `.bc-draw` | `--ink-3` |
+| `hantei` | `H` | `.bc-draw` | `--ink-3` |
+| `kiken` | `Kiken` | `.bc-decision-chip` (inline style) | `--accent` |
+| `fusenpai` | `Fus.` | `.bc-decision-chip` (inline style) | `--accent` |
+| `daihyosen` | `DH` | `.bc-decision-chip` (inline style) | `--accent` |
+| Encho (overtime) | `(E)` | `.bc-encho` (inline style) | `--accent` |
+| `kachinuki-exhaustion` | rendered via score-line suffix only | — | inherits |
+
+Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for liveness, not outcome.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
+
+Note: the `kiken/fusenpai/daihyosen` chips currently apply their visual styling inline rather than via the `.bc-decision-chip` class — the class is a stable hook but the color/size live on the JSX element. If you consolidate that into CSS, keep the class name.
 
 ### Pools — `.pool`, `.pools-grid`
 
@@ -275,23 +338,7 @@ When any match is live, three things must be true simultaneously:
 
 If only one or two surface the signal, it's a bug.
 
-### Match-decision visual suffixes
-
-Decision types ([CLAUDE.md](CLAUDE.md) — "Match Decision Types") map to short tags rendered inside `.bc-match-meta`. Source: [bracket.jsx#L149-L160](web-mobile/js/bracket.jsx#L149).
-
-| Decision | Tag | Class | Color |
-|---|---|---|---|
-| `hikiwake` | `△` | `.bc-draw` | `--ink-3` |
-| `hantei` | `H` | `.bc-draw` | `--ink-3` |
-| `kiken` | `Kiken` | `.bc-decision-chip` (inline style) | `--accent` |
-| `fusenpai` | `Fus.` | `.bc-decision-chip` (inline style) | `--accent` |
-| `daihyosen` | `DH` | `.bc-decision-chip` (inline style) | `--accent` |
-| Encho (overtime) | `(E)` | `.bc-encho` (inline style) | `--accent` |
-| `kachinuki-exhaustion` | rendered via score-line suffix only | — | inherits |
-
-Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for liveness, not outcome.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
-
-Note: the `kiken/fusenpai/daihyosen` chips currently apply their visual styling inline rather than via the `.bc-decision-chip` class — the class is a stable hook but the color/size live on the JSX element. If you consolidate that into CSS, keep the class name.
+Match-decision visual suffixes are documented in [§4 Match cards](#match-cards--bc-match).
 
 ## 6. Accessibility
 

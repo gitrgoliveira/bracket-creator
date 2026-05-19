@@ -56,6 +56,7 @@ specs/*/*
 .agent*
 .playwright-mcp
 .claude/skills/speckit-*
+.claude/worktrees/*
 
 # Beads / Dolt files (added by bd init)
 .dolt/
@@ -69,4 +70,4 @@ bracket-creator-webapp*
 .github/prompts
 .gemini*
 # bd worktree
-bracket-creator-*
+bracket-creator-*/*

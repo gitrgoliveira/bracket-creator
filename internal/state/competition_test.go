@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -280,6 +281,37 @@ func TestNaginataFieldPersists(t *testing.T) {
 		data, err := writeFrontMatter(&original)
 		require.NoError(t, err)
 		assert.NotContains(t, string(data), "naginata", "omitempty: naginata=false must not appear in YAML")
+	})
+}
+
+// TestNaginataJSONAlwaysPresent verifies that the Naginata field uses
+// json:"naginata" WITHOUT omitempty so false is always serialised in
+// JSON API responses. This is intentionally asymmetric with the YAML tag
+// (which keeps omitempty so Kendo config.md files stay clean). The JSON
+// no-omitempty prevents stale client state: the admin UI merges PUT
+// responses via { ...c, ...updated }, so if the server omits naginata
+// when false, toggling back to Kendo leaves a stale naginata:true in the
+// client until a full page reload.
+func TestNaginataJSONAlwaysPresent(t *testing.T) {
+	t.Run("naginata false serialises to json:false (not omitted)", func(t *testing.T) {
+		c := Competition{ID: "kendo", Name: "Kendo Comp", Naginata: false}
+		data, err := json.Marshal(&c)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"naginata":false`, "json tag must NOT have omitempty: false must appear explicitly")
+	})
+
+	t.Run("naginata true serialises to json:true", func(t *testing.T) {
+		c := Competition{ID: "naginata", Name: "Naginata Comp", Naginata: true}
+		data, err := json.Marshal(&c)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"naginata":true`)
+	})
+
+	t.Run("yaml false still omitted (omitempty on YAML tag)", func(t *testing.T) {
+		c := Competition{ID: "kendo", Name: "Kendo Comp", Naginata: false}
+		data, err := writeFrontMatter(&c)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "naginata", "YAML tag keeps omitempty: false must not appear in config.md")
 	})
 }
 

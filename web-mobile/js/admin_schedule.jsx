@@ -139,11 +139,15 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
           buffer: estBuffer,
           ceremonyMinutes: estCeremony
         }, password);
-        setEstResult(res);
+        if (estOpen) {
+          setEstResult(res);
+        }
       } catch (e) {
         console.error("Estimation failed", e);
       } finally {
-        setEstLoading(false);
+        if (estOpen) {
+          setEstLoading(false);
+        }
       }
     }, 300);
     return () => clearTimeout(timer);
@@ -351,6 +355,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
                     value={Number.isFinite(estMatchDuration) ? estMatchDuration : ""}
                     min="1"
                     max="60"
+                    step="1"
                     onChange={e => {
                       const val = e.target.value;
                       setEstMatchDuration(val === "" ? NaN : +val);

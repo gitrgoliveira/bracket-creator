@@ -134,6 +134,8 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 			return err
 		}
 	}
+	// Side-effect writes are non-fatal: the match score is already on disk,
+	// so propagating would cause a 500 retry that double-records the score.
 	if _, err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 	}

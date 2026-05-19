@@ -261,7 +261,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 	t.Run("ignored for playoffs-format competitions", func(t *testing.T) {
 		koID := "auto-complete-ko"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: koID, Name: "KO", Format: state.CompFormatPlayoffs, Status: state.CompStatusPlayoffs,
+			ID: koID, Name: "KO", Format: "playoffs", Status: state.CompStatusPlayoffs,
 		}))
 		require.NoError(t, store.SavePoolMatches(koID, []state.MatchResult{
 			{ID: "M1", Status: state.MatchStatusCompleted, Winner: "X", SideA: "X", SideB: "Y"},
@@ -966,4 +966,128 @@ func TestHansokuCarriesIntoEncho(t *testing.T) {
 		require.True(t, r.Encho == encho1, "Encho pointer identity must be preserved")
 		assert.Equal(t, enchoSnap, *r.Encho, "Encho fields must not be mutated")
 	})
+}
+
+// TestDeriveDaihyosenWinner covers the helper that auto-fills result.Winner
+// from a completed daihyosen sub-result (Position=-1) when the operator has
+// not explicitly set the bracket match winner.
+func TestDeriveDaihyosenWinner(t *testing.T) {
+	t.Run("winner already set — no change", func(t *testing.T) {
+		r := &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			SubResults: []state.SubMatchResult{
+				{Position: -1, SideA: "PlayerA1", SideB: "PlayerB1", Winner: "PlayerA1"},
+			},
+		}
+		deriveDaihyosenWinner(r)
+		assert.Equal(t, "TeamA", r.Winner)
+	})
+
+	t.Run("sub-result winner is representative player name (SideA side)", func(t *testing.T) {
+		r := &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "P-A1", SideB: "P-B1", Winner: "P-A1"}, // regular bout
+				{Position: -1, SideA: "P-A2", SideB: "P-B2", Winner: "P-A2"}, // daihyosen
+			},
+		}
+		deriveDaihyosenWinner(r)
+		assert.Equal(t, "TeamA", r.Winner)
+	})
+
+	t.Run("sub-result winner is representative player name (SideB side)", func(t *testing.T) {
+		r := &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB",
+			SubResults: []state.SubMatchResult{
+				{Position: -1, SideA: "P-A1", SideB: "P-B1", Winner: "P-B1"},
+			},
+		}
+		deriveDaihyosenWinner(r)
+		assert.Equal(t, "TeamB", r.Winner)
+	})
+
+	t.Run("sub-result winner is team name directly", func(t *testing.T) {
+		r := &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB",
+			SubResults: []state.SubMatchResult{
+				{Position: -1, SideA: "P-A1", SideB: "P-B1", Winner: "TeamB"},
+			},
+		}
+		deriveDaihyosenWinner(r)
+		assert.Equal(t, "TeamB", r.Winner)
+	})
+
+	t.Run("daihyosen sub-result has no winner yet — no change", func(t *testing.T) {
+		r := &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB",
+			SubResults: []state.SubMatchResult{
+				{Position: -1, SideA: "P-A1", SideB: "P-B1", Winner: ""},
+			},
+		}
+		deriveDaihyosenWinner(r)
+		assert.Equal(t, "", r.Winner)
+	})
+
+	t.Run("no daihyosen sub-result — no change", func(t *testing.T) {
+		r := &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "P-A1", SideB: "P-B1", Winner: "P-A1"},
+			},
+		}
+		deriveDaihyosenWinner(r)
+		assert.Equal(t, "", r.Winner)
+	})
+
+	t.Run("nil result — no panic", func(t *testing.T) {
+		deriveDaihyosenWinner(nil)
+	})
+}
+
+// TestRecordBracketMatchResult_DaihyosenWinnerDerived verifies the end-to-end
+// path: when a bracket team match is scored with a daihyosen sub-result but
+// no explicit Winner, the engine derives the bracket match winner and
+// propagates it to the next round.
+func TestRecordBracketMatchResult_DaihyosenWinnerDerived(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "dh-bracket-winner"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "DH Bracket", Format: "playoffs",
+		Status: state.CompStatusPlayoffs, TeamSize: 3,
+	}))
+
+	// Two-round bracket: r0m0 feeds winner into r1m0.
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "r0m0", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusScheduled},
+			},
+			{
+				{ID: "r1m0", SideA: "", SideB: "TeamC", Status: state.MatchStatusScheduled},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, bracket))
+
+	// Score r0m0 with a daihyosen sub-result — Winner field intentionally blank.
+	result := &state.MatchResult{
+		ID:     "r0m0",
+		SideA:  "TeamA",
+		SideB:  "TeamB",
+		Status: state.MatchStatusCompleted,
+		// No top-level Winner — engine must derive it from the daihyosen sub-result.
+		SubResults: []state.SubMatchResult{
+			{Position: -1, SideA: "PlayerA", SideB: "PlayerB", Winner: "PlayerB",
+				Decision: "daihyosen"},
+		},
+	}
+
+	_, err := eng.RecordMatchResultWithIneligibility(compID, "r0m0", result)
+	require.NoError(t, err)
+
+	saved, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "TeamB", saved.Rounds[0][0].Winner, "r0m0 winner must be TeamB")
+	assert.Equal(t, "TeamB", saved.Rounds[1][0].SideA, "TeamB must propagate to next round")
 }

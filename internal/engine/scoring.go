@@ -101,6 +101,34 @@ func applyHansokuIppons(result *state.MatchResult) {
 	}
 }
 
+// deriveDaihyosenWinner fills result.Winner from a completed daihyosen
+// sub-result (Position == -1) when the caller has not set it explicitly.
+// Playoff team matches end in daihyosen when IV and PW are tied; the
+// operator scores a single representative bout whose winner becomes the
+// team match winner. The sub-result Winner may be the representative
+// player's name or the team name; this function maps it back to the
+// canonical team name (result.SideA / result.SideB) using the same
+// side-matching logic as computeStandings.
+func deriveDaihyosenWinner(result *state.MatchResult) {
+	if result == nil || result.Winner != "" {
+		return
+	}
+	for _, sub := range result.SubResults {
+		if sub.Position != -1 || sub.Winner == "" {
+			continue
+		}
+		sideAWin := sub.Winner == result.SideA || sub.Winner == sub.SideA
+		sideBWin := sub.Winner == result.SideB || sub.Winner == sub.SideB
+		switch {
+		case sideAWin:
+			result.Winner = result.SideA
+		case sideBWin:
+			result.Winner = result.SideB
+		}
+		return
+	}
+}
+
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	applyHansokuIppons(result)
@@ -158,6 +186,7 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchId
 	applyHansokuIppons(result)
+	deriveDaihyosenWinner(result)
 
 	// T105/CHK047: capture the prior result so we can rollback if the atomic
 	// ineligibility write below fails with AlreadyIneligibleError.

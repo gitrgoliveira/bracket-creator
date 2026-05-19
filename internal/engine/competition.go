@@ -80,7 +80,9 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 				hasCompleteTB = true
 			}
 		case IsPoolDaihyosenMatchID(m.ID):
-			if m.Status != state.MatchStatusCompleted {
+			// A DH match without a winner (e.g. hikiwake) leaves standings
+			// still tied, so it must not count as resolved.
+			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
 				hasIncompleteDH = true
 			} else {
 				hasCompleteDH = true
@@ -138,6 +140,9 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		}
 		for _, m := range freshMatches {
 			if m.Status != state.MatchStatusCompleted {
+				return nil, nil
+			}
+			if IsPoolDaihyosenMatchID(m.ID) && m.Winner == "" {
 				return nil, nil
 			}
 		}

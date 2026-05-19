@@ -264,6 +264,31 @@ func TestMaybeAutoCompletePools_TeamDHCompleteTransitions(t *testing.T) {
 	assert.Equal(t, AutoCompleteTransitioned, outcome)
 }
 
+// TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner verifies that a DH
+// match saved as completed but with no winner (e.g. hikiwake) does not allow
+// the competition to transition — standings would remain tied.
+func TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner(t *testing.T) {
+	eng, store := setupTeamPoolComp(t, "autocomplete-team-dh-nowinner", true)
+
+	// Inject DH.
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-nowinner")
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+
+	// Mark all matches completed but leave DH winner empty (hikiwake).
+	allMatches, err := store.LoadPoolMatches("autocomplete-team-dh-nowinner")
+	require.NoError(t, err)
+	for i := range allMatches {
+		allMatches[i].Status = state.MatchStatusCompleted
+		// Deliberately do NOT set Winner on DH matches.
+	}
+	require.NoError(t, store.SavePoolMatches("autocomplete-team-dh-nowinner", allMatches))
+
+	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-nowinner")
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteNoChange, outcome, "DH with no winner should block auto-completion")
+}
+
 // TestDHStandingsApplied verifies that a completed pool-DH match result is
 // applied as a secondary sort to break a tie in team pool standings.
 func TestDHStandingsApplied(t *testing.T) {

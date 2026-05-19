@@ -128,7 +128,7 @@ function RankInput({ initial, className, onCommit, style }) {
   );
 }
 
-function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
+function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const resetOverrides = async () => {
     if (!confirm("Are you sure you want to reset ALL manual overrides (ranks and winners) for this competition?")) return;
     try {
@@ -228,7 +228,7 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
               for this pool (all regular matches complete but teams still tied). */}
           {(() => {
             const poolPrefix = selectedPool.poolName + '-';
-            const dhMatches = (c.poolMatches || []).filter(m =>
+            const dhMatches = (poolMatches || []).filter(m =>
               isPoolDaihyosenID(m.id || "") && (m.id || "").startsWith(poolPrefix)
             );
             if (dhMatches.length === 0) return null;

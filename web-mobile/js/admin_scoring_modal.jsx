@@ -698,7 +698,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   //   ←/→              → previous / next match (skipped inside text-entry elements)
   //   Enter            → finish (or finish + start next when available)
   //   Esc              → close the modal (respects dirty-state confirm)
-  // Scoring shortcuts (Enter/M/K/D/T/H/X) are skipped when any interactive
+  // Scoring shortcuts (Enter/M/K/D/T/[S/]H/X) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
   kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata };

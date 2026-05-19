@@ -912,8 +912,8 @@ describe('getValidPointKeys', () => {
     expect(getValidPointKeys(true)).toBe("MKDTSH");
   });
 
-  it('all button labels from getIpponButtons match a key in getValidPointKeys (excluding H=hansoku)', () => {
-    // H is a valid key but also the Hansoku button — include it in the check.
+  it('all button labels from getIpponButtons (including H) match a key in getValidPointKeys', () => {
+    // H is a valid scoring key (Hansoku transfers a point) and IS a button —
     const kendoKeys = getValidPointKeys(false);
     getIpponButtons(false).forEach(btn => {
       expect(kendoKeys).toContain(btn);

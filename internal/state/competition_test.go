@@ -255,12 +255,12 @@ func TestNaginataFieldPersists(t *testing.T) {
 			Name:     "Naginata Test",
 			Naginata: true,
 		}
-		data, err := yaml.Marshal(&original)
+		data, err := writeFrontMatter(&original)
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "naginata: true", "YAML must contain naginata: true")
 
 		var loaded Competition
-		require.NoError(t, yaml.Unmarshal(data, &loaded))
+		require.NoError(t, parseFrontMatter(data, &loaded))
 		assert.True(t, loaded.Naginata, "Naginata should round-trip to true")
 	})
 

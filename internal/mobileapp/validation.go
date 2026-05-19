@@ -266,7 +266,7 @@ func (r *ScoreRequest) Validate() error {
 // rules. Splitting it out keeps Validate() at a glance.
 func (r *ScoreRequest) validateDecision() error {
 	switch r.Decision {
-	case "", "fought", "hikiwake", "kiken", "fusenpai", "fusensho", "daihyosen", "kachinuki-exhaustion":
+	case "", "fought", "hikiwake", "kiken", "kiken-voluntary", "kiken-injury", "fusenpai", "fusensho", "daihyosen", "kachinuki-exhaustion":
 		// ok
 	default:
 		return &ValidationError{
@@ -281,7 +281,7 @@ func (r *ScoreRequest) validateDecision() error {
 		}
 	}
 	switch r.Decision {
-	case "kiken":
+	case "kiken", "kiken-voluntary", "kiken-injury":
 		if r.DecisionBy == "" {
 			return &ValidationError{Field: "decisionBy", Message: "required when decision is kiken"}
 		}

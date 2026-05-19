@@ -155,7 +155,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
             the meta row, so the bare ippon count there loses the decision.
             A chip in the meta keeps the operator and viewers oriented when
             scanning a wall of bracket cards. */}
-        {match.decision === "kiken" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="kiken">Kiken</TermBC></span> : null}
+        {(match.decision === "kiken" || match.decision === "kiken-voluntary" || match.decision === "kiken-injury") ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="kiken">Kiken</TermBC></span> : null}
         {match.decision === "fusenpai" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="fusenpai">Fus.</TermBC></span> : null}
         {match.decision === "daihyosen" ? <span className="bc-decision-chip" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)" }}><TermBC name="daihyosen">DH</TermBC></span> : null}
       </div>

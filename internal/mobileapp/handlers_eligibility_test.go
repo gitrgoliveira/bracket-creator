@@ -235,7 +235,7 @@ func TestReinstateHandler(t *testing.T) {
 	})
 
 	t.Run("engine validation error returns 409", func(t *testing.T) {
-		eng := &stubEligibilityEngine{Err: engine.NewValidationError("not reinstateable")}
+		eng := &stubEligibilityEngine{Err: &engine.ValidationError{Msg: "not reinstateable"}}
 		r, store := setupReinstateTestRouter(t, eng)
 		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: pw}))
 		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))

@@ -8,30 +8,24 @@ import (
 // ValidationError represents a client-caused precondition or input failure.
 // Handlers should return HTTP 400 for these.
 type ValidationError struct {
-	msg string
+	Msg string
 }
 
-func (e *ValidationError) Error() string { return e.msg }
+func (e *ValidationError) Error() string { return e.Msg }
 
 func validationErrorf(format string, args ...any) *ValidationError {
-	return &ValidationError{msg: fmt.Sprintf(format, args...)}
-}
-
-// NewValidationError creates a ValidationError with the given message.
-// Exported for use in tests outside the engine package.
-func NewValidationError(msg string) *ValidationError {
-	return &ValidationError{msg: msg}
+	return &ValidationError{Msg: fmt.Sprintf(format, args...)}
 }
 
 // NotFoundError represents a missing resource. Handlers should return HTTP 404.
 type NotFoundError struct {
-	msg string
+	Msg string
 }
 
-func (e *NotFoundError) Error() string { return e.msg }
+func (e *NotFoundError) Error() string { return e.Msg }
 
 func notFoundErrorf(format string, args ...any) *NotFoundError {
-	return &NotFoundError{msg: fmt.Sprintf(format, args...)}
+	return &NotFoundError{Msg: fmt.Sprintf(format, args...)}
 }
 
 // ErrDecisionLocked is returned when a decision-overwrite (kiken-undo

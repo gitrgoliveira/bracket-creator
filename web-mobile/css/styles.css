@@ -9,9 +9,11 @@
   --white-side: #f6f7fb;
 
   --ink: #1a1d24;
+  --ink-1: #111827; /* AAA-grade text, ~18:1 on white — use for critical numerals, glossary */
   --ink-2: #3a414e;
   --ink-3: #6b7280;
   --ink-4: #6c7480; /* 4.7:1 on white — was #9aa1ac (2.8:1) */
+  --ink-5: #f1f3f6; /* inverse text/border — use only on dark (--ink / --ink-1) backgrounds */
   --line: #e4e6eb;
   --line-2: #eef0f4;
   --bg: #f7f8fa;
@@ -858,6 +860,10 @@ a:hover {
 .bc-match--live {
   border-color: var(--red);
   box-shadow: 0 0 0 3px var(--red-soft);
+}
+
+.bc-match--done {
+  opacity: 0.75;
 }
 
 .bc-match-meta {
@@ -1713,7 +1719,7 @@ a:hover {
 }
 
 .my-match__name {
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -2999,7 +3005,7 @@ a:hover {
 
 .sb-draw-toggle:hover {
   border-color: var(--ink-4);
-  color: var(--ink-5);
+  color: var(--ink-2);
 }
 
 .sb-draw-toggle--active {
@@ -3710,6 +3716,14 @@ a:hover {
   margin-left: auto;
 }
 
+/* Decision outcome chips and encho marker in bracket meta row */
+.bc-decision-chip,
+.bc-encho {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
 /* ---------- Multi-day schedule tabs ---------- */
 .day-tabs {
   display: flex;
@@ -3782,7 +3796,7 @@ a:hover {
   font-size: 14px;
   font-weight: 600;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  z-index: 10000;
+  z-index: 500;
   pointer-events: none;
   animation: toast-in 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
@@ -5017,5 +5031,14 @@ a:hover {
 /* In compact mode the wrapper is layout-transparent — flow normally. */
 .editor-modal--compact .team-bouts-scroll {
   display: contents;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot--live,
+  .spinner,
+  .toast,
+  .decision-prompt {
+    animation: none;
+  }
 }
 

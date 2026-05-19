@@ -60,17 +60,17 @@ All tokens are defined in [styles.css#L3-L31](web-mobile/css/styles.css#L3). Ref
 | `--red-soft` | `#fde7e8` | Live-strip background, `bc-match--live` ring |
 | `--white-side` | `#f6f7fb` | Shiro (White) side background — **not** pure white, to keep both sides visually weighted |
 | `--ink` | `#1a1d24` | Body text |
+| `--ink-1` | `#111827` | **AAA-grade text (~18:1 on white)** — tournament-critical numerals, glossary terms, score displays. Use when `--ink` isn't dark enough. |
 | `--ink-2` | `#3a414e` | Secondary text, labels |
 | `--ink-3` | `#6b7280` | Tertiary text (meta, hints) |
-| `--ink-4` | `#6c7480` | **Contrast floor for fine print** — picked to hold **4.7:1 on white (WCAG AA)**. Do not lighten. AA only — there is no AAA-grade ink token yet. |
+| `--ink-4` | `#6c7480` | **Contrast floor for fine print** — holds **4.7:1 on white (WCAG AA)**. Do not lighten. |
+| `--ink-5` | `#f1f3f6` | **Inverse text/border** — use only on dark (`--ink` / `--ink-1`) backgrounds (e.g. `.sb-draw-toggle--active`). Never use on `--surface` or `--bg`. |
 | `--line` | `#e4e6eb` | Default borders, dividers |
 | `--line-2` | `#eef0f4` | Subtle dividers, alt rows, hover backgrounds |
 | `--bg` | `#f7f8fa` | Page background |
 | `--surface` | `#ffffff` | Cards, modals, inputs |
 
 **No dark mode.** The mobile app is light-only by design — tournaments run under venue lighting and the contrast targets are tuned for that. The legacy `web/` surface has a dark-mode block, but it is not part of the shared system.
-
-> **Known drift:** `var(--ink-5)` and `var(--ink-1)` are referenced in `styles.css` (e.g. inside `.sb-draw-toggle--active`) but never defined in `:root`. Tracked in `bd show bracket-creator-3ch` — those usages fall back to browser defaults today. Don't introduce new ones; reach for `--ink` or `--ink-4` until the scale is extended.
 
 **Status palette** (badges only — don't pull these into other components):
 
@@ -90,19 +90,19 @@ All tokens are defined in [styles.css#L3-L31](web-mobile/css/styles.css#L3). Ref
 | `--font-mono` | SFMono-Regular → Menlo → Consolas |
 | `--font-display` | SF Pro Display (hero titles only) |
 
-Base: 15px / 1.4. Use the documented sizes below — don't introduce new in-between values. The CSS today contains a few stragglers (11, 11.5, 12.5, 14, 17, 24, 28); treat them as drift to fold back, not as license to invent more.
+Base: 15px / 1.4. Use the documented sizes below — don't introduce new in-between values. The CSS today contains a few stragglers (11, 11.5, 12.5, 14, 17, 24); treat them as drift to fold back, not as license to invent more.
 
 | Size | Use |
 |---|---|
+| 10px | Decision chips, encho marker (`.bc-decision-chip`, `.bc-encho`) |
 | 10.5px | Pill labels, court tags, table column headers |
 | 12px | Hints, breadcrumbs, secondary meta |
 | 13–13.5px | Buttons, inputs, badges, bracket sides |
 | 15px | Body text |
 | 16–18px | Card titles, modal titles |
-| 22px | Player-viewer hero (`.my-match__name`), large scoreboard numbers (`.sb-name`, `.match-detail-card__ippons-val`, `.stat-box .v`) |
+| 22px | Large scoreboard numbers (`.sb-name`, `.match-detail-card__ippons-val`, `.stat-box .v`) |
 | 26px | Page-head titles |
-
-The 26px page-head title sits visually above the 22px hero — that's intentional in admin surfaces (the page chrome dominates) but reads as inverted on the player viewer's "My Match" screen. If the viewer's hero ever loses prominence in real use, bump it past the page-head rather than dragging the page-head down (tracked in `bd show bracket-creator-3ch`).
+| 28px | Player-viewer hero (`.my-match__name`) — intentionally larger than page-head so the player's name dominates on the viewer screen |
 
 Common weights: 500 (default UI), 600 (titles, active state), 700 (badges, scores). 800 appears in localized emphasis (podium step numbers, live strip); 400 in de-emphasis. Prefer the common three unless matching an existing emphasis pattern.
 
@@ -146,7 +146,7 @@ Keyframes (find each `@keyframes` block in [styles.css](web-mobile/css/styles.cs
 - `toast-in` (300ms) — toast entrance
 - `decision-prompt-in` (160ms, cubic-bezier(0.2, 0.8, 0.2, 1)) — match-decision modal entrance
 
-The CSS has **no `prefers-reduced-motion` block.** This is a tracked gap (`bd show bracket-creator-3ch`), not a design choice. Until it's stubbed, gate any non-essential animation you add behind the media query yourself.
+A `prefers-reduced-motion: reduce` block at the bottom of `styles.css` disables all four animations (`.dot--live`, `.spinner`, `.toast`, `.decision-prompt`). Gate any new non-essential animation behind this media query.
 
 ### Breakpoints
 
@@ -171,9 +171,9 @@ Only three media queries exist; match them rather than inventing new ones:
 | Sticky action rows | 60 | Admin tab/action sticky bar |
 | Modal | 100 | `.modal-backdrop` |
 | Popover dropdowns | 200 | Court popover dropdown |
-| Toast | 10000 | Above everything — known anomaly (`bd show bracket-creator-3ch`); should compress to ~500, currently jumps two orders of magnitude past the rest of the system |
+| Toast | 500 | `.toast` — sits above modals and dropdowns but within the same order of magnitude as the rest |
 
-If a new overlay doesn't fit one of these, lift the layer for the entire band rather than slotting in a one-off value. Don't follow the toast example.
+If a new overlay doesn't fit one of these, lift the layer for the entire band rather than slotting in a one-off value.
 
 ## 4. Components
 
@@ -247,11 +247,11 @@ Layout variants (composed by [bracket.jsx#L140](web-mobile/js/bracket.jsx#L140) 
 - `bc-match--v2` — filled sides, used in the viewer's "now playing" surface ([styles.css#L979](web-mobile/css/styles.css#L979))
 - `bc-match--v3` — compact, used in dense round columns ([styles.css#L1048](web-mobile/css/styles.css#L1048))
 
-State modifiers (applied unconditionally in JSX): `bc-match--live` and `bc-match--highlight` have CSS rules; `bc-match--done` is applied when `match.status === "completed"` but currently has no CSS rule — treat it as a stable hook for future styling, not a guaranteed visual change.
+State modifiers: `bc-match--live` (red ring), `bc-match--highlight` (accent ring), and `bc-match--done` (0.75 opacity — completed matches fade back so active ones stand out) all have CSS rules.
 
 Side composition (via `PlayerLine` in [bracket.jsx#L96](web-mobile/js/bracket.jsx#L96)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Winner side gets `bc-side--winner` plus a fill swap to `--red` (Aka) or `--accent` (Shiro). **Never swap side order based on seeding** — the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
 
-Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-live` (red, 700-weight "● LIVE"), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, inline `--accent`), `.bc-encho` ((E), inline `--accent`).
+Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-live` (red, 700-weight "● LIVE"), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, `--accent`, 10px 700), `.bc-encho` ((E), `--accent`, 10px 700).
 
 #### Match-decision visual suffixes
 
@@ -261,17 +261,13 @@ Decision types ([CLAUDE.md](CLAUDE.md) "Match Decision Types") map to short tags
 |---|---|---|---|
 | `hikiwake` | `△` | `.bc-draw` | `--ink-3` |
 | `hantei` | `H` | `.bc-draw` | `--ink-3` |
-| `kiken` | `Kiken` | `.bc-decision-chip` (inline style) | `--accent` |
-| `fusenpai` | `Fus.` | `.bc-decision-chip` (inline style) | `--accent` |
-| `daihyosen` | `DH` | `.bc-decision-chip` (inline style) | `--accent` |
-| Encho (overtime) | `(E)` | `.bc-encho` (inline style) | `--accent` |
+| `kiken` | `Kiken` | `.bc-decision-chip` | `--accent` |
+| `fusenpai` | `Fus.` | `.bc-decision-chip` | `--accent` |
+| `daihyosen` | `DH` | `.bc-decision-chip` | `--accent` |
+| Encho (overtime) | `(E)` | `.bc-encho` | `--accent` |
 | `kachinuki-exhaustion` | rendered via score-line suffix only | — | inherits |
 
 Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for liveness, not outcome.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
-
-Note: the `kiken/fusenpai/daihyosen` chips currently apply their visual styling inline rather than via the `.bc-decision-chip` class — the class is a stable hook but the color/size live on the JSX element. Consolidating that into CSS is tracked in `bd show bracket-creator-3ch`; keep the class name when you do.
-
-`bc-match--done` is also an unstyled hook today: JSX applies it when `match.status === "completed"` but there's no CSS rule. Either give it a visual treatment or drop the modifier (tracked in the same issue).
 
 ### Pools — `.pool`, `.pools-grid`
 
@@ -351,7 +347,7 @@ Match-decision visual suffixes are documented in [§4 Match cards](#match-cards-
 
 ## 6. Accessibility
 
-- **Contrast**: `--ink-4` is the floor at 4.7:1 on `--surface` — that's WCAG **AA only** (AAA wants 7:1). The system has no AAA-grade ink token yet; if you have text that must survive venue glare on a tablet, raise the issue rather than darkening `--ink-4` in place. Don't introduce new gray tokens without re-checking contrast.
+- **Contrast**: `--ink-4` is the floor at 4.7:1 on `--surface` (WCAG AA). For tournament-critical surfaces that must survive venue glare, use `--ink-1` (~18:1, AAA). Don't introduce new gray tokens without re-checking contrast.
 - **Keyboard**: every modal honors Escape via `useEscapeToClose`. The admin score editor supports `←` / `→` to navigate between matches **on the same shiaijo** — see [CLAUDE.md](CLAUDE.md) and the note in [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx). When adding keyboard shortcuts, gate them on `!isTextEntry(e.target)` (defined in [ui.jsx#L151](web-mobile/js/ui.jsx#L151)) so they don't clobber inputs.
 - **Touch**: `@media (pointer: coarse)` blocks bump padding on dense controls. The internal floor is ≥ 36px on shared surfaces and ≥ 44px under coarse pointers — note that platform guidance (Apple HIG, WCAG 2.5.5 AAA) wants 44px universally; the 36px floor is a pragmatic choice for laptop-mouse admin surfaces, not a target to aim for. Test any new dense surface on a tablet before merging.
 - **Focus rings**: inputs use a 3px `--accent-soft` ring. Don't suppress `:focus-visible` — operators tab through forms.

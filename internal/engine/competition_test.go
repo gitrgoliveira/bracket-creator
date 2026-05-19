@@ -143,3 +143,34 @@ func TestMaybeAutoCompletePools_AlreadyComplete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteNoChange, outcome, "already-completed competition must return AutoCompleteNoChange")
 }
+
+// TestMaybeAutoCompletePools_LeagueFormat verifies that a league-format
+// competition with all matches completed transitions to CompStatusComplete,
+// the same as a pools-format competition.
+func TestMaybeAutoCompletePools_LeagueFormat(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "auto-complete-league"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "League Auto Complete",
+		Format: state.CompFormatLeague,
+		Status: state.CompStatusPools,
+		Courts: []string{"A"},
+	}))
+
+	matches := []state.MatchResult{
+		{ID: "P1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
+		{ID: "P1-1", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Charlie"},
+		{ID: "P1-2", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Bob"},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "league format with all matches done must transition to complete")
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusComplete, comp.Status)
+}

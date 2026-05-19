@@ -389,38 +389,35 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 		})
 
 		// Apply tiebreaker results as a secondary sort within tied groups.
-		// Win counts are scoped per group: only TB matches between the two players
-		// in the same tied group influence that group's ordering, preventing wins
-		// from an unrelated tied group from bleeding into another.
-		{
-			i := 0
-			for i < len(sorted) {
-				j := i + 1
-				for j < len(sorted) && sorted[j].Points == sorted[i].Points {
-					j++
-				}
-				if j-i >= 2 {
-					groupNames := make(map[string]bool, j-i)
-					for k := i; k < j; k++ {
-						groupNames[sorted[k].Player.Name] = true
-					}
-					groupTBWins := map[string]int{}
-					for _, m := range matches {
-						if !IsTiebreakerMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-							continue
-						}
-						if groupNames[m.SideA] && groupNames[m.SideB] {
-							groupTBWins[m.Winner]++
-						}
-					}
-					if len(groupTBWins) > 0 {
-						sort.SliceStable(sorted[i:j], func(a, b int) bool {
-							return groupTBWins[sorted[i+a].Player.Name] > groupTBWins[sorted[i+b].Player.Name]
-						})
-					}
-				}
-				i = j
+		// Win counts are scoped per group: only TB matches between the players
+		// in the same tied group influence that group's ordering, preventing
+		// wins from an unrelated tied group from bleeding into another.
+		for i := 0; i < len(sorted); {
+			j := i + 1
+			for j < len(sorted) && sorted[j].Points == sorted[i].Points {
+				j++
 			}
+			if j-i >= 2 {
+				groupNames := make(map[string]bool, j-i)
+				for k := i; k < j; k++ {
+					groupNames[sorted[k].Player.Name] = true
+				}
+				groupTBWins := map[string]int{}
+				for _, m := range matches {
+					if !IsTiebreakerMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+						continue
+					}
+					if groupNames[m.SideA] && groupNames[m.SideB] {
+						groupTBWins[m.Winner]++
+					}
+				}
+				if len(groupTBWins) > 0 {
+					sort.SliceStable(sorted[i:j], func(a, b int) bool {
+						return groupTBWins[sorted[i+a].Player.Name] > groupTBWins[sorted[i+b].Player.Name]
+					})
+				}
+			}
+			i = j
 		}
 
 		// Apply manual rank overrides

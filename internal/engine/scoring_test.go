@@ -5,10 +5,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
-	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 func TestScoring_OverrideBracketWinner(t *testing.T) {

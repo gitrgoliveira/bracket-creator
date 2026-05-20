@@ -89,6 +89,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
 			if err != nil {
+				if errors.Is(err, state.ErrDuplicateName) {
+					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+					return
+				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add participant: " + err.Error()})
 				return
 			}
@@ -197,8 +201,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 		if err != nil {
 			status := http.StatusInternalServerError
-			if errors.Is(err, state.ErrParticipantNotFound) {
+			switch {
+			case errors.Is(err, state.ErrParticipantNotFound):
 				status = http.StatusNotFound
+			case errors.Is(err, state.ErrDuplicateName):
+				status = http.StatusConflict
 			}
 			c.JSON(status, gin.H{"error": err.Error()})
 			return

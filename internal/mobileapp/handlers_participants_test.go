@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,6 +49,11 @@ func TestSingleParticipantAddAndReplace(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, addedPlayer.ID)
+	// Bead spec + project convention: minted participant IDs must be UUIDv4
+	// so the format-sniffer in loadParticipantsNoLock stays on a single
+	// contract. Lock the format here to catch a future "compID-pX" regression.
+	assert.True(t, helper.IsUUIDv4(addedPlayer.ID),
+		"AddParticipant must mint UUIDv4 IDs, got %q", addedPlayer.ID)
 	assert.Equal(t, "Test Player", addedPlayer.Name)
 	assert.Equal(t, "T. Player", addedPlayer.DisplayName)
 	assert.Equal(t, "Test Dojo", addedPlayer.Dojo)
@@ -162,4 +168,65 @@ func TestSeedRenamingUnderReplace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, storedSeeds, 1)
 	assert.Equal(t, "Alice Cooper", storedSeeds[0].Name)
+}
+
+// TestDuplicateNameRejection pins the bead acceptance criterion that
+// add/replace must reject a name already in the roster with 409. Without
+// the guard, name-keyed lookups (seeds, lineups) would silently key on
+// whichever row happens to come first in the CSV.
+func TestDuplicateNameRejection(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-dup-name"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Dup Name Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	// Seed two participants directly via the store helper.
+	first, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Bob", Dojo: "Dojo B"}, false)
+	require.NoError(t, err)
+
+	// 1. POST add duplicate → 409.
+	dupAdd, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo X"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(dupAdd))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, "POST add of duplicate name must return 409")
+
+	// 2. PUT replace of Bob renaming to Alice → 409.
+	dupReplace, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo B"})
+	bobID := ""
+	for _, p := range mustLoad(t, store, compID) {
+		if p.Name == "Bob" {
+			bobID = p.ID
+			break
+		}
+	}
+	require.NotEmpty(t, bobID)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+bobID, bytes.NewBuffer(dupReplace))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, "PUT replace renaming Bob→Alice must return 409")
+
+	// 3. PUT renaming Alice to her OWN current name is a no-op rename and must succeed.
+	sameName, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A2"})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+first.ID, bytes.NewBuffer(sameName))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "PUT with unchanged name (dojo edit) must succeed")
+}
+
+func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {
+	t.Helper()
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	return players
 }

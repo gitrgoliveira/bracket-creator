@@ -974,9 +974,29 @@ func TestTournamentHandlers_CheckInWindowValidation(t *testing.T) {
 			field: "checkInWindowStart",
 			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = strings.Repeat("x", 6); return t }(),
 		},
-		{
+			{
 			field: "checkInWindowEnd",
 			tour:  func() state.Tournament { t := base; t.CheckInWindowEnd = "invalid"; return t }(),
+		},
+		// Cross-field: only start set → rejected (end missing).
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "09:00"; return t }(),
+		},
+		// Cross-field: only end set → rejected (start missing).
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowEnd = "17:00"; return t }(),
+		},
+		// Cross-field: start == end → rejected.
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "09:00"; t.CheckInWindowEnd = "09:00"; return t }(),
+		},
+		// Cross-field: start after end → rejected.
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "17:00"; t.CheckInWindowEnd = "09:00"; return t }(),
 		},
 	}
 	for _, tc := range invalid {

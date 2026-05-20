@@ -547,6 +547,12 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
 //      empty-state if all matches are complete) + a "Following: name [X]"
 //      header so the viewer can clear the selection (FR-022).
 function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, onMatchClick }) {
+  // Hoisted above the early return to satisfy the Rules of Hooks — hook order
+  // must be stable across renders regardless of followedPlayer being set.
+  const pRecord = followedPlayer?.id
+    ? (roster.find(p => p.id === followedPlayer.id) ?? null)
+    : null;
+
   if (!followedPlayer || !followedPlayer.id) {
     return (
       <div className="card" data-testid="viewer-home-mymatch" style={{ marginBottom: 16, padding: 14 }}>
@@ -564,7 +570,6 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   }
 
   // Followed-player state: header indicator + next-match details.
-  const pRecord = useMemo(() => roster.find(p => p.id === followedPlayer.id), [roster, followedPlayer.id]);
   const header = (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Following:</span>

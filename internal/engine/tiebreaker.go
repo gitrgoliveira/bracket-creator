@@ -10,8 +10,7 @@ import (
 // IsTiebreakerMatchID reports whether matchID identifies a supplementary
 // ippon-shobu tiebreaker match (IDs of the form "Pool X-TB-N").
 func IsTiebreakerMatchID(matchID string) bool {
-	parts := strings.SplitN(matchID, "-", 2)
-	return len(parts) == 2 && strings.HasPrefix(parts[1], "TB-")
+	return strings.Contains(matchID, "-TB-")
 }
 
 // detectPoolTies walks a sorted (descending Points) standings slice and

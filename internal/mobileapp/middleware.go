@@ -7,6 +7,18 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// MaxBodyBytes returns middleware that caps the request body at n bytes.
+// Requests exceeding the limit receive 413 Request Entity Too Large.
+// Apply to all write routes to prevent memory exhaustion from oversized
+// payloads. Do not apply to SSE (GET, no body) or file-import endpoints
+// whose payloads may legitimately exceed the default cap.
+func MaxBodyBytes(n int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, n)
+		c.Next()
+	}
+}
+
 // requireValidCompID extracts the `:id` URL parameter and validates it
 // via state.ValidateCompetitionID. Rejects:
 //   - empty

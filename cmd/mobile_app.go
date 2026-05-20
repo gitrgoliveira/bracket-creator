@@ -1,10 +1,16 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
@@ -108,7 +114,42 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	log.Printf("Starting mobile-app server on %s:%d using folder %s", o.bindAddress, o.port, o.folder)
 	eng := engine.New(store)
 	r := mobileapp.NewRouter(store, eng, GetResources(), verifier)
-	return r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))
+
+	addr := o.bindAddress + ":" + strconv.Itoa(o.port)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: r,
+		// Prevent Slowloris: header must arrive within 10 s.
+		ReadHeaderTimeout: 10 * time.Second,
+		// Individual request body read deadline (not SSE — streaming
+		// connections upgrade WriteTimeout via ResponseController).
+		ReadTimeout: 30 * time.Second,
+		// WriteTimeout=0 leaves SSE connections open indefinitely.
+		// gin.Default()'s Recovery middleware still caps panics on the
+		// non-streaming path; the safeGo helpers protect viewer goroutines.
+		WriteTimeout: 0,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("mobile-app server error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down mobile-app server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("mobile-app server forced shutdown: %v", err)
+		return err
+	}
+	log.Println("mobile-app server exited cleanly")
+	return nil
 }
 
 func init() {

@@ -422,3 +422,58 @@ Subscribed:
 		t.Fatal("HandleEvents did not exit after channel closure")
 	}
 }
+
+func TestHub_MaxClients(t *testing.T) {
+	t.Run("subscribe returns nil at cap", func(t *testing.T) {
+		h := NewHubWithOptions(DefaultHistorySize, 2)
+		ch1 := h.Subscribe()
+		require.NotNil(t, ch1)
+		ch2 := h.Subscribe()
+		require.NotNil(t, ch2)
+		ch3 := h.Subscribe()
+		assert.Nil(t, ch3, "Subscribe should return nil when maxClients reached")
+		h.Unsubscribe(ch1)
+		h.Unsubscribe(ch2)
+	})
+
+	t.Run("subscribe succeeds after slot freed", func(t *testing.T) {
+		h := NewHubWithOptions(DefaultHistorySize, 1)
+		ch1 := h.Subscribe()
+		require.NotNil(t, ch1)
+		h.Unsubscribe(ch1)
+		ch2 := h.Subscribe()
+		assert.NotNil(t, ch2, "Subscribe should succeed after a slot is freed")
+		h.Unsubscribe(ch2)
+	})
+
+	t.Run("HandleEvents returns 503 at cap", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		h := NewHubWithOptions(DefaultHistorySize, 1)
+
+		// Fill the cap
+		occupied := h.Subscribe()
+		require.NotNil(t, occupied)
+		defer h.Unsubscribe(occupied)
+
+		router := gin.New()
+		router.GET("/events", h.HandleEvents())
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/events", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+
+	t.Run("zero maxClients means unlimited", func(t *testing.T) {
+		h := NewHubWithOptions(DefaultHistorySize, 0)
+		channels := make([]chan string, 10)
+		for i := range channels {
+			ch := h.Subscribe()
+			require.NotNil(t, ch, "Subscribe should never return nil when maxClients=0")
+			channels[i] = ch
+		}
+		for _, ch := range channels {
+			h.Unsubscribe(ch)
+		}
+	})
+}

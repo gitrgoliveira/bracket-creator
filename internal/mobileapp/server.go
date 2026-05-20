@@ -4,7 +4,9 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -34,7 +36,13 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 		c.Next()
 	})
 
-	hub := NewHub()
+	maxClients := 0
+	if raw := os.Getenv("SSE_MAX_CLIENTS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			maxClients = n
+		}
+	}
+	hub := NewHubWithOptions(DefaultHistorySize, maxClients)
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
@@ -84,6 +92,10 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 
 	// Admin API endpoints (protected)
 	admin := r.Group("/api")
+	// Cap request bodies at 4 MiB before auth runs so oversized payloads
+	// don't tie up the bcrypt/file-read in AuthMiddleware. Import endpoints
+	// (participant CSV) are well under 4 MiB in practice.
+	admin.Use(MaxBodyBytes(4 * 1024 * 1024))
 	admin.Use(AuthMiddleware(verifier, store))
 	{
 		RegisterTournamentHandlers(admin, store, hub, verifier)

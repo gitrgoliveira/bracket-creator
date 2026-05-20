@@ -119,6 +119,11 @@ type Hub struct {
 	// take the write lock.
 	history     []historyEntry
 	HistorySize int
+
+	// maxClients caps concurrent SSE connections. Subscribe returns nil
+	// when the cap is reached; HandleEvents responds with 503 in that case.
+	// 0 means unlimited (default for NewHub).
+	maxClients int
 }
 
 func NewHub() *Hub {
@@ -139,10 +144,23 @@ func NewHubWithHistory(historySize int) *Hub {
 	}
 }
 
-// Subscribe adds a new client channel to the hub
+// NewHubWithOptions constructs a Hub with custom history and client cap.
+// maxClients=0 means unlimited.
+func NewHubWithOptions(historySize, maxClients int) *Hub {
+	h := NewHubWithHistory(historySize)
+	h.maxClients = maxClients
+	return h
+}
+
+// Subscribe adds a new client channel to the hub.
+// Returns nil when the maxClients cap is reached; the caller (HandleEvents)
+// must treat nil as a 503.
 func (h *Hub) Subscribe() chan string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.maxClients > 0 && len(h.clients) >= h.maxClients {
+		return nil
+	}
 	// Buffer absorbs short bursts (bulk-score and schedule updates) for ~300
 	// concurrent SSE clients; truly stalled clients are detected via the
 	// non-blocking send in Broadcast and unsubscribed.
@@ -289,6 +307,10 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		}
 
 		ch := h.Subscribe()
+		if ch == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "too many SSE connections"})
+			return
+		}
 		defer h.Unsubscribe(ch)
 
 		// Set SSE headers

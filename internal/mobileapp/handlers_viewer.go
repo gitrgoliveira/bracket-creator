@@ -33,11 +33,12 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// wg.Wait() provides the happens-before for reads below.
 		results := make([]any, len(ids))
 		var wg sync.WaitGroup
+		errCh := make(chan error, len(ids))
 
 		for i, id := range ids {
 			wg.Add(1)
-			go func(idx int, compID string) {
-				defer wg.Done()
+			idx, compID := i, id
+			safeGo(&wg, errCh, func() {
 				comp, _ := store.LoadCompetition(compID)
 				if comp == nil {
 					return
@@ -73,9 +74,14 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 					"poolMatches": poolMatches,
 					"bracket":     bracket,
 				}
-			}(i, id)
+			})
 		}
 		wg.Wait()
+
+		if len(errCh) > 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
 
 		comps := make([]any, 0, len(ids))
 		for _, comp := range results {
@@ -120,10 +126,11 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr, reservedSlotsErr error
 		)
 
+		const goroutineCount = 7
 		var wg sync.WaitGroup
-		wg.Add(7)
-		go func() {
-			defer wg.Done()
+		errCh := make(chan error, goroutineCount)
+		wg.Add(goroutineCount)
+		safeGo(&wg, errCh, func() {
 			// Only pass HasIDs=true hint; false means unset so auto-detect
 			// still runs for competitions created before the flag existed.
 			var hasIDsHint *bool
@@ -137,32 +144,31 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			})
 			comp.Players = p
 			playersErr = e
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, errCh, func() {
 			pools, poolsErr = store.LoadPools(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, errCh, func() {
 			poolMatches, poolMatchesErr = store.LoadPoolMatches(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, errCh, func() {
 			standings, standingsErr = eng.CalculatePoolStandings(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, errCh, func() {
 			bracket, bracketErr = store.LoadBracket(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, errCh, func() {
 			schedule, scheduleErr = store.LoadSchedule(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, errCh, func() {
 			reservedSlots, reservedSlotsErr = store.LoadReservedSlots(id)
-		}()
+		})
 		wg.Wait()
+
+		if len(errCh) > 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
 
 		for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr, reservedSlotsErr} {
 			if e != nil {
@@ -193,15 +199,22 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// the reads below.
 		perComp := make([][]state.ScheduleEntry, len(ids))
 		var wg sync.WaitGroup
+		errCh := make(chan error, len(ids))
 		for i, id := range ids {
 			wg.Add(1)
-			go func(idx int, compID string) {
-				defer wg.Done()
+			idx, compID := i, id
+			safeGo(&wg, errCh, func() {
 				s, _ := store.LoadSchedule(compID)
 				perComp[idx] = s
-			}(i, id)
+			})
 		}
 		wg.Wait()
+
+		if len(errCh) > 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+
 		allEntries := []state.ScheduleEntry{}
 		for _, s := range perComp {
 			allEntries = append(allEntries, s...)

@@ -1054,7 +1054,7 @@ func TestRecordBracketMatchResult_DaihyosenWinnerDerived(t *testing.T) {
 	compID := "dh-bracket-winner"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "DH Bracket", Format: "playoffs",
+		ID: compID, Name: "DH Bracket", Format: state.CompFormatPlayoffs,
 		Status: state.CompStatusPlayoffs, TeamSize: 3,
 	}))
 

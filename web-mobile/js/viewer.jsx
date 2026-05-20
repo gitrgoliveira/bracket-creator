@@ -40,7 +40,7 @@ function competitionKindLabel(c) {
 }
 
 const pluralize = window.pluralize;
-const isPoolDaihyosenID = id => { const i = id.indexOf('-'); return i >= 0 && id.slice(i + 1).startsWith('DH-'); };
+const isPoolDaihyosenID = id => /-DH-\d+$/.test(id);
 
 function compMatches(c) {
   const out = [];

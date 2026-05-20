@@ -1,7 +1,7 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
-const { useState, useMemo, useRef: useRefV } = React;
+const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 
@@ -2024,6 +2024,61 @@ function MatchViewerModal({ match, onClose }) {
   );
 }
 
+function AnnouncementBanner({ announcement, onDismiss }) {
+  const [timeLeft, setTimeLeft] = useState("");
+
+  useEffect(() => {
+    const updateTimer = () => {
+      const expiresAt = new Date(announcement.expiresAt).getTime();
+      const now = Date.now();
+      const diff = expiresAt - now;
+
+      if (diff <= 0) {
+        onDismiss();
+        return;
+      }
+
+      const totalSeconds = Math.floor(diff / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      const paddedSeconds = seconds.toString().padStart(2, '0');
+
+      if (minutes > 0) {
+        setTimeLeft(`${minutes}:${paddedSeconds} left`);
+      } else {
+        setTimeLeft(`${seconds}s left`);
+      }
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+
+    return () => clearInterval(interval);
+  }, [announcement.expiresAt, onDismiss]);
+
+  return (
+    <div className="announcement-banner">
+      <div className="announcement-banner__content">
+        <div className="announcement-banner__icon" aria-hidden="true">📢</div>
+        <p className="announcement-banner__message">{announcement.message}</p>
+      </div>
+      <div className="announcement-banner__meta">
+        <span className="announcement-banner__badge">
+          {timeLeft}
+        </span>
+        <button
+          className="announcement-banner__dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss announcement"
+        >
+          &times;
+        </button>
+      </div>
+    </div>
+  );
+}
+
+window.AnnouncementBanner = AnnouncementBanner;
 window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;
 window.ViewerSchedule = ViewerSchedule;
@@ -2033,3 +2088,4 @@ window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
+

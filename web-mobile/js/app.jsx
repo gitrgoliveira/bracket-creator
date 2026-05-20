@@ -130,6 +130,7 @@ class ErrorBoundary extends React.Component {
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
+  const [activeAnnouncement, setActiveAnnouncement] = useS(null);
   // Hydrate the route state from the URL synchronously, BEFORE the first
   // render. The post-mount useEffect that previously did this ran AFTER
   // the URL-sync effect, so a direct load of /reset (or any non-`/`
@@ -316,6 +317,21 @@ function App() {
 
   useE(() => { load(); }, []);
 
+  useE(() => {
+    window.API.fetchAnnouncement()
+      .then(ann => {
+        if (ann) {
+          const dismissedAt = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
+          if (!dismissedAt && new Date(ann.expiresAt) > new Date()) {
+            setActiveAnnouncement(ann);
+          }
+        }
+      })
+      .catch(err => {
+        console.error("Failed to fetch initial announcement:", err);
+      });
+  }, []);
+
   // Fetch the auth-config once on mount. Always resolves the null
   // initial state — success sets the actual config; fail-open
   // (5xx/timeout/parse-error) falls back to file mode so the
@@ -454,6 +470,18 @@ function App() {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
             }
             jitteredTimeout(load, jitter);
+        } else if (event.type === "announcement") {
+            const ann = event.data;
+            if (ann) {
+                const dismissedAt = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
+                if (!dismissedAt && new Date(ann.expiresAt) > new Date()) {
+                    setActiveAnnouncement(ann);
+                } else {
+                    setActiveAnnouncement(null);
+                }
+            } else {
+                setActiveAnnouncement(null);
+            }
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can
@@ -558,6 +586,17 @@ function App() {
   // viewer mode
   return (
     <>
+      {activeAnnouncement && window.AnnouncementBanner && (
+        <window.AnnouncementBanner
+          announcement={activeAnnouncement}
+          onDismiss={() => {
+            if (activeAnnouncement?.sentAt) {
+              sessionStorage.setItem(`bc_dismissed_announcement_${activeAnnouncement.sentAt}`, "true");
+            }
+            setActiveAnnouncement(null);
+          }}
+        />
+      )}
       {selectedCompData ? (
         <window.ViewerCompetition
           tournament={tournament}

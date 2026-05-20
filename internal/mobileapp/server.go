@@ -71,6 +71,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 	RegisterPublicEligibilityHandlers(api, store)
 	RegisterPublicLineupHandlers(api, store)
 	RegisterPublicSwissHandlers(api, store, eng)
+	RegisterPublicAnnouncementHandlers(api, store)
 
 	// Public password-reset + auth-config endpoints. Both must live
 	// outside the admin group: /reset is the recovery path for a
@@ -97,6 +98,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 		RegisterLineupHandlers(admin, store, store, store)
 		RegisterDaihyosenHandlers(admin, eng, store, hub)
 		RegisterSwissHandlers(admin, store, eng, hub)
+		RegisterAnnouncementHandlers(admin, store, hub)
 	}
 
 	// Static files & SPA Fallback

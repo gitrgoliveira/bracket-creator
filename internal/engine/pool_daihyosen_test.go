@@ -21,9 +21,10 @@ func TestIsPoolDaihyosenMatchID(t *testing.T) {
 		{"Pool A-DH-0", true},
 		{"Pool A-DH-1", true},
 		{"Pool B-DH-42", true},
+		{"My-Pool A-DH-0", true}, // hyphenated pool name — strings.Contains handles correctly
 		{"Pool A-0", false},
 		{"Pool A-TB-0", false},
-		{"Pool A-DH", false},    // no index after DH
+		{"Pool A-DH", false},    // no index after DH (no trailing dash)
 		{"Pool A-D-0", false},   // different prefix
 		{"Pool A-DHx-0", false}, // wrong prefix
 		{"DH-0", false},         // no pool separator
@@ -485,16 +486,22 @@ func TestDHStandingsApplied(t *testing.T) {
 	_, err := eng.InjectPoolDaihyosenMatches("dh-standings")
 	require.NoError(t, err)
 
-	// Find the injected DH match and mark Alpha as the winner.
+	// Score all DH matches: Alpha beats everyone; the Beta–Gamma match gives
+	// Beta the win. This makes Alpha the clear #1, Beta #2, Gamma #3 and also
+	// produces a valid fixture (all DH matches have explicit winners).
 	allMatches, err := store.LoadPoolMatches("dh-standings")
 	require.NoError(t, err)
 	for i := range allMatches {
-		if IsPoolDaihyosenMatchID(allMatches[i].ID) {
-			allMatches[i].Status = state.MatchStatusCompleted
-			// Determine which team is "Alpha" (SideA or SideB).
-			if allMatches[i].SideA == "Alpha" || allMatches[i].SideB == "Alpha" {
-				allMatches[i].Winner = "Alpha"
-			}
+		if !IsPoolDaihyosenMatchID(allMatches[i].ID) {
+			continue
+		}
+		allMatches[i].Status = state.MatchStatusCompleted
+		sA, sB := allMatches[i].SideA, allMatches[i].SideB
+		switch {
+		case sA == "Alpha" || sB == "Alpha":
+			allMatches[i].Winner = "Alpha"
+		default:
+			allMatches[i].Winner = sA // Beta beats Gamma
 		}
 	}
 	require.NoError(t, store.SavePoolMatches("dh-standings", allMatches))

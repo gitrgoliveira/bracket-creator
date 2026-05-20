@@ -188,6 +188,10 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 // group. When true, auto-completion is blocked; the operator must use
 // manual rank overrides (or physically replay the pool).
 //
+// Note: this blocks even when the tied teams fall outside the pool_winners
+// cut (e.g. a 3rd/4th place tie in a 4-team pool with pool_winners=2).
+// Operators resolve by applying manual rank overrides to every tied member.
+//
 // poolRanks is the operator's manual rank override map (keyed by pool
 // name → team name → rank). A tied group whose every member has a
 // manual rank override is considered resolved — the operator has

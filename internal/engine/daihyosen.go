@@ -80,8 +80,7 @@ func IsPoolMatchID(matchID string) bool {
 // but scored as individual (one representative per side) rather than as
 // full team bouts.
 func IsPoolDaihyosenMatchID(matchID string) bool {
-	_, suffix, ok := strings.Cut(matchID, "-")
-	return ok && strings.HasPrefix(suffix, "DH-")
+	return strings.Contains(matchID, "-DH-")
 }
 
 // generatePoolDaihyosenMatches creates round-robin MatchResult entries for
@@ -156,6 +155,8 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		pn, _, ok := strings.Cut(m.ID, "-")
 		if ok {
 			if _, seen := poolCourt[pn]; !seen {
+				// Uses the first match's court. Pool competitions assign one
+				// court per pool, so all matches in a pool share the same court.
 				poolCourt[pn] = m.Court
 			}
 			if IsPoolDaihyosenMatchID(m.ID) {

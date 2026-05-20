@@ -3,6 +3,10 @@
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
+function formatMinutes(m) {
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -85,6 +89,64 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   const [autoStart, setAutoStart] = useStateA(tournament.competitions[0]?.startTime || "09:00");
   const [autoSaving, setAutoSaving] = useStateA(false);
 
+  const [estOpen, setEstOpen] = useStateA(false);
+  const [estMatchDuration, setEstMatchDuration] = useStateA(3);
+  const [estMultiplier, setEstMultiplier] = useStateA(1.5);
+  const [estCourts, setEstCourts] = useStateA(tournament.courts?.length || 1);
+  const [estNumMatches, setEstNumMatches] = useStateA(0);
+  const [estTeamSize, setEstTeamSize] = useStateA(tournament.competitions[0]?.teamSize || 0);
+  const [estBoutsPerTeamMatch, setEstBoutsPerTeamMatch] = useStateA(0);
+  const [estBuffer, setEstBuffer] = useStateA(0);
+  const [estCeremony, setEstCeremony] = useStateA(0);
+  const [estResult, setEstResult] = useStateA(null);
+  const [estLoading, setEstLoading] = useStateA(false);
+
+  useEffectA(() => {
+    const newBouts = estTeamSize > 0 ? 2 * estTeamSize - 1 : 0;
+    setEstBoutsPerTeamMatch(prev => prev === newBouts ? prev : newBouts);
+  }, [estTeamSize]);
+
+  useEffectA(() => {
+    if (!estOpen) {
+      setEstLoading(false);
+      return;
+    }
+    // Guard: required params must be valid numbers > 0 to avoid 400s
+    if (!Number.isFinite(estMatchDuration) || estMatchDuration <= 0 ||
+        !Number.isFinite(estMultiplier) || estMultiplier <= 0 ||
+        !Number.isFinite(estCourts) || estCourts <= 0 ||
+        !Number.isFinite(estNumMatches) || estNumMatches <= 0) {
+      setEstResult(null);
+      setEstLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setEstLoading(true);
+      try {
+        const res = await window.API.estimateSchedule({
+          matchDuration: estMatchDuration,
+          multiplier: estMultiplier,
+          courts: estCourts,
+          numMatches: estNumMatches,
+          teamSize: estTeamSize,
+          boutsPerTeamMatch: estBoutsPerTeamMatch,
+          buffer: estBuffer,
+          ceremonyMinutes: estCeremony
+        }, password, controller.signal);
+        setEstResult(res);
+      } catch (e) {
+        if (!controller.signal.aborted) {
+          console.error("Estimation failed", e);
+        }
+      } finally {
+        setEstLoading(false);
+      }
+    }, 300);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [estOpen, estMatchDuration, estMultiplier, estCourts, estNumMatches, estTeamSize, estBoutsPerTeamMatch, estBuffer, estCeremony, password]);
+
   // T040/T041: read ?court= from the URL; useQuery re-renders on history
   // changes so navigating between /admin/schedule and /admin/schedule?court=A
   // toggles the filter without a full page reload. The window.AppRouter
@@ -111,6 +173,14 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
     () => window.tournamentMatches(tournament).filter(hasBothSides),
     [tournament]
   );
+
+  const estNumMatchesRef = useRefA(false);
+  useEffectA(() => {
+    if (!estNumMatchesRef.current && allMatches.length > 0) {
+      setEstNumMatches(allMatches.length);
+      estNumMatchesRef.current = true;
+    }
+  }, [allMatches.length]);
 
   const filtered = window.applyFilters(allMatches, picked, dojoText, compFilter);
   // T040 (US1, FR-001): apply the court scope AFTER the user-driven
@@ -157,7 +227,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
     const b = timeToMinutes(lastTime);
     if (a === null || b === null) return null;
     const diff = b - a + safeMatchDuration;
-    return `${Math.floor(diff / 60)}h ${diff % 60}m`;
+    return formatMinutes(diff);
   })() : null;
 
   const saveMatchTime = async (m, newTime) => {
@@ -264,6 +334,48 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
               </div>
             )}
           </div>
+        </div>
+
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div
+            className="card__title"
+            style={{ display: "flex", justifyContent: "space-between", cursor: "pointer", marginBottom: estOpen ? 12 : 0 }}
+            onClick={() => setEstOpen(!estOpen)}
+          >
+            <span>Schedule estimator {estLoading && <span style={{ fontSize: 12, fontWeight: 400, color: "var(--ink-4)", marginLeft: 8 }}>Recalculating...</span>}</span>
+            <span style={{ fontSize: 18, fontWeight: 400 }}>{estOpen ? "−" : "+"}</span>
+          </div>
+          {estOpen && (
+            <div className="est-form">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
+                <EstInput label="Match duration (min)" value={estMatchDuration} setter={setEstMatchDuration} min="1" max="60" />
+                <EstInput label="Multiplier" value={estMultiplier} setter={setEstMultiplier} min="1" max="3" step="0.1" />
+                <EstInput label="Courts" value={estCourts} setter={setEstCourts} min="1" max="26" />
+                <EstInput label="Matches" value={estNumMatches} setter={setEstNumMatches} min="1" />
+                <EstInput label="Team size (0=indiv)" value={estTeamSize} setter={setEstTeamSize} min="0" />
+                <EstInput label="Bouts per team match" value={estBoutsPerTeamMatch} setter={setEstBoutsPerTeamMatch} min="0" />
+                <EstInput label="Buffer %" value={estBuffer} setter={setEstBuffer} min="0" max="100" />
+                <EstInput label="Ceremony (min)" value={estCeremony} setter={setEstCeremony} min="0" />
+              </div>
+
+              {estResult && (
+                <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid var(--bg-3)" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 12 }}>
+                    <div style={{ fontSize: 24, fontWeight: 700 }}>Total: {formatMinutes(estResult.totalDurationMinutes)}</div>
+                    {autoStart && (
+                      <div style={{ fontSize: 16, color: "var(--ink-2)" }}>
+                        Projected finish: <strong>{window.addMinutes(autoStart, estResult.totalDurationMinutes)}</strong>
+                      </div>
+                    )}
+                  </div>
+                  {estResult.ceremonyMinutes > 0 && (
+                    <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>Includes {estResult.ceremonyMinutes}m ceremony</div>
+                  )}
+                  <PerCourtBreakdown perCourtMinutes={estResult.perCourtMinutes} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="tw-sched">
@@ -645,7 +757,6 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
   );
 }
 
-
 function AdminExport({ c, t, password }) {
   const url = `${window.location.origin}/viewer.html?id=${t.id}#comp-${c.id}`;
 
@@ -700,7 +811,42 @@ function AdminExport({ c, t, password }) {
   );
 }
 
+function EstInput({ label, value, setter, min, max, step = "1" }) {
+  return (
+    <div className="form-group">
+      <label className="label">{label}</label>
+      <input
+        type="number"
+        className="input"
+        value={Number.isFinite(value) ? value : ""}
+        min={min}
+        max={max}
+        step={step}
+        onChange={e => { const val = e.target.value; setter(val === "" ? NaN : +val); }}
+      />
+    </div>
+  );
+}
+
+function PerCourtBreakdown({ perCourtMinutes }) {
+  if (!perCourtMinutes || perCourtMinutes.length === 0) return null;
+  return (
+    <div className="est-breakdown" style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--ink-2)" }}>Per-court breakdown:</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8 }}>
+        {perCourtMinutes.map((m, i) => (
+          <div key={i} style={{ fontSize: 12, padding: "4px 8px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
+            <span style={{ color: "var(--ink-3)" }}>Court {i < 26 ? String.fromCharCode(65 + i) : i + 1}:</span>
+            <strong style={{ marginLeft: 4 }}>{formatMinutes(m)}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 window.AdminSchedulePage = AdminSchedulePage;
+window.PerCourtBreakdown = PerCourtBreakdown;
 window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;

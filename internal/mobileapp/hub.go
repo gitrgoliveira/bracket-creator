@@ -57,6 +57,20 @@ const (
 // (multi-court bulk score) and matches what we measured in v3 review.
 const DefaultHistorySize = 100
 
+// DefaultMaxSSEClients caps concurrent /api/events subscribers per process.
+// Each subscriber allocates one buffered channel + one streaming goroutine,
+// and Broadcast fan-out is O(N) in the subscriber count. 1000 is well
+// above what a typical tournament floor needs (operator + ~5-20 viewers
+// per court × ~10 courts ≈ 50-200 connections) and well below the point
+// where the linear fan-out becomes a noticeable latency tax.
+//
+// Override at startup via the SSE_MAX_CLIENTS env var or by passing a
+// positive value to NewHubWithLimits. A non-positive (zero or negative)
+// value disables the cap entirely — used by tests that need to exceed
+// the default and not enforced anywhere production. The cap is mp-663
+// Phase 4 mitigation for resource-exhaustion via unbounded subscriber maps.
+const DefaultMaxSSEClients = 1000
+
 // SSEEvent represents the payload sent to clients.
 //
 // Seq (T215, A2 closure) is a strictly monotonic counter stamped by the
@@ -119,16 +133,45 @@ type Hub struct {
 	// take the write lock.
 	history     []historyEntry
 	HistorySize int
+
+	// MaxClients caps concurrent SSE subscribers (mp-663 Phase 4).
+	// Subscribe returns nil when the cap is reached; HandleEvents
+	// converts that into HTTP 503 so the client knows to back off. A
+	// non-positive value disables the cap (treat as unbounded — useful
+	// for tests).
+	MaxClients int
+
+	// closed is set when Close has been called (mp-663 Phase 2 graceful
+	// shutdown hook). New subscribers are rejected after this; existing
+	// subscriber channels are closed so the per-connection streaming
+	// goroutine in HandleEvents exits cleanly. Guarded by mu.
+	closed bool
 }
 
 func NewHub() *Hub {
-	return NewHubWithHistory(DefaultHistorySize)
+	return NewHubWithLimits(DefaultHistorySize, DefaultMaxSSEClients)
 }
 
 // NewHubWithHistory constructs a Hub with a custom ring buffer capacity.
 // Used by tests that need predictable eviction behaviour without
-// generating 100+ events.
+// generating 100+ events. MaxClients stays at the default.
 func NewHubWithHistory(historySize int) *Hub {
+	return NewHubWithLimits(historySize, DefaultMaxSSEClients)
+}
+
+// NewHubWithLimits constructs a Hub with explicit history-size and
+// subscriber-cap.
+//
+// historySize: non-positive falls back to DefaultHistorySize (the ring
+// buffer needs a non-zero capacity to function).
+//
+// maxClients: passed through as-is. A POSITIVE value caps concurrent
+// subscribers at that count (Subscribe returns nil over the cap). A
+// non-positive value (zero or negative) DISABLES the cap entirely —
+// useful for tests that need to exceed DefaultMaxSSEClients without
+// constructing thousands of stub clients to prove the cap fires. It is
+// deliberately not coerced to the default so callers can opt out.
+func NewHubWithLimits(historySize, maxClients int) *Hub {
 	if historySize <= 0 {
 		historySize = DefaultHistorySize
 	}
@@ -136,19 +179,52 @@ func NewHubWithHistory(historySize int) *Hub {
 		clients:     make(map[chan string]bool),
 		history:     make([]historyEntry, historySize),
 		HistorySize: historySize,
+		MaxClients:  maxClients,
 	}
 }
 
-// Subscribe adds a new client channel to the hub
+// Subscribe adds a new client channel to the hub. Returns nil when:
+//   - the hub has been Close()d (graceful shutdown in progress)
+//   - the subscriber count has reached MaxClients
+//
+// HandleEvents converts a nil return into HTTP 503 so the SSE client
+// knows to back off and retry rather than hanging on a stuck connection.
 func (h *Hub) Subscribe() chan string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.closed {
+		return nil
+	}
+	if h.MaxClients > 0 && len(h.clients) >= h.MaxClients {
+		return nil
+	}
 	// Buffer absorbs short bursts (bulk-score and schedule updates) for ~300
 	// concurrent SSE clients; truly stalled clients are detected via the
 	// non-blocking send in Broadcast and unsubscribed.
 	ch := make(chan string, 100)
 	h.clients[ch] = true
 	return ch
+}
+
+// Close marks the hub as shutting down and closes every subscriber
+// channel. The per-connection streaming goroutine in HandleEvents
+// observes the channel close (the `case msg, ok := <-ch; if !ok`
+// branch) and returns, unblocking http.Server.Shutdown's wait loop.
+//
+// Idempotent — safe to call twice. After Close, Subscribe returns nil
+// for all new subscribers and Broadcast becomes a no-op observable to
+// clients (no live channels remain).
+func (h *Hub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	h.closed = true
+	for ch := range h.clients {
+		delete(h.clients, ch)
+		close(ch)
+	}
 }
 
 // Unsubscribe removes a client channel
@@ -289,6 +365,14 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		}
 
 		ch := h.Subscribe()
+		if ch == nil {
+			// mp-663 Phase 4: subscriber cap reached, or hub shutting down.
+			// 503 + Retry-After tells well-behaved clients (and the
+			// browser's EventSource auto-reconnect) to back off.
+			c.Header("Retry-After", "30")
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SSE subscriber limit reached, please retry"})
+			return
+		}
 		defer h.Unsubscribe(ch)
 
 		// Set SSE headers

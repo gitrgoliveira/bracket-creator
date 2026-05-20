@@ -38,4 +38,4 @@ USER 65534
 
 EXPOSE 8080
 ENTRYPOINT [ "/bin/bracket-creator" ]
-CMD [ "mobile-app", "--port=8080", "--folder=/tournament-data" ]
+CMD [ "mobile-app", "--bind=0.0.0.0", "--folder=/tournament-data" ]

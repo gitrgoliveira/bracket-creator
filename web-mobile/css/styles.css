@@ -2238,12 +2238,21 @@ a:hover {
 
 .seed-row {
   display: grid;
-  grid-template-columns: 20px 36px 1fr 32px 64px;
+  grid-template-columns: 24px 20px 36px 1fr 32px 64px;
   gap: 8px;
   align-items: center;
   padding: 7px 10px;
   border-radius: 6px;
   border: 1px solid transparent;
+}
+
+.seed-row.is-checked-in {
+  background: #f0fdf4; /* Very light green */
+  border-color: #dcfce7;
+}
+
+.seed-row.is-checked-in .seed-row__name {
+  color: var(--ink-2);
 }
 
 .seed-row:hover {
@@ -2258,6 +2267,10 @@ a:hover {
 .seed-row.has-seed {
   background: #fffbeb;
   border-color: #fde68a;
+}
+
+.seed-row.has-seed.is-checked-in {
+  background: linear-gradient(90deg, #fffbeb 0%, #f0fdf4 100%);
 }
 
 .seed-row__handle {
@@ -2409,6 +2422,11 @@ a:hover {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.pmf__chip.is-checked-in {
+  background: #f0fdf4;
+  color: #166534;
 }
 
 .pmf__chip button {

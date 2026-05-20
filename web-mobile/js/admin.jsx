@@ -29,6 +29,8 @@ const REFRESHABLE_EVENTS = new Set([
   // detail so the round counter, match list, and "Generate next round"
   // button enable-state all reconcile.
   "swiss_round_generated",
+  // participants_updated fires when a participant is checked in or out.
+  "participants_updated",
 ]);
 
 // Page components rendered by AdminApp's view switch (produced by sibling

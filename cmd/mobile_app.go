@@ -1,15 +1,47 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/spf13/cobra"
+)
+
+// Server tuning constants for the mobile-app HTTP listener. mp-663 Phase 2:
+// closes slowloris and never-drains-connection vectors that the default
+// (zero-timeout) http.Server inherits from r.Run.
+const (
+	// httpReadHeaderTimeout caps how long the server waits for the request
+	// line + headers. Defends against slowloris-header attacks where a
+	// client trickles one byte every few seconds.
+	httpReadHeaderTimeout = 10 * time.Second
+	// httpReadTimeout caps how long the body read may take. POST bodies
+	// on this server are JSON (small) or CSV import (~MBs); 30s allows
+	// the import on a slow link but kills indefinite slow uploads.
+	httpReadTimeout = 30 * time.Second
+	// httpIdleTimeout closes keep-alive connections that sit idle. Bounds
+	// the file-descriptor commitment per idle client.
+	httpIdleTimeout = 120 * time.Second
+	// httpMaxHeaderBytes caps request header size — defends against
+	// header-bombs (1 MB is generous; default is 1 MB but explicit is
+	// clearer).
+	httpMaxHeaderBytes = 1 << 20
+	// httpShutdownTimeout is how long we wait for in-flight requests to
+	// finish before force-closing connections. Long enough for a typical
+	// CSV import to land safely, short enough that container restarts
+	// don't hang.
+	httpShutdownTimeout = 30 * time.Second
 )
 
 type mobileAppOptions struct {
@@ -116,8 +148,87 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 
 	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "tournamentDataDir", o.folder)
 	eng := engine.New(store)
-	r := mobileapp.NewRouter(store, eng, GetResources(), verifier)
-	return r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))
+
+	// SSE subscriber cap is configurable via SSE_MAX_CLIENTS to handle
+	// deployments with unusually high viewer counts; non-numeric values
+	// silently fall back to the default rather than failing startup —
+	// the cap is a soft DoS mitigation, not a correctness gate.
+	maxClients := mobileapp.DefaultMaxSSEClients
+	if raw := os.Getenv("SSE_MAX_CLIENTS"); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			maxClients = v
+		} else {
+			// slog.Warn escapes attribute values through its encoder
+			// (text/JSON), so a malicious env var like `1\nFAKE LOG
+			// ENTRY` lands as a quoted attribute value rather than
+			// splitting into a second log line.
+			slog.Warn("mobile-app: SSE_MAX_CLIENTS not a positive integer; using default",
+				"value", raw, "default", maxClients)
+		}
+	}
+	hub := mobileapp.NewHubWithLimits(mobileapp.DefaultHistorySize, maxClients)
+
+	r, _ := mobileapp.NewRouterWithHub(store, eng, GetResources(), verifier, hub)
+
+	// Explicit http.Server with timeouts (mp-663 Phase 2). r.Run uses a
+	// zero-value http.Server, which has no read/write/idle timeouts and
+	// no graceful-shutdown hook — a single slowloris client can pin a
+	// goroutine + fd forever, and SIGTERM kills in-flight requests mid-
+	// response. WriteTimeout is intentionally left at 0 because the SSE
+	// stream is unbounded; per-request write cancellation happens via
+	// Request.Context().Done() which the SSE handler already selects on.
+	srv := &http.Server{
+		Addr:              o.bindAddress + ":" + strconv.Itoa(o.port),
+		Handler:           r,
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		ReadTimeout:       httpReadTimeout,
+		IdleTimeout:       httpIdleTimeout,
+		MaxHeaderBytes:    httpMaxHeaderBytes,
+	}
+
+	// Close the SSE hub on shutdown — Shutdown waits for active requests
+	// to finish, but SSE handlers loop forever on the per-client channel
+	// and on the request context. Closing the hub closes each client
+	// channel, which makes the per-connection streaming goroutine return
+	// (the `case msg, ok := <-ch` arm sees !ok). Without this, Shutdown
+	// hangs until httpShutdownTimeout elapses on every SIGTERM.
+	srv.RegisterOnShutdown(hub.Close)
+
+	serveErr := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+			return
+		}
+		serveErr <- nil
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// Defer unregistration so BOTH exit paths (clean shutdown OR
+	// listener error) drop the signal subscription. Without this the
+	// shutdown branch left sigCh registered with the signal package,
+	// leaking the channel reference if run() is invoked multiple times
+	// in the same process (notably from tests). Idempotent — signal.Stop
+	// on an already-stopped channel is a no-op.
+	defer signal.Stop(sigCh)
+
+	select {
+	case sig := <-sigCh:
+		slog.Info("mobile-app: shutting down", "signal", sig.String(), "deadline", httpShutdownTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			slog.Error("mobile-app: shutdown error", "err", err)
+			return err
+		}
+		// Drain the listener goroutine so deferred cleanup completes.
+		<-serveErr
+		slog.Info("mobile-app: shutdown complete")
+		return nil
+	case err := <-serveErr:
+		return err
+	}
 }
 
 func init() {

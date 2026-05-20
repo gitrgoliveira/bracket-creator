@@ -97,6 +97,37 @@ The workbook is built entirely from code in `internal/excel/template.go` (`NewFi
 
 `main.go` embeds `web/*` via `//go:embed`. The global var `helper.WebFs` exists for backward compatibility with code paths that still reference it directly. Must rebuild after changing embedded files.
 
+### Mobile-app runtime defaults
+
+Production-hardening defaults applied in the `mobile-app` command. Constants live in [cmd/mobile_app.go](cmd/mobile_app.go) and [internal/mobileapp/middleware.go](internal/mobileapp/middleware.go) / [hub.go](internal/mobileapp/hub.go):
+
+| Concern | Default | Override | Rationale |
+|---|---|---|---|
+| `ReadHeaderTimeout` | 10s | — | Slowloris-header defense |
+| `ReadTimeout` | 30s | — | Slow-body defense (still permits multi-MB CSV import) |
+| `IdleTimeout` | 120s | — | Bounds fd commitment per idle keep-alive client |
+| `WriteTimeout` | **0** (unbounded) | — | SSE streams are infinite; per-request cancellation runs via `Request.Context().Done()` |
+| `MaxHeaderBytes` | 1 MB | — | Header-bomb defense |
+| Body cap (admin JSON) | 1 MB | `DefaultMaxBodyBytes` const | `c.BindJSON` payloads are tiny in practice; cap is enforced by `MaxBodyBytes` middleware (returns 413) |
+| Body cap (`/tournament/import`) | 64 MB | `MaxImportBodyBytes` const | Matches `ParseMultipartForm` already in the handler |
+| SSE subscribers | 1000 | `SSE_MAX_CLIENTS` env var | Bounds fan-out cost + per-client goroutine/channel allocation |
+| Graceful shutdown | 30s | `httpShutdownTimeout` const | `Hub.Close` is wired via `srv.RegisterOnShutdown` so SSE goroutines exit before the deadline |
+
+**`safeGo` convention.** Any goroutine spawned inside a request handler MUST use the `safeGo` helper in [internal/mobileapp/safego.go](internal/mobileapp/safego.go). Gin's Recovery middleware only catches panics on the request goroutine — a panic in a spawned goroutine crashes the entire process. The helper guarantees `wg.Done()` on panic and captures the recovered value into a shared `atomic.Pointer[recoveredPanic]` so the handler can return a single HTTP 500 without leaking internals. Pattern:
+
+```go
+var wg sync.WaitGroup
+var panicRef atomic.Pointer[recoveredPanic]
+safeGo(&wg, &panicRef, func() { /* spawned work */ })
+wg.Wait()
+if p := panicRef.Load(); p != nil {
+    c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+    return
+}
+```
+
+See `handlers_viewer.go` for the canonical use sites (mp-663 Phase 1).
+
 ## Testing Conventions
 
 - **Table-driven tests** with `t.Run()` subtests throughout (see `seed_test.go`, `tree_test.go`)

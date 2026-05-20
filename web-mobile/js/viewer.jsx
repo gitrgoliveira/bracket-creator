@@ -2043,7 +2043,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
               <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
               <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
               {a.dojo && (
-                <div className="d" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
+                <div className="dojo" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
               )}
             </div>
           );

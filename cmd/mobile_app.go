@@ -114,7 +114,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		verifier = mobileapp.NewFileVerifier(store)
 	}
 
-	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "folder", o.folder)
+	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "tournamentDataDir", o.folder)
 	eng := engine.New(store)
 	r := mobileapp.NewRouter(store, eng, GetResources(), verifier)
 	return r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))

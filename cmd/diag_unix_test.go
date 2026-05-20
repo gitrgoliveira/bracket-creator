@@ -66,10 +66,10 @@ func TestDiagnoseFolderError_MismatchArrowWhenUIDDiffers(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root — UID mismatch against root-owned dir not testable")
 	}
-	// /usr/bin exists on macOS and Linux and is always owned by root (uid=0).
+	// "/" is always present on any Unix system and owned by root (uid=0).
 	// Inject uid=999 (≠ 0) to trigger the mismatch arrow without needing Docker
 	// or elevated privileges.
-	result := diagnoseFolderErrorForProcess("/usr/bin", 999, 999)
+	result := diagnoseFolderErrorForProcess("/", 999, 999)
 
 	if !strings.Contains(result, "→") {
 		t.Errorf("expected UID mismatch arrow when uid=999 != owner(0), got:\n%s", result)

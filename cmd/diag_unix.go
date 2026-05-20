@@ -42,6 +42,16 @@ func diagnoseFolderErrorForProcess(folder string, uid, gid int) string {
 	target := folder
 	info, err := os.Stat(folder)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			// EACCES or other non-NotExist errors mean the folder exists but we
+			// can't inspect it — report that directly rather than silently falling
+			// back to the parent, which could have different ownership and mislead
+			// the operator about what's wrong.
+			hint += fmt.Sprintf("  %s: could not stat (%v)", folder, err)
+			return hint
+		}
+		// Folder doesn't exist yet (common: data dir was never created on this
+		// host). Stat the parent to show who owns the volume root.
 		parent := filepath.Dir(folder)
 		info, err = os.Stat(parent)
 		if err != nil {

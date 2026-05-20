@@ -127,7 +127,7 @@ function RankInput({ initial, className, onCommit, style }) {
   );
 }
 
-function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
+function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const resetOverrides = async () => {
     if (!confirm("Are you sure you want to reset ALL manual overrides (ranks and winners) for this competition?")) return;
     try {
@@ -223,12 +223,42 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
             </tbody>
           </table>
 
+          {/* Pool-daihyosen banner: shown when the backend has injected DH matches
+              for this pool (all regular matches complete but teams still tied). */}
+          {(() => {
+            const dhPrefix = selectedPool.poolName + '-DH-';
+            const dhMatches = (poolMatches || []).filter(m =>
+              (m.id || "").startsWith(dhPrefix)
+            );
+            if (dhMatches.length === 0) return null;
+            const pending = dhMatches.filter(m => m.status !== "completed" || !m.winner);
+            const label = pending.length > 0
+              ? `${pending.length} daihyosen bout${pending.length > 1 ? "s" : ""} pending — teams tied on all 8 criteria`
+              : "Daihyosen complete — standings updated";
+            const color = pending.length > 0 ? "var(--warn-bg, #fffbe6)" : "var(--ok-bg, #e8f5e9)";
+            const border = pending.length > 0 ? "1px solid var(--warn, #e6a817)" : "1px solid var(--ok, #4caf50)";
+            return (
+              <div style={{ marginTop: 16, padding: "10px 14px", background: color, border, borderRadius: 6, fontSize: 13 }}>
+                <strong>Representative bout (daihyosen):</strong> {label}
+                {pending.length > 0 && (
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+                    {pending.map(m => {
+                      const a = m.sideA?.name || m.sideA || "";
+                      const b = m.sideB?.name || m.sideB || "";
+                      return <li key={m.id}>{a && b ? `${b} vs ${a}` : m.id}</li>;
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })()}
+
           <div style={{ marginTop: 24 }}>
             <h3 className="section-title">Match Results</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {selectedPool.matches.map(m => (
                 <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
-                  <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id.split('-').pop()}</div>
+                  <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id ? m.id.split('-').pop() : ""}</div>
                   <div className="sched-row__players">
                     {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
                     <div className="sched-row__side" style={{ textAlign: "right" }}>
@@ -341,7 +371,7 @@ function AdminPools({ c, pools, standings, tweaks, onEditScore, password }) {
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {pool.matches.map(m => (
                       <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center", padding: "2px 0" }}>
-                        <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id.split('-').pop()}</div>
+                        <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id ? m.id.split('-').pop() : ""}</div>
                         {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
                         <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideB?.name || m.sideB}</span>

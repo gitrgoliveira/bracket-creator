@@ -19,6 +19,7 @@ package mobileapp
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -55,7 +56,27 @@ const (
 	MaxLenEntityID          = 64 // matches state.ValidateCompetitionID cap
 
 	MaxLenSeedAssignmentName = 100
+
+	MaxLenCheckInWindow = 5 // "HH:MM"
 )
+
+// hhmmRE matches HH:MM time strings (00:00–23:59).
+var hhmmRE = regexp.MustCompile(`^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$`)
+
+// validateCheckInWindow returns a ValidationError when val is non-empty and
+// not a valid HH:MM string (hour 00-23, minute 00-59).
+func validateCheckInWindow(field, val string) error {
+	if val == "" {
+		return nil
+	}
+	if err := validateMaxLen(field, val, MaxLenCheckInWindow); err != nil {
+		return err
+	}
+	if !hhmmRE.MatchString(val) {
+		return &ValidationError{Field: field, Message: "must be a valid HH:MM time (e.g. 09:00)"}
+	}
+	return nil
+}
 
 // validateMaxLen returns a ValidationError when val exceeds max bytes.
 // Empty strings pass — required-field checks live separately so callers

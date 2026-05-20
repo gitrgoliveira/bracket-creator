@@ -89,7 +89,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 		RegisterTournamentHandlers(admin, store, hub, verifier)
 		RegisterImportHandlers(admin, store, hub)
 		RegisterCompetitionHandlers(admin, store, eng, hub)
-		RegisterParticipantHandlers(admin, store)
+		RegisterParticipantHandlers(admin, store, hub)
 		RegisterMatchHandlers(admin, eng, store, store, hub)
 		RegisterDecisionHandlers(admin, eng, store, store, hub)
 		RegisterEligibilityHandlers(admin, store, hub)

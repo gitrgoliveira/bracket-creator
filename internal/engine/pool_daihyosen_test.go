@@ -21,7 +21,8 @@ func TestIsPoolDaihyosenMatchID(t *testing.T) {
 		{"Pool A-DH-0", true},
 		{"Pool A-DH-1", true},
 		{"Pool B-DH-42", true},
-		{"My-Pool A-DH-0", true}, // hyphenated pool name — strings.Contains handles correctly
+		{"My-Pool A-DH-0", true},    // hyphenated pool name — strings.Contains handles correctly
+		{"Pool A-East-DH-0", true},  // realistic hyphenated pool name
 		{"Pool A-0", false},
 		{"Pool A-TB-0", false},
 		{"Pool A-DH", false},    // no index after DH (no trailing dash)
@@ -33,6 +34,39 @@ func TestIsPoolDaihyosenMatchID(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.id, func(t *testing.T) {
 			assert.Equal(t, tc.want, IsPoolDaihyosenMatchID(tc.id))
+		})
+	}
+}
+
+// TestPoolNameFromMatchID covers the pool-name extraction helper for all ID
+// forms, including hyphenated pool names and prefix-overlap edge cases.
+func TestPoolNameFromMatchID(t *testing.T) {
+	tests := []struct {
+		id      string
+		want    string
+		wantOK  bool
+	}{
+		// DH suffix
+		{"Pool A-DH-0", "Pool A", true},
+		{"Pool A-East-DH-2", "Pool A-East", true},
+		// TB suffix
+		{"Pool A-TB-0", "Pool A", true},
+		{"Pool A-East-TB-2", "Pool A-East", true},
+		// Plain numeric suffix
+		{"Pool A-0", "Pool A", true},
+		{"Pool A-East-0", "Pool A-East", true},
+		// Prefix-overlap: "Pool A" must not eat into "Pool A-East"
+		{"Pool A-East-DH-0", "Pool A-East", true},
+		// Edge cases
+		{"", "", false},
+		{"noHyphen", "", false},
+		{"Pool A-notdigits", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.id, func(t *testing.T) {
+			got, ok := poolNameFromMatchID(tc.id)
+			assert.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

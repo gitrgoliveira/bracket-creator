@@ -185,6 +185,16 @@ function CheckInBanner({ tournament, players }) {
 
 function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, showToast, onSection }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
+  const [replaceTarget, setReplaceTarget] = useStateA(null);
+  const [showAddForm, setShowAddForm] = useStateA(false);
+  const [addName, setAddName] = useStateA("");
+  const [addDojo, setAddDojo] = useStateA("");
+  const [addDanGrade, setAddDanGrade] = useStateA("");
+  const [addLoading, setAddLoading] = useStateA(false);
+  const [replaceLoading, setReplaceLoading] = useStateA(false);
+  const [replaceName, setReplaceName] = useStateA("");
+  const [replaceDojo, setReplaceDojo] = useStateA("");
+  const [replaceDanGrade, setReplaceDanGrade] = useStateA("");
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
@@ -473,6 +483,48 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
   };
 
+  const bulkCheckInAll = async () => {
+    const targets = (c.players || []).filter(p => !p.checkedIn);
+    if (targets.length === 0) { showToast("All participants already checked in"); return; }
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
+    const failed = results.filter(r => r.status === "rejected").length;
+    const succeeded = results.length - failed;
+    if (failed > 0) {
+      showToast(`${succeeded}/${results.length} checked in (${failed} failed)`, "error");
+    } else {
+      showToast(`All ${succeeded} participants checked in`);
+    }
+  };
+
+  const handleAddParticipant = async () => {
+    if (!addName.trim() || !addDojo.trim()) { showToast("Name and dojo are required", "error"); return; }
+    setAddLoading(true);
+    try {
+      await window.API.addParticipant(c.id, { name: addName.trim(), dojo: addDojo.trim(), danGrade: addDanGrade.trim() || undefined }, password);
+      setAddName(""); setAddDojo(""); setAddDanGrade(""); setShowAddForm(false);
+      showToast(`${addName.trim()} added`);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setAddLoading(false);
+    }
+  };
+
+  const handleReplaceParticipant = async () => {
+    if (!replaceTarget) return;
+    if (!replaceName.trim() || !replaceDojo.trim()) { showToast("Name and dojo are required", "error"); return; }
+    setReplaceLoading(true);
+    try {
+      await window.API.replaceParticipant(c.id, replaceTarget.id, { name: replaceName.trim(), dojo: replaceDojo.trim(), danGrade: replaceDanGrade.trim() || undefined }, password);
+      setReplaceTarget(null);
+      showToast(`${replaceTarget.name} replaced with ${replaceName.trim()}`);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setReplaceLoading(false);
+    }
+  };
+
   const [showSlotForm, setShowSlotForm] = useStateA(false);
   const [slotSrcComp, setSlotSrcComp] = useStateA("");
   const [slotRank, setSlotRank] = useStateA(1);
@@ -624,7 +676,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
   return (
     <>
-      <CheckInBanner tournament={tournament} players={players} />
+      {c.checkInEnabled && <CheckInBanner tournament={tournament} players={players} />}
       {isStarted && (
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
           <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
@@ -762,13 +814,18 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
             <div>
               <div className="card__title">Check-in & Seeding</div>
               <div className="card__sub">
-                {players.filter(p => p.checkedIn).length} / {players.length} checked in · {players.filter((p) => p.seed).length} seeded
+                {c.checkInEnabled && `${players.filter(p => p.checkedIn).length} / ${players.length} checked in · `}{players.filter((p) => p.seed).length} seeded
               </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button className={`btn btn--sm ${showOnlyUnchecked ? "btn--primary" : ""}`} type="button" onClick={() => setShowOnlyUnchecked(!showOnlyUnchecked)}>
-                {showOnlyUnchecked ? "Show all" : "Show unchecked"}
-              </button>
+              {c.checkInEnabled && (
+                <button className={`btn btn--sm ${showOnlyUnchecked ? "btn--primary" : ""}`} type="button" onClick={() => setShowOnlyUnchecked(!showOnlyUnchecked)}>
+                  {showOnlyUnchecked ? "Show all" : "Show unchecked"}
+                </button>
+              )}
+              {c.checkInEnabled && (
+                <button className="btn btn--sm" type="button" onClick={bulkCheckInAll} disabled={players.length === 0} title="Mark all as checked in">Check in all</button>
+              )}
               <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0} title="Shuffle unseeded players">Shuffle unseeded</button>
               <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
@@ -812,6 +869,60 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               ))}
             </div>
           )}
+          {c.status === "setup" && (
+            <div style={{ padding: "0 16px 12px" }}>
+              {!showAddForm ? (
+                <button className="btn btn--sm" type="button" onClick={() => setShowAddForm(true)}>+ Add participant</button>
+              ) : (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div>
+                    <div className="field__label" style={{ fontSize: 11 }}>Name *</div>
+                    <input className="input" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder="Full name" />
+                  </div>
+                  <div>
+                    <div className="field__label" style={{ fontSize: 11 }}>Dojo *</div>
+                    <input className="input" style={{ width: 140 }} value={addDojo} onChange={e => setAddDojo(e.target.value)} placeholder="Dojo" />
+                  </div>
+                  <div>
+                    <div className="field__label" style={{ fontSize: 11 }}>Dan grade</div>
+                    <input className="input" style={{ width: 100 }} value={addDanGrade} onChange={e => setAddDanGrade(e.target.value)} placeholder="Optional" />
+                  </div>
+                  <button className="btn btn--sm btn--primary" disabled={addLoading || !addName.trim() || !addDojo.trim()} onClick={handleAddParticipant}>
+                    {addLoading ? "Adding…" : "Add"}
+                  </button>
+                  <button className="btn btn--sm" onClick={() => { setShowAddForm(false); setAddName(""); setAddDojo(""); setAddDanGrade(""); }}>Cancel</button>
+                </div>
+              )}
+            </div>
+          )}
+          {replaceTarget && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
+              <div className="card" style={{ minWidth: 320, maxWidth: 420, margin: 16 }}>
+                <div className="card__head"><div className="card__title">Replace {replaceTarget.name}</div></div>
+                <div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div>
+                    <div className="field__label">Name *</div>
+                    <input className="input" value={replaceName} onChange={e => setReplaceName(e.target.value)} placeholder="Replacement name" />
+                  </div>
+                  <div>
+                    <div className="field__label">Dojo *</div>
+                    <input className="input" value={replaceDojo} onChange={e => setReplaceDojo(e.target.value)} placeholder="Dojo" />
+                  </div>
+                  <div>
+                    <div className="field__label">Dan grade</div>
+                    <input className="input" value={replaceDanGrade} onChange={e => setReplaceDanGrade(e.target.value)} placeholder="Optional" />
+                  </div>
+                  <div className="field__hint">The participant's ID and seed assignment are preserved. Any existing seeds for this name are renamed automatically.</div>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <button className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
+                    <button className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
+                      {replaceLoading ? "Replacing…" : "Replace"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {players.length === 0 ? (
             <div className="empty" style={{ padding: 24 }}>
               <div className="icon">🌱</div>
@@ -847,22 +958,24 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     }}
                     style={{ cursor: reorderDisabled ? "default" : "grab" }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
-                      <input
-                        type="checkbox"
-                        checked={p.checkedIn}
-                        onChange={(e) => toggleCheckIn(p.id, e.target.checked)}
-                        style={{ width: 18, height: 18, cursor: "pointer" }}
-                        aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
-                      />
-                    </div>
+                    {c.checkInEnabled && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
+                        <input
+                          type="checkbox"
+                          checked={p.checkedIn}
+                          onChange={(e) => toggleCheckIn(p.id, e.target.checked)}
+                          style={{ width: 18, height: 18, cursor: "pointer" }}
+                          aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
+                        />
+                      </div>
+                    )}
                     <span className="seed-row__handle" title={reorderDisabled ? "Clear all filters to reorder" : "Drag to reorder"}>⠿</span>
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div style={{ flex: 1 }}>
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                       <div className="seed-row__dojo">
                         {p.dojo}
-                        {dojoFirstRowSet.has(p.id) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
+                        {c.checkInEnabled && dojoFirstRowSet.has(p.id) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}
@@ -876,6 +989,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
+                      {c.status === "setup" && (
+                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 9 }} title={`Replace ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade((p.metadata || [])[0] || ""); }} aria-label={`Replace ${p.name}`}>↔</button>
+                      )}
                     </div>
                      <window.StableInput
                         className="seed-row__input"

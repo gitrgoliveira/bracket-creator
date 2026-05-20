@@ -344,7 +344,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -499,6 +499,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // value before the user types a valid replacement).
       swissRounds: safeInt(effective.swissRounds, latestC.swissRounds || 0),
       naginata: !!effective.naginata,
+      checkInEnabled: !!effective.checkInEnabled,
     };
     // Capture the snapshot of edited fields we're about to persist. On
     // success we clear ONLY those fields from the edited set — preserving
@@ -765,6 +766,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => updateNow("naginata", e.target.checked)} /> Naginata competition</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => updateNow("checkInEnabled", e.target.checked)} /> Check-in tracking</label>
+          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>

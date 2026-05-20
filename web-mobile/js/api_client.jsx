@@ -590,6 +590,30 @@ const API = {
         }
         return res.json();
     },
+    async addParticipant(compID, payload, password) {
+        const res = await fetch(`/api/competitions/${compID}/participants`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to add participant');
+        }
+        return res.json();
+    },
+    async replaceParticipant(compID, pid, payload, password) {
+        const res = await fetch(`/api/competitions/${compID}/participants/${pid}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to replace participant');
+        }
+        return res.json();
+    },
     async sendAnnouncement(message, durationMinutes, password) {
         const res = await fetch('/api/tournament/announce', {
             method: 'POST',

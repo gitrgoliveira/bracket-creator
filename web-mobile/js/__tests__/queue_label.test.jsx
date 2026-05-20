@@ -8,10 +8,10 @@ import { queueLabel, queueLabelCompact } from '../display.jsx';
 //
 // Contract:
 //   - queueLabel(m)        — full-form label used in scheduled-list rows
-//     - qp === 1 → "Up next"
+//     - qp === 1 → "Up next"  (qp coerced with Number(), handles string values)
 //     - qp >  1 → "(qp - 1) before yours"
-//     - falsy qp + scheduledAt → "Scheduled hh:mm" fallback
-//     - falsy qp + no scheduledAt → ""
+//     - status === "scheduled" + falsy qp + scheduledAt → "Scheduled hh:mm" fallback
+//     - any other combination → ""  (running/completed matches never show scheduledAt)
 //   - queueLabelCompact(m) — pill form used in dense rows
 //     - status !== "scheduled" → null (so callers can hide the pill)
 //     - qp === 1 → "Up next"
@@ -49,6 +49,19 @@ describe('queueLabel (full form)', () => {
 
   it('treats a negative queuePosition as "no queue"', () => {
     expect(queueLabel({ status: 'scheduled', queuePosition: -1 })).toBe('');
+  });
+
+  it('handles a string queuePosition (e.g. from JSON deserialization)', () => {
+    expect(queueLabel({ status: 'scheduled', queuePosition: '1' })).toBe('Up next');
+    expect(queueLabel({ status: 'scheduled', queuePosition: '2' })).toBe('1 before yours');
+  });
+
+  it('does not show scheduledAt for running matches even if scheduledAt is present', () => {
+    expect(queueLabel({ status: 'running', scheduledAt: '10:30' })).toBe('');
+  });
+
+  it('does not show scheduledAt for completed matches even if scheduledAt is present', () => {
+    expect(queueLabel({ status: 'completed', scheduledAt: '10:30' })).toBe('');
   });
 });
 

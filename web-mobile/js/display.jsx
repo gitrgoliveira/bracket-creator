@@ -175,20 +175,21 @@ function findActiveCourts(tournament, competitions) {
 // viewer surfaces (display.jsx, VSchedItem in viewer.jsx, etc.).
 //
 // Contract: position 1 → "Up next"; position N → "(N-1) before yours".
-// Falls back to scheduledAt time if no queue position is present (pre-T046
-// payloads or unannotated matches). Returns "" for non-scheduled rows or
-// when no info is available so callers can render unconditionally.
+// Falls back to scheduledAt time only when status === "scheduled" and no
+// queue position is present (pre-T046 payloads or unannotated matches).
+// Returns "" for non-scheduled rows or when no info is available so
+// callers can render unconditionally.
 //
 // Wording is consolidated on "Up next" across all surfaces (bead mp-e3k).
 // If you need a denser pill form for a tight row, use queueLabelCompact.
 function queueLabel(m) {
     if (!m) return "";
-    const qp = m.queuePosition;
-    if (qp && qp > 0) {
+    const qp = Number(m.queuePosition);
+    if (qp > 0) {
         if (qp === 1) return "Up next";
         return `${qp - 1} before yours`;
     }
-    if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
+    if (m.status === "scheduled" && m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
     return "";
 }
 

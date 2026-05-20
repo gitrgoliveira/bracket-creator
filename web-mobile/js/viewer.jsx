@@ -932,7 +932,7 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
     isSwiss ? { id: "swiss", label: "Standings" } : null,
     hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
     hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
-    c.status === "completed" && !isSwiss ? { id: "results", label: "Results" } : null,
+    c.status === "completed" ? { id: "results", label: "Awards" } : null,
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
@@ -1013,8 +1013,8 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           {tab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
-          {tab === "results" && c.status === "completed" && derivedBracket && (
-            <ResultsViewer c={c} bracket={derivedBracket} />
+          {tab === "results" && c.status === "completed" && (
+            <ResultsViewer c={c} bracket={derivedBracket} standings={standings} pools={pools} players={c.players} />
           )}
         </div>
       </div>
@@ -1637,7 +1637,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, deriveAwards };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -1645,6 +1645,7 @@ if (typeof window !== 'undefined') {
     window.matchHighlightedBy = matchHighlightedBy;
     window.buildPlayerMatchHighlight = buildPlayerMatchHighlight;
     window.buildWatchlistUpcoming = buildWatchlistUpcoming;
+    window.deriveAwards = deriveAwards;
 }
 
 // Tournament-wide schedule (across competitions) — grouped by day, then court swimlanes + filter
@@ -1853,47 +1854,153 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   );
 }
 
-function ResultsViewer({ _c, bracket }) {
-  const final = bracket.rounds[bracket.rounds.length - 1][0];
-  const sf = bracket.rounds[bracket.rounds.length - 2] || [];
-  const champion = final.winner;
-  const runnerUp = final.winner === final.sideA ? final.sideB : final.sideA;
-  const third = sf.map((m) => m.winner === m.sideA ? m.sideB : m.sideA).filter(Boolean);
-  return (
-    <div>
-      <div className="podium">
-        {third[0] && (
-          <div className="podium-step podium-step--3">
-            <div className="place">3</div>
-            <div className="name">{third[0]}</div>
-          </div>
-        )}
-        {champion && (
-          <div className="podium-step podium-step--1">
-            <div style={{ fontSize: 28 }}>🏆</div>
-            <div className="place">1</div>
-            <div className="name">{champion}</div>
-          </div>
-        )}
-        {runnerUp && (
-          <div className="podium-step podium-step--2">
-            <div className="place">2</div>
-            <div className="name">{runnerUp}</div>
-          </div>
-        )}
-        {third[1] && (
-          <div className="podium-step podium-step--3" style={{ order: 4 }}>
-            <div className="place">3</div>
-            <div className="name">{third[1]}</div>
-          </div>
-        )}
+// deriveAwards returns up to four placements for the closing ceremony per
+// FIK convention: 1st, 2nd, and two 3rds (semi-final losers — no bronze match).
+// Returns [] when the final isn't decided yet or no podium data exists.
+// `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich entries
+// with dojo info; missing names fall back to {name, dojo: ""}.
+function deriveAwards(bracket, standings, pools, format, nameToPlayer) {
+  const lookup = (name) => {
+    if (!name) return null;
+    const p = nameToPlayer && nameToPlayer.get(name);
+    return { name, dojo: (p && p.dojo) || "" };
+  };
+
+  // Bracket-based: final + semi-finals
+  if (bracket && bracket.rounds && bracket.rounds.length > 0) {
+    const finalRound = bracket.rounds[bracket.rounds.length - 1];
+    const sfRound = bracket.rounds[bracket.rounds.length - 2] || [];
+    const final = finalRound[0];
+    if (!final || !final.winner) return [];
+    const champion = final.winner;
+    const runnerUp = final.winner === final.sideA ? final.sideB : final.sideA;
+    const thirds = sfRound
+      .map((m) => (m.winner ? (m.winner === m.sideA ? m.sideB : m.sideA) : null))
+      .filter(Boolean);
+    return [
+      { place: 1, ...lookup(champion) },
+      runnerUp ? { place: 2, ...lookup(runnerUp) } : null,
+      thirds[0] ? { place: 3, ...lookup(thirds[0]) } : null,
+      thirds[1] ? { place: 3, ...lookup(thirds[1]) } : null,
+    ].filter(Boolean);
+  }
+
+  // League / Swiss / pools-only: take the top four from the single standings.
+  // For pools-only with multiple pools we still want the first pool's leader
+  // (consistent with PoolsViewer's leagueWinner pick).
+  if (standings && pools && pools.length > 0) {
+    const list = standings[pools[0].poolName] || [];
+    const slice = list.slice(0, 4).map((s, i) => ({
+      place: i < 3 ? i + 1 : 3,
+      name: s.player?.name || "",
+      dojo: s.player?.dojo || "",
+    }));
+    return slice.filter((e) => e.name);
+  }
+
+  return [];
+}
+
+const PLACE_STYLE = {
+  1: { icon: "🏆", label: "1st Place", accent: "var(--gold, #d4af37)" },
+  2: { icon: "🥈", label: "2nd Place", accent: "var(--silver, #c0c0c0)" },
+  3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
+};
+
+function AwardsView({ c, bracket, standings, pools, players }) {
+  const containerRef = useRefV(null);
+  const [isFs, setIsFs] = useState(false);
+
+  React.useEffect(() => {
+    const onFsChange = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  const nameToPlayer = useMemo(() => {
+    const m = new Map();
+    (players || []).forEach((p) => {
+      if (p && p.name) m.set(p.name, p);
+    });
+    return m;
+  }, [players]);
+
+  const awards = useMemo(
+    () => deriveAwards(bracket, standings, pools, c?.format, nameToPlayer),
+    [bracket, standings, pools, c?.format, nameToPlayer]
+  );
+
+  const toggleFs = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else if (el.requestFullscreen) {
+      el.requestFullscreen().catch(() => {});
+    }
+  };
+
+  if (awards.length === 0) {
+    return (
+      <div className="empty" data-testid="awards-empty">
+        <div className="icon">🏆</div>
+        <h3>Final standings not yet available</h3>
       </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card__title" style={{ marginBottom: 10 }}>Final match</div>
-        <window.MatchCard match={final} variant={1} showDojo={true} />
+    );
+  }
+
+  // FIK ordering for podium display: 3 left, 1 center, 2 right, 3 right-most.
+  // For the fullscreen ceremony layout we keep the same order but enlarge.
+  return (
+    <div
+      ref={containerRef}
+      className="awards"
+      data-testid="awards-view"
+      style={{
+        background: isFs ? "var(--bg)" : "transparent",
+        padding: isFs ? 40 : 0,
+        minHeight: isFs ? "100vh" : "auto",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
+            {c?.name ? `${c.name} — Awards` : "Awards"}
+          </div>
+          <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
+            Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
+          </div>
+        </div>
+        <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
+          {isFs ? "Exit fullscreen" : "Fullscreen"}
+        </button>
+      </div>
+      <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
+        {awards.map((a, idx) => {
+          const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
+          return (
+            <div
+              key={`${a.place}-${a.name}-${idx}`}
+              className={`podium-step podium-step--${a.place}`}
+              data-testid={`awards-place-${a.place}`}
+              style={{ borderTop: `4px solid ${style.accent}` }}
+            >
+              <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>
+              <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
+              <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
+              {a.dojo && (
+                <div className="d" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+function ResultsViewer({ c, bracket, standings, pools, players }) {
+  return <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={players} />;
 }
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)

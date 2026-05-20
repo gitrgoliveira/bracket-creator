@@ -36,6 +36,8 @@ COPY --from=builder /etc_passwd /etc/passwd
 # Use numeric user ID
 USER 65534
 
+ENV TOURNAMENT_DATA_DIR=/tournament-data
+
 EXPOSE 8080
 ENTRYPOINT [ "/bin/bracket-creator" ]
-CMD [ "mobile-app", "--port=8080", "--folder=/tournament-data" ]
+CMD [ "mobile-app", "--bind=0.0.0.0" ]

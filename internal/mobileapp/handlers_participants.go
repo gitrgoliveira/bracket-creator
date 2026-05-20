@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -77,7 +78,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		}
 		checkedInByName := make(map[string]bool, len(existing))
 		for _, ep := range existing {
-			checkedInByName[ep.Name] = ep.CheckedIn
+			checkedInByName[strings.ToLower(strings.TrimSpace(ep.Name))] = ep.CheckedIn
 		}
 
 		players := make([]domain.Player, 0, len(req.Players))
@@ -89,7 +90,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				Metadata:     p.Metadata,
 				Tag:          p.Tag,
 				PoolPosition: int64(i),
-				CheckedIn:    checkedInByName[p.Name],
+				CheckedIn:    checkedInByName[strings.ToLower(strings.TrimSpace(p.Name))],
 			})
 		}
 

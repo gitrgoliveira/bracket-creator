@@ -547,8 +547,8 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
 //      empty-state if all matches are complete) + a "Following: name [X]"
 //      header so the viewer can clear the selection (FR-022).
 function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, onMatchClick }) {
-  // Hoisted above the early return to satisfy the Rules of Hooks — hook order
-  // must be stable across renders regardless of followedPlayer being set.
+  // Hoisted above the early return so it is always computed before the guard;
+  // used in the non-empty branch to show the check-in badge.
   const pRecord = followedPlayer?.id
     ? (roster.find(p => p.id === followedPlayer.id) ?? null)
     : null;

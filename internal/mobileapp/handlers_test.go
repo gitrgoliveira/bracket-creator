@@ -1981,7 +1981,7 @@ func TestCheckInHandlers(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	comp := state.Competition{ID: "ci-comp"}
-	store.SaveCompetition(&comp)
+	require.NoError(t, store.SaveCompetition(&comp))
 
 	// PUT on unknown competition → 404
 	w := httptest.NewRecorder()

@@ -21,8 +21,8 @@ func TestIsPoolDaihyosenMatchID(t *testing.T) {
 		{"Pool A-DH-0", true},
 		{"Pool A-DH-1", true},
 		{"Pool B-DH-42", true},
-		{"My-Pool A-DH-0", true},    // hyphenated pool name — strings.Contains handles correctly
-		{"Pool A-East-DH-0", true},  // realistic hyphenated pool name
+		{"My-Pool A-DH-0", true},   // hyphenated pool name — strings.Contains handles correctly
+		{"Pool A-East-DH-0", true}, // realistic hyphenated pool name
 		{"Pool A-0", false},
 		{"Pool A-TB-0", false},
 		{"Pool A-DH", false},    // no index after DH (no trailing dash)
@@ -42,9 +42,9 @@ func TestIsPoolDaihyosenMatchID(t *testing.T) {
 // forms, including hyphenated pool names and prefix-overlap edge cases.
 func TestPoolNameFromMatchID(t *testing.T) {
 	tests := []struct {
-		id      string
-		want    string
-		wantOK  bool
+		id     string
+		want   string
+		wantOK bool
 	}{
 		// DH suffix
 		{"Pool A-DH-0", "Pool A", true},

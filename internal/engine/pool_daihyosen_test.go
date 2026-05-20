@@ -254,8 +254,8 @@ func TestMaybeAutoCompletePools_TeamDHCompleteTransitions(t *testing.T) {
 	require.NoError(t, err)
 	for i := range allMatches {
 		allMatches[i].Status = state.MatchStatusCompleted
-		if allMatches[i].Winner == "" {
-			allMatches[i].Winner = allMatches[i].SideA // assign a winner to DH match
+		if IsPoolDaihyosenMatchID(allMatches[i].ID) && allMatches[i].Winner == "" {
+			allMatches[i].Winner = allMatches[i].SideA
 		}
 	}
 	require.NoError(t, store.SavePoolMatches("autocomplete-team-dhcomplete", allMatches))

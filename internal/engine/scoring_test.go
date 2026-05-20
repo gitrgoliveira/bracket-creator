@@ -261,7 +261,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 	t.Run("ignored for playoffs-format competitions", func(t *testing.T) {
 		koID := "auto-complete-ko"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: koID, Name: "KO", Format: "playoffs", Status: state.CompStatusPlayoffs,
+			ID: koID, Name: "KO", Format: state.CompFormatPlayoffs, Status: state.CompStatusPlayoffs,
 		}))
 		require.NoError(t, store.SavePoolMatches(koID, []state.MatchResult{
 			{ID: "M1", Status: state.MatchStatusCompleted, Winner: "X", SideA: "X", SideB: "Y"},

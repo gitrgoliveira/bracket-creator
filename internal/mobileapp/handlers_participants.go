@@ -42,6 +42,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		if comp.Status != state.CompStatusSetup && comp.Status != "" {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
+			return
+		}
+
 		var req struct {
 			Players []struct {
 				Name        string   `json:"name"`
@@ -50,9 +55,46 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				Metadata    []string `json:"metadata"`
 				Tag         string   `json:"tag"`
 			} `json:"players"`
+			Name        string   `json:"name"`
+			DisplayName string   `json:"displayName"`
+			Dojo        string   `json:"dojo"`
+			Metadata    []string `json:"metadata"`
+			DanGrade    string   `json:"danGrade"`
+			Tag         string   `json:"tag"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if len(req.Players) == 0 && req.Name != "" {
+			// Single player add workflow
+			metadata := req.Metadata
+			if len(metadata) == 0 && req.DanGrade != "" {
+				metadata = []string{req.DanGrade}
+			}
+
+			if err := validatePlayerLengths(req.Name, req.DisplayName, req.Dojo, req.Tag, metadata); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			player := domain.Player{
+				Name:        req.Name,
+				DisplayName: req.DisplayName,
+				Dojo:        req.Dojo,
+				Metadata:    metadata,
+				Tag:         req.Tag,
+			}
+
+			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add participant: " + err.Error()})
+				return
+			}
+
+			hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+			c.JSON(http.StatusOK, addedPlayer)
 			return
 		}
 
@@ -99,7 +141,71 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 		c.JSON(http.StatusOK, players)
+	})
+
+	r.PUT("/competitions/:id/participants/:pid", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		pid := c.Param("pid")
+
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		if comp.Status != state.CompStatusSetup && comp.Status != "" {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
+			return
+		}
+
+		var req struct {
+			Name        string   `json:"name"`
+			DisplayName string   `json:"displayName"`
+			Dojo        string   `json:"dojo"`
+			Metadata    []string `json:"metadata"`
+			DanGrade    string   `json:"danGrade"`
+			Tag         string   `json:"tag"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		metadata := req.Metadata
+		if len(metadata) == 0 && req.DanGrade != "" {
+			metadata = []string{req.DanGrade}
+		}
+
+		if err := validatePlayerLengths(req.Name, req.DisplayName, req.Dojo, req.Tag, metadata); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+			p.Name = req.Name
+			p.DisplayName = req.DisplayName
+			p.Dojo = req.Dojo
+			p.Metadata = metadata
+			p.Tag = req.Tag
+			return nil
+		})
+
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, state.ErrParticipantNotFound) {
+				status = http.StatusNotFound
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		c.JSON(http.StatusOK, updatedPlayer)
 	})
 
 	r.GET("/competitions/:id/seeds", func(c *gin.Context) {

@@ -65,8 +65,10 @@ const DefaultHistorySize = 100
 // where the linear fan-out becomes a noticeable latency tax.
 //
 // Override at startup via the SSE_MAX_CLIENTS env var or by passing a
-// non-zero value to NewHubWithLimits — the cap is mp-663 Phase 4 mitigation
-// for resource-exhaustion via unbounded subscriber maps.
+// positive value to NewHubWithLimits. A non-positive (zero or negative)
+// value disables the cap entirely — used by tests that need to exceed
+// the default and not enforced anywhere production. The cap is mp-663
+// Phase 4 mitigation for resource-exhaustion via unbounded subscriber maps.
 const DefaultMaxSSEClients = 1000
 
 // SSEEvent represents the payload sent to clients.
@@ -158,7 +160,17 @@ func NewHubWithHistory(historySize int) *Hub {
 }
 
 // NewHubWithLimits constructs a Hub with explicit history-size and
-// subscriber-cap. Non-positive values fall back to defaults.
+// subscriber-cap.
+//
+// historySize: non-positive falls back to DefaultHistorySize (the ring
+// buffer needs a non-zero capacity to function).
+//
+// maxClients: passed through as-is. A POSITIVE value caps concurrent
+// subscribers at that count (Subscribe returns nil over the cap). A
+// non-positive value (zero or negative) DISABLES the cap entirely —
+// useful for tests that need to exceed DefaultMaxSSEClients without
+// constructing thousands of stub clients to prove the cap fires. It is
+// deliberately not coerced to the default so callers can opt out.
 func NewHubWithLimits(historySize, maxClients int) *Hub {
 	if historySize <= 0 {
 		historySize = DefaultHistorySize

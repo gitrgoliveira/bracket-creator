@@ -195,6 +195,13 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// Defer unregistration so BOTH exit paths (clean shutdown OR
+	// listener error) drop the signal subscription. Without this the
+	// shutdown branch left sigCh registered with the signal package,
+	// leaking the channel reference if run() is invoked multiple times
+	// in the same process (notably from tests). Idempotent — signal.Stop
+	// on an already-stopped channel is a no-op.
+	defer signal.Stop(sigCh)
 
 	select {
 	case sig := <-sigCh:
@@ -210,7 +217,6 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		log.Printf("mobile-app: shutdown complete")
 		return nil
 	case err := <-serveErr:
-		signal.Stop(sigCh)
 		return err
 	}
 }

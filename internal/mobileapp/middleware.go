@@ -7,10 +7,14 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// Body-size caps for mp-663 Phase 3. The default cap covers every admin
-// JSON endpoint; the import cap matches handlers_import.go's existing
-// ParseMultipartForm(64<<20) so the middleware doesn't silently shrink
-// the limit the import handler already enforces.
+// Body-size caps for mp-663 Phase 3. The MaxBodyBytes middleware
+// enforces the actual request-size cap; the import handler's existing
+// ParseMultipartForm(64<<20) is only a memory threshold for form parsing
+// (parts above the threshold spill to disk rather than RAM) and does
+// not by itself limit total request size. Keeping MaxImportBodyBytes
+// at the same numeric value just lets the two layers reason about
+// "64 MB" consistently — but the request-size cap lives here, in the
+// MaxBodyBytes middleware applied to the import group in server.go.
 const (
 	// DefaultMaxBodyBytes caps non-import admin request bodies. 1 MB is
 	// far above any legitimate JSON payload on this server (the largest
@@ -20,9 +24,12 @@ const (
 	// exhaustion vector.
 	DefaultMaxBodyBytes int64 = 1 << 20 // 1 MB
 
-	// MaxImportBodyBytes caps the /tournament/import endpoint. Matches
-	// the existing ParseMultipartForm limit so we cap consistently at
-	// both the middleware and form-parser layers.
+	// MaxImportBodyBytes is the request-size cap for /tournament/import.
+	// The handler's ParseMultipartForm(64<<20) is a memory threshold, not
+	// a request-size cap — without this middleware-level limit a client
+	// could stream a 10 GB body that the form parser would happily spill
+	// to disk. 64 MB is sized for a worst-case full-roster CSV plus
+	// metadata; raise here if real tournaments outgrow it.
 	MaxImportBodyBytes int64 = 64 << 20 // 64 MB
 )
 

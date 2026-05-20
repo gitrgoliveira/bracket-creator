@@ -591,3 +591,4 @@ func (e *Engine) StartCompetition(id string) error {
 
 	return e.GenerateSchedule(id)
 }
+

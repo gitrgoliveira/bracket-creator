@@ -1249,9 +1249,13 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
   // stays gracefully empty for non-queued matches and pre-T046 responses.
+  // Wording is owned by display.jsx::queueLabel (bead mp-e3k) so every
+  // viewer surface stays in sync; we still gate on scheduled+qp>0 here
+  // because this row already renders ●LIVE / Final on the right for
+  // running/completed and we don't want the fallback "Scheduled hh:mm".
   const qp = m.queuePosition;
-  const queueLabel = (m.status === "scheduled" && qp && qp > 0)
-    ? (qp === 1 ? "Next up" : `${qp - 1} before yours`)
+  const queueLabel = (m.status === "scheduled" && qp && qp > 0 && window.queueLabel)
+    ? window.queueLabel(m)
     : null;
   return (
     <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
@@ -1840,11 +1844,11 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : null;
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
-  // upcoming-list row in the per-competition viewer.
+  // upcoming-list row in the per-competition viewer. Wording is owned
+  // by display.jsx::queueLabelCompact (bead mp-e3k); we still grab `qp`
+  // separately because the accent-color styling below keys off qp===1.
   const qp = m.queuePosition;
-  const queuePill = (m.status === "scheduled" && qp && qp > 0)
-    ? (qp === 1 ? "Next" : `#${qp}`)
-    : null;
+  const queuePill = window.queueLabelCompact ? window.queueLabelCompact(m) : null;
   return (
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div>

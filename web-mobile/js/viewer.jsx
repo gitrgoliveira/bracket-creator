@@ -589,6 +589,13 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   const isOnSideA = aId === followedPlayer.id;
   const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
   const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
+  // FR-025: queue position is 1-indexed per court for scheduled matches; 0 for
+  // running/completed. Treat null/undefined/0 as "don't render" so we stay
+  // gracefully empty for non-queued matches and pre-T046 responses.
+  const qp = nextMatch.queuePosition;
+  const queueLabel = (nextMatch.status === "scheduled" && qp && qp > 0)
+    ? (qp === 1 ? "Up next" : `${qp - 1} before you`)
+    : (nextMatch.status === "running" ? "LIVE NOW" : null);
 
   return (
     <div className="my-match" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
@@ -608,6 +615,12 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
           <span className="l">Time</span>
           <span className="v">{nextMatch.scheduledAt || "TBA"}</span>
         </div>
+        {queueLabel && (
+          <div className="my-match__chip" data-testid="my-match-queue">
+            <span className="l">Queue</span>
+            <span className="v" style={{ color: (qp === 1 || nextMatch.status === "running") ? "var(--accent)" : "inherit" }}>{queueLabel}</span>
+          </div>
+        )}
       </div>
       {opponent && (typeof opponent === "object") ? (
         <button

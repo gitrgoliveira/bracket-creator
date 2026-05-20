@@ -1,0 +1,15 @@
+.git
+.github
+.beads
+.agents
+.venv
+.vscode
+.claude
+.gemini
+node_modules
+web/node_modules
+web-mobile/node_modules
+bin/
+*.xlsx
+*.out
+*.log

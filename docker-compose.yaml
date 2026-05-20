@@ -28,7 +28,7 @@ services:
       # Set to 'true' to enable locked password mode in production/staging environments
       - LOCK_PASSWORD=false
       # When LOCK_PASSWORD=true, supply a bcrypt hash of the password here:
-      - TOURNAMENT_PASSWORD_HASH=
+      # - TOURNAMENT_PASSWORD_HASH=
     ports:
       # Exposes the live tournament manager on host port 8081.
       - "8081:8080"

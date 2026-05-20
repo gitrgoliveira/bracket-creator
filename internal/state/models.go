@@ -115,6 +115,8 @@ type Competition struct {
 	// in addition to the standard M/K/D/T/H set. Default false = Kendo.
 	Naginata bool `yaml:"naginata,omitempty" json:"naginata"`
 
+	CheckInEnabled bool `yaml:"check_in_enabled,omitempty" json:"checkInEnabled,omitempty"`
+
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 

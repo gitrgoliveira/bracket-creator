@@ -220,6 +220,9 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 		return nil, ErrParticipantNotFound
 	}
 
+	oldName := players[foundIdx].Name
+	oldDojo := players[foundIdx].Dojo
+
 	if err := transform(&players[foundIdx]); err != nil {
 		return nil, err
 	}
@@ -228,7 +231,76 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 		return nil, err
 	}
 
+	// Update seeds.csv if name changes (under same lock to avoid deadlocks)
+	if oldName != players[foundIdx].Name {
+		seedsPath := s.compPath(compID, "seeds.csv")
+		seeds, err := helper.ParseSeedsFile(seedsPath)
+		if err == nil {
+			changed := false
+			for i := range seeds {
+				if seeds[i].Name == oldName {
+					seeds[i].Name = players[foundIdx].Name
+					if seeds[i].Dojo != "" && seeds[i].Dojo == oldDojo {
+						seeds[i].Dojo = players[foundIdx].Dojo
+					}
+					changed = true
+				}
+			}
+			if changed {
+				var sb strings.Builder
+				sb.WriteString("Rank,Name\n")
+				for _, a := range seeds {
+					fmt.Fprintf(&sb, "%d,%s\n", a.SeedRank, a.Name)
+				}
+				_ = s.atomicWrite(seedsPath, []byte(sb.String()), 0600)
+			}
+		}
+	}
+
 	return &players[foundIdx], nil
+}
+
+// AddParticipant atomically loads the participant list, assigns a sequential ID compID-pX,
+// sets PoolPosition, appends the participant, and saves the file.
+func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bool) (*domain.Player, error) {
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{})
+	if err != nil {
+		return nil, err
+	}
+
+	usedIds := make(map[string]bool)
+	for _, pl := range players {
+		if pl.ID != "" {
+			usedIds[pl.ID] = true
+		}
+	}
+
+	nextSlot := 1
+	for {
+		id := fmt.Sprintf("%s-p%d", compID, nextSlot)
+		if !usedIds[id] {
+			p.ID = id
+			break
+		}
+		nextSlot++
+	}
+
+	p.PoolPosition = int64(len(players))
+	if p.DisplayName == "" {
+		p.DisplayName = helper.SanitizeName(p.Name)
+	}
+
+	players = append(players, p)
+
+	if err := s.saveParticipantsNoLock(compID, players); err != nil {
+		return nil, err
+	}
+
+	return &p, nil
 }
 
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) error {

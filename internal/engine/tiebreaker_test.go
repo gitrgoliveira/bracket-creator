@@ -18,6 +18,7 @@ func TestIsTiebreakerMatchID(t *testing.T) {
 		{"Pool A-TB-0", true},
 		{"Pool A-TB-1", true},
 		{"Pool B-TB-42", true},
+		{"Pool A-East-TB-0", true}, // hyphenated pool name
 		{"Pool A-0", false},
 		{"Pool A-1", false},
 		{"Pool A-TB", false},    // no index after TB

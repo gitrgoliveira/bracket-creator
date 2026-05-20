@@ -40,6 +40,7 @@ const (
 	// instead of waiting for their next write to fail with 401. Viewers
 	// ignore the event — their flow doesn't depend on the admin password.
 	EventPasswordReset EventType = "password_reset"
+	EventAnnouncement  EventType = "announcement"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the

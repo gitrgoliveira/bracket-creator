@@ -52,16 +52,6 @@ func TestDiagnoseFolderError_OwnerInfo(t *testing.T) {
 	}
 }
 
-func TestDiagnoseFolderError_NoMismatchWarningWhenSameUID(t *testing.T) {
-	dir := t.TempDir()
-	result := diagnoseFolderError(dir)
-
-	// When the process uid matches the dir owner there should be no arrow warning.
-	if strings.Contains(result, "→") {
-		t.Errorf("expected no mismatch arrow when uid matches, got:\n%s", result)
-	}
-}
-
 func TestDiagnoseFolderError_MismatchArrowWhenUIDDiffers(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root — UID mismatch against root-owned dir not testable")
@@ -90,9 +80,10 @@ func TestDiagnoseFolderError_NoArrowWhenUIDMatches(t *testing.T) {
 }
 
 func TestDiagnoseFolderError_BothParentsMissing(t *testing.T) {
-	// Deeply nested path that doesn't exist at all — both folder and its
-	// immediate parent are absent. diagnoseFolderError must not panic.
-	result := diagnoseFolderError("/nonexistent-bc-diag-test/sub/deeper")
+	// Construct a guaranteed-missing nested path under t.TempDir() so that
+	// both the target folder and its immediate parent are absent regardless
+	// of the environment. diagnoseFolderError must not panic.
+	result := diagnoseFolderError(filepath.Join(t.TempDir(), "a", "b"))
 
 	if !strings.Contains(result, "uid=") {
 		t.Errorf("expected uid= in output even when both paths missing, got:\n%s", result)

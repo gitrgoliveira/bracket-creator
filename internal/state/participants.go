@@ -202,7 +202,8 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 	mu.Lock()
 	defer mu.Unlock()
 
-	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{})
+	// Seeds are not merged here — check-in mutations don't need seed data.
+	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {
 		return nil, err
 	}

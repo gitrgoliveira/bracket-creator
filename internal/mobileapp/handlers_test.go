@@ -2043,6 +2043,60 @@ func TestCheckInHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+func TestCheckInPreservedOnRosterReplace(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "ci-pr"}))
+
+	// Seed an initial roster with Alice.
+	body, _ := json.Marshal(map[string]interface{}{
+		"players": []map[string]string{{"name": "Alice", "dojo": "Dojo A"}},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/ci-pr/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Retrieve Alice's ID.
+	existing, err := store.LoadParticipants("ci-pr", false)
+	require.NoError(t, err)
+	require.Len(t, existing, 1)
+	aliceID := existing[0].ID
+	require.NotEmpty(t, aliceID)
+
+	// Check Alice in via PUT /checkin.
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-pr/participants/"+aliceID+"/checkin", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Replace the roster via POST (Alice still in the list, Bob added).
+	body, _ = json.Marshal(map[string]interface{}{
+		"players": []map[string]string{
+			{"name": "Alice", "dojo": "Dojo A"},
+			{"name": "Bob", "dojo": "Dojo B"},
+		},
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/ci-pr/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Alice's check-in must be preserved; Bob (new) must be unchecked.
+	reloaded, err := store.LoadParticipants("ci-pr", false)
+	require.NoError(t, err)
+	require.Len(t, reloaded, 2)
+	byName := map[string]domain.Player{}
+	for _, p := range reloaded {
+		byName[p.Name] = p
+	}
+	assert.True(t, byName["Alice"].CheckedIn, "Alice's check-in must survive a roster replace")
+	assert.False(t, byName["Bob"].CheckedIn, "Bob (newly added) must start unchecked")
+}
+
 func TestMatchHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

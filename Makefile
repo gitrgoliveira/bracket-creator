@@ -7,13 +7,11 @@ GO_VERSION := 1.26.3
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
-# Build flags
+# Build metadata (used by docker/build, release, and make version)
+# Version stamping uses //go:embed in internal/cmd/version — not LDFLAGS.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS := -ldflags "-X github.com/gitrgoliveira/bracket-creator/internal/cmd/version.Version=$(VERSION) \
-           -X github.com/gitrgoliveira/bracket-creator/internal/cmd/version.Commit=$(COMMIT) \
-           -X github.com/gitrgoliveira/bracket-creator/internal/cmd/version.BuildDate=$(BUILD_TIME)"
 
 # OS detection
 UNAME_S := $(shell uname -s)
@@ -118,7 +116,7 @@ $(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx $(GO_SOURCES) $(EMBEDDED_AS
 	@echo "Building $(BIN_NAME) version $(VERSION)..."
 	@mkdir -p $(BIN_PATH)
 	go generate ./...
-	go build $(LDFLAGS) -o $(BIN_PATH)/$(BIN_NAME) .
+	go build -o $(BIN_PATH)/$(BIN_NAME) .
 
 examples: go/build ## Build locally and create example files
 	@echo "Cleaning previous examples..."

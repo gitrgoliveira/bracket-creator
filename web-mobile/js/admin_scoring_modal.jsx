@@ -481,11 +481,16 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // round-trips the count via toBackendMatchResult; Slice 3 (T093+) layers
   // the decision/kiken UI on top.
   const initialEnchoPeriods = m.encho?.periodCount || 0;
+  const initialDecidedByHantei = !!m.decidedByHantei;
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
   const [aFouls, setAFouls] = useStateA(initialAFouls);
   const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // FIK Art. 7-5 / 29-6: an encho match that remains tied is decided by
+  // referee hantei. Persisting this on MatchResult so the UI / Excel can
+  // mark it distinctly (vs an ippon-derived win).
+  const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
   const [submitting, setSubmitting] = useStateA(false);
   // T104/CHK029: MaxEnchoPeriods cap from the competition config.
   // Fetched once on open so the warning banner can fire before the
@@ -609,6 +614,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // to non-"reset" patches. periodCount=0 means "no overtime"; emitting the
   // field as undefined keeps the wire payload clean (omitempty server-side).
   const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // Hantei is meaningful only when overtime has been declared; we tolerate
+  // the operator clearing encho by silently dropping the flag from the
+  // outbound patch (omitempty server-side keeps disk clean).
+  const hanteiBlock = () => (decidedByHantei && enchoPeriodCount > 0) ? { decidedByHantei: true } : {};
 
   const buildPatch = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
@@ -620,7 +629,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
       ...enchoBlock(),
     };
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiBlock() };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
@@ -629,10 +638,30 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiBlock() };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock() };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiBlock() };
+  };
+
+  // Hantei submit: tied at end of encho. Operator picks a side; we send a
+  // completed patch with the chosen side as winner, no ippons, and the
+  // decidedByHantei flag set. This is a dedicated affordance because the
+  // regular flow assumes an ippon-derived win.
+  const submitHantei = (winnerSide) => {
+    const fouls = { a: aFouls, b: bFouls };
+    const winner = winnerSide === "a" ? m.sideA : m.sideB;
+    return doSubmit(() => onSubmit({
+      winner,
+      ipponsA: [],
+      ipponsB: [],
+      hansokuA: aFouls,
+      hansokuB: bFouls,
+      status: "completed",
+      score: { type: "hantei", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, hantei: true },
+      ...enchoBlock(),
+      decidedByHantei: true,
+    }));
   };
 
   const doSubmit = async (fn) => {
@@ -682,7 +711,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     aFouls !== initialAFouls ||
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled ||
-    enchoPeriodCount !== initialEnchoPeriods;
+    enchoPeriodCount !== initialEnchoPeriods ||
+    decidedByHantei !== initialDecidedByHantei;
   const handleDismiss = () => {
     // Don't close while any save/decision request is in flight — letting
     // the modal unmount would orphan the pending fetch and lose the
@@ -792,6 +822,59 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             setEnchoPeriodCount={setEnchoPeriodCount}
             maxEnchoPeriods={maxEnchoPeriods}
           />
+          {/* FIK 7-5 / 29-6: in encho a still-tied match is decided by
+              referee hantei. Surface a dedicated affordance so the
+              winner is recorded with the hantei flag — distinguishable
+              from an ippon-derived win for stats, audit, and Excel. */}
+          {enchoPeriodCount > 0 && (
+            <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginBottom: 6, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
+              <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
+              <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
+              {!decidedByHantei && (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  data-testid="scoring-modal-hantei-arm"
+                  onClick={() => setDecidedByHantei(true)}
+                  disabled={submitting || decisionSubmitting}
+                  style={{ marginLeft: "auto" }}
+                >
+                  Decide by hantei…
+                </button>
+              )}
+              {decidedByHantei && (
+                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="scoring-modal-hantei-shiro"
+                    onClick={() => submitHantei("b")}
+                    disabled={submitting || decisionSubmitting}
+                  >
+                    SHIRO wins
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="scoring-modal-hantei-aka"
+                    onClick={() => submitHantei("a")}
+                    disabled={submitting || decisionSubmitting}
+                  >
+                    AKA wins
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    data-testid="scoring-modal-hantei-cancel"
+                    onClick={() => setDecidedByHantei(false)}
+                    disabled={submitting || decisionSubmitting}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="scoring-board">
               {/* Score slots + point buttons */}
               <div className="sb-match">

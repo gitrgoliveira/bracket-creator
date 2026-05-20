@@ -1394,11 +1394,22 @@ func TestOverrideBracketWinner_NotFound(t *testing.T) {
 // --- Scoring and Standing Logic Tests ---
 
 func TestFormatScore_HansokuOnly(t *testing.T) {
+	// Legacy disk values: hansoku used to be cumulative, so values >1 still
+	// appear when reading old saves. The renderer must keep displaying them.
 	score := formatScore([]string{}, 2)
 	assert.Equal(t, "(H2)", score)
 
 	score = formatScore([]string{"M"}, 1)
 	assert.Equal(t, "M (H1)", score)
+
+	// Post-PR-#110 saves: the discharged foul pair is recorded as an "H" ippon
+	// on the opponent's slice and HansokuA resets to 0. No redundant "(H...)"
+	// suffix should appear alongside the H ippon.
+	score = formatScore([]string{"H"}, 0)
+	assert.Equal(t, "H", score)
+
+	score = formatScore([]string{"M", "H"}, 0)
+	assert.Equal(t, "MH", score)
 }
 
 func TestCalculatePoolStandings_WithManualOverrides(t *testing.T) {

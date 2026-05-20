@@ -62,6 +62,33 @@ func TestDiagnoseFolderError_NoMismatchWarningWhenSameUID(t *testing.T) {
 	}
 }
 
+func TestDiagnoseFolderError_MismatchArrowWhenUIDDiffers(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root — UID mismatch against root-owned dir not testable")
+	}
+	// /usr/bin exists on macOS and Linux and is always owned by root (uid=0).
+	// Inject uid=999 (≠ 0) to trigger the mismatch arrow without needing Docker
+	// or elevated privileges.
+	result := diagnoseFolderErrorForProcess("/usr/bin", 999, 999)
+
+	if !strings.Contains(result, "→") {
+		t.Errorf("expected UID mismatch arrow when uid=999 != owner(0), got:\n%s", result)
+	}
+	if !strings.Contains(result, "uid 999") {
+		t.Errorf("expected injected uid 999 in mismatch message, got:\n%s", result)
+	}
+}
+
+func TestDiagnoseFolderError_NoArrowWhenUIDMatches(t *testing.T) {
+	dir := t.TempDir()
+	// Inject the actual process uid/gid — they match the t.TempDir() owner.
+	result := diagnoseFolderErrorForProcess(dir, os.Geteuid(), os.Getegid())
+
+	if strings.Contains(result, "→") {
+		t.Errorf("expected no mismatch arrow when uid matches dir owner, got:\n%s", result)
+	}
+}
+
 func TestDiagnoseFolderError_BothParentsMissing(t *testing.T) {
 	// Deeply nested path that doesn't exist at all — both folder and its
 	// immediate parent are absent. diagnoseFolderError must not panic.

@@ -25,9 +25,15 @@ import (
 // On POSIX, syscall.Stat_t carries Uid/Gid; on Windows this file is excluded
 // by the build tag and the stub in diag_windows.go returns "".
 func diagnoseFolderError(folder string) string {
-	uid := os.Geteuid()
-	gid := os.Getegid()
+	return diagnoseFolderErrorForProcess(folder, os.Geteuid(), os.Getegid())
+}
 
+// diagnoseFolderErrorForProcess is the testable core of diagnoseFolderError.
+// uid and gid are the effective credentials of the running process; callers
+// other than diagnoseFolderError should only use this in tests where
+// injecting a synthetic uid/gid is needed to exercise the mismatch path
+// without requiring root or a real foreign-owned directory.
+func diagnoseFolderErrorForProcess(folder string, uid, gid int) string {
 	hint := fmt.Sprintf("Hint: process running as uid=%d gid=%d\n", uid, gid)
 
 	// Prefer statting the folder itself — it often exists as the bind-mount

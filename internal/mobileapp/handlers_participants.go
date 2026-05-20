@@ -70,7 +70,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		// players that survive the edit (matched by name). A full roster
 		// replacement via this endpoint must not silently clear check-ins
 		// that were already recorded.
-		existing, _ := store.LoadParticipants(id, comp.WithZekkenName)
+		existing, err := store.LoadParticipants(id, comp.WithZekkenName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load participants: " + err.Error()})
+			return
+		}
 		checkedInByName := make(map[string]bool, len(existing))
 		for _, ep := range existing {
 			checkedInByName[ep.Name] = ep.CheckedIn

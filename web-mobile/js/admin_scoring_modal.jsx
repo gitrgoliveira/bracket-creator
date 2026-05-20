@@ -132,15 +132,11 @@ function GlossaryHintAS({ name }) {
 
 // T093–T098: shared helpers for the decision (kiken/fusenpai/fusensho) flow.
 //
-// Resolve the password to use for the /decision POST. The modal historically
-// took no password prop (the parent does the recordScore call). Rather than
-// re-thread the AdminApp props tree in this slice we accept an explicit prop
-// AND fall back to a window-scoped session value if the caller hasn't wired
-// it yet. The orchestrator marks the prop wiring as a separate follow-up.
+// Resolve the password for /decision POST. All mount sites now pass the
+// password prop explicitly; return it directly (or "" as a safe sentinel
+// that the server will reject with 401, surfacing the misconfiguration).
 function resolveDecisionPassword(propPassword) {
-  if (propPassword) return propPassword;
-  if (typeof window !== "undefined" && window.adminPassword) return window.adminPassword;
-  return "";
+  return propPassword || "";
 }
 
 // T093/T094: build the /decision POST body. Pure helper so we can pin the

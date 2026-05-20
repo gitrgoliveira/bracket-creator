@@ -750,6 +750,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
                 if (mountedRef.current) setOpenMatch(nextMatch);
               } catch (_err) { /* keep modal open on error */ }
             } : null}
+            password={password}
           />
         );
       })()}

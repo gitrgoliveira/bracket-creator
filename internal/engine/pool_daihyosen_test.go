@@ -412,6 +412,69 @@ func TestMaybeAutoCompletePools_TeamDHCycleBlocks(t *testing.T) {
 	assert.Equal(t, AutoCompleteNoChange, outcome, "cyclic DH results should block auto-completion")
 }
 
+// TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions verifies that
+// when DH results form a cycle but the operator has applied manual rank
+// overrides covering every tied team, MaybeAutoCompletePools transitions to
+// complete instead of blocking forever.
+func TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions(t *testing.T) {
+	eng, store := setupTeamPoolComp(t, "autocomplete-team-dh-cycle-override", true)
+
+	// Inject DH and build the same 3-way cycle as TeamDHCycleBlocks.
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle-override")
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+
+	allMatches, err := store.LoadPoolMatches("autocomplete-team-dh-cycle-override")
+	require.NoError(t, err)
+
+	nameSet := map[string]bool{}
+	for _, m := range allMatches {
+		if IsPoolDaihyosenMatchID(m.ID) {
+			nameSet[m.SideA] = true
+			nameSet[m.SideB] = true
+		}
+	}
+	sortedNames := make([]string, 0, len(nameSet))
+	for n := range nameSet {
+		sortedNames = append(sortedNames, n)
+	}
+	sort.Strings(sortedNames)
+	cycleBeats := map[string]string{
+		sortedNames[0]: sortedNames[1],
+		sortedNames[1]: sortedNames[2],
+		sortedNames[2]: sortedNames[0],
+	}
+	for i := range allMatches {
+		allMatches[i].Status = state.MatchStatusCompleted
+		if IsPoolDaihyosenMatchID(allMatches[i].ID) {
+			sA, sB := allMatches[i].SideA, allMatches[i].SideB
+			if cycleBeats[sA] == sB {
+				allMatches[i].Winner = sA
+			} else {
+				allMatches[i].Winner = sB
+			}
+		}
+	}
+	require.NoError(t, store.SavePoolMatches("autocomplete-team-dh-cycle-override", allMatches))
+
+	// Without overrides the cycle blocks.
+	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle-override")
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteNoChange, outcome, "cycle must block before overrides are set")
+
+	// Operator manually ranks all three tied teams — cycle is now resolved.
+	require.NoError(t, store.SaveOverrides("autocomplete-team-dh-cycle-override", &state.Overrides{
+		PoolRanks: map[string]map[string]int{
+			"Pool A": {sortedNames[0]: 1, sortedNames[1]: 2, sortedNames[2]: 3},
+		},
+		Winners: map[string]string{},
+	}))
+
+	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle-override")
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "manual overrides must unblock cyclic DH completion")
+}
+
 // TestDHStandingsApplied verifies that a completed pool-DH match result is
 // applied as a secondary sort to break a tie in team pool standings.
 func TestDHStandingsApplied(t *testing.T) {

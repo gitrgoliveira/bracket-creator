@@ -232,7 +232,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               isPoolDaihyosenID(m.id || "") && (m.id || "").startsWith(poolPrefix)
             );
             if (dhMatches.length === 0) return null;
-            const pending = dhMatches.filter(m => m.status !== "completed");
+            const pending = dhMatches.filter(m => m.status !== "completed" || !m.winner);
             const label = pending.length > 0
               ? `${pending.length} daihyosen bout${pending.length > 1 ? "s" : ""} pending — teams tied on all 8 criteria`
               : "Daihyosen complete — standings updated";

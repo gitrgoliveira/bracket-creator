@@ -507,3 +507,58 @@ func TestDHStandingsApplied(t *testing.T) {
 	// Alpha should rank first after winning the DH (all three teams were tied).
 	assert.Equal(t, "Alpha", poolA[0].Player.Name, "Alpha should rank first after winning DH")
 }
+
+// TestInjectPoolDaihyosenMatches_PreservesExistingScheduledAt is the
+// regression guard that ensures InjectPoolDaihyosenMatches does not
+// overwrite operator-adjusted ScheduledAt values on pre-existing matches.
+// Only newly injected DH matches (empty ScheduledAt) should receive fresh
+// slot assignments.
+func TestInjectPoolDaihyosenMatches_PreservesExistingScheduledAt(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "dh-preserves-time"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:        compID,
+		Name:      "DH Preserves Time",
+		Format:    state.CompFormatPools,
+		Status:    state.CompStatusPools,
+		Courts:    []string{"A"},
+		TeamSize:  2,
+		StartTime: "09:00",
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alpha"}, {Name: "Beta"},
+		}},
+	}))
+
+	// Operator adjusts the match time well outside the auto-assigned window.
+	const operatorTime = "15:00"
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta",
+			Status: state.MatchStatusCompleted,
+			Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
+			ScheduledAt: operatorTime,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Alpha", SideB: "Beta", Winner: "", Decision: string(domain.DecisionHikiwake)},
+				{Position: 2, SideA: "Alpha", SideB: "Beta", Winner: "", Decision: string(domain.DecisionHikiwake)},
+			}},
+	}))
+
+	injected, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, injected, 1, "one DH match expected for a two-way team tie")
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	for _, m := range all {
+		if IsPoolDaihyosenMatchID(m.ID) {
+			assert.NotEmpty(t, m.ScheduledAt,
+				"DH match must receive an auto-assigned slot")
+		} else {
+			assert.Equal(t, operatorTime, m.ScheduledAt,
+				"existing match %s must retain its operator-adjusted ScheduledAt", m.ID)
+		}
+	}
+}

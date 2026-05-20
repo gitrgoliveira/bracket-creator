@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -114,9 +114,18 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	slog.Info("mobile-app: initializing",
+		"tournamentDataDir", o.folder,
+		"bind", o.bindAddress,
+		"port", o.port,
+		"lockPassword", o.lockPassword,
+	)
 	store, err := state.NewStore(o.folder)
 	if err != nil {
-		return fmt.Errorf("failed to initialize state store: %w", err)
+		if hint := diagnoseFolderError(o.folder); hint != "" {
+			return fmt.Errorf("failed to initialize state store at %q: %w\n%s", o.folder, err, hint)
+		}
+		return fmt.Errorf("failed to initialize state store at %q: %w", o.folder, err)
 	}
 
 	// Select the auth source. Fail-closed: when --lock-password is set
@@ -132,12 +141,12 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--lock-password set but TOURNAMENT_PASSWORD_HASH invalid: %w", err)
 		}
 		verifier = v
-		log.Printf("Starting mobile-app server in LOCKED mode (auth from TOURNAMENT_PASSWORD_HASH; POST /api/tournament/reset disabled)")
+		slog.Info("mobile-app: locked mode", "authSource", "TOURNAMENT_PASSWORD_HASH", "resetDisabled", true)
 	} else {
 		verifier = mobileapp.NewFileVerifier(store)
 	}
 
-	log.Printf("Starting mobile-app server on %s:%d using folder %s", o.bindAddress, o.port, o.folder)
+	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "tournamentDataDir", o.folder)
 	eng := engine.New(store)
 
 	// SSE subscriber cap is configurable via SSE_MAX_CLIENTS to handle
@@ -149,11 +158,12 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
 			maxClients = v
 		} else {
-			// #nosec G706 — `%q` (strconv.Quote) escapes newlines, tabs,
-			// and control characters, so a malicious env var like
-			// `1\nFAKE LOG ENTRY` lands as the literal string `"1\nFAKE…"`
-			// in the log rather than splitting into a second log line.
-			log.Printf("SSE_MAX_CLIENTS=%q is not a positive integer; using default %d", raw, maxClients)
+			// slog.Warn escapes attribute values through its encoder
+			// (text/JSON), so a malicious env var like `1\nFAKE LOG
+			// ENTRY` lands as a quoted attribute value rather than
+			// splitting into a second log line.
+			slog.Warn("mobile-app: SSE_MAX_CLIENTS not a positive integer; using default",
+				"value", raw, "default", maxClients)
 		}
 	}
 	hub := mobileapp.NewHubWithLimits(mobileapp.DefaultHistorySize, maxClients)
@@ -205,16 +215,16 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 
 	select {
 	case sig := <-sigCh:
-		log.Printf("mobile-app: received %s, shutting down (deadline %s)", sig, httpShutdownTimeout)
+		slog.Info("mobile-app: shutting down", "signal", sig.String(), "deadline", httpShutdownTimeout)
 		ctx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("mobile-app: shutdown error: %v", err)
+			slog.Error("mobile-app: shutdown error", "err", err)
 			return err
 		}
 		// Drain the listener goroutine so deferred cleanup completes.
 		<-serveErr
-		log.Printf("mobile-app: shutdown complete")
+		slog.Info("mobile-app: shutdown complete")
 		return nil
 	case err := <-serveErr:
 		return err

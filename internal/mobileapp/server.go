@@ -96,12 +96,18 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// Admin API endpoints (protected). Split into two sub-groups so the
 	// CSV-import route gets a larger body cap than the rest — every
 	// other admin endpoint takes small JSON, while /tournament/import
-	// legitimately uploads multi-MB CSVs. mp-663 Phase 3.
-	admin := r.Group("/api")
-	admin.Use(AuthMiddleware(verifier, store))
-
-	adminSmallBody := admin.Group("")
+	// legitimately uploads multi-MB CSVs.
+	//
+	// Middleware ordering: MaxBodyBytes runs BEFORE AuthMiddleware on
+	// purpose (mp-663 Phase 3). An unauthenticated attacker who streams
+	// a huge Content-Length should hit 413 immediately, not get a
+	// chance to consume an auth roundtrip first. The Content-Length
+	// fast path inside MaxBodyBytes is constant-time and reads no body
+	// bytes, so the order doesn't add measurable cost to the happy
+	// path either.
+	adminSmallBody := r.Group("/api")
 	adminSmallBody.Use(MaxBodyBytes(DefaultMaxBodyBytes))
+	adminSmallBody.Use(AuthMiddleware(verifier, store))
 	{
 		RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
 		RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
@@ -115,8 +121,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		RegisterSwissHandlers(adminSmallBody, store, eng, hub)
 	}
 
-	adminLargeBody := admin.Group("")
+	adminLargeBody := r.Group("/api")
 	adminLargeBody.Use(MaxBodyBytes(MaxImportBodyBytes))
+	adminLargeBody.Use(AuthMiddleware(verifier, store))
 	{
 		RegisterImportHandlers(adminLargeBody, store, hub)
 	}

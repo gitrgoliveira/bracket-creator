@@ -91,3 +91,33 @@ func TestMaxBodyBytes_SkipsBodylessMethods(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code, "GET should bypass body cap")
 }
+
+// TestMaxBodyBytes_FiresBeforeAuth pins the wiring contract used by
+// server.go: the body cap middleware is installed BEFORE AuthMiddleware
+// on each admin group, so an unauthenticated POST with an oversized
+// Content-Length gets 413 — not 401. Regression test for the
+// mp-663 Phase 3 acceptance criterion.
+func TestMaxBodyBytes_FiresBeforeAuth(t *testing.T) {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+
+	// Order matches server.go: body cap, then auth.
+	r.Use(MaxBodyBytes(100))
+	r.Use(func(c *gin.Context) {
+		// Stand-in for AuthMiddleware that always returns 401 — proves
+		// the body cap fired first if the response is 413 instead.
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	})
+	r.POST("/api/anything", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	body := strings.Repeat("x", 500)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/anything", bytes.NewBufferString(body))
+	req.ContentLength = int64(len(body))
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
+		"oversized body must be rejected before auth runs; got %d (body: %s)", w.Code, w.Body.String())
+}

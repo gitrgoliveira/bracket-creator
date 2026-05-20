@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading } from '../viewer.jsx';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, ResultsViewer } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 
 describe('Viewer Utils', () => {
@@ -139,5 +139,57 @@ describe('Viewer Utils', () => {
       const c = { format: 'swiss', swissRounds: 4, swissCurrentRound: 0 };
       expect(swissStandingsHeading(c, [])).toBe('Standings — pending');
     });
+  });
+});
+
+describe('ResultsViewer', () => {
+  // Tests call ResultsViewer as a plain function (not a mounted component) —
+  // the same pattern used throughout this test suite.
+
+  const makeStanding = (name, dojo) => ({ player: { name, dojo }, wins: 2, losses: 0, draws: 0, ipponsGiven: 4, ipponsTaken: 0 });
+
+  it('pools-only: renders "Pool winners" heading and one row per pool', () => {
+    const pools = [
+      { poolName: 'Pool A' },
+      { poolName: 'Pool B' },
+    ];
+    const standings = {
+      'Pool A': [makeStanding('Alice', 'DojoA'), makeStanding('Bob', 'DojoB')],
+      'Pool B': [makeStanding('Charlie', 'DojoC')],
+    };
+    const tree = ResultsViewer({ bracket: null, standings, pools, _c: {} });
+    const text = JSON.stringify(tree);
+    expect(text).toContain('Pool winners');
+    expect(text).toContain('Alice');
+    expect(text).toContain('Charlie');
+    expect(text).not.toContain('Bob'); // only rank-1 per pool
+  });
+
+  it('pools-only: shows "No results available yet." when standings are empty', () => {
+    const pools = [{ poolName: 'Pool A' }];
+    const standings = { 'Pool A': [] };
+    const tree = ResultsViewer({ bracket: null, standings, pools, _c: {} });
+    expect(JSON.stringify(tree)).toContain('No results available');
+  });
+
+  it('pools-only: shows "No results available yet." when standings is null', () => {
+    const pools = [{ poolName: 'Pool A' }];
+    const tree = ResultsViewer({ bracket: null, standings: null, pools, _c: {} });
+    expect(JSON.stringify(tree)).toContain('No results available');
+  });
+
+  it('bracket path: renders podium with champion and runner-up (no regression)', () => {
+    const bracket = {
+      rounds: [
+        [{ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' }, { sideA: 'Charlie', sideB: 'Dave', winner: 'Charlie' }],
+        [{ sideA: 'Alice', sideB: 'Charlie', winner: 'Alice' }],
+      ],
+    };
+    // Stub window.MatchCard so the component doesn't blow up
+    window.MatchCard = () => null;
+    const tree = ResultsViewer({ bracket, standings: null, pools: null, _c: {} });
+    const text = JSON.stringify(tree);
+    expect(text).toContain('Alice'); // champion
+    expect(text).toContain('Charlie'); // runner-up
   });
 });

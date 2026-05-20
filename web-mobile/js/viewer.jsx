@@ -955,7 +955,7 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
     isSwiss ? { id: "swiss", label: "Standings" } : null,
     hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
     hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
-    c.status === "completed" && !isSwiss ? { id: "results", label: "Results" } : null,
+    c.status === "completed" && !isSwiss && (hasBracket || hasPools) ? { id: "results", label: "Results" } : null,
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
@@ -1036,8 +1036,8 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           {tab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
-          {tab === "results" && c.status === "completed" && derivedBracket && (
-            <ResultsViewer c={c} bracket={derivedBracket} />
+          {tab === "results" && c.status === "completed" && (derivedBracket || hasPools) && (
+            <ResultsViewer c={c} bracket={derivedBracket} standings={standings} pools={pools} />
           )}
         </div>
       </div>
@@ -1660,7 +1660,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, ResultsViewer };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -1876,7 +1876,46 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   );
 }
 
-function ResultsViewer({ _c, bracket }) {
+function ResultsViewer({ _c, bracket, standings, pools }) {
+  // Pools-only competitions have no bracket — show pool winners instead.
+  if (!bracket) {
+    const winners = (pools || []).map(p => {
+      const ps = standings ? standings[p.poolName] : null;
+      const top = ps && ps.length > 0 ? ps[0] : null;
+      return { poolName: p.poolName, winner: top ? top.player.name : null, dojo: top ? top.player.dojo : null };
+    }).filter(w => w.winner);
+    return (
+      <div>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card__title" style={{ marginBottom: 10 }}>Pool winners</div>
+          {winners.length === 0 ? (
+            <div style={{ color: "var(--ink-3)", fontSize: 14 }}>No results available yet.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", paddingBottom: 6, color: "var(--ink-3)", fontSize: 12 }}>Pool</th>
+                  <th style={{ textAlign: "left", paddingBottom: 6, color: "var(--ink-3)", fontSize: 12 }}>Winner</th>
+                </tr>
+              </thead>
+              <tbody>
+                {winners.map(w => (
+                  <tr key={w.poolName}>
+                    <td style={{ paddingRight: 16, paddingBottom: 8, color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: 13 }}>{w.poolName}</td>
+                    <td style={{ paddingBottom: 8 }}>
+                      <div style={{ fontWeight: 600 }}>{w.winner}</div>
+                      {w.dojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{w.dojo}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const final = bracket.rounds[bracket.rounds.length - 1][0];
   const sf = bracket.rounds[bracket.rounds.length - 2] || [];
   const champion = final.winner;

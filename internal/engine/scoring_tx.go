@@ -62,6 +62,13 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, m := range round {
 				if m.ID == matchID {
+					if result.SideA == "" {
+						result.SideA = m.SideA
+					}
+					if result.SideB == "" {
+						result.SideB = m.SideB
+					}
+					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
 					status := result.Status
 					if status == "" {
@@ -196,6 +203,7 @@ func (e *Engine) maybeLockTeamLineupsForRoundTx(tx state.StoreTx, compID string,
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchID
 	applyHansokuIppons(result)
+	deriveDaihyosenWinner(result)
 
 	// Capture the prior result so we can roll back the score on
 	// AlreadyIneligibleError. lookupExistingResultTx reads directly from

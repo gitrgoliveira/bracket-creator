@@ -12,6 +12,7 @@ package engine
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -70,6 +71,196 @@ func IsTied(a, b TeamSummary) bool {
 // duplicating the prefix check.
 func IsPoolMatchID(matchID string) bool {
 	return strings.HasPrefix(matchID, "Pool ")
+}
+
+// poolNameFromMatchID extracts the pool name from a pool match ID by
+// stripping the trailing DH, TB, or plain numeric suffix. This is
+// unambiguous regardless of hyphens in the pool name and avoids the
+// ambiguity of prefix-scanning against a map of known pool names.
+//
+// Examples:
+//
+//	"Pool A-DH-0"      → "Pool A"
+//	"Pool A-East-TB-2" → "Pool A-East"
+//	"Pool A-0"         → "Pool A"
+func poolNameFromMatchID(id string) (string, bool) {
+	if i := strings.LastIndex(id, "-DH-"); i > 0 {
+		return id[:i], true
+	}
+	if i := strings.LastIndex(id, "-TB-"); i > 0 {
+		return id[:i], true
+	}
+	// Plain pool match: strip trailing "-<digits>".
+	if i := strings.LastIndexByte(id, '-'); i > 0 {
+		suffix := id[i+1:]
+		allDigits := len(suffix) > 0
+		for _, c := range suffix {
+			if c < '0' || c > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			return id[:i], true
+		}
+	}
+	return "", false
+}
+
+// IsPoolDaihyosenMatchID reports whether a match ID is a pool-stage
+// daihyosen bout (IDs of the form "Pool X-DH-N"). These are generated
+// by InjectPoolDaihyosenMatches when all team-pool matches complete with
+// a tie on all 8 ranking criteria. They are structurally pool matches
+// but scored as individual (one representative per side) rather than as
+// full team bouts.
+func IsPoolDaihyosenMatchID(matchID string) bool {
+	return strings.Contains(matchID, "-DH-")
+}
+
+// generatePoolDaihyosenMatches creates round-robin MatchResult entries for
+// a tied group of teams in team-pool competitions. Mirrors
+// generateTiebreakerMatches but uses the "DH-N" ID prefix and is used when
+// teams are fully tied on all 8 ranking criteria after regular pool play.
+func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStanding, existingDHCount int, court string, existingPairs map[string]bool) []state.MatchResult {
+	var results []state.MatchResult
+	idx := existingDHCount
+	for _, a := range tiedGroup {
+		for _, b := range tiedGroup {
+			if a.Player.Name >= b.Player.Name {
+				continue // only generate each pair once (a < b alphabetically)
+			}
+			key := tiebreakerPairKey(a.Player.Name, b.Player.Name)
+			if existingPairs[key] {
+				continue
+			}
+			results = append(results, state.MatchResult{
+				ID:     fmt.Sprintf("%s-DH-%d", poolName, idx),
+				SideA:  a.Player.Name,
+				SideB:  b.Player.Name,
+				Status: state.MatchStatusScheduled,
+				Court:  court,
+			})
+			existingPairs[key] = true
+			idx++
+		}
+	}
+	return results
+}
+
+// InjectPoolDaihyosenMatches inspects team-pool standings for compID after
+// all regular pool matches are complete. For every tied group (same weighted
+// Points encoding all 8 ranking criteria), it generates a round-robin of
+// daihyosen (representative) bouts, appends them to the pool-matches store,
+// and regenerates the schedule. Returns the newly injected matches (nil when
+// there are no ties or all DH pairs already exist).
+//
+// Pool-DH match IDs use the "Pool X-DH-N" format. They are scored as
+// individual (one representative per side) rather than as full team bouts;
+// their results are applied to standings via the DH secondary sort in
+// computeStandings. The frontend routes these to the individual ScoreEditorModal
+// by detecting the DH prefix in compMatches.
+func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, err
+	}
+	if comp == nil {
+		return nil, notFoundErrorf("competition %s not found", compID)
+	}
+
+	standings, err := e.CalculatePoolStandings(compID)
+	if err != nil {
+		return nil, err
+	}
+
+	allMatches, err := e.store.LoadPoolMatches(compID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Scan existing DH matches per pool for idempotency and ID sequencing.
+	// poolNameFromMatchID strips the trailing suffix deterministically so
+	// overlapping pool names (e.g. "Pool A" vs "Pool A-East") are handled
+	// correctly without ambiguous prefix scanning.
+	type poolDHInfo struct {
+		existingPairs map[string]bool
+		count         int
+	}
+	poolDH := map[string]*poolDHInfo{}
+	poolCourt := map[string]string{}
+	for _, m := range allMatches {
+		pn, ok := poolNameFromMatchID(m.ID)
+		if !ok {
+			continue
+		}
+		if _, inStandings := standings[pn]; !inStandings {
+			continue
+		}
+		if _, seen := poolCourt[pn]; !seen {
+			// Uses the first match's court. Pool competitions assign one
+			// court per pool, so all matches in a pool share the same court.
+			poolCourt[pn] = m.Court
+		}
+		if IsPoolDaihyosenMatchID(m.ID) {
+			if poolDH[pn] == nil {
+				poolDH[pn] = &poolDHInfo{existingPairs: map[string]bool{}}
+			}
+			poolDH[pn].count++
+			poolDH[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
+		}
+	}
+
+	var injected []state.MatchResult
+	for poolName, poolStandings := range standings {
+		info := poolDH[poolName]
+		existingCount := 0
+		existingPairs := map[string]bool{}
+		if info != nil {
+			existingCount = info.count
+			existingPairs = info.existingPairs
+		}
+
+		for _, group := range detectPoolTies(poolStandings) {
+			newMatches := generatePoolDaihyosenMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
+			existingCount += len(newMatches)
+			injected = append(injected, newMatches...)
+		}
+	}
+
+	if len(injected) == 0 {
+		return nil, nil
+	}
+
+	allMatches = append(allMatches, injected...)
+
+	// Reassign slots so the new DH matches get ScheduledAt values.
+	existingTimes := make(map[string]string, len(allMatches))
+	for _, m := range allMatches {
+		if m.ScheduledAt != "" {
+			existingTimes[m.ID] = m.ScheduledAt
+		}
+	}
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return nil, err
+	}
+	state.ApplyTournamentDefaults(tournament)
+	state.ApplyCompetitionDefaults(comp)
+	allMatches = assignPoolMatchSlots(allMatches, comp, tournament)
+	for i := range allMatches {
+		if t, ok := existingTimes[allMatches[i].ID]; ok {
+			allMatches[i].ScheduledAt = t
+		}
+	}
+
+	if err := e.store.SavePoolMatches(compID, allMatches); err != nil {
+		return nil, err
+	}
+
+	e.standingsCache.Delete(compID)
+	e.standingsFlight.Delete(compID)
+
+	return injected, e.GenerateSchedule(compID)
 }
 
 // ComputeTeamSummary aggregates SubMatchResult entries into TeamSummary

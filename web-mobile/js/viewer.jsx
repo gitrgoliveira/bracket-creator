@@ -667,6 +667,8 @@ function addDojoToWatchlist(watchlist, roster, dojo, max) {
 function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatchClick }) {
   const [dojoSel, setDojoSel] = useState("");
   const [bulkMsg, setBulkMsg] = useState(null);
+  const bulkMsgTimer = useRefV(null);
+  React.useEffect(() => () => clearTimeout(bulkMsgTimer.current), []);
   const removeOne = (id) => setWatchlist(watchlist.filter((w) => w.id !== id));
   const addOne = (p) => {
     if (watchlist.find((w) => w.id === p.id)) return;
@@ -717,8 +719,12 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
     );
     setDojoSel("");
     // Auto-clear the toast after a few seconds so it doesn't linger.
-    setTimeout(() => setBulkMsg(null), 4000);
+    clearTimeout(bulkMsgTimer.current);
+    bulkMsgTimer.current = setTimeout(() => setBulkMsg(null), 4000);
   };
+
+  const selStats = dojoStats.get(dojoSel);
+  const addDojoDisabled = !dojoSel || !selStats || selStats.watched >= selStats.total;
 
   return (
     <div className="card" data-testid="viewer-home-watchlist" style={{ marginBottom: 16, padding: 14 }}>
@@ -776,10 +782,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
           </select>
           <button
             className="btn btn--sm"
-            disabled={!dojoSel || (() => {
-              const s = dojoStats.get(dojoSel);
-              return !s || s.watched >= s.total;
-            })()}
+            disabled={addDojoDisabled}
             onClick={addDojo}
             data-testid="watchlist-dojo-add"
           >

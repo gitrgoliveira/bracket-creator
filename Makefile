@@ -118,10 +118,10 @@ $(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx $(GO_SOURCES) $(EMBEDDED_AS
 	@echo "Building $(BIN_NAME) version $(VERSION)..."
 	@mkdir -p $(BIN_PATH)
 	go generate ./...
-	# -buildvcs=false: version/commit/build-date are already embedded via `go generate`
-	# (internal/cmd/version/get_build_info.sh writes commit.txt/version.txt/build_date.txt
-	# consumed by //go:embed), so Go's auto VCS stamp is redundant. Go 1.26's default
-	# -buildvcs=auto fails in git worktrees with "error obtaining VCS status: exit status 128".
+	@# -buildvcs=false: version/commit/build-date are already embedded via `go generate`
+	@# (internal/cmd/version/get_build_info.sh writes commit.txt/version.txt/build_date.txt
+	@# consumed by //go:embed), so Go's auto VCS stamp is redundant. Go 1.26's default
+	@# -buildvcs=auto fails in git worktrees with "error obtaining VCS status: exit status 128".
 	go build -buildvcs=false $(LDFLAGS) -o $(BIN_PATH)/$(BIN_NAME) .
 
 examples: go/build ## Build locally and create example files

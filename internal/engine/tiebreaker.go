@@ -107,21 +107,22 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	poolTB := map[string]*poolTBInfo{}
 	poolCourt := map[string]string{}
 	for _, m := range allMatches {
-		for pn := range standings {
-			if !strings.HasPrefix(m.ID, pn+"-") {
-				continue
+		pn, ok := poolNameFromMatchID(m.ID)
+		if !ok {
+			continue
+		}
+		if _, inStandings := standings[pn]; !inStandings {
+			continue
+		}
+		if _, ok := poolCourt[pn]; !ok {
+			poolCourt[pn] = m.Court
+		}
+		if IsTiebreakerMatchID(m.ID) {
+			if poolTB[pn] == nil {
+				poolTB[pn] = &poolTBInfo{existingPairs: map[string]bool{}}
 			}
-			if _, ok := poolCourt[pn]; !ok {
-				poolCourt[pn] = m.Court
-			}
-			if IsTiebreakerMatchID(m.ID) {
-				if poolTB[pn] == nil {
-					poolTB[pn] = &poolTBInfo{existingPairs: map[string]bool{}}
-				}
-				poolTB[pn].count++
-				poolTB[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
-			}
-			break
+			poolTB[pn].count++
+			poolTB[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
 		}
 	}
 

@@ -227,9 +227,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           {/* Pool-daihyosen banner: shown when the backend has injected DH matches
               for this pool (all regular matches complete but teams still tied). */}
           {(() => {
-            const poolPrefix = selectedPool.poolName + '-';
+            const dhPrefix = selectedPool.poolName + '-DH-';
             const dhMatches = (poolMatches || []).filter(m =>
-              isPoolDaihyosenID(m.id || "") && (m.id || "").startsWith(poolPrefix)
+              (m.id || "").startsWith(dhPrefix)
             );
             if (dhMatches.length === 0) return null;
             const pending = dhMatches.filter(m => m.status !== "completed" || !m.winner);

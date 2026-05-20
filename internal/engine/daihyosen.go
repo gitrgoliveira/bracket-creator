@@ -73,6 +73,40 @@ func IsPoolMatchID(matchID string) bool {
 	return strings.HasPrefix(matchID, "Pool ")
 }
 
+// poolNameFromMatchID extracts the pool name from a pool match ID by
+// stripping the trailing DH, TB, or plain numeric suffix. This is
+// unambiguous regardless of hyphens in the pool name and avoids the
+// ambiguity of prefix-scanning against a map of known pool names.
+//
+// Examples:
+//
+//	"Pool A-DH-0"      → "Pool A"
+//	"Pool A-East-TB-2" → "Pool A-East"
+//	"Pool A-0"         → "Pool A"
+func poolNameFromMatchID(id string) (string, bool) {
+	if i := strings.LastIndex(id, "-DH-"); i > 0 {
+		return id[:i], true
+	}
+	if i := strings.LastIndex(id, "-TB-"); i > 0 {
+		return id[:i], true
+	}
+	// Plain pool match: strip trailing "-<digits>".
+	if i := strings.LastIndexByte(id, '-'); i > 0 {
+		suffix := id[i+1:]
+		allDigits := len(suffix) > 0
+		for _, c := range suffix {
+			if c < '0' || c > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			return id[:i], true
+		}
+	}
+	return "", false
+}
+
 // IsPoolDaihyosenMatchID reports whether a match ID is a pool-stage
 // daihyosen bout (IDs of the form "Pool X-DH-N"). These are generated
 // by InjectPoolDaihyosenMatches when all team-pool matches complete with
@@ -145,8 +179,9 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	}
 
 	// Scan existing DH matches per pool for idempotency and ID sequencing.
-	// Use standings keys (known pool names) to match prefixes so hyphenated
-	// pool names like "Pool A-East" are handled correctly.
+	// poolNameFromMatchID strips the trailing suffix deterministically so
+	// overlapping pool names (e.g. "Pool A" vs "Pool A-East") are handled
+	// correctly without ambiguous prefix scanning.
 	type poolDHInfo struct {
 		existingPairs map[string]bool
 		count         int
@@ -154,23 +189,24 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	poolDH := map[string]*poolDHInfo{}
 	poolCourt := map[string]string{}
 	for _, m := range allMatches {
-		for pn := range standings {
-			if !strings.HasPrefix(m.ID, pn+"-") {
-				continue
+		pn, ok := poolNameFromMatchID(m.ID)
+		if !ok {
+			continue
+		}
+		if _, inStandings := standings[pn]; !inStandings {
+			continue
+		}
+		if _, seen := poolCourt[pn]; !seen {
+			// Uses the first match's court. Pool competitions assign one
+			// court per pool, so all matches in a pool share the same court.
+			poolCourt[pn] = m.Court
+		}
+		if IsPoolDaihyosenMatchID(m.ID) {
+			if poolDH[pn] == nil {
+				poolDH[pn] = &poolDHInfo{existingPairs: map[string]bool{}}
 			}
-			if _, seen := poolCourt[pn]; !seen {
-				// Uses the first match's court. Pool competitions assign one
-				// court per pool, so all matches in a pool share the same court.
-				poolCourt[pn] = m.Court
-			}
-			if IsPoolDaihyosenMatchID(m.ID) {
-				if poolDH[pn] == nil {
-					poolDH[pn] = &poolDHInfo{existingPairs: map[string]bool{}}
-				}
-				poolDH[pn].count++
-				poolDH[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
-			}
-			break
+			poolDH[pn].count++
+			poolDH[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
 		}
 	}
 

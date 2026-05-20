@@ -101,6 +101,34 @@ func applyHansokuIppons(result *state.MatchResult) {
 	}
 }
 
+// deriveDaihyosenWinner fills result.Winner from a completed daihyosen
+// sub-result (Position == -1) when the caller has not set it explicitly.
+// Playoff team matches end in daihyosen when IV and PW are tied; the
+// operator scores a single representative bout whose winner becomes the
+// team match winner. The sub-result Winner may be the representative
+// player's name or the team name; this function maps it back to the
+// canonical team name (result.SideA / result.SideB) using the same
+// side-matching logic as computeStandings.
+func deriveDaihyosenWinner(result *state.MatchResult) {
+	if result == nil || result.Winner != "" {
+		return
+	}
+	for _, sub := range result.SubResults {
+		if sub.Position != -1 || sub.Winner == "" {
+			continue
+		}
+		sideAWin := sub.Winner == result.SideA || sub.Winner == sub.SideA
+		sideBWin := sub.Winner == result.SideB || sub.Winner == sub.SideB
+		switch {
+		case sideAWin:
+			result.Winner = result.SideA
+		case sideBWin:
+			result.Winner = result.SideB
+		}
+		return
+	}
+}
+
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	applyHansokuIppons(result)
@@ -158,6 +186,7 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchId
 	applyHansokuIppons(result)
+	deriveDaihyosenWinner(result)
 
 	// T105/CHK047: capture the prior result so we can rollback if the atomic
 	// ineligibility write below fails with AlreadyIneligibleError.
@@ -313,12 +342,13 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 	comp, _ := e.store.LoadCompetition(compId)
 	isTeam := comp != nil && comp.TeamSize > 0
 
-	// Map match results by pool — IDs are formatted as "PoolName-MatchIdx"
+	// Map match results by pool using poolNameFromMatchID so hyphenated pool
+	// names (e.g. "Pool A-East") are handled correctly for all ID forms
+	// ("Pool A-East-0", "Pool A-East-TB-0", "Pool A-East-DH-0").
 	poolResults := make(map[string][]state.MatchResult)
 	for _, r := range results {
-		parts := strings.SplitN(r.ID, "-", 2)
-		if len(parts) == 2 {
-			poolResults[parts[0]] = append(poolResults[parts[0]], r)
+		if pn, ok := poolNameFromMatchID(r.ID); ok {
+			poolResults[pn] = append(poolResults[pn], r)
 		}
 	}
 
@@ -338,8 +368,8 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 			if m.Status != state.MatchStatusCompleted {
 				continue
 			}
-			// Tiebreaker matches don't count toward regular pool stats.
-			if IsTiebreakerMatchID(m.ID) {
+			// Tiebreaker and pool-daihyosen matches don't count toward regular pool stats.
+			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
 			sA := playerStandings[m.SideA]
@@ -449,6 +479,39 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 			i = j
 		}
 
+		// Apply pool-daihyosen results as a secondary sort within tied groups
+		// for team competitions. Mirrors the TB block above: DH wins are scoped
+		// per tied group to prevent cross-group bleed.
+		if isTeam {
+			for i := 0; i < len(sorted); {
+				j := i + 1
+				for j < len(sorted) && sorted[j].Points == sorted[i].Points {
+					j++
+				}
+				if j-i >= 2 {
+					groupNames := make(map[string]bool, j-i)
+					for k := i; k < j; k++ {
+						groupNames[sorted[k].Player.Name] = true
+					}
+					groupDHWins := map[string]int{}
+					for _, m := range matches {
+						if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+							continue
+						}
+						if groupNames[m.SideA] && groupNames[m.SideB] {
+							groupDHWins[m.Winner]++
+						}
+					}
+					if len(groupDHWins) > 0 {
+						sort.SliceStable(sorted[i:j], func(a, b int) bool {
+							return groupDHWins[sorted[i+a].Player.Name] > groupDHWins[sorted[i+b].Player.Name]
+						})
+					}
+				}
+				i = j
+			}
+		}
+
 		// Apply manual rank overrides
 		overrides, _ := e.store.LoadOverrides(compId)
 		if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
@@ -505,6 +568,18 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, m := range round {
 				if m.ID == matchId {
+					// Merge stored sides into result when the payload omitted
+					// them so that deriveDaihyosenWinner can map a
+					// representative player name back to the canonical team
+					// name. Must happen before deriveDaihyosenWinner and
+					// before writing result.Winner back to the bracket.
+					if result.SideA == "" {
+						result.SideA = m.SideA
+					}
+					if result.SideB == "" {
+						result.SideB = m.SideB
+					}
+					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
 					// Preserve incoming Status — pre-fix this was
 					// unconditionally set to Completed, so the scoring

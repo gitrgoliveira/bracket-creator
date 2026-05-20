@@ -58,18 +58,38 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		return AutoCompleteNoChange, err
 	}
 
-	// Partition matches into regular vs tiebreaker.
+	// Determine whether this is a team competition for tie-injection routing.
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
+	isTeamComp := comp != nil && comp.TeamSize > 0
+
+	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
 	allComplete := true
 	hasIncompleteTB := false
 	hasCompleteTB := false
+	hasIncompleteDH := false
+	hasCompleteDH := false
 	for _, m := range matches {
-		if IsTiebreakerMatchID(m.ID) {
-			if m.Status != state.MatchStatusCompleted {
+		switch {
+		case IsTiebreakerMatchID(m.ID):
+			// A TB match without a winner (malformed payload) leaves standings
+			// still tied, so treat it as unresolved just like DH.
+			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
 				hasIncompleteTB = true
 			} else {
 				hasCompleteTB = true
 			}
-		} else {
+		case IsPoolDaihyosenMatchID(m.ID):
+			// A DH match without a winner (e.g. hikiwake) leaves standings
+			// still tied, so it must not count as resolved.
+			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
+				hasIncompleteDH = true
+			} else {
+				hasCompleteDH = true
+			}
+		default:
 			if m.Status != state.MatchStatusCompleted {
 				allComplete = false
 			}
@@ -79,29 +99,58 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	if !allComplete {
 		return AutoCompleteNoChange, nil
 	}
-	if hasIncompleteTB {
+	if hasIncompleteTB || hasIncompleteDH {
 		return AutoCompleteNoChange, nil
 	}
 
-	// All regular matches (and any existing TB matches) are complete.
-	// If there are no TB matches yet, check for ties and inject if needed.
+	// All regular matches (and any existing TB/DH matches) are complete.
+	// If no supplementary matches exist yet, check for ties and inject.
 	//
-	// Concurrent callers that reach this point simultaneously are safe:
-	// InjectTiebreakerMatches loads fresh pool-match state and uses an
-	// existingPairs guard, so both goroutines generate identical content.
-	// SavePoolMatches is a full overwrite — the last write wins, but the
+	// Concurrent callers are safe: the injection functions load fresh state
+	// and use existingPairs guards, so parallel goroutines produce identical
+	// content. SavePoolMatches is a full overwrite — last write wins but the
 	// data is the same, making concurrent injection idempotent.
-	// Pre-existing TOCTOU: if a score result is committed between two
-	// goroutines' loads inside InjectTiebreakerMatches, the later caller
-	// may compute different standings. This is a general pool-match-save
-	// TOCTOU issue tracked separately — not specific to injection.
-	if !hasCompleteTB {
-		injected, injErr := e.InjectTiebreakerMatches(compID)
-		if injErr != nil {
-			return AutoCompleteNoChange, injErr
+	if (isTeamComp && !hasCompleteDH) || (!isTeamComp && !hasCompleteTB) {
+		if isTeamComp {
+			injected, injErr := e.InjectPoolDaihyosenMatches(compID)
+			if injErr != nil {
+				return AutoCompleteNoChange, injErr
+			}
+			if len(injected) > 0 {
+				return AutoCompleteTiebreakInjected, nil
+			}
+		} else {
+			injected, injErr := e.InjectTiebreakerMatches(compID)
+			if injErr != nil {
+				return AutoCompleteNoChange, injErr
+			}
+			if len(injected) > 0 {
+				return AutoCompleteTiebreakInjected, nil
+			}
 		}
-		if len(injected) > 0 {
-			return AutoCompleteTiebreakInjected, nil
+	}
+
+	// For team competitions where DH matches have been played: verify that
+	// the DH results actually broke all ties before transitioning.  In the
+	// rare event that DH bouts produce a cycle (A>B, B>C, C>A — only
+	// possible in a 3+ team pool with a full round-robin DH), every team in
+	// that group still has equal DH win counts and standings remain
+	// unresolved.  Per tournament practice the pool would normally be
+	// replayed; here we block auto-completion so the operator can apply
+	// manual rank overrides via the admin UI rather than seeding playoffs
+	// from an arbitrary order.
+	if isTeamComp && hasCompleteDH {
+		standings, standErr := e.CalculatePoolStandings(compID)
+		if standErr != nil {
+			return AutoCompleteNoChange, standErr
+		}
+		overridesObj, _ := e.store.LoadOverrides(compID)
+		var poolRanks map[string]map[string]int
+		if overridesObj != nil {
+			poolRanks = overridesObj.PoolRanks
+		}
+		if dhCycleExists(standings, matches, poolRanks) {
+			return AutoCompleteNoChange, nil
 		}
 	}
 
@@ -119,6 +168,9 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 			if m.Status != state.MatchStatusCompleted {
 				return nil, nil
 			}
+			if (IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID)) && m.Winner == "" {
+				return nil, nil
+			}
 		}
 		comp.Status = state.CompStatusComplete
 		return comp, nil
@@ -130,6 +182,68 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		return AutoCompleteTransitioned, nil
 	}
 	return AutoCompleteNoChange, nil
+}
+
+// dhCycleExists reports whether any pool still has a tied group that DH
+// results did not fully resolve. This catches the cyclic case (A>B, B>C,
+// C>A) where every team ends up with the same DH win count inside the
+// group. When true, auto-completion is blocked; the operator must use
+// manual rank overrides (or physically replay the pool).
+//
+// Note: this blocks even when the tied teams fall outside the pool_winners
+// cut (e.g. a 3rd/4th place tie in a 4-team pool with pool_winners=2).
+// Operators resolve by applying manual rank overrides to every tied member.
+//
+// poolRanks is the operator's manual rank override map (keyed by pool
+// name → team name → rank). A tied group whose every member has a
+// manual rank override is considered resolved — the operator has
+// explicitly ranked them, so the cycle no longer blocks completion.
+func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
+	for poolName, poolStandings := range standings {
+		for _, group := range detectPoolTies(poolStandings) {
+			// If the operator has manually ranked every member of this
+			// tied group, treat the cycle as resolved.
+			if overrides := poolRanks[poolName]; len(overrides) > 0 {
+				allOverridden := true
+				for _, s := range group {
+					if _, ok := overrides[s.Player.Name]; !ok {
+						allOverridden = false
+						break
+					}
+				}
+				if allOverridden {
+					continue
+				}
+			}
+			groupNames := make(map[string]bool, len(group))
+			for _, s := range group {
+				groupNames[s.Player.Name] = true
+			}
+			dhWins := make(map[string]int, len(group))
+			dhPlayed := false
+			for _, m := range allMatches {
+				if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+					continue
+				}
+				if groupNames[m.SideA] && groupNames[m.SideB] {
+					dhWins[m.Winner]++
+					dhPlayed = true
+				}
+			}
+			if !dhPlayed {
+				continue
+			}
+			seen := make(map[int]bool, len(group))
+			for _, s := range group {
+				count := dhWins[s.Player.Name]
+				if seen[count] {
+					return true
+				}
+				seen[count] = true
+			}
+		}
+	}
+	return false
 }
 
 // StartCompetition runs the competition-start pipeline: validate

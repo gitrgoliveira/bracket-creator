@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -8,6 +9,9 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
+
+// ErrParticipantNotFound is returned by UpdateParticipant when the pid is not in the roster.
+var ErrParticipantNotFound = errors.New("participant not found")
 
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
@@ -29,7 +33,10 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
+	return s.loadParticipantsNoLock(compID, withZekkenName, opts)
+}
 
+func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
 	// Use a virtual filename for cache to distinguish between with/without seeds.
 	cacheKey := "participants.csv"
 	if opts.WithSeeds {
@@ -82,20 +89,63 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	}
 
 	var ids []string
+	var checkedInFlags []bool
 	var plainLines []string
-	if hasIDs {
-		for _, line := range lines {
+
+	for _, line := range lines {
+		isCheckedIn := false
+
+		// Robust column-based detection: strip the UUID prefix first so
+		// the threshold is applied to the data columns only (per Copilot
+		// review). After stripping the ID the minimum valid data row is
+		// "Name,Dojo" (2 parts), so checked_in is only treated as a
+		// marker when at least 3 data parts are present (Name, Dojo,
+		// checked_in).
+		//
+		// Known limitation: a dojo literally named "checked_in" in a
+		// zekken competition that also has a distinct DisplayName column
+		// produces "Name, DisplayName, checked_in" (3 data parts) after
+		// UUID strip, which the threshold cannot distinguish from the
+		// legitimate "Name, Dojo, checked_in" row. Resolving this
+		// ambiguity without a format version or column header is not
+		// possible; in practice no real dojo uses this name.
+		line = strings.TrimSpace(line)
+
+		// Strip UUID prefix for threshold calculation only (idLine is
+		// what remains after the ID field).
+		idLine := line
+		if hasIDs {
+			if _, rest, ok := strings.Cut(line, ","); ok {
+				idLine = strings.TrimSpace(rest)
+			}
+		}
+		dataParts := strings.Split(idLine, ",")
+		if len(dataParts) > 2 {
+			last := strings.TrimSpace(dataParts[len(dataParts)-1])
+			if strings.ToLower(last) == "checked_in" {
+				isCheckedIn = true
+				// Strip from the full original line (preserves UUID prefix).
+				if li := strings.LastIndex(line, ","); li >= 0 {
+					line = strings.TrimRight(line[:li], " ")
+				}
+			}
+		}
+
+		if hasIDs {
 			id, rest, ok := strings.Cut(line, ",")
 			if !ok {
 				plainLines = append(plainLines, line)
 				ids = append(ids, "")
+				checkedInFlags = append(checkedInFlags, isCheckedIn)
 				continue
 			}
 			ids = append(ids, strings.TrimSpace(id))
 			plainLines = append(plainLines, rest)
+			checkedInFlags = append(checkedInFlags, isCheckedIn)
+		} else {
+			plainLines = append(plainLines, line)
+			checkedInFlags = append(checkedInFlags, isCheckedIn)
 		}
-	} else {
-		plainLines = lines
 	}
 
 	players, err := helper.CreatePlayers(plainLines, withZekkenName)
@@ -103,11 +153,12 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 		return nil, err
 	}
 
-	if hasIDs {
-		for i := range players {
-			if i < len(ids) {
-				players[i].ID = ids[i]
-			}
+	for i := range players {
+		if hasIDs && i < len(ids) {
+			players[i].ID = ids[i]
+		}
+		if i < len(checkedInFlags) {
+			players[i].CheckedIn = checkedInFlags[i]
 		}
 	}
 
@@ -140,7 +191,47 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
+	return s.saveParticipantsNoLock(compID, players)
+}
 
+// UpdateParticipant atomically loads the participant list, applies transform
+// to the target player, and persists the result. Used to avoid TOCTOU races
+// on concurrent check-ins.
+func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Seeds are not merged here — check-in mutations don't need seed data.
+	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
+	if err != nil {
+		return nil, err
+	}
+
+	foundIdx := -1
+	for i := range players {
+		if players[i].ID == pid {
+			foundIdx = i
+			break
+		}
+	}
+
+	if foundIdx == -1 {
+		return nil, ErrParticipantNotFound
+	}
+
+	if err := transform(&players[foundIdx]); err != nil {
+		return nil, err
+	}
+
+	if err := s.saveParticipantsNoLock(compID, players); err != nil {
+		return nil, err
+	}
+
+	return &players[foundIdx], nil
+}
+
+func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) error {
 	path := s.compPath(compID, "participants.csv")
 
 	var sb strings.Builder
@@ -163,6 +254,9 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 		}
 		if p.Tag != "" {
 			row += ", " + p.Tag
+		}
+		if p.CheckedIn {
+			row += ", checked_in"
 		}
 		sb.WriteString(id + ", " + row + "\n")
 	}

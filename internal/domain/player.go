@@ -12,6 +12,7 @@ type Player struct {
 	Dojo        string   `json:"dojo"`
 	Metadata    []string `json:"metadata,omitempty"`
 	Tag         string   `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer", "reserved"
+	CheckedIn   bool     `json:"checkedIn"`
 
 	PoolPosition int64  `json:"-"`
 	Seed         int    `json:"seed"`

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { 
-  standardSeedOrder, nextPow2, buildBracket, advanceByes, 
-  buildPools, computeStandings 
+import {
+  standardSeedOrder, nextPow2, buildBracket, advanceByes,
+  buildPools, computeStandings, parseParticipantLines
 } from '../data.jsx';
 
 describe('Data Utils', () => {
@@ -81,5 +81,30 @@ describe('Data Utils', () => {
       expect(standings[1].losses).toBe(1);
       expect(standings[1].ippons).toBe(1);
     });
+  });
+});
+
+describe('parseParticipantLines', () => {
+  it('sets checkedIn=true when last column is "checked_in" and parts > 2', () => {
+    const [p] = parseParticipantLines(['Name, Dojo, checked_in'], false);
+    expect(p.checkedIn).toBe(true);
+    expect(p.name).toBe('Name');
+    expect(p.dojo).toBe('Dojo');
+  });
+
+  it('does NOT set checkedIn when only 2 parts (below threshold)', () => {
+    // "Name, checked_in" has only 2 parts — must not be treated as the flag.
+    const [p] = parseParticipantLines(['Name, checked_in'], false);
+    expect(p.checkedIn).toBe(false);
+    // The second column is read as dojo.
+    expect(p.dojo).toBe('checked_in');
+  });
+
+  it('detects both tag and checkedIn when "..., tag, checked_in"', () => {
+    const [p] = parseParticipantLines(['Name, Dojo, registered, checked_in'], false);
+    expect(p.checkedIn).toBe(true);
+    expect(p.tag).toBe('registered');
+    expect(p.name).toBe('Name');
+    expect(p.dojo).toBe('Dojo');
   });
 });

@@ -625,6 +625,11 @@ func parseWinnerOf(s string, numRounds int) (int, int) {
 	return numRounds - depth, matchIdx
 }
 
+// formatScore renders a side's ippons plus any "(HN)" hansoku suffix for the
+// Excel bracket cell. Since PR #110 hansoku is 0 or 1 (outstanding undischarged
+// fouls); the discharged pair appears as an "H" ippon in the opponent's slice
+// instead of a redundant counter on this side. Values >1 only surface when
+// reading legacy disk entries written before the shift.
 func formatScore(ippons []string, hansoku int) string {
 	score := strings.Join(ippons, "")
 	if hansoku > 0 {

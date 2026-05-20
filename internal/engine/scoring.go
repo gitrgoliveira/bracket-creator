@@ -342,12 +342,13 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 	comp, _ := e.store.LoadCompetition(compId)
 	isTeam := comp != nil && comp.TeamSize > 0
 
-	// Map match results by pool — IDs are formatted as "PoolName-MatchIdx"
+	// Map match results by pool using poolNameFromMatchID so hyphenated pool
+	// names (e.g. "Pool A-East") are handled correctly for all ID forms
+	// ("Pool A-East-0", "Pool A-East-TB-0", "Pool A-East-DH-0").
 	poolResults := make(map[string][]state.MatchResult)
 	for _, r := range results {
-		parts := strings.SplitN(r.ID, "-", 2)
-		if len(parts) == 2 {
-			poolResults[parts[0]] = append(poolResults[parts[0]], r)
+		if pn, ok := poolNameFromMatchID(r.ID); ok {
+			poolResults[pn] = append(poolResults[pn], r)
 		}
 	}
 

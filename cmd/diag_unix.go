@@ -51,8 +51,10 @@ func diagnoseFolderErrorForProcess(folder string, uid, gid int) string {
 			return hint
 		}
 		// Folder doesn't exist yet (common: data dir was never created on this
-		// host). Stat the parent to show who owns the volume root.
-		parent := filepath.Dir(folder)
+		// host). Stat the parent to show who owns the volume root. Clean first
+		// so a trailing separator (e.g. "/tournament-data/") doesn't make
+		// filepath.Dir return the folder itself instead of its parent.
+		parent := filepath.Dir(filepath.Clean(folder))
 		info, err = os.Stat(parent)
 		if err != nil {
 			hint += fmt.Sprintf("  %s: could not stat (%v)", parent, err)

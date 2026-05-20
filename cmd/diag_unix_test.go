@@ -79,6 +79,24 @@ func TestDiagnoseFolderError_NoArrowWhenUIDMatches(t *testing.T) {
 	}
 }
 
+// TestDiagnoseFolderError_TrailingSeparatorFallsBackToTrueParent guards against
+// the filepath.Dir quirk where Dir("/x/") returns "/x" rather than "/" — the
+// fallback must Clean before computing the parent, otherwise it would stat the
+// folder itself again.
+func TestDiagnoseFolderError_TrailingSeparatorFallsBackToTrueParent(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "does-not-exist")
+	// Append trailing slash to the missing path; the parent must still be `dir`.
+	result := diagnoseFolderError(missing + string(filepath.Separator))
+
+	if !strings.Contains(result, dir) {
+		t.Errorf("expected true parent %s in output (not the path itself), got:\n%s", dir, result)
+	}
+	if !strings.Contains(result, "exists, mode=") {
+		t.Errorf("expected parent's mode info in output, got:\n%s", result)
+	}
+}
+
 func TestDiagnoseFolderError_TargetAndParentMissing(t *testing.T) {
 	// Construct a guaranteed-missing nested path under t.TempDir() so that
 	// both the target folder and its immediate parent are absent regardless

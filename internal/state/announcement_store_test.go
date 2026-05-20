@@ -66,3 +66,29 @@ func TestAnnouncementStore(t *testing.T) {
 		t.Errorf("expected announcement to be cleared (nil), got: %v", cleared)
 	}
 }
+
+// TestAnnouncementStoreGetAfterConcurrentSet guards against the race where
+// Get() sees an expired announcement under the read lock, then a concurrent
+// Set() replaces it before Get() acquires the write lock. The fresh
+// announcement must be visible to the caller, not swallowed.
+func TestAnnouncementStoreGetAfterConcurrentSet(t *testing.T) {
+	store := NewAnnouncementStore()
+
+	// Set an announcement that expires immediately.
+	store.Set("expires now", 1*time.Nanosecond)
+	time.Sleep(5 * time.Millisecond) // ensure it is expired
+
+	// Simulate: a concurrent writer calls Set() with a fresh announcement
+	// just as Get() is about to acquire the write lock.  We test the
+	// outcome rather than the timing, which is deterministic: after Set()
+	// completes, Get() must return the new announcement (not nil).
+	store.Set("fresh announcement", 10*time.Minute)
+
+	got := store.Get()
+	if got == nil {
+		t.Fatal("expected Get() to return the fresh announcement, got nil")
+	}
+	if got.Message != "fresh announcement" {
+		t.Errorf("expected message %q, got %q", "fresh announcement", got.Message)
+	}
+}

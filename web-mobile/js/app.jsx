@@ -3,7 +3,7 @@
 
 import { applyPatch as patchCompetitionData } from './patch.jsx';
 
-const { useState: useS, useEffect: useE, useRef: useR } = React;
+const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
 // synchronisation. The render path itself still drives off
@@ -583,18 +583,26 @@ function App() {
     );
   }
 
+  // Stable dismiss callback — wrapping in useCallback prevents the
+  // AnnouncementBanner countdown useEffect from re-running on every
+  // parent render (the effect lists onDismiss as a dependency, so an
+  // inline arrow function would reset the interval on every re-render).
+  const handleDismissAnnouncement = useC(() => {
+    setActiveAnnouncement(prev => {
+      if (prev?.sentAt) {
+        sessionStorage.setItem(`bc_dismissed_announcement_${prev.sentAt}`, "true");
+      }
+      return null;
+    });
+  }, []);
+
   // viewer mode
   return (
     <>
       {activeAnnouncement && window.AnnouncementBanner && (
         <window.AnnouncementBanner
           announcement={activeAnnouncement}
-          onDismiss={() => {
-            if (activeAnnouncement?.sentAt) {
-              sessionStorage.setItem(`bc_dismissed_announcement_${activeAnnouncement.sentAt}`, "true");
-            }
-            setActiveAnnouncement(null);
-          }}
+          onDismiss={handleDismissAnnouncement}
         />
       )}
       {selectedCompData ? (

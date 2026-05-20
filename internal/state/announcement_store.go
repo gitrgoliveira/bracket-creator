@@ -47,11 +47,18 @@ func (s *AnnouncementStore) Get() *Announcement {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Double check under write lock
-	if s.current != nil && time.Now().After(s.current.ExpiresAt) {
-		s.current = nil
+	// Double-check under write lock: a concurrent Set() may have replaced
+	// the expired announcement with a fresh one between our RUnlock and
+	// Lock above. Only clear if still expired; if fresh, return a copy.
+	if s.current == nil {
+		return nil
 	}
-	return nil
+	if time.Now().After(s.current.ExpiresAt) {
+		s.current = nil
+		return nil
+	}
+	annCopy := *s.current
+	return &annCopy
 }
 
 func (s *AnnouncementStore) Clear() {

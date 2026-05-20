@@ -447,8 +447,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const toggleCheckIn = async (pid, checkedIn) => {
     try {
       await window.API.toggleCheckIn(c.id, pid, checkedIn, password);
-      // No onUpdate() call needed here because the SSE broadcast will trigger
-      // a reload of the competition data in the parent component.
+      // Call onUpdate() immediately so the checkbox reflects the new state
+      // without waiting for the SSE round-trip. The SSE event still fires
+      // and triggers a second (harmless) refresh.
+      await onUpdate();
     } catch (err) {
       console.error("AdminParticipants: toggleCheckIn failed", err);
       showToast(err.message, "error");

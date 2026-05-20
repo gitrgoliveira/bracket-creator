@@ -119,6 +119,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     const { norm, error: dateError } = validateAndNormalizeDate(date);
     if (dateError) { setError(dateError); return; }
     if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
+    if ((checkInStart && !checkInEnd) || (!checkInStart && checkInEnd)) { setError("Both check-in start and end must be set together, or both must be empty."); return; }
     if (checkInStart && checkInEnd && checkInStart >= checkInEnd) { setError("Check-in start must be before check-in end."); return; }
 
     onSave({

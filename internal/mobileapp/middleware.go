@@ -7,6 +7,59 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// Body-size caps for mp-663 Phase 3. The default cap covers every admin
+// JSON endpoint; the import cap matches handlers_import.go's existing
+// ParseMultipartForm(64<<20) so the middleware doesn't silently shrink
+// the limit the import handler already enforces.
+const (
+	// DefaultMaxBodyBytes caps non-import admin request bodies. 1 MB is
+	// far above any legitimate JSON payload on this server (the largest
+	// is a competition with embedded roster ~ a few KB per player ×
+	// thousands of players = low hundreds of KB) and well below the
+	// point where streaming the body to BindJSON becomes a memory-
+	// exhaustion vector.
+	DefaultMaxBodyBytes int64 = 1 << 20 // 1 MB
+
+	// MaxImportBodyBytes caps the /tournament/import endpoint. Matches
+	// the existing ParseMultipartForm limit so we cap consistently at
+	// both the middleware and form-parser layers.
+	MaxImportBodyBytes int64 = 64 << 20 // 64 MB
+)
+
+// MaxBodyBytes returns a Gin middleware that rejects requests whose
+// body exceeds n bytes. Two checks, in order of cost:
+//
+//  1. Fast path — if Content-Length is set and > n, return 413 before
+//     reading a single byte (defends against malicious clients that
+//     truthfully advertise a huge body so we can drop them cheaply).
+//  2. Defensive wrap — replace c.Request.Body with http.MaxBytesReader
+//     so handlers that don't trust Content-Length (or where the client
+//     lied / used chunked encoding) still trip the limit during
+//     reading. Handlers that read past n get an *http.MaxBytesError
+//     surfaced via c.ShouldBindJSON; the existing 500 path renders the
+//     error reasonably even if not optimally — a follow-up could map
+//     that specific error to 413 inside BindJSON wrappers.
+//
+// Skips GET/HEAD/DELETE/OPTIONS — those don't carry a body in
+// practice and wrapping a nil body would surface false errors.
+func MaxBodyBytes(n int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodDelete, http.MethodOptions:
+			c.Next()
+			return
+		}
+		if c.Request.ContentLength > n {
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": "request body too large",
+			})
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, n)
+		c.Next()
+	}
+}
+
 // requireValidCompID extracts the `:id` URL parameter and validates it
 // via state.ValidateCompetitionID. Rejects:
 //   - empty

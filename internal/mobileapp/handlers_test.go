@@ -49,7 +49,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
 	RegisterImportHandlers(admin, store, hub)
 	RegisterCompetitionHandlers(admin, store, eng, hub)
-	RegisterParticipantHandlers(admin, store)
+	RegisterParticipantHandlers(admin, store, hub)
 	RegisterMatchHandlers(admin, eng, store, store, hub)
 	RegisterDecisionHandlers(admin, eng, store, store, hub)
 	RegisterEligibilityHandlers(admin, store, hub)
@@ -944,6 +944,100 @@ func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code,
 		"PUT /api/tournament with exactly-200-char Name/Venue must be accepted")
+}
+
+// TestTournamentHandlers_CheckInWindowValidation verifies that the
+// checkInWindowStart/End fields are validated as HH:MM strings and
+// rejected when malformed or over-cap.
+func TestTournamentHandlers_CheckInWindowValidation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Seed", Password: "secret", Courts: []string{"A"},
+	}))
+
+	base := state.Tournament{Name: "OK", Password: "secret", Courts: []string{"A"}}
+
+	invalid := []struct {
+		field string
+		tour  state.Tournament
+	}{
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "9:00"; return t }(),
+		},
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "25:00"; return t }(),
+		},
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = strings.Repeat("x", 6); return t }(),
+		},
+		{
+			field: "checkInWindowEnd",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowEnd = "invalid"; return t }(),
+		},
+		// Cross-field: only start set → rejected (end missing).
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "09:00"; return t }(),
+		},
+		// Cross-field: only end set → rejected (start missing).
+		{
+			field: "checkInWindowStart",
+			tour:  func() state.Tournament { t := base; t.CheckInWindowEnd = "17:00"; return t }(),
+		},
+		// Cross-field: start == end → rejected.
+		{
+			field: "checkInWindowStart",
+			tour: func() state.Tournament {
+				t := base
+				t.CheckInWindowStart = "09:00"
+				t.CheckInWindowEnd = "09:00"
+				return t
+			}(),
+		},
+		// Cross-field: start after end → rejected.
+		{
+			field: "checkInWindowStart",
+			tour: func() state.Tournament {
+				t := base
+				t.CheckInWindowStart = "17:00"
+				t.CheckInWindowEnd = "09:00"
+				return t
+			}(),
+		},
+	}
+	for _, tc := range invalid {
+		body, _ := json.Marshal(tc.tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "field %s value %q must be rejected", tc.field, tc.tour.CheckInWindowStart+tc.tour.CheckInWindowEnd)
+		assert.Contains(t, w.Body.String(), tc.field, "rejection must name the field")
+	}
+
+	// Valid HH:MM values must be accepted.
+	valid := base
+	valid.CheckInWindowStart = "09:00"
+	valid.CheckInWindowEnd = "17:30"
+	body, _ := json.Marshal(valid)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "valid HH:MM check-in window must be accepted")
+
+	// Empty values (window not set) must also pass.
+	noWindow := base
+	body, _ = json.Marshal(noWindow)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "omitted check-in window must be accepted")
 }
 
 // TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost pins the
@@ -1880,6 +1974,127 @@ func TestParticipantHandlers(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCheckInHandlers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	comp := state.Competition{ID: "ci-comp"}
+	require.NoError(t, store.SaveCompetition(&comp))
+
+	// PUT on unknown competition → 404
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/nonexistent/participants/any-pid/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// DELETE on unknown competition → 404
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/competitions/nonexistent/participants/any-pid/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// Seed a participant.
+	require.NoError(t, store.SaveParticipants("ci-comp", []domain.Player{{Name: "Alice", Dojo: "Kenshikan"}}))
+	existing, err := store.LoadParticipants("ci-comp", false)
+	require.NoError(t, err)
+	aliceID := existing[0].ID
+
+	// PUT on unknown participant → 404
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-comp/participants/nonexistent-pid/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// PUT (check in) known participant → 200, checkedIn=true in response
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-comp/participants/"+aliceID+"/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.True(t, resp.CheckedIn, "PUT response must have checkedIn=true")
+
+	// Verify check-in persists to disk.
+	reloaded, err := store.LoadParticipants("ci-comp", false)
+	require.NoError(t, err)
+	require.Len(t, reloaded, 1)
+	assert.True(t, reloaded[0].CheckedIn, "check-in must persist to disk")
+
+	// DELETE (undo check-in) known participant → 200, checkedIn=false in response
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/competitions/ci-comp/participants/"+aliceID+"/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.False(t, resp.CheckedIn, "DELETE response must have checkedIn=false")
+
+	// Verify undo persists to disk.
+	reloaded, err = store.LoadParticipants("ci-comp", false)
+	require.NoError(t, err)
+	require.Len(t, reloaded, 1)
+	assert.False(t, reloaded[0].CheckedIn, "undo check-in must persist to disk")
+
+	// DELETE on unknown participant → 404
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/competitions/ci-comp/participants/nonexistent-pid/checkin", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestCheckInPreservedOnRosterReplace(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "ci-pr"}))
+
+	// Seed an initial roster with Alice.
+	body, _ := json.Marshal(map[string]interface{}{
+		"players": []map[string]string{{"name": "Alice", "dojo": "Dojo A"}},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/ci-pr/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Retrieve Alice's ID.
+	existing, err := store.LoadParticipants("ci-pr", false)
+	require.NoError(t, err)
+	require.Len(t, existing, 1)
+	aliceID := existing[0].ID
+	require.NotEmpty(t, aliceID)
+
+	// Check Alice in via PUT /checkin.
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-pr/participants/"+aliceID+"/checkin", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Replace the roster via POST (Alice still in the list, Bob added).
+	body, _ = json.Marshal(map[string]interface{}{
+		"players": []map[string]string{
+			{"name": "Alice", "dojo": "Dojo A"},
+			{"name": "Bob", "dojo": "Dojo B"},
+		},
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/ci-pr/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Alice's check-in must be preserved; Bob (new) must be unchecked.
+	reloaded, err := store.LoadParticipants("ci-pr", false)
+	require.NoError(t, err)
+	require.Len(t, reloaded, 2)
+	byName := map[string]domain.Player{}
+	for _, p := range reloaded {
+		byName[p.Name] = p
+	}
+	assert.True(t, byName["Alice"].CheckedIn, "Alice's check-in must survive a roster replace")
+	assert.False(t, byName["Bob"].CheckedIn, "Bob (newly added) must start unchecked")
 }
 
 func TestMatchHandlers(t *testing.T) {

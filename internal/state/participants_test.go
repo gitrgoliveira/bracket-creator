@@ -248,3 +248,134 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	assert.Equal(t, "C. CAROL", loaded[0].DisplayName)
 	assert.Equal(t, "Dojo C", loaded[0].Dojo)
 }
+
+func TestCheckedInRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "checkin-rt"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A", CheckedIn: true},
+		{Name: "Bob", Dojo: "Dojo B", CheckedIn: false},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	require.NoError(t, err)
+	rawStr := string(raw)
+	assert.Contains(t, rawStr, "checked_in", "checked-in flag must be written to CSV")
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.True(t, loaded[0].CheckedIn, "Alice must round-trip as checked-in")
+	assert.False(t, loaded[1].CheckedIn, "Bob must round-trip as not checked-in")
+}
+
+func TestCheckedInColumnBasedDetection(t *testing.T) {
+	// Regression: checked_in must be detected by column position, not suffix match.
+	// A dojo literally named "checked_in" must not be consumed.
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "checkin-col"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	path := filepath.Join(dir, "competitions", compID, "participants.csv")
+	// Minimal "Name, Dojo, checked_in" (3-column) format.
+	content := "Alice, Kenshikan, checked_in\nBob, Mumeishi\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.True(t, loaded[0].CheckedIn, "Alice must be detected as checked-in from 3-column row")
+	assert.Equal(t, "Kenshikan", loaded[0].Dojo, "Dojo must not be consumed by checked_in detection")
+	assert.False(t, loaded[1].CheckedIn, "Bob must not be checked-in")
+
+	// Negative: dojo literally named "checked_in" must NOT be consumed.
+	content2 := "Carol, checked_in\n"
+	require.NoError(t, os.WriteFile(path, []byte(content2), 0600))
+	loaded2, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded2, 1)
+	assert.False(t, loaded2[0].CheckedIn, "2-column row must never trigger checked_in detection")
+	assert.Equal(t, "checked_in", loaded2[0].Dojo, "dojo named checked_in must be preserved")
+}
+
+func TestUpdateParticipant(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "update-p"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Update"}))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A"},
+		{Name: "Bob", Dojo: "Dojo B"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	aliceID := loaded[0].ID
+
+	// Check Alice in.
+	updated, err := store.UpdateParticipant(compID, aliceID, false, func(p *domain.Player) error {
+		p.CheckedIn = true
+		return nil
+	})
+	require.NoError(t, err)
+	assert.True(t, updated.CheckedIn)
+
+	// Reload and verify persistence.
+	reloaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	var alice domain.Player
+	for _, p := range reloaded {
+		if p.ID == aliceID {
+			alice = p
+		}
+	}
+	assert.True(t, alice.CheckedIn, "check-in must persist to disk")
+	assert.False(t, reloaded[1].CheckedIn, "Bob must remain unchecked")
+
+	// Not-found case.
+	_, err = store.UpdateParticipant(compID, "nonexistent-id", false, func(p *domain.Player) error {
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrParticipantNotFound)
+}
+
+func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
+	// Regression (Copilot review): UUID rows have format "uuid,Name,Dojo[,tag][,checked_in]".
+	// A 3-part UUID row "uuid,Alice,checked_in" must NOT be misclassified: "checked_in" is the Dojo.
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "checkin-uuid"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	path := filepath.Join(dir, "competitions", compID, "participants.csv")
+
+	// 3-col UUID row: uuid, Name, Dojo — "checked_in" is the Dojo value, not a marker.
+	require.NoError(t, os.WriteFile(path,
+		[]byte("550e8400-e29b-41d4-a716-446655440000, Alice, checked_in\n"), 0600))
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.False(t, loaded[0].CheckedIn, "3-part UUID row must NOT be misclassified as checked-in")
+	assert.Equal(t, "checked_in", loaded[0].Dojo, "dojo value must be preserved for 3-part UUID row")
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
+
+	// 4-col UUID row: uuid, Name, Dojo, checked_in — trailing checked_in IS a valid marker.
+	require.NoError(t, os.WriteFile(path,
+		[]byte("550e8400-e29b-41d4-a716-446655440001, Bob, Kenshikan, checked_in\n"), 0600))
+	loaded2, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded2, 1)
+	assert.True(t, loaded2[0].CheckedIn, "4-part UUID row must be detected as checked-in")
+	assert.Equal(t, "Kenshikan", loaded2[0].Dojo, "Dojo must survive after checked_in token is stripped")
+}

@@ -103,6 +103,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [venue, setVenue] = useStateA(tournament.venue);
   const [date, setDate] = useStateA(tournament.date);
   const [courts, setCourts] = useStateA(tournament.courts.length);
+  const [checkInStart, setCheckInStart] = useStateA(tournament.checkInWindowStart || "");
+  const [checkInEnd, setCheckInEnd] = useStateA(tournament.checkInWindowEnd || "");
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
 
@@ -117,13 +119,17 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     const { norm, error: dateError } = validateAndNormalizeDate(date);
     if (dateError) { setError(dateError); return; }
     if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
+    if ((checkInStart && !checkInEnd) || (!checkInStart && checkInEnd)) { setError("Both check-in start and end must be set together, or both must be empty."); return; }
+    if (checkInStart && checkInEnd && checkInStart >= checkInEnd) { setError("Check-in start must be before check-in end."); return; }
 
     onSave({
       name: trimmedName,
       venue: venue.trim(),
       date: norm,
       password: pass || undefined,
-      courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
+      courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
+      checkInWindowStart: checkInStart || undefined,
+      checkInWindowEnd: checkInEnd || undefined
     });
   };
 
@@ -171,6 +177,16 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
             />
             <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
+          </div>
+          <div className="row" style={{ marginTop: 16 }}>
+            <div className="field">
+              <label className="field__label">Check-in start (HH:MM)</label>
+              <input className="input" type="time" value={checkInStart} onChange={(e) => setCheckInStart(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="field__label">Check-in end (HH:MM)</label>
+              <input className="input" type="time" value={checkInEnd} onChange={(e) => setCheckInEnd(e.target.value)} />
+            </div>
           </div>
           {locked ? (
             <div className="field">

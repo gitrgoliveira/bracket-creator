@@ -563,6 +563,18 @@ const API = {
             throw new Error(err.error || "Failed to load Swiss standings");
         }
         return res.json();
+    },
+    async toggleCheckIn(compID, pid, checkedIn, password) {
+        const method = checkedIn ? 'PUT' : 'DELETE';
+        const res = await fetch(`/api/competitions/${compID}/participants/${pid}/checkin`, {
+            method,
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
+        }
+        return res.json();
     }
 };
 

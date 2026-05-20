@@ -253,6 +253,11 @@ type MatchResult struct {
 	SubResults     []SubMatchResult `json:"subResults,omitempty"`
 	Encho          *EnchoMetadata   `json:"encho,omitempty" yaml:"encho,omitempty"`
 	QueuePosition  int              `json:"queuePosition,omitempty" yaml:"-"`
+	// DecidedByHantei is true when the winner was declared by referee
+	// hantei after an encho remained tied (FIK Article 7-5 / 29-6).
+	// Distinguishes a judges' decision from an ippon-derived win for
+	// stats, audit, and display. Zero value omitted from the wire.
+	DecidedByHantei bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a
@@ -303,6 +308,8 @@ type BracketMatch struct {
 	DecisionBy     string         `json:"decisionBy,omitempty"`
 	DecisionReason string         `json:"decisionReason,omitempty"`
 	Encho          *EnchoMetadata `json:"encho,omitempty"`
+	// DecidedByHantei mirrors MatchResult.DecidedByHantei for bracket reads.
+	DecidedByHantei bool `json:"decidedByHantei,omitempty"`
 }
 
 type Bracket struct {

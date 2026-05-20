@@ -583,6 +583,37 @@ func TestRecordBracketMatchResult_PropagatesWinner(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status)
 }
 
+func TestRecordBracketMatchResult_DecidedByHantei_RoundTrips(t *testing.T) {
+	// FIK Art. 7-5 / 29-6: a knockout match that remains tied after encho is
+	// decided by referee hantei. The flag must survive the disk round-trip
+	// and surface on both the MatchResult and the propagated BracketMatch
+	// so the UI and Excel export can mark hantei wins explicitly.
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-hantei"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+
+	firstMatchID := bracket.Rounds[0][0].ID
+	err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
+		Winner:          "Alice",
+		Status:          state.MatchStatusCompleted,
+		Encho:           &state.EnchoMetadata{PeriodCount: 1},
+		DecidedByHantei: true,
+	})
+	require.NoError(t, err)
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.True(t, bracket.Rounds[0][0].DecidedByHantei, "BracketMatch.DecidedByHantei must reflect the MatchResult flag")
+	// Zero-value baseline: the un-scored second semi-final must NOT have the flag set.
+	assert.False(t, bracket.Rounds[0][1].DecidedByHantei, "untouched bracket match must remain non-hantei")
+}
+
 func TestRecordBracketMatchResult_SecondMatch_PropagatesAsSideB(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-sideb"

@@ -81,6 +81,7 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					bracket.Rounds[rIdx][mIdx].DecidedByHantei = result.DecidedByHantei
 					if result.Court == "" {
 						result.Court = m.Court
 					}
@@ -312,15 +313,16 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 			for _, bm := range round {
 				if bm.ID == matchID {
 					return &state.MatchResult{
-						ID:             bm.ID,
-						SideA:          bm.SideA,
-						SideB:          bm.SideB,
-						Winner:         bm.Winner,
-						Status:         bm.Status,
-						Decision:       bm.Decision,
-						DecisionBy:     bm.DecisionBy,
-						DecisionReason: bm.DecisionReason,
-						Encho:          bm.Encho,
+						ID:              bm.ID,
+						SideA:           bm.SideA,
+						SideB:           bm.SideB,
+						Winner:          bm.Winner,
+						Status:          bm.Status,
+						Decision:        bm.Decision,
+						DecisionBy:      bm.DecisionBy,
+						DecisionReason:  bm.DecisionReason,
+						Encho:           bm.Encho,
+						DecidedByHantei: bm.DecidedByHantei,
 					}, nil
 				}
 			}

@@ -130,4 +130,30 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null)).toBe('M–K');
     });
   });
+
+  // FIK Art. 7-5 / 29-6: a knockout match that remains tied in encho is
+  // decided by referee hantei. The renderer must mark this distinctly so
+  // it's not confused with an ippon-derived win.
+  describe('hantei (judges\' decision) suffix', () => {
+    it('appends "(E) HT" for a 0-0 hantei-decided overtime', () => {
+      // Tied 0-0 in encho, AKA awarded by hantei. No ippons → suffix only.
+      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true)).toBe('(E) HT');
+    });
+
+    it('combines (E) HT for a hantei-decided overtime', () => {
+      // Realistic: tied with scores, then hantei chose a winner — backend
+      // sends decidedByHantei=true alongside the tied ippons.
+      const result = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true);
+      expect(result).toBe('M–K (E) HT');
+    });
+
+    it('omits HT when decidedByHantei is false/missing', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, false)).toBe('M–K (E)');
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
+    });
+
+    it('still emits HT for score.hantei=true (defensive read for older payloads)', () => {
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E) HT');
+    });
+  });
 });

@@ -1286,7 +1286,7 @@ function MatchDetailCard({ match, onClose }) {
         </div>
         <div className="match-detail-card__score">
           {isDone ? (() => {
-            const scoreStr = window.formatIpponsScore(match.ipponsB, match.ipponsA, match.score, match.decision, match.encho);
+            const scoreStr = window.formatIpponsScore(match.ipponsB, match.ipponsA, match.score, match.decision, match.encho, match.decidedByHantei);
             return <span>{scoreStr || "—"}</span>;
           })() : <span className="match-detail-card__vs">vs</span>}
         </div>
@@ -1303,7 +1303,7 @@ function MatchDetailCard({ match, onClose }) {
             {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
           </div>
           <div className="match-detail-card__ippons-center">
-            {match.score?.type === "hantei" && <span className="match-detail-card__decision">Hantei</span>}
+            {(match.decidedByHantei || match.score?.type === "hantei") && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
             {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
           </div>
           <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
@@ -1449,7 +1449,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : null;
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
   // FR-025: queue position is 1-indexed per court for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
@@ -1476,6 +1476,11 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
         )}
         {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
         {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
+        {m.status === "completed" && m.decidedByHantei && (
+          <span className="vsched-item__hantei" data-testid="vsched-hantei" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "var(--accent-soft, #eef)", color: "var(--accent, #36c)" }}>
+            HANTEI
+          </span>
+        )}
       </div>
       <div className="vsched-item__players">
         <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
@@ -1509,7 +1514,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
   const bWin = winnerName && winnerName === bName;
 
   const scoreStr = m.status === "completed"
-    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)
+    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
     : null;
 
   return (
@@ -2048,7 +2053,7 @@ function ScheduleViewer({ tournament, tweaks }) {
 function TWMatch({ m, highlight, _tweaks, onClick }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : null;
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned

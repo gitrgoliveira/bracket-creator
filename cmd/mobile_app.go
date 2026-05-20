@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 
@@ -82,9 +82,18 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	slog.Info("mobile-app: initializing",
+		"tournamentDataDir", o.folder,
+		"bind", o.bindAddress,
+		"port", o.port,
+		"lockPassword", o.lockPassword,
+	)
 	store, err := state.NewStore(o.folder)
 	if err != nil {
-		return fmt.Errorf("failed to initialize state store: %w", err)
+		if hint := diagnoseFolderError(o.folder); hint != "" {
+			return fmt.Errorf("failed to initialize state store at %q: %w\n%s", o.folder, err, hint)
+		}
+		return fmt.Errorf("failed to initialize state store at %q: %w", o.folder, err)
 	}
 
 	// Select the auth source. Fail-closed: when --lock-password is set
@@ -100,12 +109,12 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--lock-password set but TOURNAMENT_PASSWORD_HASH invalid: %w", err)
 		}
 		verifier = v
-		log.Printf("Starting mobile-app server in LOCKED mode (auth from TOURNAMENT_PASSWORD_HASH; POST /api/tournament/reset disabled)")
+		slog.Info("mobile-app: locked mode", "authSource", "TOURNAMENT_PASSWORD_HASH", "resetDisabled", true)
 	} else {
 		verifier = mobileapp.NewFileVerifier(store)
 	}
 
-	log.Printf("Starting mobile-app server on %s:%d using folder %s", o.bindAddress, o.port, o.folder)
+	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "tournamentDataDir", o.folder)
 	eng := engine.New(store)
 	r := mobileapp.NewRouter(store, eng, GetResources(), verifier)
 	return r.Run(o.bindAddress + ":" + strconv.Itoa(o.port))

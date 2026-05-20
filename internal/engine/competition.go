@@ -74,7 +74,9 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	for _, m := range matches {
 		switch {
 		case IsTiebreakerMatchID(m.ID):
-			if m.Status != state.MatchStatusCompleted {
+			// A TB match without a winner (malformed payload) leaves standings
+			// still tied, so treat it as unresolved just like DH.
+			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
 				hasIncompleteTB = true
 			} else {
 				hasCompleteTB = true
@@ -166,7 +168,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 			if m.Status != state.MatchStatusCompleted {
 				return nil, nil
 			}
-			if IsPoolDaihyosenMatchID(m.ID) && m.Winner == "" {
+			if (IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID)) && m.Winner == "" {
 				return nil, nil
 			}
 		}

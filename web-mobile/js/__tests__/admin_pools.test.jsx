@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideRankCommit } from '../admin_pools.jsx';
+import { decideRankCommit, buildLiveById, isRanksLocked } from '../admin_pools.jsx';
 
 // decideRankCommit is the pure predicate that drives RankInput.handleBlur.
 // It returns one of:
@@ -172,5 +172,56 @@ describe('decideRankCommit', () => {
         expect(r.value).not.toBe(v);
       }
     });
+  });
+});
+
+describe('buildLiveById', () => {
+  it('returns an object keyed by match id', () => {
+    const matches = [
+      { id: 'pool-A-1', status: 'completed', ipponsA: 2, ipponsB: 0 },
+      { id: 'pool-A-2', status: 'scheduled' },
+    ];
+    const live = buildLiveById(matches);
+    expect(live['pool-A-1'].status).toBe('completed');
+    expect(live['pool-A-2'].status).toBe('scheduled');
+  });
+
+  it('returns empty object when poolMatches is null or empty', () => {
+    expect(buildLiveById(null)).toEqual({});
+    expect(buildLiveById([])).toEqual({});
+  });
+
+  it('live state overrides stale pool.matches entry', () => {
+    const stale = { id: 'pool-A-1', status: 'scheduled' };
+    const live = buildLiveById([{ id: 'pool-A-1', status: 'completed', ipponsA: 1, ipponsB: 0 }]);
+    const resolved = live[stale.id] || stale;
+    expect(resolved.status).toBe('completed');
+    expect(resolved.ipponsA).toBe(1);
+  });
+
+  it('falls back to stale entry when match not yet in live list', () => {
+    const stale = { id: 'pool-A-99', status: 'scheduled' };
+    const live = buildLiveById([]);
+    const resolved = live[stale.id] || stale;
+    expect(resolved.status).toBe('scheduled');
+  });
+});
+
+describe('isRanksLocked', () => {
+  it('unlocked when status is pools', () => {
+    expect(isRanksLocked('pools')).toBe(false);
+  });
+
+  it('locked when status is playoffs', () => {
+    expect(isRanksLocked('playoffs')).toBe(true);
+  });
+
+  it('locked when status is completed', () => {
+    expect(isRanksLocked('completed')).toBe(true);
+  });
+
+  it('locked when status is empty string or undefined', () => {
+    expect(isRanksLocked('')).toBe(true);
+    expect(isRanksLocked(undefined)).toBe(true);
   });
 });

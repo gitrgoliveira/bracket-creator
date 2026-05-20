@@ -31,7 +31,7 @@ func TestNewRouter(t *testing.T) {
 	}
 	res := resources.NewResources(nil, mockFS)
 
-	r := NewRouter(store, eng, res, NewFileVerifier(store))
+	r, _ := NewRouter(store, eng, res, NewFileVerifier(store))
 
 	// Test Health check
 	w := httptest.NewRecorder()

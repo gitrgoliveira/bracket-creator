@@ -97,4 +97,47 @@ describe('deriveAwards (standings-based)', () => {
   it('returns [] when no bracket and no pools/standings', () => {
     expect(deriveAwards(null, null, null, 'playoffs', new Map())).toEqual([]);
   });
+
+  it('accepts a flat Swiss-shape standings array (no pool key)', () => {
+    const standings = [
+      { player: { name: 'Alice', dojo: 'Aoyama' } },
+      { player: { name: 'Bob', dojo: 'Bunkyo' } },
+      { player: { name: 'Carol', dojo: 'Chiba' } },
+      { player: { name: 'Dan', dojo: 'Denenchofu' } },
+    ];
+    const awards = deriveAwards(null, standings, null, 'swiss', new Map());
+    expect(awards).toEqual([
+      { place: 1, name: 'Alice', dojo: 'Aoyama' },
+      { place: 2, name: 'Bob', dojo: 'Bunkyo' },
+      { place: 3, name: 'Carol', dojo: 'Chiba' },
+      { place: 3, name: 'Dan', dojo: 'Denenchofu' },
+    ]);
+  });
+
+  it('falls back to standings when a bracket exists but the final has no winner (pools+playoffs placeholder)', () => {
+    // Simulates a pools-only competition where derivedBracket is a TBD
+    // placeholder (rounds present, no winners). The standings fallback
+    // should still produce the podium.
+    const bracket = {
+      rounds: [
+        [
+          { sideA: null, sideB: null, winner: null },
+          { sideA: null, sideB: null, winner: null },
+        ],
+        [{ sideA: null, sideB: null, winner: null }],
+      ],
+    };
+    const pools = [{ poolName: 'Pool A' }];
+    const standings = {
+      'Pool A': [
+        { player: { name: 'Alice', dojo: 'Aoyama' } },
+        { player: { name: 'Bob', dojo: 'Bunkyo' } },
+        { player: { name: 'Carol', dojo: 'Chiba' } },
+        { player: { name: 'Dan', dojo: 'Denenchofu' } },
+      ],
+    };
+    const awards = deriveAwards(bracket, standings, pools, 'pools', new Map());
+    expect(awards.map((a) => a.name)).toEqual(['Alice', 'Bob', 'Carol', 'Dan']);
+    expect(awards.map((a) => a.place)).toEqual([1, 2, 3, 3]);
+  });
 });

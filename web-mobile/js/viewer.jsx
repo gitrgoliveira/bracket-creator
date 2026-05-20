@@ -1037,7 +1037,10 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
           {tab === "results" && c.status === "completed" && (
-            <ResultsViewer c={c} bracket={derivedBracket} standings={standings} pools={pools} players={c.players} />
+            // Pass the *real* server bracket (not derivedBracket) — the latter
+            // is a TBD placeholder for visualization that has no winners and
+            // would short-circuit the standings fallback inside AwardsView.
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} />
           )}
         </div>
       </div>
@@ -1879,9 +1882,11 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
 
 // deriveAwards returns up to four placements for the closing ceremony per
 // FIK convention: 1st, 2nd, and two 3rds (semi-final losers — no bronze match).
-// Returns [] when the final isn't decided yet or no podium data exists.
-// `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich entries
-// with dojo info; missing names fall back to {name, dojo: ""}.
+// Returns [] when no podium data exists yet.
+// `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich bracket
+// entries with dojo info; missing names fall back to {name, dojo: ""}.
+// `standings` may be either a flat array (Swiss-shape) or an object keyed by
+// pool name (pools/league shape).
 function deriveAwards(bracket, standings, pools, format, nameToPlayer) {
   const lookup = (name) => {
     if (!name) return null;
@@ -1889,30 +1894,42 @@ function deriveAwards(bracket, standings, pools, format, nameToPlayer) {
     return { name, dojo: (p && p.dojo) || "" };
   };
 
-  // Bracket-based: final + semi-finals
+  // Bracket-based: final + semi-finals. Only used when the final has a
+  // decided winner; if it doesn't, fall through to standings below so a
+  // pools-only competition that has a TBD-placeholder bracket still shows
+  // the podium from its pool standings.
   if (bracket && bracket.rounds && bracket.rounds.length > 0) {
     const finalRound = bracket.rounds[bracket.rounds.length - 1];
     const sfRound = bracket.rounds[bracket.rounds.length - 2] || [];
     const final = finalRound[0];
-    if (!final || !final.winner) return [];
-    const champion = final.winner;
-    const runnerUp = final.winner === final.sideA ? final.sideB : final.sideA;
-    const thirds = sfRound
-      .map((m) => (m.winner ? (m.winner === m.sideA ? m.sideB : m.sideA) : null))
-      .filter(Boolean);
-    return [
-      { place: 1, ...lookup(champion) },
-      runnerUp ? { place: 2, ...lookup(runnerUp) } : null,
-      thirds[0] ? { place: 3, ...lookup(thirds[0]) } : null,
-      thirds[1] ? { place: 3, ...lookup(thirds[1]) } : null,
-    ].filter(Boolean);
+    if (final && final.winner) {
+      const champion = final.winner;
+      const runnerUp = final.winner === final.sideA ? final.sideB : final.sideA;
+      const thirds = sfRound
+        .map((m) => (m.winner ? (m.winner === m.sideA ? m.sideB : m.sideA) : null))
+        .filter(Boolean);
+      return [
+        { place: 1, ...lookup(champion) },
+        runnerUp ? { place: 2, ...lookup(runnerUp) } : null,
+        thirds[0] ? { place: 3, ...lookup(thirds[0]) } : null,
+        thirds[1] ? { place: 3, ...lookup(thirds[1]) } : null,
+      ].filter(Boolean);
+    }
   }
 
-  // League / Swiss / pools-only: take the top four from the single standings.
-  // For pools-only with multiple pools we still want the first pool's leader
-  // (consistent with PoolsViewer's leagueWinner pick).
-  if (standings && pools && pools.length > 0) {
-    const list = standings[pools[0].poolName] || [];
+  // Standings-based fallback. Two payload shapes are supported:
+  //   - Swiss/`/swiss/standings`: a flat array of standings rows.
+  //   - Pools/league: an object keyed by poolName → array of rows.
+  // We take the top four from the (single) leaderboard; for pools-only with
+  // multiple pools we use the first pool (consistent with PoolsViewer's
+  // leagueWinner pick).
+  let list = null;
+  if (Array.isArray(standings)) {
+    list = standings;
+  } else if (standings && pools && pools.length > 0) {
+    list = standings[pools[0].poolName] || [];
+  }
+  if (list && list.length > 0) {
     const slice = list.slice(0, 4).map((s, i) => ({
       place: i < 3 ? i + 1 : 3,
       name: s.player?.name || "",
@@ -1933,12 +1950,25 @@ const PLACE_STYLE = {
 function AwardsView({ c, bracket, standings, pools, players }) {
   const containerRef = useRefV(null);
   const [isFs, setIsFs] = useState(false);
+  // Swiss standings aren't part of the competition-detail payload — they live
+  // behind /swiss/standings. Fetch them here when the format is swiss so the
+  // Awards tab works for Swiss competitions too.
+  const [swissStandings, setSwissStandings] = useState(null);
 
   React.useEffect(() => {
     const onFsChange = () => setIsFs(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", onFsChange);
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
+
+  React.useEffect(() => {
+    if (c?.format !== "swiss" || !window.API?.swissStandings) return undefined;
+    let cancelled = false;
+    window.API.swissStandings(c.id)
+      .then((data) => { if (!cancelled) setSwissStandings(Array.isArray(data) ? data : []); })
+      .catch(() => { if (!cancelled) setSwissStandings([]); });
+    return () => { cancelled = true; };
+  }, [c?.id, c?.format, c?.swissCurrentRound]);
 
   const nameToPlayer = useMemo(() => {
     const m = new Map();
@@ -1948,9 +1978,10 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     return m;
   }, [players]);
 
+  const effectiveStandings = c?.format === "swiss" ? swissStandings : standings;
   const awards = useMemo(
-    () => deriveAwards(bracket, standings, pools, c?.format, nameToPlayer),
-    [bracket, standings, pools, c?.format, nameToPlayer]
+    () => deriveAwards(bracket, effectiveStandings, pools, c?.format, nameToPlayer),
+    [bracket, effectiveStandings, pools, c?.format, nameToPlayer]
   );
 
   const toggleFs = () => {
@@ -2020,10 +2051,6 @@ function AwardsView({ c, bracket, standings, pools, players }) {
       </div>
     </div>
   );
-}
-
-function ResultsViewer({ c, bracket, standings, pools, players }) {
-  return <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={players} />;
 }
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)

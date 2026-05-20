@@ -106,18 +106,20 @@ function mintParticipantIds(compID, existingPlayers, parsed) {
   });
   let nextSlot = 1;
   let added = 0, updatedCount = 0;
-  const np = parsed.map(({ name, displayName, dojo, danGrade, tag }) => {
+  const np = parsed.map(({ name, displayName, dojo, danGrade, tag, checkedIn: parsedCheckedIn }) => {
     const existing = existingMap.get(name.toLowerCase());
     if (existing) {
       updatedCount++;
-      return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null };
+      // Preserve existing check-in state; CSV token takes precedence if explicitly set.
+      const checkedIn = parsedCheckedIn || existing.checkedIn || false;
+      return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null, checkedIn };
     }
     added++;
     while (usedIds.has(`${compID}-p${nextSlot}`)) nextSlot++;
     const id = `${compID}-p${nextSlot}`;
     usedIds.add(id);
     nextSlot++;
-    return { id, name, displayName, dojo, danGrade, tag, seed: null };
+    return { id, name, displayName, dojo, danGrade, tag, seed: null, checkedIn: parsedCheckedIn || false };
   });
   return { np, added, updatedCount };
 }
@@ -137,7 +139,52 @@ function levenshtein(a, b) {
   return prev[n];
 }
 
+function CheckInBanner({ tournament, players }) {
+  const [nowStr, setNowStr] = useStateA(() => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  });
+
+  useEffectA(() => {
+    const timer = setInterval(() => {
+      const d = new Date();
+      setNowStr(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!tournament?.checkInWindowStart || !tournament?.checkInWindowEnd) return null;
+  const start = tournament.checkInWindowStart;
+  const end = tournament.checkInWindowEnd;
+
+  const diffStart = window.diffMinutes(start, nowStr);
+  const diffEnd = window.diffMinutes(end, nowStr);
+
+  if (diffStart > 0) {
+    return (
+      <div className="alert alert--info" style={{ marginBottom: 12 }}>
+        🕒 Check-in window starts at {start} (in {diffStart}m)
+      </div>
+    );
+  }
+  if (diffEnd > 0) {
+    return (
+      <div className="alert alert--success" style={{ marginBottom: 12 }}>
+        ✅ Check-in window is OPEN: {start}–{end} (closes in {diffEnd}m)
+      </div>
+    );
+  }
+
+  const uncheckeds = (players || []).filter(p => !p.checkedIn).length;
+  return (
+    <div className="alert alert--warn" style={{ marginBottom: 12 }}>
+      ⌛ Check-in CLOSED — {uncheckeds > 0 ? `${uncheckeds} participants did not check in` : "all participants checked in"}
+    </div>
+  );
+}
+
 function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, showToast, onSection }) {
+  const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
@@ -284,7 +331,27 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
   const players = useMemoA(() => c.players || [], [c.players]);
   const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
-  const visiblePlayers = useMemoA(() => tagFilter ? players.filter(p => p.tag === tagFilter) : players, [players, tagFilter]);
+  const visiblePlayers = useMemoA(() => {
+    let out = players;
+    if (tagFilter) out = out.filter(p => p.tag === tagFilter);
+    if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
+    return out;
+  }, [players, tagFilter, showOnlyUnchecked]);
+  const dojoFirstRowSet = useMemoA(() => {
+    const seen = new Set();
+    const first = new Set();
+    visiblePlayers.forEach((p) => {
+      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(p.id); }
+    });
+    return first;
+  }, [visiblePlayers]);
+  const dojoUncheckedCount = useMemoA(() => {
+    const counts = new Map();
+    players.forEach(p => {
+      if (!p.checkedIn) counts.set(p.dojo, (counts.get(p.dojo) || 0) + 1);
+    });
+    return counts;
+  }, [players]);
   const { gaps, hasGaps } = useMemoA(() => {
     const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
     const gaps = [];
@@ -375,6 +442,35 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       return;
     }
     if (mountedRef.current) showToast("Unseeded list shuffled");
+  };
+
+  const toggleCheckIn = async (pid, checkedIn) => {
+    try {
+      await window.API.toggleCheckIn(c.id, pid, checkedIn, password);
+      // State refresh is handled by the SSE participants_updated event,
+      // which admin.jsx's REFRESHABLE_EVENTS subscriber picks up and
+      // uses to call fetchCompetitionDetails. No onUpdate() call needed.
+    } catch (err) {
+      console.error("AdminParticipants: toggleCheckIn failed", err);
+      showToast(err.message, "error");
+    }
+  };
+
+  const bulkCheckInDojo = async (dojo) => {
+    const targets = (c.players || []).filter(p => p.dojo === dojo && !p.checkedIn);
+    if (targets.length === 0) return;
+
+    if (!confirm(`Mark all ${targets.length} participants from ${dojo} as checked-in?`)) return;
+
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
+    const failed = results.filter(r => r.status === "rejected").length;
+    const succeeded = results.length - failed;
+    if (failed > 0) {
+      console.error("AdminParticipants: bulkCheckInDojo partial failure", results.filter(r => r.status === "rejected").map(r => r.reason));
+      showToast(`${succeeded}/${results.length} checked in from ${dojo} (${failed} failed)`, "error");
+    } else {
+      showToast(`Checked in ${succeeded} participants from ${dojo}`);
+    }
   };
 
   const [showSlotForm, setShowSlotForm] = useStateA(false);
@@ -525,8 +621,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   };
 
   const isStarted = c.status !== "setup";
+
   return (
     <>
+      <CheckInBanner tournament={tournament} players={players} />
       {isStarted && (
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
           <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
@@ -662,10 +760,15 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         <div className="card">
           <div className="card__head">
             <div>
-              <div className="card__title">Seeding</div>
-              <div className="card__sub">{players.filter((p) => p.seed).length} of {players.length} seeded</div>
+              <div className="card__title">Check-in & Seeding</div>
+              <div className="card__sub">
+                {players.filter(p => p.checkedIn).length} / {players.length} checked in · {players.filter((p) => p.seed).length} seeded
+              </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
+              <button className={`btn btn--sm ${showOnlyUnchecked ? "btn--primary" : ""}`} type="button" onClick={() => setShowOnlyUnchecked(!showOnlyUnchecked)}>
+                {showOnlyUnchecked ? "Show all" : "Show unchecked"}
+              </button>
               <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0} title="Shuffle unseeded players">Shuffle unseeded</button>
               <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
@@ -720,18 +823,18 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               {/* When a tag filter is active, reorder controls would operate on */}
               {/* full-list indices but rows are filtered — so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
-              {tagFilter && (
+              {(tagFilter || showOnlyUnchecked) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
-                  Reordering disabled while filtered by tag. Clear the filter to drag rows or use the arrows.
+                  Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
                 </div>
               )}
               {visiblePlayers.map((p) => {
                 const i = players.indexOf(p);
-                const reorderDisabled = !!tagFilter;
+                const reorderDisabled = !!tagFilter || showOnlyUnchecked;
                 return (
                   <div
                     key={p.id}
-                    className={`seed-row ${p.seed ? "has-seed" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
+                    className={`seed-row ${p.seed ? "has-seed" : ""} ${p.checkedIn ? "is-checked-in" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
                     draggable={!reorderDisabled}
                     onDragStart={() => { dragIdxRef.current = i; }}
                     onDragOver={(e) => { if (reorderDisabled) return; e.preventDefault(); setDragOverIdx(i); }}
@@ -744,11 +847,31 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     }}
                     style={{ cursor: reorderDisabled ? "default" : "grab" }}
                   >
-                    <span className="seed-row__handle" title={reorderDisabled ? "Clear the tag filter to reorder" : "Drag to reorder"}>⠿</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
+                      <input
+                        type="checkbox"
+                        checked={p.checkedIn}
+                        onChange={(e) => toggleCheckIn(p.id, e.target.checked)}
+                        style={{ width: 18, height: 18, cursor: "pointer" }}
+                        aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
+                      />
+                    </div>
+                    <span className="seed-row__handle" title={reorderDisabled ? "Clear all filters to reorder" : "Drag to reorder"}>⠿</span>
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div style={{ flex: 1 }}>
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
-                      <div className="seed-row__dojo">{p.dojo}</div>
+                      <div className="seed-row__dojo">
+                        {p.dojo}
+                        {dojoFirstRowSet.has(p.id) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
+                          <button
+                            className="btn--link"
+                            style={{ marginLeft: 8, fontSize: 10, padding: 0 }}
+                            onClick={() => bulkCheckInDojo(p.dojo)}
+                          >
+                            Mark all from {p.dojo}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>

@@ -10,8 +10,7 @@ import (
 // IsTiebreakerMatchID reports whether matchID identifies a supplementary
 // ippon-shobu tiebreaker match (IDs of the form "Pool X-TB-N").
 func IsTiebreakerMatchID(matchID string) bool {
-	parts := strings.SplitN(matchID, "-", 2)
-	return len(parts) == 2 && strings.HasPrefix(parts[1], "TB-")
+	return strings.Contains(matchID, "-TB-")
 }
 
 // detectPoolTies walks a sorted (descending Points) standings slice and
@@ -107,19 +106,22 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	poolTB := map[string]*poolTBInfo{}
 	poolCourt := map[string]string{}
 	for _, m := range allMatches {
-		parts := strings.SplitN(m.ID, "-", 2)
-		if len(parts) == 2 {
-			pn := parts[0]
-			if _, ok := poolCourt[pn]; !ok {
-				poolCourt[pn] = m.Court
+		pn, ok := poolNameFromMatchID(m.ID)
+		if !ok {
+			continue
+		}
+		if _, inStandings := standings[pn]; !inStandings {
+			continue
+		}
+		if _, ok := poolCourt[pn]; !ok {
+			poolCourt[pn] = m.Court
+		}
+		if IsTiebreakerMatchID(m.ID) {
+			if poolTB[pn] == nil {
+				poolTB[pn] = &poolTBInfo{existingPairs: map[string]bool{}}
 			}
-			if IsTiebreakerMatchID(m.ID) {
-				if poolTB[pn] == nil {
-					poolTB[pn] = &poolTBInfo{existingPairs: map[string]bool{}}
-				}
-				poolTB[pn].count++
-				poolTB[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
-			}
+			poolTB[pn].count++
+			poolTB[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
 		}
 	}
 

@@ -1,15 +1,17 @@
 package mobileapp
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
+func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -65,6 +67,20 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 			}
 		}
 
+		// Load existing participants so we can preserve check-in state for
+		// players that survive the edit (matched by name). A full roster
+		// replacement via this endpoint must not silently clear check-ins
+		// that were already recorded.
+		existing, err := store.LoadParticipants(id, comp.WithZekkenName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load participants: " + err.Error()})
+			return
+		}
+		checkedInByName := make(map[string]bool, len(existing))
+		for _, ep := range existing {
+			checkedInByName[strings.ToLower(strings.TrimSpace(ep.Name))] = ep.CheckedIn
+		}
+
 		players := make([]domain.Player, 0, len(req.Players))
 		for i, p := range req.Players {
 			players = append(players, domain.Player{
@@ -74,6 +90,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 				Metadata:     p.Metadata,
 				Tag:          p.Tag,
 				PoolPosition: int64(i),
+				CheckedIn:    checkedInByName[strings.ToLower(strings.TrimSpace(p.Name))],
 			})
 		}
 
@@ -123,5 +140,67 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 		c.JSON(http.StatusOK, assignments)
+	})
+
+	r.PUT("/competitions/:id/participants/:pid/checkin", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		pid := c.Param("pid")
+
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+			p.CheckedIn = true
+			return nil
+		})
+
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, state.ErrParticipantNotFound) {
+				status = http.StatusNotFound
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		c.JSON(http.StatusOK, updatedPlayer)
+	})
+
+	r.DELETE("/competitions/:id/participants/:pid/checkin", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		pid := c.Param("pid")
+
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+			p.CheckedIn = false
+			return nil
+		})
+
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, state.ErrParticipantNotFound) {
+				status = http.StatusNotFound
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		c.JSON(http.StatusOK, updatedPlayer)
 	})
 }

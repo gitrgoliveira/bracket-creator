@@ -152,6 +152,21 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
 		return err
 	}
+	if err := validateCheckInWindow("checkInWindowStart", t.CheckInWindowStart); err != nil {
+		return err
+	}
+	if err := validateCheckInWindow("checkInWindowEnd", t.CheckInWindowEnd); err != nil {
+		return err
+	}
+	// Cross-field invariants: both fields must be set together, and start < end.
+	hasStart := t.CheckInWindowStart != ""
+	hasEnd := t.CheckInWindowEnd != ""
+	if hasStart != hasEnd {
+		return &ValidationError{Field: "checkInWindowStart", Message: "checkInWindowStart and checkInWindowEnd must both be set or both be empty"}
+	}
+	if hasStart && hasEnd && t.CheckInWindowStart >= t.CheckInWindowEnd {
+		return &ValidationError{Field: "checkInWindowStart", Message: "checkInWindowStart must be before checkInWindowEnd"}
+	}
 	return nil
 }
 

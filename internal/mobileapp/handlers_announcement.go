@@ -15,9 +15,23 @@ type announcementRequest struct {
 	DurationMinutes int    `json:"durationMinutes"`
 }
 
+// maxAnnounceBodyBytes caps the POST /api/tournament/announce request
+// body. Worst-case JSON encoding of a valid payload:
+//
+//	message         200 chars × 6 chars/escape = 1200 bytes (full \uXXXX)
+//	durationMinutes 2 digits                    =    2 bytes
+//	JSON overhead (keys, braces, quotes)        =   ~40 bytes
+//	Total                                       = ~1242 bytes
+//
+// 4096 bytes gives a ~3x safety margin while still bounding malicious
+// or accidental large-body uploads. Mirrors the pattern established in
+// handlers_reset.go for body-bounded admin endpoints.
+const maxAnnounceBodyBytes = 4096
+
 func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
 	// POST /api/tournament/announce is protected (requires admin credentials)
 	r.POST("/tournament/announce", func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAnnounceBodyBytes)
 		var req announcementRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})

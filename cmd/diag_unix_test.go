@@ -79,7 +79,7 @@ func TestDiagnoseFolderError_NoArrowWhenUIDMatches(t *testing.T) {
 	}
 }
 
-func TestDiagnoseFolderError_BothParentsMissing(t *testing.T) {
+func TestDiagnoseFolderError_TargetAndParentMissing(t *testing.T) {
 	// Construct a guaranteed-missing nested path under t.TempDir() so that
 	// both the target folder and its immediate parent are absent regardless
 	// of the environment. diagnoseFolderError must not panic.
@@ -90,5 +90,38 @@ func TestDiagnoseFolderError_BothParentsMissing(t *testing.T) {
 	}
 	if !strings.Contains(result, "could not stat") {
 		t.Errorf("expected 'could not stat' message, got:\n%s", result)
+	}
+}
+
+// TestDiagnoseFolderError_StatErrorReportedDirectly covers the non-IsNotExist
+// branch: when os.Stat returns EACCES (folder exists but is unreadable due to
+// a parent dir we can't traverse), the diagnostic must report the failure on
+// the original folder rather than silently falling back to the parent — the
+// parent's ownership would be misleading in this case.
+func TestDiagnoseFolderError_StatErrorReportedDirectly(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses POSIX permission checks; EACCES branch not reachable")
+	}
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	if err := os.Mkdir(child, 0o700); err != nil {
+		t.Fatalf("mkdir child: %v", err)
+	}
+	// Strip search permission on parent. stat(parent/child) now returns EACCES
+	// (not IsNotExist). Restore in cleanup so t.TempDir() can remove the tree.
+	if err := os.Chmod(parent, 0o000); err != nil {
+		t.Fatalf("chmod parent 000: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+
+	result := diagnoseFolderError(child)
+
+	if !strings.Contains(result, "could not stat") {
+		t.Errorf("expected 'could not stat' for EACCES, got:\n%s", result)
+	}
+	// The hint must reference the target itself, not its parent — falling back
+	// to the parent would tell the operator about a different directory's owner.
+	if !strings.Contains(result, child) {
+		t.Errorf("expected target %s in output, got:\n%s", child, result)
 	}
 }

@@ -237,6 +237,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [teamSize, setTeamSize] = useStateA(5);
   const [numberPrefix, setNumberPrefix] = useStateA("");
   const [withZekken, setWithZekken] = useStateA(false);
+  const [checkInEnabled, setCheckInEnabled] = useStateA(false);
   const [selectedCourts, setSelectedCourts] = useStateA(tournament.courts.slice(0, Math.min(2, tournament.courts.length)));
   const [error, setError] = useStateA("");
 
@@ -331,6 +332,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       poolMode, poolSize, winnersPerPool: winners,
       numberPrefix: numberPrefix.trim().substring(0, 3),
       withZekkenName: kind === "individual" ? withZekken : false,
+      checkInEnabled: checkInEnabled,
     });
     // FR-050 / T044: persist poolFormat alongside the rest of the
     // create payload. buildCompetition (data.jsx) doesn't know about
@@ -576,6 +578,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <div className="field__hint" style={{ marginTop: 4 }}>When enabled, participant CSV uses three columns: Name, Zekken, Dojo.</div>
             </div>
           )}
+
+          <div className="field">
+            <label className="checkbox"><input type="checkbox" checked={checkInEnabled} onChange={(e) => setCheckInEnabled(e.target.checked)} /> Check-in tracking</label>
+            <div className="field__hint" style={{ marginTop: 4 }}>Show check-in column and counter for this competition.</div>
+          </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button className="btn" onClick={onCancel}>Cancel</button>

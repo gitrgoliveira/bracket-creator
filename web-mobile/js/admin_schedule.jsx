@@ -907,11 +907,15 @@ function CourtPacePanel({ byCourt, safeMatchDuration }) {
     [byCourt, safeMatchDuration]
   );
 
-  // Only show the panel when there is at least one court with matches
-  const hasAnyCourt = stats.some(s => s.completedCount + s.remainingCount > 0);
-  if (!hasAnyCourt) return null;
+  // Drop courts with zero matches so the cards (and the rebalance heuristic)
+  // ignore empty buckets — e.g. a configured court the user hasn't placed
+  // anything on yet, or every non-A court when the operator has applied
+  // ?court=A scope to the page. Otherwise those courts render confusing
+  // "0/0 done · Done" tiles.
+  const populatedStats = stats.filter(s => s.completedCount + s.remainingCount > 0);
+  if (populatedStats.length === 0) return null;
 
-  const suggestion = suggestRebalances(stats, safeMatchDuration);
+  const suggestion = suggestRebalances(populatedStats, safeMatchDuration);
 
   const badgeStyle = (delta) => {
     const abs = Math.abs(delta);
@@ -943,7 +947,7 @@ function CourtPacePanel({ byCourt, safeMatchDuration }) {
       {open && (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 8, marginBottom: suggestion ? 12 : 0 }}>
-            {stats.map(stat => (
+            {populatedStats.map(stat => (
               <div key={stat.court} style={{ fontSize: 12, padding: "6px 10px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
                 <div style={{ fontWeight: 600, marginBottom: 2 }}>Shiaijo {stat.court}</div>
                 <div style={{ color: "var(--ink-3)" }}>

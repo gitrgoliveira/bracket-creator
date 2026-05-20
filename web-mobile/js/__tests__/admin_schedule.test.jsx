@@ -465,6 +465,18 @@ describe('computeCourtPaceStats', () => {
     const [stat] = computeCourtPaceStats(byCourt, 5, 600);
     expect(stat.court).toBe('Z');
   });
+
+  it('returns an entry for empty court buckets (CourtPacePanel filters them)', () => {
+    // Pre-condition for the populated-only filter in CourtPacePanel: the
+    // helper must still emit a row for empty buckets so the component can
+    // recognise and drop them.  Otherwise the filter is a no-op and configured
+    // courts with no matches would render confusing "0/0 done" tiles.
+    const byCourt = { A: [{ status: 'scheduled', scheduledAt: '09:00' }], B: [] };
+    const stats = computeCourtPaceStats(byCourt, 5, 9 * 60);
+    expect(stats.map(s => s.court).sort()).toEqual(['A', 'B']);
+    const empty = stats.find(s => s.court === 'B');
+    expect(empty.completedCount + empty.remainingCount).toBe(0);
+  });
 });
 
 describe('suggestRebalances', () => {

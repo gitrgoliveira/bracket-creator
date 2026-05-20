@@ -7,7 +7,7 @@ const pluralize = window.pluralize;
 // on the Go side. The override-rank handler ALSO validates against the
 // actual pool size; this cap is the absolute overflow guard.
 const MAX_RANK = window.MAX_RANK;
-const isPoolDaihyosenID = id => /-DH-\d+$/.test(id);
+const isPoolDaihyosenID = id => id.includes('-DH-');
 
 // Pure decision logic for what RankInput.handleBlur should do, given the
 // state of its refs and props at blur time. Returned as a tagged action so

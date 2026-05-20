@@ -40,7 +40,7 @@ function competitionKindLabel(c) {
 }
 
 const pluralize = window.pluralize;
-const isPoolDaihyosenID = id => /-DH-\d+$/.test(id);
+const isPoolDaihyosenID = id => id.includes('-DH-');
 
 function compMatches(c) {
   const out = [];

@@ -145,6 +145,8 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	}
 
 	// Scan existing DH matches per pool for idempotency and ID sequencing.
+	// Use standings keys (known pool names) to match prefixes so hyphenated
+	// pool names like "Pool A-East" are handled correctly.
 	type poolDHInfo struct {
 		existingPairs map[string]bool
 		count         int
@@ -152,8 +154,10 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	poolDH := map[string]*poolDHInfo{}
 	poolCourt := map[string]string{}
 	for _, m := range allMatches {
-		pn, _, ok := strings.Cut(m.ID, "-")
-		if ok {
+		for pn := range standings {
+			if !strings.HasPrefix(m.ID, pn+"-") {
+				continue
+			}
 			if _, seen := poolCourt[pn]; !seen {
 				// Uses the first match's court. Pool competitions assign one
 				// court per pool, so all matches in a pool share the same court.
@@ -166,6 +170,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 				poolDH[pn].count++
 				poolDH[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
 			}
+			break
 		}
 	}
 

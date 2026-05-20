@@ -107,9 +107,10 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	poolTB := map[string]*poolTBInfo{}
 	poolCourt := map[string]string{}
 	for _, m := range allMatches {
-		parts := strings.SplitN(m.ID, "-", 2)
-		if len(parts) == 2 {
-			pn := parts[0]
+		for pn := range standings {
+			if !strings.HasPrefix(m.ID, pn+"-") {
+				continue
+			}
 			if _, ok := poolCourt[pn]; !ok {
 				poolCourt[pn] = m.Court
 			}
@@ -120,6 +121,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 				poolTB[pn].count++
 				poolTB[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
 			}
+			break
 		}
 	}
 

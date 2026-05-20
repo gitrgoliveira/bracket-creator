@@ -69,13 +69,12 @@ describe('buildPlayerMatchHighlight', () => {
   });
 });
 
-// FR-025 — MyMatchPanel Queue chip label. Sibling helpers in display.jsx
-// (queueLabel) and lower in viewer.jsx (VSchedItem inline) must agree on
-// wording so a viewer who looks at "Your next match" then scrolls down to
+// FR-025 — MyMatchPanel Queue chip label. Wording mirrors VSchedItem (also in
+// viewer.jsx) so a viewer who looks at "Your next match" then scrolls down to
 // the per-court schedule sees the same label.
 describe('mymatchQueueLabel', () => {
-  it('returns "Up next" when scheduled and queuePosition === 1', () => {
-    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 1 })).toBe('Up next');
+  it('returns "Next up" when scheduled and queuePosition === 1', () => {
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 1 })).toBe('Next up');
   });
 
   it('returns "N before yours" for queuePosition > 1 (1-indexed → N-1 ahead)', () => {
@@ -84,11 +83,12 @@ describe('mymatchQueueLabel', () => {
     expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 99 })).toBe('98 before yours');
   });
 
-  it('returns "LIVE NOW" when status === "running" regardless of queuePosition', () => {
-    expect(mymatchQueueLabel({ status: 'running', queuePosition: 0 })).toBe('LIVE NOW');
-    expect(mymatchQueueLabel({ status: 'running' })).toBe('LIVE NOW');
-    // qp is meant to be 0 for running per FR-025, but a stale 3 must not bleed through.
-    expect(mymatchQueueLabel({ status: 'running', queuePosition: 3 })).toBe('LIVE NOW');
+  it('returns null when status === "running" (round label already shows LIVE NOW)', () => {
+    // The my-match__round element appends " · LIVE NOW" for running matches, so
+    // the Queue chip must not duplicate it.
+    expect(mymatchQueueLabel({ status: 'running', queuePosition: 0 })).toBeNull();
+    expect(mymatchQueueLabel({ status: 'running' })).toBeNull();
+    expect(mymatchQueueLabel({ status: 'running', queuePosition: 3 })).toBeNull();
   });
 
   it('returns null for non-running / non-scheduled statuses', () => {

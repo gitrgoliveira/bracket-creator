@@ -378,6 +378,8 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
           )}
         </div>
 
+        <CourtPacePanel byCourt={byCourt} safeMatchDuration={safeMatchDuration} />
+
         <div className="tw-sched">
           <div className="tw-sched__filters" data-testid="admin-schedule-court-filter">
             <window.PlayerMultiFilter tournament={tournament} picked={picked} setPicked={setPicked} dojoText={dojoText} setDojoText={setDojoText} />
@@ -845,6 +847,157 @@ function PerCourtBreakdown({ perCourtMinutes }) {
   );
 }
 
+// computeCourtPaceStats(byCourt, perMatchMinutes) — pure helper.
+//
+// For each court, derive:
+//   court               — the court label (e.g. "A")
+//   completedCount      — matches with status === "completed"
+//   remainingCount      — matches NOT yet completed
+//   wallClockElapsedMin — minutes from the earliest scheduledAt on that court
+//                         to now. Falls back to 0 when no scheduledAt data.
+//   estimatedRemainingMin — remainingCount × perMatchMinutes
+//   plannedRemainingMin   — time from now to the latest scheduledAt on the
+//                           court. Falls back to estimatedRemainingMin when
+//                           no scheduled times exist.
+//   delta               — estimatedRemainingMin − plannedRemainingMin
+//                         positive = behind schedule, negative = ahead
+//
+// Exported for the vitest suite.
+export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
+  const ppm = perMatchMinutes > 0 ? perMatchMinutes : 3;
+  const nowMin = nowMinutes !== undefined ? nowMinutes : (() => {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  })();
+
+  return Object.entries(byCourt).map(([court, matches]) => {
+    const completedCount = matches.filter(m => m.status === "completed").length;
+    const remainingCount = matches.length - completedCount;
+    const estimatedRemainingMin = remainingCount * ppm;
+
+    // Earliest and latest scheduledAt on this court (in minutes)
+    const times = matches
+      .map(m => timeToMinutes(m.scheduledAt))
+      .filter(t => t !== null);
+    const earliestMin = times.length > 0 ? Math.min(...times) : null;
+    const latestMin = times.length > 0 ? Math.max(...times) : null;
+
+    // Wall-clock elapsed: from earliest scheduled time on this court to now.
+    const wallClockElapsedMin = earliestMin !== null ? Math.max(0, nowMin - earliestMin) : 0;
+
+    // Planned remaining: from now to end of last scheduled match (+ one match duration).
+    // If no times available, fall back to estimatedRemainingMin.
+    const plannedRemainingMin = latestMin !== null
+      ? Math.max(0, latestMin + ppm - nowMin)
+      : estimatedRemainingMin;
+
+    const delta = estimatedRemainingMin - plannedRemainingMin;
+
+    return { court, completedCount, remainingCount, wallClockElapsedMin, estimatedRemainingMin, plannedRemainingMin, delta };
+  });
+}
+
+// CourtPacePanel — admin-only collapsible card showing per-court pace status
+// and a rebalancing suggestion. Never rendered in viewer or display views.
+function CourtPacePanel({ byCourt, safeMatchDuration }) {
+  const [open, setOpen] = useStateA(false);
+
+  const stats = useMemoA(
+    () => computeCourtPaceStats(byCourt, safeMatchDuration),
+    [byCourt, safeMatchDuration]
+  );
+
+  // Drop courts with zero matches so the cards (and the rebalance heuristic)
+  // ignore empty buckets — e.g. a configured court the user hasn't placed
+  // anything on yet, or every non-A court when the operator has applied
+  // ?court=A scope to the page. Otherwise those courts render confusing
+  // "0/0 done · Done" tiles.
+  const populatedStats = stats.filter(s => s.completedCount + s.remainingCount > 0);
+  if (populatedStats.length === 0) return null;
+
+  const suggestion = suggestRebalances(populatedStats, safeMatchDuration);
+
+  const badgeStyle = (delta) => {
+    const abs = Math.abs(delta);
+    if (abs <= 5) return { color: "var(--green, #16a34a)", fontWeight: 600 };
+    if (abs <= 20) return { color: "var(--amber, #d97706)", fontWeight: 600 };
+    return { color: "var(--red, #dc2626)", fontWeight: 700 };
+  };
+
+  const statusLabel = (stat) => {
+    if (stat.remainingCount === 0) return <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>Done</span>;
+    const abs = Math.abs(stat.delta);
+    if (abs <= 5) return <span style={badgeStyle(stat.delta)}>On track</span>;
+    const dir = stat.delta > 0 ? "behind" : "ahead";
+    return <span style={badgeStyle(stat.delta)}>{Math.round(abs)}m {dir}</span>;
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }} data-testid="court-pace-panel">
+      <div
+        className="card__title"
+        style={{ display: "flex", justifyContent: "space-between", cursor: "pointer", marginBottom: open ? 12 : 0 }}
+        onClick={() => setOpen(!open)}
+        role="button"
+        aria-expanded={open}
+      >
+        <span>Court pace</span>
+        <span style={{ fontSize: 18, fontWeight: 400 }}>{open ? "−" : "+"}</span>
+      </div>
+      {open && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 8, marginBottom: suggestion ? 12 : 0 }}>
+            {populatedStats.map(stat => (
+              <div key={stat.court} style={{ fontSize: 12, padding: "6px 10px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 2 }}>Shiaijo {stat.court}</div>
+                <div style={{ color: "var(--ink-3)" }}>
+                  {stat.completedCount}/{stat.completedCount + stat.remainingCount} done
+                </div>
+                <div style={{ marginTop: 2 }}>{statusLabel(stat)}</div>
+              </div>
+            ))}
+          </div>
+          {suggestion && (
+            <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--amber-bg, #fffbeb)", border: "1px solid var(--amber-border, #fde68a)", borderRadius: 6, fontSize: 13 }}>
+              <strong>Suggestion:</strong> Move {suggestion.n} {suggestion.n === 1 ? "match" : "matches"} from Shiaijo {suggestion.from} to Shiaijo {suggestion.to} to rebalance court load. Use the court picker on each match card to reassign.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function suggestRebalances(perCourtStats, perMatchMinutes) {
+  if (!perCourtStats || perCourtStats.length < 2 || !perMatchMinutes || perMatchMinutes <= 0) return null;
+
+  let slowest = null;
+  let fastest = null;
+
+  perCourtStats.forEach(stat => {
+    if (stat.remainingCount > 0) {
+      if (!slowest || stat.delta > slowest.delta) {
+        slowest = stat;
+      }
+    }
+    if (!fastest || stat.delta < fastest.delta) {
+      fastest = stat;
+    }
+  });
+
+  if (!slowest || !fastest || slowest.court === fastest.court) return null;
+  if (slowest.delta <= 0 || fastest.delta >= 0) return null;
+
+  const n = Math.floor(Math.min(slowest.delta, Math.abs(fastest.delta)) / perMatchMinutes);
+  if (n <= 0) return null;
+
+  return {
+    from: slowest.court,
+    to: fastest.court,
+    n: n
+  };
+}
+
 window.AdminSchedulePage = AdminSchedulePage;
 window.PerCourtBreakdown = PerCourtBreakdown;
 window.AdminScoreEditorPage = AdminScoreEditorPage;
@@ -853,4 +1006,7 @@ window.AdminExport = AdminExport;
 
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { timeEdited, timeToMinutes, clampMatchDuration };
+// Note: computeCourtPaceStats is already exported at its declaration site
+// (export function computeCourtPaceStats).
+export { timeEdited, timeToMinutes, clampMatchDuration, suggestRebalances };
+

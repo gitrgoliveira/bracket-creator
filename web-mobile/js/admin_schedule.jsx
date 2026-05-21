@@ -17,6 +17,7 @@ const ScoreEditorModal = window.ScoreEditorModal;
 // {id:"",name:""} for missing sides, making the naive `m.sideA && m.sideB`
 // check always pass.
 const hasBothSides = window.hasBothSides;
+const getScoreBtnClass = window.getScoreBtnClass;
 
 // ---------- Tournament-wide schedule (admin) ----------
 // Estimate minutes from HH:MM string; returns null if invalid
@@ -709,7 +710,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
                 {m.status === "running" && <span className="bc-live">● LIVE</span>}
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
-              <button className="btn btn--sm score-edit-row__edit" onClick={() => setOpenMatch(m)}>
+              <button className={getScoreBtnClass(m.status)} onClick={() => setOpenMatch(m)}>
                 {m.status === "completed" ? "Correct" : "Score"}
               </button>
             </div>

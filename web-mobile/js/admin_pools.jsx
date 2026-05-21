@@ -7,6 +7,7 @@ const pluralize = window.pluralize;
 // on the Go side. The override-rank handler ALSO validates against the
 // actual pool size; this cap is the absolute overflow guard.
 const MAX_RANK = window.MAX_RANK;
+const getScoreBtnClass = window.getScoreBtnClass;
 
 // Pure decision logic for what RankInput.handleBlur should do, given the
 // state of its refs and props at blur time. Returned as a tagged action so
@@ -273,7 +274,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
                       {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
                     </div>
-                    <button className="btn btn--sm" onClick={() => onEditScore(c.id, m.id, null, m)}>
+                    <button className={getScoreBtnClass(m.status)} onClick={() => onEditScore(c.id, m.id, null, m)}>
                       {m.status === "completed" ? "Edit" : "Score"}
                     </button>
                   </div>
@@ -380,7 +381,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); onEditScore(c.id, m.id, null, m); }}>Score</button>
+                          <button className={getScoreBtnClass(m.status)} onClick={(e) => { e.stopPropagation(); onEditScore(c.id, m.id, null, m); }}>
+                            {m.status === "completed" ? "Edit" : "Score"}
+                          </button>
                         </div>
                       </div>
                     ))}

@@ -171,19 +171,40 @@ function findActiveCourts(tournament, competitions) {
     return all.filter(cc => inUse.has(cc));
 }
 
-// Queue-position label per T068. We mirror the contract from VSchedItem in
-// viewer.jsx: position 1 → "Up next"; position N → "(N-1) before yours".
-// Falls back to scheduledAt time if no queue position is present (pre-T046
-// payloads or unannotated matches). Keep this synchronised with the
-// equivalent helper in viewer.jsx so the two surfaces agree.
+// Queue-position label per T068, and the canonical source of truth for all
+// viewer surfaces (display.jsx, VSchedItem in viewer.jsx, etc.).
+//
+// Contract: position 1 → "Up next"; position N → "(N-1) before yours".
+// Falls back to scheduledAt time only when status === "scheduled" and no
+// queue position is present (pre-T046 payloads or unannotated matches).
+// Returns "" for non-scheduled rows or when no info is available so
+// callers can render unconditionally.
+//
+// Wording is consolidated on "Up next" across all surfaces (bead mp-e3k).
+// If you need a denser pill form for a tight row, use queueLabelCompact.
 function queueLabel(m) {
-    const qp = m.queuePosition;
-    if (qp && qp > 0) {
+    if (!m) return "";
+    const qp = Number(m.queuePosition);
+    if (qp > 0) {
         if (qp === 1) return "Up next";
         return `${qp - 1} before yours`;
     }
-    if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
+    if (m.status === "scheduled" && m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
     return "";
+}
+
+// Compact pill form of the queue-position label, for dense rows like the
+// per-court TWMatch tiles on the tournament-wide viewer. Same canonical
+// "Up next" wording for qp=1 so all surfaces agree (bead mp-e3k); other
+// positions render as "#N". Returns null when there's nothing to show so
+// callers can conditionally render the pill.
+function queueLabelCompact(m) {
+    if (!m) return null;
+    if (m.status !== "scheduled") return null;
+    const qp = m.queuePosition;
+    if (!qp || qp <= 0) return null;
+    if (qp === 1) return "Up next";
+    return `#${qp}`;
 }
 
 // Compute a phase label for either a pool or a bracket match.
@@ -900,6 +921,7 @@ export {
     findActiveCourts,
     countCourtMatches,
     queueLabel,
+    queueLabelCompact,
     LOBBY_PAGE_SIZE,
     LOBBY_CYCLE_MS,
 };
@@ -909,4 +931,6 @@ if (typeof window !== 'undefined') {
     window.LobbyDisplay = LobbyDisplay;
     window.StreamingOverlay = StreamingOverlay;
     window.DisplayRoute = DisplayRoute;
+    window.queueLabel = queueLabel;
+    window.queueLabelCompact = queueLabelCompact;
 }

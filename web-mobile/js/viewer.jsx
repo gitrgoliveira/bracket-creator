@@ -1885,13 +1885,25 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
 // Returns [] when no podium data exists yet.
 // `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich bracket
 // entries with dojo info; missing names fall back to {name, dojo: ""}.
+// Bracket match fields (sideA/sideB/winner) may be either plain strings (raw
+// backend payload) or normalized objects ({id, name, dojo}) as produced by
+// normalizeMatch() in api_serializers.jsx — both shapes are handled.
 // `standings` may be either a flat array (Swiss-shape) or an object keyed by
 // pool name (pools/league shape).
 function deriveAwards(bracket, standings, pools, nameToPlayer) {
-  const lookup = (name) => {
+  // Extract the name string from a match field that may be a string (raw
+  // backend payload) or a normalized object ({id, name, dojo}) produced by
+  // normalizeMatch() in api_serializers.jsx.
+  const toName = (v) => (v && typeof v === "object" ? v.name || "" : v || "");
+
+  // Enrich a player field with dojo info. If the field is already a normalized
+  // object with a dojo, use it directly; otherwise fall back to nameToPlayer.
+  const lookup = (v) => {
+    const name = toName(v);
     if (!name) return null;
+    const fromField = v && typeof v === "object" ? v.dojo : null;
     const p = nameToPlayer && nameToPlayer.get(name);
-    return { name, dojo: (p && p.dojo) || "" };
+    return { name, dojo: fromField || (p && p.dojo) || "" };
   };
 
   // Bracket-based: final + semi-finals. Only used when the final has a
@@ -1903,10 +1915,14 @@ function deriveAwards(bracket, standings, pools, nameToPlayer) {
     const sfRound = bracket.rounds[bracket.rounds.length - 2] || [];
     const final = finalRound[0];
     if (final && final.winner) {
+      const winnerName = toName(final.winner);
       const champion = final.winner;
-      const runnerUp = final.winner === final.sideA ? final.sideB : final.sideA;
+      const runnerUp = winnerName === toName(final.sideA) ? final.sideB : final.sideA;
       const thirds = sfRound
-        .map((m) => (m.winner ? (m.winner === m.sideA ? m.sideB : m.sideA) : null))
+        .map((m) => {
+          if (!m.winner) return null;
+          return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
+        })
         .filter(Boolean);
       return [
         { place: 1, ...lookup(champion) },

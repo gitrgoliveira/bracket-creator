@@ -34,6 +34,32 @@ describe('deriveAwards (bracket-based)', () => {
     ]);
   });
 
+  it('handles normalized object fields (as produced by normalizeMatch)', () => {
+    // Simulate the shape produced by normalizeMatch() / normalizeCompetitionDetail()
+    // where sideA/sideB/winner are objects {id, name, dojo} rather than strings.
+    const mkPlayer = (name, dojo) => ({ id: name.toLowerCase(), name, dojo });
+    const bracket = {
+      rounds: [
+        // round 0 — semis (irrelevant)
+        [],
+        // round 1 — semi-finals
+        [
+          { sideA: mkPlayer('Alice', 'Aoyama'), sideB: mkPlayer('Bob', 'Bunkyo'), winner: mkPlayer('Alice', 'Aoyama') },
+          { sideA: mkPlayer('Carol', 'Chiba'), sideB: mkPlayer('Dan', 'Denenchofu'), winner: mkPlayer('Carol', 'Chiba') },
+        ],
+        // round 2 — final
+        [{ sideA: mkPlayer('Alice', 'Aoyama'), sideB: mkPlayer('Carol', 'Chiba'), winner: mkPlayer('Alice', 'Aoyama') }],
+      ],
+    };
+    const awards = deriveAwards(bracket, null, null, new Map());
+    expect(awards).toEqual([
+      { place: 1, name: 'Alice', dojo: 'Aoyama' },
+      { place: 2, name: 'Carol', dojo: 'Chiba' },
+      { place: 3, name: 'Bob', dojo: 'Bunkyo' },
+      { place: 3, name: 'Dan', dojo: 'Denenchofu' },
+    ]);
+  });
+
   it('returns [] when the final has no winner yet', () => {
     const bracket = {
       rounds: [

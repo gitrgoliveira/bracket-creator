@@ -547,6 +547,30 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
   );
 }
 
+// mymatchQueueLabel — FR-025 label for the "Your next match" Queue chip.
+//
+// Contract:
+//   - status==="scheduled" + queuePosition===1 → "Next up"
+//   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
+//   - status==="running"                       → null (round label already shows " · LIVE NOW")
+//   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
+//
+// Wording mirrors the VSchedItem helper below so both viewer surfaces agree.
+// Running matches return null because the my-match__round label already appends
+// " · LIVE NOW" — rendering it again in the Queue chip would be a duplicate.
+// We intentionally do NOT fall back to "Scheduled HH:MM" the way display.jsx
+// does — the MyMatchPanel already has a dedicated Time chip.
+// Exported for unit-testing.
+export function mymatchQueueLabel(m) {
+  if (!m) return null;
+  if (m.status === "running") return null;
+  if (m.status !== "scheduled") return null;
+  const qp = Number(m.queuePosition);
+  if (!Number.isFinite(qp) || qp <= 0) return null;
+  if (qp === 1) return "Next up";
+  return `${qp - 1} before yours`;
+}
+
 // MyMatchPanel — "Find my matches" entry point + active "Your next match"
 // card. Two states:
 //   1) No followed player yet → render a picker; selecting persists to
@@ -607,6 +631,14 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   const isOnSideA = aId === followedPlayer.id;
   const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
   const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
+  // FR-025: queue position is 1-indexed per court for scheduled matches; 0 for
+  // running/completed. Treat null/undefined/0 as "don't render" so we stay
+  // gracefully empty for non-queued matches and pre-T046 responses. Wording
+  // ("Next up" / "N before yours") mirrors VSchedItem below so both viewer
+  // surfaces agree. Running matches show null here because the round label
+  // already appends " · LIVE NOW".
+  const queueLabel = mymatchQueueLabel(nextMatch);
+  const queueHighlight = queueLabel === "Next up";
 
   return (
     <div className="my-match" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
@@ -626,6 +658,22 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
           <span className="l">Time</span>
           <span className="v">{nextMatch.scheduledAt || "TBA"}</span>
         </div>
+        {queueLabel && (
+          <div
+            className="my-match__chip"
+            data-testid="my-match-queue"
+            aria-live={queueHighlight ? "polite" : "off"}
+          >
+            <span className="l">Queue</span>
+            {/* The .my-match card background is var(--accent) (dark blue), so
+                colouring text with var(--accent) renders unreadable. The chip
+                inherits white from --accent-fg; emphasise the live/up-next
+                state with full opacity + a Unicode bullet instead. */}
+            <span className="v" style={{ opacity: queueHighlight ? 1 : 0.92 }}>
+              {queueHighlight ? "• " : ""}{queueLabel}
+            </span>
+          </div>
+        )}
       </div>
       {opponent && (typeof opponent === "object") ? (
         <button

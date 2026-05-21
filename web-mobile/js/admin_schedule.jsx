@@ -553,7 +553,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           "FS" badge to each affected bout cell. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
         {m.status === "completed" && (
-          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)}</div>
         )}
         {m.status === "running" && <span className="bc-live">●</span>}
         <CourtPicker
@@ -695,7 +695,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
                   <div className="score-edit-row__score">
-                    {m.status === "completed" && window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)}
+                    {m.status === "completed" && window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
                     {m.status === "running" && <span className="bc-live">●</span>}
                     {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                   </div>

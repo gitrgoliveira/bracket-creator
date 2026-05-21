@@ -53,10 +53,15 @@ function decisionSuffix(match) {
   if (!match) return "";
   const d = match.decision || "";
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
+  const hanteiOn = !!match.decidedByHantei;
   let suffix = "";
   if (isKikenDecisionBC(d)) suffix = "Kiken";
   else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;
   if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
+  // FIK 7-5 / 29-6: judges' decision after a tied encho. Mark explicitly so
+  // a hantei-decided final is distinguishable from an ippon-derived one
+  // (audit + Excel + viewer parity).
+  if (hanteiOn) suffix = (suffix ? suffix + " " : "") + "HT";
   return suffix;
 }
 
@@ -73,8 +78,11 @@ function decisionSuffix(match) {
 // by display.jsx's hand-rolled score block. The decision-derived suffix
 // supersedes the bare " (E)" so we don't double-print "(E)" alongside
 // "Kiken (E)".
-function formatIpponsScore(ipponsA, ipponsB, score, decision, encho) {
-  const decSfx = decisionSuffix({ decision, encho });
+function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHantei) {
+  // decidedByHantei can be passed positionally (newer callers) or read from
+  // score.hantei (older callers / future-proofing). Either lights up "HT".
+  const hantei = !!(decidedByHantei || score?.hantei);
+  const decSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
   const enchoOnly = (encho && encho.periodCount > 0) ? " (E)" : "";
   const suffix = decSfx ? " " + decSfx : enchoOnly;
   if (score?.type === "bye") return "BYE";

@@ -601,6 +601,7 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					bracket.Rounds[rIdx][mIdx].DecidedByHantei = result.DecidedByHantei
 					// Echo the persisted scheduling fields back into the result so the
 					// caller (and SSE broadcast) sees the full, correct match state
 					// rather than the empty Court/ScheduledAt the scoring UI sends.

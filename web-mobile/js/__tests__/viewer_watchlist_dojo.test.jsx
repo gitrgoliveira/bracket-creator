@@ -21,7 +21,7 @@ describe('addDojoToWatchlist', () => {
 
   it('respects the max cap and reports the skipped count', () => {
     const current = [{ id: 'b1', name: 'Bob', dojo: 'Bunkyo' }];
-    // max=2 → already at 1, only 1 slot left, but 1 candidate (a1) → fits.
+    // max=2 → already at 1, only 1 slot left, with 2 candidates (a1, a2) so one is skipped.
     let r = addDojoToWatchlist(current, roster, 'Aoyama', 2);
     expect(r.added).toBe(1);
     expect(r.skipped).toBe(1); // a2 didn't fit

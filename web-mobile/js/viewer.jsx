@@ -711,10 +711,12 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
     const { next, added, skipped } = addDojoToWatchlist(watchlist, roster, dojoSel, WATCHLIST_MAX);
     setWatchlist(next);
     setBulkMsg(
-      added === 0
+      skipped > 0
+        ? added === 0
+          ? `Watchlist full · ${skipped} from ${dojoSel} skipped`
+          : `Added ${added} from ${dojoSel} · ${skipped} skipped (watchlist full)`
+        : added === 0
         ? `Everyone from ${dojoSel} is already in your watchlist`
-        : skipped > 0
-        ? `Added ${added} from ${dojoSel} · ${skipped} skipped (watchlist full)`
         : `Added ${added} from ${dojoSel}`
     );
     setDojoSel("");
@@ -724,7 +726,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
   };
 
   const selStats = dojoStats.get(dojoSel);
-  const addDojoDisabled = !dojoSel || !selStats || selStats.watched >= selStats.total;
+  const addDojoDisabled = watchlist.length >= WATCHLIST_MAX || !dojoSel || !selStats || selStats.watched >= selStats.total;
 
   return (
     <div className="card" data-testid="viewer-home-watchlist" style={{ marginBottom: 16, padding: 14 }}>

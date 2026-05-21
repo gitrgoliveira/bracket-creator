@@ -571,7 +571,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
 AdminTWMatch.displayName = "AdminTWMatch";
 
 // ---------- Score editor ----------
-function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode }) {
+function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password }) {
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
@@ -586,7 +586,7 @@ function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, on
             <div className="page-head__sub">Update live scores or correct past matches across the tournament. Changes propagate through the bracket.</div>
           </div>
         </div>
-        <AdminScoreEditor t={tournament} onEditScore={onEditScore} onMoveCourt={onMoveCourt} />
+        <AdminScoreEditor t={tournament} onEditScore={onEditScore} onMoveCourt={onMoveCourt} password={password} />
       </div>
     </div>
   );
@@ -606,7 +606,7 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
   );
 }
 
-function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) {
+function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password }) {
   const [filter, setFilter] = useStateA("");
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
   const [statusFilter, setStatusFilter] = useStateA("all");

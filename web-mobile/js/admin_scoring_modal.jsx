@@ -132,9 +132,10 @@ function GlossaryHintAS({ name }) {
 
 // T093–T098: shared helpers for the decision (kiken/fusenpai/fusensho) flow.
 //
-// Resolve the password for /decision POST. All mount sites now pass the
-// password prop explicitly; return it directly (or "" as a safe sentinel
-// that the server will reject with 401, surfacing the misconfiguration).
+// Resolve the password for /decision POST. The helper only uses the prop
+// (no window fallback); callers must pass the password explicitly. Returns ""
+// as a safe sentinel that the server will reject with 401, surfacing any
+// misconfiguration where the prop was not provided.
 function resolveDecisionPassword(propPassword) {
   return propPassword || "";
 }

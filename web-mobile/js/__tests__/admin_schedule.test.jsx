@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt } from '../admin_schedule.jsx';
+import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, allMatchesCompleted } from '../admin_schedule.jsx';
 
 describe('timeEdited', () => {
   // Copilot round-9 finding: AdminTWMatch.submitTime() used
@@ -367,6 +367,62 @@ describe('AdminScoreEditor chained navigation stays on the same shiaijo (T043 re
     const openIdx = sameCourt.findIndex((m) => m.id === currentMatch.id);
     const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
 
+    expect(nextMatch).toBeNull();
+  });
+});
+
+describe('allMatchesCompleted', () => {
+  // Drives the "All matches scored" banner in AdminScoreEditor. The banner
+  // should appear only when there are matches and every one is completed.
+
+  it('returns false for an empty list', () => {
+    expect(allMatchesCompleted([])).toBe(false);
+  });
+
+  it('returns false when any match is not completed', () => {
+    const matches = [
+      { id: '1', status: 'completed' },
+      { id: '2', status: 'scheduled' },
+      { id: '3', status: 'completed' },
+    ];
+    expect(allMatchesCompleted(matches)).toBe(false);
+  });
+
+  it('returns false when any match is running', () => {
+    const matches = [
+      { id: '1', status: 'completed' },
+      { id: '2', status: 'running' },
+    ];
+    expect(allMatchesCompleted(matches)).toBe(false);
+  });
+
+  it('returns true when all matches are completed', () => {
+    const matches = [
+      { id: '1', status: 'completed' },
+      { id: '2', status: 'completed' },
+      { id: '3', status: 'completed' },
+    ];
+    expect(allMatchesCompleted(matches)).toBe(true);
+  });
+
+  it('returns true for a single completed match', () => {
+    expect(allMatchesCompleted([{ id: '1', status: 'completed' }])).toBe(true);
+  });
+
+  it('regression: nextMatch is null for the last match in a fully-scored court', () => {
+    // When all pool matches are complete, the score editor's sameCourt list
+    // is all-completed. The last (and only remaining) match is at the end —
+    // nextMatch must be null so the modal does not loop back to the start.
+    const allDone = [
+      { id: 'm1', court: 'A', status: 'completed', compId: 'c1' },
+      { id: 'm2', court: 'A', status: 'completed', compId: 'c1' },
+      { id: 'm3', court: 'A', status: 'completed', compId: 'c1' },
+    ];
+    const openMatch = allDone[2]; // last match
+    const sameCourt = filterMatchesByCourt(allDone, openMatch.court);
+    const openIdx = sameCourt.findIndex(m => m.id === openMatch.id);
+    const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+    expect(allMatchesCompleted(allDone)).toBe(true);
     expect(nextMatch).toBeNull();
   });
 });

@@ -73,6 +73,12 @@ function clampMatchDuration(raw, fallback = 3) {
   return Number.isFinite(raw) && Number.isInteger(raw) && raw >= 1 ? raw : fallback;
 }
 
+// True when the list is non-empty and every match is in 'completed' status.
+// Drives the "All matches scored" banner in AdminScoreEditor.
+function allMatchesCompleted(matches) {
+  return matches.length > 0 && matches.every(m => m.status === "completed");
+}
+
 // T041 (US1, FR-002, SC-002): per-tablet localStorage key. The URL
 // ?court= param remains canonical — localStorage is a fallback that lets
 // a bookmarked operator tablet land on the same shiaijo after they
@@ -677,6 +683,12 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
         {filtered.length === 0 && (
           <div className="empty"><div className="icon">🔍</div><h3>No matches</h3><div style={{ fontSize: 12 }}>Adjust your filters or check that competitions have started.</div></div>
         )}
+        {allMatchesCompleted(filtered) && (
+          <div className="notice notice--success" style={{ marginBottom: 12, padding: "12px 16px", background: "var(--green-soft, #e8f8f0)", border: "1px solid var(--green, #34b872)", borderRadius: 8 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>All matches scored</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Pool play is complete. Head to the Bracket tab to generate or start playoffs, or view final standings in the Pools tab.</div>
+          </div>
+        )}
         {filtered.map((m) => {
           const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
           const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
@@ -853,4 +865,4 @@ window.AdminExport = AdminExport;
 
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { timeEdited, timeToMinutes, clampMatchDuration };
+export { timeEdited, timeToMinutes, clampMatchDuration, allMatchesCompleted };

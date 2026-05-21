@@ -7,6 +7,7 @@ const pluralize = window.pluralize;
 // on the Go side. The override-rank handler ALSO validates against the
 // actual pool size; this cap is the absolute overflow guard.
 const MAX_RANK = window.MAX_RANK;
+const ScoreEditorModal = window.ScoreEditorModal;
 
 // Pure decision logic for what RankInput.handleBlur should do, given the
 // state of its refs and props at blur time. Returned as a tagged action so
@@ -148,6 +149,30 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   };
 
   const [selectedPoolName, setSelectedPoolName] = useStateA(null);
+  const [scoreOpenMatch, setScoreOpenMatch] = useStateA(null);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // Modal rendered in both return paths (detail view and card list).
+  const scoreModal = scoreOpenMatch ? (
+    <ScoreEditorModal
+      key={c.id + '-' + scoreOpenMatch.id}
+      match={scoreOpenMatch}
+      prevMatch={null}
+      nextMatch={null}
+      onPrev={null}
+      onNext={null}
+      onClose={() => setScoreOpenMatch(null)}
+      onSubmit={async (patch) => {
+        try {
+          await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch);
+          if (mountedRef.current) setScoreOpenMatch(null);
+        } catch (_err) { /* keep modal open on error */ }
+      }}
+      onSubmitAndNext={null}
+      password={password}
+    />
+  ) : null;
 
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to draw pools.</div></div>;
@@ -159,6 +184,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     const poolStandings = standings ? standings[selectedPool.poolName] : null;
     const court = c.courts[pools.indexOf(selectedPool) % c.courts.length];
     return (
+      <>
       <div className="pool-detail">
         <div style={{ marginBottom: 16 }}>
           <button className="btn btn--sm" onClick={() => setSelectedPoolName(null)}>← All pools</button>
@@ -273,7 +299,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
                       {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
                     </div>
-                    <button className="btn btn--sm" onClick={() => onEditScore(c.id, m.id, null, m)}>
+                    <button className="btn btn--sm" onClick={() => setScoreOpenMatch(m)}>
                       {m.status === "completed" ? "Edit" : "Score"}
                     </button>
                   </div>
@@ -283,9 +309,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           </div>
         </div>
       </div>
+      {scoreModal}
+      </>
     );
   }
   return (
+    <>
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
@@ -380,7 +409,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); onEditScore(c.id, m.id, null, m); }}>Score</button>
+                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(m); }}>Score</button>
                         </div>
                       </div>
                     ))}
@@ -392,6 +421,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         })}
       </div>
     </div>
+    {scoreModal}
+    </>
   );
 }
 

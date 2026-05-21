@@ -239,7 +239,7 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 			if i == foundIdx {
 				continue
 			}
-			if players[i].Name == players[foundIdx].Name {
+			if strings.EqualFold(players[i].Name, players[foundIdx].Name) {
 				return nil, ErrDuplicateName
 			}
 		}
@@ -298,7 +298,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 	// UI accepts the same name twice without warning otherwise, and
 	// the rest of the roster identifies competitors by display name.
 	for _, existing := range players {
-		if existing.Name == p.Name {
+		if strings.EqualFold(existing.Name, p.Name) {
 			return nil, ErrDuplicateName
 		}
 	}

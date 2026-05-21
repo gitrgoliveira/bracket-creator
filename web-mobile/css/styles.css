@@ -3029,6 +3029,11 @@ a:hover {
   color: var(--ink-2);
 }
 
+.sb-draw-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .sb-draw-toggle--active {
   background: var(--ink-1);
   border-color: var(--ink-5);
@@ -5082,4 +5087,3 @@ a:hover {
     transition: none;
   }
 }
-

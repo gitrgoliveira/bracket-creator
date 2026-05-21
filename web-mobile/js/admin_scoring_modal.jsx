@@ -827,7 +827,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                         )}
                         <button
                           className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
-                          data-testid="mark-draw"
+                          data-testid="scoring-modal-mark-draw"
                           onClick={() => {
                             const r = decideDrawToggle({ isDrawToggled, aTotal, bTotal });
                             if (r.action === "cancel") setIsDrawToggled(false);

@@ -41,7 +41,7 @@ describe('applyPatch', () => {
     const prev = makeState();
     const next = applyPatch(prev, { data: { result: { id: "p1", winner: "Alice", status: "completed" } } });
     expect(next).not.toBe(prev);
-    expect(next.poolMatches[0].winner).toBe("Alice");
+    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
     expect(next.poolMatches[0].status).toBe("completed");
     // unchanged matches keep their reference and values
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
@@ -57,8 +57,8 @@ describe('applyPatch', () => {
         ],
       },
     });
-    expect(next.poolMatches[0].winner).toBe("Alice");
-    expect(next.poolMatches[1].winner).toBe("Bob");
+    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    expect(next.poolMatches[1].winner).toEqual({ id: "Bob", name: "Bob" });
   });
 
   it('lets results take precedence over result when both present', () => {
@@ -69,7 +69,7 @@ describe('applyPatch', () => {
         results: [{ id: "p1", winner: "FromArray" }],
       },
     });
-    expect(next.poolMatches[0].winner).toBe("FromArray");
+    expect(next.poolMatches[0].winner).toEqual({ id: "FromArray", name: "FromArray" });
   });
 
   it('maps ipponsA/B to scoreA/B on bracket-round matches', () => {
@@ -79,7 +79,7 @@ describe('applyPatch', () => {
         result: { id: "b1", winner: "Alice", ipponsA: ["M", "K"], ipponsB: ["D"], status: "completed" },
       },
     });
-    expect(next.bracket.rounds[0][0].winner).toBe("Alice");
+    expect(next.bracket.rounds[0][0].winner).toEqual({ id: "Alice", name: "Alice" });
     expect(next.bracket.rounds[0][0].scoreA).toBe("MK");
     expect(next.bracket.rounds[0][0].scoreB).toBe("D");
     // ipponsA/B copied through too (the patch spread carries them)
@@ -95,7 +95,7 @@ describe('applyPatch', () => {
     });
     expect(next.poolMatches[0].court).toBe("A");
     expect(next.poolMatches[0].scheduledAt).toBe("09:30");
-    expect(next.poolMatches[0].winner).toBe("Alice");
+    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
   });
 
   it('does not mutate prev when changes apply', () => {
@@ -160,6 +160,28 @@ describe('applyPatch', () => {
     expect(next.poolMatches[0].status).toBe("running");
     // sibling untouched — same reference
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
+  });
+
+  it('normalizes sideA and sideB strings into player objects when applying a patch', () => {
+    const prev = {
+      poolMatches: [
+        { id: "p1", sideA: { id: "Alice", name: "Alice" }, sideB: { id: "Bob", name: "Bob" }, status: "scheduled" }
+      ]
+    };
+    const next = applyPatch(prev, {
+      data: {
+        result: {
+          id: "p1",
+          sideA: "Alice",
+          sideB: "Bob",
+          winner: "Alice",
+          status: "completed"
+        }
+      }
+    });
+    expect(next.poolMatches[0].sideA).toEqual({ id: "Alice", name: "Alice" });
+    expect(next.poolMatches[0].sideB).toEqual({ id: "Bob", name: "Bob" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
   });
 });
 

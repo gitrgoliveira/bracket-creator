@@ -58,7 +58,7 @@ go/lint: go/fmt ## Run linters
 
 go/sec: ## Run security scans (gosec)
 	@echo "Running security scans..."
-	gosec ./...
+	gosec ./cmd/... ./internal/... ./tests/... .
 
 go/vuln: ## Run vulnerability check (govulncheck)
 	@echo "Running vulnerability check..."

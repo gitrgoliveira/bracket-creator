@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveDecisionPassword,
   buildDecisionBody,
+  submitDecisionRequest,
   shouldShowEnchoMaxBanner,
   getIpponButtons,
   getValidPointKeys,
@@ -358,30 +359,16 @@ describe('DecisionPrompt → /decision POST integration', () => {
     );
   });
 
-  it('regression: recordDecision receives the prop password, not "" or window.adminPassword', async () => {
-    // mp-os3: ScoreEditorModal.submitDecision was calling recordDecision with
-    // resolveDecisionPassword(password) where the password prop was not wired
-    // through from AdminSchedulePage → ScoreEditorModal. window.adminPassword
-    // is never set in production, so every decision POST was sent with "".
-    // This test pins that the prop password is what actually reaches the API.
-    const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('fusenpai', payload, 0);
-      const password = resolveDecisionPassword('tournament-secret');
-      return window.API.recordDecision('comp-9', 'match-9', body, password);
-    });
-    const tree = DecisionPrompt({
-      kind: 'fusenpai',
-      sideA: { name: 'A' },
-      sideB: { name: 'B' },
-      defaultSide: 'shiro',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-
-    await tree.props.onSubmit({ preventDefault: () => {} });
-
+  it('regression: submitDecision path forwards the modal password prop to recordDecision', async () => {
+    // This is the production path used by ScoreEditorModal/TeamScoreEditorModal.
+    await submitDecisionRequest(
+      'comp-9',
+      'match-9',
+      'fusenpai',
+      { decisionBy: 'shiro', decisionReason: '' },
+      0,
+      'tournament-secret',
+    );
     expect(window.API.recordDecision).toHaveBeenCalledWith(
       'comp-9',
       'match-9',

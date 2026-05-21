@@ -153,6 +153,11 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
   return body;
 }
 
+function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeriodCount, password, opts = {}) {
+  const body = buildDecisionBody(kind, decisionPayload, enchoPeriodCount, opts);
+  return window.API.recordDecision(compId, matchId, body, resolveDecisionPassword(password));
+}
+
 // T104/CHK029: encho-period clamp + banner predicates. maxEnchoPeriods === 0
 // (or nullish) means unlimited per the FIK default
 // (state.CompetitionConfig.MaxEnchoPeriods). shouldShowEnchoMaxBanner
@@ -533,8 +538,15 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     setDecisionSubmitting(true);
     setDecisionErr("");
     try {
-      const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
-      const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
+      const updated = await submitDecisionRequest(
+        m.compId,
+        m.id,
+        kind,
+        { decisionBy, decisionReason },
+        enchoPeriodCount,
+        password,
+        opts,
+      );
       if (!mountedRef.current) return;
       if (window.isKikenDecision(kind)) {
         // The loser is the side != Winner. SideA/SideB on MatchResult are
@@ -1093,8 +1105,15 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     setDecisionSubmitting(true);
     setDecisionErr("");
     try {
-      const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
-      const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
+      const updated = await submitDecisionRequest(
+        m.compId,
+        m.id,
+        kind,
+        { decisionBy, decisionReason },
+        enchoPeriodCount,
+        password,
+        opts,
+      );
       if (!mountedRef.current) return;
       if (window.isKikenDecision(kind)) {
         const winnerName = (updated?.winner || "").trim();
@@ -1732,6 +1751,7 @@ window.ScoreEditorModal = ScoreEditorModal;
 export {
   resolveDecisionPassword,
   buildDecisionBody,
+  submitDecisionRequest,
   shouldShowEnchoMaxBanner,
   canIncrementEncho,
   nextEnchoPeriod,

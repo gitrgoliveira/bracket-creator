@@ -1962,7 +1962,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
   }, []);
 
   React.useEffect(() => {
-    if (c?.format !== "swiss" || !window.API?.swissStandings) return undefined;
+    if (c?.format !== "swiss" || !window.API?.swissStandings) return;
     let cancelled = false;
     window.API.swissStandings(c.id)
       .then((data) => { if (!cancelled) setSwissStandings(Array.isArray(data) ? data : []); })
@@ -2013,7 +2013,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     );
   }
 
-  // Podium ordering follows CSS order rules: 2 left, 1 center, then 3rd-place cards.
+  // Visual podium ordering is driven by CSS order rules: 2 left, 1 center, then 3rd-place cards.
   // For the fullscreen ceremony layout we keep the same order but enlarge.
   return (
     <div

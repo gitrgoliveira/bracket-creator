@@ -526,6 +526,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     return () => { cancelled = true; };
   }, [m.compId]);
 
+  // Auto-clear decidedByHantei when encho (overtime) period count is 0
+  useEffectA(() => {
+    if (enchoPeriodCount === 0 && decidedByHantei) {
+      setDecidedByHantei(false);
+    }
+  }, [enchoPeriodCount, decidedByHantei]);
+
   // T093/T094: shared decision-submit path for kiken & fusenpai.
   // - decisionBy is "shiro" or "aka" per the server contract.
   // - encho rides along when the operator has marked overtime so the server

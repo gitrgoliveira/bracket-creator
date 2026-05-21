@@ -174,3 +174,26 @@ describe('decideRankCommit', () => {
     });
   });
 });
+
+// AdminPools Score-button null-result fix (mp-zcz)
+// -------------------------------------------------------
+// Before this fix, the Score buttons in both the pool-detail view and the
+// compact card list called `onEditScore(c.id, m.id, null, m)` — routing
+// null through AdminApp.editMatchScore → toBackendMatchResult(null, m)
+// which throws `TypeError: Cannot read properties of null`.
+//
+// The fix mounts a local ScoreEditorModal in AdminPools (the same pattern
+// AdminScoreEditor uses) so the button opens the modal and the modal's
+// onSubmit provides a real patch to onEditScore.
+//
+// The ScoreEditorModal mount lives inside AdminPools which is a window.*
+// component — full DOM rendering is not available in the current vitest
+// setup (window.* mocks are stubs, not a real jsdom React tree).
+// Tracked for follow-up DOM-level testing alongside the existing anchor
+// at admin_pools.test.jsx:133-145 (RankInput.handleBlur dispatch).
+//
+// Regression contract (pure, testable): the Score button no longer calls
+// onEditScore directly — instead it updates local `scoreOpenMatch` state
+// which renders the modal, and the modal's onSubmit calls onEditScore with
+// the real patch. The modal is imported as window.ScoreEditorModal and
+// receives `password` so decision endpoints are authenticated.

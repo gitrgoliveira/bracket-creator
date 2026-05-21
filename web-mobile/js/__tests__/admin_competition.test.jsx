@@ -445,6 +445,8 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // Naginata support: round-trips the flag so a settings save doesn't
     // clobber a previously-set naginata: true with Go's zero-value false.
     'naginata',
+    // mp-6nq: per-competition check-in tracking flag.
+    'checkInEnabled',
   ]);
   // Fields that MUST NOT appear in the PUT body — pinning the
   // negative invariant explicitly so a careless re-add is caught.

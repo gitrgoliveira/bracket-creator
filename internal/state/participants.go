@@ -13,6 +13,11 @@ import (
 // ErrParticipantNotFound is returned by UpdateParticipant when the pid is not in the roster.
 var ErrParticipantNotFound = errors.New("participant not found")
 
+// ErrDuplicateName is returned by AddParticipant and UpdateParticipant when
+// the supplied display name collides with another participant in the same
+// roster (excluding the participant being edited, for the update path).
+var ErrDuplicateName = errors.New("participant name already exists")
+
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
 	WithSeeds bool  // set false to skip the seeds.csv read (hot list paths)
@@ -220,15 +225,97 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 		return nil, ErrParticipantNotFound
 	}
 
+	oldName := players[foundIdx].Name
+
 	if err := transform(&players[foundIdx]); err != nil {
 		return nil, err
+	}
+
+	// Duplicate-name guard: when the transform renames the participant,
+	// reject if any OTHER participant already has that name. Keeps the
+	// roster's name-keyed lookups (seeds, lineups) unambiguous.
+	if players[foundIdx].Name != oldName {
+		for i := range players {
+			if i == foundIdx {
+				continue
+			}
+			if strings.EqualFold(players[i].Name, players[foundIdx].Name) {
+				return nil, ErrDuplicateName
+			}
+		}
 	}
 
 	if err := s.saveParticipantsNoLock(compID, players); err != nil {
 		return nil, err
 	}
 
+	// Update seeds.csv if name changes (under same lock to avoid deadlocks
+	// — SaveSeeds takes the same per-comp mutex). The on-disk format
+	// (Rank,Name only) is mirrored from SaveSeeds; only the Name field
+	// is persisted, so the in-memory Dojo update would be dead writes.
+	if oldName != players[foundIdx].Name {
+		seedsPath := s.compPath(compID, "seeds.csv")
+		seeds, err := helper.ParseSeedsFile(seedsPath)
+		if err == nil {
+			changed := false
+			for i := range seeds {
+				if seeds[i].Name == oldName {
+					seeds[i].Name = players[foundIdx].Name
+					changed = true
+				}
+			}
+			if changed {
+				var sb strings.Builder
+				sb.WriteString("Rank,Name\n")
+				for _, a := range seeds {
+					fmt.Fprintf(&sb, "%d,%s\n", a.SeedRank, a.Name)
+				}
+				if werr := s.atomicWrite(seedsPath, []byte(sb.String()), 0600); werr != nil {
+					return nil, fmt.Errorf("rename seed for %q: %w", oldName, werr)
+				}
+			}
+		}
+	}
 	return &players[foundIdx], nil
+}
+
+// AddParticipant atomically loads the participant list, mints a UUIDv4 ID,
+// sets PoolPosition to the new tail index, appends the participant, and
+// saves the file. Matches the ID format used everywhere else
+// (see newParticipantID and saveParticipantsNoLock's ID-fill branch) so
+// the format-sniffer in loadParticipantsNoLock keeps a single contract.
+func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bool) (*domain.Player, error) {
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Duplicate-name guard (per bead acceptance criteria): the admin
+	// UI accepts the same name twice without warning otherwise, and
+	// the rest of the roster identifies competitors by display name.
+	for _, existing := range players {
+		if strings.EqualFold(existing.Name, p.Name) {
+			return nil, ErrDuplicateName
+		}
+	}
+
+	p.ID = newParticipantID()
+	p.PoolPosition = int64(len(players))
+	if p.DisplayName == "" {
+		p.DisplayName = helper.SanitizeName(p.Name)
+	}
+
+	players = append(players, p)
+
+	if err := s.saveParticipantsNoLock(compID, players); err != nil {
+		return nil, err
+	}
+
+	return &p, nil
 }
 
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) error {

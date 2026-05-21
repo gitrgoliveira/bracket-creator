@@ -1887,7 +1887,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
 // entries with dojo info; missing names fall back to {name, dojo: ""}.
 // `standings` may be either a flat array (Swiss-shape) or an object keyed by
 // pool name (pools/league shape).
-function deriveAwards(bracket, standings, pools, format, nameToPlayer) {
+function deriveAwards(bracket, standings, pools, nameToPlayer) {
   const lookup = (name) => {
     if (!name) return null;
     const p = nameToPlayer && nameToPlayer.get(name);
@@ -1979,9 +1979,10 @@ function AwardsView({ c, bracket, standings, pools, players }) {
   }, [players]);
 
   const effectiveStandings = c?.format === "swiss" ? swissStandings : standings;
+  const isSwissLoading = c?.format === "swiss" && swissStandings === null;
   const awards = useMemo(
-    () => deriveAwards(bracket, effectiveStandings, pools, c?.format, nameToPlayer),
-    [bracket, effectiveStandings, pools, c?.format, nameToPlayer]
+    () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer),
+    [bracket, effectiveStandings, pools, nameToPlayer]
   );
 
   const toggleFs = () => {
@@ -1994,6 +1995,15 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     }
   };
 
+  if (isSwissLoading) {
+    return (
+      <div className="empty" data-testid="awards-loading">
+        <div className="icon">🏆</div>
+        <h3>Loading final standings…</h3>
+      </div>
+    );
+  }
+
   if (awards.length === 0) {
     return (
       <div className="empty" data-testid="awards-empty">
@@ -2003,7 +2013,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     );
   }
 
-  // FIK ordering for podium display: 3 left, 1 center, 2 right, 3 right-most.
+  // Podium ordering follows CSS order rules: 2 left, 1 center, then 3rd-place cards.
   // For the fullscreen ceremony layout we keep the same order but enlarge.
   return (
     <div
@@ -2036,7 +2046,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
             <div
               key={`${a.place}-${a.name}-${idx}`}
               className={`podium-step podium-step--${a.place}`}
-              data-testid={`awards-place-${a.place}`}
+              data-testid={`awards-place-${a.place}-${idx}`}
               style={{ borderTop: `4px solid ${style.accent}` }}
             >
               <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>

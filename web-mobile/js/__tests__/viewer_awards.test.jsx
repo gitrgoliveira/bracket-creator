@@ -25,7 +25,7 @@ describe('deriveAwards (bracket-based)', () => {
       ],
     };
     const m = playerMap(['Alice', 'Aoyama'], ['Bob', 'Bunkyo'], ['Carol', 'Chiba'], ['Dan', 'Denenchofu']);
-    const awards = deriveAwards(bracket, null, null, 'playoffs', m);
+    const awards = deriveAwards(bracket, null, null, m);
     expect(awards).toEqual([
       { place: 1, name: 'Alice', dojo: 'Aoyama' },
       { place: 2, name: 'Carol', dojo: 'Chiba' },
@@ -41,7 +41,7 @@ describe('deriveAwards (bracket-based)', () => {
         [{ sideA: 'A', sideB: 'C', winner: '' }],
       ],
     };
-    expect(deriveAwards(bracket, null, null, 'playoffs', new Map())).toEqual([]);
+    expect(deriveAwards(bracket, null, null, new Map())).toEqual([]);
   });
 
   it('handles missing dojos by defaulting to empty string', () => {
@@ -50,7 +50,7 @@ describe('deriveAwards (bracket-based)', () => {
         [{ sideA: 'X', sideB: 'Y', winner: 'X' }],
       ],
     };
-    const awards = deriveAwards(bracket, null, null, 'playoffs', new Map());
+    const awards = deriveAwards(bracket, null, null, new Map());
     expect(awards.length).toBe(2);
     expect(awards[0]).toEqual({ place: 1, name: 'X', dojo: '' });
     expect(awards[1]).toEqual({ place: 2, name: 'Y', dojo: '' });
@@ -63,7 +63,7 @@ describe('deriveAwards (bracket-based)', () => {
         [{ sideA: 'A', sideB: 'C', winner: 'A' }],
       ],
     };
-    const awards = deriveAwards(bracket, null, null, 'playoffs', new Map());
+    const awards = deriveAwards(bracket, null, null, new Map());
     expect(awards.map((a) => a.name)).toEqual(['A', 'C', 'B']);
   });
 });
@@ -80,7 +80,7 @@ describe('deriveAwards (standings-based)', () => {
         { player: { name: 'Eve', dojo: 'Edogawa' } },
       ],
     };
-    const awards = deriveAwards(null, standings, pools, 'league', new Map());
+    const awards = deriveAwards(null, standings, pools, new Map());
     expect(awards).toEqual([
       { place: 1, name: 'Alice', dojo: 'Aoyama' },
       { place: 2, name: 'Bob', dojo: 'Bunkyo' },
@@ -91,11 +91,11 @@ describe('deriveAwards (standings-based)', () => {
 
   it('returns [] when standings is empty', () => {
     const pools = [{ poolName: 'Pool A' }];
-    expect(deriveAwards(null, { 'Pool A': [] }, pools, 'league', new Map())).toEqual([]);
+    expect(deriveAwards(null, { 'Pool A': [] }, pools, new Map())).toEqual([]);
   });
 
   it('returns [] when no bracket and no pools/standings', () => {
-    expect(deriveAwards(null, null, null, 'playoffs', new Map())).toEqual([]);
+    expect(deriveAwards(null, null, null, new Map())).toEqual([]);
   });
 
   it('accepts a flat Swiss-shape standings array (no pool key)', () => {
@@ -105,7 +105,7 @@ describe('deriveAwards (standings-based)', () => {
       { player: { name: 'Carol', dojo: 'Chiba' } },
       { player: { name: 'Dan', dojo: 'Denenchofu' } },
     ];
-    const awards = deriveAwards(null, standings, null, 'swiss', new Map());
+    const awards = deriveAwards(null, standings, null, new Map());
     expect(awards).toEqual([
       { place: 1, name: 'Alice', dojo: 'Aoyama' },
       { place: 2, name: 'Bob', dojo: 'Bunkyo' },
@@ -136,7 +136,7 @@ describe('deriveAwards (standings-based)', () => {
         { player: { name: 'Dan', dojo: 'Denenchofu' } },
       ],
     };
-    const awards = deriveAwards(bracket, standings, pools, 'pools', new Map());
+    const awards = deriveAwards(bracket, standings, pools, new Map());
     expect(awards.map((a) => a.name)).toEqual(['Alice', 'Bob', 'Carol', 'Dan']);
     expect(awards.map((a) => a.place)).toEqual([1, 2, 3, 3]);
   });

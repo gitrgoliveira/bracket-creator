@@ -562,13 +562,13 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
 // does — the MyMatchPanel already has a dedicated Time chip.
 // Exported for unit-testing.
 export function mymatchQueueLabel(m) {
-    if (!m) return null;
-    if (m.status === "running") return null;
-    if (m.status !== "scheduled") return null;
-    const qp = m.queuePosition;
-    if (typeof qp !== "number" || qp <= 0) return null;
-    if (qp === 1) return "Next up";
-    return `${qp - 1} before yours`;
+  if (!m) return null;
+  if (m.status === "running") return null;
+  if (m.status !== "scheduled") return null;
+  const qp = Number(m.queuePosition);
+  if (!Number.isFinite(qp) || qp <= 0) return null;
+  if (qp === 1) return "Next up";
+  return `${qp - 1} before yours`;
 }
 
 // MyMatchPanel — "Find my matches" entry point + active "Your next match"
@@ -638,7 +638,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   // surfaces agree. Running matches show null here because the round label
   // already appends " · LIVE NOW".
   const queueLabel = mymatchQueueLabel(nextMatch);
-  const queueHighlight = nextMatch.queuePosition === 1 || nextMatch.status === "running";
+  const queueHighlight = queueLabel === "Next up";
 
   return (
     <div className="my-match" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>

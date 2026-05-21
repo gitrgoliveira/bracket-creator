@@ -72,4 +72,13 @@ bracket-creator-webapp*
 .github/prompts
 .gemini*
 # bd worktree
+bracket-creator-*
 bracket-creator-*/*
+# bd worktree
+bracket-creator-lvh/
+# bd worktree
+mp-h60/
+# bd worktree
+mp-k8x/
+# bd worktree
+mp-t3h/

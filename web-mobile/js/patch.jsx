@@ -40,6 +40,7 @@
 // dependency a build-graph contract — esbuild will fail loudly rather
 // than fall through to a wrong-shape merge.
 import { mergeMatchPatch as _mergeMatchPatch } from './data.jsx';
+import { normalizeMatch, buildPlayerMap } from './api_serializers.jsx';
 
 // Recompute queuePosition on scheduled poolMatches per court after an
 // SSE patch transitions a match to completed. The backend recomputes
@@ -187,13 +188,15 @@ function applyPatch(prev, event) {
     // transition; only then is a queue-position recompute meaningful.
     let needsQueueRecompute = false;
 
+    const playerMap = buildPlayerMap(prev);
+
     if (next.poolMatches) {
         next.poolMatches = next.poolMatches.map(m => {
             const update = resultMap.get(m.id);
             if (update) {
                 changed = true;
                 const prevStatus = m.status;
-                const merged = _mergeMatchPatch(m, update);
+                const merged = normalizeMatch(_mergeMatchPatch(m, update), playerMap);
                 if (merged.status === "completed" && (prevStatus === "scheduled" || prevStatus === "running")) {
                     needsQueueRecompute = true;
                 }
@@ -220,7 +223,8 @@ function applyPatch(prev, event) {
                     const patch = { ...update };
                     if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
                     if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-                    return _mergeMatchPatch(m, patch);
+                    const merged = normalizeMatch(_mergeMatchPatch(m, patch), playerMap);
+                    return merged;
                 }
                 return m;
             })

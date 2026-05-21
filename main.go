@@ -20,12 +20,11 @@ import (
 //go:embed web/css web/js
 var webFiles embed.FS
 
-// Mobile-app assets. Single-level glob (not all:) so the underscore-
-// prefixed __tests__/ directory is excluded — Go embed drops _- and
-// .-prefixed entries by default. Don't switch to all:web-mobile
-// without first relocating __tests__/.
+// Mobile-app assets. Explicitly list embedded directories to avoid embedding
+// node_modules or other developer tooling.
 //
-//go:embed web-mobile/*
+//go:embed web-mobile/index.html
+//go:embed web-mobile/css web-mobile/js web-mobile/dist web-mobile/vendor
 var mobileWebFiles embed.FS
 
 func main() {

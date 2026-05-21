@@ -3009,14 +3009,17 @@ a:hover {
 .sb-draw-toggle {
   font-family: var(--font-display);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.1em;
   color: var(--ink-4);
   background: none;
   border: 2px dashed var(--ink-2);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px 14px;
+  min-width: 96px;
+  min-height: 44px;
+  margin-top: 8px;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
@@ -3031,9 +3034,8 @@ a:hover {
   border-color: var(--ink-5);
   border-style: solid;
   color: var(--ink-5);
-  font-size: 22px;
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 700;
+  letter-spacing: 0.05em;
 }
 
 .sb-controls {

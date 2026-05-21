@@ -104,10 +104,10 @@ describe('mymatchQueueLabel', () => {
     expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: -1 })).toBeNull();
   });
 
-  it('rejects non-numeric queuePosition values', () => {
-    // Older payloads or buggy fixtures may send strings; we should not render
-    // "1 before yours" if qp is the string "2".
-    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: '2' })).toBeNull();
+  it('accepts numeric strings and rejects non-numeric queuePosition values', () => {
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: '1' })).toBe('Next up');
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: '2' })).toBe('1 before yours');
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 'abc' })).toBeNull();
   });
 
   it('handles null / undefined match gracefully', () => {

@@ -7,7 +7,7 @@ GO_VERSION := 1.26.3
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
-# Build metadata (used by docker/build, release, and make version)
+# Build metadata (used by docker/build and make version; release uses VERSION)
 # Version stamping uses //go:embed in internal/cmd/version — not LDFLAGS.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")

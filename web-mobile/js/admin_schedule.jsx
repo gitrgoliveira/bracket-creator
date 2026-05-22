@@ -847,7 +847,7 @@ function PerCourtBreakdown({ perCourtMinutes }) {
   );
 }
 
-// computeCourtPaceStats(byCourt, perMatchMinutes) — pure helper.
+// computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) — pure helper.
 //
 // For each court, derive:
 //   court               — the court label (e.g. "A")
@@ -859,6 +859,11 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //                           no scheduled times exist.
 //   delta               — estimatedRemainingMin − plannedRemainingMin
 //                         positive = behind schedule, negative = ahead
+//
+// nowMinutes is optional; defaults to the current wall-clock (read via
+// `new Date()`). The CourtPacePanel does NOT pass it, so the 60s tick in
+// the panel forces the memo to re-invoke this helper and read fresh time.
+// Tests pass nowMinutes explicitly for determinism.
 //
 // Exported for the vitest suite.
 export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {

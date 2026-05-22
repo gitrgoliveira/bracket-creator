@@ -8,10 +8,11 @@ import { queueLabel, queueLabelCompact } from '../display.jsx';
 //
 // Contract:
 //   - queueLabel(m)        — full-form label used in scheduled-list rows
+//     - status !== "scheduled" → "" (gate applied first, matches queueLabelCompact)
 //     - qp === 1 → "Up next"  (qp coerced with Number(), handles string values)
 //     - qp >  1 → "(qp - 1) before yours"
 //     - status === "scheduled" + falsy qp + scheduledAt → "Scheduled hh:mm" fallback
-//     - any other combination → ""  (running/completed matches never show scheduledAt)
+//     - any other combination → ""
 //   - queueLabelCompact(m) — pill form used in dense rows
 //     - status !== "scheduled" → null (so callers can hide the pill)
 //     - qp === 1 → "Up next"
@@ -62,6 +63,15 @@ describe('queueLabel (full form)', () => {
 
   it('does not show scheduledAt for completed matches even if scheduledAt is present', () => {
     expect(queueLabel({ status: 'completed', scheduledAt: '10:30' })).toBe('');
+  });
+
+  it('returns "" for a running match with queuePosition (status gate applied first)', () => {
+    expect(queueLabel({ status: 'running', queuePosition: 1 })).toBe('');
+    expect(queueLabel({ status: 'running', queuePosition: 2 })).toBe('');
+  });
+
+  it('returns "" for a completed match with queuePosition', () => {
+    expect(queueLabel({ status: 'completed', queuePosition: 1 })).toBe('');
   });
 });
 

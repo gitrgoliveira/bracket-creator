@@ -184,12 +184,13 @@ function findActiveCourts(tournament, competitions) {
 // If you need a denser pill form for a tight row, use queueLabelCompact.
 function queueLabel(m) {
     if (!m) return "";
+    if (m.status !== "scheduled") return "";
     const qp = Number(m.queuePosition);
     if (qp > 0) {
         if (qp === 1) return "Up next";
         return `${qp - 1} before yours`;
     }
-    if (m.status === "scheduled" && m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
+    if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
     return "";
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -13,7 +14,8 @@ import (
 )
 
 // annotateQueuePositions fills in MatchResult.QueuePosition for each
-// element of matches in-place, using state.DeriveQueuePositions.
+// element of matches in-place, delegating to state.DeriveQueuePositions
+// for the per-court (status priority, ScheduledAt, original index) sort.
 //
 // FR-025, T036: queue positions are derived at serve time rather than
 // persisted — a stored value would go stale the instant any match
@@ -30,6 +32,87 @@ func annotateQueuePositions(matches []state.MatchResult) {
 	positions := state.DeriveQueuePositions(matches)
 	for i := range matches {
 		matches[i].QueuePosition = positions[i]
+	}
+}
+
+// annotateBracketQueuePositions fills in BracketMatch.QueuePosition for each
+// bracket match in-place. Non-scheduled matches are explicitly reset to 0 so
+// any stale value previously persisted in bracket.json (or written by future
+// code paths) cannot leak back out to clients via the omitempty JSON tag.
+//
+// The ordering basis matches the viewer's ScheduleViewer (web-mobile/js/
+// viewer.jsx around the byCourt sort): pointers to all bracket matches are
+// gathered, then sorted per-court by (status priority, ScheduledAt, round,
+// position) before the per-court counter is incremented. This keeps the
+// "Next up / N before yours" label consistent with the row order the viewer
+// actually renders, even when bracket matches are scheduled out of round
+// order (e.g., a finals court that started 30 minutes early).
+func annotateBracketQueuePositions(b *state.Bracket) {
+	if b == nil {
+		return
+	}
+
+	// Group pointers per court, preserving the round/position pair as a
+	// stable tie-break key. We can't sort b.Rounds itself — the bracket
+	// tree structure is load-bearing for the renderer.
+	type entry struct {
+		m        *state.BracketMatch
+		round    int
+		position int
+	}
+	byCourt := make(map[string][]entry)
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			byCourt[m.Court] = append(byCourt[m.Court], entry{m: m, round: ri, position: mi})
+		}
+	}
+
+	statusOrder := func(s state.MatchStatus) int {
+		switch s {
+		case state.MatchStatusRunning:
+			return 0
+		case state.MatchStatusScheduled:
+			return 1
+		default: // completed and any future status
+			return 2
+		}
+	}
+
+	for _, entries := range byCourt {
+		sort.SliceStable(entries, func(i, j int) bool {
+			oi, oj := statusOrder(entries[i].m.Status), statusOrder(entries[j].m.Status)
+			if oi != oj {
+				return oi < oj
+			}
+			// Empty scheduledAt sinks to the end (mirrors the JS
+			// fallback to "99:99" in ScheduleViewer's sort).
+			ai := entries[i].m.ScheduledAt
+			aj := entries[j].m.ScheduledAt
+			if ai == "" {
+				ai = "99:99"
+			}
+			if aj == "" {
+				aj = "99:99"
+			}
+			if ai != aj {
+				return ai < aj
+			}
+			if entries[i].round != entries[j].round {
+				return entries[i].round < entries[j].round
+			}
+			return entries[i].position < entries[j].position
+		})
+
+		counter := 0
+		for _, e := range entries {
+			if e.m.Status == state.MatchStatusScheduled {
+				counter++
+				e.m.QueuePosition = counter
+			} else {
+				e.m.QueuePosition = 0
+			}
+		}
 	}
 }
 

@@ -14,8 +14,8 @@ import (
 )
 
 // annotateQueuePositions fills in MatchResult.QueuePosition for each
-// element of matches in-place, using the same per-court sort key as
-// annotateBracketQueuePositions and the viewer's ScheduleViewer.
+// element of matches in-place, delegating to state.DeriveQueuePositions
+// for the per-court (status priority, ScheduledAt, original index) sort.
 //
 // FR-025, T036: queue positions are derived at serve time rather than
 // persisted — a stored value would go stale the instant any match
@@ -25,73 +25,13 @@ import (
 // "next up: 3" without any background recomputation job. Score-write
 // endpoints return a single MatchResult and intentionally do NOT
 // annotate (a single match has no list ordering to derive against).
-//
-// Ordering basis: per-court, sort by (status priority, ScheduledAt,
-// original slice index) so the result agrees with the bracket helper
-// and with the JS SSE recompute in web-mobile/js/patch.jsx
-// (_orderByCourtKey). UpdateMatchTime / UpdateMatchCourt mutate
-// ScheduledAt/Court in place without reordering pool-matches.csv,
-// so without this sort a subsequent GET refresh would assign
-// queuePosition values that disagree with the viewer's render order —
-// causing flicker / wrong labels after reschedules.
 func annotateQueuePositions(matches []state.MatchResult) {
 	if len(matches) == 0 {
 		return
 	}
-	// Collect indices per court, then sort each bucket and assign.
-	type entry struct {
-		idx   int
-		match *state.MatchResult
-	}
-	byCourt := make(map[string][]entry, 4)
+	positions := state.DeriveQueuePositions(matches)
 	for i := range matches {
-		byCourt[matches[i].Court] = append(byCourt[matches[i].Court], entry{idx: i, match: &matches[i]})
-	}
-
-	statusOrder := func(s state.MatchStatus) int {
-		switch s {
-		case state.MatchStatusRunning:
-			return 0
-		case state.MatchStatusScheduled:
-			return 1
-		default:
-			return 2
-		}
-	}
-
-	// Reset all positions first so non-scheduled stays at 0 even if a
-	// stale persisted value were present (mirror of bracket helper).
-	for i := range matches {
-		matches[i].QueuePosition = 0
-	}
-
-	for _, entries := range byCourt {
-		sort.SliceStable(entries, func(i, j int) bool {
-			oi, oj := statusOrder(entries[i].match.Status), statusOrder(entries[j].match.Status)
-			if oi != oj {
-				return oi < oj
-			}
-			ai := entries[i].match.ScheduledAt
-			aj := entries[j].match.ScheduledAt
-			if ai == "" {
-				ai = "99:99"
-			}
-			if aj == "" {
-				aj = "99:99"
-			}
-			if ai != aj {
-				return ai < aj
-			}
-			return entries[i].idx < entries[j].idx
-		})
-
-		counter := 0
-		for _, e := range entries {
-			if e.match.Status == state.MatchStatusScheduled {
-				counter++
-				e.match.QueuePosition = counter
-			}
-		}
+		matches[i].QueuePosition = positions[i]
 	}
 }
 

@@ -70,10 +70,13 @@ describe('buildPlayerMatchHighlight', () => {
 });
 
 describe('isFollowedPlayer', () => {
-  it('matches by UUID when both sides expose ids', () => {
+  it('matches by UUID first, then falls back to name when ids diverge', () => {
+    // Both sides have ids — same id is a match.
     const sideA = { id: 'p1', name: 'Alice' };
     expect(isFollowedPlayer(sideA, { id: 'p1', name: 'Alice' })).toBe(true);
-    expect(isFollowedPlayer(sideA, { id: 'p2', name: 'Alice' })).toBe(true); // name fallback
+    // Both sides have ids and they differ — the id check fails but the
+    // name fallback still matches. Documents the two-layer match contract.
+    expect(isFollowedPlayer(sideA, { id: 'p2', name: 'Alice' })).toBe(true);
   });
 
   it('falls back to name match when UUID is missing on either side', () => {

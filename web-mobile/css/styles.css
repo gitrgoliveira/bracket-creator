@@ -1760,14 +1760,21 @@ a:hover {
   letter-spacing: 0.05em;
 }
 
+/* Shared card styling — applies to both the home MyMatchPanel
+   <button> and the ViewerOverview <div> mount sites. */
 .my-match__opp {
   display: block;
   width: 100%;
   margin-top: 14px;
   padding: 12px;
   background: rgba(255, 255, 255, 0.1);
-  border: none;
   border-radius: 10px;
+}
+
+/* Button-only resets: keep these on <button>.my-match__opp so the
+   non-clickable <div> in ViewerOverview doesn't look interactive. */
+button.my-match__opp {
+  border: none;
   text-align: left;
   cursor: pointer;
 }

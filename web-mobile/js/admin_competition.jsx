@@ -776,11 +776,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
                 try {
                   const updated = await window.API.invalidateCompetition(local.id, password);
                   if (mountedRef.current) {
-                    // Use the server-returned competition so local state
-                    // (and the parent via onUpdate) carry every field the
-                    // backend set during invalidation — not just `status`
-                    // — and the page header StatusBadge flips immediately
-                    // without waiting for the SSE refresh.
                     const next = updated && typeof updated === "object"
                       ? { ...local, ...updated }
                       : { ...local, status: "invalid" };

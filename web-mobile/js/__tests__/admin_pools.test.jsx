@@ -282,6 +282,21 @@ describe('enrichPoolMatchWithComp', () => {
     expect(enrichedEmpty.poolName).toBe('');
   });
 
+  it('handles hyphenated pool names correctly (not split on first hyphen)', () => {
+    // Pool names can contain hyphens (e.g. "Pool A-East"). A naive
+    // split('-')[0] would return "Pool A" losing the "-East" suffix.
+    // The regex strips only the trailing numeric/DH/TB match-index segment.
+    expect(enrichPoolMatchWithComp({ id: 'Pool A-East-0', status: 'scheduled' }, comp).poolName)
+      .toBe('Pool A-East');
+    expect(enrichPoolMatchWithComp({ id: 'Pool A-East-DH-0', status: 'scheduled' }, comp).poolName)
+      .toBe('Pool A-East');
+    expect(enrichPoolMatchWithComp({ id: 'Pool A-East-TB-2', status: 'scheduled' }, comp).poolName)
+      .toBe('Pool A-East');
+    // Simple (non-hyphenated) pool name still works.
+    expect(enrichPoolMatchWithComp({ id: 'A-0', status: 'scheduled' }, comp).poolName)
+      .toBe('A');
+  });
+
   it('handles a null competition (rare, but defensive against transitional state)', () => {
     const m = { id: 'A-0', status: 'scheduled' };
     const enriched = enrichPoolMatchWithComp(m, null);

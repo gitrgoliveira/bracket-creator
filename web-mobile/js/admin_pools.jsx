@@ -74,8 +74,14 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   if (!m) return m;
+  // Strip the trailing match-index segment from the id to recover the pool
+  // name. Backend formats: "PoolName-N", "PoolName-DH-N", "PoolName-TB-N".
+  // A simple split('-')[0] breaks when the pool name itself contains hyphens
+  // (e.g. "Pool A-East-0" → "Pool A" not "Pool"). Use a capture-based regex
+  // that extracts everything before the trailing numeric / DH / TB suffix;
+  // ids without a recognisable suffix degrade to "" (no pool name inferable).
   const derivedPoolName = poolNameOverride
-    || (m.id && m.id.indexOf('-') > 0 ? m.id.split('-')[0] : "");
+    || (m.id ? (m.id.match(/^(.*?)-(?:DH-|TB-)?\d+$/)?.[1] ?? "") : "");
   const playerMap = window.buildPlayerMap ? window.buildPlayerMap(comp) : {};
   const toPlayer = (side) => {
     if (side && typeof side === "object") return side;

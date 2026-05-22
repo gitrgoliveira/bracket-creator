@@ -301,12 +301,27 @@ describe('recomputeQueuePositions', () => {
     expect(out[1].queuePosition).toBe(2);
   });
 
-  it('no-ops when no matches are scheduled (all running/completed)', () => {
+  it('no-ops when no matches are scheduled and no stale qps to clear', () => {
     const matches = [
       { id: "a1", court: "A", status: "running" },
       { id: "a2", court: "A", status: "completed" },
     ];
     expect(recomputeQueuePositions(matches)).toBe(matches);
+  });
+
+  it('clears stale non-zero queuePosition when the last scheduled match transitions off', () => {
+    // The contract is that non-scheduled matches must have queuePosition === 0.
+    // When the last scheduled match in a court flips to running/completed,
+    // _mergeMatchPatch preserves the old queuePosition field, so the recompute
+    // must still run to zero it out — even though no match is `scheduled`.
+    const matches = [
+      { id: "a1", court: "A", status: "running", queuePosition: 1 },
+      { id: "a2", court: "A", status: "completed", queuePosition: 0 },
+    ];
+    const out = recomputeQueuePositions(matches);
+    expect(out).not.toBe(matches);
+    expect(out[0].queuePosition).toBe(0);
+    expect(out[1].queuePosition).toBe(0);
   });
 });
 
@@ -380,7 +395,7 @@ describe('recomputeBracketQueuePositions', () => {
     expect(out.rounds[0][1].queuePosition).toBe(2);
   });
 
-  it('no-ops when no bracket match is scheduled (all running/completed)', () => {
+  it('no-ops when no bracket match is scheduled and no stale qps to clear', () => {
     const bracket = {
       rounds: [
         [
@@ -390,6 +405,24 @@ describe('recomputeBracketQueuePositions', () => {
       ],
     };
     expect(recomputeBracketQueuePositions(bracket)).toBe(bracket);
+  });
+
+  it('clears stale non-zero queuePosition on bracket matches that transitioned off scheduled', () => {
+    // Mirror of the pool case: when the last scheduled bracket match
+    // completes, the recompute must still zero out the stale qp left
+    // behind by _mergeMatchPatch.
+    const bracket = {
+      rounds: [
+        [
+          { id: "r1m1", court: "A", status: "running", queuePosition: 1 },
+          { id: "r1m2", court: "A", status: "completed", queuePosition: 0 },
+        ],
+      ],
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out).not.toBe(bracket);
+    expect(out.rounds[0][0].queuePosition).toBe(0);
+    expect(out.rounds[0][1].queuePosition).toBe(0);
   });
 
   it('handles nil / empty / malformed bracket gracefully', () => {

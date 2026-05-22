@@ -75,19 +75,25 @@ function _orderByCourtKey(entries) {
     return byCourt;
 }
 
-// Recompute queuePosition on scheduled poolMatches per court after an
-// SSE patch transitions a match to completed. The backend recomputes
-// server-side on the next GET (see internal/state/match.go), but SSE
-// patches only carry the single updated match — without this client-side
-// step the UI would still show stale "3 before yours" labels until the
-// next viewer refresh. FR-025, R3.
+// Recompute queuePosition on poolMatches per court after any SSE patch
+// that could invalidate the queue. The backend recomputes server-side
+// on the next GET (see internal/state/match.go), but SSE patches only
+// carry the single updated match — without this client-side step the
+// UI would show stale "N before yours" labels until the next viewer
+// refresh. FR-025, R3.
 //
-// Algorithm mirrors annotateBracketQueuePositions in handlers_match.go:
-// gather per-court entries, sort by (status priority, scheduledAt) so
-// the counter increments in viewer-display order, then assign 1, 2,
-// 3, … to scheduled matches. Running/completed get 0. This handles
-// the case where an SSE patch moves a match's court/scheduledAt and
-// the array order no longer reflects the displayed order.
+// Triggered by applyPatch's `isScheduleAffecting` on any change that
+// affects the per-court queue:
+//   - status transition into or out of `scheduled` (completed, running,
+//     forfeit, kiken, and the admin-correction reverse direction)
+//   - court move while still scheduled
+//   - scheduledAt move while still scheduled
+//
+// Algorithm mirrors annotateQueuePositions in handlers_match.go (which
+// delegates to state.DeriveQueuePositions): gather per-court entries,
+// sort by (status priority, scheduledAt, original index) so the counter
+// increments in viewer-display order, assign 1, 2, 3, … to scheduled
+// matches and 0 to everything else.
 //
 // Touches only matches whose existing queuePosition differs from the
 // recomputed value, preserving object identity for unaffected matches
@@ -99,11 +105,11 @@ function recomputeQueuePositions(matches) {
     // — even when no matches are scheduled — because we also need to
     // clear stale non-zero queuePosition values on matches that just
     // transitioned off `scheduled` (the last scheduled match becoming
-    // running/completed must drop from "Up next" to 0). _mergeMatchPatch
-    // preserves fields not in the patch, so a stale qp would linger on
-    // the transitioned match until the next GET refresh otherwise.
-    // The touched-tracking below still preserves identity when nothing
-    // actually changes (e.g. all qps already 0).
+    // running/completed must drop its "Next up" label to 0).
+    // _mergeMatchPatch preserves fields not in the patch, so a stale
+    // qp would linger on the transitioned match until the next GET
+    // refresh otherwise. The touched-tracking below still preserves
+    // identity when nothing actually changes (e.g. all qps already 0).
     const entries = matches.map((m, idx) => ({ idx, m, court: m.court || "" }));
     const byCourt = _orderByCourtKey(entries);
     const newPositions = new Array(matches.length).fill(0);
@@ -155,12 +161,15 @@ function recomputeBracketQueuePositions(bracket) {
     // tracking below still preserves identity when nothing changes.
 
     // Flatten round/position pairs into entries the per-court sorter
-    // can consume; idx encodes "round-position" for stable tie-break.
+    // can consume. `idx` is a monotonic push-order counter so the
+    // (round, position) traversal order doubles as a stable tie-break
+    // for _orderByCourtKey when status + scheduledAt are equal. No
+    // magic number, no upper-bound assumption on round size.
     const entries = [];
     bracket.rounds.forEach((round, ri) => {
         round.forEach((m, mi) => {
             entries.push({
-                idx: ri * 100000 + mi, // safe room for any realistic round size
+                idx: entries.length,
                 m,
                 court: m.court || "",
                 ri,

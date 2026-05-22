@@ -302,15 +302,16 @@ function applyPatch(prev, event) {
     let needsQueueRecompute = false;
 
     // Queue positions count *scheduled* matches only, so a recompute
-    // is needed whenever a match leaves the scheduled state (→ running,
-    // → completed, → cancelled / forfeit / kiken / etc.) OR when a
-    // scheduled match's court/scheduledAt changes — the remaining
-    // scheduled siblings on the same court need to shift up/down
-    // immediately rather than waiting for the next jittered refresh.
+    // is needed whenever a match's "scheduled-ness" changes — leaving
+    // (→ running / completed / cancelled / forfeit / kiken / …) OR
+    // entering (admin correction reverts a completed match back to
+    // scheduled) — and whenever a still-scheduled match's
+    // court/scheduledAt moves so siblings on either side re-rank.
     const isScheduleAffecting = (prevStatus, nextStatus, prevMatch, nextMatch) => {
-        // Status transition off "scheduled" — any such transition
-        // releases a slot in the per-court queue.
-        if (prevStatus === "scheduled" && nextStatus !== "scheduled") return true;
+        // Any change in scheduled-ness flips the per-court queue's
+        // membership: either releasing a slot (leaving scheduled) or
+        // claiming one (entering scheduled). Both directions matter.
+        if ((prevStatus === "scheduled") !== (nextStatus === "scheduled")) return true;
         // Court or scheduledAt move while still scheduled — the
         // per-court bucket itself changes (or the within-court sort
         // order does), so siblings on either side need to re-rank.

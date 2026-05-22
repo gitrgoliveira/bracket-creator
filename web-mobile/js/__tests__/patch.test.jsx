@@ -168,6 +168,28 @@ describe('applyPatch', () => {
     expect(next.poolMatches[1].queuePosition).toBe(1);
   });
 
+  // Admin correction case: an SSE patch can revert a completed match back
+  // to scheduled (status set via the score endpoint). The match re-enters
+  // the per-court queue and should claim a non-zero queuePosition while
+  // shifting siblings down. Copilot flagged this on PR #124.
+  it('recomputes queue positions when a completed match transitions back to scheduled', () => {
+    const prev = {
+      poolMatches: [
+        { id: "p1", court: "A", scheduledAt: "09:00", status: "completed", queuePosition: 0 },
+        { id: "p2", court: "A", scheduledAt: "09:10", status: "scheduled", queuePosition: 1 },
+        { id: "p3", court: "A", scheduledAt: "09:20", status: "scheduled", queuePosition: 2 },
+      ],
+    };
+    const next = applyPatch(prev, {
+      data: { result: { id: "p1", status: "scheduled", winner: null } },
+    });
+    expect(next.poolMatches[0].status).toBe("scheduled");
+    // p1 re-enters the queue at qp=1 (array order); p2 and p3 shift down.
+    expect(next.poolMatches[0].queuePosition).toBe(1);
+    expect(next.poolMatches[1].queuePosition).toBe(2);
+    expect(next.poolMatches[2].queuePosition).toBe(3);
+  });
+
   it('does not recompute queue positions when patch does not change scheduled status', () => {
     const prev = {
       poolMatches: [

@@ -774,13 +774,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
               if (confirm(`Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`)) {
                 setInvalidating(true);
                 try {
-                  const updated = await window.API.invalidateCompetition(local.id, password);
+                  await window.API.invalidateCompetition(local.id, password);
                   if (mountedRef.current) {
-                    const next = updated && typeof updated === "object"
-                      ? { ...local, ...updated }
-                      : { ...local, status: "invalid" };
-                    setLocal(next);
-                    onUpdate(next);
+                    // Rely on the invalidate handler's SSE tournament_updated
+                    // broadcast to refresh the parent view — calling onUpdate
+                    // here would trigger AdminApp.updateCompetition() which
+                    // performs a full PUT with unsanitised local state.
+                    setLocal(prev => ({ ...prev, status: "invalid" }));
                     showToast("Competition marked invalid.", "success");
                   }
                 } catch (e) {

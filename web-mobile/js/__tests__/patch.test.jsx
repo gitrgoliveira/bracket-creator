@@ -147,7 +147,12 @@ describe('applyPatch', () => {
     expect(next.poolMatches[3].queuePosition).toBe(1);
   });
 
-  it('recomputes queue positions when patch transitions a scheduled match to running', () => {
+  // Any transition off "scheduled" releases a slot in the per-court
+  // queue — running included. Previously this test asserted "no
+  // recompute on scheduled → running"; the Copilot review on PR #124
+  // flagged that as wrong because the remaining scheduled siblings
+  // need to shift up immediately rather than wait for a refresh.
+  it('recomputes queue positions when a scheduled match transitions to running', () => {
     const prev = {
       poolMatches: [
         { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
@@ -158,6 +163,7 @@ describe('applyPatch', () => {
       data: { result: { id: "p1", status: "running" } },
     });
     expect(next.poolMatches[0].status).toBe("running");
+    // p1 dropped out of the queue (running ⇒ 0); p2 shifts up to 1.
     expect(next.poolMatches[0].queuePosition).toBe(0);
     expect(next.poolMatches[1].queuePosition).toBe(1);
   });
@@ -177,12 +183,26 @@ describe('applyPatch', () => {
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
   });
 
+  it('does not recompute queue positions for a no-op patch on a non-scheduled match', () => {
+    const prev = {
+      poolMatches: [
+        { id: "p1", court: "A", scheduledAt: "09:00", status: "completed", queuePosition: 0 },
+        { id: "p2", court: "A", scheduledAt: "09:10", status: "scheduled", queuePosition: 1 },
+      ],
+    };
+    const next = applyPatch(prev, {
+      // Patch a completed match's metadata — no queue impact.
+      data: { result: { id: "p1", status: "completed", winner: "Alice" } },
+    });
+    // sibling untouched — same reference
+    expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
+  });
+
   it('recomputes pool queue positions when a scheduled match moves to a different court', () => {
-    // p1 starts on court A (qp=1) and moves to court B. recomputeQueuePositions
-    // walks the array in order, so p1 lands at B-qp=1 and b1 shifts down to
+    // p1 (09:00) moves to court B where b1 (08:30) already is. recomputeQueuePositions
+    // sorts per-court by scheduledAt, so b1 (08:30) is B-qp=1 and p1 (09:00) is
     // B-qp=2; p2 becomes A-qp=1. The point is *that the recompute happens at
-    // all* (not waiting for a refetch) — the exact numbering follows the
-    // existing helper's array-order contract.
+    // all* (not waiting for a refetch) — exact ordering follows scheduledAt.
     const prev = {
       poolMatches: [
         { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
@@ -195,13 +215,12 @@ describe('applyPatch', () => {
     });
     const byId = Object.fromEntries(next.poolMatches.map(m => [m.id, m]));
     expect(byId.p1.court).toBe("B");
-    expect(byId.p1.queuePosition).toBe(1);
-    expect(byId.p2.queuePosition).toBe(1);
-    expect(byId.b1.queuePosition).toBe(2);
-    // Sibling identities updated (regression guard: without the court-move
-    // trigger, p2 and b1 would keep their stale qp values from `prev`).
+    expect(byId.p1.queuePosition).toBe(2); // 09:00 is after b1's 08:30 on court B
+    expect(byId.p2.queuePosition).toBe(1); // sole match on A
+    expect(byId.b1.queuePosition).toBe(1); // 08:30 is first on B
+    // p2's qp changed (2→1), so it's a new object; b1's qp stayed 1 (identity preserved).
     expect(next.poolMatches[1]).not.toBe(prev.poolMatches[1]);
-    expect(next.poolMatches[2]).not.toBe(prev.poolMatches[2]);
+    expect(next.poolMatches[2]).toBe(prev.poolMatches[2]);
   });
 });
 
@@ -351,7 +370,10 @@ describe('recomputeBracketQueuePositions', () => {
     expect(next.bracket.rounds[0][2].queuePosition).toBe(1);
   });
 
-  it('applyPatch recomputes bracket queue positions when patch transitions a scheduled match to running', () => {
+  it('applyPatch recomputes bracket queue positions when a scheduled match transitions to running', () => {
+    // Bracket-side counterpart of the pool test above. Any off-scheduled
+    // transition (running/forfeit/cancelled/kiken) releases a slot in
+    // the per-court queue and triggers a recompute.
     const prev = {
       bracket: {
         rounds: [
@@ -366,6 +388,7 @@ describe('recomputeBracketQueuePositions', () => {
       data: { result: { id: "b1", status: "running" } },
     });
     expect(next.bracket.rounds[0][0].status).toBe("running");
+    // b1 dropped to 0 (running); b2 shifted up to 1.
     expect(next.bracket.rounds[0][0].queuePosition).toBe(0);
     expect(next.bracket.rounds[0][1].queuePosition).toBe(1);
   });
@@ -392,8 +415,9 @@ describe('recomputeBracketQueuePositions', () => {
   it('applyPatch recomputes bracket queue positions when a scheduled match moves to a different court', () => {
     // b1 (court A, qp=1) moves to court B. recomputeBracketQueuePositions
     // walks rounds in order, so b1 lands at B-qp=1, b2 becomes A-qp=1, and
-    // c1 shifts down to B-qp=2. Same array-order contract as the pool helper —
-    // the test pins that the recompute fires *immediately on a court move*
+    // c1 (10:30) lands ahead of b1 (11:00) on court B in scheduledAt order,
+    // so c1=1 and b1=2. b2 is the only match left on court A → b2=1. The
+    // test pins that the recompute fires *immediately on a court move*
     // (not just on a status flip), which is the bug Copilot flagged.
     const prev = {
       bracket: {
@@ -412,8 +436,8 @@ describe('recomputeBracketQueuePositions', () => {
     const flat = next.bracket.rounds[0];
     const byId = Object.fromEntries(flat.map(m => [m.id, m]));
     expect(byId.b1.court).toBe("B");
-    expect(byId.b1.queuePosition).toBe(1);
-    expect(byId.b2.queuePosition).toBe(1);
-    expect(byId.c1.queuePosition).toBe(2);
+    expect(byId.b1.queuePosition).toBe(2); // 11:00 > c1's 10:30 → b1 is second on B
+    expect(byId.b2.queuePosition).toBe(1); // sole match on A
+    expect(byId.c1.queuePosition).toBe(1); // 10:30 is first on B
   });
 });

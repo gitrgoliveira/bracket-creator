@@ -675,7 +675,11 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
                 Wrap the decorative bullet in aria-hidden to keep screen reader
                 announcements clean and focused on the queue label text. */}
             <span className="v" style={{ opacity: queueHighlight ? 1 : 0.92 }}>
-              {queueHighlight && <span aria-hidden="true">• </span>}{queueLabel}
+              {/* Decorative bullet glyph — hidden from screen readers so the
+                  announcement is just the queue label text ("Next up" /
+                  "1 before yours") without a spurious "bullet" prefix. */}
+              {queueHighlight ? <span aria-hidden="true">{"• "}</span> : null}
+              {queueLabel}
             </span>
           </div>
         )}

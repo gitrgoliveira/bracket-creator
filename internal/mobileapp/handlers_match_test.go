@@ -803,6 +803,42 @@ func TestAnnotateQueuePositions_Empty(t *testing.T) {
 	annotateQueuePositions([]state.MatchResult{})
 }
 
+// TestAnnotateQueuePositions_ScheduledAtOrder verifies that the annotator
+// sorts per-court by ScheduledAt rather than relying on slice order.
+// UpdateMatchTime / UpdateMatchCourt mutate the underlying CSV in place
+// without reordering rows, so the server-side annotation must derive
+// ordering from the data — not the storage order — to agree with the
+// viewer's render order and the client-side SSE recompute. Copilot
+// flagged this on PR #124 (web-mobile/js/patch.jsx:110).
+func TestAnnotateQueuePositions_ScheduledAtOrder(t *testing.T) {
+	matches := []state.MatchResult{
+		// Storage order is out of schedule order: the 09:30 row sits
+		// before the 09:00 row on the same court.
+		{ID: "m1", Court: "A", ScheduledAt: "09:30", Status: state.MatchStatusScheduled},
+		{ID: "m2", Court: "A", ScheduledAt: "09:00", Status: state.MatchStatusScheduled},
+		{ID: "m3", Court: "B", ScheduledAt: "09:15", Status: state.MatchStatusScheduled},
+	}
+	annotateQueuePositions(matches)
+	// m2 (09:00) is up-next on court A, m1 (09:30) is queue-position 2.
+	assert.Equal(t, 2, matches[0].QueuePosition) // m1 at 09:30
+	assert.Equal(t, 1, matches[1].QueuePosition) // m2 at 09:00
+	assert.Equal(t, 1, matches[2].QueuePosition) // m3 on court B
+}
+
+// TestAnnotateQueuePositions_StaleReset verifies that non-scheduled rows
+// have their QueuePosition forced to 0 even if a stale persisted value
+// were present — mirroring the bracket-variant guard so omitempty drops
+// the field cleanly on the wire.
+func TestAnnotateQueuePositions_StaleReset(t *testing.T) {
+	matches := []state.MatchResult{
+		{ID: "m1", Court: "A", Status: state.MatchStatusRunning, QueuePosition: 99},
+		{ID: "m2", Court: "A", Status: state.MatchStatusScheduled, QueuePosition: 77},
+	}
+	annotateQueuePositions(matches)
+	assert.Equal(t, 0, matches[0].QueuePosition)
+	assert.Equal(t, 1, matches[1].QueuePosition)
+}
+
 // TestAnnotateBracketQueuePositions_* mirrors the annotateQueuePositions tests
 // for the bracket variant (BracketMatch), covering multiple courts, mixed
 // statuses, nil/empty inputs, and stale-value reset.

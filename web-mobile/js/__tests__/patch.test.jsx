@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyPatch, recomputeQueuePositions } from '../patch.jsx';
+import { applyPatch, recomputeQueuePositions, recomputeBracketQueuePositions } from '../patch.jsx';
 
 // Tests for the centralised SSE-patch applier (Slice 0 / NFR-006).
 // applyPatch composes mergeMatchPatch (covered in mergeMatchPatch.test.jsx)
@@ -208,5 +208,123 @@ describe('recomputeQueuePositions', () => {
       { id: "a2", court: "A", status: "scheduled" },
     ];
     expect(recomputeQueuePositions(matches)).toBe(matches);
+  });
+});
+
+// FR-025: bracket-side queue position recompute. Mirrors the pool helper
+// tests above. Without this, a knockout-only competition would show
+// stale "N before yours" labels for ~500-1000ms after a bracket match
+// completes (until the jittered GET refresh lands).
+describe('recomputeBracketQueuePositions', () => {
+  it('assigns per-court 1-indexed positions to scheduled bracket matches across rounds', () => {
+    const bracket = {
+      rounds: [
+        [
+          { id: "r1m1", court: "A", status: "scheduled", queuePosition: 99 },
+          { id: "r1m2", court: "B", status: "scheduled" },
+        ],
+        [
+          { id: "r2m1", court: "A", status: "scheduled" },
+        ],
+      ],
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out.rounds[0][0].queuePosition).toBe(1);
+    expect(out.rounds[0][1].queuePosition).toBe(1);
+    expect(out.rounds[1][0].queuePosition).toBe(2);
+  });
+
+  it('assigns 0 to running/completed bracket matches', () => {
+    const bracket = {
+      rounds: [
+        [
+          { id: "r1m1", court: "A", status: "running", queuePosition: 99 },
+          { id: "r1m2", court: "A", status: "scheduled" },
+          { id: "r1m3", court: "A", status: "completed", queuePosition: 77 },
+          { id: "r1m4", court: "A", status: "scheduled" },
+        ],
+      ],
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out.rounds[0][0].queuePosition).toBe(0);
+    expect(out.rounds[0][1].queuePosition).toBe(1);
+    expect(out.rounds[0][2].queuePosition).toBe(0);
+    expect(out.rounds[0][3].queuePosition).toBe(2);
+  });
+
+  it('preserves identity when nothing needs to change', () => {
+    const bracket = {
+      rounds: [
+        [
+          { id: "r1m1", court: "A", status: "scheduled", queuePosition: 1 },
+          { id: "r1m2", court: "A", status: "scheduled", queuePosition: 2 },
+        ],
+      ],
+    };
+    expect(recomputeBracketQueuePositions(bracket)).toBe(bracket);
+  });
+
+  it('no-ops when no round has a populated queuePosition (older server)', () => {
+    const bracket = {
+      rounds: [
+        [
+          { id: "r1m1", court: "A", status: "scheduled" },
+          { id: "r1m2", court: "A", status: "scheduled" },
+        ],
+      ],
+    };
+    expect(recomputeBracketQueuePositions(bracket)).toBe(bracket);
+  });
+
+  it('handles nil / empty / malformed bracket gracefully', () => {
+    expect(recomputeBracketQueuePositions(null)).toBeNull();
+    expect(recomputeBracketQueuePositions(undefined)).toBeUndefined();
+    expect(recomputeBracketQueuePositions({})).toEqual({});
+    const emptyRounds = { rounds: [] };
+    expect(recomputeBracketQueuePositions(emptyRounds)).toBe(emptyRounds);
+  });
+
+  it('applyPatch recomputes bracket queuePositions on completion', () => {
+    // The applyPatch SSE integration: a single bracket match transitions
+    // to completed; its scheduled siblings on the same court should drop
+    // by one slot. Mirrors the existing pool integration test.
+    const prev = {
+      bracket: {
+        rounds: [
+          [
+            { id: "b1", court: "A", scheduledAt: "11:00", status: "scheduled", queuePosition: 1 },
+            { id: "b2", court: "A", scheduledAt: "11:10", status: "scheduled", queuePosition: 2 },
+            { id: "b3", court: "B", scheduledAt: "11:00", status: "scheduled", queuePosition: 1 },
+          ],
+        ],
+      },
+    };
+    const next = applyPatch(prev, {
+      data: { result: { id: "b1", winner: "Alice", status: "completed" } },
+    });
+    expect(next.bracket.rounds[0][0].status).toBe("completed");
+    expect(next.bracket.rounds[0][0].queuePosition).toBe(0);
+    expect(next.bracket.rounds[0][1].queuePosition).toBe(1);
+    // Court B is untouched
+    expect(next.bracket.rounds[0][2].queuePosition).toBe(1);
+  });
+
+  it('applyPatch does not recompute bracket queue positions on non-completion', () => {
+    const prev = {
+      bracket: {
+        rounds: [
+          [
+            { id: "b1", court: "A", status: "scheduled", queuePosition: 1 },
+            { id: "b2", court: "A", status: "scheduled", queuePosition: 2 },
+          ],
+        ],
+      },
+    };
+    const next = applyPatch(prev, {
+      data: { result: { id: "b1", status: "running" } },
+    });
+    expect(next.bracket.rounds[0][0].status).toBe("running");
+    // sibling untouched — same reference
+    expect(next.bracket.rounds[0][1]).toBe(prev.bracket.rounds[0][1]);
   });
 });

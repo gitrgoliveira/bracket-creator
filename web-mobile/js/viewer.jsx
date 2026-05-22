@@ -555,11 +555,12 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
 //   - status==="running"                       → null (round label already shows " · LIVE NOW")
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
-// Wording mirrors the VSchedItem helper below so both viewer surfaces agree.
-// Running matches return null because the my-match__round label already appends
-// " · LIVE NOW" — rendering it again in the Queue chip would be a duplicate.
-// We intentionally do NOT fall back to "Scheduled HH:MM" the way display.jsx
-// does — the MyMatchPanel already has a dedicated Time chip.
+// Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
+// so all three viewer surfaces agree. Running matches return null because
+// the my-match__round label already appends " · LIVE NOW" — rendering it
+// again in the Queue chip would be a duplicate. We intentionally do NOT
+// fall back to "Scheduled HH:MM" the way display.jsx does — the
+// MyMatchPanel already has a dedicated Time chip.
 // Exported for unit-testing.
 export function mymatchQueueLabel(m) {
   if (!m) return null;
@@ -634,9 +635,9 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   // FR-025: queue position is 1-indexed per court for scheduled matches; 0 for
   // running/completed. Treat null/undefined/0 as "don't render" so we stay
   // gracefully empty for non-queued matches and pre-T046 responses. Wording
-  // ("Next up" / "N before yours") mirrors VSchedItem below so both viewer
-  // surfaces agree. Running matches show null here because the round label
-  // already appends " · LIVE NOW".
+  // ("Next up" / "N before yours") mirrors VSchedItem below and display.jsx
+  // so all three viewer surfaces agree. Running matches show null here
+  // because the round label already appends " · LIVE NOW".
   const queueLabel = mymatchQueueLabel(nextMatch);
   const queueHighlight = queueLabel === "Next up";
 

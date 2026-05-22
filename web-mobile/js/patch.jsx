@@ -84,6 +84,50 @@ function recomputeQueuePositions(matches) {
     return touched ? next : matches;
 }
 
+// Bracket-variant of recomputeQueuePositions. Walks bracket.rounds in
+// round-then-position order (mirrors the Go-side annotateBracketQueuePositions
+// in internal/mobileapp/handlers_match.go) and assigns 1-indexed positions to
+// scheduled matches per court. Running/completed get 0.
+//
+// FR-025: without this, an SSE patch transitioning a bracket match to
+// completed would leave sibling bracket matches showing stale "N before
+// yours" labels until the jittered fetchCompetitionDetails refresh lands
+// (~500-1000ms later). Mirrors the pool helper exactly — the only
+// structural difference is the nested round-then-position iteration.
+//
+// Returns the original `bracket` reference when nothing needed to change,
+// preserving React identity for memoised bracket components.
+function recomputeBracketQueuePositions(bracket) {
+    if (!bracket || !bracket.rounds || bracket.rounds.length === 0) return bracket;
+    // Same older-payload guard as the pool helper: if no round has a
+    // populated queuePosition, do nothing.
+    const hasAnyQueuePosition = bracket.rounds.some(round =>
+        round.some(m => m.queuePosition !== undefined)
+    );
+    if (!hasAnyQueuePosition) return bracket;
+    const counters = {};
+    let touched = false;
+    const nextRounds = bracket.rounds.map(round => {
+        let roundTouched = false;
+        const nextRound = round.map(m => {
+            let pos = 0;
+            if (m.status === "scheduled") {
+                const court = m.court || "";
+                counters[court] = (counters[court] || 0) + 1;
+                pos = counters[court];
+            }
+            if ((m.queuePosition || 0) !== pos) {
+                roundTouched = true;
+                touched = true;
+                return { ...m, queuePosition: pos };
+            }
+            return m;
+        });
+        return roundTouched ? nextRound : round;
+    });
+    return touched ? { ...bracket, rounds: nextRounds } : bracket;
+}
+
 // T099: re-broadcast competitor_status_updated SSE events as a window-level
 // CustomEvent. Backend wire shape (per specs/003-tournament-gap-closure/
 // contracts/match-decisions.md §SSE):
@@ -208,6 +252,9 @@ function applyPatch(prev, event) {
 
     if (next.bracket && next.bracket.rounds) {
         let bChanged = false;
+        // Track whether any bracket patch was a scheduled/running →
+        // completed transition; same trigger as the pool branch above.
+        let bracketNeedsQueueRecompute = false;
         const rounds = next.bracket.rounds.map(round =>
             round.map(m => {
                 const update = resultMap.get(m.id);
@@ -220,15 +267,25 @@ function applyPatch(prev, event) {
                     const patch = { ...update };
                     if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
                     if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-                    return _mergeMatchPatch(m, patch);
+                    const prevStatus = m.status;
+                    const merged = _mergeMatchPatch(m, patch);
+                    if (merged.status === "completed" && (prevStatus === "scheduled" || prevStatus === "running")) {
+                        bracketNeedsQueueRecompute = true;
+                    }
+                    return merged;
                 }
                 return m;
             })
         );
-        if (bChanged) next.bracket = { ...next.bracket, rounds };
+        if (bChanged) {
+            next.bracket = { ...next.bracket, rounds };
+            if (bracketNeedsQueueRecompute) {
+                next.bracket = recomputeBracketQueuePositions(next.bracket);
+            }
+        }
     }
 
     return changed ? next : prev;
 }
 
-export { applyPatch, applyPatchOrdered, recomputeQueuePositions };
+export { applyPatch, applyPatchOrdered, recomputeQueuePositions, recomputeBracketQueuePositions };

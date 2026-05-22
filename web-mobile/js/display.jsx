@@ -172,14 +172,14 @@ function findActiveCourts(tournament, competitions) {
 }
 
 // Queue-position label per T068. We mirror the contract from VSchedItem in
-// viewer.jsx: position 1 → "Up next"; position N → "(N-1) before yours".
+// viewer.jsx: position 1 → "Next up"; position N → "(N-1) before yours".
 // Falls back to scheduledAt time if no queue position is present (pre-T046
 // payloads or unannotated matches). Keep this synchronised with the
 // equivalent helper in viewer.jsx so the two surfaces agree.
 function queueLabel(m) {
     const qp = m.queuePosition;
     if (qp && qp > 0) {
-        if (qp === 1) return "Up next";
+        if (qp === 1) return "Next up";
         return `${qp - 1} before yours`;
     }
     if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
@@ -422,7 +422,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
 
             {/* T068: upcoming-match list with queue-position labels.
                 Pulls m.queuePosition (1-indexed, populated by handlers_viewer
-                annotateQueuePositions). Position 1 → "Up next"; position N
+                annotateQueuePositions). Position 1 → "Next up"; position N
                 (>1) → "(N-1) before yours" to match VSchedItem's wording.
                 T061: capped at 2 entries when live, falls back to up to 2
                 additional cards when auto-promoting (so we still show a

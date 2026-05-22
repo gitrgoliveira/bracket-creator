@@ -176,6 +176,33 @@ describe('applyPatch', () => {
     // sibling untouched — same reference
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
   });
+
+  it('recomputes pool queue positions when a scheduled match moves to a different court', () => {
+    // p1 starts on court A (qp=1) and moves to court B. recomputeQueuePositions
+    // walks the array in order, so p1 lands at B-qp=1 and b1 shifts down to
+    // B-qp=2; p2 becomes A-qp=1. The point is *that the recompute happens at
+    // all* (not waiting for a refetch) — the exact numbering follows the
+    // existing helper's array-order contract.
+    const prev = {
+      poolMatches: [
+        { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
+        { id: "p2", court: "A", scheduledAt: "09:10", status: "scheduled", queuePosition: 2 },
+        { id: "b1", court: "B", scheduledAt: "08:30", status: "scheduled", queuePosition: 1 },
+      ],
+    };
+    const next = applyPatch(prev, {
+      data: { result: { id: "p1", court: "B", scheduledAt: "09:00", status: "scheduled" } },
+    });
+    const byId = Object.fromEntries(next.poolMatches.map(m => [m.id, m]));
+    expect(byId.p1.court).toBe("B");
+    expect(byId.p1.queuePosition).toBe(1);
+    expect(byId.p2.queuePosition).toBe(1);
+    expect(byId.b1.queuePosition).toBe(2);
+    // Sibling identities updated (regression guard: without the court-move
+    // trigger, p2 and b1 would keep their stale qp values from `prev`).
+    expect(next.poolMatches[1]).not.toBe(prev.poolMatches[1]);
+    expect(next.poolMatches[2]).not.toBe(prev.poolMatches[2]);
+  });
 });
 
 describe('recomputeQueuePositions', () => {
@@ -360,5 +387,33 @@ describe('recomputeBracketQueuePositions', () => {
     expect(next.bracket.rounds[0][0].scoreA).toBe("M");
     // sibling untouched — same reference
     expect(next.bracket.rounds[0][1]).toBe(prev.bracket.rounds[0][1]);
+  });
+
+  it('applyPatch recomputes bracket queue positions when a scheduled match moves to a different court', () => {
+    // b1 (court A, qp=1) moves to court B. recomputeBracketQueuePositions
+    // walks rounds in order, so b1 lands at B-qp=1, b2 becomes A-qp=1, and
+    // c1 shifts down to B-qp=2. Same array-order contract as the pool helper —
+    // the test pins that the recompute fires *immediately on a court move*
+    // (not just on a status flip), which is the bug Copilot flagged.
+    const prev = {
+      bracket: {
+        rounds: [
+          [
+            { id: "b1", court: "A", scheduledAt: "11:00", status: "scheduled", queuePosition: 1 },
+            { id: "b2", court: "A", scheduledAt: "11:30", status: "scheduled", queuePosition: 2 },
+            { id: "c1", court: "B", scheduledAt: "10:30", status: "scheduled", queuePosition: 1 },
+          ],
+        ],
+      },
+    };
+    const next = applyPatch(prev, {
+      data: { result: { id: "b1", court: "B", scheduledAt: "11:00", status: "scheduled" } },
+    });
+    const flat = next.bracket.rounds[0];
+    const byId = Object.fromEntries(flat.map(m => [m.id, m]));
+    expect(byId.b1.court).toBe("B");
+    expect(byId.b1.queuePosition).toBe(1);
+    expect(byId.b2.queuePosition).toBe(1);
+    expect(byId.c1.queuePosition).toBe(2);
   });
 });

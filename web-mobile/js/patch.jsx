@@ -237,8 +237,15 @@ function applyPatch(prev, event) {
             if (update) {
                 changed = true;
                 const prevStatus = m.status;
+                const prevCourt = m.court || "";
                 const merged = _mergeMatchPatch(m, update);
-                if ((prevStatus === "scheduled") !== (merged.status === "scheduled")) {
+                const statusFlipped = (prevStatus === "scheduled") !== (merged.status === "scheduled");
+                // Court moves also stale per-court queue positions: a scheduled
+                // match leaving court A and arriving on court B must re-number
+                // both courts' remaining scheduled siblings.
+                const courtMoved = (merged.court || "") !== prevCourt
+                    && (prevStatus === "scheduled" || merged.status === "scheduled");
+                if (statusFlipped || courtMoved) {
                     needsQueueRecompute = true;
                 }
                 return merged;
@@ -268,8 +275,13 @@ function applyPatch(prev, event) {
                     if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
                     if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
                     const prevStatus = m.status;
+                    const prevCourt = m.court || "";
                     const merged = _mergeMatchPatch(m, patch);
-                    if ((prevStatus === "scheduled") !== (merged.status === "scheduled")) {
+                    const statusFlipped = (prevStatus === "scheduled") !== (merged.status === "scheduled");
+                    // Same court-move invalidation as the pool branch above.
+                    const courtMoved = (merged.court || "") !== prevCourt
+                        && (prevStatus === "scheduled" || merged.status === "scheduled");
+                    if (statusFlipped || courtMoved) {
                         bracketNeedsQueueRecompute = true;
                     }
                     return merged;

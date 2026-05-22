@@ -288,6 +288,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
   const [lastSaved, setLastSaved] = useStateA(null);
   const [saveErr, setSaveErr] = useStateA(null);
   const [deleting, setDeleting] = useStateA(false);
+  const [invalidating, setInvalidating] = useStateA(false);
   const [local, setLocal] = useStateA({ ...c });
   const debounceRef = useRefA(null);
   // AdminSettings unmounts when the user navigates to a different section
@@ -766,7 +767,28 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
         </div>
       </div>
-      <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)" }}>
+      <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
+        {(local.status === "pools" || local.status === "playoffs") && (
+          <div>
+            <button className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
+              if (confirm(`Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`)) {
+                setInvalidating(true);
+                try {
+                  await window.API.invalidateCompetition(local.id, password);
+                  onUpdate();
+                } catch (e) {
+                  if (mountedRef.current) showToast(e.message, "error");
+                } finally {
+                  if (mountedRef.current) setInvalidating(false);
+                }
+              }
+            }}>
+              {invalidating && <span className="spinner" />}
+              {invalidating ? "Marking invalid…" : "Mark competition invalid"}
+            </button>
+            <div className="field__hint" style={{ marginTop: 4 }}>Required before deleting an in-progress competition.</div>
+          </div>
+        )}
         <button className="btn btn--danger btn--ghost" disabled={deleting} onClick={async () => {
           const started = local.status && local.status !== "setup";
           const msg = started

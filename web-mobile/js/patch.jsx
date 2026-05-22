@@ -94,13 +94,15 @@ function _orderByCourtKey(entries) {
 // (matters for React.memo on VSchedItem / TWMatch).
 function recomputeQueuePositions(matches) {
     if (!matches || matches.length === 0) return matches;
-    // If the server's payload never populated queuePosition (older
-    // backends or non-annotated views), do nothing — there's no UI
-    // baseline to keep in sync and assigning positions risks adding a
-    // field the UI doesn't currently render. Avoids gratuitous identity
-    // churn for memoised match-card components.
-    const hasAnyQueuePosition = matches.some(m => m.queuePosition !== undefined);
-    if (!hasAnyQueuePosition) return matches;
+    // Skip when nothing is scheduled — all positions are 0 and there is
+    // no label to derive, so we preserve identity without extra work.
+    // We no longer gate on existing queuePosition fields: the backend
+    // emits queuePosition with omitempty, so a payload where every match
+    // is running/completed arrives with all queuePosition fields missing.
+    // If an SSE patch later transitions a match to scheduled we must still
+    // be able to derive positions from scratch (FR-025).
+    const hasAnyScheduled = matches.some(m => m.status === "scheduled");
+    if (!hasAnyScheduled) return matches;
 
     // Build per-court ordered buckets, then derive positions by court
     // and write them back into a positions-by-index lookup.
@@ -146,12 +148,15 @@ function recomputeQueuePositions(matches) {
 // preserving React identity for memoised bracket components.
 function recomputeBracketQueuePositions(bracket) {
     if (!bracket || !bracket.rounds || bracket.rounds.length === 0) return bracket;
-    // Same older-payload guard as the pool helper: if no round has a
-    // populated queuePosition, do nothing.
-    const hasAnyQueuePosition = bracket.rounds.some(round =>
-        round.some(m => m.queuePosition !== undefined)
+    // Same rationale as the pool helper: gate on scheduled matches, not
+    // on pre-existing queuePosition fields. omitempty means a bracket
+    // where every match is running/completed arrives with all
+    // queuePosition fields missing; an SSE patch transitioning one back
+    // to scheduled must still derive positions from scratch (FR-025).
+    const hasAnyScheduled = bracket.rounds.some(round =>
+        round.some(m => m.status === "scheduled")
     );
-    if (!hasAnyQueuePosition) return bracket;
+    if (!hasAnyScheduled) return bracket;
 
     // Flatten round/position pairs into entries the per-court sorter
     // can consume; idx encodes "round-position" for stable tie-break.

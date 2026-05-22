@@ -43,8 +43,9 @@ describe('applyPatch', () => {
     expect(next).not.toBe(prev);
     expect(next.poolMatches[0].winner).toBe("Alice");
     expect(next.poolMatches[0].status).toBe("completed");
-    // unchanged matches keep their reference and values
-    expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
+    // p2 is the only remaining scheduled match on court B — it gets
+    // queuePosition: 1 via the post-patch recompute (FR-025).
+    expect(next.poolMatches[1].queuePosition).toBe(1);
   });
 
   it('applies an array of results to multiple poolMatches', () => {
@@ -285,10 +286,25 @@ describe('recomputeQueuePositions', () => {
     expect(recomputeQueuePositions(matches)).toBe(matches);
   });
 
-  it('no-ops when the payload never populated queuePosition (older server)', () => {
+  it('derives positions even when no prior queuePosition fields exist (omitempty payload)', () => {
+    // Backend omits queuePosition=0 via omitempty. A viewer opened while
+    // all matches were running/completed gets a payload with no
+    // queuePosition fields. An SSE patch that transitions one match back
+    // to scheduled must still derive positions from scratch.
     const matches = [
       { id: "a1", court: "A", status: "scheduled" },
       { id: "a2", court: "A", status: "scheduled" },
+    ];
+    const out = recomputeQueuePositions(matches);
+    expect(out).not.toBe(matches);
+    expect(out[0].queuePosition).toBe(1);
+    expect(out[1].queuePosition).toBe(2);
+  });
+
+  it('no-ops when no matches are scheduled (all running/completed)', () => {
+    const matches = [
+      { id: "a1", court: "A", status: "running" },
+      { id: "a2", court: "A", status: "completed" },
     ];
     expect(recomputeQueuePositions(matches)).toBe(matches);
   });
@@ -347,12 +363,29 @@ describe('recomputeBracketQueuePositions', () => {
     expect(recomputeBracketQueuePositions(bracket)).toBe(bracket);
   });
 
-  it('no-ops when no round has a populated queuePosition (older server)', () => {
+  it('derives positions even when no prior queuePosition fields exist (omitempty payload)', () => {
+    // Same omitempty scenario as the pool helper: bracket matches can
+    // arrive without queuePosition when all were running/completed.
     const bracket = {
       rounds: [
         [
           { id: "r1m1", court: "A", status: "scheduled" },
           { id: "r1m2", court: "A", status: "scheduled" },
+        ],
+      ],
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out).not.toBe(bracket);
+    expect(out.rounds[0][0].queuePosition).toBe(1);
+    expect(out.rounds[0][1].queuePosition).toBe(2);
+  });
+
+  it('no-ops when no bracket match is scheduled (all running/completed)', () => {
+    const bracket = {
+      rounds: [
+        [
+          { id: "r1m1", court: "A", status: "running" },
+          { id: "r1m2", court: "A", status: "completed" },
         ],
       ],
     };

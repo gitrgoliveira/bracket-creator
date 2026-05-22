@@ -802,3 +802,159 @@ func TestAnnotateQueuePositions_Empty(t *testing.T) {
 	annotateQueuePositions(nil)
 	annotateQueuePositions([]state.MatchResult{})
 }
+
+// TestAnnotateQueuePositions_ScheduledAtOrder verifies that the annotator
+// sorts per-court by ScheduledAt rather than relying on slice order.
+// UpdateMatchTime / UpdateMatchCourt mutate the underlying CSV in place
+// without reordering rows, so the server-side annotation must derive
+// ordering from the data — not the storage order — to agree with the
+// viewer's render order and the client-side SSE recompute. Copilot
+// flagged this on PR #124 (web-mobile/js/patch.jsx:110).
+func TestAnnotateQueuePositions_ScheduledAtOrder(t *testing.T) {
+	matches := []state.MatchResult{
+		// Storage order is out of schedule order: the 09:30 row sits
+		// before the 09:00 row on the same court.
+		{ID: "m1", Court: "A", ScheduledAt: "09:30", Status: state.MatchStatusScheduled},
+		{ID: "m2", Court: "A", ScheduledAt: "09:00", Status: state.MatchStatusScheduled},
+		{ID: "m3", Court: "B", ScheduledAt: "09:15", Status: state.MatchStatusScheduled},
+	}
+	annotateQueuePositions(matches)
+	// m2 (09:00) is up-next on court A, m1 (09:30) is queue-position 2.
+	assert.Equal(t, 2, matches[0].QueuePosition) // m1 at 09:30
+	assert.Equal(t, 1, matches[1].QueuePosition) // m2 at 09:00
+	assert.Equal(t, 1, matches[2].QueuePosition) // m3 on court B
+}
+
+// TestAnnotateQueuePositions_StaleReset verifies that non-scheduled rows
+// have their QueuePosition forced to 0 even if a stale persisted value
+// were present — mirroring the bracket-variant guard so omitempty drops
+// the field cleanly on the wire.
+func TestAnnotateQueuePositions_StaleReset(t *testing.T) {
+	matches := []state.MatchResult{
+		{ID: "m1", Court: "A", Status: state.MatchStatusRunning, QueuePosition: 99},
+		{ID: "m2", Court: "A", Status: state.MatchStatusScheduled, QueuePosition: 77},
+	}
+	annotateQueuePositions(matches)
+	assert.Equal(t, 0, matches[0].QueuePosition)
+	assert.Equal(t, 1, matches[1].QueuePosition)
+}
+
+// TestAnnotateBracketQueuePositions_* mirrors the annotateQueuePositions tests
+// for the bracket variant (BracketMatch), covering multiple courts, mixed
+// statuses, nil/empty inputs, and stale-value reset.
+func TestAnnotateBracketQueuePositions_Nil(t *testing.T) {
+	annotateBracketQueuePositions(nil) // must not panic
+}
+
+func TestAnnotateBracketQueuePositions_Empty(t *testing.T) {
+	annotateBracketQueuePositions(&state.Bracket{})
+	annotateBracketQueuePositions(&state.Bracket{Rounds: [][]state.BracketMatch{}})
+}
+
+func TestAnnotateBracketQueuePositions_MultipleCourts(t *testing.T) {
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "r1m1", Court: "A", Status: state.MatchStatusScheduled},
+				{ID: "r1m2", Court: "B", Status: state.MatchStatusScheduled},
+			},
+			{
+				{ID: "r2m1", Court: "A", Status: state.MatchStatusScheduled},
+			},
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	assert.Equal(t, 1, b.Rounds[0][0].QueuePosition, "r1m1: first on court A")
+	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "r1m2: first on court B")
+	assert.Equal(t, 2, b.Rounds[1][0].QueuePosition, "r2m1: second on court A")
+}
+
+func TestAnnotateBracketQueuePositions_MixedStatuses(t *testing.T) {
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m1", Court: "A", Status: state.MatchStatusRunning, QueuePosition: 99},
+				{ID: "m2", Court: "A", Status: state.MatchStatusScheduled},
+				{ID: "m3", Court: "A", Status: state.MatchStatusCompleted, QueuePosition: 77},
+				{ID: "m4", Court: "A", Status: state.MatchStatusScheduled},
+			},
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	assert.Equal(t, 0, b.Rounds[0][0].QueuePosition, "running: stale value reset to 0")
+	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "first scheduled on court A")
+	assert.Equal(t, 0, b.Rounds[0][2].QueuePosition, "completed: stale value reset to 0")
+	assert.Equal(t, 2, b.Rounds[0][3].QueuePosition, "second scheduled on court A")
+}
+
+// TestAnnotateBracketQueuePositions_ScheduledAtOrdering verifies that queue
+// positions follow per-court ScheduledAt ordering, not storage order.
+// Mirrors the viewer's ScheduleViewer per-court sort so the "N before yours"
+// label is consistent with the row order the user actually sees.
+func TestAnnotateBracketQueuePositions_ScheduledAtOrdering(t *testing.T) {
+	// Round 0 holds an early match scheduled at 11:00 on court A; round 1
+	// holds an earlier-scheduled match (10:30) on the same court. The
+	// later round should rank first because its scheduledAt is earlier.
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "r0m0", Court: "A", ScheduledAt: "11:00", Status: state.MatchStatusScheduled},
+				{ID: "r0m1", Court: "A", ScheduledAt: "11:30", Status: state.MatchStatusScheduled},
+			},
+			{
+				{ID: "r1m0", Court: "A", ScheduledAt: "10:30", Status: state.MatchStatusScheduled},
+			},
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	assert.Equal(t, 2, b.Rounds[0][0].QueuePosition, "r0m0 @ 11:00 = 2nd on court A")
+	assert.Equal(t, 3, b.Rounds[0][1].QueuePosition, "r0m1 @ 11:30 = 3rd on court A")
+	assert.Equal(t, 1, b.Rounds[1][0].QueuePosition, "r1m0 @ 10:30 = 1st on court A despite later round")
+}
+
+// TestAnnotateBracketQueuePositions_RunningRanksFirst verifies that a
+// running match counts ahead of scheduled siblings in the per-court sort
+// (status priority dominates ScheduledAt), matching the viewer.
+func TestAnnotateBracketQueuePositions_RunningRanksFirst(t *testing.T) {
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				// Scheduled match at 10:00, but a running match at 11:00
+				// should be ordered first because status=running has the
+				// highest priority in the viewer's sort.
+				{ID: "sched", Court: "A", ScheduledAt: "10:00", Status: state.MatchStatusScheduled},
+				{ID: "live", Court: "A", ScheduledAt: "11:00", Status: state.MatchStatusRunning},
+			},
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	// Only the scheduled match gets a 1-indexed position; the running
+	// match keeps QueuePosition=0 (it isn't "in queue"). But because the
+	// running match ranks ahead in the sort, the counter doesn't
+	// increment past it before reaching the scheduled match — so the
+	// scheduled match's position is still 1, not 2.
+	assert.Equal(t, 0, b.Rounds[0][1].QueuePosition, "running has no queue position")
+	assert.Equal(t, 1, b.Rounds[0][0].QueuePosition, "lone scheduled = position 1")
+}
+
+// TestAnnotateBracketQueuePositions_EmptyScheduledAt verifies that matches
+// without a ScheduledAt fall to the end of their per-court bucket (matches
+// the JS fallback to "99:99" in ScheduleViewer's sort).
+func TestAnnotateBracketQueuePositions_EmptyScheduledAt(t *testing.T) {
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "no-time", Court: "A", ScheduledAt: "", Status: state.MatchStatusScheduled},
+				{ID: "has-time", Court: "A", ScheduledAt: "10:00", Status: state.MatchStatusScheduled},
+			},
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "has-time = 1st")
+	assert.Equal(t, 2, b.Rounds[0][0].QueuePosition, "no-time = 2nd (sinks to end)")
+}

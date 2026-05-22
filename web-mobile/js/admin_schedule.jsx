@@ -208,8 +208,12 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   });
   const courtOrder = (a, b) => {
     const order = { running: 0, scheduled: 1, completed: 2 };
-    const ao = order[a.status] ?? 99;
-    const bo = order[b.status] ?? 99;
+    // Unknown / new statuses sink to "completed" (=2) — matches the
+    // ScheduleViewer in viewer.jsx and the patch.jsx _orderByCourtKey
+    // helper, so admin and viewer surfaces stay in sync if a new
+    // terminal status (kiken / fusenpai / forfeit) ever appears.
+    const ao = order[a.status] ?? 2;
+    const bo = order[b.status] ?? 2;
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   };

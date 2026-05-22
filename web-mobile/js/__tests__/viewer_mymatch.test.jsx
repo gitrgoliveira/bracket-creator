@@ -1,7 +1,7 @@
 // Pure-logic tests for buildPlayerMatchHighlight (FR-020, FR-022).
 // Slice 4 / T108–T109: drives "Find my matches" filtering on the viewer home.
 import { describe, it, expect } from 'vitest';
-import { buildPlayerMatchHighlight, isFollowedPlayer } from '../viewer.jsx';
+import { buildPlayerMatchHighlight, isFollowedPlayer, mymatchQueueLabel } from '../viewer.jsx';
 
 describe('buildPlayerMatchHighlight', () => {
   it('returns matches where playerId is on SideA', () => {
@@ -100,5 +100,52 @@ describe('isFollowedPlayer', () => {
     // FR-020 regression guard: two participants both lacking UUIDs must not
     // be treated as the same person just because their ids are empty.
     expect(isFollowedPlayer({ id: '', name: 'Alice' }, { id: '', name: 'Bob' })).toBe(false);
+  });
+});
+
+// FR-025 — MyMatchPanel Queue chip label. Wording mirrors VSchedItem (also in
+// viewer.jsx) so a viewer who looks at "Your next match" then scrolls down to
+// the per-court schedule sees the same label.
+describe('mymatchQueueLabel', () => {
+  it('returns "Next up" when scheduled and queuePosition === 1', () => {
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 1 })).toBe('Next up');
+  });
+
+  it('returns "N before yours" for queuePosition > 1 (1-indexed → N-1 ahead)', () => {
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 2 })).toBe('1 before yours');
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 5 })).toBe('4 before yours');
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 99 })).toBe('98 before yours');
+  });
+
+  it('returns null when status === "running" (round label already shows LIVE NOW)', () => {
+    // The my-match__round element appends " · LIVE NOW" for running matches, so
+    // the Queue chip must not duplicate it.
+    expect(mymatchQueueLabel({ status: 'running', queuePosition: 0 })).toBeNull();
+    expect(mymatchQueueLabel({ status: 'running' })).toBeNull();
+    expect(mymatchQueueLabel({ status: 'running', queuePosition: 3 })).toBeNull();
+  });
+
+  it('returns null for non-running / non-scheduled statuses', () => {
+    for (const status of ['completed', 'forfeit', 'cancelled', '', undefined]) {
+      expect(mymatchQueueLabel({ status, queuePosition: 1 })).toBeNull();
+    }
+  });
+
+  it('returns null when scheduled but queuePosition is missing / 0 / negative', () => {
+    expect(mymatchQueueLabel({ status: 'scheduled' })).toBeNull();
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 0 })).toBeNull();
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: null })).toBeNull();
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: -1 })).toBeNull();
+  });
+
+  it('accepts numeric strings and rejects non-numeric queuePosition values', () => {
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: '1' })).toBe('Next up');
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: '2' })).toBe('1 before yours');
+    expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 'abc' })).toBeNull();
+  });
+
+  it('handles null / undefined match gracefully', () => {
+    expect(mymatchQueueLabel(null)).toBeNull();
+    expect(mymatchQueueLabel(undefined)).toBeNull();
   });
 });

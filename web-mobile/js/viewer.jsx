@@ -1189,7 +1189,11 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             </div>
           </div>
           {(() => {
-            const opp = myUpcoming.sideA?.id === myPlayer.id ? myUpcoming.sideB : myUpcoming.sideA;
+            // Use isFollowedPlayer (same helper MyMatchPanel uses) so
+            // opponent resolution stays consistent across viewer screens.
+            // Direct id-equality misses legacy/name-keyed fixtures and
+            // team sub-player shapes where ids may diverge but names align.
+            const opp = isFollowedPlayer(myUpcoming.sideA, myPlayer) ? myUpcoming.sideB : myUpcoming.sideA;
             return opp ? (
               <div className="my-match__opp">
                 <div className="l">vs Opponent</div>

@@ -1596,12 +1596,38 @@ a:hover {
 }
 
 .viewer__shell {
+  width: 100%;
   max-width: 480px;
   margin: 0 auto;
   background: var(--bg);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* Tablet: widen the viewer shell */
+@media (min-width: 769px) {
+  .viewer__shell {
+    max-width: 768px;
+  }
+  .viewer__body {
+    padding: 16px 20px 80px;
+  }
+}
+
+/* Desktop: full-width shell up to 1024px, two-column schedule grid */
+@media (min-width: 1025px) {
+  .viewer__shell {
+    max-width: 1024px;
+  }
+  .viewer__body {
+    padding: 20px 28px 80px;
+  }
+  .vsched {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
 }
 
 .viewer__head {

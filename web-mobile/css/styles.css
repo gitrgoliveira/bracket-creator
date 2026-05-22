@@ -2688,6 +2688,7 @@ a:hover {
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 12px;
+  min-width: 0; /* grid item: allow .tw-match__phase ellipsis to truncate */
 }
 
 .tw-match__phase {

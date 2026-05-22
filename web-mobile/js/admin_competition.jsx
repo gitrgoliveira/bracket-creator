@@ -775,7 +775,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
                 setInvalidating(true);
                 try {
                   await window.API.invalidateCompetition(local.id, password);
-                  onUpdate();
+                  if (mountedRef.current) {
+                    setLocal(prev => ({ ...prev, status: "invalid" }));
+                    showToast("Competition marked invalid.", "success");
+                  }
                 } catch (e) {
                   if (mountedRef.current) showToast(e.message, "error");
                 } finally {
@@ -789,7 +792,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
             <div className="field__hint" style={{ marginTop: 4 }}>Required before deleting an in-progress competition.</div>
           </div>
         )}
-        <button className="btn btn--danger btn--ghost" disabled={deleting} onClick={async () => {
+        <button className="btn btn--danger btn--ghost" disabled={deleting || invalidating} onClick={async () => {
           const started = local.status && local.status !== "setup";
           const msg = started
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`

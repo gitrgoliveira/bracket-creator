@@ -1,7 +1,7 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
-const { useState, useMemo, useRef: useRefV } = React;
+const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 
@@ -2348,6 +2348,66 @@ function MatchViewerModal({ match, onClose }) {
   );
 }
 
+// Shared formatter so the synchronous initializer and the useEffect tick
+// produce identical strings — keeps the first paint stable.
+function formatAnnouncementTimeLeft(expiresAtIso) {
+  const diff = new Date(expiresAtIso).getTime() - Date.now();
+  if (diff <= 0) return "";
+  const totalSeconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = seconds.toString().padStart(2, "0");
+  return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
+}
+
+function AnnouncementBanner({ announcement, onDismiss }) {
+  // Initialize synchronously so the badge isn't blank on the first paint
+  // (Copilot finding on PR #128). The useEffect tick keeps it accurate.
+  const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(announcement.expiresAt));
+
+  useEffect(() => {
+    const updateTimer = () => {
+      const expiresAt = new Date(announcement.expiresAt).getTime();
+      const now = Date.now();
+      const diff = expiresAt - now;
+
+      if (diff <= 0) {
+        onDismiss();
+        return;
+      }
+
+      setTimeLeft(formatAnnouncementTimeLeft(announcement.expiresAt));
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+
+    return () => clearInterval(interval);
+  }, [announcement.expiresAt, onDismiss]);
+
+  return (
+    <div className="announcement-banner">
+      <div className="announcement-banner__content">
+        <div className="announcement-banner__icon" aria-hidden="true">📢</div>
+        <p className="announcement-banner__message">{announcement.message}</p>
+      </div>
+      <div className="announcement-banner__meta">
+        <span className="announcement-banner__badge">
+          {timeLeft}
+        </span>
+        <button
+          className="announcement-banner__dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss announcement"
+        >
+          &times;
+        </button>
+      </div>
+    </div>
+  );
+}
+
+window.AnnouncementBanner = AnnouncementBanner;
 window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;
 window.ViewerSchedule = ViewerSchedule;
@@ -2357,3 +2417,4 @@ window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
+

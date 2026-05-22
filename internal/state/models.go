@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
@@ -315,4 +316,10 @@ type ReservedSlot struct {
 	ParticipantID string `json:"participantID"` // ID of the placeholder in participants.csv
 	SourceCompID  string `json:"sourceCompID"`
 	SourceRank    int    `json:"sourceRank"`
+}
+
+type Announcement struct {
+	Message   string    `json:"message" yaml:"message"`
+	SentAt    time.Time `json:"sentAt" yaml:"sent_at"`
+	ExpiresAt time.Time `json:"expiresAt" yaml:"expires_at"`
 }

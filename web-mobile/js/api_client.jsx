@@ -575,6 +575,32 @@ const API = {
             throw new Error(err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
         }
         return res.json();
+    },
+    async sendAnnouncement(message, durationMinutes, password) {
+        const res = await fetch('/api/tournament/announce', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ message, durationMinutes })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to send announcement (Status ${res.status})`);
+        }
+        return res.json();
+    },
+    async fetchAnnouncement() {
+        const res = await fetch('/api/tournament/announcement');
+        if (res.status === 204) {
+            return null;
+        }
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to fetch announcement (Status ${res.status})`);
+        }
+        return res.json();
     }
 };
 

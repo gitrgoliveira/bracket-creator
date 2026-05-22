@@ -3,7 +3,7 @@
 
 import { applyPatch as patchCompetitionData } from './patch.jsx';
 
-const { useState: useS, useEffect: useE, useRef: useR } = React;
+const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
 // synchronisation. The render path itself still drives off
@@ -130,6 +130,7 @@ class ErrorBoundary extends React.Component {
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
+  const [activeAnnouncement, setActiveAnnouncement] = useS(null);
   // Hydrate the route state from the URL synchronously, BEFORE the first
   // render. The post-mount useEffect that previously did this ran AFTER
   // the URL-sync effect, so a direct load of /reset (or any non-`/`
@@ -316,6 +317,26 @@ function App() {
 
   useE(() => { load(); }, []);
 
+  useE(() => {
+    window.API.fetchAnnouncement()
+      .then(ann => {
+        if (ann) {
+          let dismissedKey = null;
+          try {
+            dismissedKey = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
+          } catch (_e) {
+            // private-browsing modes can throw
+          }
+          if (isAnnouncementActive(ann, dismissedKey)) {
+            setActiveAnnouncement(ann);
+          }
+        }
+      })
+      .catch(err => {
+        console.error("Failed to fetch initial announcement:", err);
+      });
+  }, []);
+
   // Fetch the auth-config once on mount. Always resolves the null
   // initial state — success sets the actual config; fail-open
   // (5xx/timeout/parse-error) falls back to file mode so the
@@ -454,6 +475,19 @@ function App() {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
             }
             jitteredTimeout(load, jitter);
+        } else if (event.type === "announcement") {
+            const ann = event.data;
+            if (ann) {
+                let dismissedKey = null;
+                try {
+                    dismissedKey = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
+                } catch (_e) {
+                    // private-browsing modes can throw
+                }
+                setActiveAnnouncement(isAnnouncementActive(ann, dismissedKey) ? ann : null);
+            } else {
+                setActiveAnnouncement(null);
+            }
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can
@@ -497,6 +531,24 @@ function App() {
     localStorage.removeItem("bc_authed");
     localStorage.removeItem("bc_password");
   };
+
+  // Stable dismiss callback — wrapping in useCallback prevents the
+  // AnnouncementBanner countdown useEffect from re-running on every
+  // parent render (the effect lists onDismiss as a dependency, so an
+  // inline arrow function would reset the interval on every re-render).
+  // Must be declared before any conditional returns to satisfy Rules of Hooks.
+  const handleDismissAnnouncement = useC(() => {
+    setActiveAnnouncement(prev => {
+      if (prev?.sentAt) {
+        try {
+          sessionStorage.setItem(`bc_dismissed_announcement_${prev.sentAt}`, "true");
+        } catch (_e) {
+          // private-browsing modes can throw
+        }
+      }
+      return null;
+    });
+  }, []);
 
   if (loading && !selectedCompData) return <div className="loading">Loading...</div>;
   if (!tournament) return (
@@ -558,6 +610,12 @@ function App() {
   // viewer mode
   return (
     <>
+      {activeAnnouncement && window.AnnouncementBanner && (
+        <window.AnnouncementBanner
+          announcement={activeAnnouncement}
+          onDismiss={handleDismissAnnouncement}
+        />
+      )}
       {selectedCompData ? (
         <window.ViewerCompetition
           tournament={tournament}
@@ -907,4 +965,12 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   </ErrorBoundary>
 );
 
-export { parsePath, pathFromState, ErrorBoundary };
+// Pure helper: returns true when an announcement should be shown.
+// `dismissedKey` is the sessionStorage value for this sentAt (truthy = dismissed).
+// `now` defaults to new Date() and can be overridden in tests for determinism.
+function isAnnouncementActive(ann, dismissedKey, now) {
+  if (!ann || dismissedKey) return false;
+  return (now || new Date()) < new Date(ann.expiresAt);
+}
+
+export { parsePath, pathFromState, ErrorBoundary, isAnnouncementActive };

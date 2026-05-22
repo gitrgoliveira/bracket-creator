@@ -2032,8 +2032,22 @@ function MatchViewerModal({ match, onClose }) {
   );
 }
 
+// Shared formatter so the synchronous initializer and the useEffect tick
+// produce identical strings — keeps the first paint stable.
+function formatAnnouncementTimeLeft(expiresAtIso) {
+  const diff = new Date(expiresAtIso).getTime() - Date.now();
+  if (diff <= 0) return "";
+  const totalSeconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = seconds.toString().padStart(2, "0");
+  return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
+}
+
 function AnnouncementBanner({ announcement, onDismiss }) {
-  const [timeLeft, setTimeLeft] = useState("");
+  // Initialize synchronously so the badge isn't blank on the first paint
+  // (Copilot finding on PR #128). The useEffect tick keeps it accurate.
+  const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(announcement.expiresAt));
 
   useEffect(() => {
     const updateTimer = () => {
@@ -2046,16 +2060,7 @@ function AnnouncementBanner({ announcement, onDismiss }) {
         return;
       }
 
-      const totalSeconds = Math.floor(diff / 1000);
-      const minutes = Math.floor(totalSeconds / 60);
-      const seconds = totalSeconds % 60;
-      const paddedSeconds = seconds.toString().padStart(2, '0');
-
-      if (minutes > 0) {
-        setTimeLeft(`${minutes}:${paddedSeconds} left`);
-      } else {
-        setTimeLeft(`${seconds}s left`);
-      }
+      setTimeLeft(formatAnnouncementTimeLeft(announcement.expiresAt));
     };
 
     updateTimer();

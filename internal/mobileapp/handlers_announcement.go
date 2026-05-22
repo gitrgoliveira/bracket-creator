@@ -15,6 +15,10 @@ type announcementRequest struct {
 	DurationMinutes int    `json:"durationMinutes"`
 }
 
+// Allowed announcement TTLs. Package-level so the validation map isn't
+// reallocated on every POST /api/tournament/announce.
+var validAnnouncementDurations = map[int]bool{5: true, 10: true, 15: true, 30: true}
+
 // maxAnnounceBodyBytes caps the POST /api/tournament/announce request
 // body. Worst-case JSON encoding of a valid payload:
 //
@@ -49,8 +53,7 @@ func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *H
 			return
 		}
 
-		validDurations := map[int]bool{5: true, 10: true, 15: true, 30: true}
-		if !validDurations[req.DurationMinutes] {
+		if !validAnnouncementDurations[req.DurationMinutes] {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Duration must be 5, 10, 15, or 30 minutes"})
 			return
 		}

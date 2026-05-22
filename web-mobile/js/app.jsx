@@ -324,7 +324,7 @@ function App() {
           let dismissedAt = null;
           try {
             dismissedAt = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
-          } catch (e) {
+          } catch (_e) {
             // private-browsing modes can throw
           }
           if (!dismissedAt && new Date(ann.expiresAt) > new Date()) {
@@ -481,7 +481,7 @@ function App() {
                 let dismissedAt = null;
                 try {
                     dismissedAt = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
-                } catch (e) {
+                } catch (_e) {
                     // private-browsing modes can throw
                 }
                 if (!dismissedAt && new Date(ann.expiresAt) > new Date()) {
@@ -602,7 +602,7 @@ function App() {
       if (prev?.sentAt) {
         try {
           sessionStorage.setItem(`bc_dismissed_announcement_${prev.sentAt}`, "true");
-        } catch (e) {
+        } catch (_e) {
           // private-browsing modes can throw
         }
       }

@@ -53,7 +53,7 @@ func (s *AnnouncementStore) Get() *Announcement {
 	if s.current == nil {
 		return nil
 	}
-	if time.Now().After(s.current.ExpiresAt) {
+	if !time.Now().Before(s.current.ExpiresAt) {
 		s.current = nil
 		return nil
 	}

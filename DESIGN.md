@@ -150,13 +150,15 @@ A `prefers-reduced-motion: reduce` block at the bottom of `styles.css` disables 
 
 ### Breakpoints
 
-Only three media queries exist; match them rather than inventing new ones:
+Five media queries exist; match them rather than inventing new ones:
 
 | Query | Trigger |
 |---|---|
 | `@media (pointer: coarse)` | Touch device — bump tap targets |
 | `@media (max-width: 720px)` | Tablet → phone — collapse the admin sidebar, drop 4-col strips to 2-col |
 | `@media (max-width: 480px)` | Small phone — viewer-specific refinements |
+| `@media (min-width: 768px)` | Viewer tablet — widen `.viewer__shell` to 768px |
+| `@media (min-width: 1024px)` | Viewer desktop — widen `.viewer__shell` to 1024px, 2-col `.vsched` grid |
 
 ### Z-index
 
@@ -332,13 +334,13 @@ Player-viewer-only. Solid `--accent` background, `--accent-fg` text. The only pl
 
 ### Viewer shell
 
-The spectator/player viewer is mobile-first but adapts at two breakpoints (mp-2m5):
+The spectator/player viewer is mobile-first but adapts at two breakpoints:
 
-| Viewport          | `.viewer__shell` max-width | Body padding         |
-|-------------------|---------------------------|----------------------|
-| ≤767px (mobile)   | `480px`                   | `14px 16px 80px`     |
-| 768–1023px (tablet)| `768px`                   | `16px 20px 80px`     |
-| ≥1024px (desktop) | `1024px`                  | `20px 28px 80px`     |
+| Viewport | `.viewer__shell` max-width | `.viewer__body` padding |
+|---|---|---|
+| Mobile (< 768px) | 480px | `14px 16px 80px` |
+| Tablet (768px – 1023px) | 768px | `16px 20px 80px` |
+| Desktop (≥ 1024px) | 1024px | `20px 28px 80px` |
 
 The mobile constraint still holds for phone-sized screens — content layout, typography, and component density are tuned around a single column. Tablet and desktop simply widen the gutter so the same column doesn't feel pinched on larger displays. The desktop tier also switches `.vsched` from a flex list to a 2-column grid so the schedule packs more matches per row.
 

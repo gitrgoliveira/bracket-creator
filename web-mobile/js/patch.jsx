@@ -49,9 +49,9 @@ const statusSortOrder = (s) => (s === "running" ? 0 : s === "scheduled" ? 1 : 2)
 
 // Stable per-court ordering: gather pointers to the original entries,
 // sort them by (status priority, scheduledAt, original index) without
-// mutating the input array. The result is a flat list of [origIndex,
-// match] pairs in display order — caller iterates and increments a
-// per-court counter to derive queue positions.
+// mutating the input array. Returns a Map of court → sorted entry
+// arrays; caller iterates per-court and increments a counter to derive
+// queue positions.
 function _orderByCourtKey(entries) {
     // `entries` is [{ idx, m, court }]; we sort within each court so
     // the per-court counter increments in viewer-visible order.
@@ -326,16 +326,8 @@ function applyPatch(prev, event) {
             const update = resultMap.get(m.id);
             if (update) {
                 changed = true;
-                const prevStatus = m.status;
-                const prevCourt = m.court || "";
                 const merged = _mergeMatchPatch(m, update);
-                const statusFlipped = (prevStatus === "scheduled") !== (merged.status === "scheduled");
-                // Court moves also stale per-court queue positions: a scheduled
-                // match leaving court A and arriving on court B must re-number
-                // both courts' remaining scheduled siblings.
-                const courtMoved = (merged.court || "") !== prevCourt
-                    && (prevStatus === "scheduled" || merged.status === "scheduled");
-                if (statusFlipped || courtMoved) {
+                if (isScheduleAffecting(m.status, merged.status, m, merged)) {
                     needsQueueRecompute = true;
                 }
                 return merged;
@@ -364,14 +356,8 @@ function applyPatch(prev, event) {
                     const patch = { ...update };
                     if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
                     if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-                    const prevStatus = m.status;
-                    const prevCourt = m.court || "";
                     const merged = _mergeMatchPatch(m, patch);
-                    const statusFlipped = (prevStatus === "scheduled") !== (merged.status === "scheduled");
-                    // Same court-move invalidation as the pool branch above.
-                    const courtMoved = (merged.court || "") !== prevCourt
-                        && (prevStatus === "scheduled" || merged.status === "scheduled");
-                    if (statusFlipped || courtMoved) {
+                    if (isScheduleAffecting(m.status, merged.status, m, merged)) {
                         bracketNeedsQueueRecompute = true;
                     }
                     return merged;

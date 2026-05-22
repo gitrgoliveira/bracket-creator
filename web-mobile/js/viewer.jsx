@@ -109,6 +109,18 @@ function matchParticipantNames(m) {
   return [aName, bName];
 }
 
+// Check whether a participant object `p` refers to the followed player,
+// matching by ID first (UUID) then by name as a fallback for cases where
+// team-match sub-players or legacy fixtures key by display name only.
+function isFollowedPlayer(p, followed) {
+  if (!p || !followed) return false;
+  const pId = (typeof p === "object" ? p.id : null) || "";
+  const pName = (typeof p === "object" ? p.name : p) || "";
+  if (pId && followed.id && pId === followed.id) return true;
+  if (pName && followed.name && pName === followed.name) return true;
+  return false;
+}
+
 // Return the subset of `matches` where the followed player participates.
 // Matching is by UUID first; if `fallbackName` is provided and no UUID hits
 // (e.g., legacy data that still keys by display name), fall back to a
@@ -603,16 +615,22 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
     );
   }
 
-  const aId = nextMatch.sideA && nextMatch.sideA.id ? nextMatch.sideA.id : "";
-  const isOnSideA = aId === followedPlayer.id;
+  const isOnSideA = isFollowedPlayer(nextMatch.sideA, followedPlayer);
   const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
+  const myBadgeClass = isOnSideA ? "tw-match__badge--aka" : "tw-match__badge--shiro";
+  const myBadgeLabel = isOnSideA ? "AKA" : "SHIRO";
+  const oppBadgeClass = isOnSideA ? "tw-match__badge--shiro" : "tw-match__badge--aka";
+  const oppBadgeLabel = isOnSideA ? "SHIRO" : "AKA";
   const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
 
   return (
     <div className="my-match" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
       {header}
       <div className="my-match__lbl">Your next match</div>
-      <div className="my-match__name">{followedPlayer.name}</div>
+      <div className="my-match__name">
+        <span className={`tw-match__badge ${myBadgeClass}`}>{myBadgeLabel}</span>
+        {followedPlayer.name}
+      </div>
       <div className="my-match__round">
         {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
         {nextMatch.status === "running" ? " · LIVE NOW" : ""}
@@ -631,9 +649,12 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
         <button
           className="my-match__opp"
           onClick={() => onMatchClick && onMatchClick(nextMatch)}
-          style={{ border: "none", background: "none", textAlign: "left", padding: 0, width: "100%", cursor: "pointer" }}
+          style={{ color: "inherit" }}
         >
-          <div className="l">vs Opponent</div>
+          <div className="l">
+            <span className={`tw-match__badge ${oppBadgeClass}`}>{oppBadgeLabel}</span>
+            vs Opponent
+          </div>
           <div className="n">{opponent.name}</div>
           {opponent.dojo ? <div className="d">{opponent.dojo}</div> : null}
         </button>

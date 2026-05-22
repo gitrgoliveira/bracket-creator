@@ -1761,10 +1761,15 @@ a:hover {
 }
 
 .my-match__opp {
+  display: block;
+  width: 100%;
   margin-top: 14px;
   padding: 12px;
   background: rgba(255, 255, 255, 0.1);
+  border: none;
   border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
 }
 
 .my-match__opp .l {

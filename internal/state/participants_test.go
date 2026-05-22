@@ -379,3 +379,57 @@ func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
 	assert.True(t, loaded2[0].CheckedIn, "4-part UUID row must be detected as checked-in")
 	assert.Equal(t, "Kenshikan", loaded2[0].Dojo, "Dojo must survive after checked_in token is stripped")
 }
+
+func TestAddParticipant_WhitespaceDuplicateGuard(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "ws-dup-add"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "WS Dup"}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{{Name: "Alice", Dojo: "Dojo A"}}))
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Alice ", Dojo: "Dojo B"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space variant must be caught by duplicate guard")
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: " Alice", Dojo: "Dojo B"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "leading-space variant must be caught by duplicate guard")
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "alice", Dojo: "Dojo B"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "case-only variant must be caught by duplicate guard")
+}
+
+func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "ws-dup-upd"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "WS Dup Upd"}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A"},
+		{Name: "Bob", Dojo: "Dojo B"},
+	}))
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	var bobID string
+	for _, p := range loaded {
+		if p.Name == "Bob" {
+			bobID = p.ID
+		}
+	}
+	require.NotEmpty(t, bobID)
+
+	// Renaming Bob to "Alice " (trailing space) must be rejected.
+	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
+		p.Name = "Alice "
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space rename colliding with existing name must be rejected")
+
+	// Renaming Bob to "alice" (case variant) must also be rejected.
+	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
+		p.Name = "alice"
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name must be rejected")
+}

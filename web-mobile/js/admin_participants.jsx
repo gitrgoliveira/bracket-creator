@@ -526,16 +526,21 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     setReplaceLoading(true);
     try {
       // Preserve fields the PUT handler would otherwise overwrite with empty
-      // values (displayName/Zekken, tag, metadata). The dialog only edits
-      // name/dojo/danGrade — everything else must round-trip from the
-      // current participant or be cleared on save.
+      // values (displayName/Zekken, tag). Build metadata from replaceDanGrade
+      // so the edited grade actually persists — the backend prefers Metadata
+      // over danGrade when Metadata is non-empty, so forwarding the old
+      // replaceTarget.metadata blindly would discard any grade change.
+      // metadata[0] = danGrade; slots 1+ are preserved from the current value.
+      const existingMeta = replaceTarget.metadata || [];
+      const metadata = replaceDanGrade.trim()
+        ? [replaceDanGrade.trim(), ...existingMeta.slice(1)]
+        : existingMeta.slice(1);
       const payload = {
         name: replaceName.trim(),
         dojo: replaceDojo.trim(),
-        danGrade: replaceDanGrade.trim() || undefined,
         displayName: replaceTarget.displayName || "",
         tag: replaceTarget.tag || "",
-        metadata: replaceTarget.metadata || [],
+        metadata,
       };
       await window.API.replaceParticipant(c.id, replaceTarget.id, payload, password);
       setReplaceTarget(null);

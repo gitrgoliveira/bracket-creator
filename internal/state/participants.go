@@ -227,14 +227,17 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 	}
 
 	// Duplicate-name guard: when the transform renames the participant,
-	// reject if any OTHER participant already has that name. Keeps the
-	// roster's name-keyed lookups (seeds, lineups) unambiguous.
+	// reject if any OTHER participant already has that name. Trim both
+	// sides — LoadParticipants canonicalises via SanitizeName (TrimSpace
+	// + Title), so "Alice " collapses to "Alice" on the next load and
+	// would reintroduce ambiguous name-keyed lookups.
 	if players[foundIdx].Name != oldName {
+		newTrimmed := strings.TrimSpace(players[foundIdx].Name)
 		for i := range players {
 			if i == foundIdx {
 				continue
 			}
-			if strings.EqualFold(players[i].Name, players[foundIdx].Name) {
+			if strings.EqualFold(strings.TrimSpace(players[i].Name), newTrimmed) {
 				return nil, ErrDuplicateName
 			}
 		}
@@ -251,7 +254,8 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 	if oldName != players[foundIdx].Name {
 		seedsPath := s.compPath(compID, "seeds.csv")
 		seeds, err := helper.ParseSeedsFile(seedsPath)
-		if err == nil {
+		switch {
+		case err == nil:
 			changed := false
 			for i := range seeds {
 				if seeds[i].Name == oldName {
@@ -269,6 +273,10 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 					return nil, fmt.Errorf("rename seed for %q: %w", oldName, werr)
 				}
 			}
+		case errors.Is(err, os.ErrNotExist):
+			// No seeds file yet — nothing to rename.
+		default:
+			return nil, fmt.Errorf("load seeds for rename of %q: %w", oldName, err)
 		}
 	}
 	return &players[foundIdx], nil
@@ -331,8 +339,11 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 	// Duplicate-name guard (per bead acceptance criteria): the admin
 	// UI accepts the same name twice without warning otherwise, and
 	// the rest of the roster identifies competitors by display name.
+	// Trim both sides: LoadParticipants canonicalises via SanitizeName
+	// (TrimSpace + Title), so a trailing-space variant like "Alice "
+	// collapses to "Alice" on the next load — reject it up front.
 	for _, existing := range players {
-		if strings.EqualFold(existing.Name, p.Name) {
+		if strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(p.Name)) {
 			return nil, ErrDuplicateName
 		}
 	}

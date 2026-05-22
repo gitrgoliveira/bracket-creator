@@ -919,8 +919,17 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 // and a rebalancing suggestion. Never rendered in viewer or display views.
 function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
+  const [tick, setTick] = useStateA(0);
 
-  const stats = computeCourtPaceStats(byCourt, safeMatchDuration);
+  useEffectA(() => {
+    const timer = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const stats = useMemoA(
+    () => computeCourtPaceStats(byCourt, safeMatchDuration),
+    [byCourt, safeMatchDuration, tick]
+  );
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)
   // ignore empty buckets — e.g. a configured court the user hasn't placed

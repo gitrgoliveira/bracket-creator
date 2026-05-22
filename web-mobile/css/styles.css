@@ -2655,8 +2655,8 @@ a:hover {
 
 .tw-match {
   display: grid;
-  grid-template-columns: 56px 1fr auto;
-  gap: 10px;
+  grid-template-columns: minmax(65px, auto) 1fr auto;
+  gap: 12px;
   align-items: center;
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -2692,6 +2692,9 @@ a:hover {
   margin-top: 1px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tw-match__players {
@@ -2713,7 +2716,10 @@ a:hover {
 .tw-match__comp {
   font-size: 10.5px;
   color: var(--ink-3);
-  margin-top: 2px;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tw-match__actions {

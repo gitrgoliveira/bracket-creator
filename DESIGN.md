@@ -336,7 +336,7 @@ The spectator/player viewer is mobile-first but adapts at two breakpoints (mp-2m
 
 | Viewport          | `.viewer__shell` max-width | Body padding         |
 |-------------------|---------------------------|----------------------|
-| ≤767px (mobile)   | `480px`                   | `14px 12px 80px`     |
+| ≤767px (mobile)   | `480px`                   | `14px 16px 80px`     |
 | 768–1023px (tablet)| `768px`                   | `16px 20px 80px`     |
 | ≥1024px (desktop) | `1024px`                  | `20px 28px 80px`     |
 

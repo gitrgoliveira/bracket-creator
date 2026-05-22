@@ -153,6 +153,13 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
   return body;
 }
 
+// mp-os3: shared decision-submit path used by both ScoreEditorModal and
+// TeamScoreEditorModal. Wraps buildDecisionBody + recordDecision and
+// resolves the password from the explicit prop. Extracted so the regression
+// test pins the production call site (rather than re-implementing the chain
+// inside the test, which was how the original gap slipped through). Returns
+// the promise from window.API.recordDecision so callers can await + handle
+// the 409 decision_locked / max_encho_exceeded retry-with-force loop.
 function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeriodCount, password, opts = {}) {
   const body = buildDecisionBody(kind, decisionPayload, enchoPeriodCount, opts);
   return window.API.recordDecision(compId, matchId, body, resolveDecisionPassword(password));

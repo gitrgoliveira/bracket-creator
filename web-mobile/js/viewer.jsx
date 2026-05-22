@@ -1885,7 +1885,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   );
 }
 
-function ResultsViewer({ _c, bracket, standings, pools }) {
+function ResultsViewer({ c, bracket, standings, pools }) {
   // Pools-only competitions have no bracket — show pool winners instead.
   if (!bracket) {
     const winners = (pools || []).map(p => {
@@ -1927,9 +1927,11 @@ function ResultsViewer({ _c, bracket, standings, pools }) {
 
   const final = bracket.rounds[bracket.rounds.length - 1][0];
   const sf = bracket.rounds[bracket.rounds.length - 2] || [];
-  const champion = final.winner;
-  const runnerUp = final.winner === final.sideA ? final.sideB : final.sideA;
-  const third = sf.map((m) => m.winner === m.sideA ? m.sideB : m.sideA).filter(Boolean);
+  const playerName = (p) => p?.name ?? p;
+  const samePlayer = (a, b) => (a?.id ?? a) === (b?.id ?? b);
+  const champion = playerName(final.winner);
+  const runnerUp = playerName(samePlayer(final.winner, final.sideA) ? final.sideB : final.sideA);
+  const third = sf.map((m) => playerName(samePlayer(m.winner, m.sideA) ? m.sideB : m.sideA)).filter(Boolean);
   return (
     <div>
       <div className="podium">

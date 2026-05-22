@@ -189,9 +189,33 @@ describe('ResultsViewer', () => {
     const MatchCardStub = () => null;
     MatchCardStub.displayName = 'MatchCardStub';
     window.MatchCard = MatchCardStub;
-    const tree = ResultsViewer({ bracket, standings: null, pools: null, _c: {} });
+    const tree = ResultsViewer({ bracket, standings: null, pools: null, c: {} });
     const text = JSON.stringify(tree);
     expect(text).toContain('Alice'); // champion
+    expect(text).toContain('Charlie'); // runner-up
+  });
+
+  it('bracket path: renders podium from normalized player objects ({id,name})', () => {
+    // normalizeMatch converts string sideA/sideB/winner to {id,name} objects.
+    // Each field may be a distinct object instance even when they refer to the
+    // same player, so the component must compare by id, not by reference.
+    const alice   = { id: 'p1', name: 'Alice' };
+    const bob     = { id: 'p2', name: 'Bob' };
+    const charlie = { id: 'p3', name: 'Charlie' };
+    const dave    = { id: 'p4', name: 'Dave' };
+    const bracket = {
+      rounds: [
+        [
+          { sideA: alice,   sideB: bob,     winner: { id: 'p1', name: 'Alice' } },
+          { sideA: charlie, sideB: dave,    winner: { id: 'p3', name: 'Charlie' } },
+        ],
+        [{ sideA: alice, sideB: charlie, winner: { id: 'p1', name: 'Alice' } }],
+      ],
+    };
+    window.MatchCard = () => null;
+    const tree = ResultsViewer({ bracket, standings: null, pools: null, c: {} });
+    const text = JSON.stringify(tree);
+    expect(text).toContain('Alice');   // champion
     expect(text).toContain('Charlie'); // runner-up
   });
 });

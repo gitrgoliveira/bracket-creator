@@ -157,7 +157,7 @@ describe('ResultsViewer', () => {
       'Pool A': [makeStanding('Alice', 'DojoA'), makeStanding('Bob', 'DojoB')],
       'Pool B': [makeStanding('Charlie', 'DojoC')],
     };
-    const tree = ResultsViewer({ bracket: null, standings, pools, _c: {} });
+    const tree = ResultsViewer({ bracket: null, standings, pools });
     const text = JSON.stringify(tree);
     expect(text).toContain('Pool winners');
     expect(text).toContain('Alice');
@@ -168,13 +168,13 @@ describe('ResultsViewer', () => {
   it('pools-only: shows "No results available yet." when standings are empty', () => {
     const pools = [{ poolName: 'Pool A' }];
     const standings = { 'Pool A': [] };
-    const tree = ResultsViewer({ bracket: null, standings, pools, _c: {} });
+    const tree = ResultsViewer({ bracket: null, standings, pools });
     expect(JSON.stringify(tree)).toContain('No results available');
   });
 
   it('pools-only: shows "No results available yet." when standings is null', () => {
     const pools = [{ poolName: 'Pool A' }];
-    const tree = ResultsViewer({ bracket: null, standings: null, pools, _c: {} });
+    const tree = ResultsViewer({ bracket: null, standings: null, pools });
     expect(JSON.stringify(tree)).toContain('No results available');
   });
 
@@ -189,7 +189,7 @@ describe('ResultsViewer', () => {
     const MatchCardStub = () => null;
     MatchCardStub.displayName = 'MatchCardStub';
     window.MatchCard = MatchCardStub;
-    const tree = ResultsViewer({ bracket, standings: null, pools: null, c: {} });
+    const tree = ResultsViewer({ bracket, standings: null, pools: null });
     const text = JSON.stringify(tree);
     expect(text).toContain('Alice'); // champion
     expect(text).toContain('Charlie'); // runner-up
@@ -212,8 +212,10 @@ describe('ResultsViewer', () => {
         [{ sideA: alice, sideB: charlie, winner: { id: 'p1', name: 'Alice' } }],
       ],
     };
-    window.MatchCard = () => null;
-    const tree = ResultsViewer({ bracket, standings: null, pools: null, c: {} });
+    const MatchCardStub = () => null;
+    MatchCardStub.displayName = 'MatchCardStub';
+    window.MatchCard = MatchCardStub;
+    const tree = ResultsViewer({ bracket, standings: null, pools: null });
     const text = JSON.stringify(tree);
     expect(text).toContain('Alice');   // champion
     expect(text).toContain('Charlie'); // runner-up

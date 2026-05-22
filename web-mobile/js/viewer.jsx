@@ -1046,7 +1046,7 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
             // derivedBracket synthesized for the Bracket tab) — ResultsViewer
             // treats a null bracket as "pools-only" and renders pool winners
             // from standings instead of an empty podium.
-            <ResultsViewer c={c} bracket={hasRealBracket ? bracket : null} standings={standings} pools={pools} />
+            <ResultsViewer bracket={hasRealBracket ? bracket : null} standings={standings} pools={pools} />
           )}
         </div>
       </div>
@@ -1885,7 +1885,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   );
 }
 
-function ResultsViewer({ c, bracket, standings, pools }) {
+function ResultsViewer({ bracket, standings, pools }) {
   // Pools-only competitions have no bracket — show pool winners instead.
   if (!bracket) {
     const winners = (pools || []).map(p => {

@@ -507,9 +507,11 @@ describe('CourtPacePanel timer', () => {
     let rootProps = null;
     let rootFactory = null;
     let effectCleanups = [];
+    let renderCount = 0;
 
     function rerender() {
       hookIndex = 0;
+      renderCount++;
       scheduledRender = rootFactory(rootProps);
       return scheduledRender;
     }
@@ -557,6 +559,7 @@ describe('CourtPacePanel timer', () => {
         rootFactory = factory;
         rootProps = props;
         effectCleanups = [];
+        renderCount = 0;
         return rerender();
       },
       unmount: () => {
@@ -564,6 +567,7 @@ describe('CourtPacePanel timer', () => {
         effectCleanups = [];
       },
       currentTree: () => scheduledRender,
+      renderCount: () => renderCount,
     };
   }
 
@@ -601,6 +605,27 @@ describe('CourtPacePanel timer', () => {
     runtime.unmount();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[0].value);
+  });
+
+  it('advancing 60s triggers a re-render so wall-clock-derived stats refresh', () => {
+    // mp-pb1 AC #3: the tick must actually re-render the panel, not just
+    // schedule a no-op interval. Advance fake timers and assert that the
+    // component was re-rendered after the tick fired. This is the real
+    // contract — without it the panel could "tick" silently and the chip
+    // color would still freeze between SSE events.
+    const byCourt = {
+      A: [
+        { status: 'scheduled', scheduledAt: '09:00' },
+      ]
+    };
+
+    runtime.mount(CourtPacePanel, { byCourt, safeMatchDuration: 5 });
+    const before = runtime.renderCount();
+
+    vi.advanceTimersByTime(60000);
+
+    const after = runtime.renderCount();
+    expect(after).toBeGreaterThan(before);
   });
 });
 

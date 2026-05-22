@@ -886,6 +886,11 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //   delta               — estimatedRemainingMin − plannedRemainingMin
 //                         positive = behind schedule, negative = ahead
 //
+// nowMinutes is optional; defaults to the current wall-clock (read via
+// `new Date()`). The CourtPacePanel does NOT pass it, so the 60s tick in
+// the panel forces the memo to re-invoke this helper and read fresh time.
+// Tests pass nowMinutes explicitly for determinism.
+//
 // Exported for the vitest suite.
 export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
   const ppm = perMatchMinutes > 0 ? perMatchMinutes : 3;

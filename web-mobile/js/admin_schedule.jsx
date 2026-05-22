@@ -694,7 +694,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
             (pools/mixed/playoffs/league/swiss), so we don't claim "Pool play is
             complete" or point at a specific next tab. */}
         {statusFilter !== "complete" && allMatchesCompleted(filtered) && (
-          <div className="notice notice--success" style={{ marginBottom: 12, padding: "12px 16px", background: "var(--green-soft, #e8f8f0)", border: "1px solid var(--green, #34b872)", borderRadius: 8 }}>
+          <div className="alert alert--success" style={{ marginBottom: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>All matches scored</div>
             <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Every visible match is complete. Check the Pools or Bracket tab to review standings, generate playoffs, or start the next phase.</div>
           </div>

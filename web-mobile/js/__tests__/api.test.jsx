@@ -182,6 +182,46 @@ describe('API Utils', () => {
       });
     });
 
+    // mp-a7y: pins the invalidate endpoint URL + auth header so a
+    // future refactor can't silently re-route the call. The handler
+    // is gated on tournament password (handlers_competition.go:782);
+    // missing the X-Tournament-Password header would 401 with the
+    // status-flip never reaching disk.
+    describe('invalidateCompetition', () => {
+      it('POSTs to /api/competitions/{id}/invalidate with password header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+        const result = await API.invalidateCompetition('comp-abc', 'secret');
+        expect(result).toBe(true);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp-abc/invalidate',
+          expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({
+              'X-Tournament-Password': 'secret',
+            }),
+          })
+        );
+      });
+
+      it('throws with server error message on failure', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'only in-progress competitions can be invalidated' }),
+        });
+        await expect(API.invalidateCompetition('c1', 'pw'))
+          .rejects.toThrow('only in-progress competitions can be invalidated');
+      });
+
+      it('throws default message if json parse fails', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error(); },
+        });
+        await expect(API.invalidateCompetition('c1', 'pw'))
+          .rejects.toThrow('Failed to invalidate competition');
+      });
+    });
+
     // Regression tests for the empty-body bug: three handlers
     // (override-rank, override-winner, reset-overrides) return `c.Status`
     // with no body. The JS client used to call `return res.json()` on

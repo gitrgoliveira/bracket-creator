@@ -547,6 +547,31 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
   );
 }
 
+// mymatchQueueLabel — FR-025 label for the "Your next match" Queue chip.
+//
+// Contract:
+//   - status==="scheduled" + queuePosition===1 → "Next up"
+//   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
+//   - status==="running"                       → null (round label already shows " · LIVE NOW")
+//   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
+//
+// Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
+// so all three viewer surfaces agree. Running matches return null because
+// the my-match__round label already appends " · LIVE NOW" — rendering it
+// again in the Queue chip would be a duplicate. We intentionally do NOT
+// fall back to "Scheduled HH:MM" the way display.jsx does — the
+// MyMatchPanel already has a dedicated Time chip.
+// Exported for unit-testing.
+export function mymatchQueueLabel(m) {
+  if (!m) return null;
+  if (m.status === "running") return null;
+  if (m.status !== "scheduled") return null;
+  const qp = Number(m.queuePosition);
+  if (!Number.isFinite(qp) || qp <= 0) return null;
+  if (qp === 1) return "Next up";
+  return `${qp - 1} before yours`;
+}
+
 // MyMatchPanel — "Find my matches" entry point + active "Your next match"
 // card. Two states:
 //   1) No followed player yet → render a picker; selecting persists to
@@ -607,6 +632,14 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   const isOnSideA = aId === followedPlayer.id;
   const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
   const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
+  // FR-025: queue position is 1-indexed per court for scheduled matches; 0 for
+  // running/completed. Treat null/undefined/0 as "don't render" so we stay
+  // gracefully empty for non-queued matches and pre-T046 responses. Wording
+  // ("Next up" / "N before yours") mirrors VSchedItem below and display.jsx
+  // so all three viewer surfaces agree. Running matches show null here
+  // because the round label already appends " · LIVE NOW".
+  const queueLabel = mymatchQueueLabel(nextMatch);
+  const queueHighlight = queueLabel === "Next up";
 
   return (
     <div className="my-match" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
@@ -626,6 +659,30 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
           <span className="l">Time</span>
           <span className="v">{nextMatch.scheduledAt || "TBA"}</span>
         </div>
+        {queueLabel && (
+          <div
+            className="my-match__chip"
+            data-testid="my-match-queue"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className="l">Queue</span>
+            {/* The .my-match card background is var(--accent) (dark blue), so
+                colouring text with var(--accent) renders unreadable. The chip
+                inherits white from --accent-fg; emphasise the live/up-next
+                state with full opacity + a Unicode bullet instead.
+                Wrap the decorative bullet in aria-hidden to keep screen reader
+                announcements clean and focused on the queue label text. */}
+            <span className="v" style={{ opacity: queueHighlight ? 1 : 0.92 }}>
+              {/* Decorative bullet glyph — hidden from screen readers so the
+                  announcement is just the queue label text ("Next up" /
+                  "1 before yours") without a spurious "bullet" prefix. */}
+              {queueHighlight ? <span aria-hidden="true">{"• "}</span> : null}
+              {queueLabel}
+            </span>
+          </div>
+        )}
       </div>
       {opponent && (typeof opponent === "object") ? (
         <button
@@ -1053,7 +1110,7 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
     isSwiss ? { id: "swiss", label: "Standings" } : null,
     hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
     hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
-    c.status === "completed" && !isSwiss ? { id: "results", label: "Results" } : null,
+    c.status === "completed" ? { id: "results", label: "Awards" } : null,
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
@@ -1134,8 +1191,11 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           {tab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
-          {tab === "results" && c.status === "completed" && derivedBracket && (
-            <ResultsViewer c={c} bracket={derivedBracket} />
+          {tab === "results" && c.status === "completed" && (
+            // Pass the *real* server bracket (not derivedBracket) — the latter
+            // is a TBD placeholder for visualization that has no winners and
+            // would short-circuit the standings fallback inside AwardsView.
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} />
           )}
         </div>
       </div>
@@ -1347,8 +1407,8 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
   // stays gracefully empty for non-queued matches and pre-T046 responses.
-  const qp = m.queuePosition;
-  const queueLabel = (m.status === "scheduled" && qp && qp > 0)
+  const qp = Number(m.queuePosition);
+  const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
     ? (qp === 1 ? "Next up" : `${qp - 1} before yours`)
     : null;
   return (
@@ -1758,7 +1818,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, addDojoToWatchlist };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, deriveAwards, addDojoToWatchlist };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -1766,6 +1826,7 @@ if (typeof window !== 'undefined') {
     window.matchHighlightedBy = matchHighlightedBy;
     window.buildPlayerMatchHighlight = buildPlayerMatchHighlight;
     window.buildWatchlistUpcoming = buildWatchlistUpcoming;
+    window.deriveAwards = deriveAwards;
     window.addDojoToWatchlist = addDojoToWatchlist;
 }
 
@@ -1834,8 +1895,8 @@ function ScheduleViewer({ tournament, tweaks }) {
   dayFiltered.forEach((m) => { (byCourt[m.court] = byCourt[m.court] || []).push(m); });
   Object.values(byCourt).forEach((list) => list.sort((a, b) => {
     const order = { running: 0, scheduled: 1, completed: 2 };
-    const ao = order[a.status] ?? 1;
-    const bo = order[b.status] ?? 1;
+    const ao = order[a.status] ?? 2;
+    const bo = order[b.status] ?? 2;
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   }));
@@ -1940,8 +2001,8 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer.
-  const qp = m.queuePosition;
-  const queuePill = (m.status === "scheduled" && qp && qp > 0)
+  const qp = Number(m.queuePosition);
+  const queuePill = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
     ? (qp === 1 ? "Next" : `#${qp}`)
     : null;
   return (
@@ -1975,44 +2036,200 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   );
 }
 
-function ResultsViewer({ _c, bracket }) {
-  const final = bracket.rounds[bracket.rounds.length - 1][0];
-  const sf = bracket.rounds[bracket.rounds.length - 2] || [];
-  const champion = final.winner;
-  const runnerUp = final.winner === final.sideA ? final.sideB : final.sideA;
-  const third = sf.map((m) => m.winner === m.sideA ? m.sideB : m.sideA).filter(Boolean);
-  return (
-    <div>
-      <div className="podium">
-        {third[0] && (
-          <div className="podium-step podium-step--3">
-            <div className="place">3</div>
-            <div className="name">{third[0]}</div>
-          </div>
-        )}
-        {champion && (
-          <div className="podium-step podium-step--1">
-            <div style={{ fontSize: 28 }}>🏆</div>
-            <div className="place">1</div>
-            <div className="name">{champion}</div>
-          </div>
-        )}
-        {runnerUp && (
-          <div className="podium-step podium-step--2">
-            <div className="place">2</div>
-            <div className="name">{runnerUp}</div>
-          </div>
-        )}
-        {third[1] && (
-          <div className="podium-step podium-step--3" style={{ order: 4 }}>
-            <div className="place">3</div>
-            <div className="name">{third[1]}</div>
-          </div>
-        )}
+// deriveAwards returns up to four placements for the closing ceremony per
+// FIK convention: 1st, 2nd, and two 3rds (semi-final losers — no bronze match).
+// Returns [] when no podium data exists yet.
+// `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich bracket
+// entries with dojo info; missing names fall back to {name, dojo: ""}.
+// Bracket match fields (sideA/sideB/winner) may be either plain strings (raw
+// backend payload) or normalized objects ({id, name, dojo}) as produced by
+// normalizeMatch() in api_serializers.jsx — both shapes are handled.
+// `standings` may be either a flat array (Swiss-shape) or an object keyed by
+// pool name (pools/league shape).
+function deriveAwards(bracket, standings, pools, nameToPlayer) {
+  // Extract the name string from a match field that may be a string (raw
+  // backend payload) or a normalized object ({id, name, dojo}) produced by
+  // normalizeMatch() in api_serializers.jsx.
+  const toName = (v) => (v && typeof v === "object" ? v.name || "" : v || "");
+
+  // Enrich a player field with dojo info. If the field is already a normalized
+  // object with a dojo, use it directly; otherwise fall back to nameToPlayer.
+  const lookup = (v) => {
+    const name = toName(v);
+    if (!name) return null;
+    const fromField = v && typeof v === "object" ? v.dojo : null;
+    const p = nameToPlayer && nameToPlayer.get(name);
+    return { name, dojo: fromField || (p && p.dojo) || "" };
+  };
+
+  // Bracket-based: final + semi-finals. Only used when the final has a
+  // decided winner; if it doesn't, fall through to standings below so a
+  // pools-only competition that has a TBD-placeholder bracket still shows
+  // the podium from its pool standings.
+  if (bracket && bracket.rounds && bracket.rounds.length > 0) {
+    const finalRound = bracket.rounds[bracket.rounds.length - 1];
+    const sfRound = bracket.rounds[bracket.rounds.length - 2] || [];
+    const final = finalRound[0];
+    if (final && final.winner) {
+      const winnerName = toName(final.winner);
+      const champion = final.winner;
+      const runnerUp = winnerName === toName(final.sideA) ? final.sideB : final.sideA;
+      const thirds = sfRound
+        .map((m) => {
+          if (!m.winner) return null;
+          return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
+        })
+        .filter(Boolean);
+      return [
+        { place: 1, ...lookup(champion) },
+        runnerUp ? { place: 2, ...lookup(runnerUp) } : null,
+        thirds[0] ? { place: 3, ...lookup(thirds[0]) } : null,
+        thirds[1] ? { place: 3, ...lookup(thirds[1]) } : null,
+      ].filter(Boolean);
+    }
+  }
+
+  // Standings-based fallback. Two payload shapes are supported:
+  //   - Swiss/`/swiss/standings`: a flat array of standings rows.
+  //   - Pools/league: an object keyed by poolName → array of rows.
+  // We take the top four from the (single) leaderboard; for pools-only with
+  // multiple pools we use the first pool (consistent with PoolsViewer's
+  // leagueWinner pick).
+  let list = null;
+  if (Array.isArray(standings)) {
+    list = standings;
+  } else if (standings && pools && pools.length > 0) {
+    list = standings[pools[0].poolName] || [];
+  }
+  if (list && list.length > 0) {
+    const slice = list.slice(0, 4).map((s, i) => ({
+      place: i < 3 ? i + 1 : 3,
+      name: s.player?.name || "",
+      dojo: s.player?.dojo || "",
+    }));
+    return slice.filter((e) => e.name);
+  }
+
+  return [];
+}
+
+const PLACE_STYLE = {
+  1: { icon: "🏆", label: "1st Place", accent: "var(--gold, #d4af37)" },
+  2: { icon: "🥈", label: "2nd Place", accent: "var(--silver, #c0c0c0)" },
+  3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
+};
+
+function AwardsView({ c, bracket, standings, pools, players }) {
+  const containerRef = useRefV(null);
+  const [isFs, setIsFs] = useState(false);
+  // Swiss standings aren't part of the competition-detail payload — they live
+  // behind /swiss/standings. Fetch them here when the format is swiss so the
+  // Awards tab works for Swiss competitions too.
+  const [swissStandings, setSwissStandings] = useState(null);
+
+  React.useEffect(() => {
+    const onFsChange = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  React.useEffect(() => {
+    if (c?.format !== "swiss" || !window.API?.swissStandings) return;
+    let cancelled = false;
+    window.API.swissStandings(c.id)
+      .then((data) => { if (!cancelled) setSwissStandings(Array.isArray(data) ? data : []); })
+      .catch(() => { if (!cancelled) setSwissStandings([]); });
+    return () => { cancelled = true; };
+  }, [c?.id, c?.format, c?.swissCurrentRound]);
+
+  const nameToPlayer = useMemo(() => {
+    const m = new Map();
+    (players || []).forEach((p) => {
+      if (p && p.name) m.set(p.name, p);
+    });
+    return m;
+  }, [players]);
+
+  const effectiveStandings = c?.format === "swiss" ? swissStandings : standings;
+  const isSwissLoading = c?.format === "swiss" && swissStandings === null;
+  const awards = useMemo(
+    () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer),
+    [bracket, effectiveStandings, pools, nameToPlayer]
+  );
+
+  const toggleFs = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else if (el.requestFullscreen) {
+      el.requestFullscreen().catch(() => {});
+    }
+  };
+
+  if (isSwissLoading) {
+    return (
+      <div className="empty" data-testid="awards-loading">
+        <div className="icon">🏆</div>
+        <h3>Loading final standings…</h3>
       </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card__title" style={{ marginBottom: 10 }}>Final match</div>
-        <window.MatchCard match={final} variant={1} showDojo={true} />
+    );
+  }
+
+  if (awards.length === 0) {
+    return (
+      <div className="empty" data-testid="awards-empty">
+        <div className="icon">🏆</div>
+        <h3>Final standings not yet available</h3>
+      </div>
+    );
+  }
+
+  // Visual podium ordering is driven by CSS order rules: 2 left, 1 center, then 3rd-place cards.
+  // For the fullscreen ceremony layout we keep the same order but enlarge.
+  return (
+    <div
+      ref={containerRef}
+      className="awards"
+      data-testid="awards-view"
+      style={{
+        background: isFs ? "var(--bg)" : "transparent",
+        padding: isFs ? 40 : 0,
+        minHeight: isFs ? "100vh" : "auto",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
+            {c?.name ? `${c.name} — Awards` : "Awards"}
+          </div>
+          <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
+            Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
+          </div>
+        </div>
+        <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
+          {isFs ? "Exit fullscreen" : "Fullscreen"}
+        </button>
+      </div>
+      <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
+        {awards.map((a, idx) => {
+          const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
+          return (
+            <div
+              key={`${a.place}-${a.name}-${idx}`}
+              className={`podium-step podium-step--${a.place}`}
+              data-testid={`awards-place-${a.place}-${idx}`}
+              style={{ borderTop: `4px solid ${style.accent}` }}
+            >
+              <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>
+              <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
+              <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
+              {a.dojo && (
+                <div className="dojo" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

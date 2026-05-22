@@ -178,7 +178,7 @@ function findActiveCourts(tournament, competitions) {
 //   1. status !== "scheduled"           → "" (no queue label on running /
 //      completed / cancelled rows, even if queuePosition or scheduledAt
 //      is set — this gate takes precedence over everything below).
-//   2. status === "scheduled" + qp ===1 → "Up next".
+//   2. status === "scheduled" + qp ===1 → "Next up".
 //   3. status === "scheduled" + qp > 1  → "(qp - 1) before yours".
 //   4. status === "scheduled" + falsy qp + scheduledAt → "Scheduled hh:mm".
 //   5. anything else                    → "".
@@ -186,14 +186,14 @@ function findActiveCourts(tournament, competitions) {
 // queuePosition is coerced with Number() so JSON-string values ("1", "2")
 // work the same as numeric ones.
 //
-// Wording is consolidated on "Up next" across all surfaces (bead mp-e3k).
+// Wording is consolidated on "Next up" across all surfaces (bead mp-e3k).
 // If you need a denser pill form for a tight row, use queueLabelCompact.
 function queueLabel(m) {
     if (!m) return "";
     if (m.status !== "scheduled") return "";
     const qp = Number(m.queuePosition);
-    if (qp > 0) {
-        if (qp === 1) return "Up next";
+    if (Number.isFinite(qp) && qp > 0) {
+        if (qp === 1) return "Next up";
         return `${qp - 1} before yours`;
     }
     if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
@@ -202,7 +202,7 @@ function queueLabel(m) {
 
 // Compact pill form of the queue-position label, for dense rows like the
 // per-court TWMatch tiles on the tournament-wide viewer. Same canonical
-// "Up next" wording for qp=1 so all surfaces agree (bead mp-e3k); other
+// "Next up" wording for qp=1 so all surfaces agree (bead mp-e3k); other
 // positions render as "#N". Returns null when there's nothing to show so
 // callers can conditionally render the pill.
 function queueLabelCompact(m) {
@@ -210,7 +210,7 @@ function queueLabelCompact(m) {
     if (m.status !== "scheduled") return null;
     const qp = Number(m.queuePosition);
     if (isNaN(qp) || qp <= 0) return null;
-    if (qp === 1) return "Up next";
+    if (qp === 1) return "Next up";
     return `#${qp}`;
 }
 
@@ -450,7 +450,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
 
             {/* T068: upcoming-match list with queue-position labels.
                 Pulls m.queuePosition (1-indexed, populated by handlers_viewer
-                annotateQueuePositions). Position 1 → "Up next"; position N
+                annotateQueuePositions). Position 1 → "Next up"; position N
                 (>1) → "(N-1) before yours" to match VSchedItem's wording.
                 T061: capped at 2 entries when live, falls back to up to 2
                 additional cards when auto-promoting (so we still show a

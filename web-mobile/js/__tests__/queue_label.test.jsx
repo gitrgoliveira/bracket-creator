@@ -9,19 +9,19 @@ import { queueLabel, queueLabelCompact } from '../display.jsx';
 // Contract:
 //   - queueLabel(m)        — full-form label used in scheduled-list rows
 //     - status !== "scheduled" → "" (gate applied first, matches queueLabelCompact)
-//     - qp === 1 → "Up next"  (qp coerced with Number(), handles string values)
+//     - qp === 1 → "Next up"  (qp coerced with Number(), handles string values)
 //     - qp >  1 → "(qp - 1) before yours"
 //     - status === "scheduled" + falsy qp + scheduledAt → "Scheduled hh:mm" fallback
 //     - any other combination → ""
 //   - queueLabelCompact(m) — pill form used in dense rows
 //     - status !== "scheduled" → null (so callers can hide the pill)
-//     - qp === 1 → "Up next"
+//     - qp === 1 → "Next up"
 //     - qp >  1 → "#N"
 //     - falsy/non-positive qp → null
 
 describe('queueLabel (full form)', () => {
-  it('returns "Up next" for queue position 1', () => {
-    expect(queueLabel({ status: 'scheduled', queuePosition: 1 })).toBe('Up next');
+  it('returns "Next up" for queue position 1', () => {
+    expect(queueLabel({ status: 'scheduled', queuePosition: 1 })).toBe('Next up');
   });
 
   it('returns "(N-1) before yours" for queue position N > 1', () => {
@@ -53,7 +53,7 @@ describe('queueLabel (full form)', () => {
   });
 
   it('handles a string queuePosition (e.g. from JSON deserialization)', () => {
-    expect(queueLabel({ status: 'scheduled', queuePosition: '1' })).toBe('Up next');
+    expect(queueLabel({ status: 'scheduled', queuePosition: '1' })).toBe('Next up');
     expect(queueLabel({ status: 'scheduled', queuePosition: '2' })).toBe('1 before yours');
   });
 
@@ -77,7 +77,7 @@ describe('queueLabel (full form)', () => {
   // Regression test for Copilot PR #133 comment 3288473578: the docstring
   // promises the status gate takes precedence over the queuePosition branch.
   // Pin every non-scheduled status × qp>0 combination so the contract
-  // cannot regress to leaking "Up next" / "N before yours" on running,
+  // cannot regress to leaking "Next up" / "N before yours" on running,
   // completed, or cancelled rows.
   it('docstring contract: status gate beats queuePosition on every non-scheduled status', () => {
     const nonScheduledStatuses = ['running', 'completed', 'cancelled', 'pending', undefined, ''];
@@ -93,10 +93,10 @@ describe('queueLabel (full form)', () => {
 });
 
 describe('queueLabelCompact (pill form)', () => {
-  it('returns "Up next" for queue position 1 (canonical wording)', () => {
+  it('returns "Next up" for queue position 1 (canonical wording)', () => {
     // Pinning this prevents drift back to the older "Next" wording
     // that used to live in TWMatch.
-    expect(queueLabelCompact({ status: 'scheduled', queuePosition: 1 })).toBe('Up next');
+    expect(queueLabelCompact({ status: 'scheduled', queuePosition: 1 })).toBe('Next up');
   });
 
   it('returns "#N" for queue position N > 1', () => {
@@ -119,7 +119,7 @@ describe('queueLabelCompact (pill form)', () => {
   });
 
   it('handles string queuePosition (coerces to number)', () => {
-    expect(queueLabelCompact({ status: 'scheduled', queuePosition: '1' })).toBe('Up next');
+    expect(queueLabelCompact({ status: 'scheduled', queuePosition: '1' })).toBe('Next up');
     expect(queueLabelCompact({ status: 'scheduled', queuePosition: '2' })).toBe('#2');
   });
 

@@ -150,7 +150,7 @@ A `prefers-reduced-motion: reduce` block at the bottom of `styles.css` disables 
 
 ### Breakpoints
 
-Five media queries exist; match them rather than inventing new ones:
+Five breakpoint-related media queries exist; match them rather than inventing new ones. (A sixth `@media (prefers-reduced-motion: reduce)` block handles accessibility — see above.)
 
 | Query | Trigger |
 |---|---|

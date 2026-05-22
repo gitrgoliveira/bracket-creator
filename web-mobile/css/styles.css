@@ -1605,8 +1605,10 @@ a:hover {
   flex-direction: column;
 }
 
-/* Tablet: widen the viewer shell */
-@media (min-width: 769px) {
+/* Tablet: widen the viewer shell. Threshold is 768px to match the
+   PR description's "Tablet 768px" expectation — viewports exactly
+   at 768 wide get the tablet treatment. */
+@media (min-width: 768px) {
   .viewer__shell {
     max-width: 768px;
   }
@@ -1615,8 +1617,9 @@ a:hover {
   }
 }
 
-/* Desktop: full-width shell up to 1024px, two-column schedule grid */
-@media (min-width: 1025px) {
+/* Desktop: full-width shell up to 1024px, two-column schedule grid.
+   Threshold is 1024px so exactly-1024 viewports get desktop styling. */
+@media (min-width: 1024px) {
   .viewer__shell {
     max-width: 1024px;
   }

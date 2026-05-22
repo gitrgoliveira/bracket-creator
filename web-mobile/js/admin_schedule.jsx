@@ -937,7 +937,7 @@ function CourtPacePanel({ byCourt, safeMatchDuration }) {
       <div
         className="card__title"
         style={{ display: "flex", justifyContent: "space-between", cursor: "pointer", marginBottom: open ? 12 : 0 }}
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen(o => !o)}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } }}
         role="button"
         tabIndex={0}

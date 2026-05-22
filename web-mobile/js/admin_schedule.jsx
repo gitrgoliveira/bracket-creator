@@ -893,7 +893,13 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //
 // Exported for the vitest suite.
 export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
-  const ppm = perMatchMinutes > 0 ? perMatchMinutes : 3;
+  // Tournament config can leak strings through (e.g. localStorage,
+  // URL params, form input). `5 > 0` is truthy in JS so the original
+  // ternary returned the bare value, and `latestMin + "5" - nowMin`
+  // would have done string-concatenation arithmetic. Coerce up front
+  // and guard against NaN.
+  const ppmNum = Number(perMatchMinutes);
+  const ppm = Number.isFinite(ppmNum) && ppmNum > 0 ? ppmNum : 3;
   const nowMin = nowMinutes !== undefined ? nowMinutes : (() => {
     const d = new Date();
     return d.getHours() * 60 + d.getMinutes();
@@ -1039,9 +1045,14 @@ window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
 
-// ES export for the vitest suite — pure helpers only. Components stay
-// behind the window.* pattern to match the rest of admin_*.jsx.
-// Note: computeCourtPaceStats is already exported at its declaration site
-// (export function computeCourtPaceStats).
+// ES exports for the vitest suite. Pure helpers (timeEdited,
+// timeToMinutes, clampMatchDuration, suggestRebalances,
+// computeCourtPaceStats, filterMatchesByCourt) are exported at their
+// declaration sites; this block re-exports the helpers that aren't.
+//
+// CourtPacePanel is also exported as an ES symbol because its vitest
+// suite needs to mount the actual component (not just call the helper).
+// All other top-level components stay behind the window.* pattern to
+// match the rest of admin_*.jsx.
 export { timeEdited, timeToMinutes, clampMatchDuration, suggestRebalances };
 

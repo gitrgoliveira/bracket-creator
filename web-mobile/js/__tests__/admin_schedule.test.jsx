@@ -582,8 +582,13 @@ describe('CourtPacePanel timer', () => {
 
   afterEach(() => {
     global.React = realReact;
-    vi.useRealTimers();
+    // The component's effect cleanup calls clearInterval on an interval
+    // created under fake timers, so unmount BEFORE switching back to real
+    // timers — otherwise the cleanup runs against a different timer
+    // implementation than the one that scheduled it. Order matters.
     runtime.unmount();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.resetModules();
   });
 
@@ -594,6 +599,9 @@ describe('CourtPacePanel timer', () => {
       ]
     };
 
+    // Spies are explicitly restored by `vi.restoreAllMocks()` in afterEach
+    // so they don't leak into later tests (the vitest config does not
+    // automatically restore them).
     const setIntervalSpy = vi.spyOn(global, 'setInterval');
     const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
 

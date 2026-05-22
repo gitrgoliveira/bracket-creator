@@ -46,6 +46,30 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
   return { action: "noop" };
 }
 
+// Regex that strips the trailing match-index segment from a pool-match id to
+// recover the pool name. Backend formats: "PoolName-N", "PoolName-DH-N",
+// "PoolName-TB-N". A plain split('-')[0] breaks on hyphenated pool names
+// (e.g. "Pool A-East-0" → "Pool A", not "Pool"). This regex captures
+// everything before the trailing numeric/DH/TB suffix; ids without a
+// recognisable suffix degrade to "" (no pool name inferable).
+const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
+
+// Filter a flat poolMatches array down to entries belonging to a single pool.
+// Uses POOL_MATCH_ID_RE so DH/TB suffix variants are handled correctly.
+//
+// pool.matches (helper.Match) carries only sideA/sideB — no id, status, or
+// score data. poolMatches (state.MatchResult) has the full data including the
+// id required by the score API endpoint. Score buttons in the pool-card view
+// must use poolMatchesForPool to get the correct MatchResult objects.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function poolMatchesForPool(poolMatches, poolName) {
+  return (poolMatches || []).filter(m => {
+    const derivedName = (m.id || "").match(POOL_MATCH_ID_RE)?.[1] ?? "";
+    return derivedName === poolName;
+  });
+}
+
 // Enrich a pool-match object with the comp-* metadata that
 // ScoreEditorModal reads off the match prop. Pool matches arrive as the
 // raw MatchResult shape (id, status, sides, ippons, decision) with none
@@ -71,36 +95,11 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 // comp's teamSize. The same `??` is applied to the comp.teamSize fallback
 // so a null comp degrades to teamSize=0 (individual) rather than throwing.
 //
-// Filter a flat poolMatches array down to matches belonging to a single pool.
-// Pool-match ids follow the format "PoolName-N" (regular), "PoolName-DH-N"
-// (daihyosen), or "PoolName-TB-N" (tiebreak). The same regex used by
-// enrichPoolMatchWithComp extracts the pool name so all id variants are
-// handled uniformly.
-//
-// This exists because pool objects from the Go API carry helper.Match entries
-// in their Matches array (only sideA/sideB, no id) whereas poolMatches holds
-// the full state.MatchResult records (id, status, scores, decision). Score
-// buttons in the pool-card view need the MatchResult id to call the API.
-//
-// Exported for vitest at __tests__/admin_pools.test.jsx.
-function poolMatchesForPool(poolMatches, poolName) {
-  return (poolMatches || []).filter(m => {
-    const derivedName = (m.id || "").match(/^(.*?)-(?:DH-|TB-)?\d+$/)?.[1] ?? "";
-    return derivedName === poolName;
-  });
-}
-
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   if (!m) return m;
-  // Strip the trailing match-index segment from the id to recover the pool
-  // name. Backend formats: "PoolName-N", "PoolName-DH-N", "PoolName-TB-N".
-  // A simple split('-')[0] breaks when the pool name itself contains hyphens
-  // (e.g. "Pool A-East-0" → "Pool A" not "Pool"). Use a capture-based regex
-  // that extracts everything before the trailing numeric / DH / TB suffix;
-  // ids without a recognisable suffix degrade to "" (no pool name inferable).
   const derivedPoolName = poolNameOverride
-    || (m.id ? (m.id.match(/^(.*?)-(?:DH-|TB-)?\d+$/)?.[1] ?? "") : "");
+    || (m.id ? (m.id.match(POOL_MATCH_ID_RE)?.[1] ?? "") : "");
   const playerMap = window.buildPlayerMap ? window.buildPlayerMap(comp) : {};
   const toPlayer = (side) => {
     if (side && typeof side === "object") return side;

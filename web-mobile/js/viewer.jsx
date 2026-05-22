@@ -646,7 +646,29 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 // Empty state hides the list; once at least one watched player exists,
 // renders the chip list, an "Add another" picker, and (when applicable)
 // the upcoming-matches preview.
+// addDojoToWatchlist — pure helper extracted for testability.
+// Given the current watchlist and a roster, return a new watchlist with every
+// roster player from `dojo` added (dedup by id, cap at `max`). Players not
+// matching the dojo (and any already in the list) are unchanged.
+function addDojoToWatchlist(watchlist, roster, dojo, max) {
+  if (!dojo) return { next: watchlist, added: 0, skipped: 0 };
+  const have = new Set(watchlist.map((w) => w.id));
+  const candidates = (roster || []).filter((p) => p && p.id && p.dojo === dojo && !have.has(p.id));
+  const room = Math.max(0, max - watchlist.length);
+  const added = candidates.slice(0, room);
+  const skipped = candidates.length - added.length;
+  return {
+    next: [...watchlist, ...added.map((p) => ({ id: p.id, name: p.name, dojo: p.dojo || "" }))],
+    added: added.length,
+    skipped,
+  };
+}
+
 function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatchClick }) {
+  const [dojoSel, setDojoSel] = useState("");
+  const [bulkMsg, setBulkMsg] = useState(null);
+  const bulkMsgTimer = useRefV(null);
+  React.useEffect(() => () => clearTimeout(bulkMsgTimer.current), []);
   const removeOne = (id) => setWatchlist(watchlist.filter((w) => w.id !== id));
   const addOne = (p) => {
     if (watchlist.find((w) => w.id === p.id)) return;
@@ -660,6 +682,51 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
     return Array.from(map.values());
   }, [tournament]);
   const rosterById = useMemo(() => new Map(roster.map(p => [p.id, p])), [roster]);
+
+  // Unique sorted dojos from the roster, excluding empty values.
+  const dojos = useMemo(() => {
+    const set = new Set();
+    roster.forEach((p) => { if (p.dojo) set.add(p.dojo); });
+    return Array.from(set).sort();
+  }, [roster]);
+
+  // Per-dojo summary: total members + currently watched. Used to label the
+  // dropdown options and to disable the "Add dojo" button when nothing new
+  // would be added.
+  const dojoStats = useMemo(() => {
+    const have = new Set(watchlist.map((w) => w.id));
+    const stats = new Map();
+    roster.forEach((p) => {
+      if (!p.dojo) return;
+      const s = stats.get(p.dojo) || { total: 0, watched: 0 };
+      s.total += 1;
+      if (have.has(p.id)) s.watched += 1;
+      stats.set(p.dojo, s);
+    });
+    return stats;
+  }, [roster, watchlist]);
+
+  const addDojo = () => {
+    if (!dojoSel) return;
+    const { next, added, skipped } = addDojoToWatchlist(watchlist, roster, dojoSel, WATCHLIST_MAX);
+    setWatchlist(next);
+    setBulkMsg(
+      skipped > 0
+        ? added === 0
+          ? `Watchlist full · ${skipped} from ${dojoSel} skipped`
+          : `Added ${added} from ${dojoSel} · ${skipped} skipped (watchlist full)`
+        : added === 0
+        ? `Everyone from ${dojoSel} is already in your watchlist`
+        : `Added ${added} from ${dojoSel}`
+    );
+    setDojoSel("");
+    // Auto-clear the toast after a few seconds so it doesn't linger.
+    clearTimeout(bulkMsgTimer.current);
+    bulkMsgTimer.current = setTimeout(() => setBulkMsg(null), 4000);
+  };
+
+  const selStats = dojoStats.get(dojoSel);
+  const addDojoDisabled = watchlist.length >= WATCHLIST_MAX || !dojoSel || !selStats || selStats.watched >= selStats.total;
 
   return (
     <div className="card" data-testid="viewer-home-watchlist" style={{ marginBottom: 16, padding: 14 }}>
@@ -695,6 +762,37 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
         placeholder={watchlist.length === 0 ? "Add a participant to watch…" : "Add another participant…"}
         excludeIds={watchlist.map((w) => w.id)}
       />
+      {dojos.length > 0 && (
+        <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }} data-testid="watchlist-dojo-picker">
+          <label style={{ fontSize: 12, color: "var(--ink-3)" }} htmlFor="watchlist-dojo-select">Watch all from dojo</label>
+          <select
+            id="watchlist-dojo-select"
+            value={dojoSel}
+            onChange={(e) => setDojoSel(e.target.value)}
+            style={{ fontSize: 13, padding: "4px 8px" }}
+            data-testid="watchlist-dojo-select"
+          >
+            <option value="">— pick a dojo —</option>
+            {dojos.map((d) => {
+              const s = dojoStats.get(d) || { total: 0, watched: 0 };
+              const remaining = s.total - s.watched;
+              const label = remaining === 0
+                ? `${d} (all ${s.total} watched)`
+                : `${d} (+${remaining} of ${s.total})`;
+              return <option key={d} value={d}>{label}</option>;
+            })}
+          </select>
+          <button
+            className="btn btn--sm"
+            disabled={addDojoDisabled}
+            onClick={addDojo}
+            data-testid="watchlist-dojo-add"
+          >
+            Add dojo
+          </button>
+          {bulkMsg && <span style={{ fontSize: 11, color: "var(--ink-3)" }} role="status">{bulkMsg}</span>}
+        </div>
+      )}
 
       {upcoming.length > 0 && (
         <>
@@ -1658,7 +1756,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, addDojoToWatchlist };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -1666,6 +1764,7 @@ if (typeof window !== 'undefined') {
     window.matchHighlightedBy = matchHighlightedBy;
     window.buildPlayerMatchHighlight = buildPlayerMatchHighlight;
     window.buildWatchlistUpcoming = buildWatchlistUpcoming;
+    window.addDojoToWatchlist = addDojoToWatchlist;
 }
 
 // Tournament-wide schedule (across competitions) — grouped by day, then court swimlanes + filter

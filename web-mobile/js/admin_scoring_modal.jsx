@@ -657,7 +657,6 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // toggle-driven hikiwake without judges' input). The Finish button is
   // also disabled while hantei is armed (see canFinish below) so this is
   // belt-and-braces defense; the UI is the primary guard.
-  const hanteiBlock = () => ({});
 
   const buildPatch = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
@@ -669,7 +668,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
       ...enchoBlock(),
     };
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiBlock() };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
@@ -678,27 +677,32 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiBlock() };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiBlock() };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock() };
   };
 
   // Hantei submit: tied at end of encho. Operator picks a side; we send a
-  // completed patch with the chosen side as winner, no ippons, and the
+  // completed patch with the chosen side as winner, the *entered* ippon
+  // arrays preserved (so a 1–1 encho score stays visible alongside the HT
+  // marker — clearing them would lose the tied score history that the
+  // viewer/Excel renderers display under the hantei suffix), and the
   // decidedByHantei flag set. This is a dedicated affordance because the
   // regular flow assumes an ippon-derived win.
   const submitHantei = (winnerSide) => {
     const fouls = { a: aFouls, b: bFouls };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
+    const aFinal = aPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
+    const bFinal = bPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
     return doSubmit(() => onSubmit({
       winner,
-      ipponsA: [],
-      ipponsB: [],
+      ipponsA: aFinal,
+      ipponsB: bFinal,
       hansokuA: aFouls,
       hansokuB: bFouls,
       status: "completed",
-      score: { type: "hantei", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete, hantei: true },
+      score: { type: "hantei", winnerPts: aFinal.length, loserPts: bFinal.length, fouls, corrected: isComplete, hantei: true },
       ...enchoBlock(),
       decidedByHantei: true,
     }));

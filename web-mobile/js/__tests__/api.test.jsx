@@ -37,6 +37,47 @@ describe('API Utils', () => {
       const result = toBackendMatchResult(patch, match);
       expect(result.decision).toBe('');
     });
+
+    it('forwards decidedByHantei on the wire payload', () => {
+      // mp-6di: judges' decision flag must round-trip so the HT suffix
+      // persists in the viewer and bracket DecidedByHantei mirror.
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        score: { type: 'hantei', fouls: {} },
+        ipponsA: ['M'],
+        ipponsB: ['K'],
+        decidedByHantei: true,
+      }, match);
+      expect(result.decidedByHantei).toBe(true);
+    });
+
+    it('forwards decidedByHantei = false (so a re-edit can clear it)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        score: { type: 'ippon', fouls: {} },
+        ipponsA: ['M'],
+        ipponsB: [],
+        decidedByHantei: false,
+      }, match);
+      expect(result.decidedByHantei).toBe(false);
+    });
+
+    it('omits decidedByHantei when the patch does not set it', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        score: { type: 'ippon', fouls: {} },
+        ipponsA: ['M'],
+        ipponsB: [],
+      }, match);
+      // No key — server-side omitempty drops it from the on-disk YAML.
+      expect('decidedByHantei' in result).toBe(false);
+    });
   });
 
   describe('isHikiwake', () => {

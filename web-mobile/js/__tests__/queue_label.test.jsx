@@ -91,6 +91,15 @@ describe('queueLabelCompact (pill form)', () => {
     expect(queueLabelCompact({ status: 'scheduled', queuePosition: -3 })).toBeNull();
   });
 
+  it('handles string queuePosition (coerces to number)', () => {
+    expect(queueLabelCompact({ status: 'scheduled', queuePosition: '1' })).toBe('Up next');
+    expect(queueLabelCompact({ status: 'scheduled', queuePosition: '2' })).toBe('#2');
+  });
+
+  it('returns null for non-numeric string queuePosition', () => {
+    expect(queueLabelCompact({ status: 'scheduled', queuePosition: 'foo' })).toBeNull();
+  });
+
   it('returns null for null input (defensive)', () => {
     expect(queueLabelCompact(null)).toBeNull();
   });

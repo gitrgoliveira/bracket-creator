@@ -1253,8 +1253,8 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   // viewer surface stays in sync; we still gate on scheduled+qp>0 here
   // because this row already renders ●LIVE / Final on the right for
   // running/completed and we don't want the fallback "Scheduled hh:mm".
-  const qp = m.queuePosition;
-  const queueLabel = (m.status === "scheduled" && qp && qp > 0 && window.queueLabel)
+  const qp = Number(m.queuePosition);
+  const queueLabel = (m.status === "scheduled" && qp > 0 && window.queueLabel)
     ? window.queueLabel(m)
     : null;
   return (

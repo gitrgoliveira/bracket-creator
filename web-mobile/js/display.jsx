@@ -201,8 +201,8 @@ function queueLabel(m) {
 function queueLabelCompact(m) {
     if (!m) return null;
     if (m.status !== "scheduled") return null;
-    const qp = m.queuePosition;
-    if (!qp || qp <= 0) return null;
+    const qp = Number(m.queuePosition);
+    if (isNaN(qp) || qp <= 0) return null;
     if (qp === 1) return "Up next";
     return `#${qp}`;
 }

@@ -649,10 +649,15 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // to non-"reset" patches. periodCount=0 means "no overtime"; emitting the
   // field as undefined keeps the wire payload clean (omitempty server-side).
   const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
-  // Hantei is meaningful only when overtime has been declared; we tolerate
-  // the operator clearing encho by silently dropping the flag from the
-  // outbound patch (omitempty server-side keeps disk clean).
-  const hanteiBlock = () => (decidedByHantei && enchoPeriodCount > 0) ? { decidedByHantei: true } : {};
+  // decidedByHantei is only set via the dedicated submitHantei path
+  // (SHIRO/AKA hantei buttons). The regular Finish/Enter buildPatch never
+  // attaches the flag — even if the operator armed hantei and then bypassed
+  // the dedicated buttons — to keep the wire payload internally consistent
+  // (no `decidedByHantei: true` alongside an ippon-derived score or a
+  // toggle-driven hikiwake without judges' input). The Finish button is
+  // also disabled while hantei is armed (see canFinish below) so this is
+  // belt-and-braces defense; the UI is the primary guard.
+  const hanteiBlock = () => ({});
 
   const buildPatch = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
@@ -738,7 +743,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // buttons on BOTH sides (mirrors validateIpponCounts on the server).
   const boutDecided = isBoutDecided(aPts, bPts);
 
-  const canFinish = isDrawToggled || aTotal > 0 || bTotal > 0;
+  // While hantei is armed the operator must commit via the dedicated SHIRO /
+  // AKA buttons (which route through submitHantei). Disable the regular
+  // Finish/Enter so the patch can't accidentally mark an ippon-decided match
+  // as hantei-decided. Keyboard Enter is also gated on canFinish.
+  const canFinish = !decidedByHantei && (isDrawToggled || aTotal > 0 || bTotal > 0);
 
   const isDirty =
     !window.arraysEqual(aPts, initialAPts) ||

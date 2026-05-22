@@ -802,3 +802,53 @@ func TestAnnotateQueuePositions_Empty(t *testing.T) {
 	annotateQueuePositions(nil)
 	annotateQueuePositions([]state.MatchResult{})
 }
+
+// TestAnnotateBracketQueuePositions_* mirrors the annotateQueuePositions tests
+// for the bracket variant (BracketMatch), covering multiple courts, mixed
+// statuses, nil/empty inputs, and stale-value reset.
+func TestAnnotateBracketQueuePositions_Nil(t *testing.T) {
+	annotateBracketQueuePositions(nil) // must not panic
+}
+
+func TestAnnotateBracketQueuePositions_Empty(t *testing.T) {
+	annotateBracketQueuePositions(&state.Bracket{})
+	annotateBracketQueuePositions(&state.Bracket{Rounds: [][]state.BracketMatch{}})
+}
+
+func TestAnnotateBracketQueuePositions_MultipleCourts(t *testing.T) {
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "r1m1", Court: "A", Status: state.MatchStatusScheduled},
+				{ID: "r1m2", Court: "B", Status: state.MatchStatusScheduled},
+			},
+			{
+				{ID: "r2m1", Court: "A", Status: state.MatchStatusScheduled},
+			},
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	assert.Equal(t, 1, b.Rounds[0][0].QueuePosition, "r1m1: first on court A")
+	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "r1m2: first on court B")
+	assert.Equal(t, 2, b.Rounds[1][0].QueuePosition, "r2m1: second on court A")
+}
+
+func TestAnnotateBracketQueuePositions_MixedStatuses(t *testing.T) {
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m1", Court: "A", Status: state.MatchStatusRunning, QueuePosition: 99},
+				{ID: "m2", Court: "A", Status: state.MatchStatusScheduled},
+				{ID: "m3", Court: "A", Status: state.MatchStatusCompleted, QueuePosition: 77},
+				{ID: "m4", Court: "A", Status: state.MatchStatusScheduled},
+			},
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	assert.Equal(t, 0, b.Rounds[0][0].QueuePosition, "running: stale value reset to 0")
+	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "first scheduled on court A")
+	assert.Equal(t, 0, b.Rounds[0][2].QueuePosition, "completed: stale value reset to 0")
+	assert.Equal(t, 2, b.Rounds[0][3].QueuePosition, "second scheduled on court A")
+}

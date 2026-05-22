@@ -48,6 +48,8 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 			if m.Status == state.MatchStatusScheduled {
 				counters[m.Court]++
 				m.QueuePosition = counters[m.Court]
+			} else {
+				m.QueuePosition = 0
 			}
 		}
 	}

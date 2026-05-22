@@ -32,6 +32,24 @@ const hasBothSides = (m) => window.hasBothSides(m);
 // dates are ordered.
 const compareDmy = (a, b) => window.compareDmy(a, b);
 
+// Local mirrors of display.jsx::queueLabel / queueLabelCompact.
+// display.js loads before viewer.js (see index.html), so window.queueLabel /
+// window.queueLabelCompact are normally available on first render.  These
+// serve as defense-in-depth if that ever changes.
+function _localQueueLabel(m) {
+  if (!m || m.status !== "scheduled") return null;
+  const qp = Number(m.queuePosition);
+  if (Number.isFinite(qp) && qp > 0) return qp === 1 ? "Next up" : `${qp - 1} before yours`;
+  if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
+  return null;
+}
+function _localQueueLabelCompact(m) {
+  if (!m || m.status !== "scheduled") return null;
+  const qp = Number(m.queuePosition);
+  if (!Number.isFinite(qp) || qp <= 0) return null;
+  return qp === 1 ? "Next up" : `#${qp}`;
+}
+
 function competitionKindLabel(c) {
   const base = c.kind === "team" ? "Teams" : "Individual";
   if (c.gender === "M") return `${base} · Men`;
@@ -1412,8 +1430,8 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   // because this row already renders ●LIVE / Final on the right for
   // running/completed and we don't want the fallback "Scheduled hh:mm".
   const qp = Number(m.queuePosition);
-  const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0 && window.queueLabel)
-    ? window.queueLabel(m)
+  const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
+    ? (window.queueLabel ? window.queueLabel(m) : _localQueueLabel(m))
     : null;
   return (
     <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
@@ -2008,7 +2026,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   // by display.jsx::queueLabelCompact (bead mp-e3k); we still grab `qp`
   // separately because the accent-color styling below keys off qp===1.
   const qp = Number(m.queuePosition);
-  const queuePill = window.queueLabelCompact ? window.queueLabelCompact(m) : null;
+  const queuePill = (window.queueLabelCompact || _localQueueLabelCompact)(m);
   return (
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div>

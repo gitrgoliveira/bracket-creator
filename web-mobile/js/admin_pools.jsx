@@ -58,9 +58,13 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 //
 // Pool name falls back to the prefix of the match id ("PoolName-MatchIdx"
 // per parsePoolMatchesRecords in internal/state/pools.go) when the caller
-// can't supply a known pool name. Existing fields on `m` always win — we
-// only fill in undefined values so we don't clobber a server-injected
-// compId or compKind that may have arrived through a later refresh.
+// can't supply a known pool name. Existing falsy fields on `m` are
+// overwritten with derived values — truthy fields are preserved so a
+// server-injected compId or compKind from a later refresh is not clobbered.
+//
+// sideA/sideB are normalized from plain strings to {id,name} objects via
+// buildPlayerMap so ScoreEditorModal can render competitor names without
+// m.sideA?.name returning undefined.
 //
 // Note: teamSize uses `??` (not `||`) so an explicit teamSize=0 on the
 // match (individual comp) is preserved instead of falling through to the
@@ -72,8 +76,17 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   if (!m) return m;
   const derivedPoolName = poolNameOverride
     || (m.id && m.id.indexOf('-') > 0 ? m.id.split('-')[0] : "");
+  const playerMap = window.buildPlayerMap ? window.buildPlayerMap(comp) : {};
+  const toPlayer = (side) => {
+    if (side && typeof side === "object") return side;
+    if (!side) return { id: "", name: "" };
+    const p = playerMap[side];
+    return p || { id: side, name: side };
+  };
   return {
     ...m,
+    sideA: toPlayer(m.sideA),
+    sideB: toPlayer(m.sideB),
     compId: m.compId || (comp && comp.id) || "",
     compName: m.compName || (comp && comp.name) || "",
     compKind: m.compKind || (comp && comp.kind) || "",

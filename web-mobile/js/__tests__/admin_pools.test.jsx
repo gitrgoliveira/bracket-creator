@@ -292,4 +292,41 @@ describe('enrichPoolMatchWithComp', () => {
     expect(enriched.phase).toBe('pool');
     expect(enriched.poolName).toBe('A');
   });
+
+  it('normalizes string sideA/sideB to {id,name} objects so ScoreEditorModal can read .name', () => {
+    // Pool matches from the Go backend have string sideA/sideB. Without
+    // normalization, ScoreEditorModal's m.sideA?.name would be undefined
+    // and competitor names would not render.
+    const m = { id: 'A-0', status: 'scheduled', sideA: 'Alice', sideB: 'Bob' };
+    const enriched = enrichPoolMatchWithComp(m, comp);
+    expect(enriched.sideA).toEqual(expect.objectContaining({ id: 'Alice', name: 'Alice' }));
+    expect(enriched.sideB).toEqual(expect.objectContaining({ id: 'Bob', name: 'Bob' }));
+  });
+
+  it('resolves player dojo from buildPlayerMap when available', () => {
+    window.buildPlayerMap = () => ({
+      Alice: { id: 'Alice', name: 'Alice', dojo: 'DojoA' },
+    });
+    const m = { id: 'A-0', status: 'scheduled', sideA: 'Alice', sideB: 'Unknown' };
+    const enriched = enrichPoolMatchWithComp(m, comp);
+    expect(enriched.sideA).toEqual({ id: 'Alice', name: 'Alice', dojo: 'DojoA' });
+    expect(enriched.sideB).toEqual({ id: 'Unknown', name: 'Unknown' });
+    delete window.buildPlayerMap;
+  });
+
+  it('converts falsy sideA/sideB to {id:"",name:""} (bye/TBD slot)', () => {
+    const m = { id: 'A-0', status: 'scheduled', sideA: '', sideB: null };
+    const enriched = enrichPoolMatchWithComp(m, comp);
+    expect(enriched.sideA).toEqual({ id: '', name: '' });
+    expect(enriched.sideB).toEqual({ id: '', name: '' });
+  });
+
+  it('leaves already-normalized object sideA/sideB unchanged', () => {
+    const sideA = { id: 'p1', name: 'Alice', dojo: 'DojoA' };
+    const sideB = { id: 'p2', name: 'Bob', dojo: 'DojoB' };
+    const m = { id: 'A-0', status: 'scheduled', sideA, sideB };
+    const enriched = enrichPoolMatchWithComp(m, comp);
+    expect(enriched.sideA).toBe(sideA);
+    expect(enriched.sideB).toBe(sideB);
+  });
 });

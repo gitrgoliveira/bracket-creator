@@ -305,6 +305,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [teamSize, setTeamSize] = useStateA(5);
   const [numberPrefix, setNumberPrefix] = useStateA("");
   const [withZekken, setWithZekken] = useStateA(false);
+  const [naginata, setNaginata] = useStateA(false);
   const [selectedCourts, setSelectedCourts] = useStateA(tournament.courts.slice(0, Math.min(2, tournament.courts.length)));
   const [error, setError] = useStateA("");
 
@@ -418,6 +419,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (format === "swiss") {
       c.swissRounds = swissRounds;
     }
+    c.naginata = naginata;
     onCreate(c);
   };
 
@@ -644,6 +646,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <div className="field__hint" style={{ marginTop: 4 }}>When enabled, participant CSV uses three columns: Name, Zekken, Dojo.</div>
             </div>
           )}
+
+          <div className="field">
+            <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => setNaginata(e.target.checked)} /> Naginata competition</label>
+            <div className="field__hint" style={{ marginTop: 4 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
+          </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button className="btn" onClick={onCancel}>Cancel</button>

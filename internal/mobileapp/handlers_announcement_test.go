@@ -40,7 +40,7 @@ func TestAnnouncementHandlers(t *testing.T) {
 	require.NoError(t, err)
 
 	// Construct router using NewRouter so we test full middleware integration
-	router := NewRouter(store, eng, res, NewFileVerifier(store))
+	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
 
 	// 1. GET /api/tournament/announcement - initially empty (204 No Content)
 	w := httptest.NewRecorder()

@@ -13,7 +13,20 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) *gin.Engine {
+// NewRouter wires the mobile-app gin engine. The returned *gin.Engine
+// is the HTTP handler; the returned *Hub is exposed so the caller
+// (cmd/mobile_app.go) can call Hub.Close() from a graceful-shutdown
+// hook — without that, http.Server.Shutdown would block forever on
+// the long-lived SSE goroutines.
+func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) (*gin.Engine, *Hub) {
+	return NewRouterWithHub(store, eng, res, verifier, NewHub())
+}
+
+// NewRouterWithHub is the testable / configurable variant — pass a
+// pre-built Hub (e.g. one with NewHubWithLimits) instead of constructing
+// the default. cmd/mobile_app.go uses this to apply the SSE_MAX_CLIENTS
+// override; tests use it to inject a small-capacity hub.
+func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier, hub *Hub) (*gin.Engine, *Hub) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
@@ -33,8 +46,6 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 		}
 		c.Next()
 	})
-
-	hub := NewHub()
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
@@ -83,22 +94,44 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 	RegisterResetHandlers(api, store, verifier, hub)
 	RegisterAuthConfigHandlers(api, verifier)
 
-	// Admin API endpoints (protected)
-	admin := r.Group("/api")
-	admin.Use(AuthMiddleware(verifier, store))
+	// Admin API endpoints (protected). Split into two sub-groups so the
+	// CSV-import route gets a larger body cap than the rest — every
+	// other admin endpoint takes small JSON, while /tournament/import
+	// legitimately uploads multi-MB CSVs.
+	//
+	// Middleware ordering: MaxBodyBytes runs BEFORE AuthMiddleware on
+	// purpose (mp-663 Phase 3). An unauthenticated attacker who streams
+	// a huge Content-Length should hit 413 immediately, not get a
+	// chance to consume an auth roundtrip first. The Content-Length
+	// fast path inside MaxBodyBytes is constant-time and reads no body
+	// bytes, so the order doesn't add measurable cost to the happy
+	// path either.
+	adminSmallBody := r.Group("/api")
+	adminSmallBody.Use(MaxBodyBytes(DefaultMaxBodyBytes))
+	adminSmallBody.Use(AuthMiddleware(verifier, store))
 	{
-		RegisterTournamentHandlers(admin, store, hub, verifier)
-		RegisterImportHandlers(admin, store, hub)
-		RegisterCompetitionHandlers(admin, store, eng, hub)
-		RegisterParticipantHandlers(admin, store, hub)
-		RegisterMatchHandlers(admin, eng, store, store, hub)
-		RegisterDecisionHandlers(admin, eng, store, store, hub)
-		RegisterEligibilityHandlers(admin, store, hub)
-		RegisterReinstateHandler(admin, eng, hub)
-		RegisterLineupHandlers(admin, store, store, store)
-		RegisterDaihyosenHandlers(admin, eng, store, hub)
-		RegisterSwissHandlers(admin, store, eng, hub)
-		RegisterAnnouncementHandlers(admin, store, hub)
+		RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
+		RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
+		RegisterParticipantHandlers(adminSmallBody, store, hub)
+		RegisterMatchHandlers(adminSmallBody, eng, store, store, hub)
+		RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
+		RegisterEligibilityHandlers(adminSmallBody, store, hub)
+		RegisterReinstateHandler(adminSmallBody, eng, hub)
+		RegisterLineupHandlers(adminSmallBody, store, store, store)
+		RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
+		RegisterSwissHandlers(adminSmallBody, store, eng, hub)
+		// Announcement send is a small JSON payload (already further
+		// capped at 4 KB inside the handler via http.MaxBytesReader,
+		// per the earlier security review). Belongs in the small-body
+		// group with the rest of the admin JSON endpoints.
+		RegisterAnnouncementHandlers(adminSmallBody, store, hub)
+	}
+
+	adminLargeBody := r.Group("/api")
+	adminLargeBody.Use(MaxBodyBytes(MaxImportBodyBytes))
+	adminLargeBody.Use(AuthMiddleware(verifier, store))
+	{
+		RegisterImportHandlers(adminLargeBody, store, hub)
 	}
 
 	// Static files & SPA Fallback
@@ -165,5 +198,5 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 		})
 	}
 
-	return r
+	return r, hub
 }

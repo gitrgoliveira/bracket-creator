@@ -3,11 +3,23 @@ package mobileapp
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// viewerLoadCompetition is the store.LoadCompetition call used by the
+// public viewer goroutines. It is a package-level variable so panic-
+// recovery tests can swap it for a function that panics, exercising the
+// safeGo wiring end-to-end without needing to corrupt on-disk state. The
+// other 8 spawned goroutines also use safeGo, so a panic in any of them
+// is caught by the same mechanism; this hook just gives the integration
+// test something deterministic to trip.
+var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Competition, error) {
+	return store.LoadCompetition(compID)
+}
 
 func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {
 	r.GET("/tournament", func(c *gin.Context) {
@@ -33,12 +45,12 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// wg.Wait() provides the happens-before for reads below.
 		results := make([]any, len(ids))
 		var wg sync.WaitGroup
+		var panicRef atomic.Pointer[recoveredPanic]
 
 		for i, id := range ids {
-			wg.Add(1)
-			go func(idx int, compID string) {
-				defer wg.Done()
-				comp, _ := store.LoadCompetition(compID)
+			idx, compID := i, id
+			safeGo(&wg, &panicRef, func() {
+				comp, _ := viewerLoadCompetition(store, compID)
 				if comp == nil {
 					return
 				}
@@ -67,15 +79,21 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				// so viewers see "Next up: 3" without persisting a value that
 				// would go stale the moment any match transitions.
 				annotateQueuePositions(poolMatches)
+				annotateBracketQueuePositions(bracket)
 
 				results[idx] = gin.H{
 					"config":      comp,
 					"poolMatches": poolMatches,
 					"bracket":     bracket,
 				}
-			}(i, id)
+			})
 		}
 		wg.Wait()
+
+		if p := panicRef.Load(); p != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
 
 		comps := make([]any, 0, len(ids))
 		for _, comp := range results {
@@ -113,7 +131,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			pools         any
 			poolMatches   []state.MatchResult
 			standings     any
-			bracket       any
+			bracket       *state.Bracket
 			schedule      any
 			reservedSlots []state.ReservedSlot
 
@@ -121,9 +139,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		)
 
 		var wg sync.WaitGroup
-		wg.Add(7)
-		go func() {
-			defer wg.Done()
+		var panicRef atomic.Pointer[recoveredPanic]
+		safeGo(&wg, &panicRef, func() {
 			// Only pass HasIDs=true hint; false means unset so auto-detect
 			// still runs for competitions created before the flag existed.
 			var hasIDsHint *bool
@@ -137,32 +154,31 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			})
 			comp.Players = p
 			playersErr = e
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, &panicRef, func() {
 			pools, poolsErr = store.LoadPools(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, &panicRef, func() {
 			poolMatches, poolMatchesErr = store.LoadPoolMatches(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, &panicRef, func() {
 			standings, standingsErr = eng.CalculatePoolStandings(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, &panicRef, func() {
 			bracket, bracketErr = store.LoadBracket(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, &panicRef, func() {
 			schedule, scheduleErr = store.LoadSchedule(id)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		safeGo(&wg, &panicRef, func() {
 			reservedSlots, reservedSlotsErr = store.LoadReservedSlots(id)
-		}()
+		})
 		wg.Wait()
+
+		if p := panicRef.Load(); p != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
 
 		for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr, reservedSlotsErr} {
 			if e != nil {
@@ -174,6 +190,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// FR-025, T036: derive per-court queue position at serve time —
 		// see annotateQueuePositions for rationale.
 		annotateQueuePositions(poolMatches)
+		annotateBracketQueuePositions(bracket)
 
 		c.JSON(http.StatusOK, gin.H{
 			"config":        comp,
@@ -193,15 +210,19 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// the reads below.
 		perComp := make([][]state.ScheduleEntry, len(ids))
 		var wg sync.WaitGroup
+		var panicRef atomic.Pointer[recoveredPanic]
 		for i, id := range ids {
-			wg.Add(1)
-			go func(idx int, compID string) {
-				defer wg.Done()
+			idx, compID := i, id
+			safeGo(&wg, &panicRef, func() {
 				s, _ := store.LoadSchedule(compID)
 				perComp[idx] = s
-			}(i, id)
+			})
 		}
 		wg.Wait()
+		if p := panicRef.Load(); p != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
 		allEntries := []state.ScheduleEntry{}
 		for _, s := range perComp {
 			allEntries = append(allEntries, s...)

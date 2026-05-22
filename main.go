@@ -20,11 +20,11 @@ import (
 //go:embed web/css web/js
 var webFiles embed.FS
 
-// Mobile-app assets. Explicitly list embedded directories to avoid embedding
-// node_modules or other developer tooling.
+// Mobile-app assets. The glob embeds all files present at build time
+// (css, js, dist, vendor) without failing when dist/ or vendor/ haven't
+// been created yet by esbuild.
 //
-//go:embed web-mobile/index.html
-//go:embed web-mobile/css web-mobile/js web-mobile/dist web-mobile/vendor
+//go:embed web-mobile/*
 var mobileWebFiles embed.FS
 
 func main() {

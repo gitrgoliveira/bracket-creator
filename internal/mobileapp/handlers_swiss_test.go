@@ -94,6 +94,54 @@ func TestSwissGenerateRound_Success(t *testing.T) {
 	assert.Len(t, matches, 2)
 }
 
+// TestSwissGenerateRound_CounterAdvances verifies that SwissCurrentRound
+// increments 1→2→3 across successive generate-round calls once each prior
+// round is fully completed, pinning the round-tracking contract end-to-end.
+func TestSwissGenerateRound_CounterAdvances(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := makeSwissComp(t, store, []string{"P1", "P2", "P3", "P4"}, 3)
+
+	completeCurrentRound := func(t *testing.T) {
+		t.Helper()
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for i := range matches {
+			if matches[i].Status != state.MatchStatusCompleted {
+				matches[i].Winner = matches[i].SideA
+				matches[i].Status = state.MatchStatusCompleted
+				matches[i].IpponsA = []string{"M", "M"}
+			}
+		}
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+	}
+
+	type roundResp struct {
+		Round             int `json:"round"`
+		SwissCurrentRound int `json:"swissCurrentRound"`
+	}
+
+	for wantRound := 1; wantRound <= 3; wantRound++ {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, adminReqSwiss("POST", fmt.Sprintf("/api/competitions/%s/swiss/generate-round", compID)))
+		require.Equal(t, http.StatusCreated, w.Code, "round %d body=%s", wantRound, w.Body.String())
+
+		var resp roundResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, wantRound, resp.Round, "resp.round for iteration %d", wantRound)
+		assert.Equal(t, wantRound, resp.SwissCurrentRound, "resp.swissCurrentRound for iteration %d", wantRound)
+
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		assert.Equal(t, wantRound, comp.SwissCurrentRound, "persisted SwissCurrentRound after round %d", wantRound)
+
+		if wantRound < 3 {
+			completeCurrentRound(t)
+		}
+	}
+}
+
 // TestSwissGenerateRound_IncompleteRound returns 409 when the current
 // round has un-completed matches (FR-050d).
 func TestSwissGenerateRound_IncompleteRound(t *testing.T) {

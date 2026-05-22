@@ -209,7 +209,10 @@ function queueLabelCompact(m) {
     if (!m) return null;
     if (m.status !== "scheduled") return null;
     const qp = Number(m.queuePosition);
-    if (isNaN(qp) || qp <= 0) return null;
+    // Use Number.isFinite so Infinity/-Infinity are rejected alongside NaN —
+    // matches queueLabel's guard. isNaN alone would let Infinity through and
+    // render "#Infinity".
+    if (!Number.isFinite(qp) || qp <= 0) return null;
     if (qp === 1) return "Next up";
     return `#${qp}`;
 }

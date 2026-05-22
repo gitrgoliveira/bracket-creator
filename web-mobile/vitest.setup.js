@@ -37,6 +37,7 @@ global.React = {
   useMemo: (fn) => fn(),
   useRef: (val) => ({ current: val }),
   useLayoutEffect: vi.fn(),
+  useCallback: (fn) => fn,
   memo: (c) => c,
   Component: _ReactComponent,
 };

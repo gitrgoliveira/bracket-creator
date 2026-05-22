@@ -695,6 +695,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const aFinal = aPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
+    // Map ippon counts onto the winner/loser axes — without this swap, a
+    // hantei decision for SHIRO (side "b") would persist winnerPts =
+    // aFinal.length and loserPts = bFinal.length, which contradicts the
+    // recorded winner. For the canonical tied-in-encho case both lengths
+    // are equal and the swap is a no-op.
+    const winnerPts = winnerSide === "a" ? aFinal.length : bFinal.length;
+    const loserPts = winnerSide === "a" ? bFinal.length : aFinal.length;
     return doSubmit(() => onSubmit({
       winner,
       ipponsA: aFinal,
@@ -702,7 +709,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       hansokuA: aFouls,
       hansokuB: bFouls,
       status: "completed",
-      score: { type: "hantei", winnerPts: aFinal.length, loserPts: bFinal.length, fouls, corrected: isComplete, hantei: true },
+      score: { type: "hantei", winnerPts, loserPts, fouls, corrected: isComplete, hantei: true },
       ...enchoBlock(),
       decidedByHantei: true,
     }));
@@ -877,7 +884,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   className="btn btn--sm"
                   data-testid="scoring-modal-hantei-arm"
                   onClick={() => setDecidedByHantei(true)}
-                  disabled={submitting || decisionSubmitting}
+                  // Hantei is only valid when the bout is genuinely tied
+                  // at end of encho (FIK 7-5 / 29-6). Disable the arm
+                  // button when the current ippon totals are unequal — an
+                  // ippon-derived win is already decided and shouldn't be
+                  // overwritten by a judges' call. (0-0 is still tied.)
+                  disabled={submitting || decisionSubmitting || aTotal !== bTotal}
+                  title={aTotal !== bTotal ? "Hantei applies only to tied matches in encho" : "Record a judges' decision"}
                   style={{ marginLeft: "auto" }}
                 >
                   Decide by hantei…

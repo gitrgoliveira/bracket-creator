@@ -257,6 +257,16 @@ type MatchResult struct {
 	// hantei after an encho remained tied (FIK Article 7-5 / 29-6).
 	// Distinguishes a judges' decision from an ippon-derived win for
 	// stats, audit, and display. Zero value omitted from the wire.
+	//
+	// Persistence caveat: pool matches are stored in pool-matches.csv,
+	// whose column layout does NOT include this field — so a hantei
+	// decision on a pool match survives in-memory and on the SSE wire,
+	// but does NOT survive a server restart. Bracket matches are stored
+	// in bracket.json, which serializes the full struct, so the flag
+	// survives there. See BracketMatch.DecidedByHantei for the mirror;
+	// pool-level hantei is a rare-enough case (FIK doesn't normally
+	// allow it in pool play) that the gap is acceptable. The yaml tag
+	// is retained for future YAML-serialised contexts.
 	DecidedByHantei bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 }
 

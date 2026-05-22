@@ -75,7 +75,8 @@ describe('API Utils', () => {
         ipponsA: ['M'],
         ipponsB: [],
       }, match);
-      // No key — server-side omitempty drops it from the on-disk YAML.
+      // No key — server-side omitempty drops it from the persisted record
+      // (pool-matches.csv columns / bracket.json fields).
       expect('decidedByHantei' in result).toBe(false);
     });
   });

@@ -617,9 +617,12 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 
   const isOnSideA = isFollowedPlayer(nextMatch.sideA, followedPlayer);
   const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
-  const myBadgeClass = isOnSideA ? "tw-match__badge--aka" : "tw-match__badge--shiro";
+  // Use the full-text Aka/Shiro badge class (bc-color-badge) consistent with
+  // bracket.jsx — the compact `tw-match__badge` variant is sized 14×14 for
+  // single-letter labels and would clip "AKA"/"SHIRO".
+  const myBadgeClass = isOnSideA ? "bc-color-badge--aka" : "bc-color-badge--shiro";
   const myBadgeLabel = isOnSideA ? "AKA" : "SHIRO";
-  const oppBadgeClass = isOnSideA ? "tw-match__badge--shiro" : "tw-match__badge--aka";
+  const oppBadgeClass = isOnSideA ? "bc-color-badge--shiro" : "bc-color-badge--aka";
   const oppBadgeLabel = isOnSideA ? "SHIRO" : "AKA";
   const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
 
@@ -628,7 +631,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
       {header}
       <div className="my-match__lbl">Your next match</div>
       <div className="my-match__name">
-        <span className={`tw-match__badge ${myBadgeClass}`}>{myBadgeLabel}</span>
+        <span className={`bc-color-badge ${myBadgeClass}`}>{myBadgeLabel}</span>
         {followedPlayer.name}
       </div>
       <div className="my-match__round">
@@ -652,7 +655,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
           style={{ color: "inherit" }}
         >
           <div className="l">
-            <span className={`tw-match__badge ${oppBadgeClass}`}>{oppBadgeLabel}</span>
+            <span className={`bc-color-badge ${oppBadgeClass}`}>{oppBadgeLabel}</span>
             vs Opponent
           </div>
           <div className="n">{opponent.name}</div>
@@ -1681,7 +1684,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

@@ -1,7 +1,7 @@
 // Pure-logic tests for buildPlayerMatchHighlight (FR-020, FR-022).
 // Slice 4 / T108–T109: drives "Find my matches" filtering on the viewer home.
 import { describe, it, expect } from 'vitest';
-import { buildPlayerMatchHighlight } from '../viewer.jsx';
+import { buildPlayerMatchHighlight, isFollowedPlayer } from '../viewer.jsx';
 
 describe('buildPlayerMatchHighlight', () => {
   it('returns matches where playerId is on SideA', () => {
@@ -66,5 +66,36 @@ describe('buildPlayerMatchHighlight', () => {
   it('handles empty / non-array inputs gracefully', () => {
     expect(buildPlayerMatchHighlight('p1', null)).toEqual([]);
     expect(buildPlayerMatchHighlight('', [{ id: 'm1', sideAId: 'p1' }])).toEqual([]);
+  });
+});
+
+describe('isFollowedPlayer', () => {
+  it('matches by UUID when both sides expose ids', () => {
+    const sideA = { id: 'p1', name: 'Alice' };
+    expect(isFollowedPlayer(sideA, { id: 'p1', name: 'Alice' })).toBe(true);
+    expect(isFollowedPlayer(sideA, { id: 'p2', name: 'Alice' })).toBe(true); // name fallback
+  });
+
+  it('falls back to name match when UUID is missing on either side', () => {
+    // Team-match sub-players (or legacy fixtures) may key by display name.
+    expect(isFollowedPlayer({ id: '', name: 'Alice' }, { id: 'p1', name: 'Alice' })).toBe(true);
+    expect(isFollowedPlayer({ name: 'Alice' }, { id: '', name: 'Alice' })).toBe(true);
+    // String side shape (legacy `sideA: 'Alice'`).
+    expect(isFollowedPlayer('Alice', { id: '', name: 'Alice' })).toBe(true);
+  });
+
+  it('rejects different ids and different names', () => {
+    expect(isFollowedPlayer({ id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' })).toBe(false);
+  });
+
+  it('handles null / undefined gracefully', () => {
+    expect(isFollowedPlayer(null, { id: 'p1', name: 'Alice' })).toBe(false);
+    expect(isFollowedPlayer({ id: 'p1' }, null)).toBe(false);
+  });
+
+  it('does not match when only blank ids align (avoids the "" === "" trap)', () => {
+    // FR-020 regression guard: two participants both lacking UUIDs must not
+    // be treated as the same person just because their ids are empty.
+    expect(isFollowedPlayer({ id: '', name: 'Alice' }, { id: '', name: 'Bob' })).toBe(false);
   });
 });

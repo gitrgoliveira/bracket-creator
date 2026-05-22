@@ -188,10 +188,14 @@ describe('API Utils', () => {
     // missing the X-Tournament-Password header would 401 with the
     // status-flip never reaching disk.
     describe('invalidateCompetition', () => {
-      it('POSTs to /api/competitions/{id}/invalidate with password header', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+      it('POSTs to /api/competitions/{id}/invalidate with password header and returns the updated competition JSON', async () => {
+        const updated = { id: 'comp-abc', status: 'invalid', name: 'Test Comp' };
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => updated });
         const result = await API.invalidateCompetition('comp-abc', 'secret');
-        expect(result).toBe(true);
+        // Returns the parsed payload (not a bare `true`) so callers can
+        // apply the updated competition to local state without waiting
+        // for the SSE refresh to land.
+        expect(result).toEqual(updated);
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/competitions/comp-abc/invalidate',
           expect.objectContaining({

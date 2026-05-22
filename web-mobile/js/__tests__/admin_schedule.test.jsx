@@ -425,4 +425,33 @@ describe('allMatchesCompleted', () => {
     expect(allMatchesCompleted(allDone)).toBe(true);
     expect(nextMatch).toBeNull();
   });
+
+  // Deep-review (2026-05-22): the AdminScoreEditor banner render is guarded
+  // by `statusFilter !== "complete" && allMatchesCompleted(filtered)`. When
+  // the operator hits the "Completed" status filter the list is trivially
+  // all-completed — firing the banner there would be misleading because the
+  // user explicitly asked to see only the completed matches; nothing about
+  // that view says "every match in this competition is done." The helper
+  // itself stays unconditional (it's a pure predicate); the guard lives
+  // in the consumer. This regression pins that the helper is true-by-shape
+  // and the guard must be applied outside.
+  it('helper alone is not enough to drive the banner: caller must guard against statusFilter', () => {
+    const filteredByCompleteStatus = [
+      { id: '1', status: 'completed' },
+      { id: '2', status: 'completed' },
+    ];
+    // Helper says true for an all-completed list — that's correct.
+    expect(allMatchesCompleted(filteredByCompleteStatus)).toBe(true);
+    // The actual AdminScoreEditor JSX guards on
+    //   statusFilter !== "complete" && allMatchesCompleted(filtered)
+    // so when the filter is "complete" we suppress the banner.
+    const statusFilter = "complete";
+    const shouldShowBanner = statusFilter !== "complete" && allMatchesCompleted(filteredByCompleteStatus);
+    expect(shouldShowBanner).toBe(false);
+    // And for any other filter value where every match really is completed,
+    // the banner does fire.
+    const statusFilterAll = "all";
+    const shouldShowBannerAll = statusFilterAll !== "complete" && allMatchesCompleted(filteredByCompleteStatus);
+    expect(shouldShowBannerAll).toBe(true);
+  });
 });

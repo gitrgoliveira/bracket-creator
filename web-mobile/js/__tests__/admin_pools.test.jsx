@@ -197,3 +197,99 @@ describe('decideRankCommit', () => {
 // which renders the modal, and the modal's onSubmit calls onEditScore with
 // the real patch. The modal is imported as window.ScoreEditorModal and
 // receives `password` so decision endpoints are authenticated.
+
+// Deep-review (2026-05-22): enrichPoolMatchWithComp regression tests.
+// Pool-match objects from pools[i].matches carry only the MatchResult
+// shape (id, status, sides, ippons, decision) without comp-level
+// metadata. The ScoreEditorModal reads compKind / teamSize / compId /
+// compName / phase / poolName off the match prop to:
+//   * pick TeamScoreEditorModal vs the individual editor,
+//   * fetch competition details for maxEnchoPeriods / naginata,
+//   * render the header.
+// Without enrichment a team-comp pool match would silently route into
+// the individual editor and the modal header would render "undefined ·
+// undefined". Enrichment is applied at the click boundary so when
+// mp-i3h merges poolMatches into pool.matches, the modal still picks
+// up the right competition context.
+import { enrichPoolMatchWithComp } from '../admin_pools.jsx';
+
+describe('enrichPoolMatchWithComp', () => {
+  const comp = { id: 'c1', name: 'Comp One', kind: 'team', teamSize: 5 };
+
+  it('returns null/undefined unchanged so a missing match short-circuits cleanly', () => {
+    expect(enrichPoolMatchWithComp(null, comp)).toBeNull();
+    expect(enrichPoolMatchWithComp(undefined, comp)).toBeUndefined();
+  });
+
+  it('fills in all comp-* fields from the competition when the match has none', () => {
+    const m = { id: 'A-0', status: 'scheduled' };
+    const enriched = enrichPoolMatchWithComp(m, comp);
+    expect(enriched.compId).toBe('c1');
+    expect(enriched.compName).toBe('Comp One');
+    expect(enriched.compKind).toBe('team');
+    expect(enriched.teamSize).toBe(5);
+    expect(enriched.phase).toBe('pool');
+    // Pool name derived from id prefix when no override is supplied.
+    expect(enriched.poolName).toBe('A');
+    // Original fields preserved verbatim.
+    expect(enriched.id).toBe('A-0');
+    expect(enriched.status).toBe('scheduled');
+  });
+
+  it('prefers the explicit poolNameOverride over the id-derived prefix', () => {
+    const m = { id: 'A-0', status: 'scheduled' };
+    const enriched = enrichPoolMatchWithComp(m, comp, 'Pool Alpha');
+    expect(enriched.poolName).toBe('Pool Alpha');
+  });
+
+  it('does NOT clobber existing comp-* fields on the match (server-injected wins)', () => {
+    // Defensive: if a future SSE patch or refresh annotates pool matches
+    // with comp-* metadata, we must not blow it away.
+    const m = {
+      id: 'A-0',
+      status: 'scheduled',
+      compId: 'server-id',
+      compName: 'Server Name',
+      compKind: 'individual',
+      teamSize: 0,
+      phase: 'bracket',
+      poolName: 'ServerPool',
+    };
+    const enriched = enrichPoolMatchWithComp(m, comp, 'Pool Alpha');
+    expect(enriched.compId).toBe('server-id');
+    expect(enriched.compName).toBe('Server Name');
+    expect(enriched.compKind).toBe('individual');
+    expect(enriched.teamSize).toBe(0);
+    expect(enriched.phase).toBe('bracket');
+    expect(enriched.poolName).toBe('ServerPool');
+  });
+
+  it('uses teamSize=0 as a valid value (?? not ||) so individual comps stay individual', () => {
+    // teamSize is numeric and 0 means "not a team competition". Using `||`
+    // would treat 0 as falsy and fall through to the comp's teamSize. Use
+    // `??` so the explicit 0 sticks.
+    const m = { id: 'A-0', status: 'scheduled', teamSize: 0 };
+    const enriched = enrichPoolMatchWithComp(m, comp);
+    expect(enriched.teamSize).toBe(0);
+  });
+
+  it('handles a match id without a "-" gracefully (empty poolName, no crash)', () => {
+    // Defensive: malformed ids ("X", "", null) shouldn't throw. Pool
+    // name falls back to "" so the modal header degrades but doesn't crash.
+    const enrichedX = enrichPoolMatchWithComp({ id: 'X', status: 'scheduled' }, comp);
+    expect(enrichedX.poolName).toBe('');
+    const enrichedEmpty = enrichPoolMatchWithComp({ id: '', status: 'scheduled' }, comp);
+    expect(enrichedEmpty.poolName).toBe('');
+  });
+
+  it('handles a null competition (rare, but defensive against transitional state)', () => {
+    const m = { id: 'A-0', status: 'scheduled' };
+    const enriched = enrichPoolMatchWithComp(m, null);
+    expect(enriched.compId).toBe('');
+    expect(enriched.compName).toBe('');
+    expect(enriched.compKind).toBe('');
+    expect(enriched.teamSize).toBe(0);
+    expect(enriched.phase).toBe('pool');
+    expect(enriched.poolName).toBe('A');
+  });
+});

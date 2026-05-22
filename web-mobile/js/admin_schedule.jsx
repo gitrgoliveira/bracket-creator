@@ -683,10 +683,16 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
         {filtered.length === 0 && (
           <div className="empty"><div className="icon">🔍</div><h3>No matches</h3><div style={{ fontSize: 12 }}>Adjust your filters or check that competitions have started.</div></div>
         )}
-        {allMatchesCompleted(filtered) && (
+        {/* "All matches scored" banner. Guarded against statusFilter === "complete"
+            because the filter trivially makes filtered all-completed, which would
+            misleadingly fire the banner. The wording is intentionally generic — this
+            view spans all match phases (pool + bracket) and all competition formats
+            (pools/mixed/playoffs/league/swiss), so we don't claim "Pool play is
+            complete" or point at a specific next tab. */}
+        {statusFilter !== "complete" && allMatchesCompleted(filtered) && (
           <div className="notice notice--success" style={{ marginBottom: 12, padding: "12px 16px", background: "var(--green-soft, #e8f8f0)", border: "1px solid var(--green, #34b872)", borderRadius: 8 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>All matches scored</div>
-            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Pool play is complete. Head to the Bracket tab to generate or start playoffs, or view final standings in the Pools tab.</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Every visible match is complete. Check the Pools or Bracket tab to review standings, generate playoffs, or start the next phase.</div>
           </div>
         )}
         {filtered.map((m) => {

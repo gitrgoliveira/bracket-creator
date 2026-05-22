@@ -46,6 +46,43 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
   return { action: "noop" };
 }
 
+// Enrich a pool-match object with the comp-* metadata that
+// ScoreEditorModal reads off the match prop. Pool matches arrive as the
+// raw MatchResult shape (id, status, sides, ippons, decision) with none
+// of the comp-level fields the modal needs:
+//   * compKind / teamSize — picks TeamScoreEditorModal vs individual editor
+//   * compId — fetches competition details (maxEnchoPeriods, naginata)
+//              and is the path for decision/score endpoints
+//   * compName — header eyebrow
+//   * phase / poolName — header subtitle ("CompName · PoolName")
+//
+// Pool name falls back to the prefix of the match id ("PoolName-MatchIdx"
+// per parsePoolMatchesRecords in internal/state/pools.go) when the caller
+// can't supply a known pool name. Existing fields on `m` always win — we
+// only fill in undefined values so we don't clobber a server-injected
+// compId or compKind that may have arrived through a later refresh.
+//
+// Note: teamSize uses `??` (not `||`) so an explicit teamSize=0 on the
+// match (individual comp) is preserved instead of falling through to the
+// comp's teamSize. The same `??` is applied to the comp.teamSize fallback
+// so a null comp degrades to teamSize=0 (individual) rather than throwing.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
+  if (!m) return m;
+  const derivedPoolName = poolNameOverride
+    || (m.id && m.id.indexOf('-') > 0 ? m.id.split('-')[0] : "");
+  return {
+    ...m,
+    compId: m.compId || (comp && comp.id) || "",
+    compName: m.compName || (comp && comp.name) || "",
+    compKind: m.compKind || (comp && comp.kind) || "",
+    teamSize: m.teamSize ?? (comp && comp.teamSize) ?? 0,
+    phase: m.phase || "pool",
+    poolName: m.poolName || derivedPoolName,
+  };
+}
+
 // Rank inputs commit on blur / Enter rather than every keystroke. Typing
 // "10" used to fire two API calls (rank=1 then rank=10); the intermediate
 // rank=1 collided with whoever already held rank 1 and produced visible
@@ -152,6 +189,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [scoreOpenMatch, setScoreOpenMatch] = useStateA(null);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // ScoreEditorModal reads comp-* metadata off the match (compId, compKind,
+  // teamSize, compName, phase, poolName). Pool-match objects from
+  // pools[i].matches carry only the MatchResult shape — no comp-level
+  // enrichment — so we wrap them at the modal boundary via the pure
+  // enrichPoolMatchWithComp helper. See its docstring for the rationale.
+  const enrichPoolMatch = (m, poolNameOverride) => enrichPoolMatchWithComp(m, c, poolNameOverride);
 
   // Modal rendered in both return paths (detail view and card list).
   const scoreModal = scoreOpenMatch ? (
@@ -299,7 +343,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
                       {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
                     </div>
-                    <button className="btn btn--sm" onClick={() => setScoreOpenMatch(m)}>
+                    <button className="btn btn--sm" onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
                       {m.status === "completed" ? "Edit" : "Score"}
                     </button>
                   </div>
@@ -409,7 +453,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(m); }}>Score</button>
+                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>Score</button>
                         </div>
                       </div>
                     ))}
@@ -428,6 +472,6 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
 window.AdminPools = AdminPools;
 
-// ES export for the vitest suite — pure helper only. The component
+// ES export for the vitest suite — pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { decideRankCommit };
+export { decideRankCommit, enrichPoolMatchWithComp };

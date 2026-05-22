@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, ResultsViewer } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 
@@ -145,6 +145,20 @@ describe('Viewer Utils', () => {
 describe('ResultsViewer', () => {
   // Tests call ResultsViewer as a plain function (not a mounted component) —
   // the same pattern used throughout this test suite.
+
+  // The bracket-path cases mutate window.MatchCard. Save/restore so other
+  // test files don't observe a stale stub if they run after this suite.
+  const MATCH_CARD_SENTINEL = Symbol('absent');
+  let prevMatchCard = MATCH_CARD_SENTINEL;
+  beforeEach(() => {
+    prevMatchCard = Object.prototype.hasOwnProperty.call(window, 'MatchCard')
+      ? window.MatchCard
+      : MATCH_CARD_SENTINEL;
+  });
+  afterEach(() => {
+    if (prevMatchCard === MATCH_CARD_SENTINEL) delete window.MatchCard;
+    else window.MatchCard = prevMatchCard;
+  });
 
   const makeStanding = (name, dojo) => ({ player: { name, dojo }, wins: 2, losses: 0, draws: 0, ipponsGiven: 4, ipponsTaken: 0 });
 

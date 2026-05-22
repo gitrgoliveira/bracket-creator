@@ -110,23 +110,26 @@ function RankInput({ initial, className, onCommit, style, disabled, title }) {
     }
   };
   return (
-    <input
-      type="number"
-      min="1"
-      max={MAX_RANK}
-      className={className}
-      value={v}
-      onChange={(e) => setV(e.target.value)}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-      onKeyDown={handleKeyDown}
-      onClick={(e) => e.stopPropagation()}
-      autoComplete="off"
-      style={style}
-      disabled={disabled}
-      title={title}
-      aria-disabled={disabled ? "true" : undefined}
-    />
+    // Wrap in a span so click/pointer events are stopped even when the input
+    // is disabled (disabled form controls don't fire click events themselves).
+    <span onClick={(e) => e.stopPropagation()} title={disabled ? title : undefined} style={{ display: "inline-block" }}>
+      <input
+        type="number"
+        min="1"
+        max={MAX_RANK}
+        className={className}
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        autoComplete="off"
+        style={style}
+        disabled={disabled}
+        title={!disabled ? title : undefined}
+        aria-disabled={disabled ? "true" : undefined}
+      />
+    </span>
   );
 }
 
@@ -157,8 +160,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   }
 
   const selectedPool = selectedPoolName ? pools.find(p => p.poolName === selectedPoolName) : null;
-  const liveById = Object.fromEntries((poolMatches || []).map(m => [m.id, m]));
-  const ranksLocked = c.status !== "pools";
+  const liveById = buildLiveById(poolMatches);
+  const ranksLocked = isRanksLocked(c.status);
   const rankLockedTitle = ranksLocked ? "Pool play complete — start playoffs from the Bracket tab" : undefined;
 
   if (selectedPool) {

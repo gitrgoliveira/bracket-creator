@@ -906,6 +906,11 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
   })();
 
   return Object.entries(byCourt).map(([court, matches]) => {
+    // Count any match that is not scheduled or running as "consumed" — this
+    // mirrors the courtOrder sort which maps unknown statuses to the completed
+    // bucket.  The backend only emits scheduled/running/completed today, but
+    // treating the two active statuses as the set to exclude is more defensive
+    // than a strict "=== completed" check.
     const completedCount = matches.filter(m => m.status !== "scheduled" && m.status !== "running").length;
     const remainingCount = matches.length - completedCount;
     const estimatedRemainingMin = remainingCount * ppm;
@@ -1045,13 +1050,11 @@ window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
 
-// ES exports for the vitest suite. Pure helpers (timeEdited,
-// timeToMinutes, clampMatchDuration, suggestRebalances,
-// computeCourtPaceStats, filterMatchesByCourt) are exported at their
-// declaration sites; this block re-exports the helpers that aren't.
+// ES exports for the vitest suite. computeCourtPaceStats,
+// filterMatchesByCourt, and CourtPacePanel use `export function` /
+// `export function` at their declaration sites.  This block exports the
+// remaining helpers that are declared without `export`.
 //
-// CourtPacePanel is also exported as an ES symbol because its vitest
-// suite needs to mount the actual component (not just call the helper).
 // All other top-level components stay behind the window.* pattern to
 // match the rest of admin_*.jsx.
 export { timeEdited, timeToMinutes, clampMatchDuration, suggestRebalances };

@@ -1141,7 +1141,6 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 
   const handleMatchClick = (m) => {
     setExpandedMatchId(prev => prev === m.id ? null : m.id);
-    if (onMatchClick) onMatchClick(m);
   };
 
   return (

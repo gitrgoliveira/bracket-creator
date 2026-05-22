@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats } from '../admin_schedule.jsx';
 
 describe('timeEdited', () => {
@@ -402,37 +402,6 @@ describe('computeCourtPaceStats', () => {
     expect(stat.estimatedRemainingMin).toBe(10); // 2 × 5
   });
 
-  it('wallClockElapsedMin is now minus earliest scheduledAt', () => {
-    const byCourt = {
-      A: [
-        { status: 'completed', scheduledAt: '09:00' },
-        { status: 'running', scheduledAt: '09:10' },
-      ]
-    };
-    // now = 09:20 = 560, earliest = 09:00 = 540 → elapsed = 20
-    const [stat] = computeCourtPaceStats(byCourt, 5, 9 * 60 + 20);
-    expect(stat.wallClockElapsedMin).toBe(20);
-  });
-
-  it('wallClockElapsedMin is 0 when no scheduledAt times exist', () => {
-    const byCourt = {
-      A: [
-        { status: 'scheduled', scheduledAt: null },
-        { status: 'scheduled', scheduledAt: null },
-      ]
-    };
-    const [stat] = computeCourtPaceStats(byCourt, 5, 600);
-    expect(stat.wallClockElapsedMin).toBe(0);
-  });
-
-  it('wallClockElapsedMin is clamped to 0 when now is before earliest scheduledAt', () => {
-    const byCourt = {
-      A: [{ status: 'scheduled', scheduledAt: '10:00' }]
-    };
-    // now = 09:00 (before match starts)
-    const [stat] = computeCourtPaceStats(byCourt, 5, 9 * 60);
-    expect(stat.wallClockElapsedMin).toBe(0);
-  });
 
   it('delta is estimatedRemainingMin - plannedRemainingMin', () => {
     const byCourt = {
@@ -523,6 +492,115 @@ describe('suggestRebalances', () => {
     ];
     // Math.min(4, |-3|) = 3. Math.floor(3 / 5) = 0.
     expect(suggestRebalances(stats, 5)).toBeNull();
+  });
+});
+
+describe('CourtPacePanel timer', () => {
+  let realReact;
+  let runtime;
+  let CourtPacePanel;
+
+  function makeReactive() {
+    let hookSlots = [];
+    let hookIndex = 0;
+    let scheduledRender = null;
+    let rootProps = null;
+    let rootFactory = null;
+    let effectCleanups = [];
+
+    function rerender() {
+      hookIndex = 0;
+      scheduledRender = rootFactory(rootProps);
+      return scheduledRender;
+    }
+
+    const reactive = {
+      createElement: (type, props, ...children) => ({ type, props, children }),
+      useState: (initial) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = typeof initial === 'function' ? initial() : initial;
+        }
+        const setter = (v) => {
+          hookSlots[i] = typeof v === 'function' ? v(hookSlots[i]) : v;
+          rerender();
+        };
+        return [hookSlots[i], setter];
+      },
+      useEffect: (effect, deps) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = deps;
+          const cleanup = effect();
+          if (typeof cleanup === 'function') {
+            effectCleanups.push(cleanup);
+          }
+        }
+      },
+      useMemo: (fn) => fn(),
+      useRef: (initial) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = { current: initial };
+        }
+        return hookSlots[i];
+      },
+      useLayoutEffect: () => {},
+      memo: (c) => c,
+    };
+
+    return {
+      React: reactive,
+      mount: (factory, props) => {
+        hookSlots = [];
+        hookIndex = 0;
+        rootFactory = factory;
+        rootProps = props;
+        effectCleanups = [];
+        return rerender();
+      },
+      unmount: () => {
+        effectCleanups.forEach(c => c());
+        effectCleanups = [];
+      },
+      currentTree: () => scheduledRender,
+    };
+  }
+
+  beforeEach(async () => {
+    realReact = global.React;
+    runtime = makeReactive();
+    global.React = runtime.React;
+    vi.useFakeTimers();
+    vi.resetModules();
+    ({ CourtPacePanel } = await import('../admin_schedule.jsx'));
+  });
+
+  afterEach(() => {
+    global.React = realReact;
+    vi.useRealTimers();
+    runtime.unmount();
+    vi.resetModules();
+  });
+
+  it('sets up a 60s interval that triggers updates, and clears it on unmount', () => {
+    const byCourt = {
+      A: [
+        { status: 'scheduled', scheduledAt: '09:00' },
+      ]
+    };
+
+    const setIntervalSpy = vi.spyOn(global, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
+
+    runtime.mount(CourtPacePanel, { byCourt, safeMatchDuration: 5 });
+
+    expect(setIntervalSpy).toHaveBeenCalledOnce();
+    expect(setIntervalSpy.mock.calls[0][1]).toBe(60000);
+
+    runtime.unmount();
+    expect(clearIntervalSpy).toHaveBeenCalledOnce();
+    expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[0].value);
   });
 });
 

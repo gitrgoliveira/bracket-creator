@@ -853,8 +853,6 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //   court               — the court label (e.g. "A")
 //   completedCount      — matches with status === "completed"
 //   remainingCount      — matches NOT yet completed
-//   wallClockElapsedMin — minutes from the earliest scheduledAt on that court
-//                         to now. Falls back to 0 when no scheduledAt data.
 //   estimatedRemainingMin — remainingCount × perMatchMinutes
 //   plannedRemainingMin   — time from now to the latest scheduledAt on the
 //                           court. Falls back to estimatedRemainingMin when
@@ -879,11 +877,7 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
     const times = matches
       .map(m => timeToMinutes(m.scheduledAt))
       .filter(t => t !== null);
-    const earliestMin = times.length > 0 ? Math.min(...times) : null;
     const latestMin = times.length > 0 ? Math.max(...times) : null;
-
-    // Wall-clock elapsed: from earliest scheduled time on this court to now.
-    const wallClockElapsedMin = earliestMin !== null ? Math.max(0, nowMin - earliestMin) : 0;
 
     // Planned remaining: from now to end of last scheduled match (+ one match duration).
     // If no times available, fall back to estimatedRemainingMin.
@@ -893,18 +887,26 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 
     const delta = estimatedRemainingMin - plannedRemainingMin;
 
-    return { court, completedCount, remainingCount, wallClockElapsedMin, estimatedRemainingMin, plannedRemainingMin, delta };
+    return { court, completedCount, remainingCount, estimatedRemainingMin, plannedRemainingMin, delta };
   });
 }
 
 // CourtPacePanel — admin-only collapsible card showing per-court pace status
 // and a rebalancing suggestion. Never rendered in viewer or display views.
-function CourtPacePanel({ byCourt, safeMatchDuration }) {
+export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
+  const [tick, setTick] = useStateA(0);
+
+  useEffectA(() => {
+    const timer = setInterval(() => {
+      setTick(t => t + 1);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const stats = useMemoA(
     () => computeCourtPaceStats(byCourt, safeMatchDuration),
-    [byCourt, safeMatchDuration]
+    [byCourt, safeMatchDuration, tick]
   );
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)

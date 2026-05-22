@@ -297,4 +297,3 @@ export {
   MAX_COURTS,
   MAX_RANK,
 };
-

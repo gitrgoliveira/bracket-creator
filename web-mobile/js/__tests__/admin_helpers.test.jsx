@@ -634,4 +634,3 @@ describe('getScoreBtnClass', () => {
     expect(getScoreBtnClass('completed')).toBe('score-btn score-btn--correct');
   });
 });
-

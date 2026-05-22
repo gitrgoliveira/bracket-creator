@@ -186,7 +186,9 @@ describe('ResultsViewer', () => {
       ],
     };
     // Stub window.MatchCard so the component doesn't blow up
-    window.MatchCard = () => null;
+    const MatchCardStub = () => null;
+    MatchCardStub.displayName = 'MatchCardStub';
+    window.MatchCard = MatchCardStub;
     const tree = ResultsViewer({ bracket, standings: null, pools: null, _c: {} });
     const text = JSON.stringify(tree);
     expect(text).toContain('Alice'); // champion

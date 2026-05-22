@@ -945,6 +945,11 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
 
   const hasPools = !!pools && pools.length > 0;
   const hasBracket = !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
+  // Only the *real* server bracket (with actual rounds) is suitable for the
+  // podium in ResultsViewer. derivedBracket may be a placeholder synthesised
+  // from pool names — useful for the Bracket tab preview, but its matches
+  // have no winners so it would render an empty podium.
+  const hasRealBracket = !!bracket && Array.isArray(bracket.rounds) && bracket.rounds.length > 0;
   // T192 (FR-050e): Swiss competitions surface a dedicated standings
   // tab in place of pools/bracket. The standings tab fetches its own
   // data via /swiss/standings (it's not part of the competition-detail
@@ -1036,8 +1041,12 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           {tab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
-          {tab === "results" && c.status === "completed" && (derivedBracket || hasPools) && (
-            <ResultsViewer c={c} bracket={derivedBracket} standings={standings} pools={pools} />
+          {tab === "results" && c.status === "completed" && (hasRealBracket || hasPools) && (
+            // Pass the *real* server bracket (not the placeholder
+            // derivedBracket synthesized for the Bracket tab) — ResultsViewer
+            // treats a null bracket as "pools-only" and renders pool winners
+            // from standings instead of an empty podium.
+            <ResultsViewer c={c} bracket={hasRealBracket ? bracket : null} standings={standings} pools={pools} />
           )}
         </div>
       </div>

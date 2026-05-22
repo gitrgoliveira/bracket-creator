@@ -858,9 +858,10 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //   wallClockElapsedMin — minutes from the earliest scheduledAt on that court
 //                         to now. Falls back to 0 when no scheduledAt data.
 //   estimatedRemainingMin — remainingCount × perMatchMinutes
-//   plannedRemainingMin   — time from now to the latest scheduledAt on the
-//                           court. Falls back to estimatedRemainingMin when
-//                           no scheduled times exist.
+//   plannedRemainingMin   — time from now to the *end* of the last scheduled
+//                           match on the court (latestMin + perMatchMinutes
+//                           − nowMin, floored at 0). Falls back to
+//                           estimatedRemainingMin when no scheduled times exist.
 //   delta               — estimatedRemainingMin − plannedRemainingMin
 //                         positive = behind schedule, negative = ahead
 //

@@ -394,11 +394,18 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 	// Verify standings after Round 2.
 	standingsR2 := getStandings()
 	// High-point pairings mean we have players with 2, 1, and 0 wins.
+	// The exact distribution depends on the pairing algorithm (Swiss
+	// pairs by win-count groups), but the differentiation is what we're
+	// pinning: at least one player at the top (2 wins) and at least one
+	// at the bottom (0 wins) — otherwise the pairing didn't honor seeds.
 	winsTally := map[int]int{}
 	for _, s := range standingsR2 {
 		winsTally[s.Wins]++
 	}
-	assert.Equal(t, 6, winsTally[2]+winsTally[1]+winsTally[0])
+	require.Len(t, standingsR2, 6)
+	assert.GreaterOrEqual(t, winsTally[2], 1, "at least one player should have 2 wins after R2")
+	assert.GreaterOrEqual(t, winsTally[0], 1, "at least one player should have 0 wins after R2")
+	assert.Equal(t, 6, winsTally[2]+winsTally[1]+winsTally[0], "all 6 players should land in {0,1,2}-wins buckets after R2")
 
 	// --- ROUND 3 ---
 	// Generate Round 3.

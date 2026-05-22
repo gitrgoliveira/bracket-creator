@@ -52,8 +52,11 @@
          (compiled to dist/glossary.js) imports it via a relative path. -->
     <script type="module" src="/dist/glossary.js?v=5"></script>
     <script type="module" src="/dist/reset.js?v=5"></script>
-    <script type="module" src="/dist/viewer.js?v=5"></script>
+    <!-- display.js exports queueLabel / queueLabelCompact to window for the
+         viewer pills. Must load *before* viewer.js so the first viewer render
+         picks up the labels (mp-e3k Copilot follow-up). -->
     <script type="module" src="/dist/display.js?v=5"></script>
+    <script type="module" src="/dist/viewer.js?v=5"></script>
     <script type="module" src="/dist/admin_helpers.js?v=5"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>
     <script type="module" src="/dist/admin_scoring_modal.js?v=5"></script>

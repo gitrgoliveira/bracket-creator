@@ -45,6 +45,8 @@ type Store struct {
 
 	// cache for competition-level files
 	compCache sync.Map // map[string]*compCache
+
+	announcementStore *AnnouncementStore
 }
 
 type compCache struct {
@@ -59,8 +61,9 @@ type fileCache struct {
 
 func NewStore(folder string) (*Store, error) {
 	s := &Store{
-		folder: folder,
-		walDir: filepath.Join(folder, ".wal"),
+		folder:            folder,
+		walDir:            filepath.Join(folder, ".wal"),
+		announcementStore: NewAnnouncementStore(),
 	}
 
 	if err := s.init(); err != nil {
@@ -68,6 +71,10 @@ func NewStore(folder string) (*Store, error) {
 	}
 
 	return s, nil
+}
+
+func (s *Store) AnnouncementStore() *AnnouncementStore {
+	return s.announcementStore
 }
 
 func (s *Store) init() error {

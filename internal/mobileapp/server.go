@@ -82,6 +82,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterPublicEligibilityHandlers(api, store)
 	RegisterPublicLineupHandlers(api, store)
 	RegisterPublicSwissHandlers(api, store, eng)
+	RegisterPublicAnnouncementHandlers(api, store)
 
 	// Public password-reset + auth-config endpoints. Both must live
 	// outside the admin group: /reset is the recovery path for a
@@ -119,6 +120,11 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		RegisterLineupHandlers(adminSmallBody, store, store, store)
 		RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
 		RegisterSwissHandlers(adminSmallBody, store, eng, hub)
+		// Announcement send is a small JSON payload (already further
+		// capped at 4 KB inside the handler via http.MaxBytesReader,
+		// per the earlier security review). Belongs in the small-body
+		// group with the rest of the admin JSON endpoints.
+		RegisterAnnouncementHandlers(adminSmallBody, store, hub)
 	}
 
 	adminLargeBody := r.Group("/api")

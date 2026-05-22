@@ -280,6 +280,23 @@ func (r *ScoreRequest) Validate() error {
 			return err
 		}
 	}
+	// DecidedByHantei encodes a rules-level invariant: judges' decision after
+	// tied encho (FIK 7-5 / 29-6). A winner must be present and the status,
+	// if supplied, must be completed.
+	if r.DecidedByHantei {
+		if r.Winner == "" {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "requires winner to be set",
+			}
+		}
+		if r.Status != "" && r.Status != state.MatchStatusCompleted {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "only valid on completed matches",
+			}
+		}
+	}
 	return r.validateDecision()
 }
 

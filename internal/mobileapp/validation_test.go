@@ -658,3 +658,60 @@ func TestSuneIpponRoundTrips(t *testing.T) {
 		assert.Equal(t, "ipponsA", verr.Field)
 	})
 }
+
+func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
+	t.Run("valid hantei: completed with winner", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("valid hantei: no status supplied (partial update)", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			DecidedByHantei: true,
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("invalid hantei: no winner", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: status is running, not completed", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusRunning,
+			DecidedByHantei: true,
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("decidedByHantei false is always valid", func(t *testing.T) {
+		req := ScoreRequest{DecidedByHantei: false}
+		assert.NoError(t, req.Validate())
+	})
+}

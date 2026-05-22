@@ -886,11 +886,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   onClick={() => setDecidedByHantei(true)}
                   // Hantei is only valid when the bout is genuinely tied
                   // at end of encho (FIK 7-5 / 29-6). Disable the arm
-                  // button when the current ippon totals are unequal — an
-                  // ippon-derived win is already decided and shouldn't be
-                  // overwritten by a judges' call. (0-0 is still tied.)
-                  disabled={submitting || decisionSubmitting || aTotal !== bTotal}
-                  title={aTotal !== bTotal ? "Hantei applies only to tied matches in encho" : "Record a judges' decision"}
+                  // button when totals are unequal (ippon-derived win already
+                  // decided), when the bout is already decided by ippons
+                  // (boutDecided), or when a draw is already toggled.
+                  // (0-0 is still a valid tied state.)
+                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled}
+                  title={aTotal !== bTotal || boutDecided ? "Hantei applies only to tied matches in encho" : "Record a judges' decision"}
                   style={{ marginLeft: "auto" }}
                 >
                   Decide by hantei…

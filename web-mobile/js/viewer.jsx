@@ -117,7 +117,7 @@ function isFollowedPlayer(p, followed) {
   const pId = (typeof p === "object" ? p.id : null) || "";
   const pName = (typeof p === "object" ? p.name : p) || "";
   if (pId && followed.id && pId === followed.id) return true;
-  if (pName && followed.name && pName === followed.name) return true;
+  if (pName && followed.name && pName.trim().toLowerCase() === followed.name.trim().toLowerCase()) return true;
   return false;
 }
 
@@ -1347,10 +1347,6 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             </div>
           </div>
           {(() => {
-            // Use isFollowedPlayer (same helper MyMatchPanel uses) so
-            // opponent resolution stays consistent across viewer screens.
-            // Direct id-equality misses legacy/name-keyed fixtures and
-            // team sub-player shapes where ids may diverge but names align.
             const opp = isFollowedPlayer(myUpcoming.sideA, myPlayer) ? myUpcoming.sideB : myUpcoming.sideA;
             return opp ? (
               <div className="my-match__opp">

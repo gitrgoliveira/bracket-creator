@@ -101,6 +101,14 @@ describe('isFollowedPlayer', () => {
     // be treated as the same person just because their ids are empty.
     expect(isFollowedPlayer({ id: '', name: 'Alice' }, { id: '', name: 'Bob' })).toBe(false);
   });
+
+  it('name fallback is case-insensitive and trims whitespace', () => {
+    // Older payloads or manual entries may differ in capitalisation or
+    // have leading/trailing spaces — treat them as the same player.
+    expect(isFollowedPlayer({ id: '', name: 'ALICE' }, { id: '', name: 'alice' })).toBe(true);
+    expect(isFollowedPlayer({ id: '', name: '  Alice  ' }, { id: '', name: 'Alice' })).toBe(true);
+    expect(isFollowedPlayer('alice', { id: '', name: 'ALICE' })).toBe(true);
+  });
 });
 
 // FR-025 — MyMatchPanel Queue chip label. Wording mirrors VSchedItem (also in

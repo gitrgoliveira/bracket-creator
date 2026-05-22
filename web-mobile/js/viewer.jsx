@@ -1888,16 +1888,17 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
 function ResultsViewer({ bracket, standings, pools }) {
   // Pools-only competitions have no bracket — show pool winners instead.
   if (!bracket) {
-    const winners = (pools || []).map(p => {
+    const poolRows = (pools || []).map(p => {
       const ps = standings ? standings[p.poolName] : null;
       const top = ps && ps.length > 0 ? ps[0] : null;
       return { poolName: p.poolName, winner: top ? top.player.name : null, dojo: top ? top.player.dojo : null };
-    }).filter(w => w.winner);
+    });
+    const hasAnyResult = poolRows.some(r => r.winner);
     return (
       <div>
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card__title" style={{ marginBottom: 10 }}>Pool winners</div>
-          {winners.length === 0 ? (
+          {!hasAnyResult ? (
             <div style={{ color: "var(--ink-3)", fontSize: 14 }}>No results available yet.</div>
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1908,12 +1909,18 @@ function ResultsViewer({ bracket, standings, pools }) {
                 </tr>
               </thead>
               <tbody>
-                {winners.map(w => (
-                  <tr key={w.poolName}>
-                    <td style={{ paddingRight: 16, paddingBottom: 8, color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: 13 }}>{w.poolName}</td>
+                {poolRows.map(r => (
+                  <tr key={r.poolName}>
+                    <td style={{ paddingRight: 16, paddingBottom: 8, color: "var(--ink-3)", fontFamily: "var(--font-mono)", fontSize: 13 }}>{r.poolName}</td>
                     <td style={{ paddingBottom: 8 }}>
-                      <div style={{ fontWeight: 600 }}>{w.winner}</div>
-                      {w.dojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{w.dojo}</div>}
+                      {r.winner ? (
+                        <>
+                          <div style={{ fontWeight: 600 }}>{r.winner}</div>
+                          {r.dojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{r.dojo}</div>}
+                        </>
+                      ) : (
+                        <div style={{ color: "var(--ink-3)" }}>—</div>
+                      )}
                     </td>
                   </tr>
                 ))}

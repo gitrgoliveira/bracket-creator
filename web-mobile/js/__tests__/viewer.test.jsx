@@ -165,6 +165,22 @@ describe('ResultsViewer', () => {
     expect(text).not.toContain('Bob'); // only rank-1 per pool
   });
 
+  it('pools-only: shows "—" placeholder for pools with no standings yet (partial results)', () => {
+    // Pool A has a winner; Pool B has no standings yet. The table should
+    // show both rows — omitting Pool B would produce a misleading partial
+    // results table with no indication that a pool is missing.
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }];
+    const standings = {
+      'Pool A': [makeStanding('Alice', 'DojoA')],
+      // Pool B intentionally absent from standings
+    };
+    const tree = ResultsViewer({ bracket: null, standings, pools });
+    const text = JSON.stringify(tree);
+    expect(text).toContain('Alice');
+    expect(text).toContain('Pool B');
+    expect(text).toContain('—'); // placeholder for the missing pool winner
+  });
+
   it('pools-only: shows "No results available yet." when standings are empty', () => {
     const pools = [{ poolName: 'Pool A' }];
     const standings = { 'Pool A': [] };

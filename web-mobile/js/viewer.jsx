@@ -1302,8 +1302,8 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
   // stays gracefully empty for non-queued matches and pre-T046 responses.
-  const qp = m.queuePosition;
-  const queueLabel = (m.status === "scheduled" && qp && qp > 0)
+  const qp = Number(m.queuePosition);
+  const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
     ? (qp === 1 ? "Next up" : `${qp - 1} before yours`)
     : null;
   return (
@@ -1894,8 +1894,8 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer.
-  const qp = m.queuePosition;
-  const queuePill = (m.status === "scheduled" && qp && qp > 0)
+  const qp = Number(m.queuePosition);
+  const queuePill = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
     ? (qp === 1 ? "Next" : `#${qp}`)
     : null;
   return (

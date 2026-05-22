@@ -227,8 +227,8 @@ function applyPatch(prev, event) {
     const resultMap = new Map(resultsToApply.map(r => [r.id, r]));
     const next = { ...prev };
     let changed = false;
-    // Track whether any patch was a scheduled/running → completed
-    // transition; only then is a queue-position recompute meaningful.
+    // Track whether any pool patch changed a match's scheduled state;
+    // only then is a queue-position recompute meaningful.
     let needsQueueRecompute = false;
 
     if (next.poolMatches) {
@@ -252,8 +252,8 @@ function applyPatch(prev, event) {
 
     if (next.bracket && next.bracket.rounds) {
         let bChanged = false;
-        // Track whether any bracket patch was a scheduled/running →
-        // completed transition; same trigger as the pool branch above.
+        // Track whether any bracket patch changed a match's scheduled state;
+        // same trigger as the pool branch above.
         let bracketNeedsQueueRecompute = false;
         const rounds = next.bracket.rounds.map(round =>
             round.map(m => {

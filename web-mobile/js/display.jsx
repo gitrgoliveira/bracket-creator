@@ -177,8 +177,8 @@ function findActiveCourts(tournament, competitions) {
 // payloads or unannotated matches). Keep this synchronised with the
 // equivalent helper in viewer.jsx so the two surfaces agree.
 function queueLabel(m) {
-    const qp = m.queuePosition;
-    if (qp && qp > 0) {
+    const qp = Number(m.queuePosition);
+    if (Number.isFinite(qp) && qp > 0) {
         if (qp === 1) return "Next up";
         return `${qp - 1} before yours`;
     }

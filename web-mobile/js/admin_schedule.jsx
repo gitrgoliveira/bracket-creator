@@ -884,6 +884,10 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
   })();
 
   return Object.entries(byCourt).map(([court, matches]) => {
+    // The backend uses exactly three MatchStatus values: scheduled / running /
+    // completed.  Kiken and fusenpai decisions mark the match "completed"
+    // rather than introducing a separate cancelled/forfeit status, so
+    // status === "completed" is the complete "this slot is consumed" signal.
     const completedCount = matches.filter(m => m.status === "completed").length;
     const remainingCount = matches.length - completedCount;
     const estimatedRemainingMin = remainingCount * ppm;

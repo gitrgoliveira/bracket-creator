@@ -321,13 +321,13 @@ function App() {
     window.API.fetchAnnouncement()
       .then(ann => {
         if (ann) {
-          let dismissedAt = null;
+          let dismissedKey = null;
           try {
-            dismissedAt = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
+            dismissedKey = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
           } catch (_e) {
             // private-browsing modes can throw
           }
-          if (!dismissedAt && new Date(ann.expiresAt) > new Date()) {
+          if (isAnnouncementActive(ann, dismissedKey)) {
             setActiveAnnouncement(ann);
           }
         }
@@ -478,17 +478,13 @@ function App() {
         } else if (event.type === "announcement") {
             const ann = event.data;
             if (ann) {
-                let dismissedAt = null;
+                let dismissedKey = null;
                 try {
-                    dismissedAt = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
+                    dismissedKey = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
                 } catch (_e) {
                     // private-browsing modes can throw
                 }
-                if (!dismissedAt && new Date(ann.expiresAt) > new Date()) {
-                    setActiveAnnouncement(ann);
-                } else {
-                    setActiveAnnouncement(null);
-                }
+                setActiveAnnouncement(isAnnouncementActive(ann, dismissedKey) ? ann : null);
             } else {
                 setActiveAnnouncement(null);
             }

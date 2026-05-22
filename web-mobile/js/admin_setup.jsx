@@ -268,10 +268,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
             <button
               className="btn btn--primary"
-              disabled={!announcementMessage.trim() || announcementInFlight}
+              disabled={isSendAnnouncementDisabled(announcementMessage, announcementInFlight)}
               onClick={handleSendAnnouncement}
             >
-              {announcementInFlight ? "Sending..." : "Send announcement"}
+              {sendAnnouncementLabel(announcementInFlight)}
             </button>
           </div>
         </div>

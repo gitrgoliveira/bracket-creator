@@ -435,7 +435,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     {queueMatches.map((m) => {
                         const compZekken = m._comp?.withZekkenName;
                         const label = queueLabel(m);
-                        const qp = m.queuePosition;
+                        const qp = Number(m.queuePosition);
                         return (
                             <div key={(m._comp?.id || '') + m.id} className="tvd__upcoming-card" style={{
                                 flex: 1,

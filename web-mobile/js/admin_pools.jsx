@@ -71,6 +71,25 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 // comp's teamSize. The same `??` is applied to the comp.teamSize fallback
 // so a null comp degrades to teamSize=0 (individual) rather than throwing.
 //
+// Filter a flat poolMatches array down to matches belonging to a single pool.
+// Pool-match ids follow the format "PoolName-N" (regular), "PoolName-DH-N"
+// (daihyosen), or "PoolName-TB-N" (tiebreak). The same regex used by
+// enrichPoolMatchWithComp extracts the pool name so all id variants are
+// handled uniformly.
+//
+// This exists because pool objects from the Go API carry helper.Match entries
+// in their Matches array (only sideA/sideB, no id) whereas poolMatches holds
+// the full state.MatchResult records (id, status, scores, decision). Score
+// buttons in the pool-card view need the MatchResult id to call the API.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function poolMatchesForPool(poolMatches, poolName) {
+  return (poolMatches || []).filter(m => {
+    const derivedName = (m.id || "").match(/^(.*?)-(?:DH-|TB-)?\d+$/)?.[1] ?? "";
+    return derivedName === poolName;
+  });
+}
+
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   if (!m) return m;
@@ -216,6 +235,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // enrichPoolMatchWithComp helper. See its docstring for the rationale.
   const enrichPoolMatch = (m, poolNameOverride) => enrichPoolMatchWithComp(m, c, poolNameOverride);
 
+  // pool.matches (helper.Match) only carries sideA/sideB — no id, status, or
+  // score data. poolMatches (state.MatchResult) has the full data including
+  // the id used by the score API endpoint. Use poolMatchesForPool filtered
+  // by pool name for rendering match rows so Score/Edit buttons have the
+  // real id. See poolMatchesForPool's docstring for the full rationale.
+  const poolMatchesFor = (poolName) => poolMatchesForPool(poolMatches, poolName);
+
   // Modal rendered in both return paths (detail view and card list).
   const scoreModal = scoreOpenMatch ? (
     <ScoreEditorModal
@@ -345,7 +371,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           <div style={{ marginTop: 24 }}>
             <h3 className="section-title">Match Results</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {selectedPool.matches.map(m => (
+              {poolMatchesFor(selectedPool.poolName).map(m => (
                 <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
                   <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id ? m.id.split('-').pop() : ""}</div>
                   <div className="sched-row__players">
@@ -457,11 +483,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   })}
                 </tbody>
               </table>
-              {pool.matches && pool.matches.length > 0 && (
+              {(() => { const pm = poolMatchesFor(pool.poolName); return pm.length > 0 && (
                 <div style={{ marginTop: 12, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", marginBottom: 6 }}>Matches</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {pool.matches.map(m => (
+                    {pm.map(m => (
                       <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center", padding: "2px 0" }}>
                         <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id ? m.id.split('-').pop() : ""}</div>
                         {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
@@ -472,13 +498,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>Score</button>
+                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Edit" : "Score"}</button>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
-              )}
+              ); })()}
             </div>
           );
         })}
@@ -493,4 +519,4 @@ window.AdminPools = AdminPools;
 
 // ES export for the vitest suite — pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { decideRankCommit, enrichPoolMatchWithComp };
+export { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool };

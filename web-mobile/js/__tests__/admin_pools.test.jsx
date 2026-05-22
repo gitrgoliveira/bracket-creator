@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideRankCommit } from '../admin_pools.jsx';
+import { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool } from '../admin_pools.jsx';
 
 // decideRankCommit is the pure predicate that drives RankInput.handleBlur.
 // It returns one of:
@@ -211,8 +211,6 @@ describe('decideRankCommit', () => {
 // undefined". Enrichment is applied at the click boundary so when
 // mp-i3h merges poolMatches into pool.matches, the modal still picks
 // up the right competition context.
-import { enrichPoolMatchWithComp } from '../admin_pools.jsx';
-
 describe('enrichPoolMatchWithComp', () => {
   const comp = { id: 'c1', name: 'Comp One', kind: 'team', teamSize: 5 };
 
@@ -343,5 +341,68 @@ describe('enrichPoolMatchWithComp', () => {
     const enriched = enrichPoolMatchWithComp(m, comp);
     expect(enriched.sideA).toBe(sideA);
     expect(enriched.sideB).toBe(sideB);
+  });
+});
+
+// poolMatchesForPool (mp-zcz follow-up)
+// -------------------------------------------------------
+// pool.matches (helper.Match) carries only sideA/sideB — no id, status, or
+// score data. Score buttons in the pool-card view need the MatchResult id to
+// call the PATCH /api/competitions/:cid/matches/:mid endpoint.
+//
+// poolMatchesForPool filters the flat poolMatches array (state.MatchResult)
+// down to entries belonging to a given pool, using the same pool-name regex
+// as enrichPoolMatchWithComp so DH/TB suffix variants are handled correctly.
+describe('poolMatchesForPool', () => {
+  const matches = [
+    { id: 'Pool A-0', status: 'completed' },
+    { id: 'Pool A-1', status: 'completed' },
+    { id: 'Pool A-2', status: 'scheduled' },
+    { id: 'Pool B-0', status: 'running' },
+    { id: 'Pool B-1', status: 'scheduled' },
+    { id: 'Pool A-DH-0', status: 'scheduled' },   // daihyosen
+    { id: 'Pool A-TB-0', status: 'scheduled' },   // tiebreak
+  ];
+
+  it('returns only matches for the requested pool name', () => {
+    const result = poolMatchesForPool(matches, 'Pool A');
+    expect(result.map(m => m.id)).toEqual(['Pool A-0', 'Pool A-1', 'Pool A-2', 'Pool A-DH-0', 'Pool A-TB-0']);
+  });
+
+  it('includes DH (daihyosen) and TB (tiebreak) match variants for the pool', () => {
+    const result = poolMatchesForPool(matches, 'Pool A');
+    expect(result.some(m => m.id === 'Pool A-DH-0')).toBe(true);
+    expect(result.some(m => m.id === 'Pool A-TB-0')).toBe(true);
+  });
+
+  it('does not bleed Pool A matches into Pool AB (prefix-safety)', () => {
+    // Pool names are "Pool A", "Pool B", etc. A naive startsWith('Pool A')
+    // would wrongly include "Pool AB-0". The regex strips the trailing
+    // numeric/DH/TB segment, so "Pool AB-0" → derivedName="Pool AB" ≠ "Pool A".
+    const withAB = [...matches, { id: 'Pool AB-0', status: 'scheduled' }];
+    const result = poolMatchesForPool(withAB, 'Pool A');
+    expect(result.some(m => m.id === 'Pool AB-0')).toBe(false);
+  });
+
+  it('returns an empty array when no matches belong to the pool', () => {
+    expect(poolMatchesForPool(matches, 'Pool Z')).toEqual([]);
+  });
+
+  it('returns an empty array for null/undefined poolMatches (guard for not-yet-started competitions)', () => {
+    expect(poolMatchesForPool(null, 'Pool A')).toEqual([]);
+    expect(poolMatchesForPool(undefined, 'Pool A')).toEqual([]);
+  });
+
+  it('skips matches with a missing or empty id without crashing', () => {
+    const withBadIds = [{ id: '', status: 'scheduled' }, { status: 'scheduled' }, ...matches];
+    // Bad-id entries derive poolName="" which won't match any real pool name
+    const result = poolMatchesForPool(withBadIds, 'Pool A');
+    expect(result.map(m => m.id)).toEqual(['Pool A-0', 'Pool A-1', 'Pool A-2', 'Pool A-DH-0', 'Pool A-TB-0']);
+  });
+
+  it('regression: match id undefined did not crash (coerced to "" by (m.id || ""))', () => {
+    const withUndefinedId = [{ id: undefined, status: 'scheduled' }];
+    expect(() => poolMatchesForPool(withUndefinedId, 'Pool A')).not.toThrow();
+    expect(poolMatchesForPool(withUndefinedId, 'Pool A')).toEqual([]);
   });
 });

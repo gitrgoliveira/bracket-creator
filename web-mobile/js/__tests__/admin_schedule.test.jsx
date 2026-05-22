@@ -426,6 +426,40 @@ describe('allMatchesCompleted', () => {
     expect(nextMatch).toBeNull();
   });
 
+  it('regression: Finish+Start Next does not loop when last scheduled match has completed matches sorted after it', () => {
+    // Real-world scenario: the operator has scored 6 of 7 pool matches. The
+    // sort order is scheduled first, completed last. The one remaining
+    // scheduled match sits at index 0; the 6 completed matches follow at
+    // indices 1-6. Clicking "Finish + Start Next" from the scheduled match
+    // used to open the first completed match (index 1) as a CORRECTION
+    // — the modal looped back to match 1. The fix is to compute
+    // nextActiveMatch = first non-completed match after openIdx, which is
+    // null when the remaining scheduled match IS the open one.
+    const sorted = [
+      { id: 'm7', court: 'A', status: 'scheduled',  compId: 'c1' }, // last unscored
+      { id: 'm1', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm2', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm3', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm4', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm5', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm6', court: 'A', status: 'completed',  compId: 'c1' },
+    ];
+    const openMatch = sorted[0]; // the last scheduled match
+    const sameCourt = filterMatchesByCourt(sorted, openMatch.court);
+    const openIdx = sameCourt.findIndex(m => m.id === openMatch.id);
+
+    // nextMatch (list position) is non-null — this is the source of the bug
+    // without the nextActiveMatch guard.
+    const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+    expect(nextMatch).not.toBeNull(); // m1 (completed) — confirms the bug path
+    expect(nextMatch.id).toBe('m1');
+
+    // nextActiveMatch (first non-completed after openIdx) must be null —
+    // this is what Finish+Start Next should use so the modal does not loop.
+    const nextActiveMatch = sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null;
+    expect(nextActiveMatch).toBeNull();
+  });
+
   // Deep-review (2026-05-22): the AdminScoreEditor banner render is guarded
   // by `statusFilter !== "complete" && allMatchesCompleted(filtered)`. When
   // the operator hits the "Completed" status filter the list is trivially

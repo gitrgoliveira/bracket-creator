@@ -749,6 +749,11 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
         const openIdx = sameCourt.findIndex(m => `${m.compId}:${m.id}` === `${openMatch.compId}:${openMatch.id}`);
         const prevMatch = openIdx > 0 ? sameCourt[openIdx - 1] : null;
         const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+        // Finish+Start Next must only advance to a non-completed match. Without
+        // this guard, the last scheduled match has nextMatch = the first completed
+        // match (completed matches sort after scheduled in the list), causing the
+        // modal to loop back to match 1 after the final save.
+        const nextActiveMatch = sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null;
         return (
           <ScoreEditorModal
             key={openMatch.compId + '-' + openMatch.id}
@@ -766,10 +771,10 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
                 // Error handled by onEditScore/toast, but we catch here to keep modal open
               }
             }}
-            onSubmitAndNext={nextMatch ? async (patch) => {
+            onSubmitAndNext={nextActiveMatch ? async (patch) => {
               try {
                 await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-                if (mountedRef.current) setOpenMatch(nextMatch);
+                if (mountedRef.current) setOpenMatch(nextActiveMatch);
               } catch (_err) { /* keep modal open on error */ }
             } : null}
           />

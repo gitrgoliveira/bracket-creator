@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"os"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -173,4 +174,41 @@ func TestMaybeAutoCompletePools_LeagueFormat(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusComplete, comp.Status)
+}
+
+// TestStartCompetition_SwissFormat pins the Swiss start flow:
+// status must move to "pools", SwissCurrentRound must be 1,
+// Round 1 matches must be written to pool-matches.csv, and no
+// bracket.json must be created.
+func TestStartCompetition_SwissFormat(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "swiss-start"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Swiss Start Test",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      state.CompStatusSetup,
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status, "Swiss start must set status to pools, not playoffs")
+	assert.Equal(t, 1, comp.SwissCurrentRound, "Swiss start must set SwissCurrentRound to 1")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, matches, "Round 1 matches must be written to pool-matches.csv on start")
+
+	_, statErr := os.Stat(dir + "/competitions/" + compID + "/bracket.json")
+	assert.True(t, os.IsNotExist(statErr), "bracket.json must not be created for Swiss start")
 }

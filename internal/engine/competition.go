@@ -391,12 +391,23 @@ func (e *Engine) StartCompetition(id string) error {
 	// (pools.csv / bracket.json) via their own per-comp lock
 	// acquisitions, so they run OUTSIDE the UpdateCompetitionChanged
 	// transform below (re-entering the lock would deadlock).
-	if comp.Format == state.CompFormatPools || comp.Format == state.CompFormatLeague {
+	switch comp.Format {
+	case state.CompFormatPools, state.CompFormatLeague:
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusPools
-	} else {
+	case state.CompFormatSwiss:
+		r1, err := e.GenerateSwissRound(id, 1)
+		if err != nil {
+			return err
+		}
+		if err := e.store.SavePoolMatches(id, r1); err != nil {
+			return err
+		}
+		comp.SwissCurrentRound = 1
+		comp.Status = state.CompStatusPools
+	default:
 		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
 			return err
 		}
@@ -527,6 +538,9 @@ func (e *Engine) StartCompetition(id string) error {
 			}
 		}
 		current.Status = comp.Status
+		if comp.Format == state.CompFormatSwiss {
+			current.SwissCurrentRound = comp.SwissCurrentRound
+		}
 		// HasParticipantIDs is auto-managed (saveCompetitionWithPlayers
 		// sets it to true when Players is non-empty) and not exposed in
 		// the admin UI as an editable field. Pre-fix this was an

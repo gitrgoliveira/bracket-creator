@@ -220,6 +220,19 @@ describe('isRanksLocked', () => {
     expect(isRanksLocked('completed')).toBe(true);
   });
 
+  it('locked when status is setup', () => {
+    // CompStatusSetup ("setup") is the pre-pools state. The component
+    // early-returns when pools is empty, so this branch rarely renders,
+    // but the predicate must still report locked for defense-in-depth.
+    expect(isRanksLocked('setup')).toBe(true);
+  });
+
+  it('locked when status is invalid', () => {
+    // CompStatusInvalid ("invalid") is set when a competition is reset.
+    // Pools may still exist on disk but rank inputs must not be editable.
+    expect(isRanksLocked('invalid')).toBe(true);
+  });
+
   it('locked when status is empty string or undefined', () => {
     expect(isRanksLocked('')).toBe(true);
     expect(isRanksLocked(undefined)).toBe(true);

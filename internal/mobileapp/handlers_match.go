@@ -33,6 +33,26 @@ func annotateQueuePositions(matches []state.MatchResult) {
 	}
 }
 
+// annotateBracketQueuePositions fills in BracketMatch.QueuePosition for each
+// scheduled bracket match in-place, using the same per-court counter logic as
+// annotateQueuePositions. Matches are visited in round then position order,
+// which matches the iteration order in the viewer's compMatches() helper.
+func annotateBracketQueuePositions(b *state.Bracket) {
+	if b == nil {
+		return
+	}
+	counters := make(map[string]int)
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			if m.Status == state.MatchStatusScheduled {
+				counters[m.Court]++
+				m.QueuePosition = counters[m.Court]
+			}
+		}
+	}
+}
+
 // enchoExceedsCap reports whether an encho block would exceed the
 // competition's MaxEnchoPeriods cap. Returns false (within limit) when
 // encho is unset, comp is nil, the cap is 0 (unlimited — FIK default),

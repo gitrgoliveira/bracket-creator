@@ -2080,11 +2080,19 @@ function deriveAwards(bracket, standings, pools, nameToPlayer) {
           return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
         })
         .filter(Boolean);
+      // `lookup` returns null when the side is a placeholder `{id:"", name:""}`
+      // (normalizeMatch's stand-in for bye / TBD slots). Spread-with-null would
+      // throw, so guard each slot before spreading. A missing slot is dropped
+      // by the trailing .filter(Boolean) — the podium just shrinks.
+      const championPlayer = lookup(champion);
+      const runnerUpPlayer = runnerUp ? lookup(runnerUp) : null;
+      const third0Player = thirds[0] ? lookup(thirds[0]) : null;
+      const third1Player = thirds[1] ? lookup(thirds[1]) : null;
       return [
-        { place: 1, ...lookup(champion) },
-        runnerUp ? { place: 2, ...lookup(runnerUp) } : null,
-        thirds[0] ? { place: 3, ...lookup(thirds[0]) } : null,
-        thirds[1] ? { place: 3, ...lookup(thirds[1]) } : null,
+        championPlayer ? { place: 1, ...championPlayer } : null,
+        runnerUpPlayer ? { place: 2, ...runnerUpPlayer } : null,
+        third0Player ? { place: 3, ...third0Player } : null,
+        third1Player ? { place: 3, ...third1Player } : null,
       ].filter(Boolean);
     }
   }

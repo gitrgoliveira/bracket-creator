@@ -92,6 +92,35 @@ describe('deriveAwards (bracket-based)', () => {
     const awards = deriveAwards(bracket, null, null, new Map());
     expect(awards.map((a) => a.name)).toEqual(['A', 'C', 'B']);
   });
+
+  it('shrinks the podium for bye/placeholder sides without throwing (normalizeMatch shape)', () => {
+    // normalizeMatch produces {id:"", name:""} for absent sides (bye matches /
+    // TBD slots). The bracket below has a completed final but the runner-up
+    // and one of the semi-final losers are placeholders. The helper must
+    // return only the populated places — no spread-on-null TypeError.
+    const blank = { id: '', name: '' };
+    const alice = { id: 'p1', name: 'Alice', dojo: 'Aoyama' };
+    const bob = { id: 'p2', name: 'Bob', dojo: 'Bunkyo' };
+    const bracket = {
+      rounds: [
+        // Semi-finals: one real match, one bye (no winner).
+        [
+          { sideA: alice, sideB: bob, winner: alice },
+          { sideA: blank, sideB: blank, winner: null },
+        ],
+        // Final: alice wins; the "opponent" slot is a placeholder
+        // because the second semi-final never produced a winner.
+        [{ sideA: alice, sideB: blank, winner: alice }],
+      ],
+    };
+    const awards = deriveAwards(bracket, null, null, new Map());
+    // Only the champion and one third (Bob, the real semi-final loser)
+    // make it into the podium. No throw; the missing places are dropped.
+    expect(awards.map((a) => `${a.place}:${a.name}`)).toEqual([
+      '1:Alice',
+      '3:Bob',
+    ]);
+  });
 });
 
 describe('deriveAwards (standings-based)', () => {

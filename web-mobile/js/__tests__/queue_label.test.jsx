@@ -43,7 +43,7 @@ describe('queueLabel (full form)', () => {
     expect(queueLabel(null)).toBe('');
   });
 
-  it('treats queuePosition 0 as "no queue" and falls back', () => {
+  it('returns "" for queuePosition 0 (non-positive treated as no queue)', () => {
     expect(queueLabel({ status: 'scheduled', queuePosition: 0 })).toBe('');
   });
 

@@ -1847,7 +1847,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   // upcoming-list row in the per-competition viewer. Wording is owned
   // by display.jsx::queueLabelCompact (bead mp-e3k); we still grab `qp`
   // separately because the accent-color styling below keys off qp===1.
-  const qp = m.queuePosition;
+  const qp = Number(m.queuePosition);
   const queuePill = window.queueLabelCompact ? window.queueLabelCompact(m) : null;
   return (
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>

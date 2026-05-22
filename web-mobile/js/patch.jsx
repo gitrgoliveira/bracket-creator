@@ -238,7 +238,7 @@ function applyPatch(prev, event) {
                 changed = true;
                 const prevStatus = m.status;
                 const merged = _mergeMatchPatch(m, update);
-                if (merged.status === "completed" && (prevStatus === "scheduled" || prevStatus === "running")) {
+                if ((prevStatus === "scheduled") !== (merged.status === "scheduled")) {
                     needsQueueRecompute = true;
                 }
                 return merged;
@@ -269,7 +269,7 @@ function applyPatch(prev, event) {
                     if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
                     const prevStatus = m.status;
                     const merged = _mergeMatchPatch(m, patch);
-                    if (merged.status === "completed" && (prevStatus === "scheduled" || prevStatus === "running")) {
+                    if ((prevStatus === "scheduled") !== (merged.status === "scheduled")) {
                         bracketNeedsQueueRecompute = true;
                     }
                     return merged;

@@ -663,15 +663,19 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
           <div
             className="my-match__chip"
             data-testid="my-match-queue"
-            aria-live={queueHighlight ? "polite" : "off"}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
           >
             <span className="l">Queue</span>
             {/* The .my-match card background is var(--accent) (dark blue), so
                 colouring text with var(--accent) renders unreadable. The chip
                 inherits white from --accent-fg; emphasise the live/up-next
-                state with full opacity + a Unicode bullet instead. */}
+                state with full opacity + a Unicode bullet instead.
+                Wrap the decorative bullet in aria-hidden to keep screen reader
+                announcements clean and focused on the queue label text. */}
             <span className="v" style={{ opacity: queueHighlight ? 1 : 0.92 }}>
-              {queueHighlight ? "• " : ""}{queueLabel}
+              {queueHighlight && <span aria-hidden="true">• </span>}{queueLabel}
             </span>
           </div>
         )}

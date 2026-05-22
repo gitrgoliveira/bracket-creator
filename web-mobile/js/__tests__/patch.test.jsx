@@ -147,7 +147,7 @@ describe('applyPatch', () => {
     expect(next.poolMatches[3].queuePosition).toBe(1);
   });
 
-  it('does not recompute queue positions when patch is not a completion', () => {
+  it('recomputes queue positions when patch transitions a scheduled match to running', () => {
     const prev = {
       poolMatches: [
         { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
@@ -158,6 +158,21 @@ describe('applyPatch', () => {
       data: { result: { id: "p1", status: "running" } },
     });
     expect(next.poolMatches[0].status).toBe("running");
+    expect(next.poolMatches[0].queuePosition).toBe(0);
+    expect(next.poolMatches[1].queuePosition).toBe(1);
+  });
+
+  it('does not recompute queue positions when patch does not change scheduled status', () => {
+    const prev = {
+      poolMatches: [
+        { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
+        { id: "p2", court: "A", scheduledAt: "09:10", status: "scheduled", queuePosition: 2 },
+      ],
+    };
+    const next = applyPatch(prev, {
+      data: { result: { id: "p1", winner: "Alice" } },
+    });
+    expect(next.poolMatches[0].winner).toBe("Alice");
     // sibling untouched — same reference
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
   });
@@ -309,7 +324,7 @@ describe('recomputeBracketQueuePositions', () => {
     expect(next.bracket.rounds[0][2].queuePosition).toBe(1);
   });
 
-  it('applyPatch does not recompute bracket queue positions on non-completion', () => {
+  it('applyPatch recomputes bracket queue positions when patch transitions a scheduled match to running', () => {
     const prev = {
       bracket: {
         rounds: [
@@ -324,6 +339,25 @@ describe('recomputeBracketQueuePositions', () => {
       data: { result: { id: "b1", status: "running" } },
     });
     expect(next.bracket.rounds[0][0].status).toBe("running");
+    expect(next.bracket.rounds[0][0].queuePosition).toBe(0);
+    expect(next.bracket.rounds[0][1].queuePosition).toBe(1);
+  });
+
+  it('applyPatch does not recompute bracket queue positions when patch does not change scheduled status', () => {
+    const prev = {
+      bracket: {
+        rounds: [
+          [
+            { id: "b1", court: "A", status: "scheduled", queuePosition: 1 },
+            { id: "b2", court: "A", status: "scheduled", queuePosition: 2 },
+          ],
+        ],
+      },
+    };
+    const next = applyPatch(prev, {
+      data: { result: { id: "b1", scoreA: "M" } },
+    });
+    expect(next.bracket.rounds[0][0].scoreA).toBe("M");
     // sibling untouched — same reference
     expect(next.bracket.rounds[0][1]).toBe(prev.bracket.rounds[0][1]);
   });

@@ -536,6 +536,24 @@ function App() {
     localStorage.removeItem("bc_password");
   };
 
+  // Stable dismiss callback — wrapping in useCallback prevents the
+  // AnnouncementBanner countdown useEffect from re-running on every
+  // parent render (the effect lists onDismiss as a dependency, so an
+  // inline arrow function would reset the interval on every re-render).
+  // Must be declared before any conditional returns to satisfy Rules of Hooks.
+  const handleDismissAnnouncement = useC(() => {
+    setActiveAnnouncement(prev => {
+      if (prev?.sentAt) {
+        try {
+          sessionStorage.setItem(`bc_dismissed_announcement_${prev.sentAt}`, "true");
+        } catch (_e) {
+          // private-browsing modes can throw
+        }
+      }
+      return null;
+    });
+  }, []);
+
   if (loading && !selectedCompData) return <div className="loading">Loading...</div>;
   if (!tournament) return (
     <CreateTournament
@@ -592,23 +610,6 @@ function App() {
       </>
     );
   }
-
-  // Stable dismiss callback — wrapping in useCallback prevents the
-  // AnnouncementBanner countdown useEffect from re-running on every
-  // parent render (the effect lists onDismiss as a dependency, so an
-  // inline arrow function would reset the interval on every re-render).
-  const handleDismissAnnouncement = useC(() => {
-    setActiveAnnouncement(prev => {
-      if (prev?.sentAt) {
-        try {
-          sessionStorage.setItem(`bc_dismissed_announcement_${prev.sentAt}`, "true");
-        } catch (_e) {
-          // private-browsing modes can throw
-        }
-      }
-      return null;
-    });
-  }, []);
 
   // viewer mode
   return (
@@ -968,4 +969,12 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   </ErrorBoundary>
 );
 
-export { parsePath, pathFromState, ErrorBoundary };
+// Pure helper: returns true when an announcement should be shown.
+// `dismissedKey` is the sessionStorage value for this sentAt (truthy = dismissed).
+// `now` defaults to new Date() and can be overridden in tests for determinism.
+function isAnnouncementActive(ann, dismissedKey, now) {
+  if (!ann || dismissedKey) return false;
+  return (now || new Date()) < new Date(ann.expiresAt);
+}
+
+export { parsePath, pathFromState, ErrorBoundary, isAnnouncementActive };

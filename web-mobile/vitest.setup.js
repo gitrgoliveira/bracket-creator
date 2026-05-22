@@ -26,6 +26,10 @@ afterEach(() => {
 });
 
 // Mock React since it's used as a global in the browser
+class _ReactComponent {
+  constructor(props) { this.props = props; this.state = {}; }
+  setState() {}
+}
 global.React = {
   createElement: (type, props, ...children) => ({ type, props, children }),
   useState: (val) => [val, vi.fn()],
@@ -34,6 +38,13 @@ global.React = {
   useRef: (val) => ({ current: val }),
   useLayoutEffect: vi.fn(),
   memo: (c) => c,
+  Component: _ReactComponent,
+};
+
+// ReactDOM stub — prevents the top-level ReactDOM.createRoot() call in
+// app.jsx from throwing when the module is imported in tests.
+global.ReactDOM = {
+  createRoot: () => ({ render: vi.fn() }),
 };
 
 // Mock other browser globals if needed

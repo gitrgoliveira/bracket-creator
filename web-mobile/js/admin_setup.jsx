@@ -845,6 +845,16 @@ window.AdminEditTournament = AdminEditTournament;
 window.AdminCreateCompetition = AdminCreateCompetition;
 window.AdminImportPage = AdminImportPage;
 
+// Pure helpers for the announcement-broadcast controls.
+// isSendDisabled drives the button's `disabled` attribute.
+// sendLabel drives the button's text (inFlight → "Sending…").
+function isSendAnnouncementDisabled(message, inFlight) {
+  return !message.trim() || inFlight;
+}
+function sendAnnouncementLabel(inFlight) {
+  return inFlight ? "Sending..." : "Send announcement";
+}
+
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, isSendAnnouncementDisabled, sendAnnouncementLabel };

@@ -210,6 +210,17 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   Object.values(byCourt).forEach((list) => list.sort(courtOrder));
   unassigned.sort(courtOrder);
 
+  // Pace stats must reflect the full per-court workload — the admin uses
+  // the panel to rebalance scheduling, not to inspect filter results.
+  // Build a separate by-court bucket from allMatches (still narrowed by
+  // the explicit ?court= scope so the panel can be reviewed one court at
+  // a time, but NOT by the ad-hoc player/dojo/competition filters).
+  const paceByCourt = {};
+  courts.forEach((cc) => paceByCourt[cc] = []);
+  filterMatchesByCourt(allMatches, effectiveCourt).forEach((m) => {
+    if (m.court && paceByCourt[m.court]) paceByCourt[m.court].push(m);
+  });
+
   const matchHasFilter = (m) => window.matchHighlightedBy(m, picked, dojoText);
   const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
 
@@ -378,7 +389,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
           )}
         </div>
 
-        <CourtPacePanel byCourt={byCourt} safeMatchDuration={safeMatchDuration} />
+        <CourtPacePanel byCourt={paceByCourt} safeMatchDuration={safeMatchDuration} />
 
         <div className="tw-sched">
           <div className="tw-sched__filters" data-testid="admin-schedule-court-filter">

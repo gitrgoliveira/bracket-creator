@@ -174,11 +174,17 @@ function findActiveCourts(tournament, competitions) {
 // Queue-position label per T068, and the canonical source of truth for all
 // viewer surfaces (display.jsx, VSchedItem in viewer.jsx, etc.).
 //
-// Contract: position 1 → "Up next"; position N → "(N-1) before yours".
-// Falls back to scheduledAt time only when status === "scheduled" and no
-// queue position is present (pre-T046 payloads or unannotated matches).
-// Returns "" for non-scheduled rows or when no info is available so
-// callers can render unconditionally.
+// Contract (evaluated in this order):
+//   1. status !== "scheduled"           → "" (no queue label on running /
+//      completed / cancelled rows, even if queuePosition or scheduledAt
+//      is set — this gate takes precedence over everything below).
+//   2. status === "scheduled" + qp ===1 → "Up next".
+//   3. status === "scheduled" + qp > 1  → "(qp - 1) before yours".
+//   4. status === "scheduled" + falsy qp + scheduledAt → "Scheduled hh:mm".
+//   5. anything else                    → "".
+//
+// queuePosition is coerced with Number() so JSON-string values ("1", "2")
+// work the same as numeric ones.
 //
 // Wording is consolidated on "Up next" across all surfaces (bead mp-e3k).
 // If you need a denser pill form for a tight row, use queueLabelCompact.

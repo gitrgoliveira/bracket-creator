@@ -73,6 +73,23 @@ describe('queueLabel (full form)', () => {
   it('returns "" for a completed match with queuePosition', () => {
     expect(queueLabel({ status: 'completed', queuePosition: 1 })).toBe('');
   });
+
+  // Regression test for Copilot PR #133 comment 3288473578: the docstring
+  // promises the status gate takes precedence over the queuePosition branch.
+  // Pin every non-scheduled status × qp>0 combination so the contract
+  // cannot regress to leaking "Up next" / "N before yours" on running,
+  // completed, or cancelled rows.
+  it('docstring contract: status gate beats queuePosition on every non-scheduled status', () => {
+    const nonScheduledStatuses = ['running', 'completed', 'cancelled', 'pending', undefined, ''];
+    const positiveQueuePositions = [1, 2, 99, '1', '2'];
+    for (const status of nonScheduledStatuses) {
+      for (const queuePosition of positiveQueuePositions) {
+        expect(queueLabel({ status, queuePosition })).toBe('');
+        // Even with a scheduledAt fallback set, the status gate wins.
+        expect(queueLabel({ status, queuePosition, scheduledAt: '10:30' })).toBe('');
+      }
+    }
+  });
 });
 
 describe('queueLabelCompact (pill form)', () => {

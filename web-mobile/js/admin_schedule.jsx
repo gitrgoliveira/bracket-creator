@@ -847,7 +847,9 @@ function PerCourtBreakdown({ perCourtMinutes }) {
   );
 }
 
-// computeCourtPaceStats(byCourt, perMatchMinutes) — pure helper.
+// computeCourtPaceStats(byCourt, perMatchMinutes[, nowMinutes]) — deterministic helper.
+// When nowMinutes is omitted the function falls back to wall-clock time (non-deterministic).
+// Pass an explicit nowMinutes (e.g. Date.now()/60000) for deterministic tests.
 //
 // For each court, derive:
 //   court               — the court label (e.g. "A")
@@ -902,10 +904,7 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
 
-  const stats = useMemoA(
-    () => computeCourtPaceStats(byCourt, safeMatchDuration),
-    [byCourt, safeMatchDuration]
-  );
+  const stats = computeCourtPaceStats(byCourt, safeMatchDuration);
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)
   // ignore empty buckets — e.g. a configured court the user hasn't placed
@@ -938,7 +937,9 @@ function CourtPacePanel({ byCourt, safeMatchDuration }) {
         className="card__title"
         style={{ display: "flex", justifyContent: "space-between", cursor: "pointer", marginBottom: open ? 12 : 0 }}
         onClick={() => setOpen(!open)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } }}
         role="button"
+        tabIndex={0}
         aria-expanded={open}
       >
         <span>Court pace</span>

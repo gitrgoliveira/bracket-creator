@@ -291,9 +291,10 @@ type BracketMatch struct {
 	Court       string      `json:"court"`
 	ScheduledAt string      `json:"scheduledAt"`
 	// Additional fields from design
-	ScoreA       string `json:"scoreA"`
-	ScoreB       string `json:"scoreB"`
-	IsOverridden bool   `json:"isOverridden"`
+	ScoreA        string `json:"scoreA"`
+	ScoreB        string `json:"scoreB"`
+	IsOverridden  bool   `json:"isOverridden"`
+	QueuePosition int    `json:"queuePosition,omitempty"`
 	// Decision-type metadata mirrors MatchResult so an elimination-stage
 	// kiken/fusenpai/encho is reconstructable from bracket.json alone
 	// (label rendering, Excel export, SSE replays).

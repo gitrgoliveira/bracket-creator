@@ -15,8 +15,10 @@ import (
 var ErrParticipantNotFound = errors.New("participant not found")
 
 // ErrDuplicateName is returned by AddParticipant and UpdateParticipant when
-// the supplied display name collides with another participant in the same
-// roster (excluding the participant being edited, for the update path).
+// the supplied Player.Name collides with another participant in the same
+// roster (excluding the participant being edited, for the update path). The
+// comparison is case-insensitive (strings.EqualFold) to match the on-disk
+// canonicalization applied by helper.CreatePlayers.
 var ErrDuplicateName = errors.New("participant name already exists")
 
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.

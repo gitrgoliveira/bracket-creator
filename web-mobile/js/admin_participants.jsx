@@ -234,6 +234,16 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
   }, [c.players, c.withZekkenName]);
 
+  // If check-in tracking is turned off while "Show unchecked" is active, the
+  // toggle button hides (it's gated on c.checkInEnabled) and the operator
+  // would be stuck with a filtered list and no visible way to reset it.
+  // Reset the filter so the full roster reappears.
+  useEffectA(() => {
+    if (!c.checkInEnabled && showOnlyUnchecked) {
+      setShowOnlyUnchecked(false);
+    }
+  }, [c.checkInEnabled, showOnlyUnchecked]);
+
   const handleSeedFile = (file) => {
     if (!file) return;
     const reader = new FileReader();
@@ -515,7 +525,19 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     if (!replaceName.trim() || !replaceDojo.trim()) { showToast("Name and dojo are required", "error"); return; }
     setReplaceLoading(true);
     try {
-      await window.API.replaceParticipant(c.id, replaceTarget.id, { name: replaceName.trim(), dojo: replaceDojo.trim(), danGrade: replaceDanGrade.trim() || undefined }, password);
+      // Preserve fields the PUT handler would otherwise overwrite with empty
+      // values (displayName/Zekken, tag, metadata). The dialog only edits
+      // name/dojo/danGrade — everything else must round-trip from the
+      // current participant or be cleared on save.
+      const payload = {
+        name: replaceName.trim(),
+        dojo: replaceDojo.trim(),
+        danGrade: replaceDanGrade.trim() || undefined,
+        displayName: replaceTarget.displayName || "",
+        tag: replaceTarget.tag || "",
+        metadata: replaceTarget.metadata || [],
+      };
+      await window.API.replaceParticipant(c.id, replaceTarget.id, payload, password);
       setReplaceTarget(null);
       showToast(`${replaceTarget.name} replaced with ${replaceName.trim()}`);
     } catch (err) {

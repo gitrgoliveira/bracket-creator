@@ -67,6 +67,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		// Reject an empty body up front so it can't fall through to the
+		// roster-replace path below and silently wipe the participants list.
+		// Each branch needs at least its own discriminator: Players[] (batch)
+		// or Name (single-add).
+		if len(req.Players) == 0 && req.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "request must include either a non-empty 'players' array or a 'name' field"})
+			return
+		}
+
 		if len(req.Players) == 0 && req.Name != "" {
 			// Single player add workflow
 			metadata := req.Metadata

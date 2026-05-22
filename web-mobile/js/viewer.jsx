@@ -1891,8 +1891,8 @@ function ScheduleViewer({ tournament, tweaks }) {
   dayFiltered.forEach((m) => { (byCourt[m.court] = byCourt[m.court] || []).push(m); });
   Object.values(byCourt).forEach((list) => list.sort((a, b) => {
     const order = { running: 0, scheduled: 1, completed: 2 };
-    const ao = order[a.status] ?? 1;
-    const bo = order[b.status] ?? 1;
+    const ao = order[a.status] ?? 2;
+    const bo = order[b.status] ?? 2;
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   }));

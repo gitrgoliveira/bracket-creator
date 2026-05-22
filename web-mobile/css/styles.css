@@ -3024,11 +3024,6 @@ a:hover {
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 
-.sb-draw-toggle:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
 .sb-draw-toggle:hover {
   border-color: var(--ink-4);
   color: var(--ink-2);

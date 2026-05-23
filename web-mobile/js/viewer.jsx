@@ -118,6 +118,7 @@ function isFollowedPlayer(p, followed) {
   const pName = (typeof p === "object" ? p.name : p) || "";
   if (pId && followed.id && pId === followed.id) return true;
   if (pName && followed.name && pName.trim().toLowerCase() === followed.name.trim().toLowerCase()) return true;
+  if (pName && followed.name && pName.toLowerCase() === followed.name.toLowerCase()) return true;
   return false;
 }
 

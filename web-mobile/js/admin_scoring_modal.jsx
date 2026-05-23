@@ -890,8 +890,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   // decided), when the bout is already decided by ippons
                   // (boutDecided), or when a draw is already toggled.
                   // (0-0 is still a valid tied state.)
-                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled}
-                  title={aTotal !== bTotal || boutDecided ? "Hantei applies only to tied matches in encho" : "Record a judges' decision"}
+                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled || enchoPeriodCount <= 0}
+                  title={aTotal !== bTotal || boutDecided || enchoPeriodCount <= 0 ? "Hantei applies only to tied matches in encho" : "Record a judges' decision"}
                   style={{ marginLeft: "auto" }}
                 >
                   Decide by hantei…

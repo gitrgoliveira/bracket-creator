@@ -281,8 +281,10 @@ func (r *ScoreRequest) Validate() error {
 		}
 	}
 	// DecidedByHantei encodes a rules-level invariant: judges' decision after
-	// tied encho (FIK 7-5 / 29-6). A winner must be present and the status,
-	// if supplied, must be completed.
+	// tied encho (FIK 7-5 / 29-6). A winner must be present, the status (if
+	// supplied) must be completed, and encho must have been played (PeriodCount
+	// > 0) — rejecting decidedByHantei=true without overtime context prevents
+	// persisting an "HT" suffix outside a real encho-decided match.
 	if r.DecidedByHantei {
 		if r.Winner == "" {
 			return &ValidationError{
@@ -294,6 +296,12 @@ func (r *ScoreRequest) Validate() error {
 			return &ValidationError{
 				Field:   "decidedByHantei",
 				Message: "only valid on completed matches",
+			}
+		}
+		if r.Encho == nil || r.Encho.PeriodCount <= 0 {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "requires encho with at least one period",
 			}
 		}
 	}

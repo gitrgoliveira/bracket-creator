@@ -660,23 +660,27 @@ func TestSuneIpponRoundTrips(t *testing.T) {
 }
 
 func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
-	t.Run("valid hantei: completed with winner", func(t *testing.T) {
+	encho1 := &state.EnchoMetadata{PeriodCount: 1}
+
+	t.Run("valid hantei: completed with winner and encho", func(t *testing.T) {
 		req := ScoreRequest{
 			SideA:           "Alice",
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
 			DecidedByHantei: true,
+			Encho:           encho1,
 		}
 		assert.NoError(t, req.Validate())
 	})
 
-	t.Run("valid hantei: no status supplied (partial update)", func(t *testing.T) {
+	t.Run("valid hantei: no status supplied (partial update) with encho", func(t *testing.T) {
 		req := ScoreRequest{
 			SideA:           "Alice",
 			SideB:           "Bob",
 			Winner:          "Alice",
 			DecidedByHantei: true,
+			Encho:           encho1,
 		}
 		assert.NoError(t, req.Validate())
 	})
@@ -687,6 +691,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Status:          state.MatchStatusCompleted,
 			DecidedByHantei: true,
+			Encho:           encho1,
 		}
 		err := req.Validate()
 		require.Error(t, err)
@@ -702,6 +707,38 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			Winner:          "Alice",
 			Status:          state.MatchStatusRunning,
 			DecidedByHantei: true,
+			Encho:           encho1,
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: no encho set", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: encho period count is zero", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+			Encho:           &state.EnchoMetadata{PeriodCount: 0},
 		}
 		err := req.Validate()
 		require.Error(t, err)

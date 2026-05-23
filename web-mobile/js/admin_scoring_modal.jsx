@@ -820,11 +820,9 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                     </div>
                     {idx === 0 && (
                       <div className="sb-center">
-                        {!isDrawToggled && (
-                          <div className="sb-vs">
-                            {aTotal === 0 && bTotal === 0 ? "VS" : `${bTotal}–${aTotal}`}
-                          </div>
-                        )}
+                        <div className={`sb-vs${isDrawToggled ? " sb-vs--draw" : ""}`}>
+                          {isDrawToggled ? "X" : (aTotal === 0 && bTotal === 0 ? "VS" : `${bTotal}–${aTotal}`)}
+                        </div>
                         <button
                           className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
                           data-testid="scoring-modal-mark-draw"

@@ -1195,9 +1195,8 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
             // Pass the *real* server bracket (not derivedBracket) — the latter
             // is a TBD placeholder for visualization that has no winners and
             // would short-circuit the standings fallback inside AwardsView.
-            // AwardsView (introduced by PR #125 / bracket-creator-duq) supersedes
-            // the original ResultsViewer from this bead — it covers the same
-            // pools-only-with-no-bracket case via deriveAwards' standings fallback.
+            // AwardsView covers the pools-only-with-no-bracket case via
+            // deriveAwards' standings fallback.
             <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} />
           )}
         </div>

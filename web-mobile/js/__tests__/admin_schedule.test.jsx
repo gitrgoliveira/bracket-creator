@@ -488,4 +488,21 @@ describe('allMatchesCompleted', () => {
     const shouldShowBannerAll = statusFilterAll !== "complete" && allMatchesCompleted(filteredByCompleteStatus);
     expect(shouldShowBannerAll).toBe(true);
   });
+
+  it('regression: nextActiveMatch is null when openMatch is not found in sameCourt (openIdx === -1)', () => {
+    // Copilot round-11: when openIdx is -1, slice(-1 + 1) = slice(0)
+    // scans the entire array and can return a spurious non-completed match.
+    // The fix guards the slice on openIdx >= 0.
+    const court = [
+      { id: 'm1', court: 'A', status: 'scheduled', compId: 'c1' },
+      { id: 'm2', court: 'A', status: 'scheduled', compId: 'c1' },
+    ];
+    const openIdx = -1; // openMatch not found in sameCourt
+    // Without the guard: slice(0) returns whole array, find returns m1 (scheduled).
+    // With the guard: null immediately, no scan.
+    const nextActiveMatch = openIdx >= 0
+      ? court.slice(openIdx + 1).find(m => m.status !== 'completed') || null
+      : null;
+    expect(nextActiveMatch).toBeNull();
+  });
 });

@@ -753,7 +753,11 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
         // this guard, the last scheduled match has nextMatch = the first completed
         // match (completed matches sort after scheduled in the list), causing the
         // modal to loop back to match 1 after the final save.
-        const nextActiveMatch = sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null;
+        // Guard on openIdx >= 0: when openMatch is not found in sameCourt (openIdx
+        // === -1), slice(0) would scan the whole array and return a spurious match.
+        const nextActiveMatch = openIdx >= 0
+          ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null
+          : null;
         return (
           <ScoreEditorModal
             key={openMatch.compId + '-' + openMatch.id}

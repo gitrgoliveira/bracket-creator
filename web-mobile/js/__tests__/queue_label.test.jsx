@@ -74,8 +74,8 @@ describe('queueLabel (full form)', () => {
     expect(queueLabel({ status: 'completed', queuePosition: 1 })).toBe('');
   });
 
-  // Regression test for Copilot PR #133 comment 3288473578: the docstring
-  // promises the status gate takes precedence over the queuePosition branch.
+  // Regression: the docstring promises the status gate takes precedence over
+  // the queuePosition branch.
   // Pin every non-scheduled status × qp>0 combination so the contract
   // cannot regress to leaking "Next up" / "N before yours" on running,
   // completed, or cancelled rows.

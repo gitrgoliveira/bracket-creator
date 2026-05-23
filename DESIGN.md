@@ -157,8 +157,8 @@ Five breakpoint-related media queries exist; match them rather than inventing ne
 | `@media (pointer: coarse)` | Touch device — bump tap targets |
 | `@media (max-width: 720px)` | Tablet → phone — collapse the admin sidebar, drop 4-col strips to 2-col |
 | `@media (max-width: 480px)` | Small phone — viewer-specific refinements |
-| `@media (min-width: 768px)` | Viewer tablet — widen `.viewer__shell` to 768px |
-| `@media (min-width: 1024px)` | Viewer desktop — widen `.viewer__shell` to 1024px, 2-col `.vsched` grid |
+| `@media (min-width: 768px)` | Viewer tablet — widen `.viewer__shell` to 768px, relax `.viewer__body` padding |
+| `@media (min-width: 1024px)` | Viewer desktop — widen `.viewer__shell` to 1024px, widen `.viewer__body` padding, 2-col `.vsched` grid |
 
 ### Z-index
 

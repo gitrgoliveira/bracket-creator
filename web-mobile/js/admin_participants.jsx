@@ -531,10 +531,13 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       // over danGrade when Metadata is non-empty, so forwarding the old
       // replaceTarget.metadata blindly would discard any grade change.
       // metadata[0] = danGrade; slots 1+ are preserved from the current value.
+      // Use "" as a placeholder when clearing the grade so positional slots
+      // 1+ stay at their original indices (existingMeta.slice(1) alone
+      // would shift them down by one).
       const existingMeta = replaceTarget.metadata || [];
       const metadata = replaceDanGrade.trim()
         ? [replaceDanGrade.trim(), ...existingMeta.slice(1)]
-        : existingMeta.slice(1);
+        : ["", ...existingMeta.slice(1)];
       const payload = {
         name: replaceName.trim(),
         dojo: replaceDojo.trim(),

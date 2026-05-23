@@ -243,40 +243,47 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 		}
 	}
 
+	// Pre-validate and load seeds before touching participants.csv so
+	// that a corrupt seeds file is caught before any disk write. If seeds
+	// doesn't exist, seeds is nil and the rename step is skipped.
+	var seeds []domain.SeedAssignment
+	var seedsPath string
+	if oldName != players[foundIdx].Name {
+		seedsPath = s.compPath(compID, "seeds.csv")
+		var loadErr error
+		seeds, loadErr = helper.ParseSeedsFile(seedsPath)
+		switch {
+		case loadErr == nil:
+			// seeds loaded; will rename below.
+		case errors.Is(loadErr, os.ErrNotExist):
+			seeds = nil // no seeds file — nothing to rename
+		default:
+			return nil, fmt.Errorf("load seeds for rename of %q: %w", oldName, loadErr)
+		}
+	}
+
 	if err := s.saveParticipantsNoLock(compID, players); err != nil {
 		return nil, err
 	}
 
-	// Update seeds.csv if name changes (under same lock to avoid deadlocks
-	// — SaveSeeds takes the same per-comp mutex). The on-disk format
-	// (Rank,Name only) is mirrored from SaveSeeds; only the Name field
-	// is persisted, so the in-memory Dojo update would be dead writes.
-	if oldName != players[foundIdx].Name {
-		seedsPath := s.compPath(compID, "seeds.csv")
-		seeds, err := helper.ParseSeedsFile(seedsPath)
-		switch {
-		case err == nil:
-			changed := false
-			for i := range seeds {
-				if seeds[i].Name == oldName {
-					seeds[i].Name = players[foundIdx].Name
-					changed = true
-				}
+	// Update seeds.csv only if it existed and the name changed.
+	if oldName != players[foundIdx].Name && seeds != nil {
+		changed := false
+		for i := range seeds {
+			if seeds[i].Name == oldName {
+				seeds[i].Name = players[foundIdx].Name
+				changed = true
 			}
-			if changed {
-				var sb strings.Builder
-				sb.WriteString("Rank,Name\n")
-				for _, a := range seeds {
-					fmt.Fprintf(&sb, "%d,%s\n", a.SeedRank, a.Name)
-				}
-				if werr := s.atomicWrite(seedsPath, []byte(sb.String()), 0600); werr != nil {
-					return nil, fmt.Errorf("rename seed for %q: %w", oldName, werr)
-				}
+		}
+		if changed {
+			var sb strings.Builder
+			sb.WriteString("Rank,Name\n")
+			for _, a := range seeds {
+				fmt.Fprintf(&sb, "%d,%s\n", a.SeedRank, a.Name)
 			}
-		case errors.Is(err, os.ErrNotExist):
-			// No seeds file yet — nothing to rename.
-		default:
-			return nil, fmt.Errorf("load seeds for rename of %q: %w", oldName, err)
+			if werr := s.atomicWrite(seedsPath, []byte(sb.String()), 0600); werr != nil {
+				return nil, fmt.Errorf("rename seed for %q: %w", oldName, werr)
+			}
 		}
 	}
 	return &players[foundIdx], nil

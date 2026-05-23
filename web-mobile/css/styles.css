@@ -3005,10 +3005,6 @@ a:hover {
   text-transform: uppercase;
   letter-spacing: 0.2em;
 }
-.sb-vs--draw {
-  color: var(--accent);
-  font-size: 18px;
-}
 
 .sb-draw-toggle {
   font-family: var(--font-display);

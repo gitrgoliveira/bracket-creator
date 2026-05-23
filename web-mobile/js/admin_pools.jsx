@@ -49,7 +49,7 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 // Regex that strips the trailing match-index segment from a pool-match id to
 // recover the pool name. Backend formats: "PoolName-N", "PoolName-DH-N",
 // "PoolName-TB-N". A plain split('-')[0] breaks on hyphenated pool names
-// (e.g. "Pool A-East-0" → "Pool A", not "Pool"). This regex captures
+// (e.g. "Pool A-East-0" → "Pool A", not "Pool A-East"). This regex captures
 // everything before the trailing numeric/DH/TB suffix; ids without a
 // recognisable suffix degrade to "" (no pool name inferable).
 const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;

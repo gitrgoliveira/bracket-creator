@@ -915,7 +915,7 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 // and a rebalancing suggestion. Never rendered in viewer or display views.
 export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
-  const [, setTick] = useStateA(0);
+  const [tick, setTick] = useStateA(0);
 
   // hasData is checked inside the effect so the interval only runs (and causes
   // re-renders) when there are matches to display, not when the panel renders null.

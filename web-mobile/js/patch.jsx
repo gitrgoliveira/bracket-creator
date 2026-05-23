@@ -312,11 +312,11 @@ function applyPatch(prev, event) {
     // only then is a queue-position recompute meaningful.
     let needsQueueRecompute = false;
 
-    // Pre-build the player map once per applyPatch call so the
-    // normalizeMatch normalization (string sideA/sideB → {id,name}) keys
-    // off the current competition's roster — Swiss SSE patches carry
-    // string sides that need lifting back to object shape (T093).
-    const playerMap = buildPlayerMap(prev);
+    // Built lazily — most events won't hit any of our match IDs (e.g.
+    // sibling-competition updates) so we skip the O(participants) scan
+    // until we actually find a match that needs normalization (T093).
+    let playerMap;
+    const getPlayerMap = () => playerMap ?? (playerMap = buildPlayerMap(prev));
 
     // Queue positions count *scheduled* matches only, so a recompute
     // is needed whenever a match's "scheduled-ness" changes — leaving
@@ -344,7 +344,7 @@ function applyPatch(prev, event) {
             const update = resultMap.get(m.id);
             if (update) {
                 changed = true;
-                const merged = normalizeMatch(_mergeMatchPatch(m, update), playerMap);
+                const merged = normalizeMatch(_mergeMatchPatch(m, update), getPlayerMap());
                 if (isScheduleAffecting(m.status, merged.status, m, merged)) {
                     needsQueueRecompute = true;
                 }
@@ -374,7 +374,7 @@ function applyPatch(prev, event) {
                     const patch = { ...update };
                     if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
                     if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-                    const merged = normalizeMatch(_mergeMatchPatch(m, patch), playerMap);
+                    const merged = normalizeMatch(_mergeMatchPatch(m, patch), getPlayerMap());
                     if (isScheduleAffecting(m.status, merged.status, m, merged)) {
                         bracketNeedsQueueRecompute = true;
                     }

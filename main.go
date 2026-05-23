@@ -22,10 +22,12 @@ var webFiles embed.FS
 
 // Mobile-app assets. The glob embeds all files present at build time.
 // After `make go/build` runs esbuild, this includes css, js, dist and vendor.
-// Node dev artifacts (package.json, eslint.config.js, etc.) are also embedded
-// because they live under web-mobile/ and are tracked in git; they are not
-// sensitive and listing explicit paths instead would break CI if dist/ or
-// vendor/ don't exist yet. node_modules/ is gitignored and absent in CI.
+// Explicit paths are not used here because dist/ and vendor/ are generated
+// by esbuild and absent in a clean checkout — listing them would break
+// `go test ./...` before a build has run. The trade-off: a local binary
+// built after `npm install` will also embed node_modules/, making it
+// larger. Production Docker builds and CI run in clean envs where
+// node_modules/ is absent, so the artifact size is not affected there.
 //
 //go:embed web-mobile/*
 var mobileWebFiles embed.FS

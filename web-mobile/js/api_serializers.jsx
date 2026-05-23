@@ -62,14 +62,12 @@ function toBackendMatchResult(patch, match) {
     if (patch.encho && patch.encho.periodCount > 0) {
         result.encho = { periodCount: patch.encho.periodCount };
     }
-    // mp-6di: judges' decision (hantei) is a top-level flag on
-    // MatchResult.DecidedByHantei. Forward it so the backend round-trips
-    // the HT suffix in the viewer and the bracket DecidedByHantei mirror.
-    // Explicitly forward `false` too so a re-edit can clear a previously
-    // hantei-decided match.
-    if (typeof patch.decidedByHantei === "boolean") {
-        result.decidedByHantei = patch.decidedByHantei;
-    }
+    // Always include decidedByHantei — the backend binds into a non-pointer
+    // bool, so omitting the field would silently clear a previously-persisted
+    // true. Preserve the match's current value when the patch doesn't touch it.
+    result.decidedByHantei = typeof patch.decidedByHantei === "boolean"
+        ? patch.decidedByHantei
+        : Boolean(match?.decidedByHantei);
     return result;
 }
 

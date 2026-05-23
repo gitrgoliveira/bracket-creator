@@ -62,12 +62,15 @@ function toBackendMatchResult(patch, match) {
     if (patch.encho && patch.encho.periodCount > 0) {
         result.encho = { periodCount: patch.encho.periodCount };
     }
-    // Always include decidedByHantei — the backend binds into a non-pointer
-    // bool, so omitting the field would silently clear a previously-persisted
-    // true. Preserve the match's current value when the patch doesn't touch it.
-    result.decidedByHantei = typeof patch.decidedByHantei === "boolean"
-        ? patch.decidedByHantei
-        : Boolean(match?.decidedByHantei);
+    // Include decidedByHantei when explicitly set in the patch, or when the
+    // current match already has it true (to preserve it across re-edits).
+    // Omit it otherwise so non-hantei payloads stay minimal.
+    const explicitHantei = typeof patch.decidedByHantei === "boolean";
+    if (explicitHantei) {
+        result.decidedByHantei = patch.decidedByHantei;
+    } else if (match?.decidedByHantei) {
+        result.decidedByHantei = true;
+    }
     return result;
 }
 

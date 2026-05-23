@@ -926,10 +926,10 @@ function CourtPacePanel({ byCourt, safeMatchDuration }) {
     return () => clearInterval(timer);
   }, []);
 
-  const stats = useMemoA(
-    () => computeCourtPaceStats(byCourt, safeMatchDuration),
-    [byCourt, safeMatchDuration, tick]
-  );
+  // byCourt is re-constructed on every parent render, so useMemoA would
+  // never skip a recompute — compute stats directly.  tick still forces a
+  // re-render every 60 s (via setTick) so wall-clock deltas stay fresh.
+  const stats = computeCourtPaceStats(byCourt, safeMatchDuration);
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)
   // ignore empty buckets — e.g. a configured court the user hasn't placed

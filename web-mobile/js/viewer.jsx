@@ -37,11 +37,11 @@ const compareDmy = (a, b) => window.compareDmy(a, b);
 // window.queueLabelCompact are normally available on first render.  These
 // serve as defense-in-depth if that ever changes.
 function _localQueueLabel(m) {
-  if (!m || m.status !== "scheduled") return null;
+  if (!m || m.status !== "scheduled") return "";
   const qp = Number(m.queuePosition);
   if (Number.isFinite(qp) && qp > 0) return qp === 1 ? "Next up" : `${qp - 1} before yours`;
   if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
-  return null;
+  return "";
 }
 function _localQueueLabelCompact(m) {
   if (!m || m.status !== "scheduled") return null;

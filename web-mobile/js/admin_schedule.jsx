@@ -868,8 +868,8 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //
 // For each court, derive:
 //   court               — the court label (e.g. "A")
-//   completedCount      — matches with status === "completed"
-//   remainingCount      — matches NOT yet completed
+//   completedCount      — matches that are neither scheduled nor running (slot is consumed)
+//   remainingCount      — matches NOT yet consumed
 //   wallClockElapsedMin — minutes from the earliest scheduledAt on that court
 //                         to now. Falls back to 0 when no scheduledAt data.
 //   estimatedRemainingMin — remainingCount × perMatchMinutes
@@ -889,7 +889,7 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
   })();
 
   return Object.entries(byCourt).map(([court, matches]) => {
-    const completedCount = matches.filter(m => m.status === "completed").length;
+    const completedCount = matches.filter(m => m.status !== "scheduled" && m.status !== "running").length;
     const remainingCount = matches.length - completedCount;
     const estimatedRemainingMin = remainingCount * ppm;
 
@@ -919,7 +919,7 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 // and a rebalancing suggestion. Never rendered in viewer or display views.
 function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
-  const [tick, setTick] = useStateA(0);
+  const [, setTick] = useStateA(0);
 
   useEffectA(() => {
     const timer = setInterval(() => setTick(t => t + 1), 60000);

@@ -184,7 +184,7 @@ describe('API Utils', () => {
 
     // mp-a7y: pins the invalidate endpoint URL + auth header so a
     // future refactor can't silently re-route the call. The handler
-    // is gated on tournament password (handlers_competition.go:782);
+    // is gated on tournament password (internal/mobileapp/handlers_competition.go:782);
     // missing the X-Tournament-Password header would 401 with the
     // status-flip never reaching disk.
     describe('invalidateCompetition', () => {

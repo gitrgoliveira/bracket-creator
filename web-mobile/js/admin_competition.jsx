@@ -774,13 +774,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
               if (confirm(`Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`)) {
                 setInvalidating(true);
                 try {
-                  await window.API.invalidateCompetition(local.id, password);
+                  const updated = await window.API.invalidateCompetition(local.id, password);
                   if (mountedRef.current) {
-                    // Rely on the invalidate handler's SSE tournament_updated
-                    // broadcast to refresh the parent view — calling onUpdate
-                    // here would trigger AdminApp.updateCompetition() which
-                    // performs a full PUT with unsanitised local state.
-                    setLocal(prev => ({ ...prev, status: "invalid" }));
+                    // Use the server response (if any) so that server-side
+                    // field updates are reflected immediately. Fall back to
+                    // forcing only `status: "invalid"` if the response isn't
+                    // a competition object. Don't call onUpdate — that would
+                    // trigger a full PUT with unsanitised local state.
+                    setLocal(prev => (updated && typeof updated === "object"
+                      ? { ...prev, ...updated }
+                      : { ...prev, status: "invalid" }));
                     showToast("Competition marked invalid.", "success");
                   }
                 } catch (e) {

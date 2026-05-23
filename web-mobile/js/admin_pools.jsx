@@ -414,8 +414,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         {pools.map((pool) => {
           const poolStandings = standings ? standings[pool.poolName] : null;
           const court = c.courts[pools.indexOf(pool) % c.courts.length];
-          const isDone = pool.matches && pool.matches.every(m => m.status === "completed");
           const pm = poolMatchesFor(pool.poolName);
+          // pool.matches (helper.Match) has no status field; use poolMatches-
+          // sourced pm entries which carry the full MatchResult including status.
+          const isDone = pm.length > 0 && pm.every(m => m.status === "completed");
           return (
             <div
               key={pool.poolName}

@@ -221,8 +221,13 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   // a time, but NOT by the ad-hoc player/dojo/competition filters).
   const paceByCourt = {};
   courts.forEach((cc) => paceByCourt[cc] = []);
+  // Also bucket matches on courts not in the current config (stale/moved)
+  // so the pace panel stays accurate even after court list changes.
   filterMatchesByCourt(allMatches, effectiveCourt).forEach((m) => {
-    if (m.court && paceByCourt[m.court]) paceByCourt[m.court].push(m);
+    if (m.court) {
+      if (!paceByCourt[m.court]) paceByCourt[m.court] = [];
+      paceByCourt[m.court].push(m);
+    }
   });
 
   const matchHasFilter = (m) => window.matchHighlightedBy(m, picked, dojoText);

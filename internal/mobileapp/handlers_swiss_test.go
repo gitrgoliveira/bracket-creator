@@ -352,6 +352,7 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 
 	// Helper to GET standings and assert player counts.
 	getStandings := func() []state.PlayerStanding {
+		t.Helper()
 		w := httptest.NewRecorder()
 		req := adminReqSwiss("GET", fmt.Sprintf("/api/competitions/%s/swiss/standings", compID))
 		r.ServeHTTP(w, req)
@@ -363,6 +364,7 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 
 	// Helper to submit score for a match.
 	submitScore := func(mid, sideA, sideB, winner string, ipponsA, ipponsB []string) {
+		t.Helper()
 		result := ScoreRequest{
 			SideA:   sideA,
 			SideB:   sideB,
@@ -382,6 +384,7 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 
 	// Helper to generate Swiss round via API.
 	generateRound := func() []state.MatchResult {
+		t.Helper()
 		w := httptest.NewRecorder()
 		req := adminReqSwiss("POST", fmt.Sprintf("/api/competitions/%s/swiss/generate-round", compID))
 		r.ServeHTTP(w, req)

@@ -20,9 +20,12 @@ import (
 //go:embed web/css web/js
 var webFiles embed.FS
 
-// Mobile-app assets. The glob embeds all files present at build time
-// (css, js, dist, vendor) without failing when dist/ or vendor/ haven't
-// been created yet by esbuild.
+// Mobile-app assets. The glob embeds all files present at build time.
+// After `make go/build` runs esbuild, this includes css, js, dist and vendor.
+// Node dev artifacts (package.json, eslint.config.js, etc.) are also embedded
+// because they live under web-mobile/ and are tracked in git; they are not
+// sensitive and listing explicit paths instead would break CI if dist/ or
+// vendor/ don't exist yet. node_modules/ is gitignored and absent in CI.
 //
 //go:embed web-mobile/*
 var mobileWebFiles embed.FS

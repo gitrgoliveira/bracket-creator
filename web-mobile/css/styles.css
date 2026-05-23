@@ -2684,11 +2684,17 @@ a:hover {
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
+/* First grid column: time + phase + queue pill. min-width: 0 allows
+   the grid item to shrink below its content size so .tw-match__phase
+   can ellipsis-truncate a long competition/pool name. */
+.tw-match__meta {
+  min-width: 0;
+}
+
 .tw-match__time {
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 12px;
-  min-width: 0; /* grid item: allow .tw-match__phase ellipsis to truncate */
 }
 
 .tw-match__phase {

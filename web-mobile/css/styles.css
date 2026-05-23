@@ -2656,9 +2656,9 @@ a:hover {
 .tw-match {
   display: grid;
   /* Cap column 1 at 110px so a pathological translated round/phase label
-     can't squeeze the players column. Matches the `max-width: 110px` cap
-     on .tw-match__court-btn. Ellipsis on .tw-match__phase and
-     .tw-match__name handles clipping past the cap. */
+     can't squeeze the players column. Ellipsis on .tw-match__phase (col 1)
+     handles clipping past the cap. .tw-match__name (col 2) clips independently
+     via its own overflow rule. */
   grid-template-columns: minmax(65px, 110px) 1fr auto;
   gap: 12px;
   align-items: center;

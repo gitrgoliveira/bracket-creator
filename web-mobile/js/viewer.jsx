@@ -1100,11 +1100,6 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
 
   const hasPools = !!pools && pools.length > 0;
   const hasBracket = !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
-  // Only the *real* server bracket (with actual rounds) is suitable for the
-  // podium in ResultsViewer. derivedBracket may be a placeholder synthesised
-  // from pool names — useful for the Bracket tab preview, but its matches
-  // have no winners so it would render an empty podium.
-  const hasRealBracket = !!bracket && Array.isArray(bracket.rounds) && bracket.rounds.length > 0;
   // T192 (FR-050e): Swiss competitions surface a dedicated standings
   // tab in place of pools/bracket. The standings tab fetches its own
   // data via /swiss/standings (it's not part of the competition-detail

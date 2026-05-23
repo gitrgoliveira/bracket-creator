@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, ResultsViewer } from '../viewer.jsx';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 
 describe('Viewer Utils', () => {

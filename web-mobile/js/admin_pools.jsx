@@ -415,6 +415,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           const poolStandings = standings ? standings[pool.poolName] : null;
           const court = c.courts[pools.indexOf(pool) % c.courts.length];
           const isDone = pool.matches && pool.matches.every(m => m.status === "completed");
+          const pm = poolMatchesFor(pool.poolName);
           return (
             <div
               key={pool.poolName}
@@ -482,7 +483,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   })}
                 </tbody>
               </table>
-              {(() => { const pm = poolMatchesFor(pool.poolName); return pm.length > 0 && (
+              {pm.length > 0 && (
                 <div style={{ marginTop: 12, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", marginBottom: 6 }}>Matches</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -503,7 +504,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     ))}
                   </div>
                 </div>
-              ); })()}
+              )}
             </div>
           );
         })}

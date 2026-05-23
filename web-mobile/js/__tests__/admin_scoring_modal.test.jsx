@@ -328,15 +328,13 @@ describe('DecisionPrompt → /decision POST integration', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('the parent flow: onSubmit payload + buildDecisionBody + resolveDecisionPassword → recordDecision', async () => {
-    // Walk through the chain that ScoreEditorModal.submitDecision does
-    // after DecisionPrompt fires. This is the surface flagged by PR #105
-    // as untested: the password must reach window.API.recordDecision.
-    const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('kiken-voluntary', payload, 0);
-      const password = resolveDecisionPassword('explicit-pw');
-      return window.API.recordDecision('comp-1', 'match-1', body, password);
-    });
+  it('the parent flow: DecisionPrompt onSubmit → submitDecisionRequest → recordDecision', async () => {
+    // Route the DecisionPrompt callback through submitDecisionRequest —
+    // the same path ScoreEditorModal.submitDecision takes — so the test
+    // would fail if the password stopped flowing to recordDecision.
+    const onSubmit = vi.fn((payload) =>
+      submitDecisionRequest('comp-1', 'match-1', 'kiken-voluntary', payload, 0, 'explicit-pw'),
+    );
 
     const tree = DecisionPrompt({
       kind: 'kiken',

@@ -876,8 +876,8 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //
 // For each court, derive:
 //   court               — the court label (e.g. "A")
-//   completedCount      — matches that are neither scheduled nor running (slot is consumed)
-//   remainingCount      — matches NOT yet consumed
+//   completedCount      — matches that are neither scheduled nor running (i.e. the slot is consumed)
+//   remainingCount      — matches NOT yet completed
 //   estimatedRemainingMin — remainingCount × perMatchMinutes
 //   plannedRemainingMin   — time from now to the *end* of the last scheduled
 //                           match on the court (latestMin + perMatchMinutes
@@ -937,14 +937,18 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 // and a rebalancing suggestion. Never rendered in viewer or display views.
 export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
-  const [tick, setTick] = useStateA(0);
+  const [, setTick] = useStateA(0);
 
+  // hasData is checked inside the effect so the interval only runs (and causes
+  // re-renders) when there are matches to display, not when the panel renders null.
+  const hasData = Object.values(byCourt).some(arr => arr.length > 0);
   useEffectA(() => {
+    if (!hasData) return;
     const timer = setInterval(() => {
       setTick(t => t + 1);
     }, 60000);
     return () => clearInterval(timer);
-  }, []);
+  }, [hasData]);
 
   const stats = useMemoA(
     () => computeCourtPaceStats(byCourt, safeMatchDuration),

@@ -782,7 +782,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
                     // a competition object. Don't call onUpdate — that would
                     // trigger a full PUT with unsanitised local state.
                     setLocal(prev => (updated && typeof updated === "object"
-                      ? { ...prev, ...updated }
+                      ? { ...prev, ...updated, players: updated.players ?? prev.players }
                       : { ...prev, status: "invalid" }));
                     showToast("Competition marked invalid.", "success");
                   }

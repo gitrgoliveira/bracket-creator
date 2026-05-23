@@ -539,6 +539,10 @@ describe('CourtPacePanel timer', () => {
           }
         }
       },
+      // useMemo runs eagerly without dependency tracking — the test runtime
+      // intentionally simplifies hooks for render isolation. This means tests
+      // can't catch "tick missing from deps" regressions; that contract is
+      // enforced by code review instead.
       useMemo: (fn) => fn(),
       useRef: (initial) => {
         const i = hookIndex++;

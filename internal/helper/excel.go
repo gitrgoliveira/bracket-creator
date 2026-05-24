@@ -303,41 +303,40 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 	poolRow = printPoolResultsTable(f, sheetName, pool, resultsTableStart, colNames, playerMatchRows, styles, mirror, teamMatches, pCoords)
 	poolRow++
 
-	for result := 1; result <= len(pool.Players); result++ {
-		poolRow++
-		resLabelColName := mustColumnName(colNames.startCol + 5) // F
-		resNameColName := mustColumnName(colNames.startCol + 6)  // G
+	resLabelColName := mustColumnName(colNames.startCol + 5) // F
+	resNameColName := mustColumnName(colNames.startCol + 6)  // G
 
-		if result == 1 {
-			poolRow++ // Extra space before ranking
-			resultsDataStart := resultsTableStart + 1
-			resultsDataEnd := resultsTableStart + len(pool.Players)
-			if teamMatches > 0 {
-				resultsDataEnd = resultsTableStart + (len(pool.Players) * 2) + 2
-			}
+	poolRow += 2 // blank row + extra space before ranking
+	resultsDataStart := resultsTableStart + 1
+	resultsDataEnd := resultsTableStart + len(pool.Players)
+	if teamMatches > 0 {
+		resultsDataEnd = resultsTableStart + (len(pool.Players) * 2) + 2
+	}
 
-			nameRange := fmt.Sprintf("$%s$%d:$%s$%d", colNames.startColName, resultsDataStart, colNames.startColName, resultsDataEnd)
-			rankRange := fmt.Sprintf("$%s$%d:$%s$%d", resNameColName, resultsDataStart, resNameColName, resultsDataEnd)
+	nameRange := fmt.Sprintf("$%s$%d:$%s$%d", colNames.startColName, resultsDataStart, colNames.startColName, resultsDataEnd)
+	rankRange := fmt.Sprintf("$%s$%d:$%s$%d", resNameColName, resultsDataStart, resNameColName, resultsDataEnd)
 
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resNameColName, poolRow), "Ranking"))
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", resLabelColName, poolRow), fmt.Sprintf("%s%d", resNameColName, poolRow), styles.poolHeader))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resNameColName, poolRow), "Ranking"))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", resLabelColName, poolRow), fmt.Sprintf("%s%d", resNameColName, poolRow), styles.poolHeader))
 
-			for i := range pool.Players {
-				rankNum := i + 1
-				label := fmt.Sprintf("%d.", rankNum)
-				handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resLabelColName, poolRow+1+i), label))
+	rankingFirstRow := poolRow + 1
+	for i := range pool.Players {
+		rankNum := i + 1
+		rankRow := rankingFirstRow + i
+		label := fmt.Sprintf("%d.", rankNum)
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resLabelColName, rankRow), label))
 
-				// Formula to find the name of the player with this rank:
-				formula := fmt.Sprintf("IFERROR(INDEX(%s, MATCH(%d, %s, 0)), \"-\")", nameRange, rankNum, rankRange)
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", resNameColName, poolRow+1+i), formula))
-				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", resNameColName, poolRow+1+i), fmt.Sprintf("%s%d", resNameColName, poolRow+1+i), styles.unlockedBorderBottom))
-			}
-			poolRow += len(pool.Players) + 1
-		}
+		// Formula to find the name of the player with this rank:
+		formula := fmt.Sprintf("IFERROR(INDEX(%s, MATCH(%d, %s, 0)), \"-\")", nameRange, rankNum, rankRange)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", resNameColName, rankRow), formula))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", resNameColName, rankRow), fmt.Sprintf("%s%d", resNameColName, rankRow), styles.unlockedBorderBottom))
 
-		if result <= numWinners {
-			matchWinners[fmt.Sprintf("%s-%s", pool.PoolName, getOrdinal(result))] = MatchWinner{
-				cellCoord: cellCoord{sheetName: sheetName, cell: fmt.Sprintf("%s%d", resNameColName, poolRow)},
+		// Elimination-bracket formulas (Pool X-1st, -2nd, ...) reference
+		// the rank-N IFERROR(INDEX(...MATCH(N,...))) cell directly so the
+		// resolved player name flows into the tree.
+		if rankNum <= numWinners {
+			matchWinners[fmt.Sprintf("%s-%s", pool.PoolName, getOrdinal(rankNum))] = MatchWinner{
+				cellCoord: cellCoord{sheetName: sheetName, cell: fmt.Sprintf("%s%d", resNameColName, rankRow)},
 			}
 		}
 	}

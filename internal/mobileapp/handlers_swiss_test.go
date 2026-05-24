@@ -344,18 +344,20 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 	// 1. Create a 6-player Swiss competition.
 	compID := makeSwissComp(t, store, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}, 3)
 
-	// Build a seed map so winnerOf can pick the better-ranked player
-	// without relying on which side (SideA/SideB) the pairing assigns them to.
+	// Build a seed map keyed by participant name so winnerOf can pick the
+	// better-ranked player without relying on which side (SideA/SideB) the
+	// pairing assigns them to. Swiss matches store names in SideA/SideB
+	// (see engine.buildSwissMatches), so the map must be name-keyed.
 	participants, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
-	seedByID := make(map[string]int, len(participants))
+	seedByName := make(map[string]int, len(participants))
 	for _, p := range participants {
-		seedByID[p.ID] = p.Seed
+		seedByName[p.Name] = p.Seed
 	}
 	// winnerOf returns the player with the lower seed number (higher rank).
 	// Falls back to SideA when both seeds are absent or equal.
 	winnerOf := func(m state.MatchResult) string {
-		seedA, seedB := seedByID[m.SideA], seedByID[m.SideB]
+		seedA, seedB := seedByName[m.SideA], seedByName[m.SideB]
 		if seedB > 0 && (seedA == 0 || seedB < seedA) {
 			return m.SideB
 		}

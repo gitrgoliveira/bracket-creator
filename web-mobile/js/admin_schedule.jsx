@@ -223,10 +223,13 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   courts.forEach((cc) => paceByCourt[cc] = []);
   // Also bucket matches on courts not in the current config (stale/moved)
   // so the pace panel stays accurate even after court list changes.
+  // Trim before bucketing — whitespace-only courts are treated as unassigned
+  // by the rest of the UI and must not create phantom pace tiles.
   filterMatchesByCourt(allMatches, effectiveCourt).forEach((m) => {
-    if (m.court) {
-      if (!paceByCourt[m.court]) paceByCourt[m.court] = [];
-      paceByCourt[m.court].push(m);
+    const court = (m.court || "").trim();
+    if (court) {
+      if (!paceByCourt[court]) paceByCourt[court] = [];
+      paceByCourt[court].push(m);
     }
   });
 

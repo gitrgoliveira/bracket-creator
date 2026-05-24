@@ -246,3 +246,37 @@ func TestStartCompetition_SwissRoundAlreadyGenerated(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already generated")
 }
+
+// TestStartCompetition_SwissMatchesOnDiskRoundZero verifies the second guard:
+// if AdvanceSwissRound wrote matches to pool-matches.csv but its
+// UpdateCompetitionChanged round-bump failed (leaving SwissCurrentRound==0),
+// StartCompetition must still refuse to overwrite those existing matches.
+func TestStartCompetition_SwissMatchesOnDiskRoundZero(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-start-guard-csv"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Swiss CSV Guard Test",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      state.CompStatusSetup,
+		// SwissCurrentRound deliberately left at 0 — simulates the bump failing
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave",
+	})
+	// Pre-write some pool matches to simulate AdvanceSwissRound having saved
+	// round-1 matches before its UpdateCompetitionChanged round-bump failed.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Swiss-R1-0", Status: state.MatchStatusScheduled},
+		{ID: "Swiss-R1-1", Status: state.MatchStatusScheduled},
+	}))
+
+	err := eng.StartCompetition(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already has")
+}

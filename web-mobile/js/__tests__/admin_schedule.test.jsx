@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, allMatchesCompleted } from '../admin_schedule.jsx';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats, allMatchesCompleted } from '../admin_schedule.jsx';
 
 describe('timeEdited', () => {
   // Copilot round-9 finding: AdminTWMatch.submitTime() used
@@ -368,6 +368,276 @@ describe('AdminScoreEditor chained navigation stays on the same shiaijo (T043 re
     const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
 
     expect(nextMatch).toBeNull();
+  });
+});
+
+describe('computeCourtPaceStats', () => {
+  // nowMinutes is passed in explicitly so tests are deterministic.
+
+  it('returns empty array for empty byCourt', () => {
+    expect(computeCourtPaceStats({}, 5, 600)).toEqual([]);
+  });
+
+  it('completedCount and remainingCount are correct', () => {
+    const byCourt = {
+      A: [
+        { status: 'completed', scheduledAt: '09:00' },
+        { status: 'completed', scheduledAt: '09:05' },
+        { status: 'scheduled', scheduledAt: '09:10' },
+      ]
+    };
+    const [stat] = computeCourtPaceStats(byCourt, 5, 9 * 60 + 12);
+    expect(stat.completedCount).toBe(2);
+    expect(stat.remainingCount).toBe(1);
+  });
+
+  it('estimatedRemainingMin = remainingCount × perMatchMinutes', () => {
+    const byCourt = {
+      B: [
+        { status: 'scheduled', scheduledAt: '10:00' },
+        { status: 'scheduled', scheduledAt: '10:05' },
+      ]
+    };
+    const [stat] = computeCourtPaceStats(byCourt, 5, 10 * 60);
+    expect(stat.estimatedRemainingMin).toBe(10); // 2 × 5
+  });
+
+
+  it('delta is estimatedRemainingMin - plannedRemainingMin', () => {
+    const byCourt = {
+      A: [
+        { status: 'completed', scheduledAt: '09:00' },
+        { status: 'scheduled', scheduledAt: '09:10' },
+        { status: 'scheduled', scheduledAt: '09:15' },
+      ]
+    };
+    // now = 09:05 = 545
+    // ppm = 5; remainingCount = 2 → estimatedRemainingMin = 10
+    // latestMin = 9*60+15=555, plannedRemainingMin = max(0, 555+5-545) = 15
+    // delta = 10 - 15 = -5 (ahead)
+    const [stat] = computeCourtPaceStats(byCourt, 5, 9 * 60 + 5);
+    expect(stat.estimatedRemainingMin).toBe(10);
+    expect(stat.plannedRemainingMin).toBe(15);
+    expect(stat.delta).toBe(-5);
+  });
+
+  it('uses fallback perMatchMinutes of 3 when 0 passed', () => {
+    const byCourt = {
+      A: [{ status: 'scheduled', scheduledAt: null }]
+    };
+    const [stat] = computeCourtPaceStats(byCourt, 0, 600);
+    expect(stat.estimatedRemainingMin).toBe(3); // 1 × 3 (fallback)
+  });
+
+  it('court label is preserved', () => {
+    const byCourt = { Z: [{ status: 'scheduled', scheduledAt: null }] };
+    const [stat] = computeCourtPaceStats(byCourt, 5, 600);
+    expect(stat.court).toBe('Z');
+  });
+
+  it('returns an entry for empty court buckets (CourtPacePanel filters them)', () => {
+    // Pre-condition for the populated-only filter in CourtPacePanel: the
+    // helper must still emit a row for empty buckets so the component can
+    // recognise and drop them.  Otherwise the filter is a no-op and configured
+    // courts with no matches would render confusing "0/0 done" tiles.
+    const byCourt = { A: [{ status: 'scheduled', scheduledAt: '09:00' }], B: [] };
+    const stats = computeCourtPaceStats(byCourt, 5, 9 * 60);
+    expect(stats.map(s => s.court).sort()).toEqual(['A', 'B']);
+    const empty = stats.find(s => s.court === 'B');
+    expect(empty.completedCount + empty.remainingCount).toBe(0);
+  });
+});
+
+describe('suggestRebalances', () => {
+  it('returns null if stats are empty or invalid', () => {
+    expect(suggestRebalances(null, 5)).toBeNull();
+    expect(suggestRebalances([], 5)).toBeNull();
+    expect(suggestRebalances([{ court: 'A', remainingCount: 1, delta: 10 }], 5)).toBeNull();
+    expect(suggestRebalances([{ court: 'A', remainingCount: 1, delta: 10 }, { court: 'B', remainingCount: 1, delta: -5 }], 0)).toBeNull();
+  });
+
+  it('returns null if there are no courts behind schedule', () => {
+    const stats = [
+      { court: 'A', remainingCount: 5, delta: 0 },
+      { court: 'B', remainingCount: 5, delta: -10 }
+    ];
+    expect(suggestRebalances(stats, 5)).toBeNull();
+  });
+
+  it('returns null if there are no courts ahead of schedule', () => {
+    const stats = [
+      { court: 'A', remainingCount: 5, delta: 15 },
+      { court: 'B', remainingCount: 5, delta: 2 }
+    ];
+    expect(suggestRebalances(stats, 5)).toBeNull();
+  });
+
+  it('suggests correct rebalancing when one court is behind and another is ahead', () => {
+    const stats = [
+      { court: 'A', remainingCount: 5, delta: 25 },
+      { court: 'B', remainingCount: 5, delta: -12 }
+    ];
+    // Math.min(25, |-12|) = 12. Math.floor(12 / 5) = 2.
+    expect(suggestRebalances(stats, 5)).toEqual({
+      from: 'A',
+      to: 'B',
+      n: 2
+    });
+  });
+
+  it('returns null if calculated N is 0', () => {
+    const stats = [
+      { court: 'A', remainingCount: 5, delta: 4 },
+      { court: 'B', remainingCount: 5, delta: -3 }
+    ];
+    // Math.min(4, |-3|) = 3. Math.floor(3 / 5) = 0.
+    expect(suggestRebalances(stats, 5)).toBeNull();
+  });
+});
+
+describe('CourtPacePanel timer', () => {
+  let realReact;
+  let runtime;
+  let CourtPacePanel;
+
+  function makeReactive() {
+    let hookSlots = [];
+    let hookIndex = 0;
+    let scheduledRender = null;
+    let rootProps = null;
+    let rootFactory = null;
+    let effectCleanups = [];
+    let renderCount = 0;
+
+    function rerender() {
+      hookIndex = 0;
+      renderCount++;
+      scheduledRender = rootFactory(rootProps);
+      return scheduledRender;
+    }
+
+    const reactive = {
+      createElement: (type, props, ...children) => ({ type, props, children }),
+      useState: (initial) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = typeof initial === 'function' ? initial() : initial;
+        }
+        const setter = (v) => {
+          hookSlots[i] = typeof v === 'function' ? v(hookSlots[i]) : v;
+          rerender();
+        };
+        return [hookSlots[i], setter];
+      },
+      useEffect: (effect, deps) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = deps;
+          const cleanup = effect();
+          if (typeof cleanup === 'function') {
+            effectCleanups.push(cleanup);
+          }
+        }
+      },
+      // useMemo runs eagerly without dependency tracking — the test runtime
+      // intentionally simplifies hooks for render isolation. This means tests
+      // can't catch "tick missing from deps" regressions; that contract is
+      // enforced by code review instead.
+      useMemo: (fn) => fn(),
+      useRef: (initial) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = { current: initial };
+        }
+        return hookSlots[i];
+      },
+      useLayoutEffect: () => {},
+      memo: (c) => c,
+    };
+
+    return {
+      React: reactive,
+      mount: (factory, props) => {
+        hookSlots = [];
+        hookIndex = 0;
+        rootFactory = factory;
+        rootProps = props;
+        effectCleanups = [];
+        renderCount = 0;
+        return rerender();
+      },
+      unmount: () => {
+        effectCleanups.forEach(c => c());
+        effectCleanups = [];
+      },
+      currentTree: () => scheduledRender,
+      renderCount: () => renderCount,
+    };
+  }
+
+  beforeEach(async () => {
+    realReact = global.React;
+    runtime = makeReactive();
+    global.React = runtime.React;
+    vi.useFakeTimers();
+    vi.resetModules();
+    ({ CourtPacePanel } = await import('../admin_schedule.jsx'));
+  });
+
+  afterEach(() => {
+    global.React = realReact;
+    // The component's effect cleanup calls clearInterval on an interval
+    // created under fake timers, so unmount BEFORE switching back to real
+    // timers — otherwise the cleanup runs against a different timer
+    // implementation than the one that scheduled it. Order matters.
+    runtime.unmount();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('sets up a 60s interval that triggers updates, and clears it on unmount', () => {
+    const byCourt = {
+      A: [
+        { status: 'scheduled', scheduledAt: '09:00' },
+      ]
+    };
+
+    // Spies are explicitly restored by `vi.restoreAllMocks()` in afterEach
+    // so they don't leak into later tests (the vitest config does not
+    // automatically restore them).
+    const setIntervalSpy = vi.spyOn(global, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
+
+    runtime.mount(CourtPacePanel, { byCourt, safeMatchDuration: 5 });
+
+    expect(setIntervalSpy).toHaveBeenCalledOnce();
+    expect(setIntervalSpy.mock.calls[0][1]).toBe(60000);
+
+    runtime.unmount();
+    expect(clearIntervalSpy).toHaveBeenCalledOnce();
+    expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[0].value);
+  });
+
+  it('advancing 60s triggers a re-render so wall-clock-derived stats refresh', () => {
+    // mp-pb1 AC #3: the tick must actually re-render the panel, not just
+    // schedule a no-op interval. Advance fake timers and assert that the
+    // component was re-rendered after the tick fired. This is the real
+    // contract — without it the panel could "tick" silently and the chip
+    // color would still freeze between SSE events.
+    const byCourt = {
+      A: [
+        { status: 'scheduled', scheduledAt: '09:00' },
+      ]
+    };
+
+    runtime.mount(CourtPacePanel, { byCourt, safeMatchDuration: 5 });
+    const before = runtime.renderCount();
+
+    vi.advanceTimersByTime(60000);
+
+    const after = runtime.renderCount();
+    expect(after).toBeGreaterThan(before);
   });
 });
 

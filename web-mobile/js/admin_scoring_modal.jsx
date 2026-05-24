@@ -132,15 +132,12 @@ function GlossaryHintAS({ name }) {
 
 // T093–T098: shared helpers for the decision (kiken/fusenpai/fusensho) flow.
 //
-// Resolve the password to use for the /decision POST. The modal historically
-// took no password prop (the parent does the recordScore call). Rather than
-// re-thread the AdminApp props tree in this slice we accept an explicit prop
-// AND fall back to a window-scoped session value if the caller hasn't wired
-// it yet. The orchestrator marks the prop wiring as a separate follow-up.
+// Resolve the password for /decision POST. The helper only uses the prop
+// (no window fallback); callers must pass the password explicitly. Returns ""
+// as a safe sentinel that the server will reject with 401, surfacing any
+// misconfiguration where the prop was not provided.
 function resolveDecisionPassword(propPassword) {
-  if (propPassword) return propPassword;
-  if (typeof window !== "undefined" && window.adminPassword) return window.adminPassword;
-  return "";
+  return propPassword || "";
 }
 
 // T093/T094: build the /decision POST body. Pure helper so we can pin the
@@ -154,6 +151,18 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
   if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
   if (opts.force) body.force = true;
   return body;
+}
+
+// mp-os3: shared decision-submit path used by both ScoreEditorModal and
+// TeamScoreEditorModal. Wraps buildDecisionBody + recordDecision and
+// resolves the password from the explicit prop. Extracted so the regression
+// test pins the production call site (rather than re-implementing the chain
+// inside the test, which was how the original gap slipped through). Returns
+// the promise from window.API.recordDecision so callers can await + handle
+// the 409 decision_locked / max_encho_exceeded retry-with-force loop.
+function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeriodCount, password, opts = {}) {
+  const body = buildDecisionBody(kind, decisionPayload, enchoPeriodCount, opts);
+  return window.API.recordDecision(compId, matchId, body, resolveDecisionPassword(password));
 }
 
 // T104/CHK029: encho-period clamp + banner predicates. maxEnchoPeriods === 0
@@ -548,8 +557,15 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     setDecisionSubmitting(true);
     setDecisionErr("");
     try {
-      const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
-      const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
+      const updated = await submitDecisionRequest(
+        m.compId,
+        m.id,
+        kind,
+        { decisionBy, decisionReason },
+        enchoPeriodCount,
+        password,
+        opts,
+      );
       if (!mountedRef.current) return;
       if (window.isKikenDecision(kind)) {
         // The loser is the side != Winner. SideA/SideB on MatchResult are
@@ -1104,8 +1120,15 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     setDecisionSubmitting(true);
     setDecisionErr("");
     try {
-      const body = buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts);
-      const updated = await window.API.recordDecision(m.compId, m.id, body, resolveDecisionPassword(password));
+      const updated = await submitDecisionRequest(
+        m.compId,
+        m.id,
+        kind,
+        { decisionBy, decisionReason },
+        enchoPeriodCount,
+        password,
+        opts,
+      );
       if (!mountedRef.current) return;
       if (window.isKikenDecision(kind)) {
         const winnerName = (updated?.winner || "").trim();
@@ -1743,6 +1766,7 @@ window.ScoreEditorModal = ScoreEditorModal;
 export {
   resolveDecisionPassword,
   buildDecisionBody,
+  submitDecisionRequest,
   shouldShowEnchoMaxBanner,
   canIncrementEncho,
   nextEnchoPeriod,

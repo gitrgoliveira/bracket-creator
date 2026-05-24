@@ -1112,7 +1112,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // page-header StatusBadge flips without waiting for the SSE refresh.
   // Cleared automatically when the prop status changes (SSE arrives).
   const [localStatus, setLocalStatus] = useStateA(null);
-  useEffectA(() => { setLocalStatus(null); }, [c.status]);
+  useEffectA(() => { setLocalStatus(null); }, [c.id, c.status]);
   // start() awaits a multi-second backend call (pool generation + bracket
   // build). If the user clicks Back during that window AdminCompetition
   // unmounts and setStarting(false) in finally targets a dead component.

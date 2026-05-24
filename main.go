@@ -20,10 +20,14 @@ import (
 //go:embed web/css web/js
 var webFiles embed.FS
 
-// Mobile-app assets. Single-level glob (not all:) so the underscore-
-// prefixed __tests__/ directory is excluded — Go embed drops _- and
-// .-prefixed entries by default. Don't switch to all:web-mobile
-// without first relocating __tests__/.
+// Mobile-app assets. The glob embeds all files present at build time.
+// After `make go/build` runs esbuild, this includes css, js, dist and vendor.
+// Explicit paths are not used here because dist/ and vendor/ are generated
+// by esbuild and absent in a clean checkout — listing them would break
+// `go test ./...` before a build has run. The trade-off: a local binary
+// built after `npm install` will also embed node_modules/, making it
+// larger. Production Docker builds and CI run in clean envs where
+// node_modules/ is absent, so the artifact size is not affected there.
 //
 //go:embed web-mobile/*
 var mobileWebFiles embed.FS

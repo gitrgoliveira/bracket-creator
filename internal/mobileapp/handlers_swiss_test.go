@@ -94,6 +94,54 @@ func TestSwissGenerateRound_Success(t *testing.T) {
 	assert.Len(t, matches, 2)
 }
 
+// TestSwissGenerateRound_CounterAdvances verifies that SwissCurrentRound
+// increments 1→2→3 across successive generate-round calls once each prior
+// round is fully completed, pinning the round-tracking contract end-to-end.
+func TestSwissGenerateRound_CounterAdvances(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := makeSwissComp(t, store, []string{"P1", "P2", "P3", "P4"}, 3)
+
+	completeCurrentRound := func(t *testing.T) {
+		t.Helper()
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for i := range matches {
+			if matches[i].Status != state.MatchStatusCompleted {
+				matches[i].Winner = matches[i].SideA
+				matches[i].Status = state.MatchStatusCompleted
+				matches[i].IpponsA = []string{"M", "M"}
+			}
+		}
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+	}
+
+	type roundResp struct {
+		Round             int `json:"round"`
+		SwissCurrentRound int `json:"swissCurrentRound"`
+	}
+
+	for wantRound := 1; wantRound <= 3; wantRound++ {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, adminReqSwiss("POST", fmt.Sprintf("/api/competitions/%s/swiss/generate-round", compID)))
+		require.Equal(t, http.StatusCreated, w.Code, "round %d body=%s", wantRound, w.Body.String())
+
+		var resp roundResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, wantRound, resp.Round, "resp.round for iteration %d", wantRound)
+		assert.Equal(t, wantRound, resp.SwissCurrentRound, "resp.swissCurrentRound for iteration %d", wantRound)
+
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		assert.Equal(t, wantRound, comp.SwissCurrentRound, "persisted SwissCurrentRound after round %d", wantRound)
+
+		if wantRound < 3 {
+			completeCurrentRound(t)
+		}
+	}
+}
+
 // TestSwissGenerateRound_IncompleteRound returns 409 when the current
 // round has un-completed matches (FR-050d).
 func TestSwissGenerateRound_IncompleteRound(t *testing.T) {
@@ -284,4 +332,177 @@ func TestPublicSwissStandings_NotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestSwissEndToEnd_3Rounds_6Participants verifies the complete, end-to-end
+// Swiss competition flow with 6 participants over 3 rounds using the live
+// API handlers (T189 / FR-050d / FR-050e).
+func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// 1. Create a 6-player Swiss competition.
+	compID := makeSwissComp(t, store, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}, 3)
+
+	// Build a seed map keyed by participant name so winnerOf can pick the
+	// better-ranked player without relying on which side (SideA/SideB) the
+	// pairing assigns them to. Swiss matches store names in SideA/SideB
+	// (see engine.buildSwissMatches), so the map must be name-keyed.
+	participants, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	seedByName := make(map[string]int, len(participants))
+	for _, p := range participants {
+		seedByName[p.Name] = p.Seed
+	}
+	// winnerOf returns the player with the lower seed number (higher rank).
+	// Falls back to SideA when both seeds are absent or equal.
+	winnerOf := func(m state.MatchResult) string {
+		seedA, seedB := seedByName[m.SideA], seedByName[m.SideB]
+		if seedB > 0 && (seedA == 0 || seedB < seedA) {
+			return m.SideB
+		}
+		return m.SideA
+	}
+
+	// Start the competition via API.
+	wStart := httptest.NewRecorder()
+	reqStart, _ := http.NewRequest("POST", fmt.Sprintf("/api/competitions/%s/start", compID), nil)
+	r.ServeHTTP(wStart, reqStart)
+	require.Equal(t, http.StatusOK, wStart.Code, "Start competition failed: %s", wStart.Body.String())
+
+	// Helper to GET standings and assert player counts.
+	getStandings := func() []state.PlayerStanding {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := adminReqSwiss("GET", fmt.Sprintf("/api/competitions/%s/swiss/standings", compID))
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var standings []state.PlayerStanding
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &standings))
+		return standings
+	}
+
+	// Helper to submit score for a match.
+	submitScore := func(mid, sideA, sideB, winner string, ipponsA, ipponsB []string) {
+		t.Helper()
+		result := ScoreRequest{
+			SideA:   sideA,
+			SideB:   sideB,
+			Winner:  winner,
+			IpponsA: ipponsA,
+			IpponsB: ipponsB,
+			Status:  state.MatchStatusCompleted,
+		}
+		body, err := json.Marshal(result)
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", fmt.Sprintf("/api/competitions/%s/matches/%s/score", compID, mid), bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "Score PUT failed: %s", w.Body.String())
+	}
+
+	// Helper to generate Swiss round via API.
+	generateRound := func() []state.MatchResult {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := adminReqSwiss("POST", fmt.Sprintf("/api/competitions/%s/swiss/generate-round", compID))
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusCreated, w.Code, "Generate round failed: %s", w.Body.String())
+		var resp struct {
+			Round             int                 `json:"round"`
+			Matches           []state.MatchResult `json:"matches"`
+			SwissCurrentRound int                 `json:"swissCurrentRound"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp.Matches
+	}
+
+	// --- ROUND 1 ---
+	// Generate Round 1.
+	r1Matches := generateRound()
+	require.Len(t, r1Matches, 3, "6 participants ⇒ 3 matches in R1")
+
+	// Verify initially standings have 6 players with 0 wins.
+	standingsR0 := getStandings()
+	require.Len(t, standingsR0, 6)
+	for _, s := range standingsR0 {
+		assert.Equal(t, 0, s.Wins)
+	}
+
+	// Complete R1 matches: higher seed wins each match.
+	for _, m := range r1Matches {
+		submitScore(m.ID, m.SideA, m.SideB, winnerOf(m), []string{"M", "K"}, nil)
+	}
+
+	// Verify standings after Round 1.
+	standingsR1 := getStandings()
+	// Top 3 players should have 1 win, bottom 3 should have 0 wins.
+	winnersR1 := 0
+	losersR1 := 0
+	for _, s := range standingsR1 {
+		switch s.Wins {
+		case 1:
+			winnersR1++
+		case 0:
+			losersR1++
+		}
+	}
+	assert.Equal(t, 3, winnersR1)
+	assert.Equal(t, 3, losersR1)
+
+	// --- ROUND 2 ---
+	// Generate Round 2.
+	r2Matches := generateRound()
+	require.Len(t, r2Matches, 3)
+
+	// Complete R2 matches: higher seed wins each match.
+	for _, m := range r2Matches {
+		submitScore(m.ID, m.SideA, m.SideB, winnerOf(m), []string{"M"}, nil)
+	}
+
+	// Verify standings after Round 2.
+	standingsR2 := getStandings()
+	// High-point pairings mean we have players with 2, 1, and 0 wins.
+	// The exact distribution depends on the pairing algorithm (Swiss
+	// pairs by win-count groups), but the differentiation is what we're
+	// pinning: at least one player at the top (2 wins) and at least one
+	// at the bottom (0 wins) — otherwise the pairing didn't honor seeds.
+	winsTally := map[int]int{}
+	for _, s := range standingsR2 {
+		winsTally[s.Wins]++
+	}
+	require.Len(t, standingsR2, 6)
+	assert.GreaterOrEqual(t, winsTally[2], 1, "at least one player should have 2 wins after R2")
+	assert.GreaterOrEqual(t, winsTally[0], 1, "at least one player should have 0 wins after R2")
+	assert.Equal(t, 6, winsTally[2]+winsTally[1]+winsTally[0], "all 6 players should land in {0,1,2}-wins buckets after R2")
+
+	// --- ROUND 3 ---
+	// Generate Round 3.
+	r3Matches := generateRound()
+	require.Len(t, r3Matches, 3)
+
+	// Complete R3 matches: higher seed wins each match.
+	for _, m := range r3Matches {
+		submitScore(m.ID, m.SideA, m.SideB, winnerOf(m), []string{"M"}, nil)
+	}
+
+	// Verify final standings.
+	finalStandings := getStandings()
+	require.Len(t, finalStandings, 6)
+	// Ranks should be 1 to 6.
+	for i, s := range finalStandings {
+		assert.Equal(t, i+1, s.Rank)
+	}
+
+	// 4. Complete competition.
+	wComplete := httptest.NewRecorder()
+	reqComplete, _ := http.NewRequest("POST", fmt.Sprintf("/api/competitions/%s/complete", compID), nil)
+	r.ServeHTTP(wComplete, reqComplete)
+	require.Equal(t, http.StatusOK, wComplete.Code, "Complete competition failed: %s", wComplete.Body.String())
+
+	// Verify comp status is "complete".
+	updated, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusComplete, updated.Status)
 }

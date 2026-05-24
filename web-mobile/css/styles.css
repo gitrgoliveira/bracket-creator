@@ -2694,8 +2694,12 @@ button.my-match__opp {
 
 .tw-match {
   display: grid;
-  grid-template-columns: 56px 1fr auto;
-  gap: 10px;
+  /* Cap column 1 at 110px so a pathological translated round/phase label
+     can't squeeze the players column. Ellipsis on .tw-match__phase (col 1)
+     handles clipping past the cap. .tw-match__name (col 2) clips independently
+     via its own overflow rule. */
+  grid-template-columns: minmax(65px, 110px) 1fr auto;
+  gap: 12px;
   align-items: center;
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -2719,6 +2723,13 @@ button.my-match__opp {
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
+/* First grid column: time + phase + queue pill. min-width: 0 allows
+   the grid item to shrink below its content size so .tw-match__phase
+   can ellipsis-truncate a long pool/round label. */
+.tw-match__meta {
+  min-width: 0;
+}
+
 .tw-match__time {
   font-family: var(--font-mono);
   font-weight: 600;
@@ -2731,6 +2742,9 @@ button.my-match__opp {
   margin-top: 1px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tw-match__players {
@@ -2752,7 +2766,10 @@ button.my-match__opp {
 .tw-match__comp {
   font-size: 10.5px;
   color: var(--ink-3);
-  margin-top: 2px;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tw-match__actions {

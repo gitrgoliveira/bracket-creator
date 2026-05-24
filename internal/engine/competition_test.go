@@ -247,17 +247,18 @@ func TestStartCompetition_SwissRoundAlreadyGenerated(t *testing.T) {
 	assert.Contains(t, err.Error(), "already generated")
 }
 
-// TestStartCompetition_SwissMatchesOnDiskRoundZero verifies the second guard:
-// if AdvanceSwissRound wrote matches to pool-matches.csv but its
-// UpdateCompetitionChanged round-bump failed (leaving SwissCurrentRound==0),
-// StartCompetition must still refuse to overwrite those existing matches.
-func TestStartCompetition_SwissMatchesOnDiskRoundZero(t *testing.T) {
+// TestStartCompetition_SwissMatchesOnDiskRoundZero_Scored verifies Guard 2:
+// pool-matches.csv has scored entries (non-scheduled status) and
+// SwissCurrentRound==0 — StartCompetition must reject to avoid data loss.
+// This covers AdvanceSwissRound having partially run (wrote matches, scored
+// a match, but the round-bump UpdateCompetitionChanged failed).
+func TestStartCompetition_SwissMatchesOnDiskRoundZero_Scored(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "swiss-start-guard-csv"
+	compID := "swiss-start-guard-scored"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:          compID,
-		Name:        "Swiss CSV Guard Test",
+		Name:        "Swiss CSV Guard Test (scored)",
 		Kind:        "individual",
 		Format:      state.CompFormatSwiss,
 		SwissRounds: 3,
@@ -269,14 +270,53 @@ func TestStartCompetition_SwissMatchesOnDiskRoundZero(t *testing.T) {
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave",
 	})
-	// Pre-write some pool matches to simulate AdvanceSwissRound having saved
-	// round-1 matches before its UpdateCompetitionChanged round-bump failed.
+	// Pre-write matches where one has been scored (completed). Guard 2 must
+	// reject here because overwriting would silently discard that result.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Swiss-R1-0", Status: state.MatchStatusScheduled},
+		{ID: "Swiss-R1-0", Status: state.MatchStatusCompleted},
 		{ID: "Swiss-R1-1", Status: state.MatchStatusScheduled},
 	}))
 
 	err := eng.StartCompetition(compID)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "already has")
+	assert.Contains(t, err.Error(), "scored Swiss matches")
+}
+
+// TestStartCompetition_SwissMatchesOnDiskRoundZero_AllScheduled verifies that
+// Guard 2 allows retry when all pool-matches.csv entries are still scheduled
+// (no scoring has occurred). This covers StartCompetition itself having
+// partially run — it writes round-1 matches then fails inside
+// UpdateCompetitionChanged. The operator must be able to retry without first
+// manually cleaning up the CSV.
+func TestStartCompetition_SwissMatchesOnDiskRoundZero_AllScheduled(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-start-retry-scheduled"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Swiss Retry Test (all scheduled)",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      state.CompStatusSetup,
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave",
+	})
+	// Pre-write purely scheduled matches — simulates a prior StartCompetition
+	// that wrote round-1 matches then failed at UpdateCompetitionChanged.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Swiss-R1-0", Status: state.MatchStatusScheduled},
+		{ID: "Swiss-R1-1", Status: state.MatchStatusScheduled},
+	}))
+
+	// Retry must succeed (regenerates/overwrites unscored matches).
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status)
+	assert.Equal(t, 1, comp.SwissCurrentRound)
 }

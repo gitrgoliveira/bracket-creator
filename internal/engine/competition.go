@@ -410,15 +410,22 @@ func (e *Engine) StartCompetition(id string) error {
 		if comp.SwissCurrentRound != 0 {
 			return validationErrorf("competition %s Swiss round %d already generated; cannot start again", id, comp.SwissCurrentRound)
 		}
-		// Guard 2: pool-matches.csv already has content — AdvanceSwissRound wrote
-		// the matches but its UpdateCompetitionChanged round-bump failed, leaving
-		// SwissCurrentRound at 0 while the file is non-empty. Without this second
-		// check, StartCompetition would silently overwrite those partially-written
-		// round-1 matches.
+		// Guard 2: pool-matches.csv has matches that have already been acted on
+		// (at least one is non-scheduled). AdvanceSwissRound may have written
+		// round-1 matches before its UpdateCompetitionChanged round-bump failed,
+		// leaving SwissCurrentRound=0 while the CSV has scored/running content.
+		// We only block when scoring has started — purely-scheduled entries are
+		// safe to overwrite on a retry (StartCompetition itself could have written
+		// them in a previous call that then failed inside UpdateCompetitionChanged,
+		// and the operator retrying should not be permanently stuck).
 		if existing, loadErr := e.store.LoadPoolMatches(id); loadErr != nil {
 			return loadErr
-		} else if len(existing) > 0 {
-			return validationErrorf("competition %s already has %d Swiss matches on disk; cannot start again", id, len(existing))
+		} else {
+			for _, m := range existing {
+				if m.Status != "" && m.Status != state.MatchStatusScheduled {
+					return validationErrorf("competition %s already has scored Swiss matches on disk (match %s status=%s); cannot start again", id, m.ID, m.Status)
+				}
+			}
 		}
 		// GenerateSwissRound reloads participants from disk. If
 		// resolveReservedSlots mutated the in-memory roster (e.g. replaced

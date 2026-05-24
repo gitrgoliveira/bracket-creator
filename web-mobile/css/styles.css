@@ -2686,7 +2686,7 @@ a:hover {
 
 /* First grid column: time + phase + queue pill. min-width: 0 allows
    the grid item to shrink below its content size so .tw-match__phase
-   can ellipsis-truncate a long competition/pool name. */
+   can ellipsis-truncate a long pool/round label. */
 .tw-match__meta {
   min-width: 0;
 }

@@ -17,6 +17,7 @@ const ScoreEditorModal = window.ScoreEditorModal;
 // {id:"",name:""} for missing sides, making the naive `m.sideA && m.sideB`
 // check always pass.
 const hasBothSides = window.hasBothSides;
+const getScoreBtnClass = window.getScoreBtnClass;
 
 // ---------- Tournament-wide schedule (admin) ----------
 // Estimate minutes from HH:MM string; returns null if invalid
@@ -602,7 +603,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
 AdminTWMatch.displayName = "AdminTWMatch";
 
 // ---------- Score editor ----------
-function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode }) {
+function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password }) {
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
@@ -617,7 +618,7 @@ function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, on
             <div className="page-head__sub">Update live scores or correct past matches across the tournament. Changes propagate through the bracket.</div>
           </div>
         </div>
-        <AdminScoreEditor t={tournament} onEditScore={onEditScore} onMoveCourt={onMoveCourt} />
+        <AdminScoreEditor t={tournament} onEditScore={onEditScore} onMoveCourt={onMoveCourt} password={password} />
       </div>
     </div>
   );
@@ -637,7 +638,7 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
   );
 }
 
-function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) {
+function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password }) {
   const [filter, setFilter] = useStateA("");
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
   const [statusFilter, setStatusFilter] = useStateA("all");
@@ -752,7 +753,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
                 {m.status === "running" && <span className="bc-live">● LIVE</span>}
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
-              <button className="btn btn--sm score-edit-row__edit" onClick={() => setOpenMatch(m)}>
+              <button className={getScoreBtnClass(m.status)} onClick={() => setOpenMatch(m)}>
                 {m.status === "completed" ? "Correct" : "Score"}
               </button>
             </div>
@@ -802,6 +803,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
                 if (mountedRef.current) setOpenMatch(nextActiveMatch);
               } catch (_err) { /* keep modal open on error */ }
             } : null}
+            password={password}
           />
         );
       })()}

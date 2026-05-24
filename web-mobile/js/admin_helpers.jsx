@@ -248,6 +248,10 @@ function compareDmy(a, b) {
   return toKey(a).localeCompare(toKey(b));
 }
 
+function getScoreBtnClass(status) {
+  return `score-btn ${status === "completed" ? "score-btn--correct" : "score-btn--active"}`;
+}
+
 // Guard window assignments so this file stays safely importable in
 // non-browser test environments (matches the pattern in data.jsx / ui.jsx).
 if (typeof window !== "undefined") {
@@ -261,6 +265,7 @@ if (typeof window !== "undefined") {
   window.isValidDate = isValidDate;
   window.validateAndNormalizeDate = validateAndNormalizeDate;
   window.decideNumericUpdate = decideNumericUpdate;
+  window.getScoreBtnClass = getScoreBtnClass;
   window.DATE_ERR_INVALID_FORMAT = DATE_ERR_INVALID_FORMAT;
   window.DATE_ERR_YEAR_RANGE = DATE_ERR_YEAR_RANGE;
   window.MIN_YEAR = MIN_YEAR;
@@ -283,6 +288,7 @@ export {
   isValidDate,
   validateAndNormalizeDate,
   decideNumericUpdate,
+  getScoreBtnClass,
   DATE_ERR_INVALID_FORMAT,
   DATE_ERR_YEAR_RANGE,
   MIN_YEAR,

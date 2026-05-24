@@ -539,11 +539,22 @@ describe('CourtPacePanel timer', () => {
           }
         }
       },
-      // useMemo runs eagerly without dependency tracking — the test runtime
-      // intentionally simplifies hooks for render isolation. This means tests
-      // can't catch "tick missing from deps" regressions; that contract is
-      // enforced by code review instead.
-      useMemo: (fn) => fn(),
+      // useMemo is slot-based like useState/useRef: each call in the render
+      // sequence maps to hookSlots[i] and stores { deps, result }. On re-render
+      // the deps are shallow-compared (Object.is) so the test runtime enforces
+      // the real contract — removing tick from the deps array would cause stats
+      // to stop refreshing after a tick, which the re-render test would catch.
+      useMemo: (fn, deps) => {
+        const i = hookIndex++;
+        const cached = hookSlots[i];
+        const depsChanged = !cached || !deps ||
+          deps.length !== cached.deps.length ||
+          deps.some((d, idx) => !Object.is(d, cached.deps[idx]));
+        if (depsChanged) {
+          hookSlots[i] = { deps: deps ? deps.slice() : [], result: fn() };
+        }
+        return hookSlots[i].result;
+      },
       useRef: (initial) => {
         const i = hookIndex++;
         if (hookSlots.length <= i) {

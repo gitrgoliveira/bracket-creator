@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -710,6 +711,76 @@ func TestSwissStandings_Draw(t *testing.T) {
 		}
 		assert.Equal(t, 1, byName[ms[0].SideA].Draws, "SideA of draw match must have 1 draw")
 		assert.Equal(t, 1, byName[ms[0].SideB].Draws, "SideB of draw match must have 1 draw")
+	}
+}
+
+// TestGenerateSwissRound_TeamSizeDefaultApplied verifies that
+// GenerateSwissRound applies the TeamSize=5 default for team
+// competitions whose stored config has TeamSize=0. Without the fix,
+// assignPoolMatchSlots falls through to the individual-match duration
+// (~5 min/slot) instead of the team-match duration (~27 min/slot with
+// 5 bouts × 3 min × 1.5 + inter-bout gaps). With the fix, sequential
+// matches on the same court must be spaced at least 10 minutes apart
+// (the team-match duration is > 10 min; individual is ~5 min). This
+// catches the regression introduced by StartCompetition NOT persisting
+// the TeamSize default before calling GenerateSwissRound.
+func TestGenerateSwissRound_TeamSizeDefaultApplied(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-team-default"
+
+	comp := &state.Competition{
+		ID:                compID,
+		Name:              "Swiss Team Test",
+		Kind:              "team",
+		Format:            state.CompFormatSwiss,
+		TeamSize:          0, // intentionally 0 — the bug: stored config missing the default
+		SwissRounds:       3,
+		Courts:            []string{"A"}, // single court so matches sequence
+		StartTime:         "09:00",
+		Status:            state.CompStatusSetup,
+		PoolMatchDuration: 3,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	players := []domain.Player{
+		{ID: helper.NewUUID4(), Name: "TeamA", Dojo: "Dojo1"},
+		{ID: helper.NewUUID4(), Name: "TeamB", Dojo: "Dojo2"},
+		{ID: helper.NewUUID4(), Name: "TeamC", Dojo: "Dojo3"},
+		{ID: helper.NewUUID4(), Name: "TeamD", Dojo: "Dojo4"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	matches, err := eng.GenerateSwissRound(compID, 1)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches, "GenerateSwissRound should return matches")
+
+	// Collect ScheduledAt times for played matches on court A in order.
+	// With TeamSize=5, PoolMatchDuration=3, default multiplier 1.5:
+	//   perMatch = 5 * 3 * 1.5 + (5-1)*1.0 = 22.5 + 4 = ~27 min
+	// With TeamSize=0 (bug), perMatch = 3 * 1.5 = ~5 min.
+	// The threshold 10 comfortably distinguishes them.
+	var times []string
+	for _, m := range matches {
+		if m.SideB != "" && m.Court == "A" {
+			times = append(times, m.ScheduledAt)
+		}
+	}
+	require.GreaterOrEqual(t, len(times), 2,
+		"need at least 2 scheduled matches on court A to measure spacing")
+
+	parse := func(s string) int {
+		t.Helper()
+		var h, m int
+		_, err := fmt.Sscanf(s, "%d:%d", &h, &m)
+		require.NoError(t, err, "ScheduledAt %q must be HH:MM", s)
+		return h*60 + m
+	}
+
+	for i := 1; i < len(times); i++ {
+		gap := parse(times[i]) - parse(times[i-1])
+		assert.GreaterOrEqual(t, gap, 10,
+			"consecutive matches on the same court should be at least 10 min apart for a team competition; got %d min between %q and %q — TeamSize default was not applied",
+			gap, times[i-1], times[i])
 	}
 }
 

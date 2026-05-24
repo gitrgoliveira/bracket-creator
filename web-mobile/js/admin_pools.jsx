@@ -62,7 +62,7 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 // Without it, the React-async-state hazard would let Esc actually commit
 // the typed value: setV(String(initial)) is queued, but blur() fires
 // handleBlur synchronously with the stale typed `v` still in the closure.
-function RankInput({ initial, className, onCommit, style }) {
+function RankInput({ initial, className, onCommit, style, disabled, title }) {
   const [v, setV] = useStateA(String(initial));
   const focusedRef = useRefA(false);
   const focusValueRef = useRefA(String(initial));
@@ -75,6 +75,11 @@ function RankInput({ initial, className, onCommit, style }) {
     focusValueRef.current = v;
   };
   const handleBlur = () => {
+    // Guard: if the input became disabled mid-edit (e.g. SSE status update
+    // moved competition from "pools" to "completed"), browsers may fire a
+    // synthetic blur when React re-renders with disabled=true. Bail out so
+    // no stale commit slips through after ranks are locked.
+    if (disabled) { focusedRef.current = false; return; }
     const result = decideRankCommit({
       v,
       initial,
@@ -110,20 +115,26 @@ function RankInput({ initial, className, onCommit, style }) {
     }
   };
   return (
-    <input
-      type="number"
-      min="1"
-      max={MAX_RANK}
-      className={className}
-      value={v}
-      onChange={(e) => setV(e.target.value)}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-      onKeyDown={handleKeyDown}
-      onClick={(e) => e.stopPropagation()}
-      autoComplete="off"
-      style={style}
-    />
+    // Wrap in a span so click/pointer events are stopped even when the input
+    // is disabled (disabled form controls don't fire click events themselves).
+    <span onClick={(e) => e.stopPropagation()} title={disabled ? title : undefined} style={{ display: "inline-block" }}>
+      <input
+        type="number"
+        min="1"
+        max={MAX_RANK}
+        className={className}
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        autoComplete="off"
+        style={style}
+        disabled={disabled}
+        title={!disabled ? title : undefined}
+        aria-disabled={disabled ? "true" : undefined}
+      />
+    </span>
   );
 }
 
@@ -154,6 +165,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   }
 
   const selectedPool = selectedPoolName ? pools.find(p => p.poolName === selectedPoolName) : null;
+  const ranksLocked = isRanksLocked(c.status);
+  const rankLockedTitle = ranksLocked ? "Pool play complete — start playoffs from the Bracket tab" : undefined;
 
   if (selectedPool) {
     const poolStandings = standings ? standings[selectedPool.poolName] : null;
@@ -195,13 +208,17 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         initial={s.rank || i + 1}
                         className="input"
                         onCommit={(v) => overrideRank(selectedPool.poolName, s.player.name, v)}
+                        disabled={ranksLocked}
+                        title={rankLockedTitle}
                         style={{
                           width: 44,
                           padding: "4px 8px",
                           border: s.isOverridden ? "1px solid var(--accent)" : "1px solid var(--line)",
-                          background: s.isOverridden ? "var(--accent-soft)" : "transparent",
+                          background: ranksLocked ? "var(--bg-2)" : s.isOverridden ? "var(--accent-soft)" : "transparent",
                           textAlign: "center",
-                          fontWeight: s.isOverridden ? "700" : "400"
+                          fontWeight: s.isOverridden ? "700" : "400",
+                          cursor: ranksLocked ? "not-allowed" : undefined,
+                          opacity: ranksLocked ? 0.6 : 1,
                         }}
                       />
                     </td>
@@ -256,7 +273,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           <div style={{ marginTop: 24 }}>
             <h3 className="section-title">Match Results</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {selectedPool.matches.map(m => (
+              {poolMatchesForPool(poolMatches, selectedPool.poolName).map(m => (
                 <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
                   <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id ? m.id.split('-').pop() : ""}</div>
                   <div className="sched-row__players">
@@ -297,7 +314,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         {pools.map((pool) => {
           const poolStandings = standings ? standings[pool.poolName] : null;
           const court = c.courts[pools.indexOf(pool) % c.courts.length];
-          const isDone = pool.matches && pool.matches.every(m => m.status === "completed");
+          const livePoolMatches = poolMatchesForPool(poolMatches, pool.poolName);
+          const isDone = livePoolMatches.length > 0 && livePoolMatches.every(m => m.status === "completed");
           return (
             <div
               key={pool.poolName}
@@ -335,16 +353,20 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                             initial={s.rank || i + 1}
                             className="rank-input"
                             onCommit={(v) => overrideRank(pool.poolName, s.player.name, v)}
+                            disabled={ranksLocked}
+                            title={rankLockedTitle}
                             style={{
                               width: 40,
                               height: 36,
                               padding: "0 4px",
                               border: s.isOverridden ? "1px solid var(--accent)" : "1px solid transparent",
-                              background: s.isOverridden ? "var(--accent-soft)" : "transparent",
+                              background: ranksLocked ? "var(--bg-2)" : s.isOverridden ? "var(--accent-soft)" : "transparent",
                               borderRadius: 4,
                               textAlign: "center",
                               fontSize: 13,
-                              fontWeight: s.isOverridden ? "700" : "400"
+                              fontWeight: s.isOverridden ? "700" : "400",
+                              cursor: ranksLocked ? "not-allowed" : undefined,
+                              opacity: ranksLocked ? 0.6 : 1,
                             }}
                           />
                         </td>
@@ -365,11 +387,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   })}
                 </tbody>
               </table>
-              {pool.matches && pool.matches.length > 0 && (
+              {livePoolMatches.length > 0 && (
                 <div style={{ marginTop: 12, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", marginBottom: 6 }}>Matches</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {pool.matches.map(m => (
+                    {livePoolMatches.map(m => (
                       <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center", padding: "2px 0" }}>
                         <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id ? m.id.split('-').pop() : ""}</div>
                         {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
@@ -380,7 +402,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); onEditScore(c.id, m.id, null, m); }}>Score</button>
+                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); onEditScore(c.id, m.id, null, m); }}>{m.status === "completed" ? "Edit" : "Score"}</button>
                         </div>
                       </div>
                     ))}
@@ -397,6 +419,30 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
 window.AdminPools = AdminPools;
 
-// ES export for the vitest suite — pure helper only. The component
-// stays behind window.* to match the rest of admin_*.jsx.
-export { decideRankCommit };
+// Pure helpers exported for vitest — component stays behind window.*.
+function buildLiveById(poolMatches) {
+  return Object.fromEntries((poolMatches || []).map(m => [m.id, m]));
+}
+function isRanksLocked(compStatus) {
+  return compStatus !== "pools";
+}
+
+// Canonical regex: strips the trailing -N / -DH-N / -TB-N index suffix
+// from a pool match ID (e.g. "Pool A-0" → "Pool A", "Pool A-DH-0" → "Pool A").
+// Kept here (rather than shared) so admin_pools stays self-contained.
+const POOL_MATCH_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
+
+// Returns the subset of flat poolMatches that belong to a named pool.
+// pool.matches (from pools[]) only carry sideA/sideB player objects — no id,
+// status, or score. poolMatchesForPool selects the scored rows from the flat
+// poolMatches list so both the detail view and the compact card can show live
+// scores and flip Score → Edit after a match is recorded.
+function poolMatchesForPool(poolMatches, poolName) {
+  if (!poolMatches || !poolName) return [];
+  return poolMatches.filter(m => {
+    const mp = (POOL_MATCH_ID_RE.exec(m.id || "") || [])[1];
+    return mp === poolName;
+  });
+}
+
+export { decideRankCommit, buildLiveById, isRanksLocked, poolMatchesForPool };

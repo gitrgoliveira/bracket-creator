@@ -284,7 +284,7 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
   );
 }
 
-function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast }) {
+function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
   const [lastSaved, setLastSaved] = useStateA(null);
   const [saveErr, setSaveErr] = useStateA(null);
   const [deleting, setDeleting] = useStateA(false);
@@ -781,9 +781,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
                     // forcing only `status: "invalid"` if the response isn't
                     // a competition object. Don't call onUpdate — that would
                     // trigger a full PUT with unsanitised local state.
+                    const newStatus = (updated && typeof updated === "object" ? updated.status : null) ?? "invalid";
                     setLocal(prev => (updated && typeof updated === "object"
                       ? { ...prev, ...updated, players: updated.players ?? prev.players }
                       : { ...prev, status: "invalid" }));
+                    if (onStatusChange) onStatusChange(newStatus);
                     showToast("Competition marked invalid.", "success");
                   }
                 } catch (e) {
@@ -1106,6 +1108,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
+  // localStatus lets AdminSettings report an invalidation immediately so the
+  // page-header StatusBadge flips without waiting for the SSE refresh.
+  // Cleared automatically when the prop status changes (SSE arrives).
+  const [localStatus, setLocalStatus] = useStateA(null);
+  useEffectA(() => { setLocalStatus(null); }, [c.status]);
   // start() awaits a multi-second backend call (pool generation + bracket
   // build). If the user clicks Back during that window AdminCompetition
   // unmounts and setStarting(false) in finally targets a dead component.
@@ -1197,7 +1204,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             <div className="page-head__eyebrow">{t.name} ›</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{c.name}</h1>
-              <StatusBadge status={c.status} />
+              <StatusBadge status={localStatus ?? c.status} />
             </div>
             <div className="page-head__sub">
               {window.competitionKindLabel(c)} · {c.players.length} {c.kind === "team" ? "teams" : "players"} ·
@@ -1260,7 +1267,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {section === "overview" && <AdminCompOverview c={c} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} />}
             {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
             {section === "lineups" && window.AdminTeamLineupsList && <window.AdminTeamLineupsList comp={c} password={password} showToast={showToast} />}
-            {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} />}
+            {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} onStatusChange={setLocalStatus} />}
             {/* T191/T193 (FR-050d/e): Swiss-round management. */}
             {/* onViewStandings is wired to the public viewer URL so the */}
             {/* operator can navigate into the viewer-mode standings */}

@@ -410,13 +410,23 @@ func (e *Engine) StartCompetition(id string) error {
 		// placeholder reserved-slot entries), save it now so round-1 pairings
 		// use the resolved names rather than the placeholder originals.
 		if resolvedSlots {
+			// Pre-check: verify no concurrent admin write landed between our
+			// initial load and this early save. Without this guard, a write that
+			// arrives in that window would be silently overwritten, and the
+			// subsequent mtime re-snapshot would hide it from the later drift
+			// check inside UpdateCompetitionChanged. The mtime check is
+			// lock-free (same caveat as the transform's check at line ~505), so
+			// a very tight race can still slip through — but this closes the
+			// large window that was previously unguarded.
+			if e.store.FileMtime(id, "participants.csv") != loadedParticipantsMtime {
+				return validationErrorf("competition %s participants changed during start; retry", id)
+			}
 			if err := e.store.SaveParticipants(id, players); err != nil {
 				return err
 			}
 			earlyParticipantsSaved = true
-			// Re-snapshot the mtime after our own write so the
-			// UpdateCompetitionChanged drift check doesn't treat this
-			// deliberate early save as a concurrent modification.
+			// Re-snapshot after our own write so UpdateCompetitionChanged's
+			// drift check doesn't flag this deliberate save as concurrent.
 			loadedParticipantsMtime = e.store.FileMtime(id, "participants.csv")
 		}
 		r1, err := e.GenerateSwissRound(id, 1)

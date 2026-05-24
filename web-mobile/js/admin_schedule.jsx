@@ -221,6 +221,25 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   Object.values(byCourt).forEach((list) => list.sort(courtOrder));
   unassigned.sort(courtOrder);
 
+  // Pace stats must reflect the full per-court workload — the admin uses
+  // the panel to rebalance scheduling, not to inspect filter results.
+  // Build a separate by-court bucket from allMatches (still narrowed by
+  // the explicit ?court= scope so the panel can be reviewed one court at
+  // a time, but NOT by the ad-hoc player/dojo/competition filters).
+  const paceByCourt = {};
+  courts.forEach((cc) => paceByCourt[cc] = []);
+  // Also bucket matches on courts not in the current config (stale/moved)
+  // so the pace panel stays accurate even after court list changes.
+  // Trim before bucketing — whitespace-only courts are treated as unassigned
+  // by the rest of the UI and must not create phantom pace tiles.
+  filterMatchesByCourt(allMatches, effectiveCourt).forEach((m) => {
+    const court = (m.court || "").trim();
+    if (court) {
+      if (!paceByCourt[court]) paceByCourt[court] = [];
+      paceByCourt[court].push(m);
+    }
+  });
+
   const matchHasFilter = (m) => window.matchHighlightedBy(m, picked, dojoText);
   const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
 
@@ -389,7 +408,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
           )}
         </div>
 
-        <CourtPacePanel byCourt={byCourt} safeMatchDuration={safeMatchDuration} />
+        <CourtPacePanel byCourt={paceByCourt} safeMatchDuration={safeMatchDuration} />
 
         <div className="tw-sched">
           <div className="tw-sched__filters" data-testid="admin-schedule-court-filter">
@@ -880,22 +899,25 @@ function PerCourtBreakdown({ perCourtMinutes }) {
   );
 }
 
-// computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) — pure helper.
+// computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) — deterministic
+// when nowMinutes is supplied; non-deterministic (reads wall-clock via
+// `new Date()`) when omitted.
 //
 // For each court, derive:
 //   court               — the court label (e.g. "A")
 //   completedCount      — matches that are neither scheduled nor running (i.e. the slot is consumed)
 //   remainingCount      — matches NOT yet completed
 //   estimatedRemainingMin — remainingCount × perMatchMinutes
-//   plannedRemainingMin   — time from now to the latest scheduledAt on the
-//                           court. Falls back to estimatedRemainingMin when
-//                           no scheduled times exist.
+//   plannedRemainingMin   — time from now to the *end* of the last scheduled
+//                           match on the court (latestMin + perMatchMinutes
+//                           − nowMin, floored at 0). Falls back to
+//                           estimatedRemainingMin when no scheduled times exist.
 //   delta               — estimatedRemainingMin − plannedRemainingMin
 //                         positive = behind schedule, negative = ahead
 //
 // nowMinutes is optional; defaults to the current wall-clock (read via
-// `new Date()`). The CourtPacePanel does NOT pass it, so the 60s tick in
-// the panel forces the memo to re-invoke this helper and read fresh time.
+// `new Date()`). CourtPacePanel omits it — the 60 s tick forces a re-render
+// so this helper re-reads fresh wall-clock time on each tick.
 // Tests pass nowMinutes explicitly for determinism.
 //
 // Exported for the vitest suite.
@@ -944,7 +966,10 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 // and a rebalancing suggestion. Never rendered in viewer or display views.
 export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
-  const [tick, setTick] = useStateA(0);
+  // setTick forces a re-render every 60 s so computeCourtPaceStats re-reads
+  // the current wall-clock time. paceByCourt is rebuilt on every parent render
+  // so useMemo would never skip the call anyway — compute stats directly.
+  const [, setTick] = useStateA(0);
 
   // hasData is checked inside the effect so the interval only runs (and causes
   // re-renders) when there are matches to display, not when the panel renders null.
@@ -957,10 +982,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
     return () => clearInterval(timer);
   }, [hasData]);
 
-  const stats = useMemoA(
-    () => computeCourtPaceStats(byCourt, safeMatchDuration),
-    [byCourt, safeMatchDuration, tick]
-  );
+  const stats = computeCourtPaceStats(byCourt, safeMatchDuration);
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)
   // ignore empty buckets — e.g. a configured court the user hasn't placed

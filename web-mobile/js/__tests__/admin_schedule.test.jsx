@@ -776,3 +776,4 @@ describe('allMatchesCompleted', () => {
     expect(nextActiveMatch).toBeNull();
   });
 });
+

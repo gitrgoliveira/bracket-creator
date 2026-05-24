@@ -2,6 +2,8 @@ package engine
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -208,7 +210,11 @@ func TestStartCompetition_SwissFormat(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, matches, "Round 1 matches must be written to pool-matches.csv on start")
+	for _, m := range matches {
+		assert.True(t, strings.HasPrefix(m.ID, "Swiss-R1-"),
+			"Round 1 match IDs must carry Swiss-R1- prefix, got %s", m.ID)
+	}
 
-	_, statErr := os.Stat(dir + "/competitions/" + compID + "/bracket.json")
+	_, statErr := os.Stat(filepath.Join(dir, "competitions", compID, "bracket.json"))
 	assert.True(t, os.IsNotExist(statErr), "bracket.json must not be created for Swiss start")
 }

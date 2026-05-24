@@ -387,10 +387,17 @@ func (e *Engine) StartCompetition(id string) error {
 		comp.RoundRobin = true
 	}
 
-	// Generate Pools or Bracket. These calls write to other files
-	// (pools.csv / bracket.json) via their own per-comp lock
-	// acquisitions, so they run OUTSIDE the UpdateCompetitionChanged
-	// transform below (re-entering the lock would deadlock).
+	// Generate Pools, Bracket, or Swiss round-1. These calls write to other
+	// files (pools.csv / bracket.json / pool-matches.csv) via their own
+	// per-comp lock acquisitions, so they run OUTSIDE the
+	// UpdateCompetitionChanged transform below (re-entering the lock would
+	// deadlock).
+	//
+	// earlyParticipantsSaved tracks whether we persisted the resolved roster
+	// before GenerateSwissRound (which reloads participants from disk). Set to
+	// true when a Swiss start saves early so the trailing resolvedSlots block
+	// skips the redundant write (the HasParticipantIDs flip still runs).
+	earlyParticipantsSaved := false
 	switch comp.Format {
 	case state.CompFormatPools, state.CompFormatLeague:
 		if err := e.generatePools(comp, players, seeds); err != nil {
@@ -398,6 +405,16 @@ func (e *Engine) StartCompetition(id string) error {
 		}
 		comp.Status = state.CompStatusPools
 	case state.CompFormatSwiss:
+		// GenerateSwissRound reloads participants from disk. If
+		// resolveReservedSlots mutated the in-memory roster (e.g. replaced
+		// placeholder reserved-slot entries), save it now so round-1 pairings
+		// use the resolved names rather than the placeholder originals.
+		if resolvedSlots {
+			if err := e.store.SaveParticipants(id, players); err != nil {
+				return err
+			}
+			earlyParticipantsSaved = true
+		}
 		r1, err := e.GenerateSwissRound(id, 1)
 		if err != nil {
 			return err
@@ -579,9 +596,14 @@ func (e *Engine) StartCompetition(id string) error {
 	// See `resolvedSlots` flag from resolveReservedSlots above. Skip the
 	// save when the pipeline didn't mutate the roster (no reserved-slot
 	// resolution happened); otherwise persist the resolved IDs/names.
+	// earlyParticipantsSaved is set by the Swiss case above when it already
+	// saved to disk — don't write twice, but still run the HasParticipantIDs
+	// flip below.
 	if resolvedSlots {
-		if err := e.store.SaveParticipants(id, players); err != nil {
-			return err
+		if !earlyParticipantsSaved {
+			if err := e.store.SaveParticipants(id, players); err != nil {
+				return err
+			}
 		}
 		// Deferred HasParticipantIDs flip — runs ONLY after the
 		// participants file lands successfully with UUID-prefixed rows.

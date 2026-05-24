@@ -182,6 +182,50 @@ describe('API Utils', () => {
       });
     });
 
+    // mp-a7y: pins the invalidate endpoint URL + auth header so a
+    // future refactor can't silently re-route the call. The handler
+    // is gated on tournament password (internal/mobileapp/handlers_competition.go);
+    // missing the X-Tournament-Password header would 401 with the
+    // status-flip never reaching disk.
+    describe('invalidateCompetition', () => {
+      it('POSTs to /api/competitions/{id}/invalidate with password header and returns the updated competition JSON', async () => {
+        const updated = { id: 'comp-abc', status: 'invalid', name: 'Test Comp' };
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => updated });
+        const result = await API.invalidateCompetition('comp-abc', 'secret');
+        // Returns the parsed payload (not a bare `true`) so callers can
+        // apply the updated competition to local state without waiting
+        // for the SSE refresh to land.
+        expect(result).toEqual(updated);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp-abc/invalidate',
+          expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({
+              'X-Tournament-Password': 'secret',
+            }),
+          })
+        );
+      });
+
+      it('throws with server error message on failure', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'only in-progress competitions can be invalidated' }),
+        });
+        await expect(API.invalidateCompetition('c1', 'pw'))
+          .rejects.toThrow('only in-progress competitions can be invalidated');
+      });
+
+      it('throws default message if json parse fails', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error(); },
+        });
+        await expect(API.invalidateCompetition('c1', 'pw'))
+          .rejects.toThrow('Failed to invalidate competition');
+      });
+    });
+
     // Regression tests for the empty-body bug: three handlers
     // (override-rank, override-winner, reset-overrides) return `c.Status`
     // with no body. The JS client used to call `return res.json()` on

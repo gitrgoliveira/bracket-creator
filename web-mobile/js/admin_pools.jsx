@@ -75,6 +75,11 @@ function RankInput({ initial, className, onCommit, style, disabled, title }) {
     focusValueRef.current = v;
   };
   const handleBlur = () => {
+    // Guard: if the input became disabled mid-edit (e.g. SSE status update
+    // moved competition from "pools" to "completed"), browsers may fire a
+    // synthetic blur when React re-renders with disabled=true. Bail out so
+    // no stale commit slips through after ranks are locked.
+    if (disabled) { focusedRef.current = false; return; }
     const result = decideRankCommit({
       v,
       initial,

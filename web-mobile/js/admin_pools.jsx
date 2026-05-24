@@ -1,7 +1,7 @@
 // Pools section of a competition: standings tables with rank-override inputs
 // and per-pool drill-down. See web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const pluralize = window.pluralize;
 // Canonical rank cap (admin_helpers.jsx) — mirrors helper.MaxRankOverride
 // on the Go side. The override-rank handler ALSO validates against the
@@ -236,10 +236,24 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
   // pool.matches (helper.Match) only carries sideA/sideB — no id, status, or
   // score data. poolMatches (state.MatchResult) has the full data including
-  // the id used by the score API endpoint. Use poolMatchesForPool filtered
-  // by pool name for rendering match rows so Score/Edit buttons have the
-  // real id. See poolMatchesForPool's docstring for the full rationale.
-  const poolMatchesFor = (poolName) => poolMatchesForPool(poolMatches, poolName);
+  // the id used by the score API endpoint. Use poolMatchesFor filtered by
+  // pool name for rendering match rows so Score/Edit buttons have the real id.
+  // See poolMatchesForPool's docstring for the full rationale.
+  //
+  // Precompute a Map<poolName, MatchResult[]> so poolMatchesFor is O(1) per
+  // lookup instead of O(pools × matches) — each card in the grid called the
+  // old inline filter independently, scanning the full array per pool.
+  const poolMatchesMap = useMemoA(() => {
+    const map = new Map();
+    for (const m of (poolMatches || [])) {
+      const name = (m.id || "").match(POOL_MATCH_ID_RE)?.[1] ?? "";
+      if (!name) continue;
+      const bucket = map.get(name);
+      if (bucket) { bucket.push(m); } else { map.set(name, [m]); }
+    }
+    return map;
+  }, [poolMatches]);
+  const poolMatchesFor = (poolName) => poolMatchesMap.get(poolName) ?? [];
 
   // Modal rendered in both return paths (detail view and card list).
   const scoreModal = scoreOpenMatch ? (

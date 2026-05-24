@@ -747,6 +747,55 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 		assert.Equal(t, "decidedByHantei", verr.Field)
 	})
 
+	t.Run("valid hantei: tied 1-1 scoreline", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+			Encho:           encho1,
+			IpponsA:         []string{"M"},
+			IpponsB:         []string{"K"},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("invalid hantei: non-tied scoreline (2-0)", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+			Encho:           encho1,
+			IpponsA:         []string{"M", "K"},
+			IpponsB:         nil,
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: decision hikiwake incompatible", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+			Encho:           encho1,
+			Decision:        "hikiwake",
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
 	t.Run("decidedByHantei false is always valid", func(t *testing.T) {
 		req := ScoreRequest{DecidedByHantei: false}
 		assert.NoError(t, req.Validate())

@@ -304,6 +304,18 @@ func (r *ScoreRequest) Validate() error {
 				Message: "requires encho with at least one period",
 			}
 		}
+		if len(r.IpponsA) != len(r.IpponsB) {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "requires a tied scoreline — ippon counts must be equal",
+			}
+		}
+		if r.Decision == "hikiwake" {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "incompatible with decision 'hikiwake' — hantei produces a winner, not a draw",
+			}
+		}
 	}
 	return r.validateDecision()
 }

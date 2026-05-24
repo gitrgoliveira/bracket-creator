@@ -32,6 +32,24 @@ const hasBothSides = (m) => window.hasBothSides(m);
 // dates are ordered.
 const compareDmy = (a, b) => window.compareDmy(a, b);
 
+// Local mirrors of display.jsx::queueLabel / queueLabelCompact.
+// display.js loads before viewer.js (see index.html), so window.queueLabel /
+// window.queueLabelCompact are normally available on first render.  These
+// serve as defense-in-depth if that ever changes.
+function _localQueueLabel(m) {
+  if (!m || m.status !== "scheduled") return "";
+  const qp = Number(m.queuePosition);
+  if (Number.isFinite(qp) && qp > 0) return qp === 1 ? "Next up" : `${qp - 1} before yours`;
+  if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
+  return "";
+}
+function _localQueueLabelCompact(m) {
+  if (!m || m.status !== "scheduled") return null;
+  const qp = Number(m.queuePosition);
+  if (!Number.isFinite(qp) || qp <= 0) return null;
+  return qp === 1 ? "Next up" : `#${qp}`;
+}
+
 function competitionKindLabel(c) {
   const base = c.kind === "team" ? "Teams" : "Individual";
   if (c.gender === "M") return `${base} · Men`;
@@ -1436,9 +1454,13 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
   // stays gracefully empty for non-queued matches and pre-T046 responses.
+  // Wording is owned by display.jsx::queueLabel (bead mp-e3k) so every
+  // viewer surface stays in sync; we still gate on scheduled+qp>0 here
+  // because this row already renders ●LIVE / Final on the right for
+  // running/completed and we don't want the fallback "Scheduled hh:mm".
   const qp = Number(m.queuePosition);
   const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
-    ? (qp === 1 ? "Next up" : `${qp - 1} before yours`)
+    ? (window.queueLabel ? window.queueLabel(m) : _localQueueLabel(m))
     : null;
   return (
     <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
@@ -2029,11 +2051,11 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : null;
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
-  // upcoming-list row in the per-competition viewer.
+  // upcoming-list row in the per-competition viewer. Wording is owned
+  // by display.jsx::queueLabelCompact (bead mp-e3k); we still grab `qp`
+  // separately because the accent-color styling below keys off qp===1.
   const qp = Number(m.queuePosition);
-  const queuePill = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
-    ? (qp === 1 ? "Next" : `#${qp}`)
-    : null;
+  const queuePill = (window.queueLabelCompact || _localQueueLabelCompact)(m);
   return (
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">

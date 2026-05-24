@@ -577,6 +577,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onMoveCourt={moveMatchCourt}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
+      password={password}
     />;
   }
 

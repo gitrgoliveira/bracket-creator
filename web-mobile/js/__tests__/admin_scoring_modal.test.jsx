@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveDecisionPassword,
   buildDecisionBody,
+  submitDecisionRequest,
   shouldShowEnchoMaxBanner,
   getIpponButtons,
   getValidPointKeys,
@@ -30,39 +31,17 @@ window.isKikenDecision = isKikenDecision;
 // tests would only ever see the initial render.
 
 describe('resolveDecisionPassword', () => {
-  // The /decision POST needs the operator password. The modal historically
-  // didn't take one (parent did the POST), so the helper has a two-tier
-  // fallback: explicit prop → window.adminPassword → "".
+  // All ScoreEditorModal mount sites now pass password as an explicit prop.
+  // resolveDecisionPassword returns the prop directly (or "" as a sentinel).
 
-  let originalAdminPassword;
-  beforeEach(() => {
-    originalAdminPassword = window.adminPassword;
-  });
-  afterEach(() => {
-    window.adminPassword = originalAdminPassword;
-  });
-
-  it('prefers the explicit prop when present', () => {
-    window.adminPassword = 'window-password';
+  it('returns the explicit prop when present', () => {
     expect(resolveDecisionPassword('prop-password')).toBe('prop-password');
   });
 
-  it('falls back to window.adminPassword when prop is empty', () => {
-    window.adminPassword = 'window-password';
-    expect(resolveDecisionPassword('')).toBe('window-password');
-    expect(resolveDecisionPassword(undefined)).toBe('window-password');
-    expect(resolveDecisionPassword(null)).toBe('window-password');
-  });
-
-  it('returns "" when neither prop nor window are set', () => {
-    delete window.adminPassword;
+  it('returns "" when prop is empty/missing (server will 401 — misconfiguration)', () => {
     expect(resolveDecisionPassword('')).toBe('');
     expect(resolveDecisionPassword(undefined)).toBe('');
-  });
-
-  it('treats empty-string window.adminPassword as missing (falls through to "")', () => {
-    window.adminPassword = '';
-    expect(resolveDecisionPassword(undefined)).toBe('');
+    expect(resolveDecisionPassword(null)).toBe('');
   });
 });
 
@@ -279,18 +258,14 @@ describe('DecisionPrompt → /decision POST integration', () => {
   // helpers together to pin the full flow against the server contract.
 
   let originalAPI;
-  let originalAdminPassword;
   beforeEach(() => {
     originalAPI = window.API;
-    originalAdminPassword = window.adminPassword;
-    window.adminPassword = 'fallback-password';
     window.API = {
       recordDecision: vi.fn().mockResolvedValue({ winner: 'Tora', sideA: 'Tora', sideB: 'Kuma' }),
     };
   });
   afterEach(() => {
     window.API = originalAPI;
-    window.adminPassword = originalAdminPassword;
   });
 
   it('DecisionPrompt onSubmit fires the form-submit handler with default side', () => {
@@ -354,15 +329,13 @@ describe('DecisionPrompt → /decision POST integration', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('the parent flow: onSubmit payload + buildDecisionBody + resolveDecisionPassword → recordDecision', async () => {
-    // Walk through the chain that ScoreEditorModal.submitDecision does
-    // after DecisionPrompt fires. This is the surface flagged by PR #105
-    // as untested: the password must reach window.API.recordDecision.
-    const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('kiken-voluntary', payload, 0);
-      const password = resolveDecisionPassword('explicit-pw');
-      return window.API.recordDecision('comp-1', 'match-1', body, password);
-    });
+  it('the parent flow: DecisionPrompt onSubmit → submitDecisionRequest → recordDecision', async () => {
+    // Route the DecisionPrompt callback through submitDecisionRequest —
+    // the same path ScoreEditorModal.submitDecision takes — so the test
+    // would fail if the password stopped flowing to recordDecision.
+    const onSubmit = vi.fn((payload) =>
+      submitDecisionRequest('comp-1', 'match-1', 'kiken-voluntary', payload, 0, 'explicit-pw'),
+    );
 
     const tree = DecisionPrompt({
       kind: 'kiken',
@@ -385,34 +358,21 @@ describe('DecisionPrompt → /decision POST integration', () => {
     );
   });
 
-  it('parent flow falls through to window.adminPassword when no prop password', async () => {
-    // Pinning the second tier of resolveDecisionPassword from the
-    // caller's perspective: when ScoreEditorModal was mounted without
-    // an explicit password prop, the chain still surfaces a password
-    // via window.adminPassword rather than hitting /decision with "".
-    const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('fusenpai', payload, 0);
-      const password = resolveDecisionPassword(''); // no explicit prop
-      return window.API.recordDecision('comp-9', 'match-9', body, password);
-    });
-    const tree = DecisionPrompt({
-      kind: 'fusenpai',
-      sideA: { name: 'A' },
-      sideB: { name: 'B' },
-      defaultSide: 'shiro',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-
-    await tree.props.onSubmit({ preventDefault: () => {} });
-
+  it('regression: submitDecision path forwards the modal password prop to recordDecision', async () => {
+    // This is the production path used by ScoreEditorModal/TeamScoreEditorModal.
+    await submitDecisionRequest(
+      'comp-9',
+      'match-9',
+      'fusenpai',
+      { decisionBy: 'shiro', decisionReason: '' },
+      0,
+      'tournament-secret',
+    );
     expect(window.API.recordDecision).toHaveBeenCalledWith(
       'comp-9',
       'match-9',
       { decision: 'fusenpai', decisionBy: 'shiro' },
-      'fallback-password',
+      'tournament-secret',
     );
   });
 

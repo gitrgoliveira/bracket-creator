@@ -127,6 +127,7 @@ examples: go/build ## Build locally and create example files
 	rm -f pools-example-*.xlsx playoffs-example-*.xlsx
 	@echo "Building examples..."
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./test-data/mock_data_small.csv -o ./pools-example-small.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 5 -f ./test-data/mock_data_small_3_teams.csv -o ./pools-example-small-3-teams.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv -o ./pools-example-single-pool-8.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv -o ./pools-example-single-pool-8-round-robin.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_teams_of_3_pool_3.csv -o ./pools-example-teams-of-3-round-robin.xlsx

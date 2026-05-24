@@ -730,6 +730,10 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
           const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
           const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
           const isCorrection = m.status === "completed" && m.score?.corrected;
+          // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B
+          // arrays (see normalizeMatch). Apply the same fallback used in VSchedItem.
+          const seIpponsA = m.ipponsA || (m.scoreA ? m.scoreA.split("") : []);
+          const seIpponsB = m.ipponsB || (m.scoreB ? m.scoreB.split("") : []);
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
@@ -744,7 +748,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
                   <div className="score-edit-row__score">
-                    {m.status === "completed" && window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
+                    {m.status === "completed" && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
                     {m.status === "running" && <span className="bc-live">●</span>}
                     {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                   </div>

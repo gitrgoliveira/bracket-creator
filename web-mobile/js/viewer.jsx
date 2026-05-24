@@ -1286,7 +1286,11 @@ function MatchDetailCard({ match, onClose }) {
         </div>
         <div className="match-detail-card__score">
           {isDone ? (() => {
-            const scoreStr = window.formatIpponsScore(match.ipponsB, match.ipponsA, match.score, match.decision, match.encho, match.decidedByHantei);
+            // Bracket matches use scoreA/scoreB strings; apply the same fallback
+            // used in VSchedItem so the score renders instead of falling back to "—".
+            const mdcIpponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
+            const mdcIpponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
+            const scoreStr = window.formatIpponsScore(mdcIpponsB, mdcIpponsA, match.score, match.decision, match.encho, match.decidedByHantei);
             return <span>{scoreStr || "—"}</span>;
           })() : <span className="match-detail-card__vs">vs</span>}
         </div>
@@ -2059,7 +2063,12 @@ function ScheduleViewer({ tournament, tweaks }) {
 function TWMatch({ m, highlight, _tweaks, onClick }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
+  // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays
+  // (see normalizeMatch). Apply the same fallback used in VSchedItem so the
+  // score cell renders the derived winnerPts–loserPts string instead of "—".
+  const twIpponsA = m.ipponsA || (m.scoreA ? m.scoreA.split("") : []);
+  const twIpponsB = m.ipponsB || (m.scoreB ? m.scoreB.split("") : []);
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(twIpponsB, twIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned

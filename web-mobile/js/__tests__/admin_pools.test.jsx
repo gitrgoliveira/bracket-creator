@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool } from '../admin_pools.jsx';
+import { decideRankCommit, enrichPoolMatchWithComp, buildLiveById, isRanksLocked, poolMatchesForPool } from '../admin_pools.jsx';
 
 // decideRankCommit is the pure predicate that drives RankInput.handleBlur.
 // It returns one of:
@@ -175,42 +175,70 @@ describe('decideRankCommit', () => {
   });
 });
 
-// AdminPools Score-button null-result fix (mp-zcz)
-// -------------------------------------------------------
-// Before this fix, the Score buttons in both the pool-detail view and the
-// compact card list called `onEditScore(c.id, m.id, null, m)` — routing
-// null through AdminApp.editMatchScore → toBackendMatchResult(null, m)
-// which throws `TypeError: Cannot read properties of null`.
-//
-// The fix mounts a local ScoreEditorModal in AdminPools (the same pattern
-// AdminScoreEditor uses) so the button opens the modal and the modal's
-// onSubmit provides a real patch to onEditScore.
-//
-// The ScoreEditorModal mount lives inside AdminPools which is a window.*
-// component — full DOM rendering is not available in the current vitest
-// setup (window.* mocks are stubs, not a real jsdom React tree).
-// Tracked for follow-up DOM-level testing alongside the existing anchor
-// at admin_pools.test.jsx:133-145 (RankInput.handleBlur dispatch).
-//
-// Regression contract (pure, testable): the Score button no longer calls
-// onEditScore directly — instead it updates local `scoreOpenMatch` state
-// which renders the modal, and the modal's onSubmit calls onEditScore with
-// the real patch. The modal is imported as window.ScoreEditorModal and
-// receives `password` so decision endpoints are authenticated.
+describe('buildLiveById', () => {
+  it('returns an object keyed by match id', () => {
+    const matches = [
+      { id: 'pool-A-1', status: 'completed', ipponsA: 2, ipponsB: 0 },
+      { id: 'pool-A-2', status: 'scheduled' },
+    ];
+    const live = buildLiveById(matches);
+    expect(live['pool-A-1'].status).toBe('completed');
+    expect(live['pool-A-2'].status).toBe('scheduled');
+  });
 
-// Deep-review (2026-05-22): enrichPoolMatchWithComp regression tests.
-// Pool-match objects from pools[i].matches carry only the MatchResult
-// shape (id, status, sides, ippons, decision) without comp-level
-// metadata. The ScoreEditorModal reads compKind / teamSize / compId /
-// compName / phase / poolName off the match prop to:
-//   * pick TeamScoreEditorModal vs the individual editor,
-//   * fetch competition details for maxEnchoPeriods / naginata,
-//   * render the header.
-// Without enrichment a team-comp pool match would silently route into
-// the individual editor and the modal header would render "undefined ·
-// undefined". Enrichment is applied at the click boundary so when
-// mp-i3h merges poolMatches into pool.matches, the modal still picks
-// up the right competition context.
+  it('returns empty object when poolMatches is null or empty', () => {
+    expect(buildLiveById(null)).toEqual({});
+    expect(buildLiveById([])).toEqual({});
+  });
+
+  it('live state overrides stale pool.matches entry', () => {
+    const stale = { id: 'pool-A-1', status: 'scheduled' };
+    const live = buildLiveById([{ id: 'pool-A-1', status: 'completed', ipponsA: 1, ipponsB: 0 }]);
+    const resolved = live[stale.id] || stale;
+    expect(resolved.status).toBe('completed');
+    expect(resolved.ipponsA).toBe(1);
+  });
+
+  it('falls back to stale entry when match not yet in live list', () => {
+    const stale = { id: 'pool-A-99', status: 'scheduled' };
+    const live = buildLiveById([]);
+    const resolved = live[stale.id] || stale;
+    expect(resolved.status).toBe('scheduled');
+  });
+});
+
+describe('isRanksLocked', () => {
+  it('unlocked when status is pools', () => {
+    expect(isRanksLocked('pools')).toBe(false);
+  });
+
+  it('locked when status is playoffs', () => {
+    expect(isRanksLocked('playoffs')).toBe(true);
+  });
+
+  it('locked when status is completed', () => {
+    expect(isRanksLocked('completed')).toBe(true);
+  });
+
+  it('locked when status is setup', () => {
+    // CompStatusSetup ("setup") is the pre-pools state. The component
+    // early-returns when pools is empty, so this branch rarely renders,
+    // but the predicate must still report locked for defense-in-depth.
+    expect(isRanksLocked('setup')).toBe(true);
+  });
+
+  it('locked when status is invalid', () => {
+    // CompStatusInvalid ("invalid") is set when a competition is reset.
+    // Pools may still exist on disk but rank inputs must not be editable.
+    expect(isRanksLocked('invalid')).toBe(true);
+  });
+
+  it('locked when status is empty string or undefined', () => {
+    expect(isRanksLocked('')).toBe(true);
+    expect(isRanksLocked(undefined)).toBe(true);
+  });
+});
+
 describe('enrichPoolMatchWithComp', () => {
   const comp = { id: 'c1', name: 'Comp One', kind: 'team', teamSize: 5 };
 
@@ -352,15 +380,6 @@ describe('enrichPoolMatchWithComp', () => {
   });
 });
 
-// poolMatchesForPool (mp-zcz follow-up)
-// -------------------------------------------------------
-// pool.matches (helper.Match) carries only sideA/sideB — no id, status, or
-// score data. Score buttons in the pool-card view need the MatchResult id to
-// call the PATCH /api/competitions/:cid/matches/:mid endpoint.
-//
-// poolMatchesForPool filters the flat poolMatches array (state.MatchResult)
-// down to entries belonging to a given pool, using the same pool-name regex
-// as enrichPoolMatchWithComp so DH/TB suffix variants are handled correctly.
 describe('poolMatchesForPool', () => {
   const matches = [
     { id: 'Pool A-0', status: 'completed' },
@@ -412,5 +431,14 @@ describe('poolMatchesForPool', () => {
     const withUndefinedId = [{ id: undefined, status: 'scheduled' }];
     expect(() => poolMatchesForPool(withUndefinedId, 'Pool A')).not.toThrow();
     expect(poolMatchesForPool(withUndefinedId, 'Pool A')).toEqual([]);
+  });
+  it('completed match retains status for Score→Edit flip', () => {
+    const mixed = [
+      { id: 'Pool A-0', status: 'completed' },
+      { id: 'Pool A-1', status: 'scheduled' },
+    ];
+    const result = poolMatchesForPool(mixed, 'Pool A');
+    expect(result[0].status).toBe('completed');
+    expect(result[1].status).toBe('scheduled');
   });
 });

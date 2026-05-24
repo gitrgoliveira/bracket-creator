@@ -897,9 +897,7 @@ function PerCourtBreakdown({ perCourtMinutes }) {
   );
 }
 
-// computeCourtPaceStats(byCourt, perMatchMinutes[, nowMinutes]) — deterministic helper.
-// When nowMinutes is omitted the function falls back to wall-clock time (non-deterministic).
-// Pass an explicit nowMinutes (e.g. new Date().getHours()*60 + new Date().getMinutes()) for deterministic tests.
+// computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) — pure helper.
 //
 // For each court, derive:
 //   court               — the court label (e.g. "A")

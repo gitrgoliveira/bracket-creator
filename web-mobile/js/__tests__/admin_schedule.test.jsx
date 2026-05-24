@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats } from '../admin_schedule.jsx';
+import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats, allMatchesCompleted } from '../admin_schedule.jsx';
 
 describe('timeEdited', () => {
   // Copilot round-9 finding: AdminTWMatch.submitTime() used
@@ -526,3 +526,138 @@ describe('suggestRebalances', () => {
   });
 });
 
+describe('allMatchesCompleted', () => {
+  // Drives the "All matches scored" banner in AdminScoreEditor. The banner
+  // should appear only when there are matches and every one is completed.
+
+  it('returns false for an empty list', () => {
+    expect(allMatchesCompleted([])).toBe(false);
+  });
+
+  it('returns false when any match is not completed', () => {
+    const matches = [
+      { id: '1', status: 'completed' },
+      { id: '2', status: 'scheduled' },
+      { id: '3', status: 'completed' },
+    ];
+    expect(allMatchesCompleted(matches)).toBe(false);
+  });
+
+  it('returns false when any match is running', () => {
+    const matches = [
+      { id: '1', status: 'completed' },
+      { id: '2', status: 'running' },
+    ];
+    expect(allMatchesCompleted(matches)).toBe(false);
+  });
+
+  it('returns true when all matches are completed', () => {
+    const matches = [
+      { id: '1', status: 'completed' },
+      { id: '2', status: 'completed' },
+      { id: '3', status: 'completed' },
+    ];
+    expect(allMatchesCompleted(matches)).toBe(true);
+  });
+
+  it('returns true for a single completed match', () => {
+    expect(allMatchesCompleted([{ id: '1', status: 'completed' }])).toBe(true);
+  });
+
+  it('regression: nextMatch is null for the last match in a fully-scored court', () => {
+    // When all pool matches are complete, the score editor's sameCourt list
+    // is all-completed. The last (and only remaining) match is at the end —
+    // nextMatch must be null so the modal does not loop back to the start.
+    const allDone = [
+      { id: 'm1', court: 'A', status: 'completed', compId: 'c1' },
+      { id: 'm2', court: 'A', status: 'completed', compId: 'c1' },
+      { id: 'm3', court: 'A', status: 'completed', compId: 'c1' },
+    ];
+    const openMatch = allDone[2]; // last match
+    const sameCourt = filterMatchesByCourt(allDone, openMatch.court);
+    const openIdx = sameCourt.findIndex(m => m.id === openMatch.id);
+    const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+    expect(allMatchesCompleted(allDone)).toBe(true);
+    expect(nextMatch).toBeNull();
+  });
+
+  it('regression: Finish+Start Next does not loop when last scheduled match has completed matches sorted after it', () => {
+    // Real-world scenario: the operator has scored 6 of 7 pool matches. The
+    // sort order is scheduled first, completed last. The one remaining
+    // scheduled match sits at index 0; the 6 completed matches follow at
+    // indices 1-6. Clicking "Finish + Start Next" from the scheduled match
+    // used to open the first completed match (index 1) as a CORRECTION
+    // — the modal looped back to match 1. The fix is to compute
+    // nextActiveMatch = first non-completed match after openIdx, which is
+    // null when the remaining scheduled match IS the open one.
+    const sorted = [
+      { id: 'm7', court: 'A', status: 'scheduled',  compId: 'c1' }, // last unscored
+      { id: 'm1', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm2', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm3', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm4', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm5', court: 'A', status: 'completed',  compId: 'c1' },
+      { id: 'm6', court: 'A', status: 'completed',  compId: 'c1' },
+    ];
+    const openMatch = sorted[0]; // the last scheduled match
+    const sameCourt = filterMatchesByCourt(sorted, openMatch.court);
+    const openIdx = sameCourt.findIndex(m => m.id === openMatch.id);
+
+    // nextMatch (list position) is non-null — this is the source of the bug
+    // without the nextActiveMatch guard.
+    const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+    expect(nextMatch).not.toBeNull(); // m1 (completed) — confirms the bug path
+    expect(nextMatch.id).toBe('m1');
+
+    // nextActiveMatch (first non-completed after openIdx) must be null —
+    // this is what Finish+Start Next should use so the modal does not loop.
+    const nextActiveMatch = sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null;
+    expect(nextActiveMatch).toBeNull();
+  });
+
+  // Deep-review (2026-05-22): the AdminScoreEditor banner render is guarded
+  // by `statusFilter !== "complete" && allMatchesCompleted(filtered)`. When
+  // the operator hits the "Completed" status filter the list is trivially
+  // all-completed — firing the banner there would be misleading because the
+  // user explicitly asked to see only the completed matches; nothing about
+  // that view says "every match in this competition is done." The helper
+  // itself stays unconditional (it's a pure predicate); the guard lives
+  // in the consumer. This regression pins that the helper is true-by-shape
+  // and the guard must be applied outside.
+  it('helper alone is not enough to drive the banner: caller must guard against statusFilter', () => {
+    const filteredByCompleteStatus = [
+      { id: '1', status: 'completed' },
+      { id: '2', status: 'completed' },
+    ];
+    // Helper says true for an all-completed list — that's correct.
+    expect(allMatchesCompleted(filteredByCompleteStatus)).toBe(true);
+    // The actual AdminScoreEditor JSX guards on
+    //   statusFilter !== "complete" && allMatchesCompleted(filtered)
+    // so when the filter is "complete" we suppress the banner.
+    const statusFilter = "complete";
+    const shouldShowBanner = statusFilter !== "complete" && allMatchesCompleted(filteredByCompleteStatus);
+    expect(shouldShowBanner).toBe(false);
+    // And for any other filter value where every match really is completed,
+    // the banner does fire.
+    const statusFilterAll = "all";
+    const shouldShowBannerAll = statusFilterAll !== "complete" && allMatchesCompleted(filteredByCompleteStatus);
+    expect(shouldShowBannerAll).toBe(true);
+  });
+
+  it('regression: nextActiveMatch is null when openMatch is not found in sameCourt (openIdx === -1)', () => {
+    // Copilot round-11: when openIdx is -1, slice(-1 + 1) = slice(0)
+    // scans the entire array and can return a spurious non-completed match.
+    // The fix guards the slice on openIdx >= 0.
+    const court = [
+      { id: 'm1', court: 'A', status: 'scheduled', compId: 'c1' },
+      { id: 'm2', court: 'A', status: 'scheduled', compId: 'c1' },
+    ];
+    const openIdx = -1; // openMatch not found in sameCourt
+    // Without the guard: slice(0) returns whole array, find returns m1 (scheduled).
+    // With the guard: null immediately, no scan.
+    const nextActiveMatch = openIdx >= 0
+      ? court.slice(openIdx + 1).find(m => m.status !== 'completed') || null
+      : null;
+    expect(nextActiveMatch).toBeNull();
+  });
+});

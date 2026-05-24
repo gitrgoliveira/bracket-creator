@@ -405,6 +405,14 @@ func (e *Engine) StartCompetition(id string) error {
 		}
 		comp.Status = state.CompStatusPools
 	case state.CompFormatSwiss:
+		// Guard: AdvanceSwissRound (POST /swiss/generate-round) can execute
+		// before StartCompetition if its status-bump update fails after the
+		// matches are already written and SwissCurrentRound is bumped. Re-calling
+		// StartCompetition would then silently overwrite those existing matches.
+		// Reject here so the operator knows round 1 was already generated.
+		if comp.SwissCurrentRound != 0 {
+			return validationErrorf("competition %s Swiss round %d already generated; cannot start again", id, comp.SwissCurrentRound)
+		}
 		// GenerateSwissRound reloads participants from disk. If
 		// resolveReservedSlots mutated the in-memory roster (e.g. replaced
 		// placeholder reserved-slot entries), save it now so round-1 pairings

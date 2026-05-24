@@ -218,3 +218,31 @@ func TestStartCompetition_SwissFormat(t *testing.T) {
 	_, statErr := os.Stat(filepath.Join(dir, "competitions", compID, "bracket.json"))
 	assert.True(t, os.IsNotExist(statErr), "bracket.json must not be created for Swiss start")
 }
+
+// TestStartCompetition_SwissRoundAlreadyGenerated verifies that StartCompetition
+// rejects the call when SwissCurrentRound != 0. This guards against
+// AdvanceSwissRound having partially run before start (matches written,
+// round bumped) and StartCompetition silently overwriting them.
+func TestStartCompetition_SwissRoundAlreadyGenerated(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-start-guard"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                compID,
+		Name:              "Swiss Guard Test",
+		Kind:              "individual",
+		Format:            state.CompFormatSwiss,
+		SwissRounds:       3,
+		Courts:            []string{"A"},
+		StartTime:         "09:00",
+		Status:            state.CompStatusSetup,
+		SwissCurrentRound: 1, // simulates AdvanceSwissRound having already run
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave",
+	})
+
+	err := eng.StartCompetition(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already generated")
+}

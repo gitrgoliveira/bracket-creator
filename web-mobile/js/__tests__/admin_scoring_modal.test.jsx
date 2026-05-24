@@ -17,6 +17,7 @@ import {
   nextFoulOnDecrement,
   applyFusenshoToggle,
   decideDrawToggle,
+  shouldBlockScoringKeys,
 } from '../admin_scoring_modal.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
@@ -960,6 +961,47 @@ describe('decideDrawToggle (mp-42g: VS demoted, dedicated draw button)', () => {
     it('keyboard x with scores → noop (mirrors button disabled state)', () => {
       const r = decideDrawToggle({ isDrawToggled: false, aTotal: 1, bTotal: 0 });
       expect(r.action).toBe("noop");
+    });
+  });
+});
+
+describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
+  // The onKeyDown handler calls shouldBlockScoringKeys(s) after the
+  // isInteractiveTarget check and before any scoring-key branch. When it
+  // returns true the handler exits without calling addPt or toggling draw.
+  // This prevents score mutations while hantei is armed — the backend
+  // requires a tied scoreline at that point (400 otherwise).
+
+  it('returns true when decidedByHantei is true — scoring keys must be suppressed', () => {
+    expect(shouldBlockScoringKeys({ decidedByHantei: true })).toBe(true);
+  });
+
+  it('returns false when decidedByHantei is false — scoring keys work normally', () => {
+    expect(shouldBlockScoringKeys({ decidedByHantei: false })).toBe(false);
+  });
+
+  it('returns false when decidedByHantei is undefined (field absent)', () => {
+    expect(shouldBlockScoringKeys({})).toBe(false);
+  });
+
+  it('returns false when decidedByHantei is null (defensive)', () => {
+    expect(shouldBlockScoringKeys({ decidedByHantei: null })).toBe(false);
+  });
+
+  describe('keyboard guard does not affect Enter / arrow nav', () => {
+    // Enter and arrow keys are handled BEFORE the shouldBlockScoringKeys
+    // check in onKeyDown, so hantei arming must not suppress them.
+    // These tests document the intended ordering constraint as a contract.
+    it('Enter fires before the hantei guard (ordering contract documented)', () => {
+      // The guard is placed after the isInteractiveTarget gate and before
+      // the validKeys / x-toggle branches. Enter is handled before that
+      // section, so it is unaffected. This test records that fact.
+      // (The actual ordering is enforced by the source; this test is a
+      // living comment pinning the design intent.)
+      expect(shouldBlockScoringKeys({ decidedByHantei: true })).toBe(true);
+      // If the function returned false for Enter-related state, it would
+      // mean the guard had been accidentally widened. The function takes
+      // only decidedByHantei — it has no knowledge of key identity.
     });
   });
 });

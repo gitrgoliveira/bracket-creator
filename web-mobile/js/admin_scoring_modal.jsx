@@ -202,6 +202,15 @@ function decideDrawToggle({ isDrawToggled, aTotal, bTotal }) {
   return { action: "noop" };
 }
 
+// shouldBlockScoringKeys — pure predicate consumed by the onKeyDown handler.
+// Returns true when scoring keys (M/K/D/T/H/S and x/X draw toggle) must be
+// suppressed. Currently this happens when hantei is armed: the backend
+// requires a tied scoreline at that point, so any score mutation would
+// produce a 400 on submit.
+function shouldBlockScoringKeys({ decidedByHantei }) {
+  return !!decidedByHantei;
+}
+
 // EnchoControl — collapsed by default to a small "⏱ Overtime" pill so
 // it occupies <24px of vertical space in the live scoring modal. The
 // full counter UI mounts only when overtime is active (enchoPeriodCount
@@ -786,7 +795,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata };
+  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -813,6 +822,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
         else s.doSubmit(() => s.onSubmit(patch));
         return;
       }
+
+      // Scoring shortcuts (point keys + draw toggle) blocked while hantei is armed
+      // (backend requires a tied scoreline; any score mutation would produce a 400).
+      // Enter and arrow keys are handled above/before this guard and are unaffected.
+      if (shouldBlockScoringKeys(s)) return;
 
       const k = ev.key;
       const upper = k.toUpperCase();
@@ -1887,6 +1901,7 @@ export {
   nextEnchoPeriod,
   prevEnchoPeriod,
   decideDrawToggle,
+  shouldBlockScoringKeys,
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,

@@ -516,7 +516,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
       }}
       style={{ cursor: "grab", position: "relative" }}
     >
-      <div>
+      <div className="tw-match__meta">
         {editingTime ? (
           <form onSubmit={submitTime} style={{ display: "flex", gap: 2 }}>
             <window.StableInput

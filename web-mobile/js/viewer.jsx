@@ -2036,7 +2036,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
     : null;
   return (
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
-      <div>
+      <div className="tw-match__meta">
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
         {queuePill && (

@@ -1193,7 +1193,6 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
               upcomingMatches={upcomingMatches}
               recentMatches={recentMatches}
               tweaks={tweaks}
-              onMatchClick={setSelectedMatch}
             />
           )}
           {tab === "bracket" && derivedBracket && (
@@ -1312,7 +1311,7 @@ function MatchDetailCard({ match, onClose }) {
   );
 }
 
-function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, onMatchClick }) {
+function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
 
   if (c.status === "setup") {
@@ -1327,7 +1326,6 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 
   const handleMatchClick = (m) => {
     setExpandedMatchId(prev => prev === m.id ? null : m.id);
-    if (onMatchClick) onMatchClick(m);
   };
 
   return (

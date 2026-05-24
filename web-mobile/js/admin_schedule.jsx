@@ -1033,8 +1033,8 @@ window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
 
 // ES exports for the vitest suite. computeCourtPaceStats,
-// filterMatchesByCourt, and CourtPacePanel use `export function` /
-// `export function` at their declaration sites.  This block exports the
+// filterMatchesByCourt, and CourtPacePanel use `export function`
+// at their declaration sites.  This block exports the
 // remaining helpers that are declared without `export`.
 //
 // All other top-level components stay behind the window.* pattern to

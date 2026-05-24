@@ -1220,8 +1220,11 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           )}
           {tab === "results" && c.status === "completed" && (
             // Pass the *real* server bracket (not derivedBracket) — the latter
-            // is a TBD placeholder for visualization that has no winners and
-            // would short-circuit the standings fallback inside AwardsView.
+            // is a TBD placeholder for visualization only and carries no
+            // winner data. Using real server data ensures deriveAwards sees
+            // actual winners; when the final has no winner yet, deriveAwards
+            // explicitly falls through to the standings-based path rather
+            // than short-circuiting.
             <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} />
           )}
         </div>

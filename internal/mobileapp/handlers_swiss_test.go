@@ -344,6 +344,24 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 	// 1. Create a 6-player Swiss competition.
 	compID := makeSwissComp(t, store, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}, 3)
 
+	// Build a seed map so winnerOf can pick the better-ranked player
+	// without relying on which side (SideA/SideB) the pairing assigns them to.
+	participants, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	seedByID := make(map[string]int, len(participants))
+	for _, p := range participants {
+		seedByID[p.ID] = p.Seed
+	}
+	// winnerOf returns the player with the lower seed number (higher rank).
+	// Falls back to SideA when both seeds are absent or equal.
+	winnerOf := func(m state.MatchResult) string {
+		seedA, seedB := seedByID[m.SideA], seedByID[m.SideB]
+		if seedB > 0 && (seedA == 0 || seedB < seedA) {
+			return m.SideB
+		}
+		return m.SideA
+	}
+
 	// Start the competition via API.
 	wStart := httptest.NewRecorder()
 	reqStart, _ := http.NewRequest("POST", fmt.Sprintf("/api/competitions/%s/start", compID), nil)
@@ -410,10 +428,9 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 		assert.Equal(t, 0, s.Wins)
 	}
 
-	// Complete R1 matches: SideA always wins.
-	// SideA in R1 will be: Alice, Bob, Charlie (high seeds) vs Dave, Eve, Frank (low seeds).
+	// Complete R1 matches: higher seed wins each match.
 	for _, m := range r1Matches {
-		submitScore(m.ID, m.SideA, m.SideB, m.SideA, []string{"M", "K"}, nil)
+		submitScore(m.ID, m.SideA, m.SideB, winnerOf(m), []string{"M", "K"}, nil)
 	}
 
 	// Verify standings after Round 1.
@@ -437,9 +454,9 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 	r2Matches := generateRound()
 	require.Len(t, r2Matches, 3)
 
-	// Complete R2 matches: SideA always wins.
+	// Complete R2 matches: higher seed wins each match.
 	for _, m := range r2Matches {
-		submitScore(m.ID, m.SideA, m.SideB, m.SideA, []string{"M"}, nil)
+		submitScore(m.ID, m.SideA, m.SideB, winnerOf(m), []string{"M"}, nil)
 	}
 
 	// Verify standings after Round 2.
@@ -463,9 +480,9 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 	r3Matches := generateRound()
 	require.Len(t, r3Matches, 3)
 
-	// Complete R3 matches.
+	// Complete R3 matches: higher seed wins each match.
 	for _, m := range r3Matches {
-		submitScore(m.ID, m.SideA, m.SideB, m.SideA, []string{"M"}, nil)
+		submitScore(m.ID, m.SideA, m.SideB, winnerOf(m), []string{"M"}, nil)
 	}
 
 	// Verify final standings.

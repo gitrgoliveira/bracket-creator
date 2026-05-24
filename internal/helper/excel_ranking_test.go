@@ -180,6 +180,87 @@ func TestTeamRanking(t *testing.T) {
 	}
 }
 
+// TestPoolWinnerCellsPointToRankingFormulas is a regression test for the bug
+// where matchWinners["Pool X-1st"]/"-2nd"/... pointed at empty cells past the
+// end of the per-pool Ranking block, so the elimination bracket's CONCATENATE
+// formulas referenced blank cells instead of the IFERROR(INDEX(...MATCH...))
+// formulas that resolve the actual 1st/2nd/3rd player names. The bug was
+// most visible with a single pool of 8 players (the elimination tree would
+// show "Pool A-1st " with no name), but it affected every pool size.
+func TestPoolWinnerCellsPointToRankingFormulas(t *testing.T) {
+	sizes := []int{3, 4, 6, 8}
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("Size_%d", size), func(t *testing.T) {
+			players := make([]Player, size)
+			for i := 0; i < size; i++ {
+				players[i] = Player{
+					Name:         fmt.Sprintf("Player %d", i+1),
+					PoolPosition: int64(i + 1),
+				}
+			}
+
+			pool := Pool{PoolName: "Pool A", Players: players}
+
+			f := excelize.NewFile()
+			sheet := SheetPoolMatches
+			f.NewSheet(sheet)
+			f.NewSheet("Pool Draw")
+
+			styles := matchStyles{poolHeader: 1, text: 2, unlockedText: 3}
+			colNames := buildMatchColumnNames(1)
+			matchWinners := make(map[string]MatchWinner)
+			maxBlocks := []int{size + 3}
+
+			poolCoords := map[string]cellCoord{
+				"Pool A": {sheetName: "Pool Draw", cell: "A1"},
+			}
+			pCoords := make(map[string]playerCellCoord, size)
+			for i := 0; i < size; i++ {
+				pCoords[playerCoordKey(players[i])] = playerCellCoord{
+					cellCoord: cellCoord{sheetName: "Pool Draw", cell: fmt.Sprintf("A%d", i+1)},
+				}
+			}
+
+			numWinners := 2
+			printSinglePool(f, sheet, pool, 1, 2, 0, numWinners, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords)
+
+			// Locate the "Ranking" header row.
+			var rankingHeaderRow int
+			for r := 1; r < 200; r++ {
+				val, _ := f.GetCellValue(sheet, fmt.Sprintf("G%d", r))
+				if val == "Ranking" {
+					rankingHeaderRow = r
+					break
+				}
+			}
+			require.NotZero(t, rankingHeaderRow, "could not find Ranking header")
+
+			// For each rank up to numWinners, the matchWinners cell must
+			// point at the IFERROR(INDEX(...MATCH(rankNum, ...))) formula
+			// that resolves the player name — NOT at a blank cell past the
+			// ranking block.
+			for rank := 1; rank <= numWinners; rank++ {
+				key := fmt.Sprintf("Pool A-%s", getOrdinal(rank))
+				mw, ok := matchWinners[key]
+				require.True(t, ok, "matchWinners[%q] missing", key)
+
+				expectedCell := fmt.Sprintf("G%d", rankingHeaderRow+rank)
+				assert.Equal(t, expectedCell, mw.cell,
+					"matchWinners[%q] should point at the rank-%d formula cell", key, rank)
+
+				formula, err := f.GetCellFormula(sheet, mw.cell)
+				require.NoError(t, err)
+				assert.Contains(t, formula, "INDEX",
+					"matchWinners[%q] cell %s should hold an INDEX formula, got %q",
+					key, mw.cell, formula)
+				assert.Contains(t, formula, fmt.Sprintf("MATCH(%d,", rank),
+					"matchWinners[%q] cell %s should MATCH rank %d, got %q",
+					key, mw.cell, rank, formula)
+			}
+		})
+	}
+}
+
 func TestManualRankingOverride(t *testing.T) {
 	players := []Player{
 		{Name: "Player 1", PoolPosition: 1},

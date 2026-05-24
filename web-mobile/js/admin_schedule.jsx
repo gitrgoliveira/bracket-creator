@@ -964,7 +964,10 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 // and a rebalancing suggestion. Never rendered in viewer or display views.
 export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
-  const [tick, setTick] = useStateA(0);
+  // setTick forces a re-render every 60 s so computeCourtPaceStats re-reads
+  // the current wall-clock time. paceByCourt is rebuilt on every parent render
+  // so useMemo would never skip the call anyway — compute stats directly.
+  const [, setTick] = useStateA(0);
 
   // hasData is checked inside the effect so the interval only runs (and causes
   // re-renders) when there are matches to display, not when the panel renders null.
@@ -977,10 +980,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
     return () => clearInterval(timer);
   }, [hasData]);
 
-  const stats = useMemoA(
-    () => computeCourtPaceStats(byCourt, safeMatchDuration),
-    [byCourt, safeMatchDuration, tick]
-  );
+  const stats = computeCourtPaceStats(byCourt, safeMatchDuration);
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)
   // ignore empty buckets — e.g. a configured court the user hasn't placed

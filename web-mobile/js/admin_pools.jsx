@@ -407,7 +407,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                       {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
                     </div>
                     <button className={getScoreBtnClass(m.status)} onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
-                      {m.status === "completed" ? "Edit" : "Score"}
+                      {m.status === "completed" ? "Correct" : "Score"}
                     </button>
                   </div>
                 </div>
@@ -519,7 +519,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className={getScoreBtnClass(m.status)} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Edit" : "Score"}</button>
+                          <button className={getScoreBtnClass(m.status)} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
                         </div>
                       </div>
                     ))}

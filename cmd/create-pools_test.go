@@ -365,6 +365,122 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 		"elimination bracket Pool A-1st must point at the rank-1 ranking cell")
 }
 
+// TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost is a regression test for
+// the team-summary Points-Won/Points-Lost (PW/PL) bug. With teams of 3 and a
+// full round robin (3 teams, single shiaijo, single pool), the SUMPRODUCT
+// formulas in buildTeamPointsFormula / buildTeamWinnersFormula passed cell
+// ranges through SUBSTITUTE/LEN — that only iterates as an array in Excel
+// 365 with dynamic-array semantics. Legacy Excel, Google Sheets, and Apple
+// Numbers collapse the range to the first cell, so PW and IV (and the
+// derived rank/score) were stuck at 1 instead of summing all 3 sub-bouts.
+// Fix expands the aggregation to per-row LEN(SUBSTITUTE(...)) terms (mp-1xe).
+func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "teams3-rr-pool-3-*.xlsx")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	writer := bufio.NewWriter(tmpFile)
+
+	o := &poolOptions{
+		outputWriter: writer,
+		outputPath:   tmpFile.Name(),
+		numPlayers:   3,
+		poolWinners:  2,
+		roundRobin:   true,
+		determined:   true,
+		courts:       1,
+		teamMatches:  3,
+	}
+
+	entries := []string{
+		"Alice Adams,Team Alpha",
+		"Bob Adams,Team Alpha",
+		"Charlie Adams,Team Alpha",
+		"Dave Brown,Team Bravo",
+		"Eve Brown,Team Bravo",
+		"Frank Brown,Team Bravo",
+		"Grace Carter,Team Charlie",
+		"Henry Carter,Team Charlie",
+		"Iris Carter,Team Charlie",
+	}
+
+	require.NoError(t, o.createPools(entries))
+	require.NoError(t, writer.Flush())
+	require.NoError(t, tmpFile.Close())
+
+	f, err := excelize.OpenFile(tmpFile.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	for _, s := range f.GetSheetList() {
+		_ = f.UnprotectSheet(s)
+	}
+
+	const sheet = "Pool Matches"
+	alphaRef := "'data'!$B$3"
+
+	// Find Alpha's team-match summary rows — column A or G resolves to
+	// Alpha and the row below contains the "1" sub-bout label.
+	var summaryRows []int
+	for r := 1; r < 200; r++ {
+		whiteFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("A%d", r))
+		redFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("G%d", r))
+		if whiteFormula != alphaRef && redFormula != alphaRef {
+			continue
+		}
+		next, _ := f.GetCellValue(sheet, fmt.Sprintf("A%d", r+1))
+		if next != "1" {
+			continue
+		}
+		summaryRows = append(summaryRows, r)
+	}
+	require.Len(t, summaryRows, 2, "expected 2 team matches for Alpha in a round-robin pool of 3")
+
+	// Award Alpha 1 ippon ("M") in every sub-bout (3 per match × 2).
+	for _, sr := range summaryRows {
+		redFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("G%d", sr))
+		col := "B" // Alpha is white — write into leftVictories column.
+		if redFormula == alphaRef {
+			col = "E" // Alpha is red — write into rightPoints column.
+		}
+		for sub := sr + 1; sub <= sr+3; sub++ {
+			require.NoError(t, f.SetCellValue(sheet, fmt.Sprintf("%s%d", col, sub), "M"))
+		}
+	}
+
+	// Find Alpha's IV/IL/IT/PW/PL row — column A resolves to Alpha,
+	// next row's column A is NOT "1", and column E has a formula
+	// (PW). The earlier Alpha row in the W/L/T results table has no
+	// formula in column E.
+	var alphaPwRow int
+	for r := 1; r < 200; r++ {
+		v, _ := f.CalcCellValue(sheet, fmt.Sprintf("A%d", r))
+		if v != "Alice Adams" {
+			continue
+		}
+		next, _ := f.GetCellValue(sheet, fmt.Sprintf("A%d", r+1))
+		if next == "1" {
+			continue // sub-bout block, not a results row
+		}
+		eForm, _ := f.GetCellFormula(sheet, fmt.Sprintf("E%d", r))
+		if eForm == "" {
+			continue // W/L/T row — no PW formula
+		}
+		alphaPwRow = r
+		break
+	}
+	require.NotZero(t, alphaPwRow, "could not find Alpha's PW/PL row")
+
+	pw, err := f.CalcCellValue(sheet, fmt.Sprintf("E%d", alphaPwRow))
+	require.NoError(t, err)
+	pl, err := f.CalcCellValue(sheet, fmt.Sprintf("F%d", alphaPwRow))
+	require.NoError(t, err)
+
+	// Alpha won 3 ippons per match × 2 matches = 6 PW, 0 PL.
+	assert.Equal(t, "6", pw, "Team Alpha PW must total 6 (3 ippons × 2 matches); got %q", pw)
+	assert.Equal(t, "0", pl, "Team Alpha PL must be 0 (Alpha won every sub-bout); got %q", pl)
+}
+
 func TestCreatePools_SingleTree(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)

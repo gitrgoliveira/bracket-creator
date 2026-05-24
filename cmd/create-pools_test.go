@@ -417,15 +417,20 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	}
 
 	const sheet = "Pool Matches"
-	alphaRef := "'data'!$B$3"
+	// Team-match summary cells reference 'data'!$B$3, which is the cell
+	// holding Team Alpha's first listed member ("Alice Adams"). The data
+	// sheet uses the first member's name as the team's display label, so
+	// every search below that targets "Team Alpha" looks for either this
+	// formula reference or the resolved value "Alice Adams".
+	alphaTeamRef := "'data'!$B$3"
 
-	// Find Alpha's team-match summary rows — column A or G resolves to
-	// Alpha and the row below contains the "1" sub-bout label.
+	// Find Team Alpha's team-match summary rows — column A or G holds the
+	// alphaTeamRef formula and the row below contains the "1" sub-bout label.
 	var summaryRows []int
 	for r := 1; r < 200; r++ {
 		whiteFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("A%d", r))
 		redFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("G%d", r))
-		if whiteFormula != alphaRef && redFormula != alphaRef {
+		if whiteFormula != alphaTeamRef && redFormula != alphaTeamRef {
 			continue
 		}
 		next, _ := f.GetCellValue(sheet, fmt.Sprintf("A%d", r+1))
@@ -434,24 +439,25 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 		}
 		summaryRows = append(summaryRows, r)
 	}
-	require.Len(t, summaryRows, 2, "expected 2 team matches for Alpha in a round-robin pool of 3")
+	require.Len(t, summaryRows, 2, "expected 2 team matches for Team Alpha in a round-robin pool of 3")
 
-	// Award Alpha 1 ippon ("M") in every sub-bout (3 per match × 2).
+	// Award Team Alpha 1 ippon ("M") in every sub-bout (3 per match × 2).
 	for _, sr := range summaryRows {
 		redFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("G%d", sr))
-		col := "B" // Alpha is white — write into leftVictories column.
-		if redFormula == alphaRef {
-			col = "E" // Alpha is red — write into rightPoints column.
+		col := "B" // Team Alpha is white — write into leftVictories column.
+		if redFormula == alphaTeamRef {
+			col = "E" // Team Alpha is red — write into rightPoints column.
 		}
 		for sub := sr + 1; sub <= sr+3; sub++ {
 			require.NoError(t, f.SetCellValue(sheet, fmt.Sprintf("%s%d", col, sub), "M"))
 		}
 	}
 
-	// Find Alpha's IV/IL/IT/PW/PL row — column A resolves to Alpha,
-	// next row's column A is NOT "1", and column E has a formula
-	// (PW). The earlier Alpha row in the W/L/T results table has no
-	// formula in column E.
+	// Find Team Alpha's IV/IL/IT/PW/PL row — column A resolves to
+	// "Alice Adams" (Alpha's first-member display label, see above),
+	// the next row's column A is NOT "1", and column E has a formula
+	// (PW). The earlier Team Alpha row in the W/L/T results table has
+	// no formula in column E.
 	var alphaPwRow int
 	for r := 1; r < 200; r++ {
 		v, _ := f.CalcCellValue(sheet, fmt.Sprintf("A%d", r))
@@ -469,7 +475,7 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 		alphaPwRow = r
 		break
 	}
-	require.NotZero(t, alphaPwRow, "could not find Alpha's PW/PL row")
+	require.NotZero(t, alphaPwRow, "could not find Team Alpha's PW/PL row")
 
 	pw, err := f.CalcCellValue(sheet, fmt.Sprintf("E%d", alphaPwRow))
 	require.NoError(t, err)

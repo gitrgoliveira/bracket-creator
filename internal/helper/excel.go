@@ -171,7 +171,7 @@ type playerMatchRecord struct {
 // array in legacy Excel, Google Sheets, or Apple Numbers; only Excel 365 with
 // dynamic-array semantics evaluates the array form correctly.
 func strippedLen(col string, row int) string {
-	return fmt.Sprintf(`LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d," ",""),"0",""),"-","")) `, col, row)
+	return fmt.Sprintf(`LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d," ",""),"0",""),"-",""))`, col, row)
 }
 
 // buildTeamWinnersFormula returns an Excel/Sheets/Numbers-compatible formula

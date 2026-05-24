@@ -7,6 +7,7 @@ const pluralize = window.pluralize;
 // on the Go side. The override-rank handler ALSO validates against the
 // actual pool size; this cap is the absolute overflow guard.
 const MAX_RANK = window.MAX_RANK;
+const getScoreBtnClass = window.getScoreBtnClass;
 const ScoreEditorModal = window.ScoreEditorModal;
 
 // Pure decision logic for what RankInput.handleBlur should do, given the
@@ -405,8 +406,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
                       {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
                     </div>
-                    <button className="btn btn--sm" onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
-                      {m.status === "completed" ? "Edit" : "Score"}
+                    <button className={getScoreBtnClass(m.status)} onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
+                      {m.status === "completed" ? "Correct" : "Score"}
                     </button>
                   </div>
                 </div>
@@ -518,7 +519,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Edit" : "Score"}</button>
+                          <button className={getScoreBtnClass(m.status)} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
                         </div>
                       </div>
                     ))}

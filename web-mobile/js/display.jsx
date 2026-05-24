@@ -171,12 +171,26 @@ function findActiveCourts(tournament, competitions) {
     return all.filter(cc => inUse.has(cc));
 }
 
-// Queue-position label per T068. We mirror the contract from VSchedItem in
-// viewer.jsx: position 1 → "Next up"; position N → "(N-1) before yours".
-// Falls back to scheduledAt time if no queue position is present (pre-T046
-// payloads or unannotated matches). Keep this synchronised with the
-// equivalent helper in viewer.jsx so the two surfaces agree.
+// Queue-position label per T068, and the canonical source of truth for all
+// viewer surfaces (display.jsx, VSchedItem in viewer.jsx, etc.).
+//
+// Contract (evaluated in this order):
+//   1. status !== "scheduled"           → "" (no queue label on running /
+//      completed / cancelled rows, even if queuePosition or scheduledAt
+//      is set — this gate takes precedence over everything below).
+//   2. status === "scheduled" + qp ===1 → "Next up".
+//   3. status === "scheduled" + qp > 1  → "(qp - 1) before yours".
+//   4. status === "scheduled" + falsy qp + scheduledAt → "Scheduled hh:mm".
+//   5. anything else                    → "".
+//
+// queuePosition is coerced with Number() so JSON-string values ("1", "2")
+// work the same as numeric ones.
+//
+// Wording is consolidated on "Next up" across all surfaces (bead mp-e3k).
+// If you need a denser pill form for a tight row, use queueLabelCompact.
 function queueLabel(m) {
+    if (!m) return "";
+    if (m.status !== "scheduled") return "";
     const qp = Number(m.queuePosition);
     if (Number.isFinite(qp) && qp > 0) {
         if (qp === 1) return "Next up";
@@ -184,6 +198,23 @@ function queueLabel(m) {
     }
     if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
     return "";
+}
+
+// Compact pill form of the queue-position label, for dense rows like the
+// per-court TWMatch tiles on the tournament-wide viewer. Same canonical
+// "Next up" wording for qp=1 so all surfaces agree (bead mp-e3k); other
+// positions render as "#N". Returns null when there's nothing to show so
+// callers can conditionally render the pill.
+function queueLabelCompact(m) {
+    if (!m) return null;
+    if (m.status !== "scheduled") return null;
+    const qp = Number(m.queuePosition);
+    // Use Number.isFinite so Infinity/-Infinity are rejected alongside NaN —
+    // matches queueLabel's guard. isNaN alone would let Infinity through and
+    // render "#Infinity".
+    if (!Number.isFinite(qp) || qp <= 0) return null;
+    if (qp === 1) return "Next up";
+    return `#${qp}`;
 }
 
 // Compute a phase label for either a pool or a bracket match.
@@ -435,6 +466,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     {queueMatches.map((m) => {
                         const compZekken = m._comp?.withZekkenName;
                         const label = queueLabel(m);
+                        // Coerce to number so the qp===1 highlight matches even if
+                        // server emits a string (consistent with TWMatch/VSchedItem).
                         const qp = Number(m.queuePosition);
                         return (
                             <div key={(m._comp?.id || '') + m.id} className="tvd__upcoming-card" style={{
@@ -900,6 +933,7 @@ export {
     findActiveCourts,
     countCourtMatches,
     queueLabel,
+    queueLabelCompact,
     LOBBY_PAGE_SIZE,
     LOBBY_CYCLE_MS,
 };
@@ -909,4 +943,6 @@ if (typeof window !== 'undefined') {
     window.LobbyDisplay = LobbyDisplay;
     window.StreamingOverlay = StreamingOverlay;
     window.DisplayRoute = DisplayRoute;
+    window.queueLabel = queueLabel;
+    window.queueLabelCompact = queueLabelCompact;
 }

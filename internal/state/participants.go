@@ -311,6 +311,7 @@ func marshalParticipantsCSV(players []domain.Player) ([]byte, error) {
 		} else {
 			record = []string{id, p.Name, p.Dojo}
 		}
+		record = append(record, p.Metadata...)
 		if p.Tag != "" {
 			record = append(record, p.Tag)
 		}

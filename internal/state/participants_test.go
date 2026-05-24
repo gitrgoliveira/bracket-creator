@@ -249,6 +249,38 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	assert.Equal(t, "Dojo C", loaded[0].Dojo)
 }
 
+func TestMetadataRoundTrip(t *testing.T) {
+	// Regression: saveParticipantsNoLock must write Metadata (danGrade and
+	// other extra CSV columns) so they survive a save→load cycle. Previously
+	// the write omitted p.Metadata entirely, silently dropping danGrade.
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "meta-rt"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A", Metadata: []string{"2d"}},
+		{Name: "Bob", Dojo: "Dojo B", Metadata: []string{"3d"}, Tag: "registered"},
+		{Name: "Carol", Dojo: "Dojo C"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	require.NoError(t, err)
+	rawStr := string(raw)
+	assert.Contains(t, rawStr, "2d", "danGrade must be written to CSV")
+	assert.Contains(t, rawStr, "3d", "danGrade must be written to CSV")
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 3)
+	assert.Equal(t, []string{"2d"}, loaded[0].Metadata, "Alice's danGrade must round-trip")
+	assert.Equal(t, []string{"3d"}, loaded[1].Metadata, "Bob's danGrade must round-trip")
+	assert.Equal(t, "registered", loaded[1].Tag, "Bob's tag must round-trip alongside danGrade")
+	assert.Empty(t, loaded[2].Metadata, "Carol with no metadata must stay empty")
+}
+
 func TestCheckedInRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)

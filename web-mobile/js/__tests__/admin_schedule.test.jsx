@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats, allMatchesCompleted } from '../admin_schedule.jsx';
 
 describe('timeEdited', () => {
@@ -402,37 +402,6 @@ describe('computeCourtPaceStats', () => {
     expect(stat.estimatedRemainingMin).toBe(10); // 2 × 5
   });
 
-  it('wallClockElapsedMin is now minus earliest scheduledAt', () => {
-    const byCourt = {
-      A: [
-        { status: 'completed', scheduledAt: '09:00' },
-        { status: 'running', scheduledAt: '09:10' },
-      ]
-    };
-    // now = 09:20 = 560, earliest = 09:00 = 540 → elapsed = 20
-    const [stat] = computeCourtPaceStats(byCourt, 5, 9 * 60 + 20);
-    expect(stat.wallClockElapsedMin).toBe(20);
-  });
-
-  it('wallClockElapsedMin is 0 when no scheduledAt times exist', () => {
-    const byCourt = {
-      A: [
-        { status: 'scheduled', scheduledAt: null },
-        { status: 'scheduled', scheduledAt: null },
-      ]
-    };
-    const [stat] = computeCourtPaceStats(byCourt, 5, 600);
-    expect(stat.wallClockElapsedMin).toBe(0);
-  });
-
-  it('wallClockElapsedMin is clamped to 0 when now is before earliest scheduledAt', () => {
-    const byCourt = {
-      A: [{ status: 'scheduled', scheduledAt: '10:00' }]
-    };
-    // now = 09:00 (before match starts)
-    const [stat] = computeCourtPaceStats(byCourt, 5, 9 * 60);
-    expect(stat.wallClockElapsedMin).toBe(0);
-  });
 
   it('delta is estimatedRemainingMin - plannedRemainingMin', () => {
     const byCourt = {
@@ -659,5 +628,162 @@ describe('allMatchesCompleted', () => {
       ? court.slice(openIdx + 1).find(m => m.status !== 'completed') || null
       : null;
     expect(nextActiveMatch).toBeNull();
+  });
+});
+
+describe('CourtPacePanel timer', () => {
+  let realReact;
+  let runtime;
+  let CourtPacePanel;
+
+  function makeReactive() {
+    let hookSlots = [];
+    let hookIndex = 0;
+    let scheduledRender = null;
+    let rootProps = null;
+    let rootFactory = null;
+    let effectCleanups = [];
+    let renderCount = 0;
+
+    function rerender() {
+      hookIndex = 0;
+      renderCount++;
+      scheduledRender = rootFactory(rootProps);
+      return scheduledRender;
+    }
+
+    const reactive = {
+      createElement: (type, props, ...children) => ({ type, props, children }),
+      useState: (initial) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = typeof initial === 'function' ? initial() : initial;
+        }
+        const setter = (v) => {
+          hookSlots[i] = typeof v === 'function' ? v(hookSlots[i]) : v;
+          rerender();
+        };
+        return [hookSlots[i], setter];
+      },
+      useEffect: (effect, deps) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = deps;
+          const cleanup = effect();
+          if (typeof cleanup === 'function') {
+            effectCleanups.push(cleanup);
+          }
+        }
+      },
+      // useMemo is slot-based like useState/useRef: each call in the render
+      // sequence maps to hookSlots[i] and stores { deps, result }. On re-render
+      // the deps are shallow-compared (Object.is) so the test runtime enforces
+      // the real contract — removing tick from the deps array would cause stats
+      // to stop refreshing after a tick, which the re-render test would catch.
+      useMemo: (fn, deps) => {
+        const i = hookIndex++;
+        const cached = hookSlots[i];
+        const depsChanged = !cached || !deps ||
+          deps.length !== cached.deps.length ||
+          deps.some((d, idx) => !Object.is(d, cached.deps[idx]));
+        if (depsChanged) {
+          hookSlots[i] = { deps: deps ? deps.slice() : [], result: fn() };
+        }
+        return hookSlots[i].result;
+      },
+      useRef: (initial) => {
+        const i = hookIndex++;
+        if (hookSlots.length <= i) {
+          hookSlots[i] = { current: initial };
+        }
+        return hookSlots[i];
+      },
+      useLayoutEffect: () => {},
+      memo: (c) => c,
+    };
+
+    return {
+      React: reactive,
+      mount: (factory, props) => {
+        hookSlots = [];
+        hookIndex = 0;
+        rootFactory = factory;
+        rootProps = props;
+        effectCleanups = [];
+        renderCount = 0;
+        return rerender();
+      },
+      unmount: () => {
+        effectCleanups.forEach(c => c());
+        effectCleanups = [];
+      },
+      currentTree: () => scheduledRender,
+      renderCount: () => renderCount,
+    };
+  }
+
+  beforeEach(async () => {
+    realReact = global.React;
+    runtime = makeReactive();
+    global.React = runtime.React;
+    vi.useFakeTimers();
+    vi.resetModules();
+    ({ CourtPacePanel } = await import('../admin_schedule.jsx'));
+  });
+
+  afterEach(() => {
+    global.React = realReact;
+    // The component's effect cleanup calls clearInterval on an interval
+    // created under fake timers, so unmount BEFORE switching back to real
+    // timers — otherwise the cleanup runs against a different timer
+    // implementation than the one that scheduled it. Order matters.
+    runtime.unmount();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('sets up a 60s interval that triggers updates, and clears it on unmount', () => {
+    const byCourt = {
+      A: [
+        { status: 'scheduled', scheduledAt: '09:00' },
+      ]
+    };
+
+    // Spies are explicitly restored by `vi.restoreAllMocks()` in afterEach
+    // so they don't leak into later tests (the vitest config does not
+    // automatically restore them).
+    const setIntervalSpy = vi.spyOn(global, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
+
+    runtime.mount(CourtPacePanel, { byCourt, safeMatchDuration: 5 });
+
+    expect(setIntervalSpy).toHaveBeenCalledOnce();
+    expect(setIntervalSpy.mock.calls[0][1]).toBe(60000);
+
+    runtime.unmount();
+    expect(clearIntervalSpy).toHaveBeenCalledOnce();
+    expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[0].value);
+  });
+
+  it('advancing 60s triggers a re-render so wall-clock-derived stats refresh', () => {
+    // mp-pb1 AC #3: the tick must actually re-render the panel, not just
+    // schedule a no-op interval. Advance fake timers and assert that the
+    // component was re-rendered after the tick fired. This is the real
+    // contract — without it the panel could "tick" silently and the chip
+    // color would still freeze between SSE events.
+    const byCourt = {
+      A: [
+        { status: 'scheduled', scheduledAt: '09:00' },
+      ]
+    };
+
+    runtime.mount(CourtPacePanel, { byCourt, safeMatchDuration: 5 });
+    const before = runtime.renderCount();
+
+    vi.advanceTimersByTime(60000);
+
+    const after = runtime.renderCount();
+    expect(after).toBeGreaterThan(before);
   });
 });

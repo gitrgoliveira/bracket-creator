@@ -227,8 +227,16 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   // a time, but NOT by the ad-hoc player/dojo/competition filters).
   const paceByCourt = {};
   courts.forEach((cc) => paceByCourt[cc] = []);
+  // Also bucket matches on courts not in the current config (stale/moved)
+  // so the pace panel stays accurate even after court list changes.
+  // Trim before bucketing — whitespace-only courts are treated as unassigned
+  // by the rest of the UI and must not create phantom pace tiles.
   filterMatchesByCourt(allMatches, effectiveCourt).forEach((m) => {
-    if (m.court && paceByCourt[m.court]) paceByCourt[m.court].push(m);
+    const court = (m.court || "").trim();
+    if (court) {
+      if (!paceByCourt[court]) paceByCourt[court] = [];
+      paceByCourt[court].push(m);
+    }
   });
 
   const matchHasFilter = (m) => window.matchHighlightedBy(m, picked, dojoText);
@@ -895,10 +903,8 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //
 // For each court, derive:
 //   court               — the court label (e.g. "A")
-//   completedCount      — matches with status === "completed"
+//   completedCount      — matches that are neither scheduled nor running (i.e. the slot is consumed)
 //   remainingCount      — matches NOT yet completed
-//   wallClockElapsedMin — minutes from the earliest scheduledAt on that court
-//                         to now. Falls back to 0 when no scheduledAt data.
 //   estimatedRemainingMin — remainingCount × perMatchMinutes
 //   plannedRemainingMin   — time from now to the *end* of the last scheduled
 //                           match on the court (latestMin + perMatchMinutes
@@ -907,16 +913,32 @@ function PerCourtBreakdown({ perCourtMinutes }) {
 //   delta               — estimatedRemainingMin − plannedRemainingMin
 //                         positive = behind schedule, negative = ahead
 //
+// nowMinutes is optional; defaults to the current wall-clock (read via
+// `new Date()`). The CourtPacePanel does NOT pass it, so the 60s tick in
+// the panel forces the memo to re-invoke this helper and read fresh time.
+// Tests pass nowMinutes explicitly for determinism.
+//
 // Exported for the vitest suite.
 export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
-  const ppm = perMatchMinutes > 0 ? perMatchMinutes : 3;
+  // Tournament config can leak strings through (e.g. localStorage,
+  // URL params, form input). `5 > 0` is truthy in JS so the original
+  // ternary returned the bare value, and `latestMin + "5" - nowMin`
+  // would have done string-concatenation arithmetic. Coerce up front
+  // and guard against NaN.
+  const ppmNum = Number(perMatchMinutes);
+  const ppm = Number.isFinite(ppmNum) && ppmNum > 0 ? ppmNum : 3;
   const nowMin = nowMinutes !== undefined ? nowMinutes : (() => {
     const d = new Date();
     return d.getHours() * 60 + d.getMinutes();
   })();
 
   return Object.entries(byCourt).map(([court, matches]) => {
-    const completedCount = matches.filter(m => m.status === "completed").length;
+    // Count any match that is not scheduled or running as "consumed" — this
+    // mirrors the courtOrder sort which maps unknown statuses to the completed
+    // bucket.  The backend only emits scheduled/running/completed today, but
+    // treating the two active statuses as the set to exclude is more defensive
+    // than a strict "=== completed" check.
+    const completedCount = matches.filter(m => m.status !== "scheduled" && m.status !== "running").length;
     const remainingCount = matches.length - completedCount;
     const estimatedRemainingMin = remainingCount * ppm;
 
@@ -924,11 +946,7 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
     const times = matches
       .map(m => timeToMinutes(m.scheduledAt))
       .filter(t => t !== null);
-    const earliestMin = times.length > 0 ? Math.min(...times) : null;
     const latestMin = times.length > 0 ? Math.max(...times) : null;
-
-    // Wall-clock elapsed: from earliest scheduled time on this court to now.
-    const wallClockElapsedMin = earliestMin !== null ? Math.max(0, nowMin - earliestMin) : 0;
 
     // Planned remaining: from now to end of last scheduled match (+ one match duration).
     // If no times available, fall back to estimatedRemainingMin.
@@ -938,20 +956,26 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
 
     const delta = estimatedRemainingMin - plannedRemainingMin;
 
-    return { court, completedCount, remainingCount, wallClockElapsedMin, estimatedRemainingMin, plannedRemainingMin, delta };
+    return { court, completedCount, remainingCount, estimatedRemainingMin, plannedRemainingMin, delta };
   });
 }
 
 // CourtPacePanel — admin-only collapsible card showing per-court pace status
 // and a rebalancing suggestion. Never rendered in viewer or display views.
-function CourtPacePanel({ byCourt, safeMatchDuration }) {
+export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
   const [tick, setTick] = useStateA(0);
 
+  // hasData is checked inside the effect so the interval only runs (and causes
+  // re-renders) when there are matches to display, not when the panel renders null.
+  const hasData = Object.values(byCourt).some(arr => arr.length > 0);
   useEffectA(() => {
-    const timer = setInterval(() => setTick(t => t + 1), 60000);
+    if (!hasData) return;
+    const timer = setInterval(() => {
+      setTick(t => t + 1);
+    }, 60000);
     return () => clearInterval(timer);
-  }, []);
+  }, [hasData]);
 
   const stats = useMemoA(
     () => computeCourtPaceStats(byCourt, safeMatchDuration),
@@ -1057,8 +1081,11 @@ window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
 
-// ES export for the vitest suite — pure helpers only. Components stay
-// behind the window.* pattern to match the rest of admin_*.jsx.
-// Note: computeCourtPaceStats is already exported at its declaration site
-// (export function computeCourtPaceStats).
+// ES exports for the vitest suite. computeCourtPaceStats,
+// filterMatchesByCourt, and CourtPacePanel use `export function`
+// at their declaration sites.  This block exports the
+// remaining helpers that are declared without `export`.
+//
+// All other top-level components stay behind the window.* pattern to
+// match the rest of admin_*.jsx.
 export { timeEdited, timeToMinutes, clampMatchDuration, suggestRebalances, allMatchesCompleted };

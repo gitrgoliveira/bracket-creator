@@ -317,14 +317,22 @@ describe('enrichPoolMatchWithComp', () => {
   });
 
   it('resolves player dojo from buildPlayerMap when available', () => {
-    window.buildPlayerMap = () => ({
-      Alice: { id: 'Alice', name: 'Alice', dojo: 'DojoA' },
-    });
-    const m = { id: 'A-0', status: 'scheduled', sideA: 'Alice', sideB: 'Unknown' };
-    const enriched = enrichPoolMatchWithComp(m, comp);
-    expect(enriched.sideA).toEqual({ id: 'Alice', name: 'Alice', dojo: 'DojoA' });
-    expect(enriched.sideB).toEqual({ id: 'Unknown', name: 'Unknown' });
-    delete window.buildPlayerMap;
+    const prev = window.buildPlayerMap;
+    try {
+      window.buildPlayerMap = () => ({
+        Alice: { id: 'Alice', name: 'Alice', dojo: 'DojoA' },
+      });
+      const m = { id: 'A-0', status: 'scheduled', sideA: 'Alice', sideB: 'Unknown' };
+      const enriched = enrichPoolMatchWithComp(m, comp);
+      expect(enriched.sideA).toEqual({ id: 'Alice', name: 'Alice', dojo: 'DojoA' });
+      expect(enriched.sideB).toEqual({ id: 'Unknown', name: 'Unknown' });
+    } finally {
+      if (prev === undefined) {
+        delete window.buildPlayerMap;
+      } else {
+        window.buildPlayerMap = prev;
+      }
+    }
   });
 
   it('converts falsy sideA/sideB to {id:"",name:""} (bye/TBD slot)', () => {

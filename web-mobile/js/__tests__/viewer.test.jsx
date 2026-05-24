@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading } from '../viewer.jsx';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 
 describe('Viewer Utils', () => {
@@ -117,6 +117,70 @@ describe('Viewer Utils', () => {
     it('false for null/missing competition', () => {
       expect(isSwissFinalStandings(null, completedR4)).toBe(false);
       expect(isSwissFinalStandings(undefined, completedR4)).toBe(false);
+    });
+  });
+
+  // mp-7e6 — isFollowedPlayer: UUID-first match with name fallback.
+  // Pins the two lookup paths so opponents are never resolved to the
+  // followed player's own side.
+  describe('isFollowedPlayer', () => {
+    const followed = { id: 'uuid-alice', name: 'Alice' };
+
+    it('matches by UUID when IDs are equal', () => {
+      expect(isFollowedPlayer({ id: 'uuid-alice', name: 'Alice' }, followed)).toBe(true);
+    });
+
+    it('falls back to case-insensitive name when IDs differ (legacy/team fixture)', () => {
+      expect(isFollowedPlayer({ id: '', name: 'alice' }, followed)).toBe(true);
+      expect(isFollowedPlayer({ id: '', name: 'ALICE' }, followed)).toBe(true);
+    });
+
+    it('returns false when neither id nor name matches', () => {
+      expect(isFollowedPlayer({ id: 'uuid-bob', name: 'Bob' }, followed)).toBe(false);
+    });
+
+    it('returns false for null/missing args', () => {
+      expect(isFollowedPlayer(null, followed)).toBe(false);
+      expect(isFollowedPlayer({ id: 'uuid-alice', name: 'Alice' }, null)).toBe(false);
+    });
+  });
+
+  // mp-7e6 — compMatches: pool phase/poolName derivation for flat viewer
+  // poolMatches that don't carry phase/poolName from the API.
+  describe('compMatches', () => {
+    const mkComp = (overrides) => ({
+      id: 'comp1',
+      name: 'Test Comp',
+      kind: 'individual',
+      teamSize: 0,
+      status: 'pools',
+      bracket: { rounds: [] },
+      ...overrides,
+    });
+
+    it('derives phase="pool" and poolName from match ID when not set by API', () => {
+      const c = mkComp({ poolMatches: [{ id: 'Pool A-0', status: 'scheduled' }] });
+      const ms = compMatches(c);
+      expect(ms.length).toBe(1);
+      expect(ms[0].phase).toBe('pool');
+      expect(ms[0].poolName).toBe('Pool A');
+    });
+
+    it('preserves existing poolName when already set', () => {
+      const c = mkComp({ poolMatches: [{ id: 'Pool B-1', phase: 'pool', poolName: 'Pool B', status: 'scheduled' }] });
+      const ms = compMatches(c);
+      expect(ms[0].poolName).toBe('Pool B');
+    });
+
+    it('handles DH suffix correctly (Pool A-DH-0)', () => {
+      const c = mkComp({ poolMatches: [{ id: 'Pool A-DH-0', status: 'scheduled' }] });
+      const ms = compMatches(c);
+      expect(ms[0].poolName).toBe('Pool A');
+    });
+
+    it('returns empty for setup status competition', () => {
+      const c = mkComp({ status: 'setup', poolMatches: [{ id: 'Pool A-0', status: 'scheduled' }] });
+      expect(compMatches(c)).toEqual([]);
     });
   });
 

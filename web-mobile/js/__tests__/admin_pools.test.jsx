@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideRankCommit } from '../admin_pools.jsx';
+import { decideRankCommit, buildLiveById, isRanksLocked, poolMatchesForPool } from '../admin_pools.jsx';
 
 // decideRankCommit is the pure predicate that drives RankInput.handleBlur.
 // It returns one of:
@@ -172,5 +172,113 @@ describe('decideRankCommit', () => {
         expect(r.value).not.toBe(v);
       }
     });
+  });
+});
+
+describe('buildLiveById', () => {
+  it('returns an object keyed by match id', () => {
+    const matches = [
+      { id: 'pool-A-1', status: 'completed', ipponsA: 2, ipponsB: 0 },
+      { id: 'pool-A-2', status: 'scheduled' },
+    ];
+    const live = buildLiveById(matches);
+    expect(live['pool-A-1'].status).toBe('completed');
+    expect(live['pool-A-2'].status).toBe('scheduled');
+  });
+
+  it('returns empty object when poolMatches is null or empty', () => {
+    expect(buildLiveById(null)).toEqual({});
+    expect(buildLiveById([])).toEqual({});
+  });
+
+  it('live state overrides stale pool.matches entry', () => {
+    const stale = { id: 'pool-A-1', status: 'scheduled' };
+    const live = buildLiveById([{ id: 'pool-A-1', status: 'completed', ipponsA: 1, ipponsB: 0 }]);
+    const resolved = live[stale.id] || stale;
+    expect(resolved.status).toBe('completed');
+    expect(resolved.ipponsA).toBe(1);
+  });
+
+  it('falls back to stale entry when match not yet in live list', () => {
+    const stale = { id: 'pool-A-99', status: 'scheduled' };
+    const live = buildLiveById([]);
+    const resolved = live[stale.id] || stale;
+    expect(resolved.status).toBe('scheduled');
+  });
+});
+
+describe('isRanksLocked', () => {
+  it('unlocked when status is pools', () => {
+    expect(isRanksLocked('pools')).toBe(false);
+  });
+
+  it('locked when status is playoffs', () => {
+    expect(isRanksLocked('playoffs')).toBe(true);
+  });
+
+  it('locked when status is completed', () => {
+    expect(isRanksLocked('completed')).toBe(true);
+  });
+
+  it('locked when status is setup', () => {
+    // CompStatusSetup ("setup") is the pre-pools state. The component
+    // early-returns when pools is empty, so this branch rarely renders,
+    // but the predicate must still report locked for defense-in-depth.
+    expect(isRanksLocked('setup')).toBe(true);
+  });
+
+  it('locked when status is invalid', () => {
+    // CompStatusInvalid ("invalid") is set when a competition is reset.
+    // Pools may still exist on disk but rank inputs must not be editable.
+    expect(isRanksLocked('invalid')).toBe(true);
+  });
+
+  it('locked when status is empty string or undefined', () => {
+    expect(isRanksLocked('')).toBe(true);
+    expect(isRanksLocked(undefined)).toBe(true);
+  });
+});
+
+// mp-i3h regression: pool.matches (from pools[]) only carry sideA/sideB player
+// objects — no id, status, or score. poolMatchesForPool selects from the flat
+// poolMatches list so the detail-view and compact card can display live scores
+// and flip "Score" → "Edit" after a match is recorded.
+describe('poolMatchesForPool', () => {
+  const allMatches = [
+    { id: 'Pool A-0', status: 'completed', sideA: 'Alice', sideB: 'Bob' },
+    { id: 'Pool A-1', status: 'scheduled', sideA: 'Carol', sideB: 'David' },
+    { id: 'Pool B-0', status: 'scheduled', sideA: 'Eve', sideB: 'Frank' },
+    { id: 'Pool A-DH-0', status: 'scheduled', sideA: 'Alice', sideB: 'Carol' },
+    { id: 'Pool AB-0', status: 'scheduled', sideA: 'X', sideB: 'Y' }, // prefix-safety: must not match "Pool A"
+  ];
+
+  it('returns matches belonging to the named pool', () => {
+    const result = poolMatchesForPool(allMatches, 'Pool A');
+    expect(result.map(m => m.id)).toEqual(['Pool A-0', 'Pool A-1', 'Pool A-DH-0']);
+  });
+
+  it('does not include matches from a pool with a longer name sharing the prefix', () => {
+    const result = poolMatchesForPool(allMatches, 'Pool A');
+    expect(result.find(m => m.id === 'Pool AB-0')).toBeUndefined();
+  });
+
+  it('returns empty array for an unknown pool name', () => {
+    expect(poolMatchesForPool(allMatches, 'Pool C')).toEqual([]);
+  });
+
+  it('returns empty array for null/undefined pool name', () => {
+    expect(poolMatchesForPool(allMatches, null)).toEqual([]);
+    expect(poolMatchesForPool(allMatches, undefined)).toEqual([]);
+  });
+
+  it('returns empty array for null/undefined poolMatches', () => {
+    expect(poolMatchesForPool(null, 'Pool A')).toEqual([]);
+    expect(poolMatchesForPool(undefined, 'Pool A')).toEqual([]);
+  });
+
+  it('completed match retains status for Score→Edit flip', () => {
+    const result = poolMatchesForPool(allMatches, 'Pool A');
+    expect(result[0].status).toBe('completed');
+    expect(result[1].status).toBe('scheduled');
   });
 });

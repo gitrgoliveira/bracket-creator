@@ -7,13 +7,11 @@ GO_VERSION := 1.26.3
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
-# Build flags
+# Build metadata (used by docker/build and make version; release uses VERSION)
+# Version stamping uses //go:embed in internal/cmd/version — not LDFLAGS.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS := -ldflags "-X github.com/gitrgoliveira/bracket-creator/internal/cmd/version.Version=$(VERSION) \
-           -X github.com/gitrgoliveira/bracket-creator/internal/cmd/version.Commit=$(COMMIT) \
-           -X github.com/gitrgoliveira/bracket-creator/internal/cmd/version.BuildDate=$(BUILD_TIME)"
 
 # OS detection
 UNAME_S := $(shell uname -s)
@@ -122,7 +120,7 @@ $(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx $(GO_SOURCES) $(EMBEDDED_AS
 	@# (internal/cmd/version/get_build_info.sh writes commit.txt/version.txt/build_date.txt
 	@# consumed by //go:embed), so Go's auto VCS stamp is redundant. Go 1.26's default
 	@# -buildvcs=auto fails in git worktrees with "error obtaining VCS status: exit status 128".
-	go build -buildvcs=false $(LDFLAGS) -o $(BIN_PATH)/$(BIN_NAME) .
+	go build -buildvcs=false -o $(BIN_PATH)/$(BIN_NAME) .
 
 examples: go/build ## Build locally and create example files
 	@echo "Cleaning previous examples..."

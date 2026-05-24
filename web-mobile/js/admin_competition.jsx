@@ -284,10 +284,11 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
   );
 }
 
-function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast }) {
+function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
   const [lastSaved, setLastSaved] = useStateA(null);
   const [saveErr, setSaveErr] = useStateA(null);
   const [deleting, setDeleting] = useStateA(false);
+  const [invalidating, setInvalidating] = useStateA(false);
   const [local, setLocal] = useStateA({ ...c });
   const debounceRef = useRefA(null);
   // AdminSettings unmounts when the user navigates to a different section
@@ -766,8 +767,41 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast })
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
         </div>
       </div>
-      <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)" }}>
-        <button className="btn btn--danger btn--ghost" disabled={deleting} onClick={async () => {
+      <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
+        {(local.status === "pools" || local.status === "playoffs") && (
+          <div>
+            <button className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
+              if (confirm(`Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`)) {
+                setInvalidating(true);
+                try {
+                  const updated = await window.API.invalidateCompetition(local.id, password);
+                  if (mountedRef.current) {
+                    // Use the server response (if any) so that server-side
+                    // field updates are reflected immediately. Fall back to
+                    // forcing only `status: "invalid"` if the response isn't
+                    // a competition object. Don't call onUpdate — that would
+                    // trigger a full PUT with unsanitised local state.
+                    const newStatus = (updated && typeof updated === "object" ? updated.status : null) ?? "invalid";
+                    setLocal(prev => (updated && typeof updated === "object"
+                      ? { ...prev, ...updated, players: updated.players ?? prev.players }
+                      : { ...prev, status: "invalid" }));
+                    if (onStatusChange) onStatusChange(newStatus);
+                    showToast("Competition marked invalid.", "success");
+                  }
+                } catch (e) {
+                  if (mountedRef.current) showToast(e.message, "error");
+                } finally {
+                  if (mountedRef.current) setInvalidating(false);
+                }
+              }
+            }}>
+              {invalidating && <span className="spinner" />}
+              {invalidating ? "Marking invalid…" : "Mark competition invalid"}
+            </button>
+            <div className="field__hint" style={{ marginTop: 4 }}>Required before deleting an in-progress competition.</div>
+          </div>
+        )}
+        <button className="btn btn--danger btn--ghost" disabled={deleting || invalidating} onClick={async () => {
           const started = local.status && local.status !== "setup";
           const msg = started
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
@@ -1074,6 +1108,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
+  // localStatus lets AdminSettings report an invalidation immediately so the
+  // page-header StatusBadge flips without waiting for the SSE refresh.
+  // Cleared automatically when the prop status changes (SSE arrives).
+  const [localStatus, setLocalStatus] = useStateA(null);
+  useEffectA(() => { setLocalStatus(null); }, [c.id, c.status]);
   // start() awaits a multi-second backend call (pool generation + bracket
   // build). If the user clicks Back during that window AdminCompetition
   // unmounts and setStarting(false) in finally targets a dead component.
@@ -1165,7 +1204,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             <div className="page-head__eyebrow">{t.name} ›</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{c.name}</h1>
-              <StatusBadge status={c.status} />
+              <StatusBadge status={localStatus ?? c.status} />
             </div>
             <div className="page-head__sub">
               {window.competitionKindLabel(c)} · {c.players.length} {c.kind === "team" ? "teams" : "players"} ·
@@ -1228,7 +1267,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {section === "overview" && <AdminCompOverview c={c} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} />}
             {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
             {section === "lineups" && window.AdminTeamLineupsList && <window.AdminTeamLineupsList comp={c} password={password} showToast={showToast} />}
-            {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} />}
+            {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} onStatusChange={setLocalStatus} />}
             {/* T191/T193 (FR-050d/e): Swiss-round management. */}
             {/* onViewStandings is wired to the public viewer URL so the */}
             {/* operator can navigate into the viewer-mode standings */}

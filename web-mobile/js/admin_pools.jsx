@@ -1,12 +1,13 @@
 // Pools section of a competition: standings tables with rank-override inputs
 // and per-pool drill-down. See web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const pluralize = window.pluralize;
 // Canonical rank cap (admin_helpers.jsx) — mirrors helper.MaxRankOverride
 // on the Go side. The override-rank handler ALSO validates against the
 // actual pool size; this cap is the absolute overflow guard.
 const MAX_RANK = window.MAX_RANK;
+const ScoreEditorModal = window.ScoreEditorModal;
 
 // Pure decision logic for what RankInput.handleBlur should do, given the
 // state of its refs and props at blur time. Returned as a tagged action so
@@ -43,6 +44,84 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
   }
   if (String(next) !== String(initial)) return { action: "commit", value: String(next) };
   return { action: "noop" };
+}
+
+// Regex that strips the trailing match-index segment from a pool-match id to
+// recover the pool name. Backend formats: "PoolName-N", "PoolName-DH-N",
+// "PoolName-TB-N". A plain split('-')[0] breaks on hyphenated pool names
+// (e.g. "Pool A-East-0" → "Pool A", not "Pool A-East"). This regex captures
+// everything before the trailing numeric/DH/TB suffix; ids without a
+// recognisable suffix degrade to "" (no pool name inferable).
+const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
+
+// Extract the pool name from a pool-match id using POOL_MATCH_ID_RE.
+// Returns "" when the id is falsy or has no recognisable suffix.
+// Single source of truth so all callers stay in sync if the backend
+// id format evolves.
+function poolNameFromMatchId(id) {
+  return (id || "").match(POOL_MATCH_ID_RE)?.[1] ?? "";
+}
+
+// Filter a flat poolMatches array down to entries belonging to a single pool.
+// Uses POOL_MATCH_ID_RE so DH/TB suffix variants are handled correctly.
+//
+// pool.matches (helper.Match) carries only sideA/sideB — no id, status, or
+// score data. poolMatches (state.MatchResult) has the full data including the
+// id required by the score API endpoint. Score buttons in the pool-card view
+// must use poolMatchesForPool to get the correct MatchResult objects.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function poolMatchesForPool(poolMatches, poolName) {
+  return (poolMatches || []).filter(m => poolNameFromMatchId(m.id) === poolName);
+}
+
+// Enrich a pool-match object with the comp-* metadata that
+// ScoreEditorModal reads off the match prop. Pool matches arrive as the
+// raw MatchResult shape (id, status, sides, ippons, decision) with none
+// of the comp-level fields the modal needs:
+//   * compKind / teamSize — picks TeamScoreEditorModal vs individual editor
+//   * compId — fetches competition details (maxEnchoPeriods, naginata)
+//              and is the path for decision/score endpoints
+//   * compName — header eyebrow
+//   * phase / poolName — header subtitle ("CompName · PoolName")
+//
+// Pool name falls back to the prefix of the match id ("PoolName-MatchIdx"
+// per parsePoolMatchesRecords in internal/state/pools.go) when the caller
+// can't supply a known pool name. Existing falsy fields on `m` are
+// overwritten with derived values — truthy fields are preserved so a
+// server-injected compId or compKind from a later refresh is not clobbered.
+//
+// sideA/sideB are normalized from plain strings to {id,name} objects via
+// buildPlayerMap so ScoreEditorModal can render competitor names without
+// m.sideA?.name returning undefined.
+//
+// Note: teamSize uses `??` (not `||`) so an explicit teamSize=0 on the
+// match (individual comp) is preserved instead of falling through to the
+// comp's teamSize. The same `??` is applied to the comp.teamSize fallback
+// so a null comp degrades to teamSize=0 (individual) rather than throwing.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
+  if (!m) return m;
+  const derivedPoolName = poolNameOverride || poolNameFromMatchId(m.id);
+  const playerMap = window.buildPlayerMap ? window.buildPlayerMap(comp) : {};
+  const toPlayer = (side) => {
+    if (side && typeof side === "object") return side;
+    if (!side) return { id: "", name: "" };
+    const p = playerMap[side];
+    return p || { id: side, name: side };
+  };
+  return {
+    ...m,
+    sideA: toPlayer(m.sideA),
+    sideB: toPlayer(m.sideB),
+    compId: m.compId || (comp && comp.id) || "",
+    compName: m.compName || (comp && comp.name) || "",
+    compKind: m.compKind || (comp && comp.kind) || "",
+    teamSize: m.teamSize ?? (comp && comp.teamSize) ?? 0,
+    phase: m.phase || "pool",
+    poolName: m.poolName || derivedPoolName,
+  };
 }
 
 // Rank inputs commit on blur / Enter rather than every keystroke. Typing
@@ -148,6 +227,58 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   };
 
   const [selectedPoolName, setSelectedPoolName] = useStateA(null);
+  const [scoreOpenMatch, setScoreOpenMatch] = useStateA(null);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // ScoreEditorModal reads comp-* metadata off the match (compId, compKind,
+  // teamSize, compName, phase, poolName). Pool-match objects from
+  // pools[i].matches carry only the MatchResult shape — no comp-level
+  // enrichment — so we wrap them at the modal boundary via the pure
+  // enrichPoolMatchWithComp helper. See its docstring for the rationale.
+  const enrichPoolMatch = (m, poolNameOverride) => enrichPoolMatchWithComp(m, c, poolNameOverride);
+
+  // pool.matches (helper.Match) only carries sideA/sideB — no id, status, or
+  // score data. poolMatches (state.MatchResult) has the full data including
+  // the id used by the score API endpoint. Use poolMatchesFor filtered by
+  // pool name for rendering match rows so Score/Edit buttons have the real id.
+  // See poolMatchesForPool's docstring for the full rationale.
+  //
+  // Precompute a Map<poolName, MatchResult[]> so poolMatchesFor is O(1) per
+  // lookup instead of O(pools × matches) — each card in the grid called the
+  // old inline filter independently, scanning the full array per pool.
+  const poolMatchesMap = useMemoA(() => {
+    const map = new Map();
+    for (const m of (poolMatches || [])) {
+      const name = poolNameFromMatchId(m.id);
+      if (!name) continue;
+      const bucket = map.get(name);
+      if (bucket) { bucket.push(m); } else { map.set(name, [m]); }
+    }
+    return map;
+  }, [poolMatches]);
+  const poolMatchesFor = (poolName) => poolMatchesMap.get(poolName) ?? [];
+
+  // Modal rendered in both return paths (detail view and card list).
+  const scoreModal = scoreOpenMatch ? (
+    <ScoreEditorModal
+      key={c.id + '-' + scoreOpenMatch.id}
+      match={scoreOpenMatch}
+      prevMatch={null}
+      nextMatch={null}
+      onPrev={null}
+      onNext={null}
+      onClose={() => setScoreOpenMatch(null)}
+      onSubmit={async (patch) => {
+        try {
+          await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch);
+          if (mountedRef.current) setScoreOpenMatch(null);
+        } catch (_err) { /* keep modal open on error */ }
+      }}
+      onSubmitAndNext={null}
+      password={password}
+    />
+  ) : null;
 
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to draw pools.</div></div>;
@@ -159,6 +290,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     const poolStandings = standings ? standings[selectedPool.poolName] : null;
     const court = c.courts[pools.indexOf(selectedPool) % c.courts.length];
     return (
+      <>
       <div className="pool-detail">
         <div style={{ marginBottom: 16 }}>
           <button className="btn btn--sm" onClick={() => setSelectedPoolName(null)}>← All pools</button>
@@ -256,7 +388,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           <div style={{ marginTop: 24 }}>
             <h3 className="section-title">Match Results</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {selectedPool.matches.map(m => (
+              {poolMatchesFor(selectedPool.poolName).map(m => (
                 <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
                   <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id ? m.id.split('-').pop() : ""}</div>
                   <div className="sched-row__players">
@@ -273,7 +405,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
                       {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
                     </div>
-                    <button className="btn btn--sm" onClick={() => onEditScore(c.id, m.id, null, m)}>
+                    <button className="btn btn--sm" onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
                       {m.status === "completed" ? "Edit" : "Score"}
                     </button>
                   </div>
@@ -283,9 +415,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           </div>
         </div>
       </div>
+      {scoreModal}
+      </>
     );
   }
   return (
+    <>
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
@@ -297,7 +432,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         {pools.map((pool) => {
           const poolStandings = standings ? standings[pool.poolName] : null;
           const court = c.courts[pools.indexOf(pool) % c.courts.length];
-          const isDone = pool.matches && pool.matches.every(m => m.status === "completed");
+          const pm = poolMatchesFor(pool.poolName);
+          // pool.matches (helper.Match) has no status field; use poolMatches-
+          // sourced pm entries which carry the full MatchResult including status.
+          const isDone = pm.length > 0 && pm.every(m => m.status === "completed");
           return (
             <div
               key={pool.poolName}
@@ -365,11 +503,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   })}
                 </tbody>
               </table>
-              {pool.matches && pool.matches.length > 0 && (
+              {pm.length > 0 && (
                 <div style={{ marginTop: 12, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", marginBottom: 6 }}>Matches</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {pool.matches.map(m => (
+                    {pm.map(m => (
                       <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center", padding: "2px 0" }}>
                         <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id ? m.id.split('-').pop() : ""}</div>
                         {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
@@ -380,7 +518,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); onEditScore(c.id, m.id, null, m); }}>Score</button>
+                          <button className="btn btn--sm" style={{ padding: "2px 6px", fontSize: 10 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Edit" : "Score"}</button>
                         </div>
                       </div>
                     ))}
@@ -392,11 +530,25 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         })}
       </div>
     </div>
+    {scoreModal}
+    </>
   );
 }
 
 window.AdminPools = AdminPools;
 
-// ES export for the vitest suite — pure helper only. The component
+// ES export for the vitest suite — pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { decideRankCommit };
+
+// Build a map of match id → MatchResult for O(1) live-state lookups.
+function buildLiveById(poolMatches) {
+  return Object.fromEntries((poolMatches || []).map(m => [m.id, m]));
+}
+
+// Returns true when rank inputs should be locked (competition is past the
+// pools phase — playoffs, completed, setup, invalid, or unknown status).
+function isRanksLocked(compStatus) {
+  return compStatus !== "pools";
+}
+
+export { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool, buildLiveById, isRanksLocked };

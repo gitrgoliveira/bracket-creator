@@ -1,7 +1,7 @@
 // Pure-logic tests for buildPlayerMatchHighlight (FR-020, FR-022).
 // Slice 4 / T108–T109: drives "Find my matches" filtering on the viewer home.
 import { describe, it, expect } from 'vitest';
-import { buildPlayerMatchHighlight, mymatchQueueLabel } from '../viewer.jsx';
+import { buildPlayerMatchHighlight, isFollowedPlayer, mymatchQueueLabel } from '../viewer.jsx';
 
 describe('buildPlayerMatchHighlight', () => {
   it('returns matches where playerId is on SideA', () => {
@@ -66,6 +66,48 @@ describe('buildPlayerMatchHighlight', () => {
   it('handles empty / non-array inputs gracefully', () => {
     expect(buildPlayerMatchHighlight('p1', null)).toEqual([]);
     expect(buildPlayerMatchHighlight('', [{ id: 'm1', sideAId: 'p1' }])).toEqual([]);
+  });
+});
+
+describe('isFollowedPlayer', () => {
+  it('matches by UUID first, then falls back to name when ids diverge', () => {
+    // Both sides have ids — same id is a match.
+    const sideA = { id: 'p1', name: 'Alice' };
+    expect(isFollowedPlayer(sideA, { id: 'p1', name: 'Alice' })).toBe(true);
+    // Both sides have ids and they differ — the id check fails but the
+    // name fallback still matches. Documents the two-layer match contract.
+    expect(isFollowedPlayer(sideA, { id: 'p2', name: 'Alice' })).toBe(true);
+  });
+
+  it('falls back to name match when UUID is missing on either side', () => {
+    // Team-match sub-players (or legacy fixtures) may key by display name.
+    expect(isFollowedPlayer({ id: '', name: 'Alice' }, { id: 'p1', name: 'Alice' })).toBe(true);
+    expect(isFollowedPlayer({ name: 'Alice' }, { id: '', name: 'Alice' })).toBe(true);
+    // String side shape (legacy `sideA: 'Alice'`).
+    expect(isFollowedPlayer('Alice', { id: '', name: 'Alice' })).toBe(true);
+  });
+
+  it('rejects different ids and different names', () => {
+    expect(isFollowedPlayer({ id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' })).toBe(false);
+  });
+
+  it('handles null / undefined gracefully', () => {
+    expect(isFollowedPlayer(null, { id: 'p1', name: 'Alice' })).toBe(false);
+    expect(isFollowedPlayer({ id: 'p1' }, null)).toBe(false);
+  });
+
+  it('does not match when only blank ids align (avoids the "" === "" trap)', () => {
+    // FR-020 regression guard: two participants both lacking UUIDs must not
+    // be treated as the same person just because their ids are empty.
+    expect(isFollowedPlayer({ id: '', name: 'Alice' }, { id: '', name: 'Bob' })).toBe(false);
+  });
+
+  it('name fallback is case-insensitive and trims whitespace', () => {
+    // Older payloads or manual entries may differ in capitalisation or
+    // have leading/trailing spaces — treat them as the same player.
+    expect(isFollowedPlayer({ id: '', name: 'ALICE' }, { id: '', name: 'alice' })).toBe(true);
+    expect(isFollowedPlayer({ id: '', name: '  Alice  ' }, { id: '', name: 'Alice' })).toBe(true);
+    expect(isFollowedPlayer('alice', { id: '', name: 'ALICE' })).toBe(true);
   });
 });
 

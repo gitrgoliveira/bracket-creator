@@ -40,6 +40,7 @@
 // dependency a build-graph contract — esbuild will fail loudly rather
 // than fall through to a wrong-shape merge.
 import { mergeMatchPatch as _mergeMatchPatch } from './data.jsx';
+import { normalizeMatch, buildPlayerMap } from './api_serializers.jsx';
 
 // statusSortOrder mirrors annotateBracketQueuePositions in
 // internal/mobileapp/handlers_match.go and the per-court sort in
@@ -311,6 +312,12 @@ function applyPatch(prev, event) {
     // only then is a queue-position recompute meaningful.
     let needsQueueRecompute = false;
 
+    // Built lazily — most events won't hit any of our match IDs (e.g.
+    // sibling-competition updates) so we skip the O(participants) scan
+    // until we actually find a match that needs normalization (T093).
+    let playerMap;
+    const getPlayerMap = () => playerMap ?? (playerMap = buildPlayerMap(prev));
+
     // Queue positions count *scheduled* matches only, so a recompute
     // is needed whenever a match's "scheduled-ness" changes — leaving
     // (→ running / completed / cancelled / forfeit / kiken / …) OR
@@ -337,7 +344,7 @@ function applyPatch(prev, event) {
             const update = resultMap.get(m.id);
             if (update) {
                 changed = true;
-                const merged = _mergeMatchPatch(m, update);
+                const merged = normalizeMatch(_mergeMatchPatch(m, update), getPlayerMap());
                 if (isScheduleAffecting(m.status, merged.status, m, merged)) {
                     needsQueueRecompute = true;
                 }
@@ -367,7 +374,7 @@ function applyPatch(prev, event) {
                     const patch = { ...update };
                     if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
                     if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-                    const merged = _mergeMatchPatch(m, patch);
+                    const merged = normalizeMatch(_mergeMatchPatch(m, patch), getPlayerMap());
                     if (isScheduleAffecting(m.status, merged.status, m, merged)) {
                         bracketNeedsQueueRecompute = true;
                     }

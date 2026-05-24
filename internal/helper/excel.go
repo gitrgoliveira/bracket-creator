@@ -163,36 +163,59 @@ type playerMatchRecord struct {
 	side       string // "left" or "right"
 }
 
-// buildTeamWinnersFormula returns a SUMPRODUCT Excel formula counting individual
-// sub-match wins for one side across the row range [startRow, endRow].
-// middleCol is the "vs/X" column; left=true counts the left side's wins.
-func buildTeamWinnersFormula(middleCol, lVCol, lPCol, rVCol, rPCol string, startRow, endRow int, left bool) string {
-	mRange := fmt.Sprintf("%s%d:%s%d", middleCol, startRow, middleCol, endRow)
-	lcL := fmt.Sprintf(
-		`(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-","")))`,
-		lVCol, startRow, lVCol, endRow, lPCol, startRow, lPCol, endRow)
-	lcR := fmt.Sprintf(
-		`(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d:%s%d," ",""),"0",""),"-","")))`,
-		rPCol, startRow, rPCol, endRow, rVCol, startRow, rVCol, endRow)
-	if left {
-		return fmt.Sprintf(`SUMPRODUCT((UPPER(%s)<>"X")*(%s>%s)*1)`, mRange, lcL, lcR)
-	}
-	return fmt.Sprintf(`SUMPRODUCT((UPPER(%s)<>"X")*(%s>%s)*1)`, mRange, lcR, lcL)
+// strippedLen returns the formula expression
+// LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(<col><row>," ",""),"0",""),"-","")), i.e.
+// the character count of one cell after stripping spaces, zeros, and dashes.
+// Used by the team-summary helpers below — kept as single-cell expressions
+// because passing a range to SUBSTITUTE/LEN does not natively iterate as an
+// array in legacy Excel, Google Sheets, or Apple Numbers; only Excel 365 with
+// dynamic-array semantics evaluates the array form correctly.
+func strippedLen(col string, row int) string {
+	return fmt.Sprintf(`LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s%d," ",""),"0",""),"-",""))`, col, row)
 }
 
-// buildTeamPointsFormula returns a SUMPRODUCT Excel formula summing the
-// point-character count for one side across [startRow, endRow].
-// left=true sums the left side (lVCol+lPCol); false sums the right (rPCol+rVCol).
-func buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol string, startRow, endRow int, left bool) string {
-	rangeA := fmt.Sprintf("%s%d:%s%d", lVCol, startRow, lVCol, endRow)
-	rangeB := fmt.Sprintf("%s%d:%s%d", lPCol, startRow, lPCol, endRow)
-	if !left {
-		rangeA = fmt.Sprintf("%s%d:%s%d", rPCol, startRow, rPCol, endRow)
-		rangeB = fmt.Sprintf("%s%d:%s%d", rVCol, startRow, rVCol, endRow)
+// buildTeamWinnersFormula returns an Excel/Sheets/Numbers-compatible formula
+// counting sub-match wins for one side across the row range [startRow, endRow].
+// middleCol is the "vs/X" column; left=true counts the left side's wins.
+//
+// Each sub-match row contributes one IF clause; the row is skipped when the
+// middle column is "X" (overall tie marker) and otherwise counts a win when
+// the side's stripped-LEN total is strictly greater than the opponent's.
+// We avoid SUMPRODUCT-over-range-with-SUBSTITUTE because that collapses to
+// the first cell outside of Excel 365 dynamic arrays.
+func buildTeamWinnersFormula(middleCol, lVCol, lPCol, rVCol, rPCol string, startRow, endRow int, left bool) string {
+	parts := make([]string, 0, endRow-startRow+1)
+	for r := startRow; r <= endRow; r++ {
+		leftTotal := fmt.Sprintf("(%s+%s)", strippedLen(lVCol, r), strippedLen(lPCol, r))
+		rightTotal := fmt.Sprintf("(%s+%s)", strippedLen(rPCol, r), strippedLen(rVCol, r))
+		win := fmt.Sprintf("%s>%s", leftTotal, rightTotal)
+		if !left {
+			win = fmt.Sprintf("%s>%s", rightTotal, leftTotal)
+		}
+		// Skip the row if it's marked X (tie); otherwise count a win.
+		parts = append(parts, fmt.Sprintf(`IF(UPPER(%s%d)="X",0,IF(%s,1,0))`, middleCol, r, win))
 	}
-	return fmt.Sprintf(
-		`SUMPRODUCT(LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s," ",""),"0",""),"-",""))+LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(%s," ",""),"0",""),"-","")))`,
-		rangeA, rangeB)
+	return strings.Join(parts, "+")
+}
+
+// buildTeamPointsFormula returns an Excel/Sheets/Numbers-compatible formula
+// summing the point-character count for one side across [startRow, endRow].
+// left=true sums the left side (lVCol+lPCol); false sums the right (rPCol+rVCol).
+//
+// As with buildTeamWinnersFormula, each cell is wrapped in its own
+// LEN(SUBSTITUTE(...)) expression — passing a range to SUBSTITUTE/LEN inside
+// SUMPRODUCT only iterates in Excel 365 dynamic arrays; Google Sheets and
+// Apple Numbers collapse it to the first element.
+func buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol string, startRow, endRow int, left bool) string {
+	colA, colB := lVCol, lPCol
+	if !left {
+		colA, colB = rPCol, rVCol
+	}
+	parts := make([]string, 0, endRow-startRow+1)
+	for r := startRow; r <= endRow; r++ {
+		parts = append(parts, fmt.Sprintf("%s+%s", strippedLen(colA, r), strippedLen(colB, r)))
+	}
+	return strings.Join(parts, "+")
 }
 
 func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) {

@@ -20,6 +20,7 @@ info:
     - **`GET /api/competitions/{id}/competitor-status`** — public read; the `POST` write is protected.
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`** — public read; `PUT`/`DELETE` are protected.
     - **`GET /api/competitions/{id}/swiss/standings`** — public read; always public.
+    - **`GET /api/tournament/announcement`** — public read; returns the currently active admin broadcast announcement (204 when none/expired).
   version: 2.1.0
 
 servers:
@@ -530,6 +531,81 @@ paths:
                             `save competition: ...`,
                             `parse participants: ...`. Empty when the row
                             imported successfully.
+
+  # ── Announcements ──────────────────────────────────────────────────────────
+
+  /api/tournament/announcement:
+    get:
+      tags: [tournament]
+      summary: Get active announcement
+      description: |
+        Returns the currently active admin broadcast announcement.
+        Returns `204 No Content` when there is no active announcement or the
+        last one has already expired. No authentication required — viewer screens
+        poll this endpoint on SSE connect to catch announcements they may have
+        missed before subscribing.
+      responses:
+        '200':
+          description: Active announcement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Announcement'
+        '204':
+          description: No active announcement (none set, or the last one has expired).
+
+  /api/tournament/announce:
+    post:
+      tags: [tournament]
+      summary: Broadcast announcement to all viewers
+      description: |
+        Sends a transient text announcement to all connected viewer screens via SSE.
+        The announcement is stored in-memory only (not persisted to disk); a server
+        restart clears it. Late-connecting viewers can retrieve the active announcement
+        via `GET /api/tournament/announcement`.
+
+        **Validation:**
+        - `message` must be non-empty after trimming whitespace.
+        - `message` may not exceed 200 characters (Unicode code-point count).
+        - `durationMinutes` must be one of `5`, `10`, `15`, or `30`.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message, durationMinutes]
+              properties:
+                message:
+                  type: string
+                  description: Announcement text (max 200 chars after trim).
+                  example: "Lunch break for 30 minutes"
+                durationMinutes:
+                  type: integer
+                  enum: [5, 10, 15, 30]
+                  description: How long (minutes) the announcement banner stays visible.
+                  example: 30
+      responses:
+        '200':
+          description: Announcement sent; returns the stored record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Announcement'
+        '400':
+          description: Validation failure (empty/too-long message or invalid duration).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   # ── Competitions (Admin, requires auth) ────────────────────────────────────
 
@@ -1643,8 +1719,9 @@ components:
         recovery endpoints `/api/auth-config` and `/api/tournament/reset`,
         the public read endpoints `GET /api/schedule/estimate`,
         `GET /api/competitions/{id}/competitor-status`,
-        `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`, and
-        `GET /api/competitions/{id}/swiss/standings`,
+        `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`,
+        `GET /api/competitions/{id}/swiss/standings`, and
+        `GET /api/tournament/announcement`,
         and (in file mode only) the bootstrap PUT/POST `/api/tournament`
         while no tournament has been configured yet.
 
@@ -1748,6 +1825,24 @@ components:
       properties:
         error:
           type: string
+
+    Announcement:
+      type: object
+      description: A transient admin broadcast announcement stored in-memory.
+      properties:
+        message:
+          type: string
+          description: Announcement text (max 200 Unicode characters after trim).
+          example: "Lunch break for 30 minutes"
+        sentAt:
+          type: string
+          format: date-time
+          description: Server timestamp when the announcement was sent (RFC 3339).
+        expiresAt:
+          type: string
+          format: date-time
+          description: Timestamp at which the announcement banner auto-dismisses (RFC 3339).
+      required: [message, sentAt, expiresAt]
 
     AppStatus:
       type: object

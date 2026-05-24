@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveCompetitionName, validatePoolSettings, validateSwissSettings } from '../admin_setup.jsx';
+import { deriveCompetitionName, validatePoolSettings, validateSwissSettings, isSendAnnouncementDisabled, sendAnnouncementLabel } from '../admin_setup.jsx';
 
 describe('deriveCompetitionName', () => {
   // Copilot round-8 finding: AdminCreateCompetition.create used
@@ -231,5 +231,33 @@ describe('validateSwissSettings (T190 / FR-050a)', () => {
       const r = validateSwissSettings('swiss', -3);
       expect(r.ok).toBe(false);
     });
+  });
+});
+
+describe('isSendAnnouncementDisabled', () => {
+  it('disabled when message is empty', () => {
+    expect(isSendAnnouncementDisabled('', false)).toBe(true);
+  });
+
+  it('disabled when message is whitespace-only (trimming guard)', () => {
+    expect(isSendAnnouncementDisabled('   ', false)).toBe(true);
+  });
+
+  it('disabled when in-flight (prevents double-send)', () => {
+    expect(isSendAnnouncementDisabled('Hello', true)).toBe(true);
+  });
+
+  it('enabled when message is non-empty and not in-flight', () => {
+    expect(isSendAnnouncementDisabled('Hello', false)).toBe(false);
+  });
+});
+
+describe('sendAnnouncementLabel', () => {
+  it('returns "Send announcement" when idle', () => {
+    expect(sendAnnouncementLabel(false)).toBe('Send announcement');
+  });
+
+  it('returns "Sending..." during in-flight request', () => {
+    expect(sendAnnouncementLabel(true)).toBe('Sending...');
   });
 });

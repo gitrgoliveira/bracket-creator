@@ -190,6 +190,18 @@ function prevEnchoPeriod(current) {
   return Math.max(1, current - 1);
 }
 
+// Pure decision for the draw-toggle action (button and keyboard shortcut).
+// Returns:
+//   {action: "enter"}  — set draw=true, clear pts (only when no scores exist)
+//   {action: "cancel"} — set draw=false (always allowed when in draw mode)
+//   {action: "noop"}   — blocked: scores exist while not in draw mode (button disabled)
+// Exported for vitest.
+function decideDrawToggle({ isDrawToggled, aTotal, bTotal }) {
+  if (isDrawToggled) return { action: "cancel" };
+  if (aTotal === 0 && bTotal === 0) return { action: "enter" };
+  return { action: "noop" };
+}
+
 // EnchoControl — collapsed by default to a small "⏱ Overtime" pill so
 // it occupies <24px of vertical space in the live scoring modal. The
 // full counter UI mounts only when overtime is active (enchoPeriodCount
@@ -761,16 +773,9 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       }
       if (k === "x" || k === "X") {
         ev.preventDefault();
-        if (s.isDrawToggled) {
-          // Cancel-draw is always allowed (mirrors the active-state X button).
-          setIsDrawToggled(false);
-        } else if (s.aTotal === 0 && s.bTotal === 0) {
-          // Toggle-on guarded: any existing score would be silently wiped by
-          // the setAPts([])/setBPts([]) below. The clickable X button has
-          // disabled={aTotal > 0 || bTotal > 0} for the same reason.
-          setIsDrawToggled(true);
-          setAPts([]); setBPts([]);
-        }
+        const r = decideDrawToggle({ isDrawToggled: s.isDrawToggled, aTotal: s.aTotal, bTotal: s.bTotal });
+        if (r.action === "cancel") setIsDrawToggled(false);
+        else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); }
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -831,20 +836,23 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                     </div>
                     {idx === 0 && (
                       <div className="sb-center">
-                        {isDrawToggled ? (
-                          <button className="sb-draw-toggle sb-draw-toggle--active" onClick={() => { setIsDrawToggled(false); }} title="Cancel draw" aria-label="Cancel draw (hikiwake)">X</button>
-                        ) : (
-                          <>
-                            {(aTotal > 0 || bTotal > 0) && <div className="sb-vs">{`${bTotal}–${aTotal}`}</div>}
-                            <button
-                              className="sb-draw-toggle"
-                              onClick={() => { setIsDrawToggled(true); setAPts([]); setBPts([]); }}
-                              disabled={aTotal > 0 || bTotal > 0}
-                              title={aTotal > 0 || bTotal > 0 ? "Clear scores before marking a draw" : "Mark as draw (hikiwake)"}
-                              aria-label="Mark as draw (hikiwake)"
-                            >{aTotal === 0 && bTotal === 0 ? "vs" : "X"}</button>
-                          </>
+                        {!isDrawToggled && (
+                          <div className="sb-vs">
+                            {aTotal === 0 && bTotal === 0 ? "VS" : `${bTotal}–${aTotal}`}
+                          </div>
                         )}
+                        <button
+                          className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
+                          data-testid="scoring-modal-mark-draw"
+                          onClick={() => {
+                            const r = decideDrawToggle({ isDrawToggled, aTotal, bTotal });
+                            if (r.action === "cancel") setIsDrawToggled(false);
+                            else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); }
+                          }}
+                          disabled={!isDrawToggled && (aTotal > 0 || bTotal > 0)}
+                          title={!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")}
+                          aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
+                        >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
                       </div>
                     )}
                   </React.Fragment>
@@ -1763,6 +1771,7 @@ export {
   canIncrementEncho,
   nextEnchoPeriod,
   prevEnchoPeriod,
+  decideDrawToggle,
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,

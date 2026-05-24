@@ -16,6 +16,7 @@ import {
   reconcileFoulsAtOpen,
   nextFoulOnDecrement,
   applyFusenshoToggle,
+  decideDrawToggle,
 } from '../admin_scoring_modal.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
@@ -907,5 +908,58 @@ describe('isNaginataTeam derivation (TeamScoreEditorModal)', () => {
   it('uses Kendo button set when compMeta.config is missing', () => {
     const compMeta = {};
     expect(getIpponButtons(!!compMeta?.config?.naginata)).toEqual(["M", "K", "D", "T", "H"]);
+  });
+});
+
+describe('decideDrawToggle (mp-42g: VS demoted, dedicated draw button)', () => {
+  // decideDrawToggle is the pure predicate used by both the Mark-draw button
+  // and the x/X keyboard shortcut. They now share a single toggle logic so
+  // keyboard and button stay in sync.
+
+  it('returns {action:"cancel"} when draw is already toggled (always allowed)', () => {
+    expect(decideDrawToggle({ isDrawToggled: true, aTotal: 0, bTotal: 0 }))
+      .toEqual({ action: "cancel" });
+  });
+
+  it('returns {action:"cancel"} even when scores exist — cancel is unconditional', () => {
+    expect(decideDrawToggle({ isDrawToggled: true, aTotal: 2, bTotal: 1 }))
+      .toEqual({ action: "cancel" });
+  });
+
+  it('returns {action:"enter"} when draw is not toggled and no scores exist', () => {
+    expect(decideDrawToggle({ isDrawToggled: false, aTotal: 0, bTotal: 0 }))
+      .toEqual({ action: "enter" });
+  });
+
+  it('returns {action:"noop"} when not toggled but aTotal > 0 (button should be disabled)', () => {
+    expect(decideDrawToggle({ isDrawToggled: false, aTotal: 1, bTotal: 0 }))
+      .toEqual({ action: "noop" });
+  });
+
+  it('returns {action:"noop"} when not toggled but bTotal > 0 (button should be disabled)', () => {
+    expect(decideDrawToggle({ isDrawToggled: false, aTotal: 0, bTotal: 1 }))
+      .toEqual({ action: "noop" });
+  });
+
+  it('returns {action:"noop"} when both sides have scored', () => {
+    expect(decideDrawToggle({ isDrawToggled: false, aTotal: 1, bTotal: 2 }))
+      .toEqual({ action: "noop" });
+  });
+
+  describe('keyboard and button consistency contract', () => {
+    it('keyboard x with draw active → cancel (mirrors button onClick)', () => {
+      const r = decideDrawToggle({ isDrawToggled: true, aTotal: 0, bTotal: 0 });
+      expect(r.action).toBe("cancel");
+    });
+
+    it('keyboard x with no draw and no scores → enter (mirrors button onClick)', () => {
+      const r = decideDrawToggle({ isDrawToggled: false, aTotal: 0, bTotal: 0 });
+      expect(r.action).toBe("enter");
+    });
+
+    it('keyboard x with scores → noop (mirrors button disabled state)', () => {
+      const r = decideDrawToggle({ isDrawToggled: false, aTotal: 1, bTotal: 0 });
+      expect(r.action).toBe("noop");
+    });
   });
 });

@@ -553,6 +553,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       authConfig={authConfig}
+      password={password}
+      showToast={showToast}
     />;
   }
 

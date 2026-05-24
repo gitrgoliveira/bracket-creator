@@ -481,10 +481,22 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	require.NoError(t, err)
 	pl, err := f.CalcCellValue(sheet, fmt.Sprintf("F%d", alphaPwRow))
 	require.NoError(t, err)
+	// IV is in column B and IL in column C of the team-results
+	// IV/IL/IT/PW/PL row. Both come from buildTeamWinnersFormula via
+	// the per-row IF clauses, which is the OTHER half of the fix in
+	// this PR — assert them here too so a regression in win-counting
+	// doesn't sneak through unnoticed (Copilot feedback).
+	iv, err := f.CalcCellValue(sheet, fmt.Sprintf("B%d", alphaPwRow))
+	require.NoError(t, err)
+	il, err := f.CalcCellValue(sheet, fmt.Sprintf("C%d", alphaPwRow))
+	require.NoError(t, err)
 
 	// Alpha won 3 ippons per match × 2 matches = 6 PW, 0 PL.
+	// Each of those bouts is also a sub-match victory, so IV = 6 / IL = 0.
 	assert.Equal(t, "6", pw, "Team Alpha PW must total 6 (3 ippons × 2 matches); got %q", pw)
 	assert.Equal(t, "0", pl, "Team Alpha PL must be 0 (Alpha won every sub-bout); got %q", pl)
+	assert.Equal(t, "6", iv, "Team Alpha IV must total 6 (3 sub-match wins × 2 matches); got %q", iv)
+	assert.Equal(t, "0", il, "Team Alpha IL must be 0 (Alpha won every sub-bout); got %q", il)
 }
 
 func TestCreatePools_SingleTree(t *testing.T) {

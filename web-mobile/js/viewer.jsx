@@ -48,14 +48,18 @@ function compMatches(c) {
   // Setup-mode: no backend data yet, return empty (no client-side preview)
   if (c.status === "setup") return out;
 
-  const poolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
+  const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
+  const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
   // Pool-daihyosen matches ("Pool X-DH-N") are representative bouts scored as
   // individual matches even in team competitions — override compKind and teamSize
   // so all isTeam checks (compKind === "team" || teamSize > 0) evaluate false,
   // routing to the individual ScoreEditorModal and rendering individual match UI.
-  poolMatches.forEach(m => {
+  // Flat poolMatches from the viewer API don't carry phase/poolName; derive them
+  // from the match ID (e.g. "Pool A-0" → poolName "Pool A") when absent.
+  rawPoolMatches.forEach(m => {
     const isDH = isPoolDaihyosenID(m.id || "");
-    out.push({ ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+    const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
+    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
   });
 
   const rounds = (c.bracket && c.bracket.rounds) ? c.bracket.rounds : (c.bracket || []);
@@ -395,7 +399,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <span className="vlist-item__icon">🗓</span>
             <div className="vlist-item__rowbody">
               <div className="vlist-item__rowtitle">Full schedule</div>
-              <div className="vlist-item__rowsub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} across {pluralize(tournament.courts.length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
+              <div className="vlist-item__rowsub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} across {pluralize((tournament.courts || []).length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
             </div>
             <span className="vlist-item__rowchev">→</span>
           </button>
@@ -1857,7 +1861,7 @@ if (typeof window !== 'undefined') {
 // Tournament-wide schedule (across competitions) — grouped by day, then court swimlanes + filter
 function ScheduleViewer({ tournament, tweaks }) {
   const allMatches = useMemo(() => tournamentMatches(tournament).filter(hasBothSides), [tournament]);
-  const courts = tournament.courts;
+  const courts = tournament.courts || [];
 
   // T113 / T117 / FR-022 / FR-024: auto-populate the schedule's `picked`
   // filter with the followed-player + watchlist so the existing

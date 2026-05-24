@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -619,5 +619,18 @@ describe('decideNumericUpdate', () => {
     it('"-Infinity" → no save', () => {
       expect(decideNumericUpdate("-Infinity", 1)).toEqual({ value: -Infinity, shouldSave: false });
     });
+  });
+});
+
+describe('getScoreBtnClass', () => {
+  it('returns active variant for non-completed matches', () => {
+    expect(getScoreBtnClass('scheduled')).toBe('score-btn score-btn--active');
+    expect(getScoreBtnClass('running')).toBe('score-btn score-btn--active');
+    expect(getScoreBtnClass(null)).toBe('score-btn score-btn--active');
+    expect(getScoreBtnClass(undefined)).toBe('score-btn score-btn--active');
+  });
+
+  it('returns correct variant for completed matches', () => {
+    expect(getScoreBtnClass('completed')).toBe('score-btn score-btn--correct');
   });
 });

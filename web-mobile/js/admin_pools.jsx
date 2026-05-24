@@ -54,6 +54,14 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 // recognisable suffix degrade to "" (no pool name inferable).
 const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
 
+// Extract the pool name from a pool-match id using POOL_MATCH_ID_RE.
+// Returns "" when the id is falsy or has no recognisable suffix.
+// Single source of truth so all callers stay in sync if the backend
+// id format evolves.
+function poolNameFromMatchId(id) {
+  return (id || "").match(POOL_MATCH_ID_RE)?.[1] ?? "";
+}
+
 // Filter a flat poolMatches array down to entries belonging to a single pool.
 // Uses POOL_MATCH_ID_RE so DH/TB suffix variants are handled correctly.
 //
@@ -64,10 +72,7 @@ const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function poolMatchesForPool(poolMatches, poolName) {
-  return (poolMatches || []).filter(m => {
-    const derivedName = (m.id || "").match(POOL_MATCH_ID_RE)?.[1] ?? "";
-    return derivedName === poolName;
-  });
+  return (poolMatches || []).filter(m => poolNameFromMatchId(m.id) === poolName);
 }
 
 // Enrich a pool-match object with the comp-* metadata that
@@ -98,8 +103,7 @@ function poolMatchesForPool(poolMatches, poolName) {
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   if (!m) return m;
-  const derivedPoolName = poolNameOverride
-    || (m.id ? (m.id.match(POOL_MATCH_ID_RE)?.[1] ?? "") : "");
+  const derivedPoolName = poolNameOverride || poolNameFromMatchId(m.id);
   const playerMap = window.buildPlayerMap ? window.buildPlayerMap(comp) : {};
   const toPlayer = (side) => {
     if (side && typeof side === "object") return side;
@@ -246,7 +250,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const poolMatchesMap = useMemoA(() => {
     const map = new Map();
     for (const m of (poolMatches || [])) {
-      const name = (m.id || "").match(POOL_MATCH_ID_RE)?.[1] ?? "";
+      const name = poolNameFromMatchId(m.id);
       if (!name) continue;
       const bucket = map.get(name);
       if (bucket) { bucket.push(m); } else { map.set(name, [m]); }

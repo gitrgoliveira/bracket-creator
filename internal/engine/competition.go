@@ -414,6 +414,10 @@ func (e *Engine) StartCompetition(id string) error {
 				return err
 			}
 			earlyParticipantsSaved = true
+			// Re-snapshot the mtime after our own write so the
+			// UpdateCompetitionChanged drift check doesn't treat this
+			// deliberate early save as a concurrent modification.
+			loadedParticipantsMtime = e.store.FileMtime(id, "participants.csv")
 		}
 		r1, err := e.GenerateSwissRound(id, 1)
 		if err != nil {

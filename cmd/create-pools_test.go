@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 func TestNewCreatePoolCmd(t *testing.T) {
@@ -214,6 +216,153 @@ func TestCreatePools_RoundRobin(t *testing.T) {
 	assert.NoError(t, err)
 	err = writer.Flush()
 	assert.NoError(t, err)
+}
+
+// TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves is an end-to-end
+// regression check for a single pool of 8 players, single shiaijo, full
+// round robin, individual matches. We populate one ippon mark per match
+// for player 1 (Kevin) so they win all 7 of their bouts, then ask Excel
+// to compute the "Ranking" lookup cell that the elimination bracket
+// reads from. It must resolve to Kevin's name; if the round-robin layout
+// causes the data ranges in the IFERROR(INDEX(...MATCH(1,...))) formula
+// to drift off the actual results table, this assertion fires.
+func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "rr-pool-8-*.xlsx")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	writer := bufio.NewWriter(tmpFile)
+
+	o := &poolOptions{
+		outputWriter: writer,
+		outputPath:   tmpFile.Name(),
+		numPlayers:   8, // single pool of 8
+		poolWinners:  2,
+		roundRobin:   true,
+		determined:   true,
+		courts:       1, // single shiaijo
+	}
+
+	playerNames := []string{
+		"Kevin Clark", "Luke Rodriguez", "Michael Lewis", "Nathan Lee",
+		"Oliver Walker", "Paul Hall", "Quentin Allen", "Robert Young",
+	}
+	entries := make([]string, len(playerNames))
+	for i, n := range playerNames {
+		entries[i] = fmt.Sprintf("%s,Team %c", n, 'A'+i)
+	}
+
+	require.NoError(t, o.createPools(entries))
+	require.NoError(t, writer.Flush())
+	require.NoError(t, tmpFile.Close())
+
+	f, err := excelize.OpenFile(tmpFile.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	// Disable sheet protection so we can write into score cells.
+	for _, sheet := range f.GetSheetList() {
+		_ = f.UnprotectSheet(sheet)
+	}
+
+	const sheet = "Pool Matches"
+
+	// Stop scanning at the "Results" header — rows below it are the
+	// results-table aggregator formulas, NOT match rows, and writing
+	// into them would clobber the W/L/PW/PL formulas we want to test.
+	var resultsRow int
+	for r := 1; r < 200; r++ {
+		v, _ := f.GetCellValue(sheet, fmt.Sprintf("A%d", r))
+		if v == "Results" {
+			resultsRow = r
+			break
+		}
+	}
+	require.NotZero(t, resultsRow, "could not find Results header")
+
+	// Walk the match rows in column G (red side) / column A (white side)
+	// of the Pool Matches sheet and, whenever Kevin (data!$B$3) is one
+	// of the two sides, write an ippon mark into the score column for
+	// his side so he wins that bout. Leave all other matches blank.
+	kevinDataRef := "'data'!$B$3"
+	// Score columns for an 8-col-per-court layout starting at column A:
+	// A=name(white), B=leftVictories, C=leftPoints, D=middle/vs,
+	// E=rightPoints, F=rightVictories, G=name(red).
+	for row := 4; row < resultsRow; row++ {
+		whiteFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("A%d", row))
+		redFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("G%d", row))
+
+		switch {
+		case strings.Contains(whiteFormula, kevinDataRef):
+			// Kevin is on the white side — left scores B/C win.
+			require.NoError(t, f.SetCellValue(sheet, fmt.Sprintf("B%d", row), "M"))
+		case strings.Contains(redFormula, kevinDataRef):
+			// Kevin is on the red side — right scores E/F win.
+			require.NoError(t, f.SetCellValue(sheet, fmt.Sprintf("F%d", row), "M"))
+		}
+	}
+
+	// Locate the Ranking-header row in column G; the rank-1 lookup formula
+	// is the row immediately below it.
+	var rankingHeaderRow int
+	for r := 1; r < 200; r++ {
+		val, _ := f.GetCellValue(sheet, fmt.Sprintf("G%d", r))
+		if val == "Ranking" {
+			rankingHeaderRow = r
+			break
+		}
+	}
+	require.NotZero(t, rankingHeaderRow, "could not find Ranking header")
+
+	// Kevin should be rank 1; the rank-1 ranking lookup must resolve to him.
+	rank1Cell := fmt.Sprintf("G%d", rankingHeaderRow+1)
+	got, err := f.CalcCellValue(sheet, rank1Cell)
+	require.NoError(t, err, "CalcCellValue %s", rank1Cell)
+	assert.Equal(t, "Kevin Clark", got,
+		"single round-robin pool of 8: rank-1 ranking cell %s should resolve to the player who won all 7 matches",
+		rank1Cell)
+
+	// No formula in any sheet may have a leading '=' — OOXML <f> bodies
+	// that start with '=' are tolerated by Excel but rejected by Google
+	// Sheets and Apple Numbers (mp-x7h).
+	for _, s := range f.GetSheetList() {
+		rows, _ := f.GetRows(s)
+		for r := range rows {
+			for c := range rows[r] {
+				cell, _ := excelize.CoordinatesToCellName(c+1, r+1)
+				form, _ := f.GetCellFormula(s, cell)
+				if form == "" {
+					continue
+				}
+				assert.NotEqual(t, byte('='), form[0],
+					"sheet=%s cell=%s formula starts with '=': %q (breaks Google Sheets / Apple Numbers)", s, cell, form)
+			}
+		}
+	}
+
+	// And the elimination bracket's Pool A-1st CONCATENATE formula must
+	// reference the rank-1 cell (regression for mp-c5c — empty-cell ref).
+	const elimSheet = "Elimination Matches"
+	var poolARefCell string
+	for r := 1; r < 50; r++ {
+		for _, col := range []string{"A", "G"} {
+			form, _ := f.GetCellFormula(elimSheet, fmt.Sprintf("%s%d", col, r))
+			if strings.Contains(form, `"Pool A-1st `) {
+				// extract the trailing cell reference like 'Pool Matches'!G45
+				idx := strings.Index(form, "'Pool Matches'!")
+				if idx >= 0 {
+					rest := form[idx+len("'Pool Matches'!"):]
+					end := strings.Index(rest, ")")
+					if end > 0 {
+						poolARefCell = rest[:end]
+					}
+				}
+			}
+		}
+	}
+	require.NotEmpty(t, poolARefCell, "elimination bracket should reference Pool A-1st cell")
+	assert.Equal(t, rank1Cell, poolARefCell,
+		"elimination bracket Pool A-1st must point at the rank-1 ranking cell")
 }
 
 func TestCreatePools_SingleTree(t *testing.T) {

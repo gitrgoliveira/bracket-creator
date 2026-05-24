@@ -387,16 +387,80 @@ func (e *Engine) StartCompetition(id string) error {
 		comp.RoundRobin = true
 	}
 
-	// Generate Pools or Bracket. These calls write to other files
-	// (pools.csv / bracket.json) via their own per-comp lock
-	// acquisitions, so they run OUTSIDE the UpdateCompetitionChanged
-	// transform below (re-entering the lock would deadlock).
-	if comp.Format == state.CompFormatPools || comp.Format == state.CompFormatLeague {
+	// Generate Pools, Bracket, or Swiss round-1. These calls write to other
+	// files (pools.csv / bracket.json / pool-matches.csv) via their own
+	// per-comp lock acquisitions, so they run OUTSIDE the
+	// UpdateCompetitionChanged transform below (re-entering the lock would
+	// deadlock).
+	//
+	// earlyParticipantsSaved tracks whether we persisted the resolved roster
+	// before GenerateSwissRound (which reloads participants from disk). Set to
+	// true when a Swiss start saves early so the trailing resolvedSlots block
+	// skips the redundant write (the HasParticipantIDs flip still runs).
+	earlyParticipantsSaved := false
+	switch comp.Format {
+	case state.CompFormatPools, state.CompFormatLeague:
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusPools
-	} else {
+	case state.CompFormatSwiss:
+		// Guard 1: SwissCurrentRound already bumped — AdvanceSwissRound ran to
+		// completion before StartCompetition was called.
+		if comp.SwissCurrentRound != 0 {
+			return validationErrorf("competition %s Swiss round %d already generated; cannot start again", id, comp.SwissCurrentRound)
+		}
+		// Guard 2: pool-matches.csv has matches that have already been acted on
+		// (at least one is non-scheduled). AdvanceSwissRound may have written
+		// round-1 matches before its UpdateCompetitionChanged round-bump failed,
+		// leaving SwissCurrentRound=0 while the CSV has scored/running content.
+		// We only block when scoring has started — purely-scheduled entries are
+		// safe to overwrite on a retry (StartCompetition itself could have written
+		// them in a previous call that then failed inside UpdateCompetitionChanged,
+		// and the operator retrying should not be permanently stuck).
+		if existing, loadErr := e.store.LoadPoolMatches(id); loadErr != nil {
+			return loadErr
+		} else {
+			for _, m := range existing {
+				if m.Status != "" && m.Status != state.MatchStatusScheduled {
+					return validationErrorf("competition %s already has scored Swiss matches on disk (match %s status=%s); cannot start again", id, m.ID, m.Status)
+				}
+			}
+		}
+		// GenerateSwissRound reloads participants from disk. If
+		// resolveReservedSlots mutated the in-memory roster (e.g. replaced
+		// placeholder reserved-slot entries), save it now so round-1 pairings
+		// use the resolved names rather than the placeholder originals.
+		if resolvedSlots {
+			// Pre-check: verify no concurrent admin write landed between our
+			// initial load and this early save. Without this guard, a write that
+			// arrives in that window would be silently overwritten, and the
+			// subsequent mtime re-snapshot would hide it from the later drift
+			// check inside UpdateCompetitionChanged. The mtime check is
+			// lock-free (same caveat as the transform's check at line ~505), so
+			// a very tight race can still slip through — but this closes the
+			// large window that was previously unguarded.
+			if e.store.FileMtime(id, "participants.csv") != loadedParticipantsMtime {
+				return validationErrorf("competition %s participants changed during start; retry", id)
+			}
+			if err := e.store.SaveParticipants(id, players); err != nil {
+				return err
+			}
+			earlyParticipantsSaved = true
+			// Re-snapshot after our own write so UpdateCompetitionChanged's
+			// drift check doesn't flag this deliberate save as concurrent.
+			loadedParticipantsMtime = e.store.FileMtime(id, "participants.csv")
+		}
+		r1, err := e.GenerateSwissRound(id, 1)
+		if err != nil {
+			return err
+		}
+		if err := e.store.SavePoolMatches(id, r1); err != nil {
+			return err
+		}
+		comp.SwissCurrentRound = 1
+		comp.Status = state.CompStatusPools
+	default:
 		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
 			return err
 		}
@@ -527,6 +591,9 @@ func (e *Engine) StartCompetition(id string) error {
 			}
 		}
 		current.Status = comp.Status
+		if comp.Format == state.CompFormatSwiss {
+			current.SwissCurrentRound = comp.SwissCurrentRound
+		}
 		// HasParticipantIDs is auto-managed (saveCompetitionWithPlayers
 		// sets it to true when Players is non-empty) and not exposed in
 		// the admin UI as an editable field. Pre-fix this was an
@@ -565,9 +632,14 @@ func (e *Engine) StartCompetition(id string) error {
 	// See `resolvedSlots` flag from resolveReservedSlots above. Skip the
 	// save when the pipeline didn't mutate the roster (no reserved-slot
 	// resolution happened); otherwise persist the resolved IDs/names.
+	// earlyParticipantsSaved is set by the Swiss case above when it already
+	// saved to disk — don't write twice, but still run the HasParticipantIDs
+	// flip below.
 	if resolvedSlots {
-		if err := e.store.SaveParticipants(id, players); err != nil {
-			return err
+		if !earlyParticipantsSaved {
+			if err := e.store.SaveParticipants(id, players); err != nil {
+				return err
+			}
 		}
 		// Deferred HasParticipantIDs flip — runs ONLY after the
 		// participants file lands successfully with UUID-prefixed rows.

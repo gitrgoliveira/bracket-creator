@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -173,4 +176,147 @@ func TestMaybeAutoCompletePools_LeagueFormat(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusComplete, comp.Status)
+}
+
+// TestStartCompetition_SwissFormat pins the Swiss start flow:
+// status must move to "pools", SwissCurrentRound must be 1,
+// Round 1 matches must be written to pool-matches.csv, and no
+// bracket.json must be created.
+func TestStartCompetition_SwissFormat(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "swiss-start"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Swiss Start Test",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      state.CompStatusSetup,
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status, "Swiss start must set status to pools, not playoffs")
+	assert.Equal(t, 1, comp.SwissCurrentRound, "Swiss start must set SwissCurrentRound to 1")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, matches, "Round 1 matches must be written to pool-matches.csv on start")
+	for _, m := range matches {
+		assert.True(t, strings.HasPrefix(m.ID, "Swiss-R1-"),
+			"Round 1 match IDs must carry Swiss-R1- prefix, got %s", m.ID)
+	}
+
+	_, statErr := os.Stat(filepath.Join(dir, "competitions", compID, "bracket.json"))
+	assert.True(t, os.IsNotExist(statErr), "bracket.json must not be created for Swiss start")
+}
+
+// TestStartCompetition_SwissRoundAlreadyGenerated verifies that StartCompetition
+// rejects the call when SwissCurrentRound != 0. This guards against
+// AdvanceSwissRound having partially run before start (matches written,
+// round bumped) and StartCompetition silently overwriting them.
+func TestStartCompetition_SwissRoundAlreadyGenerated(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-start-guard"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                compID,
+		Name:              "Swiss Guard Test",
+		Kind:              "individual",
+		Format:            state.CompFormatSwiss,
+		SwissRounds:       3,
+		Courts:            []string{"A"},
+		StartTime:         "09:00",
+		Status:            state.CompStatusSetup,
+		SwissCurrentRound: 1, // simulates AdvanceSwissRound having already run
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave",
+	})
+
+	err := eng.StartCompetition(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already generated")
+}
+
+// TestStartCompetition_SwissMatchesOnDiskRoundZero_Scored verifies Guard 2:
+// pool-matches.csv has scored entries (non-scheduled status) and
+// SwissCurrentRound==0 — StartCompetition must reject to avoid data loss.
+// This covers AdvanceSwissRound having partially run (wrote matches, scored
+// a match, but the round-bump UpdateCompetitionChanged failed).
+func TestStartCompetition_SwissMatchesOnDiskRoundZero_Scored(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-start-guard-scored"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Swiss CSV Guard Test (scored)",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      state.CompStatusSetup,
+		// SwissCurrentRound deliberately left at 0 — simulates the bump failing
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave",
+	})
+	// Pre-write matches where one has been scored (completed). Guard 2 must
+	// reject here because overwriting would silently discard that result.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Swiss-R1-0", Status: state.MatchStatusCompleted},
+		{ID: "Swiss-R1-1", Status: state.MatchStatusScheduled},
+	}))
+
+	err := eng.StartCompetition(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scored Swiss matches")
+}
+
+// TestStartCompetition_SwissMatchesOnDiskRoundZero_AllScheduled verifies that
+// Guard 2 allows retry when all pool-matches.csv entries are still scheduled
+// (no scoring has occurred). This covers StartCompetition itself having
+// partially run — it writes round-1 matches then fails inside
+// UpdateCompetitionChanged. The operator must be able to retry without first
+// manually cleaning up the CSV.
+func TestStartCompetition_SwissMatchesOnDiskRoundZero_AllScheduled(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-start-retry-scheduled"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Swiss Retry Test (all scheduled)",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      state.CompStatusSetup,
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave",
+	})
+	// Pre-write purely scheduled matches — simulates a prior StartCompetition
+	// that wrote round-1 matches then failed at UpdateCompetitionChanged.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Swiss-R1-0", Status: state.MatchStatusScheduled},
+		{ID: "Swiss-R1-1", Status: state.MatchStatusScheduled},
+	}))
+
+	// Retry must succeed (regenerates/overwrites unscored matches).
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status)
+	assert.Equal(t, 1, comp.SwissCurrentRound)
 }

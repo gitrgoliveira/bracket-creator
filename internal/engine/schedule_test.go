@@ -186,6 +186,33 @@ func TestGenerateSchedule_BracketFormat(t *testing.T) {
 	assert.Equal(t, "A", b2Entry.Court, "empty court should default to 'A'")
 }
 
+// TestGenerateSchedule_SwissFormat verifies that GenerateSchedule produces
+// "pool" type entries for a Swiss competition (matches live in pool-matches.csv,
+// same as the Pools format).
+func TestGenerateSchedule_SwissFormat(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "gen-sched-swiss"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Format: state.CompFormatSwiss,
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Swiss-R1-0", Court: "A", Status: state.MatchStatusScheduled},
+		{ID: "Swiss-R1-1", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+
+	err := eng.GenerateSchedule(compID)
+	require.NoError(t, err)
+
+	entries, err := store.LoadSchedule(compID)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "Swiss competition must produce one schedule entry per pool match")
+	for _, e := range entries {
+		assert.Equal(t, "pool", e.MatchType, "Swiss schedule entries must use 'pool' match type")
+	}
+}
+
 // TestGenerateSchedule_CompNotFound verifies error when competition does not exist.
 func TestGenerateSchedule_CompNotFound(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)

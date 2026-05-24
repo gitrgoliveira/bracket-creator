@@ -91,7 +91,7 @@ function validateSwissSettings(format, swissRounds) {
   return { ok: true, error: null };
 }
 
-function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig }) {
+function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant — auth comes
   // from TOURNAMENT_PASSWORD_HASH and the backend rejects PUTs that
   // try to set a non-empty password. Surfacing the field anyway would
@@ -107,6 +107,29 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [checkInEnd, setCheckInEnd] = useStateA(tournament.checkInWindowEnd || "");
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
+
+  const [announcementMessage, setAnnouncementMessage] = useStateA("");
+  const [announcementDuration, setAnnouncementDuration] = useStateA(5);
+  const [announcementInFlight, setAnnouncementInFlight] = useStateA(false);
+
+  const handleSendAnnouncement = async () => {
+    const trimmed = announcementMessage.trim();
+    if (!trimmed) return;
+    setAnnouncementInFlight(true);
+    try {
+      await window.API.sendAnnouncement(trimmed, announcementDuration, password);
+      setAnnouncementMessage("");
+      if (showToast) {
+        showToast(`Announcement broadcast for ${announcementDuration} minutes!`, "success");
+      }
+    } catch (e) {
+      if (showToast) {
+        showToast(e.message, "error");
+      }
+    } finally {
+      setAnnouncementInFlight(false);
+    }
+  };
 
   const handleSave = () => {
     // Trim early and send the trimmed value. The empty-name check below
@@ -205,6 +228,51 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button className="btn" onClick={onCancel}>Cancel</button>
             <button className="btn btn--primary" onClick={handleSave}>Save changes</button>
+          </div>
+        </div>
+
+        <div className="page-head" style={{ marginTop: 32 }}><h1 className="page-head__title">Broadcast announcement</h1></div>
+        <div className="card card--pad-lg">
+          <div className="field">
+            <label className="field__label">Message</label>
+            <textarea
+              className="input"
+              style={{ width: "100%", height: 80, boxSizing: "border-box", padding: "8px 12px", resize: "vertical" }}
+              maxLength={200}
+              placeholder="e.g. Lunch break for 30 minutes, Delay on court B..."
+              value={announcementMessage}
+              onChange={(e) => setAnnouncementMessage(e.target.value)}
+            />
+            <div className="field__hint" style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+              <span>Maximum 200 characters. Pushes a temporary announcement to all active viewer screens.</span>
+              <span>{announcementMessage.length}/200</span>
+            </div>
+          </div>
+          <div className="field">
+            <label className="field__label">Duration</label>
+            <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+              {[5, 10, 15, 30].map((m) => (
+                <label key={m} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 500 }}>
+                  <input
+                    type="radio"
+                    name="duration"
+                    value={m}
+                    checked={announcementDuration === m}
+                    onChange={() => setAnnouncementDuration(m)}
+                  />
+                  <span>{m} min</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+            <button
+              className="btn btn--primary"
+              disabled={isSendAnnouncementDisabled(announcementMessage, announcementInFlight)}
+              onClick={handleSendAnnouncement}
+            >
+              {sendAnnouncementLabel(announcementInFlight)}
+            </button>
           </div>
         </div>
       </div>
@@ -784,6 +852,16 @@ window.AdminEditTournament = AdminEditTournament;
 window.AdminCreateCompetition = AdminCreateCompetition;
 window.AdminImportPage = AdminImportPage;
 
+// Pure helpers for the announcement-broadcast controls.
+// isSendDisabled drives the button's `disabled` attribute.
+// sendLabel drives the button's text (inFlight → "Sending…").
+function isSendAnnouncementDisabled(message, inFlight) {
+  return !message.trim() || inFlight;
+}
+function sendAnnouncementLabel(inFlight) {
+  return inFlight ? "Sending..." : "Send announcement";
+}
+
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, isSendAnnouncementDisabled, sendAnnouncementLabel };

@@ -74,6 +74,12 @@ function clampMatchDuration(raw, fallback = 3) {
   return Number.isFinite(raw) && Number.isInteger(raw) && raw >= 1 ? raw : fallback;
 }
 
+// True when the list is non-empty and every match is in 'completed' status.
+// Drives the "All matches scored" banner in AdminScoreEditor.
+function allMatchesCompleted(matches) {
+  return matches.length > 0 && matches.every(m => m.status === "completed");
+}
+
 // T041 (US1, FR-002, SC-002): per-tablet localStorage key. The URL
 // ?court= param remains canonical — localStorage is a fallback that lets
 // a bookmarked operator tablet land on the same shiaijo after they
@@ -203,8 +209,12 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
   });
   const courtOrder = (a, b) => {
     const order = { running: 0, scheduled: 1, completed: 2 };
-    const ao = order[a.status] ?? 99;
-    const bo = order[b.status] ?? 99;
+    // Unknown / new statuses sink to "completed" (=2) — matches the
+    // ScheduleViewer in viewer.jsx and the patch.jsx _orderByCourtKey
+    // helper, so admin and viewer surfaces stay in sync if a new
+    // terminal status (kiken / fusenpai / forfeit) ever appears.
+    const ao = order[a.status] ?? 2;
+    const bo = order[b.status] ?? 2;
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   };
@@ -507,7 +517,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
       }}
       style={{ cursor: "grab", position: "relative" }}
     >
-      <div>
+      <div className="tw-match__meta">
         {editingTime ? (
           <form onSubmit={submitTime} style={{ display: "flex", gap: 2 }}>
             <window.StableInput
@@ -678,6 +688,18 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
         {filtered.length === 0 && (
           <div className="empty"><div className="icon">🔍</div><h3>No matches</h3><div style={{ fontSize: 12 }}>Adjust your filters or check that competitions have started.</div></div>
         )}
+        {/* "All matches scored" banner. Guarded against statusFilter === "complete"
+            because the filter trivially makes filtered all-completed, which would
+            misleadingly fire the banner. The wording is intentionally generic — this
+            view spans all match phases (pool + bracket) and all competition formats
+            (pools/mixed/playoffs/league/swiss), so we don't claim "Pool play is
+            complete" or point at a specific next tab. */}
+        {statusFilter !== "complete" && allMatchesCompleted(filtered) && (
+          <div className="alert alert--success" style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>All matches scored</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Every visible match is complete. Open the competition to review standings, generate playoffs, or start the next phase.</div>
+          </div>
+        )}
         {filtered.map((m) => {
           const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
           const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
@@ -728,6 +750,15 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
         const openIdx = sameCourt.findIndex(m => `${m.compId}:${m.id}` === `${openMatch.compId}:${openMatch.id}`);
         const prevMatch = openIdx > 0 ? sameCourt[openIdx - 1] : null;
         const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
+        // Finish+Start Next must only advance to a non-completed match. Without
+        // this guard, the last scheduled match has nextMatch = the first completed
+        // match (completed matches sort after scheduled in the list), causing the
+        // modal to loop back to match 1 after the final save.
+        // Guard on openIdx >= 0: when openMatch is not found in sameCourt (openIdx
+        // === -1), slice(0) would scan the whole array and return a spurious match.
+        const nextActiveMatch = openIdx >= 0
+          ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null
+          : null;
         return (
           <ScoreEditorModal
             key={openMatch.compId + '-' + openMatch.id}
@@ -745,10 +776,10 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId }) 
                 // Error handled by onEditScore/toast, but we catch here to keep modal open
               }
             }}
-            onSubmitAndNext={nextMatch ? async (patch) => {
+            onSubmitAndNext={nextActiveMatch ? async (patch) => {
               try {
                 await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-                if (mountedRef.current) setOpenMatch(nextMatch);
+                if (mountedRef.current) setOpenMatch(nextActiveMatch);
               } catch (_err) { /* keep modal open on error */ }
             } : null}
           />
@@ -854,4 +885,4 @@ window.AdminExport = AdminExport;
 
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { timeEdited, timeToMinutes, clampMatchDuration };
+export { timeEdited, timeToMinutes, clampMatchDuration, allMatchesCompleted };

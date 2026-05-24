@@ -467,6 +467,20 @@ const API = {
         }
         return true;
     },
+    // Returns the updated competition JSON (including the new `status`) so
+    // callers can apply it to local state immediately instead of waiting for
+    // the SSE refresh / tournament refetch to land.
+    async invalidateCompetition(id, password) {
+        const res = await fetch(`/api/competitions/${id}/invalidate`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to invalidate competition");
+        }
+        return res.json();
+    },
     // T129/T130: per-round team lineups (FR-040). GET returns the persisted
     // TeamLineup for (compId, teamId, round) — 404 when no lineup has been
     // submitted yet, which the form treats as "blank, editable". PUT replaces
@@ -573,6 +587,32 @@ const API = {
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
+        }
+        return res.json();
+    },
+    async sendAnnouncement(message, durationMinutes, password) {
+        const res = await fetch('/api/tournament/announce', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ message, durationMinutes })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to send announcement (Status ${res.status})`);
+        }
+        return res.json();
+    },
+    async fetchAnnouncement() {
+        const res = await fetch('/api/tournament/announcement');
+        if (res.status === 204) {
+            return null;
+        }
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to fetch announcement (Status ${res.status})`);
         }
         return res.json();
     }

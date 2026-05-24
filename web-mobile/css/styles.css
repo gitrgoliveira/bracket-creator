@@ -1649,6 +1649,7 @@ a:hover {
 }
 
 .viewer__shell {
+  width: 100%;
   max-width: 480px;
   margin: 0 auto;
   background: var(--bg);
@@ -1813,11 +1814,23 @@ a:hover {
   letter-spacing: 0.05em;
 }
 
+/* Shared card styling — applies to both the home MyMatchPanel
+   <button> and the ViewerOverview <div> mount sites. */
 .my-match__opp {
+  display: block;
+  width: 100%;
   margin-top: 14px;
   padding: 12px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 10px;
+}
+
+/* Button-only resets: keep these on <button>.my-match__opp so the
+   non-clickable <div> in ViewerOverview doesn't look interactive. */
+button.my-match__opp {
+  border: none;
+  text-align: left;
+  cursor: pointer;
 }
 
 .my-match__opp .l {
@@ -1844,6 +1857,32 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Responsive overrides — placed after all base rules they target so the
+   cascade is correct. At 768px+ the shell widens; at 1024px+ the schedule
+   grid switches to two columns. */
+@media (min-width: 768px) {
+  .viewer__shell {
+    max-width: 768px;
+  }
+  .viewer__body {
+    padding: 16px 20px 80px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .viewer__shell {
+    max-width: 1024px;
+  }
+  .viewer__body {
+    padding: 20px 28px 80px;
+  }
+  .vsched {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
 }
 
 .vsched-item {
@@ -2708,8 +2747,12 @@ a:hover {
 
 .tw-match {
   display: grid;
-  grid-template-columns: 56px 1fr auto;
-  gap: 10px;
+  /* Cap column 1 at 110px so a pathological translated round/phase label
+     can't squeeze the players column. Ellipsis on .tw-match__phase (col 1)
+     handles clipping past the cap. .tw-match__name (col 2) clips independently
+     via its own overflow rule. */
+  grid-template-columns: minmax(65px, 110px) 1fr auto;
+  gap: 12px;
   align-items: center;
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -2733,6 +2776,13 @@ a:hover {
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
+/* First grid column: time + phase + queue pill. min-width: 0 allows
+   the grid item to shrink below its content size so .tw-match__phase
+   can ellipsis-truncate a long pool/round label. */
+.tw-match__meta {
+  min-width: 0;
+}
+
 .tw-match__time {
   font-family: var(--font-mono);
   font-weight: 600;
@@ -2745,6 +2795,9 @@ a:hover {
   margin-top: 1px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tw-match__players {
@@ -2766,7 +2819,10 @@ a:hover {
 .tw-match__comp {
   font-size: 10.5px;
   color: var(--ink-3);
-  margin-top: 2px;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tw-match__actions {
@@ -3059,14 +3115,17 @@ a:hover {
 .sb-draw-toggle {
   font-family: var(--font-display);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.1em;
   color: var(--ink-4);
   background: none;
   border: 2px dashed var(--ink-2);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px 14px;
+  min-width: 96px;
+  min-height: 44px;
+  margin-top: 8px;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
@@ -3076,14 +3135,23 @@ a:hover {
   color: var(--ink-2);
 }
 
+.sb-draw-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.sb-draw-toggle:disabled:hover {
+  border-color: var(--ink-2);
+  color: var(--ink-4);
+}
+
 .sb-draw-toggle--active {
   background: var(--ink-1);
   border-color: var(--ink-5);
   border-style: solid;
   color: var(--ink-5);
-  font-size: 22px;
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 700;
+  letter-spacing: 0.05em;
 }
 
 .sb-controls {
@@ -5131,3 +5199,87 @@ a:hover {
   }
 }
 
+/* Announcement Banner - Feature mp-h60 */
+.announcement-banner {
+  position: relative;
+  width: 100%;
+  background: linear-gradient(135deg, #d97706, #b45309);
+  color: #ffffff;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1001;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.announcement-banner__content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.announcement-banner__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.announcement-banner__message {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  margin: 0;
+  word-break: break-word;
+  flex: 1;
+}
+
+.announcement-banner__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.announcement-banner__badge {
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.announcement-banner__dismiss {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.announcement-banner__dismiss:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}

@@ -1,7 +1,7 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
-const { useState, useMemo, useRef: useRefV } = React;
+const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 
@@ -48,14 +48,18 @@ function compMatches(c) {
   // Setup-mode: no backend data yet, return empty (no client-side preview)
   if (c.status === "setup") return out;
 
-  const poolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
+  const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
+  const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
   // Pool-daihyosen matches ("Pool X-DH-N") are representative bouts scored as
   // individual matches even in team competitions — override compKind and teamSize
   // so all isTeam checks (compKind === "team" || teamSize > 0) evaluate false,
   // routing to the individual ScoreEditorModal and rendering individual match UI.
-  poolMatches.forEach(m => {
+  // Flat poolMatches from the viewer API don't carry phase/poolName; derive them
+  // from the match ID (e.g. "Pool A-0" → poolName "Pool A") when absent.
+  rawPoolMatches.forEach(m => {
     const isDH = isPoolDaihyosenID(m.id || "");
-    out.push({ ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+    const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
+    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
   });
 
   const rounds = (c.bracket && c.bracket.rounds) ? c.bracket.rounds : (c.bracket || []);
@@ -107,6 +111,18 @@ function matchParticipantNames(m) {
   const aName = (m.sideA && typeof m.sideA === "object" ? m.sideA.name : m.sideA) || "";
   const bName = (m.sideB && typeof m.sideB === "object" ? m.sideB.name : m.sideB) || "";
   return [aName, bName];
+}
+
+// Check whether a participant object `p` refers to the followed player,
+// matching by ID first (UUID) then by name as a fallback for cases where
+// team-match sub-players or legacy fixtures key by display name only.
+function isFollowedPlayer(p, followed) {
+  if (!p || !followed) return false;
+  const pId = (typeof p === "object" ? p.id : null) || "";
+  const pName = (typeof p === "object" ? p.name : p) || "";
+  if (pId && followed.id && pId === followed.id) return true;
+  if (pName && followed.name && pName.trim().toLowerCase() === followed.name.trim().toLowerCase()) return true;
+  return false;
 }
 
 // Return the subset of `matches` where the followed player participates.
@@ -383,7 +399,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <span className="vlist-item__icon">🗓</span>
             <div className="vlist-item__rowbody">
               <div className="vlist-item__rowtitle">Full schedule</div>
-              <div className="vlist-item__rowsub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} across {pluralize(tournament.courts.length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
+              <div className="vlist-item__rowsub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} across {pluralize((tournament.courts || []).length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
             </div>
             <span className="vlist-item__rowchev">→</span>
           </button>
@@ -547,6 +563,31 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
   );
 }
 
+// mymatchQueueLabel — FR-025 label for the "Your next match" Queue chip.
+//
+// Contract:
+//   - status==="scheduled" + queuePosition===1 → "Next up"
+//   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
+//   - status==="running"                       → null (round label already shows " · LIVE NOW")
+//   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
+//
+// Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
+// so all three viewer surfaces agree. Running matches return null because
+// the my-match__round label already appends " · LIVE NOW" — rendering it
+// again in the Queue chip would be a duplicate. We intentionally do NOT
+// fall back to "Scheduled HH:MM" the way display.jsx does — the
+// MyMatchPanel already has a dedicated Time chip.
+// Exported for unit-testing.
+export function mymatchQueueLabel(m) {
+  if (!m) return null;
+  if (m.status === "running") return null;
+  if (m.status !== "scheduled") return null;
+  const qp = Number(m.queuePosition);
+  if (!Number.isFinite(qp) || qp <= 0) return null;
+  if (qp === 1) return "Next up";
+  return `${qp - 1} before yours`;
+}
+
 // MyMatchPanel — "Find my matches" entry point + active "Your next match"
 // card. Two states:
 //   1) No followed player yet → render a picker; selecting persists to
@@ -603,16 +644,33 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
     );
   }
 
-  const aId = nextMatch.sideA && nextMatch.sideA.id ? nextMatch.sideA.id : "";
-  const isOnSideA = aId === followedPlayer.id;
+  const isOnSideA = isFollowedPlayer(nextMatch.sideA, followedPlayer);
   const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
+  // Use the full-text Aka/Shiro badge class (bc-color-badge) consistent with
+  // bracket.jsx — the compact `tw-match__badge` variant is sized 14×14 for
+  // single-letter labels and would clip "AKA"/"SHIRO".
+  const myBadgeClass = isOnSideA ? "bc-color-badge--aka" : "bc-color-badge--shiro";
+  const myBadgeLabel = isOnSideA ? "AKA" : "SHIRO";
+  const oppBadgeClass = isOnSideA ? "bc-color-badge--shiro" : "bc-color-badge--aka";
+  const oppBadgeLabel = isOnSideA ? "SHIRO" : "AKA";
   const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
+  // FR-025: queue position is 1-indexed per court for scheduled matches; 0 for
+  // running/completed. Treat null/undefined/0 as "don't render" so we stay
+  // gracefully empty for non-queued matches and pre-T046 responses. Wording
+  // ("Next up" / "N before yours") mirrors VSchedItem below and display.jsx
+  // so all three viewer surfaces agree. Running matches show null here
+  // because the round label already appends " · LIVE NOW".
+  const queueLabel = mymatchQueueLabel(nextMatch);
+  const queueHighlight = queueLabel === "Next up";
 
   return (
     <div className="my-match" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
       {header}
       <div className="my-match__lbl">Your next match</div>
-      <div className="my-match__name">{followedPlayer.name}</div>
+      <div className="my-match__name">
+        <span className={`bc-color-badge ${myBadgeClass}`}>{myBadgeLabel}</span>
+        {followedPlayer.name}
+      </div>
       <div className="my-match__round">
         {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
         {nextMatch.status === "running" ? " · LIVE NOW" : ""}
@@ -626,14 +684,41 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
           <span className="l">Time</span>
           <span className="v">{nextMatch.scheduledAt || "TBA"}</span>
         </div>
+        {queueLabel && (
+          <div
+            className="my-match__chip"
+            data-testid="my-match-queue"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className="l">Queue</span>
+            {/* The .my-match card background is var(--accent) (dark blue), so
+                colouring text with var(--accent) renders unreadable. The chip
+                inherits white from --accent-fg; emphasise the live/up-next
+                state with full opacity + a Unicode bullet instead.
+                Wrap the decorative bullet in aria-hidden to keep screen reader
+                announcements clean and focused on the queue label text. */}
+            <span className="v" style={{ opacity: queueHighlight ? 1 : 0.92 }}>
+              {/* Decorative bullet glyph — hidden from screen readers so the
+                  announcement is just the queue label text ("Next up" /
+                  "1 before yours") without a spurious "bullet" prefix. */}
+              {queueHighlight ? <span aria-hidden="true">{"• "}</span> : null}
+              {queueLabel}
+            </span>
+          </div>
+        )}
       </div>
       {opponent && (typeof opponent === "object") ? (
         <button
           className="my-match__opp"
           onClick={() => onMatchClick && onMatchClick(nextMatch)}
-          style={{ border: "none", background: "none", textAlign: "left", padding: 0, width: "100%", cursor: "pointer" }}
+          style={{ color: "inherit" }}
         >
-          <div className="l">vs Opponent</div>
+          <div className="l">
+            <span className={`bc-color-badge ${oppBadgeClass}`}>{oppBadgeLabel}</span>
+            vs Opponent
+          </div>
           <div className="n">{opponent.name}</div>
           {opponent.dojo ? <div className="d">{opponent.dojo}</div> : null}
         </button>
@@ -646,7 +731,29 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 // Empty state hides the list; once at least one watched player exists,
 // renders the chip list, an "Add another" picker, and (when applicable)
 // the upcoming-matches preview.
+// addDojoToWatchlist — pure helper extracted for testability.
+// Given the current watchlist and a roster, return a new watchlist with every
+// roster player from `dojo` added (dedup by id, cap at `max`). Players not
+// matching the dojo (and any already in the list) are unchanged.
+function addDojoToWatchlist(watchlist, roster, dojo, max) {
+  if (!dojo) return { next: watchlist, added: 0, skipped: 0 };
+  const have = new Set(watchlist.map((w) => w.id));
+  const candidates = (roster || []).filter((p) => p && p.id && p.dojo === dojo && !have.has(p.id));
+  const room = Math.max(0, max - watchlist.length);
+  const added = candidates.slice(0, room);
+  const skipped = candidates.length - added.length;
+  return {
+    next: [...watchlist, ...added.map((p) => ({ id: p.id, name: p.name, dojo: p.dojo || "" }))],
+    added: added.length,
+    skipped,
+  };
+}
+
 function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatchClick }) {
+  const [dojoSel, setDojoSel] = useState("");
+  const [bulkMsg, setBulkMsg] = useState(null);
+  const bulkMsgTimer = useRefV(null);
+  React.useEffect(() => () => clearTimeout(bulkMsgTimer.current), []);
   const removeOne = (id) => setWatchlist(watchlist.filter((w) => w.id !== id));
   const addOne = (p) => {
     if (watchlist.find((w) => w.id === p.id)) return;
@@ -660,6 +767,51 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
     return Array.from(map.values());
   }, [tournament]);
   const rosterById = useMemo(() => new Map(roster.map(p => [p.id, p])), [roster]);
+
+  // Unique sorted dojos from the roster, excluding empty values.
+  const dojos = useMemo(() => {
+    const set = new Set();
+    roster.forEach((p) => { if (p.dojo) set.add(p.dojo); });
+    return Array.from(set).sort();
+  }, [roster]);
+
+  // Per-dojo summary: total members + currently watched. Used to label the
+  // dropdown options and to disable the "Add dojo" button when nothing new
+  // would be added.
+  const dojoStats = useMemo(() => {
+    const have = new Set(watchlist.map((w) => w.id));
+    const stats = new Map();
+    roster.forEach((p) => {
+      if (!p.dojo) return;
+      const s = stats.get(p.dojo) || { total: 0, watched: 0 };
+      s.total += 1;
+      if (have.has(p.id)) s.watched += 1;
+      stats.set(p.dojo, s);
+    });
+    return stats;
+  }, [roster, watchlist]);
+
+  const addDojo = () => {
+    if (!dojoSel) return;
+    const { next, added, skipped } = addDojoToWatchlist(watchlist, roster, dojoSel, WATCHLIST_MAX);
+    setWatchlist(next);
+    setBulkMsg(
+      skipped > 0
+        ? added === 0
+          ? `Watchlist full · ${skipped} from ${dojoSel} skipped`
+          : `Added ${added} from ${dojoSel} · ${skipped} skipped (watchlist full)`
+        : added === 0
+        ? `Everyone from ${dojoSel} is already in your watchlist`
+        : `Added ${added} from ${dojoSel}`
+    );
+    setDojoSel("");
+    // Auto-clear the toast after a few seconds so it doesn't linger.
+    clearTimeout(bulkMsgTimer.current);
+    bulkMsgTimer.current = setTimeout(() => setBulkMsg(null), 4000);
+  };
+
+  const selStats = dojoStats.get(dojoSel);
+  const addDojoDisabled = watchlist.length >= WATCHLIST_MAX || !dojoSel || !selStats || selStats.watched >= selStats.total;
 
   return (
     <div className="card" data-testid="viewer-home-watchlist" style={{ marginBottom: 16, padding: 14 }}>
@@ -695,6 +847,37 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
         placeholder={watchlist.length === 0 ? "Add a participant to watch…" : "Add another participant…"}
         excludeIds={watchlist.map((w) => w.id)}
       />
+      {dojos.length > 0 && (
+        <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }} data-testid="watchlist-dojo-picker">
+          <label style={{ fontSize: 12, color: "var(--ink-3)" }} htmlFor="watchlist-dojo-select">Watch all from dojo</label>
+          <select
+            id="watchlist-dojo-select"
+            value={dojoSel}
+            onChange={(e) => setDojoSel(e.target.value)}
+            style={{ fontSize: 13, padding: "4px 8px" }}
+            data-testid="watchlist-dojo-select"
+          >
+            <option value="">— pick a dojo —</option>
+            {dojos.map((d) => {
+              const s = dojoStats.get(d) || { total: 0, watched: 0 };
+              const remaining = s.total - s.watched;
+              const label = remaining === 0
+                ? `${d} (all ${s.total} watched)`
+                : `${d} (+${remaining} of ${s.total})`;
+              return <option key={d} value={d}>{label}</option>;
+            })}
+          </select>
+          <button
+            className="btn btn--sm"
+            disabled={addDojoDisabled}
+            onClick={addDojo}
+            data-testid="watchlist-dojo-add"
+          >
+            Add dojo
+          </button>
+          {bulkMsg && <span style={{ fontSize: 11, color: "var(--ink-3)" }} role="status">{bulkMsg}</span>}
+        </div>
+      )}
 
       {upcoming.length > 0 && (
         <>
@@ -955,7 +1138,7 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
     isSwiss ? { id: "swiss", label: "Standings" } : null,
     hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
     hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
-    c.status === "completed" && !isSwiss ? { id: "results", label: "Results" } : null,
+    c.status === "completed" ? { id: "results", label: "Awards" } : null,
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
@@ -1010,7 +1193,6 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
               upcomingMatches={upcomingMatches}
               recentMatches={recentMatches}
               tweaks={tweaks}
-              onMatchClick={setSelectedMatch}
             />
           )}
           {tab === "bracket" && derivedBracket && (
@@ -1036,8 +1218,14 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           {tab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
-          {tab === "results" && c.status === "completed" && derivedBracket && (
-            <ResultsViewer c={c} bracket={derivedBracket} />
+          {tab === "results" && c.status === "completed" && (
+            // Pass the *real* server bracket (not derivedBracket) — the latter
+            // is a TBD placeholder for visualization only and carries no
+            // winner data. Using real server data ensures deriveAwards sees
+            // actual winners; when the final has no winner yet, deriveAwards
+            // explicitly falls through to the standings-based path rather
+            // than short-circuiting.
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} />
           )}
         </div>
       </div>
@@ -1126,7 +1314,7 @@ function MatchDetailCard({ match, onClose }) {
   );
 }
 
-function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, onMatchClick }) {
+function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
 
   if (c.status === "setup") {
@@ -1141,7 +1329,6 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 
   const handleMatchClick = (m) => {
     setExpandedMatchId(prev => prev === m.id ? null : m.id);
-    if (onMatchClick) onMatchClick(m);
   };
 
   return (
@@ -1165,7 +1352,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             </div>
           </div>
           {(() => {
-            const opp = myUpcoming.sideA?.id === myPlayer.id ? myUpcoming.sideB : myUpcoming.sideA;
+            const opp = isFollowedPlayer(myUpcoming.sideA, myPlayer) ? myUpcoming.sideB : myUpcoming.sideA;
             return opp ? (
               <div className="my-match__opp">
                 <div className="l">vs Opponent</div>
@@ -1249,8 +1436,8 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
   // stays gracefully empty for non-queued matches and pre-T046 responses.
-  const qp = m.queuePosition;
-  const queueLabel = (m.status === "scheduled" && qp && qp > 0)
+  const qp = Number(m.queuePosition);
+  const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
     ? (qp === 1 ? "Next up" : `${qp - 1} before yours`)
     : null;
   return (
@@ -1660,7 +1847,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -1668,12 +1855,14 @@ if (typeof window !== 'undefined') {
     window.matchHighlightedBy = matchHighlightedBy;
     window.buildPlayerMatchHighlight = buildPlayerMatchHighlight;
     window.buildWatchlistUpcoming = buildWatchlistUpcoming;
+    window.deriveAwards = deriveAwards;
+    window.addDojoToWatchlist = addDojoToWatchlist;
 }
 
 // Tournament-wide schedule (across competitions) — grouped by day, then court swimlanes + filter
 function ScheduleViewer({ tournament, tweaks }) {
   const allMatches = useMemo(() => tournamentMatches(tournament).filter(hasBothSides), [tournament]);
-  const courts = tournament.courts;
+  const courts = tournament.courts || [];
 
   // T113 / T117 / FR-022 / FR-024: auto-populate the schedule's `picked`
   // filter with the followed-player + watchlist so the existing
@@ -1735,8 +1924,8 @@ function ScheduleViewer({ tournament, tweaks }) {
   dayFiltered.forEach((m) => { (byCourt[m.court] = byCourt[m.court] || []).push(m); });
   Object.values(byCourt).forEach((list) => list.sort((a, b) => {
     const order = { running: 0, scheduled: 1, completed: 2 };
-    const ao = order[a.status] ?? 1;
-    const bo = order[b.status] ?? 1;
+    const ao = order[a.status] ?? 2;
+    const bo = order[b.status] ?? 2;
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   }));
@@ -1841,13 +2030,13 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer.
-  const qp = m.queuePosition;
-  const queuePill = (m.status === "scheduled" && qp && qp > 0)
+  const qp = Number(m.queuePosition);
+  const queuePill = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
     ? (qp === 1 ? "Next" : `#${qp}`)
     : null;
   return (
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
-      <div>
+      <div className="tw-match__meta">
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
         {queuePill && (
@@ -1876,44 +2065,200 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   );
 }
 
-function ResultsViewer({ _c, bracket }) {
-  const final = bracket.rounds[bracket.rounds.length - 1][0];
-  const sf = bracket.rounds[bracket.rounds.length - 2] || [];
-  const champion = final.winner;
-  const runnerUp = final.winner === final.sideA ? final.sideB : final.sideA;
-  const third = sf.map((m) => m.winner === m.sideA ? m.sideB : m.sideA).filter(Boolean);
-  return (
-    <div>
-      <div className="podium">
-        {third[0] && (
-          <div className="podium-step podium-step--3">
-            <div className="place">3</div>
-            <div className="name">{third[0]}</div>
-          </div>
-        )}
-        {champion && (
-          <div className="podium-step podium-step--1">
-            <div style={{ fontSize: 28 }}>🏆</div>
-            <div className="place">1</div>
-            <div className="name">{champion}</div>
-          </div>
-        )}
-        {runnerUp && (
-          <div className="podium-step podium-step--2">
-            <div className="place">2</div>
-            <div className="name">{runnerUp}</div>
-          </div>
-        )}
-        {third[1] && (
-          <div className="podium-step podium-step--3" style={{ order: 4 }}>
-            <div className="place">3</div>
-            <div className="name">{third[1]}</div>
-          </div>
-        )}
+// deriveAwards returns up to four placements for the closing ceremony per
+// FIK convention: 1st, 2nd, and two 3rds (semi-final losers — no bronze match).
+// Returns [] when no podium data exists yet.
+// `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich bracket
+// entries with dojo info; missing names fall back to {name, dojo: ""}.
+// Bracket match fields (sideA/sideB/winner) may be either plain strings (raw
+// backend payload) or normalized objects ({id, name, dojo}) as produced by
+// normalizeMatch() in api_serializers.jsx — both shapes are handled.
+// `standings` may be either a flat array (Swiss-shape) or an object keyed by
+// pool name (pools/league shape).
+function deriveAwards(bracket, standings, pools, nameToPlayer) {
+  // Extract the name string from a match field that may be a string (raw
+  // backend payload) or a normalized object ({id, name, dojo}) produced by
+  // normalizeMatch() in api_serializers.jsx.
+  const toName = (v) => (v && typeof v === "object" ? v.name || "" : v || "");
+
+  // Enrich a player field with dojo info. If the field is already a normalized
+  // object with a dojo, use it directly; otherwise fall back to nameToPlayer.
+  const lookup = (v) => {
+    const name = toName(v);
+    if (!name) return null;
+    const fromField = v && typeof v === "object" ? v.dojo : null;
+    const p = nameToPlayer && nameToPlayer.get(name);
+    return { name, dojo: fromField || (p && p.dojo) || "" };
+  };
+
+  // Bracket-based: final + semi-finals. Only used when the final has a
+  // decided winner; if it doesn't, fall through to standings below so a
+  // pools-only competition that has a TBD-placeholder bracket still shows
+  // the podium from its pool standings.
+  if (bracket && bracket.rounds && bracket.rounds.length > 0) {
+    const finalRound = bracket.rounds[bracket.rounds.length - 1];
+    const sfRound = bracket.rounds[bracket.rounds.length - 2] || [];
+    const final = finalRound[0];
+    if (final && final.winner) {
+      const winnerName = toName(final.winner);
+      const champion = final.winner;
+      const runnerUp = winnerName === toName(final.sideA) ? final.sideB : final.sideA;
+      const thirds = sfRound
+        .map((m) => {
+          if (!m.winner) return null;
+          return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
+        })
+        .filter(Boolean);
+      return [
+        { place: 1, ...lookup(champion) },
+        runnerUp ? { place: 2, ...lookup(runnerUp) } : null,
+        thirds[0] ? { place: 3, ...lookup(thirds[0]) } : null,
+        thirds[1] ? { place: 3, ...lookup(thirds[1]) } : null,
+      ].filter(Boolean);
+    }
+  }
+
+  // Standings-based fallback. Two payload shapes are supported:
+  //   - Swiss/`/swiss/standings`: a flat array of standings rows.
+  //   - Pools/league: an object keyed by poolName → array of rows.
+  // We take the top four from the (single) leaderboard; for pools-only with
+  // multiple pools we use the first pool (consistent with PoolsViewer's
+  // leagueWinner pick).
+  let list = null;
+  if (Array.isArray(standings)) {
+    list = standings;
+  } else if (standings && pools && pools.length > 0) {
+    list = standings[pools[0].poolName] || [];
+  }
+  if (list && list.length > 0) {
+    const slice = list.slice(0, 4).map((s, i) => ({
+      place: i < 3 ? i + 1 : 3,
+      name: s.player?.name || "",
+      dojo: s.player?.dojo || "",
+    }));
+    return slice.filter((e) => e.name);
+  }
+
+  return [];
+}
+
+const PLACE_STYLE = {
+  1: { icon: "🏆", label: "1st Place", accent: "var(--gold, #d4af37)" },
+  2: { icon: "🥈", label: "2nd Place", accent: "var(--silver, #c0c0c0)" },
+  3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
+};
+
+function AwardsView({ c, bracket, standings, pools, players }) {
+  const containerRef = useRefV(null);
+  const [isFs, setIsFs] = useState(false);
+  // Swiss standings aren't part of the competition-detail payload — they live
+  // behind /swiss/standings. Fetch them here when the format is swiss so the
+  // Awards tab works for Swiss competitions too.
+  const [swissStandings, setSwissStandings] = useState(null);
+
+  React.useEffect(() => {
+    const onFsChange = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  React.useEffect(() => {
+    if (c?.format !== "swiss" || !window.API?.swissStandings) return;
+    let cancelled = false;
+    window.API.swissStandings(c.id)
+      .then((data) => { if (!cancelled) setSwissStandings(Array.isArray(data) ? data : []); })
+      .catch(() => { if (!cancelled) setSwissStandings([]); });
+    return () => { cancelled = true; };
+  }, [c?.id, c?.format, c?.swissCurrentRound]);
+
+  const nameToPlayer = useMemo(() => {
+    const m = new Map();
+    (players || []).forEach((p) => {
+      if (p && p.name) m.set(p.name, p);
+    });
+    return m;
+  }, [players]);
+
+  const effectiveStandings = c?.format === "swiss" ? swissStandings : standings;
+  const isSwissLoading = c?.format === "swiss" && swissStandings === null;
+  const awards = useMemo(
+    () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer),
+    [bracket, effectiveStandings, pools, nameToPlayer]
+  );
+
+  const toggleFs = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else if (el.requestFullscreen) {
+      el.requestFullscreen().catch(() => {});
+    }
+  };
+
+  if (isSwissLoading) {
+    return (
+      <div className="empty" data-testid="awards-loading">
+        <div className="icon">🏆</div>
+        <h3>Loading final standings…</h3>
       </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card__title" style={{ marginBottom: 10 }}>Final match</div>
-        <window.MatchCard match={final} variant={1} showDojo={true} />
+    );
+  }
+
+  if (awards.length === 0) {
+    return (
+      <div className="empty" data-testid="awards-empty">
+        <div className="icon">🏆</div>
+        <h3>Final standings not yet available</h3>
+      </div>
+    );
+  }
+
+  // Visual podium ordering is driven by CSS order rules: 2 left, 1 center, then 3rd-place cards.
+  // For the fullscreen ceremony layout we keep the same order but enlarge.
+  return (
+    <div
+      ref={containerRef}
+      className="awards"
+      data-testid="awards-view"
+      style={{
+        background: isFs ? "var(--bg)" : "transparent",
+        padding: isFs ? 40 : 0,
+        minHeight: isFs ? "100vh" : "auto",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
+            {c?.name ? `${c.name} — Awards` : "Awards"}
+          </div>
+          <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
+            Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
+          </div>
+        </div>
+        <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
+          {isFs ? "Exit fullscreen" : "Fullscreen"}
+        </button>
+      </div>
+      <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
+        {awards.map((a, idx) => {
+          const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
+          return (
+            <div
+              key={`${a.place}-${a.name}-${idx}`}
+              className={`podium-step podium-step--${a.place}`}
+              data-testid={`awards-place-${a.place}-${idx}`}
+              style={{ borderTop: `4px solid ${style.accent}` }}
+            >
+              <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>
+              <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
+              <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
+              {a.dojo && (
+                <div className="dojo" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -2032,6 +2377,66 @@ function MatchViewerModal({ match, onClose }) {
   );
 }
 
+// Shared formatter so the synchronous initializer and the useEffect tick
+// produce identical strings — keeps the first paint stable.
+function formatAnnouncementTimeLeft(expiresAtIso) {
+  const diff = new Date(expiresAtIso).getTime() - Date.now();
+  if (diff <= 0) return "";
+  const totalSeconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = seconds.toString().padStart(2, "0");
+  return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
+}
+
+function AnnouncementBanner({ announcement, onDismiss }) {
+  // Initialize synchronously so the badge isn't blank on the first paint
+  // (Copilot finding on PR #128). The useEffect tick keeps it accurate.
+  const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(announcement.expiresAt));
+
+  useEffect(() => {
+    const updateTimer = () => {
+      const expiresAt = new Date(announcement.expiresAt).getTime();
+      const now = Date.now();
+      const diff = expiresAt - now;
+
+      if (diff <= 0) {
+        onDismiss();
+        return;
+      }
+
+      setTimeLeft(formatAnnouncementTimeLeft(announcement.expiresAt));
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+
+    return () => clearInterval(interval);
+  }, [announcement.expiresAt, onDismiss]);
+
+  return (
+    <div className="announcement-banner">
+      <div className="announcement-banner__content">
+        <div className="announcement-banner__icon" aria-hidden="true">📢</div>
+        <p className="announcement-banner__message">{announcement.message}</p>
+      </div>
+      <div className="announcement-banner__meta">
+        <span className="announcement-banner__badge">
+          {timeLeft}
+        </span>
+        <button
+          className="announcement-banner__dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss announcement"
+        >
+          &times;
+        </button>
+      </div>
+    </div>
+  );
+}
+
+window.AnnouncementBanner = AnnouncementBanner;
 window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;
 window.ViewerSchedule = ViewerSchedule;
@@ -2041,3 +2446,4 @@ window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
+

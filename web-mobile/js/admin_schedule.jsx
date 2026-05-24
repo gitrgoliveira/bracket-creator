@@ -584,9 +584,14 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           serializer and the schedule row exposes bout details, append an
           "FS" badge to each affected bout cell. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-        {m.status === "completed" && (
-          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)}</div>
-        )}
+        {m.status === "completed" && (() => {
+          // Bracket matches carry scoreA/scoreB rather than ipponsA/B.
+          // Derive per-side arrays so the score reads SHIRO–AKA correctly
+          // even when AKA wins (winnerPts–loserPts fallback inverts left/right).
+          const tIpponsA = m.ipponsA || (m.scoreA ? m.scoreA.split("") : []);
+          const tIpponsB = m.ipponsB || (m.scoreB ? m.scoreB.split("") : []);
+          return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(tIpponsB, tIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}</div>;
+        })()}
         {m.status === "running" && <span className="bc-live">●</span>}
         <CourtPicker
           value={m.court}

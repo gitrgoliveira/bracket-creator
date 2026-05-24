@@ -1449,7 +1449,13 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
+  // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays.
+  // Fall back so the score string reflects per-side letters instead of the
+  // orientation-agnostic winnerPts–loserPts that formatIpponsScore uses when
+  // both ippon arrays are absent (which would invert left/right when AKA wins).
+  const vIpponsA = m.ipponsA || (m.scoreA ? m.scoreA.split("") : []);
+  const vIpponsB = m.ipponsB || (m.scoreB ? m.scoreB.split("") : []);
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(vIpponsB, vIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
   // FR-025: queue position is 1-indexed per court for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI

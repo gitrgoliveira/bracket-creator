@@ -514,7 +514,10 @@ func printTeamIndividualStatsSection(ctx poolResultsCtx, headerRow int, headerRo
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[4], row2), joinFormulas(plF)))
 
 		// Hierarchical Score Formula
-		scoreFormula := fmt.Sprintf("=(%s%d*1000000000)-(%s%d*10000000)+(%s%d*100000)+(%s%d*1000)-(%s%d*100)+(%s%d*10)+(%s%d*1)-(%s%d*0.01)",
+		// No leading '=' — OOXML <f> elements store the formula body
+		// only. Excel tolerates the prefix, but Google Sheets and Apple
+		// Numbers reject it and produce #ERROR! / blank cells.
+		scoreFormula := fmt.Sprintf("(%s%d*1000000000)-(%s%d*10000000)+(%s%d*100000)+(%s%d*1000)-(%s%d*100)+(%s%d*10)+(%s%d*1)-(%s%d*0.01)",
 			cols[0], row, cols[1], row, cols[2], row, cols2[0], row2, cols2[1], row2, cols2[2], row2, cols2[3], row2, cols2[4], row2)
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", scoreCol, row), scoreFormula))
 
@@ -603,7 +606,10 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, row), joinFormulas(plFormulas)))
 
 		// Weighted Score formula
-		scoreFormula := fmt.Sprintf("=(%s%d*1000000)-(%s%d*10000)+(%s%d*100)+(%s%d*1)-(%s%d*0.01)",
+		// No leading '=' — see the matching note in the team-results
+		// scoreFormula above. Google Sheets and Apple Numbers reject
+		// OOXML <f> bodies that begin with '='.
+		scoreFormula := fmt.Sprintf("(%s%d*1000000)-(%s%d*10000)+(%s%d*100)+(%s%d*1)-(%s%d*0.01)",
 			lVCol, row, lPCol, row, middleColName, row, rPCol, row, rVCol, row)
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", scoreCol, row), scoreFormula))
 

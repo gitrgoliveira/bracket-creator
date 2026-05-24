@@ -322,6 +322,24 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 		"single round-robin pool of 8: rank-1 ranking cell %s should resolve to the player who won all 7 matches",
 		rank1Cell)
 
+	// No formula in any sheet may have a leading '=' — OOXML <f> bodies
+	// that start with '=' are tolerated by Excel but rejected by Google
+	// Sheets and Apple Numbers (mp-x7h).
+	for _, s := range f.GetSheetList() {
+		rows, _ := f.GetRows(s)
+		for r := range rows {
+			for c := range rows[r] {
+				cell, _ := excelize.CoordinatesToCellName(c+1, r+1)
+				form, _ := f.GetCellFormula(s, cell)
+				if form == "" {
+					continue
+				}
+				assert.NotEqual(t, byte('='), form[0],
+					"sheet=%s cell=%s formula starts with '=': %q (breaks Google Sheets / Apple Numbers)", s, cell, form)
+			}
+		}
+	}
+
 	// And the elimination bracket's Pool A-1st CONCATENATE formula must
 	// reference the rank-1 cell (regression for mp-c5c — empty-cell ref).
 	const elimSheet = "Elimination Matches"

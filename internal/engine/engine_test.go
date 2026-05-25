@@ -53,7 +53,7 @@ func saveTestParticipants(t *testing.T, store *state.Store, compID string, names
 
 // --- Pool Generation Tests ---
 
-func TestStartCompetition_PoolsFormat_BasicGeneration(t *testing.T) {
+func TestStartCompetition_MixedFormat_BasicGeneration(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "mens-individual"
 
@@ -101,7 +101,7 @@ func TestStartCompetition_PoolsFormat_BasicGeneration(t *testing.T) {
 	}
 }
 
-func TestStartCompetition_PoolsFormat_WithSeeds(t *testing.T) {
+func TestStartCompetition_MixedFormat_WithSeeds(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "seeded-pools"
 
@@ -152,7 +152,7 @@ func TestStartCompetition_PoolsFormat_WithSeeds(t *testing.T) {
 	assert.Equal(t, 3, totalSeeds, "all seeds should be placed in pools")
 }
 
-func TestStartCompetition_PoolsFormat_DojoConflictAvoidance(t *testing.T) {
+func TestStartCompetition_MixedFormat_DojoConflictAvoidance(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "dojo-conflict"
 
@@ -191,7 +191,7 @@ func TestStartCompetition_PoolsFormat_DojoConflictAvoidance(t *testing.T) {
 	}
 }
 
-func TestStartCompetition_PoolsFormat_MaxMode(t *testing.T) {
+func TestStartCompetition_MixedFormat_MaxMode(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "max-mode"
 
@@ -229,7 +229,7 @@ func TestStartCompetition_PoolsFormat_MaxMode(t *testing.T) {
 	assert.Equal(t, 7, totalPlayers)
 }
 
-func TestStartCompetition_PoolsFormat_NonRoundRobin(t *testing.T) {
+func TestStartCompetition_MixedFormat_NonRoundRobin(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "non-rr"
 

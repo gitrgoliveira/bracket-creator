@@ -1128,7 +1128,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		if src.Format != state.CompFormatMixed {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "source competition must use pools format"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "source competition must use mixed (Pools + Knockout) format"})
 			return
 		}
 

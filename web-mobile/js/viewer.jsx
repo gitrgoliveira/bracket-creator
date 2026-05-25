@@ -4,6 +4,7 @@
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
+const formatLabel = window.formatLabel;
 
 // TermV — kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.
@@ -450,7 +451,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                           <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
                           <div className="vlist-item__name">{c.name}</div>
                           <div className="vlist-item__meta">
-                            {c.players.length} {c.kind === "team" ? "teams" : "players"} · {c.format === "mixed" ? "Pools + Knockout" : c.format === "league" ? "League" : c.format === "swiss" ? "Swiss" : "Knockout"} · Starts {c.startTime}
+                            {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
                           </div>
                         </div>
                         <StatusBadge status={c.status} showLiveDot />

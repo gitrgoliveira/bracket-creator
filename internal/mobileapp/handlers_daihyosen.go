@@ -189,16 +189,17 @@ func findMatchForDaihyosen(store DaihyosenStore, compID, matchID string) (*state
 				// on the bracket side until the operator records team
 				// sub-bouts via /score.
 				return &state.MatchResult{
-					ID:          bm.ID,
-					SideA:       bm.SideA,
-					SideB:       bm.SideB,
-					Winner:      bm.Winner,
-					Status:      bm.Status,
-					Court:       bm.Court,
-					ScheduledAt: bm.ScheduledAt,
-					Decision:    bm.Decision,
-					DecisionBy:  bm.DecisionBy,
-					Encho:       bm.Encho,
+					ID:              bm.ID,
+					SideA:           bm.SideA,
+					SideB:           bm.SideB,
+					Winner:          bm.Winner,
+					Status:          bm.Status,
+					Court:           bm.Court,
+					ScheduledAt:     bm.ScheduledAt,
+					Decision:        bm.Decision,
+					DecisionBy:      bm.DecisionBy,
+					Encho:           bm.Encho,
+					DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
 				}, true, nil
 			}
 		}

@@ -292,15 +292,16 @@ func (e *Engine) lookupExistingResult(compID, matchID string) (*state.MatchResul
 			for _, bm := range round {
 				if bm.ID == matchID {
 					return &state.MatchResult{
-						ID:             bm.ID,
-						SideA:          bm.SideA,
-						SideB:          bm.SideB,
-						Winner:         bm.Winner,
-						Status:         bm.Status,
-						Decision:       bm.Decision,
-						DecisionBy:     bm.DecisionBy,
-						DecisionReason: bm.DecisionReason,
-						Encho:          bm.Encho,
+						ID:              bm.ID,
+						SideA:           bm.SideA,
+						SideB:           bm.SideB,
+						Winner:          bm.Winner,
+						Status:          bm.Status,
+						Decision:        bm.Decision,
+						DecisionBy:      bm.DecisionBy,
+						DecisionReason:  bm.DecisionReason,
+						Encho:           bm.Encho,
+						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
 					}, nil
 				}
 			}

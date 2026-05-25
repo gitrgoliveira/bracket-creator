@@ -47,8 +47,8 @@ function toBackendMatchResult(patch, match) {
         winner: winnerName,
         ipponsA,
         ipponsB,
-        hansokuA: fouls.a || 0,
-        hansokuB: fouls.b || 0,
+        hansokuA: patch.hansokuA ?? fouls.a ?? 0,
+        hansokuB: patch.hansokuB ?? fouls.b ?? 0,
         decision: isHikiwake(score.type) ? "hikiwake" : "",
         status: toBackendStatus(patch.status || "scheduled"),
     };
@@ -61,6 +61,15 @@ function toBackendMatchResult(patch, match) {
     // periodCount alongside the score so re-edits and history retain it.
     if (patch.encho && patch.encho.periodCount > 0) {
         result.encho = { periodCount: patch.encho.periodCount };
+    }
+    // Include decidedByHantei when explicitly set in the patch, or when the
+    // current match already has it true (to preserve it across re-edits).
+    // Omit it otherwise so non-hantei payloads stay minimal.
+    const explicitHantei = typeof patch.decidedByHantei === "boolean";
+    if (explicitHantei) {
+        result.decidedByHantei = patch.decidedByHantei;
+    } else if (match?.decidedByHantei) {
+        result.decidedByHantei = true;
     }
     return result;
 }
@@ -90,14 +99,24 @@ function normalizeMatch(m, playerMap) {
     }
     // Build score object from flat scoreA/scoreB if needed (bracket matches)
     if (!norm.score && (norm.scoreA || norm.scoreB) && norm.status === "completed") {
-        const aLen = (norm.scoreA || "").replace(/\s*\(H\d+\)/g, "").length;
-        const bLen = (norm.scoreB || "").replace(/\s*\(H\d+\)/g, "").length;
+        // Strip the trailing "(HN)" hansoku suffix (with optional separator
+        // space — see engine/scoring.go::formatScore) before measuring length
+        // or splitting into ippon chars. Without this, scoreA="MK (H1)" would
+        // count length 7 and split to ["M","K"," ","(","H","1",")"], polluting
+        // both the displayed score and the modal's ippon-slot seeding (which
+        // falls back to score.ippons when ipponsA/B are absent for bracket
+        // matches). Mirrors web-mobile/js/bracket.jsx::ipponsFromScore —
+        // kept inline to avoid load-order coupling with bracket.js (which
+        // window-registers its helper LATER in the script order).
+        const stripHansoku = (s) => (s || "").replace(/\s*\(H\d+\)$/, "");
+        const cleanA = stripHansoku(norm.scoreA);
+        const cleanB = stripHansoku(norm.scoreB);
         const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
         norm.score = {
             type: "ippon",
-            winnerPts: aWin ? aLen : bLen,
-            loserPts: aWin ? bLen : aLen,
-            ippons: aWin ? (norm.scoreA || "").split("") : (norm.scoreB || "").split(""),
+            winnerPts: aWin ? cleanA.length : cleanB.length,
+            loserPts: aWin ? cleanB.length : cleanA.length,
+            ippons: (aWin ? cleanA : cleanB).split(""),
         };
     }
     // Build score from ipponsA/ipponsB for pool matches

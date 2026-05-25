@@ -280,6 +280,63 @@ func (r *ScoreRequest) Validate() error {
 			return err
 		}
 	}
+	// DecidedByHantei encodes a rules-level invariant: judges' decision after
+	// tied encho (FIK 7-5 / 29-6). A winner must be present, the status (if
+	// supplied) must be completed, and encho must have been played (PeriodCount
+	// > 0) — rejecting decidedByHantei=true without overtime context prevents
+	// persisting an "HT" suffix outside a real encho-decided match.
+	if r.DecidedByHantei != nil && *r.DecidedByHantei {
+		if r.Winner == "" {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "requires winner to be set",
+			}
+		}
+		if r.Status != "" && r.Status != state.MatchStatusCompleted {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "only valid on completed matches",
+			}
+		}
+		if r.Encho == nil || r.Encho.PeriodCount <= 0 {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "requires encho with at least one period",
+			}
+		}
+		if len(r.IpponsA) != len(r.IpponsB) {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "requires a tied scoreline — ippon counts must be equal",
+			}
+		}
+		// Hantei is a referee judges' decision that produces a winner from a
+		// tied encho. Any other special decision (hikiwake=draw, kiken=withdrawal,
+		// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible —
+		// persisting both would render contradictory suffixes like "Kiken (E) HT".
+		// Only the neutral values ("" and "fought") are allowed alongside hantei.
+		switch r.Decision {
+		case "", "fought":
+			// compatible: normal fight decided by judges
+		default:
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '' or 'fought'", r.Decision),
+			}
+		}
+		if r.DecisionBy != "" {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "decisionBy must be empty when decidedByHantei is true",
+			}
+		}
+		if r.DecisionReason != "" {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "decisionReason must be empty when decidedByHantei is true",
+			}
+		}
+	}
 	return r.validateDecision()
 }
 

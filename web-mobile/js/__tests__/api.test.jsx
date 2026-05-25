@@ -37,6 +37,83 @@ describe('API Utils', () => {
       const result = toBackendMatchResult(patch, match);
       expect(result.decision).toBe('');
     });
+
+    it('forwards decidedByHantei on the wire payload', () => {
+      // mp-6di: judges' decision flag must round-trip so the HT suffix
+      // persists in the viewer and bracket DecidedByHantei mirror.
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        ipponsA: ['M'],
+        ipponsB: ['K'],
+        decidedByHantei: true,
+      }, match);
+      expect(result.decidedByHantei).toBe(true);
+    });
+
+    it('forwards decidedByHantei = false (so a re-edit can clear it)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        ipponsA: ['M'],
+        ipponsB: [],
+        decidedByHantei: false,
+      }, match);
+      expect(result.decidedByHantei).toBe(false);
+    });
+
+    it('preserves decidedByHantei=true from the existing match when patch omits it', () => {
+      // The serialiser forwards `true` from the existing match whenever the
+      // patch doesn't override it, so non-hantei-touching edits (changing
+      // score, court, scheduledAt) keep the previously recorded hantei flag
+      // on the wire.
+      //
+      // The Go backend uses `*bool` for state.MatchResult.DecidedByHantei
+      // (see internal/state/models.go), so an OMITTED JSON field decodes as
+      // nil and the bracket-match engine preserves the stored value
+      // (recordBracketMatchResult / recordBracketMatchResultTx gate on
+      // `result.DecidedByHantei != nil`). The frontend still forwards true
+      // for two reasons: (a) defence-in-depth in case the backend
+      // preserve-on-nil contract regresses, (b) pool matches use `*r =
+      // *result` and WOULD clear on nil — although FIK doesn't permit
+      // hantei in pool play, the codepath exists so we keep the wire
+      // payload self-describing.
+      const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        ipponsA: ['M'],
+        ipponsB: ['K'],
+        // decidedByHantei intentionally omitted
+      }, match);
+      expect(result.decidedByHantei).toBe(true);
+    });
+
+    it('does not forward decidedByHantei when the existing match flag is false', () => {
+      const match = { sideA: 'A', sideB: 'B', decidedByHantei: false };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        ipponsA: ['M'],
+        ipponsB: [],
+        // decidedByHantei intentionally omitted
+      }, match);
+      expect('decidedByHantei' in result).toBe(false);
+    });
+
+    it('omits decidedByHantei when neither patch nor existing match sets it', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        ipponsA: ['M'],
+        ipponsB: [],
+      }, match);
+      // No key — server-side omitempty drops it from the persisted record.
+      expect('decidedByHantei' in result).toBe(false);
+    });
   });
 
   describe('isHikiwake', () => {
@@ -64,9 +141,9 @@ describe('API Utils', () => {
     });
 
     it('should build score object from ippons for pool matches', () => {
-      const match = { 
-        sideA: 'A', sideB: 'B', winner: 'A', 
-        status: 'completed', ipponsA: ['M'], ipponsB: [] 
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A',
+        status: 'completed', ipponsA: ['M'], ipponsB: []
       };
       const norm = normalizeMatch(match, {});
       expect(norm.score).toEqual({
@@ -75,6 +152,40 @@ describe('API Utils', () => {
         loserPts: 0,
         ippons: ['M']
       });
+    });
+
+    // Bracket matches carry scoreA/scoreB strings (no ipponsA/B arrays). The
+    // backend formatScore() emits "MK (H1)" when ippons coexist with an
+    // outstanding hansoku, so normalizeMatch must strip the suffix + leading
+    // space before splitting — otherwise score.ippons leaks " ", "(", "H",
+    // "1", ")" tokens. score.ippons seeds the admin scoring modal's slot
+    // editor when the modal opens on a bracket match.
+    it('strips hansoku "(HN)" suffix from bracket scoreA/scoreB when building score.ippons', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A',
+        status: 'completed',
+        scoreA: 'MK (H1)', scoreB: 'M',
+      };
+      const norm = normalizeMatch(match, {});
+      expect(norm.score).toEqual({
+        type: 'ippon',
+        winnerPts: 2,
+        loserPts: 1,
+        ippons: ['M', 'K'],
+      });
+    });
+
+    it('strips no-space "(HN)" suffix from bracket scoreA/scoreB too', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'B',
+        status: 'completed',
+        scoreA: '(H1)', scoreB: 'MD(H2)',
+      };
+      const norm = normalizeMatch(match, {});
+      // B wins: ippons come from cleaned scoreB
+      expect(norm.score.ippons).toEqual(['M', 'D']);
+      expect(norm.score.winnerPts).toBe(2);
+      expect(norm.score.loserPts).toBe(0);
     });
   });
 

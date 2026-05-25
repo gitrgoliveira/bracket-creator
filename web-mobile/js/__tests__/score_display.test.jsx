@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatIpponsScore } from '../bracket.jsx';
+import { formatIpponsScore, ipponsFromScore } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -40,10 +40,6 @@ describe('formatIpponsScore', () => {
   describe('special cases', () => {
     it('returns BYE for bye matches', () => {
       expect(formatIpponsScore([], [], { type: 'bye' }, null)).toBe('BYE');
-    });
-
-    it('returns H for hantei decision', () => {
-      expect(formatIpponsScore([], [], { type: 'hantei' }, null)).toBe('H');
     });
 
     it('returns X for a no-score draw', () => {
@@ -118,10 +114,6 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E)');
     });
 
-    it('appends (E) to a hantei result', () => {
-      expect(formatIpponsScore([], [], { type: 'hantei' }, null, { periodCount: 1 })).toBe('H (E)');
-    });
-
     it('does not append (E) when periodCount is 0', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M–K');
     });
@@ -129,5 +121,69 @@ describe('formatIpponsScore', () => {
     it('is a no-op when encho argument is missing entirely', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null)).toBe('M–K');
     });
+  });
+
+  // FIK Art. 7-5 / 29-6: a knockout match that remains tied in encho is
+  // decided by referee hantei. The renderer must mark this distinctly so
+  // it's not confused with an ippon-derived win.
+  describe('hantei (judges\' decision) suffix', () => {
+    it('appends "(E) HT" for a 0-0 hantei-decided overtime', () => {
+      // Tied 0-0 in encho, AKA awarded by hantei. No ippons → suffix only.
+      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true)).toBe('(E) HT');
+    });
+
+    it('combines (E) HT for a hantei-decided overtime', () => {
+      // Realistic: tied with scores, then hantei chose a winner — backend
+      // sends decidedByHantei=true alongside the tied ippons.
+      const result = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true);
+      expect(result).toBe('M–K (E) HT');
+    });
+
+    it('omits HT when decidedByHantei is false/missing', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, false)).toBe('M–K (E)');
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
+    });
+
+    it('score.hantei is not read — only the decidedByHantei param controls HT', () => {
+      // The `score` object is derived client-side by normalizeMatch from flat
+      // API fields (ipponsA/B, scoreA/B). The backend never emits a `score`
+      // object, so score.hantei can never appear in real match data. Only the
+      // positional decidedByHantei arg matters.
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E)');
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M–K (E) HT');
+    });
+  });
+});
+
+// ipponsFromScore: strips the Go formatScore "(HN)" hansoku suffix before splitting
+describe('ipponsFromScore', () => {
+  it('splits plain letters', () => {
+    expect(ipponsFromScore('MK')).toEqual(['M', 'K']);
+  });
+
+  it('strips (HN) suffix before splitting', () => {
+    expect(ipponsFromScore('M(H1)')).toEqual(['M']);
+    expect(ipponsFromScore('MK(H2)')).toEqual(['M', 'K']);
+  });
+
+  // Real backend output: engine/scoring.go formatScore() inserts a space
+  // between ippons and the (HN) suffix when both are present
+  // ("MK (H1)"). The regex must strip the optional whitespace too,
+  // otherwise split("") returns a trailing " " token that renders as a
+  // bogus ippon character.
+  it('strips spaced (HN) suffix before splitting (real backend shape)', () => {
+    expect(ipponsFromScore('M (H1)')).toEqual(['M']);
+    expect(ipponsFromScore('MK (H2)')).toEqual(['M', 'K']);
+    expect(ipponsFromScore('MKD (H1)')).toEqual(['M', 'K', 'D']);
+  });
+
+  it('handles suffix-only string (no ippons, just fouls)', () => {
+    expect(ipponsFromScore('(H1)')).toEqual([]);
+  });
+
+  it('returns [] for empty/null/undefined', () => {
+    expect(ipponsFromScore('')).toEqual([]);
+    expect(ipponsFromScore(null)).toEqual([]);
+    expect(ipponsFromScore(undefined)).toEqual([]);
   });
 });

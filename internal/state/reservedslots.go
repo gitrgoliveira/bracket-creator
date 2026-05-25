@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -98,31 +99,33 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 		return []domain.Player{}, nil
 	}
 
-	lines, err := helper.ReadEntriesFromFile(path)
+	records, err := helper.ReadCSVFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	hasIDs := len(lines) > 0 && uuidRE(strings.TrimSpace(strings.SplitN(lines[0], ",", 2)[0]))
+	hasIDs := len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
 
 	var ids []string
-	var plainLines []string
-	if hasIDs {
-		for _, line := range lines {
-			id, rest, ok := strings.Cut(line, ",")
-			if !ok {
-				plainLines = append(plainLines, line)
-				ids = append(ids, "")
-				continue
+	var playerRecords [][]string
+	for _, record := range records {
+		if hasIDs {
+			id := ""
+			if len(record) > 0 {
+				id = strings.TrimSpace(record[0])
 			}
-			ids = append(ids, strings.TrimSpace(id))
-			plainLines = append(plainLines, rest)
+			ids = append(ids, id)
+			if len(record) > 1 {
+				playerRecords = append(playerRecords, record[1:])
+			} else {
+				playerRecords = append(playerRecords, nil)
+			}
+		} else {
+			playerRecords = append(playerRecords, record)
 		}
-	} else {
-		plainLines = lines
 	}
 
-	players, err := helper.CreatePlayers(plainLines, withZekkenName)
+	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName)
 	if err != nil {
 		return nil, err
 	}
@@ -159,21 +162,28 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 func (s *Store) saveParticipantsLocked(compID string, players []domain.Player) error {
 	path := s.compPath(compID, "participants.csv")
 	var sb strings.Builder
+	w := csv.NewWriter(&sb)
 	for _, p := range players {
 		id := p.ID
 		if id == "" {
 			id = newParticipantID()
 		}
-		var row string
+		var record []string
 		if p.DisplayName != "" && p.DisplayName != p.Name {
-			row = fmt.Sprintf("%s, %s, %s", p.Name, p.DisplayName, p.Dojo)
+			record = []string{id, p.Name, p.DisplayName, p.Dojo}
 		} else {
-			row = fmt.Sprintf("%s, %s", p.Name, p.Dojo)
+			record = []string{id, p.Name, p.Dojo}
 		}
 		if p.Tag != "" {
-			row += ", " + p.Tag
+			record = append(record, p.Tag)
 		}
-		sb.WriteString(id + ", " + row + "\n")
+		if err := w.Write(record); err != nil {
+			return fmt.Errorf("writing participant CSV record: %w", err)
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return fmt.Errorf("flushing participant CSV: %w", err)
 	}
 	if err := s.atomicWrite(path, []byte(sb.String()), 0600); err != nil {
 		return err

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"os"
@@ -70,7 +71,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	}
 
 	path := s.compPath(compID, "participants.csv")
-	lines, err := helper.ReadEntriesFromFile(path)
+	records, err := helper.ReadCSVFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			cache.data = []domain.Player{}
@@ -85,70 +86,51 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	if opts.HasIDs != nil {
 		hasIDs = *opts.HasIDs
 	} else {
-		hasIDs = len(lines) > 0 && uuidRE(strings.TrimSpace(strings.SplitN(lines[0], ",", 2)[0]))
+		hasIDs = len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
 	}
 
 	var ids []string
 	var checkedInFlags []bool
-	var plainLines []string
+	var playerRecords [][]string
 
-	for _, line := range lines {
+	for _, record := range records {
 		isCheckedIn := false
 
-		// Robust column-based detection: strip the UUID prefix first so
-		// the threshold is applied to the data columns only (per Copilot
-		// review). After stripping the ID the minimum valid data row is
-		// "Name,Dojo" (2 parts), so checked_in is only treated as a
-		// marker when at least 3 data parts are present (Name, Dojo,
-		// checked_in).
-		//
-		// Known limitation: a dojo literally named "checked_in" in a
-		// zekken competition that also has a distinct DisplayName column
-		// produces "Name, DisplayName, checked_in" (3 data parts) after
-		// UUID strip, which the threshold cannot distinguish from the
-		// legitimate "Name, Dojo, checked_in" row. Resolving this
-		// ambiguity without a format version or column header is not
-		// possible; in practice no real dojo uses this name.
-		line = strings.TrimSpace(line)
-
-		// Strip UUID prefix for threshold calculation only (idLine is
-		// what remains after the ID field).
-		idLine := line
+		// Determine data fields (everything after UUID if present).
+		// If hasIDs but this record's first field is not a UUID (mixed-
+		// format file, e.g. plain "Bob" line), treat the whole record as
+		// data with an empty ID.
+		dataStart := 0
 		if hasIDs {
-			if _, rest, ok := strings.Cut(line, ","); ok {
-				idLine = strings.TrimSpace(rest)
+			if len(record) > 1 || (len(record) == 1 && uuidRE(strings.TrimSpace(record[0]))) {
+				dataStart = 1
 			}
 		}
-		dataParts := strings.Split(idLine, ",")
-		if len(dataParts) > 2 {
-			last := strings.TrimSpace(dataParts[len(dataParts)-1])
+		dataFields := record[dataStart:]
+
+		// Detect and strip checked_in marker from the last data field.
+		// Minimum valid data row is "Name,Dojo" (2 parts), so checked_in
+		// is only treated as a marker when at least 3 data parts are present.
+		if len(dataFields) > 2 {
+			last := strings.TrimSpace(dataFields[len(dataFields)-1])
 			if strings.ToLower(last) == "checked_in" {
 				isCheckedIn = true
-				// Strip from the full original line (preserves UUID prefix).
-				if li := strings.LastIndex(line, ","); li >= 0 {
-					line = strings.TrimRight(line[:li], " ")
-				}
+				dataFields = dataFields[:len(dataFields)-1]
 			}
 		}
 
 		if hasIDs {
-			id, rest, ok := strings.Cut(line, ",")
-			if !ok {
-				plainLines = append(plainLines, line)
-				ids = append(ids, "")
-				checkedInFlags = append(checkedInFlags, isCheckedIn)
-				continue
+			id := ""
+			if dataStart > 0 && len(record) > 0 {
+				id = strings.TrimSpace(record[0])
 			}
-			ids = append(ids, strings.TrimSpace(id))
-			plainLines = append(plainLines, rest)
-			checkedInFlags = append(checkedInFlags, isCheckedIn)
-		} else {
-			plainLines = append(plainLines, line)
-			checkedInFlags = append(checkedInFlags, isCheckedIn)
+			ids = append(ids, id)
 		}
+		playerRecords = append(playerRecords, dataFields)
+		checkedInFlags = append(checkedInFlags, isCheckedIn)
 	}
 
-	players, err := helper.CreatePlayers(plainLines, withZekkenName)
+	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName)
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +217,7 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) e
 	path := s.compPath(compID, "participants.csv")
 
 	var sb strings.Builder
+	w := csv.NewWriter(&sb)
 	for _, p := range players {
 		id := p.ID
 		if id == "" {
@@ -246,19 +229,25 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) e
 		// LoadParticipants(_, withZekkenName=false) reads column 2 as Dojo
 		// and pushes the real Dojo into Metadata. See the round-trip
 		// regression test in participants_test.go.
-		var row string
+		var record []string
 		if p.DisplayName != "" && p.DisplayName != helper.SanitizeName(p.Name) {
-			row = fmt.Sprintf("%s, %s, %s", p.Name, p.DisplayName, p.Dojo)
+			record = []string{id, p.Name, p.DisplayName, p.Dojo}
 		} else {
-			row = fmt.Sprintf("%s, %s", p.Name, p.Dojo)
+			record = []string{id, p.Name, p.Dojo}
 		}
 		if p.Tag != "" {
-			row += ", " + p.Tag
+			record = append(record, p.Tag)
 		}
 		if p.CheckedIn {
-			row += ", checked_in"
+			record = append(record, "checked_in")
 		}
-		sb.WriteString(id + ", " + row + "\n")
+		if err := w.Write(record); err != nil {
+			return fmt.Errorf("writing participant CSV record: %w", err)
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return fmt.Errorf("flushing participant CSV: %w", err)
 	}
 
 	if err := s.atomicWrite(path, []byte(sb.String()), 0600); err != nil {

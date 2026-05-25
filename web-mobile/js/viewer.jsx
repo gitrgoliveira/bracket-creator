@@ -2268,7 +2268,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
         </button>
       </div>
       {isLeague && awards[0] && (
-        <div className="winner-badge" style={{
+        <div className="winner-badge" data-testid="league-winner-badge" style={{
           padding: isFs ? "14px 18px" : "10px 14px",
           background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
           color: "white",

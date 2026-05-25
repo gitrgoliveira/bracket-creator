@@ -1,8 +1,6 @@
 package state
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"sync"
 	"time"
 )
@@ -18,28 +16,45 @@ func NewAnnouncementStore() *AnnouncementStore {
 	return &AnnouncementStore{}
 }
 
-// Add appends a new announcement and returns it. Expired entries are pruned
-// first; if still at capacity the oldest is evicted.
-func (s *AnnouncementStore) Add(msg string, dur time.Duration) Announcement {
+// Add appends a new announcement. Returns the new item and the updated list
+// snapshot under the same lock, eliminating any race between mutation and
+// broadcast.
+func (s *AnnouncementStore) Add(msg string, dur time.Duration) (Announcement, []Announcement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now()
-	ann := Announcement{
-		ID:        newAnnouncementID(),
-		Message:   msg,
-		SentAt:    now,
-		ExpiresAt: now.Add(dur),
-	}
-
-	s.pruneExpiredLocked(now)
+	ann := makeAnnouncement(msg, dur)
+	s.pruneExpiredLocked(time.Now())
 
 	if len(s.active) >= maxActiveAnnouncements {
 		s.active = s.active[1:]
 	}
 
 	s.active = append(s.active, ann)
-	return ann
+	return ann, snapshotLocked(s.active)
+}
+
+// Remove dismisses the announcement with the given ID. Returns whether it was
+// found and the updated list snapshot under the same lock.
+func (s *AnnouncementStore) Remove(id string) (bool, []Announcement) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, a := range s.active {
+		if a.ID == id {
+			s.active = append(s.active[:i], s.active[i+1:]...)
+			return true, snapshotLocked(s.active)
+		}
+	}
+	return false, snapshotLocked(s.active)
+}
+
+// Clear removes all announcements and returns an empty snapshot.
+func (s *AnnouncementStore) Clear() []Announcement {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.active = nil
+	return []Announcement{}
 }
 
 // List returns a copy of all currently active (non-expired) announcements,
@@ -49,32 +64,7 @@ func (s *AnnouncementStore) List() []Announcement {
 	defer s.mu.Unlock()
 
 	s.pruneExpiredLocked(time.Now())
-	if len(s.active) == 0 {
-		return nil
-	}
-	out := make([]Announcement, len(s.active))
-	copy(out, s.active)
-	return out
-}
-
-// Remove dismisses the announcement with the given ID. Returns true if found.
-func (s *AnnouncementStore) Remove(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for i, a := range s.active {
-		if a.ID == id {
-			s.active = append(s.active[:i], s.active[i+1:]...)
-			return true
-		}
-	}
-	return false
-}
-
-func (s *AnnouncementStore) Clear() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.active = nil
+	return snapshotLocked(s.active)
 }
 
 // Get returns the most recent active announcement, or nil.
@@ -97,13 +87,7 @@ func (s *AnnouncementStore) Set(msg string, dur time.Duration) Announcement {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now()
-	ann := Announcement{
-		ID:        newAnnouncementID(),
-		Message:   msg,
-		SentAt:    now,
-		ExpiresAt: now.Add(dur),
-	}
+	ann := makeAnnouncement(msg, dur)
 	s.active = []Announcement{ann}
 	return ann
 }
@@ -119,8 +103,21 @@ func (s *AnnouncementStore) pruneExpiredLocked(now time.Time) {
 	s.active = kept
 }
 
-func newAnnouncementID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+func makeAnnouncement(msg string, dur time.Duration) Announcement {
+	now := time.Now()
+	return Announcement{
+		ID:        newParticipantID(),
+		Message:   msg,
+		SentAt:    now,
+		ExpiresAt: now.Add(dur),
+	}
+}
+
+func snapshotLocked(active []Announcement) []Announcement {
+	if len(active) == 0 {
+		return []Announcement{}
+	}
+	out := make([]Announcement, len(active))
+	copy(out, active)
+	return out
 }

@@ -2435,23 +2435,20 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
-// AnnouncementBanner accepts either a single `announcement` (legacy) or an
-// `announcements` array. When multiple are active it rotates through them
-// every 8 seconds so all are visible without stacking vertically.
-function AnnouncementBanner({ announcement, announcements, onDismiss }) {
-  const list = announcements || (announcement ? [announcement] : []);
+function AnnouncementBanner({ announcements, onDismiss }) {
+  const list = announcements || [];
   const [idx, setIdx] = useState(0);
 
-  // Rotate through items every 8 seconds when multiple are active.
   useEffect(() => {
     if (list.length <= 1) return;
+    const len = list.length;
     const interval = setInterval(() => {
-      setIdx(i => (i + 1) % list.length);
+      setIdx(i => (i + 1) % len);
     }, 8000);
     return () => clearInterval(interval);
   }, [list.length]);
 
-  // Reset to first slot when the list shrinks and idx is out of bounds.
+  // % keeps safeIdx in bounds when the list shrinks after a dismiss.
   const safeIdx = list.length > 0 ? idx % list.length : 0;
   const ann = list[safeIdx];
 

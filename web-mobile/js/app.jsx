@@ -951,18 +951,15 @@ function isAnnouncementActive(ann, dismissedKey, now) {
   return (now || new Date()) < new Date(ann.expiresAt);
 }
 
-// Filters a list from the server, removing expired and locally-dismissed items.
 function filterActiveAnnouncements(list, now) {
-  const t = now || new Date();
   return list.filter(ann => {
-    if (t >= new Date(ann.expiresAt)) return false;
-    let dismissed = false;
+    let dismissedKey = null;
     try {
-      dismissed = !!sessionStorage.getItem(`bc_dismissed_announcement_${ann.id}`);
+      dismissedKey = sessionStorage.getItem(`bc_dismissed_announcement_${ann.id}`);
     } catch (_e) {
       // private-browsing modes can throw
     }
-    return !dismissed;
+    return isAnnouncementActive(ann, dismissedKey, now);
   });
 }
 

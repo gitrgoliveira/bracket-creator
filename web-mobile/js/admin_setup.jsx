@@ -1,7 +1,7 @@
 // Tournament-edit, competition-create, and bulk-import pages. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useCallback: useCallbackA, useRef: useRefA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
@@ -113,17 +113,16 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [announcementInFlight, setAnnouncementInFlight] = useStateA(false);
   const [activeAnnouncements, setActiveAnnouncements] = useStateA([]);
 
-  // Fetch active announcements on mount and after any change.
-  const refreshAnnouncements = async () => {
+  const refreshAnnouncements = useCallbackA(async () => {
     try {
       const list = await window.API.fetchAnnouncements();
       setActiveAnnouncements(list || []);
     } catch (_e) {
       // non-fatal
     }
-  };
+  }, []);
 
-  useEffectA(() => { refreshAnnouncements(); }, []);
+  useEffectA(() => { refreshAnnouncements(); }, [refreshAnnouncements]);
 
   const handleSendAnnouncement = async () => {
     const trimmed = announcementMessage.trim();

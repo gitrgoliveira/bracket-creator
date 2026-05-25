@@ -12,8 +12,8 @@ func TestAnnouncementStore(t *testing.T) {
 	if ann := store.Get(); ann != nil {
 		t.Errorf("expected initial announcement to be nil, got: %v", ann)
 	}
-	if list := store.List(); list != nil {
-		t.Errorf("expected initial list to be nil, got: %v", list)
+	if list := store.List(); len(list) != 0 {
+		t.Errorf("expected initial list to be empty, got: %v", list)
 	}
 
 	// Set replaces all prior.
@@ -66,8 +66,8 @@ func TestAnnouncementStore(t *testing.T) {
 func TestAnnouncementStoreAdd(t *testing.T) {
 	store := NewAnnouncementStore()
 
-	a1 := store.Add("first", 30*time.Minute)
-	a2 := store.Add("second", 30*time.Minute)
+	a1, _ := store.Add("first", 30*time.Minute)
+	a2, _ := store.Add("second", 30*time.Minute)
 
 	if a1.ID == a2.ID {
 		t.Error("IDs should be unique")
@@ -94,16 +94,14 @@ func TestAnnouncementStoreAdd(t *testing.T) {
 func TestAnnouncementStoreRemove(t *testing.T) {
 	store := NewAnnouncementStore()
 
-	a1 := store.Add("msg1", 30*time.Minute)
-	a2 := store.Add("msg2", 30*time.Minute)
-	_ = a2
+	a1, _ := store.Add("msg1", 30*time.Minute)
+	_, _ = store.Add("msg2", 30*time.Minute)
 
-	removed := store.Remove(a1.ID)
+	removed, list := store.Remove(a1.ID)
 	if !removed {
 		t.Error("expected Remove to return true for existing ID")
 	}
 
-	list := store.List()
 	if len(list) != 1 {
 		t.Fatalf("expected 1 remaining, got %d", len(list))
 	}
@@ -111,7 +109,8 @@ func TestAnnouncementStoreRemove(t *testing.T) {
 		t.Errorf("expected msg2 to remain, got %q", list[0].Message)
 	}
 
-	if store.Remove("nonexistent") {
+	notFound, _ := store.Remove("nonexistent")
+	if notFound {
 		t.Error("expected Remove to return false for missing ID")
 	}
 }
@@ -120,10 +119,9 @@ func TestAnnouncementStoreCapEvictsOldest(t *testing.T) {
 	store := NewAnnouncementStore()
 
 	for range maxActiveAnnouncements {
-		store.Add("msg", 30*time.Minute)
+		_, _ = store.Add("msg", 30*time.Minute)
 	}
-	// One more should evict the oldest.
-	newest := store.Add("newest", 30*time.Minute)
+	newest, _ := store.Add("newest", 30*time.Minute)
 	list := store.List()
 	if len(list) != maxActiveAnnouncements {
 		t.Fatalf("expected cap %d, got %d", maxActiveAnnouncements, len(list))
@@ -173,7 +171,7 @@ func TestAnnouncementStoreConcurrentAddList(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			store.Add("concurrent", 30*time.Minute)
+			_, _ = store.Add("concurrent", 30*time.Minute)
 		}()
 		go func() {
 			defer wg.Done()

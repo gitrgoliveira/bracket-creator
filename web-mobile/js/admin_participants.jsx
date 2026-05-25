@@ -360,21 +360,25 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
   const [tagFilter, setTagFilter] = useStateA(null);
   const [searchQuery, setSearchQuery] = useStateA("");
+  const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
   const players = useMemoA(() => c.players || [], [c.players]);
   const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
+  const playerSearchTargets = useMemoA(() => {
+    const map = new Map();
+    players.forEach(p => {
+      map.set(p.id, `${p.name || ""} ${p.displayName || ""} ${p.dojo || ""}`.toLowerCase());
+    });
+    return map;
+  }, [players]);
   const visiblePlayers = useMemoA(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = trimmedSearch.toLowerCase();
     let out = players;
     if (tagFilter) out = out.filter(p => p.tag === tagFilter);
     if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
-    if (q) out = out.filter(p =>
-      (p.name || "").toLowerCase().includes(q) ||
-      (p.displayName || "").toLowerCase().includes(q) ||
-      (p.dojo || "").toLowerCase().includes(q)
-    );
+    if (q) out = out.filter(p => playerSearchTargets.get(p.id)?.includes(q));
     return out;
-  }, [players, tagFilter, showOnlyUnchecked, searchQuery]);
+  }, [players, tagFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
   const dojoFirstRowSet = useMemoA(() => {
     const seen = new Set();
     const first = new Set();
@@ -1028,20 +1032,20 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               {/* When a tag filter is active, reorder controls would operate on */}
               {/* full-list indices but rows are filtered — so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
-              {(tagFilter || showOnlyUnchecked || searchQuery.trim()) && (
+              {(tagFilter || showOnlyUnchecked || trimmedSearch) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
                   {visiblePlayers.length < players.length && `Showing ${visiblePlayers.length} of ${players.length}. `}
                   Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
                 </div>
               )}
-              {visiblePlayers.length === 0 && searchQuery.trim() && (
+              {visiblePlayers.length === 0 && trimmedSearch && (
                 <div className="empty" style={{ padding: "16px 24px" }}>
-                  No match for "{searchQuery.trim()}".
+                  No match for "{trimmedSearch}".
                 </div>
               )}
               {visiblePlayers.map((p) => {
                 const i = players.indexOf(p);
-                const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!searchQuery.trim();
+                const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!trimmedSearch;
                 return (
                   <div
                     key={p.id}

@@ -2337,6 +2337,10 @@ function MatchViewerModal({ match, onClose }) {
   const bName = match.sideB?.name || "TBD";
   const aWin = match.winner?.id === match.sideA?.id;
   const bWin = match.winner?.id === match.sideB?.id;
+  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
+  // same fallback used in MatchDetailCard and VSchedItem.
+  const mvmIpponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
+  const mvmIpponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
 
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2398,13 +2402,13 @@ function MatchViewerModal({ match, onClose }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flex: 1 }}>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>{(match.ipponsB || []).filter(x => x && x !== "•").join("") || "—"}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsB.filter(x => x && x !== "•").join("") || "—"}</div>
                   {match.hansokuB > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuB}</div>}
                </div>
                <div style={{ fontSize: 24, color: "var(--ink-3)", padding: "0 16px" }}>-</div>
                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flex: 1 }}>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>{(match.ipponsA || []).filter(x => x && x !== "•").join("") || "—"}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsA.filter(x => x && x !== "•").join("") || "—"}</div>
                   {match.hansokuA > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuA}</div>}
                </div>
             </div>

@@ -2177,6 +2177,7 @@ const PLACE_STYLE = {
 function AwardsView({ c, bracket, standings, pools, players }) {
   const containerRef = useRefV(null);
   const [isFs, setIsFs] = useState(false);
+  const isLeague = c?.format === "league";
   // Swiss standings aren't part of the competition-detail payload — they live
   // behind /swiss/standings. Fetch them here when the format is swiss so the
   // Awards tab works for Swiss competitions too.
@@ -2266,6 +2267,23 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           {isFs ? "Exit fullscreen" : "Fullscreen"}
         </button>
       </div>
+      {isLeague && awards[0] && (
+        <div className="winner-badge" style={{
+          padding: "10px 14px",
+          background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
+          color: "white",
+          borderRadius: 8,
+          fontWeight: 700,
+          fontSize: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 16,
+        }}>
+          <span style={{ fontSize: 18 }}>🏆</span>
+          <span>Winner: {awards[0].name}</span>
+        </div>
+      )}
       <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
         {awards.map((a, idx) => {
           const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];

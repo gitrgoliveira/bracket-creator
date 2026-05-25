@@ -1001,6 +1001,30 @@ function swissStandingsHeading(comp, poolMatches) {
   return `Standings after round ${current}`;
 }
 
+function WinnerBadge({ name, isFs = false, testId, marginBottom }) {
+  return (
+    <div
+      className="winner-badge"
+      data-testid={testId}
+      style={{
+        padding: isFs ? "14px 18px" : "10px 14px",
+        background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
+        color: "white",
+        borderRadius: 8,
+        fontWeight: 700,
+        fontSize: isFs ? 18 : 14,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        marginBottom: marginBottom,
+      }}
+    >
+      <span style={{ fontSize: isFs ? 28 : 18 }}>🏆</span>
+      <span>Winner: {name}</span>
+    </div>
+  );
+}
+
 function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   const c = competition;
   const [standings, setStandings] = useState([]);
@@ -1040,22 +1064,7 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {isFinal && winner && (
-        <div className="winner-badge" style={{
-          padding: "10px 14px",
-          background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
-          color: "white",
-          borderRadius: 8,
-          fontWeight: 700,
-          fontSize: 14,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}>
-          <span style={{ fontSize: 18 }}>🏆</span>
-          <span>Winner: {winner.player?.name || ""}</span>
-        </div>
-      )}
+      {isFinal && winner && <WinnerBadge name={winner.player?.name || ""} />}
       <div className="pool" style={{ padding: 14 }}>
         <div className="pool__head">
           <div className="pool__name">{heading}</div>
@@ -1661,22 +1670,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {isLeague && leagueWinner && (
-        <div className="winner-badge" style={{
-          padding: "10px 14px",
-          background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
-          color: "white",
-          borderRadius: 8,
-          fontWeight: 700,
-          fontSize: 14,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}>
-          <span style={{ fontSize: 18 }}>🏆</span>
-          <span>Winner: {leagueWinner.player?.name || ""}</span>
-        </div>
-      )}
+      {isLeague && leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} />}
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
         const matches = poolMatches ? poolMatches.filter(m => {
@@ -2196,6 +2190,7 @@ const PLACE_STYLE = {
 function AwardsView({ c, bracket, standings, pools, players }) {
   const containerRef = useRefV(null);
   const [isFs, setIsFs] = useState(false);
+  const isLeague = c?.format === "league";
   // Swiss standings aren't part of the competition-detail payload — they live
   // behind /swiss/standings. Fetch them here when the format is swiss so the
   // Awards tab works for Swiss competitions too.
@@ -2230,6 +2225,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer),
     [bracket, effectiveStandings, pools, nameToPlayer]
   );
+  const leagueWinner = isLeague ? (awards.find(a => a.place === 1) || null) : null;
 
   const toggleFs = () => {
     const el = containerRef.current;
@@ -2285,6 +2281,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           {isFs ? "Exit fullscreen" : "Fullscreen"}
         </button>
       </div>
+      {leagueWinner && <WinnerBadge name={leagueWinner.name} isFs={isFs} testId="league-winner-badge" marginBottom={16} />}
       <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
         {awards.map((a, idx) => {
           const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];

@@ -231,8 +231,6 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Rank Rejects Wrong Competition Status With 409", func(t *testing.T) {
-		// Rank overrides are only meaningful while pools are running.
-		// Any other status should return 409 Conflict.
 		validBody, _ := json.Marshal(map[string]any{"playerName": "P1", "rank": 1})
 		for _, status := range []state.CompetitionStatus{
 			state.CompStatusSetup,

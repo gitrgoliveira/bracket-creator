@@ -85,6 +85,11 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					if result.DecidedByHantei != nil {
 						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei
 					}
+					// Project persisted flag back so the SSE/HTTP response
+					// reflects committed state (see scoring.go for the full
+					// rationale — nil-preserve would otherwise drop the
+					// stored true from the same-turn response).
+					result.DecidedByHantei = state.HanteiPtr(bracket.Rounds[rIdx][mIdx].DecidedByHantei)
 					if result.Court == "" {
 						result.Court = m.Court
 					}

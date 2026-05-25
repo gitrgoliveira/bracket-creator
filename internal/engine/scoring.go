@@ -608,6 +608,15 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					if result.DecidedByHantei != nil {
 						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei
 					}
+					// Project the persisted flag back into result so the HTTP
+					// response and SSE broadcast reflect committed state. Without
+					// this, a nil-preserve request would correctly keep a stored
+					// hantei flag on disk but emit an omitted field in the same
+					// turn — clients (and the bracket HT chip) would see the
+					// match flip non-hantei until the next refresh. HanteiPtr
+					// returns nil for false so omitempty still drops the field
+					// for non-hantei matches.
+					result.DecidedByHantei = state.HanteiPtr(bracket.Rounds[rIdx][mIdx].DecidedByHantei)
 					// Echo the persisted scheduling fields back into the result so the
 					// caller (and SSE broadcast) sees the full, correct match state
 					// rather than the empty Court/ScheduledAt the scoring UI sends.

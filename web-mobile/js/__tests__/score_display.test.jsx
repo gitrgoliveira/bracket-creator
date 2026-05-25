@@ -166,6 +166,17 @@ describe('ipponsFromScore', () => {
     expect(ipponsFromScore('MK(H2)')).toEqual(['M', 'K']);
   });
 
+  // Real backend output: engine/scoring.go formatScore() inserts a space
+  // between ippons and the (HN) suffix when both are present
+  // ("MK (H1)"). The regex must strip the optional whitespace too,
+  // otherwise split("") returns a trailing " " token that renders as a
+  // bogus ippon character.
+  it('strips spaced (HN) suffix before splitting (real backend shape)', () => {
+    expect(ipponsFromScore('M (H1)')).toEqual(['M']);
+    expect(ipponsFromScore('MK (H2)')).toEqual(['M', 'K']);
+    expect(ipponsFromScore('MKD (H1)')).toEqual(['M', 'K', 'D']);
+  });
+
   it('handles suffix-only string (no ippons, just fouls)', () => {
     expect(ipponsFromScore('(H1)')).toEqual([]);
   });

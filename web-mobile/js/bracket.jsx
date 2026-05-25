@@ -67,11 +67,14 @@ function decisionSuffix(match) {
 
 // Derive an ippon array from a Go-formatted scoreA/scoreB string.
 // The backend formatScore() appends "(HN)" for outstanding hansoku, e.g.
-// "MK(H1)". Splitting the raw string would inject "(", "H", "1", ")" as
-// bogus ippon letters. This helper strips the suffix first.
+// "MK(H1)" — and inserts a SPACE separator between ippons and the suffix
+// when both are present, e.g. "MK (H1)" (see engine/scoring.go:715-724).
+// Splitting the raw string would inject "(", "H", "1", ")" — plus a
+// stray " " for the spaced shape — as bogus ippon letters. This helper
+// strips the suffix AND the separator space first.
 function ipponsFromScore(scoreStr) {
   if (!scoreStr) return [];
-  return scoreStr.replace(/\(H\d+\)$/, "").split("");
+  return scoreStr.replace(/\s*\(H\d+\)$/, "").split("");
 }
 
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""

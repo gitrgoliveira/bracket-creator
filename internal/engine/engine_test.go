@@ -616,16 +616,23 @@ func TestRecordBracketMatchResult_DecidedByHantei_RoundTrips(t *testing.T) {
 
 	// A re-score that omits DecidedByHantei (nil *bool) must PRESERVE the stored
 	// flag rather than silently clearing it — the *bool tri-state API contract.
-	err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
+	// Additionally, the engine must PROJECT the persisted value back into the
+	// in-memory result so the HTTP response + SSE broadcast reflect committed
+	// state (without projection, clients would see the match flip non-hantei
+	// for one turn after a nil-preserve re-score).
+	rescore := &state.MatchResult{
 		Winner:          "Alice",
 		Status:          state.MatchStatusCompleted,
 		Encho:           &state.EnchoMetadata{PeriodCount: 1},
 		DecidedByHantei: nil, // intentionally omitted
-	})
+	}
+	err = eng.RecordMatchResult(compID, firstMatchID, rescore)
 	require.NoError(t, err)
 	bracket, err = store.LoadBracket(compID)
 	require.NoError(t, err)
 	assert.True(t, bracket.Rounds[0][0].DecidedByHantei, "nil DecidedByHantei must preserve the stored true value")
+	require.NotNil(t, rescore.DecidedByHantei, "result.DecidedByHantei must be projected back from storage so SSE/HTTP response reflects committed state")
+	assert.True(t, *rescore.DecidedByHantei, "projected value must reflect the preserved stored true")
 }
 
 func TestRecordBracketMatchResult_SecondMatch_PropagatesAsSideB(t *testing.T) {

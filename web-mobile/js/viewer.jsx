@@ -2212,6 +2212,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer),
     [bracket, effectiveStandings, pools, nameToPlayer]
   );
+  const leagueWinner = isLeague ? (awards.find(a => a.place === 1) || null) : null;
 
   const toggleFs = () => {
     const el = containerRef.current;
@@ -2267,7 +2268,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           {isFs ? "Exit fullscreen" : "Fullscreen"}
         </button>
       </div>
-      {isLeague && awards[0] && (
+      {leagueWinner && (
         <div className="winner-badge" data-testid="league-winner-badge" style={{
           padding: isFs ? "14px 18px" : "10px 14px",
           background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
@@ -2281,7 +2282,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           marginBottom: 16,
         }}>
           <span style={{ fontSize: isFs ? 28 : 18 }}>🏆</span>
-          <span>Winner: {awards[0].name}</span>
+          <span>Winner: {leagueWinner.name}</span>
         </div>
       )}
       <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>

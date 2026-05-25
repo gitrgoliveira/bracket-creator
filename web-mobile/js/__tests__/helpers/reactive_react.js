@@ -18,7 +18,10 @@
 //   const { MyComponent } = await import('../my_component.jsx');
 //   runtime.mount(MyComponent, { ...props });
 //
-// Restore the original React in afterEach.
+// In afterEach, call runtime.unmount() to fire captured effect cleanups
+// (intervals, listeners, etc.) before restoring the original React. If
+// the component under test uses no effects with cleanups, the unmount
+// call is a no-op but still safe to include.
 
 export function makeReactive() {
   let hookSlots = [];
@@ -37,7 +40,17 @@ export function makeReactive() {
   }
 
   const reactive = {
-    createElement: (type, props, ...children) => ({ type, props, children }),
+    // Mirror React's element shape: children are exposed on props.children
+    // (single child vs array, matching how JSX-compiled components read
+    // them) and also kept as a top-level alias so simple tree-traversal
+    // helpers can walk node.children directly.
+    createElement: (type, props, ...children) => {
+      const merged = { ...(props || {}) };
+      if (children.length > 0) {
+        merged.children = children.length === 1 ? children[0] : children;
+      }
+      return { type, props: merged, children };
+    },
     useState: (initial) => {
       const i = hookIndex++;
       if (hookSlots.length <= i) {

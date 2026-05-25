@@ -161,7 +161,13 @@ const API = {
         if (config.players) {
             body = {
                 ...config,
-                players: config.players.map(({ danGrade, ...p }) => {
+                players: config.players.map((player) => {
+                    // Only transform players that have been through normalizePlayer
+                    // (which always adds an explicit danGrade key). A Go-sourced player
+                    // object without danGrade must be passed through unchanged — if we
+                    // destructure it, rest would be empty and metadata[0] would be lost.
+                    if (!('danGrade' in player)) return player;
+                    const { danGrade, ...p } = player;
                     const rest = (p.metadata || []).slice(1);
                     if (danGrade) return { ...p, metadata: [danGrade, ...rest] };
                     if (rest.length > 0) return { ...p, metadata: ["", ...rest] };

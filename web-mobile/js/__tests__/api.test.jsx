@@ -715,6 +715,9 @@ describe('API Utils', () => {
           { name: 'Carol', dojo: 'Yoshinkan', danGrade: '', metadata: [] },
           // no grade but has extra slot: emit ["", ...rest] to preserve slot
           { name: 'Dave', dojo: 'Yoshinkan', danGrade: '', metadata: ['', 'registered'] },
+          // Go-sourced player (no danGrade key at all): pass through unchanged
+          // so metadata[0] (the grade) is NOT dropped
+          { name: 'Eve', dojo: 'Kenshikan', metadata: ['1 Dan'] },
         ];
         await API.updateCompetition('c1', { players }, 'pw');
         expect(capturedBody.players[0].metadata).toEqual(['3 Dan', 'registered']);
@@ -725,6 +728,9 @@ describe('API Utils', () => {
         expect(capturedBody.players[2].danGrade).toBeUndefined();
         // Dave has no grade but has extra slot: ["", "registered"]
         expect(capturedBody.players[3].metadata).toEqual(['', 'registered']);
+        // Eve has no danGrade key — metadata must be passed through unchanged
+        expect(capturedBody.players[4].metadata).toEqual(['1 Dan']);
+        expect(capturedBody.players[4].danGrade).toBeUndefined();
       });
     });
   });

@@ -208,7 +208,16 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, record)
+		allEmpty := true
+		for _, f := range record {
+			if strings.TrimSpace(f) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if !allEmpty {
+			records = append(records, record)
+		}
 	}
 
 	return records, nil

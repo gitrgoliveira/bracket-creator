@@ -116,17 +116,6 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 		}
 		dataFields := record[dataStart:]
 
-		allEmpty := true
-		for _, f := range dataFields {
-			if strings.TrimSpace(f) != "" {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
-			continue
-		}
-
 		if len(dataFields) > 2 {
 			last := strings.TrimSpace(dataFields[len(dataFields)-1])
 			if strings.ToLower(last) == "checked_in" {

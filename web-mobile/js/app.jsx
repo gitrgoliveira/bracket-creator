@@ -751,7 +751,7 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
-        <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="auth__logo" />
+        <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="auth__logo" decoding="async" />
         <div className="auth__title">Admin sign in</div>
         <div className="auth__sub">Enter the tournament password to manage brackets, schedules and live results.</div>
         <form onSubmit={submit}>

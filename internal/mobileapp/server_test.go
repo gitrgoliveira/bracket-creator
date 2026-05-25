@@ -26,8 +26,10 @@ func TestNewRouter(t *testing.T) {
 
 	// Mock FS
 	mockFS := fstest.MapFS{
-		"web-mobile/index.html": {Data: []byte("<html><body>Mobile</body></html>")},
-		"web-mobile/main.js":    {Data: []byte("console.log('hello')")},
+		"web-mobile/index.html":    {Data: []byte("<html><body>Mobile</body></html>")},
+		"web-mobile/main.js":       {Data: []byte("console.log('hello')")},
+		"web-mobile/favicon.jpeg":  {Data: []byte("fake-jpeg-favicon")},
+		"web-mobile/logo.jpeg":     {Data: []byte("fake-jpeg-logo")},
 	}
 	res := resources.NewResources(nil, mockFS)
 
@@ -53,6 +55,14 @@ func TestNewRouter(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "console.log")
+
+	// Test embedded brand assets (favicon + logo)
+	for _, asset := range []string{"/favicon.jpeg", "/logo.jpeg"} {
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("GET", asset, nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "expected 200 for %s", asset)
+	}
 
 	// Test SPA Fallback
 	w = httptest.NewRecorder()

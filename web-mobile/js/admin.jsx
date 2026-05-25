@@ -618,6 +618,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onBack={() => setView({ kind: "dashboard" })}
       onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
+      onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then(setAdminCompData).catch(err => console.error("refresh failed:", err))}
       onCreatePlayoff={createPlayoff}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}

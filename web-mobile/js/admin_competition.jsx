@@ -1110,7 +1110,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
   );
 }
 
-function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, reservedSlots, section, onSection, onBack, onOpenCompetition, onUpdate, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
+function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, reservedSlots, section, onSection, onBack, onOpenCompetition, onUpdate, onRefreshCompetition, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
@@ -1139,9 +1139,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     setGenerating(true);
     try {
       await window.API.generateDraw(c.id, password);
-      // SSE draw_generated triggers a tournament reload; navigate to the
-      // bracket/pools preview so the operator can inspect the draw.
       if (!mountedRef.current) return;
+      // Refresh immediately so the UI reflects draw-ready status without
+      // waiting for SSE (which may be slow or temporarily disconnected).
+      onRefreshCompetition?.();
       showToast(`Draw generated for ${c.name}`);
       onSection(c.format === "playoffs" || c.format === "mixed" ? "bracket" : "pools");
     } catch (e) {
@@ -1158,6 +1159,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     try {
       await window.API.discardDraw(c.id, password);
       if (!mountedRef.current) return;
+      onRefreshCompetition?.();
       showToast(`Draw discarded for ${c.name}`);
       onSection("overview");
     } catch (e) {
@@ -1174,6 +1176,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       await window.API.discardDraw(c.id, password);
       await window.API.generateDraw(c.id, password);
       if (!mountedRef.current) return;
+      onRefreshCompetition?.();
       showToast(`Draw regenerated for ${c.name}`);
       onSection(c.format === "playoffs" || c.format === "mixed" ? "bracket" : "pools");
     } catch (e) {

@@ -81,6 +81,18 @@ func MaxBodyBytes(n int64) gin.HandlerFunc {
 	}
 }
 
+// adminGroup creates an /api route group with MaxBodyBytes(capBytes) wired
+// BEFORE AuthMiddleware, enforcing the cap→auth ordering that prevents an
+// unauthenticated attacker from consuming auth overhead before hitting 413.
+// Use this for every protected admin sub-group so the ordering can't be
+// accidentally reversed when adding new groups.
+func adminGroup(r *gin.Engine, capBytes int64, verifier PasswordVerifier, store *state.Store) *gin.RouterGroup {
+	g := r.Group("/api")
+	g.Use(MaxBodyBytes(capBytes))
+	g.Use(AuthMiddleware(verifier, store))
+	return g
+}
+
 // requireValidCompID extracts the `:id` URL parameter and validates it
 // via state.ValidateCompetitionID. Rejects:
 //   - empty

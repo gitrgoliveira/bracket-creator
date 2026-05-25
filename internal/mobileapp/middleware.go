@@ -16,6 +16,20 @@ import (
 // "64 MB" consistently — but the request-size cap lives here, in the
 // MaxBodyBytes middleware applied to the import group in server.go.
 const (
+	// AnnouncementMaxBodyBytes caps POST /api/tournament/announce.
+	// Worst-case JSON encoding: 200-char message × 6 bytes/escape + keys
+	// ≈ 1242 bytes; 4096 gives ≈3× headroom. Used by adminTinyBody in
+	// server.go so the cap fires before AuthMiddleware.
+	AnnouncementMaxBodyBytes int64 = 4096
+
+	// ResetMaxBodyBytes caps POST /api/tournament/reset.
+	// Worst-case JSON: password 256 chars × 6 bytes/escape + originatorId
+	// 128 × 6 + overhead ≈ 2344 bytes; 4096 gives ≈1.7× headroom. Applied
+	// inside the handler (not as group middleware) to preserve the locked-mode
+	// 404 response before any body is read — a per-group cap would reveal the
+	// route's existence via 413 vs 404 on locked deployments.
+	ResetMaxBodyBytes int64 = 4096
+
 	// DefaultMaxBodyBytes caps non-import admin request bodies. 1 MB is
 	// far above any legitimate JSON payload on this server (the largest
 	// is a competition with embedded roster ~ a few KB per player ×

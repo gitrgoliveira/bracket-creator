@@ -1,9 +1,11 @@
 package state
 
 import (
+	"encoding/csv"
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -59,9 +61,18 @@ func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) er
 	})
 
 	var sb strings.Builder
-	sb.WriteString("Rank,Name\n")
+	w := csv.NewWriter(&sb)
+	if err := w.Write([]string{"Rank", "Name"}); err != nil {
+		return fmt.Errorf("writing seeds CSV header: %w", err)
+	}
 	for _, a := range assignments {
-		fmt.Fprintf(&sb, "%d,%s\n", a.SeedRank, a.Name)
+		if err := w.Write([]string{strconv.Itoa(a.SeedRank), a.Name}); err != nil {
+			return fmt.Errorf("writing seeds CSV record: %w", err)
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return fmt.Errorf("flushing seeds CSV: %w", err)
 	}
 
 	return s.atomicWrite(path, []byte(sb.String()), 0600)

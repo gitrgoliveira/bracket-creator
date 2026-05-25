@@ -779,7 +779,27 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 		assert.Equal(t, "decidedByHantei", verr.Field)
 	})
 
-	t.Run("invalid hantei: decision hikiwake incompatible", func(t *testing.T) {
+	for _, decision := range []string{"hikiwake", "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen", "kachinuki-exhaustion"} {
+		decision := decision
+		t.Run("invalid hantei: decision "+decision+" incompatible", func(t *testing.T) {
+			req := ScoreRequest{
+				SideA:           "Alice",
+				SideB:           "Bob",
+				Winner:          "Alice",
+				Status:          state.MatchStatusCompleted,
+				DecidedByHantei: true,
+				Encho:           encho1,
+				Decision:        decision,
+			}
+			err := req.Validate()
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, "decidedByHantei", verr.Field)
+		})
+	}
+
+	t.Run("invalid hantei: decisionBy set", func(t *testing.T) {
 		req := ScoreRequest{
 			SideA:           "Alice",
 			SideB:           "Bob",
@@ -787,13 +807,43 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			Status:          state.MatchStatusCompleted,
 			DecidedByHantei: true,
 			Encho:           encho1,
-			Decision:        "hikiwake",
+			DecisionBy:      "aka",
 		}
 		err := req.Validate()
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
 		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: decisionReason set", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+			Encho:           encho1,
+			DecisionReason:  "injury",
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("valid hantei: decision fought is compatible", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: true,
+			Encho:           encho1,
+			Decision:        "fought",
+		}
+		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("decidedByHantei false is always valid", func(t *testing.T) {

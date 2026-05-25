@@ -310,10 +310,30 @@ func (r *ScoreRequest) Validate() error {
 				Message: "requires a tied scoreline — ippon counts must be equal",
 			}
 		}
-		if r.Decision == "hikiwake" {
+		// Hantei is a referee judges' decision that produces a winner from a
+		// tied encho. Any other special decision (hikiwake=draw, kiken=withdrawal,
+		// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible —
+		// persisting both would render contradictory suffixes like "Kiken (E) HT".
+		// Only the neutral values ("" and "fought") are allowed alongside hantei.
+		switch r.Decision {
+		case "", "fought":
+			// compatible: normal fight decided by judges
+		default:
 			return &ValidationError{
 				Field:   "decidedByHantei",
-				Message: "incompatible with decision 'hikiwake' — hantei produces a winner, not a draw",
+				Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '' or 'fought'", r.Decision),
+			}
+		}
+		if r.DecisionBy != "" {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "decisionBy must be empty when decidedByHantei is true",
+			}
+		}
+		if r.DecisionReason != "" {
+			return &ValidationError{
+				Field:   "decidedByHantei",
+				Message: "decisionReason must be empty when decidedByHantei is true",
 			}
 		}
 	}

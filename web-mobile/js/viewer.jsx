@@ -2439,6 +2439,12 @@ function AnnouncementBanner({ announcements, onDismiss }) {
   const list = announcements || [];
   const [idx, setIdx] = useState(0);
 
+  // Reset to 0 whenever the list shrinks so the next item shown is
+  // deterministic (first/oldest) rather than wherever % lands.
+  useEffect(() => {
+    setIdx(0);
+  }, [list.length]);
+
   useEffect(() => {
     if (list.length <= 1) return;
     const len = list.length;
@@ -2448,7 +2454,6 @@ function AnnouncementBanner({ announcements, onDismiss }) {
     return () => clearInterval(interval);
   }, [list.length]);
 
-  // % keeps safeIdx in bounds when the list shrinks after a dismiss.
   const safeIdx = list.length > 0 ? idx % list.length : 0;
   const ann = list[safeIdx];
 

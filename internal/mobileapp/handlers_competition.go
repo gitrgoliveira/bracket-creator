@@ -1038,8 +1038,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load competition"})
+			return
+		}
+		if comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
 		if comp.Status != state.CompStatusPools {

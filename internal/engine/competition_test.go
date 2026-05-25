@@ -320,3 +320,155 @@ func TestStartCompetition_SwissMatchesOnDiskRoundZero_AllScheduled(t *testing.T)
 	assert.Equal(t, state.CompStatusPools, comp.Status)
 	assert.Equal(t, 1, comp.SwissCurrentRound)
 }
+
+// TestGenerateDraw_PoolsFormat verifies that GenerateDraw transitions a pools
+// competition from Setup to DrawReady and writes pools/pool-matches artifacts.
+func TestGenerateDraw_PoolsFormat(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "generate-draw-pools"
+
+	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusDrawReady, comp.Status, "GenerateDraw must set status to draw-ready")
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, pools, "pools must be written on GenerateDraw")
+}
+
+// TestGenerateDraw_PlayoffsFormat verifies GenerateDraw on a playoffs
+// competition writes bracket.json and sets draw-ready.
+func TestGenerateDraw_PlayoffsFormat(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "generate-draw-playoffs"
+
+	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusDrawReady, comp.Status)
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.NotNil(t, bracket, "bracket must be written on GenerateDraw for playoffs")
+}
+
+// TestGenerateDraw_RejectsDrawReady ensures GenerateDraw returns an error
+// when the competition is already in draw-ready state.
+func TestGenerateDraw_RejectsDrawReady(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "generate-draw-already-ready"
+
+	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	err := eng.GenerateDraw(compID)
+	require.Error(t, err)
+	var ve *ValidationError
+	assert.ErrorAs(t, err, &ve, "second GenerateDraw must return a ValidationError")
+}
+
+// TestDiscardDraw verifies that DiscardDraw resets status to Setup and
+// removes draw artifacts.
+func TestDiscardDraw_ResetsToSetup(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "discard-draw"
+
+	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+
+	require.NoError(t, eng.GenerateDraw(compID))
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusDrawReady, comp.Status)
+
+	require.NoError(t, eng.DiscardDraw(compID))
+
+	comp, err = store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusSetup, comp.Status, "DiscardDraw must reset status to setup")
+
+	// Draw artifacts should be deleted.
+	_, poolsErr := os.Stat(filepath.Join(dir, "competitions", compID, "pool-matches.csv"))
+	assert.True(t, os.IsNotExist(poolsErr), "pool-matches.csv must be deleted after DiscardDraw")
+}
+
+// TestDiscardDraw_RejectsNonDrawReady ensures DiscardDraw errors when not in
+// draw-ready state.
+func TestDiscardDraw_RejectsNonDrawReady(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "discard-draw-guard"
+
+	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+
+	err := eng.DiscardDraw(compID)
+	require.Error(t, err)
+	var ve *ValidationError
+	assert.ErrorAs(t, err, &ve, "DiscardDraw on setup competition must return ValidationError")
+}
+
+// TestStartCompetition_FromDrawReady verifies that StartCompetition on a
+// draw-ready competition transitions to running without regenerating the draw.
+func TestStartCompetition_FromDrawReady(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "start-from-draw-ready"
+
+	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+
+	require.NoError(t, eng.GenerateDraw(compID))
+	comp, _ := store.LoadCompetition(compID)
+	require.Equal(t, state.CompStatusDrawReady, comp.Status)
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status, "StartCompetition from DrawReady must set status to pools")
+}
+
+// TestStartCompetition_BackwardCompatSetup verifies that StartCompetition
+// still works directly from Setup (one-click path, no explicit GenerateDraw).
+func TestStartCompetition_BackwardCompatSetup(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "start-backward-compat"
+
+	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPlayoffs, comp.Status, "StartCompetition from Setup must set status to playoffs for playoffs format")
+}
+
+// TestGenerateDraw_ThenDiscardThenRegenerateAndStart exercises the full
+// preview workflow: generate, discard, regenerate, then start.
+func TestGenerateDraw_ThenDiscardThenRegenerateAndStart(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "full-preview-flow"
+
+	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+
+	require.NoError(t, eng.GenerateDraw(compID))
+	require.NoError(t, eng.DiscardDraw(compID))
+	require.NoError(t, eng.GenerateDraw(compID))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status)
+}

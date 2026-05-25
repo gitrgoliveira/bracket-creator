@@ -3,6 +3,7 @@
 function StatusBadge({ status, showLiveDot }) {
   const map = {
     setup: ["badge--setup", "Pending"],
+    "draw-ready": ["badge--draw-ready", "Draw ready"],
     pools: ["badge--pools", "Pools"],
     playoffs: ["badge--playoffs", "Playoffs"],
     completed: ["badge--completed", "Completed"],

@@ -42,6 +42,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
+			return
+		}
 		if comp.Status != state.CompStatusSetup && comp.Status != "" {
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
 			return
@@ -217,6 +221,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
+			return
+		}
 		if comp.Status != state.CompStatusSetup && comp.Status != "" {
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
 			return

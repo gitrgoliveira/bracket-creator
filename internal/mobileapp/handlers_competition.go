@@ -935,6 +935,55 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, comp)
 	})
 
+	r.POST("/competitions/:id/generate-draw", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		if err := eng.GenerateDraw(id); err != nil {
+			var notFound *engine.NotFoundError
+			var validation *engine.ValidationError
+			switch {
+			case errors.As(err, &notFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validation):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
+			return
+		}
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "draw generated but failed to load updated state: " + err.Error()})
+			return
+		}
+		hub.Broadcast(EventDrawGenerated, gin.H{"competitionId": id})
+		c.JSON(http.StatusOK, comp)
+	})
+
+	r.DELETE("/competitions/:id/draw", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		if err := eng.DiscardDraw(id); err != nil {
+			var notFound *engine.NotFoundError
+			var validation *engine.ValidationError
+			switch {
+			case errors.As(err, &notFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validation):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
+			return
+		}
+		hub.Broadcast(EventDrawDiscarded, gin.H{"competitionId": id})
+		c.Status(http.StatusNoContent)
+	})
+
 	r.POST("/competitions/:id/complete", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

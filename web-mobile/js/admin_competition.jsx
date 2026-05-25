@@ -852,7 +852,8 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
   }, [runningMatchId]);
 
   if (!bracket || !bracket.rounds) {
-    return <div className="empty"><div className="icon">⚙</div><h3>Bracket not generated yet</h3><div>Start the competition to build the bracket.</div></div>;
+    const previewMode = c && c.status === "draw-ready";
+    return <div className="empty"><div className="icon">⚙</div><h3>Bracket not generated yet</h3><div>{previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."}</div></div>;
   }
   const select = (m, ri, mi) => setSelected({ matchId: m.id, ri, mi });
   // Look up the selected match by ID rather than [ri][mi] index. The
@@ -1113,6 +1114,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
+  const [generating, setGenerating] = useStateA(false);
+  const [discarding, setDiscarding] = useStateA(false);
   // localStatus lets AdminSettings report an invalidation immediately so the
   // page-header StatusBadge flips without waiting for the SSE refresh.
   // Cleared automatically when the prop status changes (SSE arrives).
@@ -1131,6 +1134,39 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // stricter check would reject — letting the operator start a competition
   // with a date that can't be saved back.
   const isDateValid = isValidDate;
+
+  const generateDraw = async () => {
+    setGenerating(true);
+    try {
+      await window.API.generateDraw(c.id, password);
+      // SSE draw_generated triggers a tournament reload; navigate to the
+      // bracket/pools preview so the operator can inspect the draw.
+      if (!mountedRef.current) return;
+      showToast(`Draw generated for ${c.name}`);
+      onSection(c.format === "playoffs" || c.format === "mixed" ? "bracket" : "pools");
+    } catch (e) {
+      console.error("Generate draw failed:", e);
+      if (mountedRef.current) showToast(e.message, "error");
+    } finally {
+      if (mountedRef.current) setGenerating(false);
+    }
+  };
+
+  const discardDraw = async () => {
+    if (!confirm(`Discard the generated draw for "${c.name}"? The pools/bracket will be removed and you can regenerate.`)) return;
+    setDiscarding(true);
+    try {
+      await window.API.discardDraw(c.id, password);
+      if (!mountedRef.current) return;
+      showToast(`Draw discarded for ${c.name}`);
+      onSection("overview");
+    } catch (e) {
+      console.error("Discard draw failed:", e);
+      if (mountedRef.current) showToast(e.message, "error");
+    } finally {
+      if (mountedRef.current) setDiscarding(false);
+    }
+  };
 
   const start = async () => {
     showToast(`Starting ${c.name}…`);
@@ -1165,6 +1201,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     }
   };
 
+  const isDrawReady = c.status === "draw-ready";
   const sections = [
     {
       sec: "Preparation", items: [
@@ -1178,12 +1215,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     },
     {
       sec: "Run", items: [
-        pools ? { id: "pools", label: "Pools — live" } : null,
+        // Show pools/bracket in nav when draw is ready (preview) or running.
+        (pools || isDrawReady) ? { id: "pools", label: isDrawReady ? "Pools — preview" : "Pools — live" } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
-        c.format === "swiss" ? { id: "swiss", label: "Swiss rounds — manage" } : null,
-        bracket ? { id: "bracket", label: "Bracket — live" } : null,
-        { id: "scores", label: "Scores — edit" },
+        c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
+        (bracket || isDrawReady) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — live" } : null,
+        !isDrawReady ? { id: "scores", label: "Scores — edit" } : null,
       ].filter(Boolean)
     },
     {
@@ -1219,16 +1257,41 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
           <div className="page-head__actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
             {c.status === "setup" && c.players.length >= 2 && (
               <>
-                <button className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting}>
-                  {starting && <span className="spinner" />}
-                  {starting ? "Starting…" : "Start competition →"}
-                </button>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button className="btn btn--ghost" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
+                    {generating && <span className="spinner" />}
+                    {generating ? "Generating…" : "Preview draw"}
+                  </button>
+                  <button className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
+                    {starting && <span className="spinner" />}
+                    {starting ? "Starting…" : "Start competition →"}
+                  </button>
+                </div>
                 {!isDateValid(c.date) && (
                   <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600 }}>
                     ⚠ Cannot start: invalid date in Settings tab (e.g. "{c.date}")
                   </div>
                 )}
               </>
+            )}
+            {isDrawReady && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting}>
+                    {discarding && <span className="spinner" />}
+                    {discarding ? "Discarding…" : "Discard draw"}
+                  </button>
+                  <button className="btn btn--ghost" onClick={generateDraw} disabled={generating || starting || discarding}>
+                    {generating && <span className="spinner" />}
+                    {generating ? "Regenerating…" : "Regenerate draw"}
+                  </button>
+                  <button className="btn btn--primary" onClick={start} disabled={starting || generating || discarding}>
+                    {starting && <span className="spinner" />}
+                    {starting ? "Starting…" : "Start competition →"}
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start when ready</div>
+              </div>
             )}
             {/* FR-050 / FR-051 / T045: the create-playoff affordance */}
             {/* is gated by format. Legacy "pools" rows kept their old */}

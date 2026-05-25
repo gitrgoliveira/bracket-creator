@@ -245,6 +245,22 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	return s.saveCompetitionChangedLocked(desired, s.directWrite)
 }
 
+// DeleteCompetitionFile removes a single file from a competition directory.
+// Returns nil when the file does not exist (idempotent delete).
+func (s *Store) DeleteCompetitionFile(id, filename string) error {
+	if err := ValidateCompetitionID(id); err != nil {
+		return fmt.Errorf("invalid competition ID: %w", err)
+	}
+	mu := s.getCompLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+	path := s.compPath(id, filename)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) DeleteCompetition(id string) error {
 	if err := ValidateCompetitionID(id); err != nil {
 		return fmt.Errorf("invalid competition ID: %w", err)

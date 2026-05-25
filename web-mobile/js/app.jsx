@@ -453,6 +453,14 @@ function App() {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
             }
             jitteredTimeout(load, jitter);
+        } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
+            // Draw generated/discarded: refresh the selected competition's
+            // details (new pools/bracket data or cleared state) and the
+            // tournament list so status badges update.
+            if (viewerCompId === event.data?.competitionId) {
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            }
+            jitteredTimeout(load, jitter);
         } else if (event.type === "swiss_round_generated") {
             // T192 (US13 — FR-050d): a new Swiss round's matches have been
             // generated. The payload carries competitionId + swissCurrentRound

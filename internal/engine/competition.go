@@ -246,33 +246,12 @@ func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []sta
 	return false
 }
 
-// StartCompetition runs the competition-start pipeline: validate
-// status, load participants/seeds, generate pools or bracket, commit
-// the new Status atomically, save participants, generate schedule.
+// StartCompetition starts a competition. When called on a draw-ready
+// competition it transitions directly to running (no regeneration).
+// When called on a setup competition it generates the draw first then
+// transitions — preserving the single-click "Start" UX.
 //
-// The final comp-status commit is wrapped in
-// state.Store.UpdateCompetitionChanged so two concurrent
-// StartCompetition calls can't both write the new Status (or, more
-// importantly, one's "start" can't clobber the other's already-applied
-// status change). The status re-check inside the transform aborts if
-// another writer moved Status off Setup between our outer Load and
-// the atomic commit.
-//
-// Pipeline limitations (pre-existing, NOT addressed by this fix):
-//   - Pool/bracket generation (writes pools.csv / bracket.json) runs
-//     OUTSIDE the comp-config lock. Two concurrent starts could each
-//     generate and overwrite each other's pools.csv before the
-//     atomic Status commit serializes them. The later start's
-//     pools.csv wins; users see the second start's player ordering.
-//     A full fix would require holding the comp lock across the
-//     entire pipeline, which would conflict with the generator's
-//     internal use of the same lock for pools.csv / bracket.json
-//     writes. Left as a follow-up — needs a deeper refactor that
-//     either threads "lock already held" through the generators or
-//     restructures the lock granularity.
-//   - SaveParticipants + GenerateSchedule (steps after the comp
-//     commit) also have their own lock acquisitions. A failure
-//     mid-pipeline leaves partial state on disk. Pre-existing.
+// See runDrawPipeline for pipeline limitations (pre-existing).
 func (e *Engine) StartCompetition(id string) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -281,12 +260,115 @@ func (e *Engine) StartCompetition(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-
-	// Best-effort early validation outside the lock — fast-fails the
-	// obviously-not-startable case (admin clicks start twice). The
-	// authoritative re-check is inside the atomic commit below.
-	if comp.Status != state.CompStatusSetup && comp.Status != "" {
+	switch comp.Status {
+	case state.CompStatusDrawReady:
+		// Draw already exists; only flip status and generate schedule.
+		if err := e.transitionDrawToRunning(id); err != nil {
+			return err
+		}
+		return e.GenerateSchedule(id)
+	case state.CompStatusSetup, "":
+		// One-click path: generate draw then transition.
+		if err := e.runDrawPipeline(id); err != nil {
+			return err
+		}
+		if err := e.transitionDrawToRunning(id); err != nil {
+			return err
+		}
+		return e.GenerateSchedule(id)
+	default:
 		return validationErrorf("competition %s already started", id)
+	}
+}
+
+// GenerateDraw generates pools/bracket/Swiss-r1 for a Setup competition
+// and transitions it to CompStatusDrawReady without starting the competition.
+// The operator can preview, discard, and regenerate the draw before calling
+// StartCompetition to enter the running state.
+func (e *Engine) GenerateDraw(id string) error {
+	comp, err := e.store.LoadCompetition(id)
+	if err != nil {
+		return err
+	}
+	if comp == nil {
+		return notFoundErrorf("competition %s not found", id)
+	}
+	if comp.Status != state.CompStatusSetup && comp.Status != "" {
+		if comp.Status == state.CompStatusDrawReady {
+			return validationErrorf("competition %s draw already generated; discard it first to regenerate", id)
+		}
+		return validationErrorf("competition %s cannot generate draw (status: %s)", id, comp.Status)
+	}
+	return e.runDrawPipeline(id)
+}
+
+// DiscardDraw discards the generated draw for a draw-ready competition,
+// deleting the draw artifacts and resetting the competition to Setup.
+// Returns an error when the competition is not in draw-ready state.
+func (e *Engine) DiscardDraw(id string) error {
+	_, err := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+		if current == nil {
+			return nil, notFoundErrorf("competition %s not found", id)
+		}
+		if current.Status != state.CompStatusDrawReady {
+			return nil, validationErrorf("competition %s is not in draw-ready state (status: %s)", id, current.Status)
+		}
+		current.Status = state.CompStatusSetup
+		return current, nil
+	})
+	if err != nil {
+		return err
+	}
+	// Delete draw artifacts so the next GenerateDraw starts clean.
+	// Ignore individual file errors — the competition config is already
+	// reset to Setup, so orphaned files are safe to leave (next
+	// GenerateDraw overwrites them).
+	_ = e.store.DeleteCompetitionFile(id, "pools.csv")
+	_ = e.store.DeleteCompetitionFile(id, "pool-matches.csv")
+	_ = e.store.DeleteCompetitionFile(id, "bracket.json")
+	return nil
+}
+
+// transitionDrawToRunning atomically moves a draw-ready competition to
+// the appropriate running status (Pools or Playoffs) based on its format.
+func (e *Engine) transitionDrawToRunning(id string) error {
+	_, err := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+		if current == nil {
+			return nil, notFoundErrorf("competition %s not found (deleted during start)", id)
+		}
+		if current.Status != state.CompStatusDrawReady {
+			return nil, validationErrorf("competition %s not in draw-ready state (status: %s); concurrent modification?", id, current.Status)
+		}
+		switch current.Format {
+		case state.CompFormatPools, state.CompFormatLeague, state.CompFormatSwiss:
+			current.Status = state.CompStatusPools
+		default:
+			current.Status = state.CompStatusPlayoffs
+		}
+		return current, nil
+	})
+	return err
+}
+
+// runDrawPipeline runs the full draw-generation pipeline for a Setup
+// competition and commits CompStatusDrawReady. It does NOT generate the
+// schedule; callers must call GenerateSchedule after transitioning to a
+// running status.
+//
+// Pipeline limitations (pre-existing):
+//   - Pool/bracket generation (writes pools.csv / bracket.json) runs
+//     OUTSIDE the comp-config lock. Two concurrent GenerateDraw calls
+//     could overwrite each other's pools.csv before the atomic Status
+//     commit serializes them. Left as a follow-up.
+//   - SaveParticipants (reserved-slot path) also has its own lock
+//     acquisition. A failure mid-pipeline leaves partial state on disk.
+func (e *Engine) runDrawPipeline(id string) error {
+	comp, err := e.store.LoadCompetition(id)
+	if err != nil {
+		return err
+	}
+	if comp == nil {
+		return notFoundErrorf("competition %s not found", id)
 	}
 
 	// Snapshot the loaded config BEFORE the pipeline mutates anything.
@@ -403,7 +485,7 @@ func (e *Engine) StartCompetition(id string) error {
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
-		comp.Status = state.CompStatusPools
+		comp.Status = state.CompStatusDrawReady
 	case state.CompFormatSwiss:
 		// Guard 1: SwissCurrentRound already bumped — AdvanceSwissRound ran to
 		// completion before StartCompetition was called.
@@ -459,12 +541,12 @@ func (e *Engine) StartCompetition(id string) error {
 			return err
 		}
 		comp.SwissCurrentRound = 1
-		comp.Status = state.CompStatusPools
+		comp.Status = state.CompStatusDrawReady
 	default:
 		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
 			return err
 		}
-		comp.Status = state.CompStatusPlayoffs
+		comp.Status = state.CompStatusDrawReady
 	}
 
 	// Atomic commit of the modified competition. The transform
@@ -497,7 +579,7 @@ func (e *Engine) StartCompetition(id string) error {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found (deleted during start)", id)
 		}
-		if current.Status != state.CompStatusSetup && current.Status != "" {
+		if current.Status != state.CompStatusSetup && current.Status != "" && current.Status != state.CompStatusDrawReady {
 			return nil, validationErrorf("competition %s started concurrently by another writer", id)
 		}
 		// Generation-relevant fields must match the SNAPSHOT we
@@ -667,5 +749,5 @@ func (e *Engine) StartCompetition(id string) error {
 		}
 	}
 
-	return e.GenerateSchedule(id)
+	return nil
 }

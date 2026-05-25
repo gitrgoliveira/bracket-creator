@@ -786,11 +786,65 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/generate-draw:
+    post:
+      tags: [competitions]
+      summary: Generate draw (preview)
+      description: |
+        Generates pools/bracket/Swiss-r1 from the saved participant list and seeds and
+        transitions the competition to `draw-ready` status without starting it.
+        The operator can inspect the draw, discard it, and regenerate before calling
+        `/start`. Participant edits are blocked while a draw is pending.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Draw generated; competition is now in `draw-ready` status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/draw:
+    delete:
+      tags: [competitions]
+      summary: Discard draw
+      description: |
+        Discards the generated draw for a `draw-ready` competition, deletes draw
+        artifacts (pools.csv, pool-matches.csv, bracket.json), and resets the
+        competition to `setup`. Returns 400 if the competition is not in `draw-ready`
+        state.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '204':
+          description: Draw discarded; competition reset to setup.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/start:
     post:
       tags: [competitions]
       summary: Start competition
-      description: Generates pools/bracket from the saved participant list and seeds.
+      description: |
+        Starts the competition. When in `draw-ready` status the existing draw is reused
+        and the competition transitions directly to `pools` or `playoffs`. When in
+        `setup` status the draw is generated first then the competition transitions
+        (backward-compatible one-click path).
       security:
         - TournamentPassword: []
       parameters:
@@ -2013,7 +2067,7 @@ components:
             `playoffs` → knockout phase active; `completed` → finished;
             `invalid` → operator-declared invalid, prerequisite for deleting
             an already-started competition.
-          enum: [setup, pools, playoffs, completed, invalid, ""]
+          enum: [setup, draw-ready, pools, playoffs, completed, invalid, ""]
         mirror:
           type: boolean
         withZekkenName:

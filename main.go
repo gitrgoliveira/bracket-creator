@@ -20,16 +20,16 @@ import (
 //go:embed web/css web/js
 var webFiles embed.FS
 
-// Mobile-app assets. The glob embeds all files present at build time.
-// After `make go/build` runs esbuild, this includes css, js, dist and vendor.
-// Explicit paths are not used here because dist/ and vendor/ are generated
-// by esbuild and absent in a clean checkout — listing them would break
-// `go test ./...` before a build has run. The trade-off: a local binary
-// built after `npm install` will also embed node_modules/, making it
-// larger. Production Docker builds and CI run in clean envs where
-// node_modules/ is absent, so the artifact size is not affected there.
+// Mobile-app assets — only the files the HTTP server actually serves.
+// web-mobile/js (JSX sources) and dev tooling are excluded; the browser
+// loads compiled output from dist/ and vendor libraries from vendor/.
+// Tracked "keep" placeholders in dist/ and vendor/ ensure the directories
+// exist on clean checkouts so this directive compiles before esbuild runs.
 //
-//go:embed web-mobile/*
+//go:embed web-mobile/index.html
+//go:embed web-mobile/css
+//go:embed web-mobile/dist
+//go:embed web-mobile/vendor
 var mobileWebFiles embed.FS
 
 func main() {

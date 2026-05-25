@@ -152,14 +152,11 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
     });
 
-    it('still emits HT for score.hantei=true (defensive read for older payloads)', () => {
-      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E) HT');
-    });
-
-    it('explicit decidedByHantei=false overrides score.hantei=true', () => {
-      // Newer callers pass the flag positionally; an explicit false must win
-      // over a truthy score.hantei so the positional arg can suppress the suffix.
-      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, false)).toBe('M–K (E)');
+    it('score.hantei is not read — only the decidedByHantei param controls HT', () => {
+      // The backend never emits score.hantei; the field is silently dropped by
+      // Go's JSON unmarshaller. Only the positional decidedByHantei arg matters.
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E)');
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M–K (E) HT');
     });
   });
 });

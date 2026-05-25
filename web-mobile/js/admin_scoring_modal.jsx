@@ -716,7 +716,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       hansokuA: aFouls,
       hansokuB: bFouls,
       status: "completed",
-      score: { type: "hantei", winnerPts, loserPts, fouls, corrected: isComplete, hantei: true },
+      score: { type: "hantei", winnerPts, loserPts, fouls, corrected: isComplete },
       ...enchoBlock(),
       decidedByHantei: true,
     }));

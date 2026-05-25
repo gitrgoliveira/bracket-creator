@@ -1307,7 +1307,7 @@ function MatchDetailCard({ match, onClose }) {
             {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
           </div>
           <div className="match-detail-card__ippons-center">
-            {(match.decidedByHantei || match.score?.hantei || match.score?.type === "hantei") && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
+            {(match.decidedByHantei || match.score?.type === "hantei") && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
             {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
           </div>
           <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
@@ -1486,7 +1486,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
         )}
         {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
         {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
-        {m.status === "completed" && (m.decidedByHantei || m.score?.hantei) && (
+        {m.status === "completed" && m.decidedByHantei && (
           <span className="vsched-item__hantei" data-testid="vsched-hantei" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "var(--accent-soft, #eef)", color: "var(--accent, #36c)" }}>
             HANTEI
           </span>

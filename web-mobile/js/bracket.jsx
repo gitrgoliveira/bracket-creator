@@ -53,10 +53,7 @@ function decisionSuffix(match) {
   if (!match) return "";
   const d = match.decision || "";
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
-  // Fall back to match.score?.hantei for legacy payloads that carry the flag
-  // there; mirrors the same fallback in formatIpponsScore so display.jsx and
-  // other decisionSuffix callers produce consistent HT suffixes.
-  const hanteiOn = !!(match.decidedByHantei || match.score?.hantei);
+  const hanteiOn = !!match.decidedByHantei;
   let suffix = "";
   if (isKikenDecisionBC(d)) suffix = "Kiken";
   else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;
@@ -82,11 +79,9 @@ function decisionSuffix(match) {
 // supersedes the bare " (E)" so we don't double-print "(E)" alongside
 // "Kiken (E)".
 function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHantei) {
-  // decidedByHantei (positional, newer callers) takes precedence when it is an
-  // explicit boolean; fall back to score.hantei for older payloads that carry
-  // the flag there instead. Using typeof guards against undefined so that a
-  // caller that omits the arg still gets the fallback read.
-  const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : !!score?.hantei;
+  // decidedByHantei (positional) is the canonical flag. The `typeof` guard
+  // lets callers that omit the arg safely get false without sending undefined.
+  const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : false;
   const decSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
   const enchoOnly = (encho && encho.periodCount > 0) ? " (E)" : "";
   const suffix = decSfx ? " " + decSfx : enchoOnly;

@@ -161,11 +161,15 @@ const API = {
         if (config.players) {
             body = {
                 ...config,
-                players: config.players.map(({ danGrade, ...p }) =>
-                    danGrade !== undefined
-                        ? { ...p, metadata: [danGrade, ...(p.metadata || []).slice(1)] }
-                        : p
-                ),
+                players: config.players.map(({ danGrade, ...p }) => {
+                    const rest = (p.metadata || []).slice(1);
+                    if (danGrade) return { ...p, metadata: [danGrade, ...rest] };
+                    if (rest.length > 0) return { ...p, metadata: ["", ...rest] };
+                    // No grade and no extra metadata — omit the field entirely
+                    // to avoid writing a blank column to participants.csv.
+                    const { metadata: _m, ...bare } = p;
+                    return bare;
+                }),
             };
         }
         const res = await fetch(`/api/competitions/${id}`, {

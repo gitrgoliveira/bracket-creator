@@ -707,15 +707,24 @@ describe('API Utils', () => {
           return Promise.resolve({ ok: true, json: async () => ({}) });
         });
         const players = [
+          // grade + extra slot: preserve both
           { name: 'Alice', dojo: 'Senbukan', danGrade: '3 Dan', metadata: ['3 Dan', 'registered'] },
+          // grade, no extra slot
           { name: 'Bob', dojo: 'Kenshikan', danGrade: '2 Dan', metadata: ['2 Dan'] },
+          // no grade, no metadata: metadata field must be omitted entirely
           { name: 'Carol', dojo: 'Yoshinkan', danGrade: '', metadata: [] },
+          // no grade but has extra slot: emit ["", ...rest] to preserve slot
+          { name: 'Dave', dojo: 'Yoshinkan', danGrade: '', metadata: ['', 'registered'] },
         ];
         await API.updateCompetition('c1', { players }, 'pw');
         expect(capturedBody.players[0].metadata).toEqual(['3 Dan', 'registered']);
         expect(capturedBody.players[0].danGrade).toBeUndefined();
         expect(capturedBody.players[1].metadata).toEqual(['2 Dan']);
-        expect(capturedBody.players[2].metadata).toEqual(['']);
+        // Carol has no grade and no extra slots — metadata must not appear at all
+        expect(capturedBody.players[2].metadata).toBeUndefined();
+        expect(capturedBody.players[2].danGrade).toBeUndefined();
+        // Dave has no grade but has extra slot: ["", "registered"]
+        expect(capturedBody.players[3].metadata).toEqual(['', 'registered']);
       });
     });
   });

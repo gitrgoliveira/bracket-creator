@@ -251,6 +251,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
 			comp, err := tx.LoadCompetition(id)
 			if err != nil {
+				httpMsg = err.Error()
 				return err
 			}
 			if comp == nil {
@@ -302,7 +303,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return nil
 		})
 		if txErr != nil {
-			c.JSON(httpStatus, gin.H{"error": httpMsg})
+			msg := httpMsg
+			if msg == "" {
+				msg = txErr.Error()
+			}
+			c.JSON(httpStatus, gin.H{"error": msg})
 			return
 		}
 

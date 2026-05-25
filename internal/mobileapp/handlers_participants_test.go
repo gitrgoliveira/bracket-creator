@@ -551,6 +551,7 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 		wg.Add(2)
 
 		var replCode int
+		var replBody []byte
 		go func() {
 			defer wg.Done()
 			body, _ := json.Marshal(map[string]interface{}{
@@ -561,17 +562,43 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(rec, req)
 			replCode = rec.Code
+			replBody = rec.Body.Bytes()
 		}()
 
+		startErrCh := make(chan error, 1)
 		go func() {
 			defer wg.Done()
-			_ = store.SaveCompetition(&state.Competition{
+			startErrCh <- store.SaveCompetition(&state.Competition{
 				ID: compID, Name: "Race", Status: state.CompStatusPools,
 			})
 		}()
 
 		wg.Wait()
+		assert.NoError(t, <-startErrCh, "iteration %d: status-flip goroutine must not error", i)
 		assert.True(t, replCode == http.StatusOK || replCode == http.StatusConflict,
 			"iteration %d: replace must return 200 or 409, got %d", i, replCode)
+
+		// When replace succeeded, verify the persisted roster is readable
+		// and the returned player name matches what was requested.
+		if replCode == http.StatusOK {
+			var returned domain.Player
+			require.NoError(t, json.Unmarshal(replBody, &returned),
+				"iteration %d: 200 body must be a valid Player JSON", i)
+			assert.Equal(t, "Alice Renamed", returned.Name,
+				"iteration %d: returned player name must match request", i)
+
+			reloaded, err := store.LoadParticipants(compID, false)
+			require.NoError(t, err, "iteration %d: must be able to reload participants after 200", i)
+			found := false
+			for _, p := range reloaded {
+				if p.ID == player.ID {
+					assert.Equal(t, "Alice Renamed", p.Name,
+						"iteration %d: persisted participant name must match request", i)
+					found = true
+					break
+				}
+			}
+			assert.True(t, found, "iteration %d: replaced participant must still exist in roster", i)
+		}
 	}
 }

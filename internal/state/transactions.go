@@ -158,6 +158,13 @@ type StoreTx interface {
 // The per-comp mutex is a non-recursive sync.RWMutex; a direct
 // s.Save* call from inside fn would re-acquire and deadlock.
 //
+// WAL caveat. StoreTx.UpdateParticipant writes directly via atomic
+// rename (not through the WAL). It is crash-safe per-file but is NOT
+// rolled back by a WAL replay. Do not mix UpdateParticipant with
+// WAL-staged tx saves (e.g. tx.SaveCompetition) and expect cross-file
+// crash-atomicity — each participant write and each WAL-staged write
+// land independently.
+//
 // fn read-after-write within the same tx. Tx-internal reads
 // (tx.LoadCompetition, tx.LoadBracket, etc.) read from disk via the
 // *Locked helpers and DO NOT see the WAL-staged writes — the on-disk

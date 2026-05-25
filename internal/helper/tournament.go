@@ -101,7 +101,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 
 		if withZekkenName {
 			if len(line) < 2 {
-				errors = append(errors, fmt.Sprintf("entry %d: invalid format: expected at least 'Name, DisplayName, Dojo'", i+1))
+				errors = append(errors, fmt.Sprintf("entry %d: invalid format: expected 'Name, Dojo' or 'Name, DisplayName, Dojo'", i+1))
 				continue
 			}
 			player.Name = c.String(line[0])

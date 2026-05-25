@@ -17,6 +17,7 @@ import {
   nextFoulOnDecrement,
   applyFusenshoToggle,
   decideDrawToggle,
+  shouldBlockScoringKeys,
 } from '../admin_scoring_modal.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
@@ -962,4 +963,35 @@ describe('decideDrawToggle (mp-42g: VS demoted, dedicated draw button)', () => {
       expect(r.action).toBe("noop");
     });
   });
+});
+
+describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
+  // The onKeyDown handler calls shouldBlockScoringKeys(s) after the
+  // isInteractiveTarget check and before any scoring-key branch. When it
+  // returns true the handler exits without calling addPt or toggling draw.
+  // This prevents score mutations while hantei is armed — the backend
+  // requires a tied scoreline at that point (400 otherwise).
+
+  it('returns true when decidedByHantei is true — scoring keys must be suppressed', () => {
+    expect(shouldBlockScoringKeys({ decidedByHantei: true })).toBe(true);
+  });
+
+  it('returns false when decidedByHantei is false — scoring keys work normally', () => {
+    expect(shouldBlockScoringKeys({ decidedByHantei: false })).toBe(false);
+  });
+
+  it('returns false when decidedByHantei is undefined (field absent)', () => {
+    expect(shouldBlockScoringKeys({})).toBe(false);
+  });
+
+  it('returns false when decidedByHantei is null (defensive)', () => {
+    expect(shouldBlockScoringKeys({ decidedByHantei: null })).toBe(false);
+  });
+
+  // Ordering contract: Enter and arrow keys are handled BEFORE
+  // shouldBlockScoringKeys in onKeyDown (see admin_scoring_modal.jsx line ~828
+  // comment "Enter and arrow keys are handled above/before this guard").
+  // Because shouldBlockScoringKeys only inspects decidedByHantei — not key
+  // identity — it cannot selectively suppress Enter; that invariant is
+  // enforced by source ordering, not by a predicate we can unit-test here.
 });

@@ -81,6 +81,15 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					// See scoring.go for the DecidedByHantei *bool semantics.
+					if result.DecidedByHantei != nil {
+						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei
+					}
+					// Project persisted flag back so the SSE/HTTP response
+					// reflects committed state (see scoring.go for the full
+					// rationale — nil-preserve would otherwise drop the
+					// stored true from the same-turn response).
+					result.DecidedByHantei = state.HanteiPtr(bracket.Rounds[rIdx][mIdx].DecidedByHantei)
 					if result.Court == "" {
 						result.Court = m.Court
 					}
@@ -312,15 +321,16 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 			for _, bm := range round {
 				if bm.ID == matchID {
 					return &state.MatchResult{
-						ID:             bm.ID,
-						SideA:          bm.SideA,
-						SideB:          bm.SideB,
-						Winner:         bm.Winner,
-						Status:         bm.Status,
-						Decision:       bm.Decision,
-						DecisionBy:     bm.DecisionBy,
-						DecisionReason: bm.DecisionReason,
-						Encho:          bm.Encho,
+						ID:              bm.ID,
+						SideA:           bm.SideA,
+						SideB:           bm.SideB,
+						Winner:          bm.Winner,
+						Status:          bm.Status,
+						Decision:        bm.Decision,
+						DecisionBy:      bm.DecisionBy,
+						DecisionReason:  bm.DecisionReason,
+						Encho:           bm.Encho,
+						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
 					}, nil
 				}
 			}

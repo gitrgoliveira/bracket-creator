@@ -53,32 +53,53 @@ function decisionSuffix(match) {
   if (!match) return "";
   const d = match.decision || "";
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
+  const hanteiOn = !!match.decidedByHantei;
   let suffix = "";
   if (isKikenDecisionBC(d)) suffix = "Kiken";
   else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;
   if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
+  // FIK 7-5 / 29-6: judges' decision after a tied encho. Mark explicitly so
+  // a hantei-decided final is distinguishable from an ippon-derived one
+  // (audit + Excel + viewer parity).
+  if (hanteiOn) suffix = (suffix ? suffix + " " : "") + "HT";
   return suffix;
 }
 
+// Derive an ippon array from a Go-formatted scoreA/scoreB string.
+// The backend formatScore() appends "(HN)" for outstanding hansoku, e.g.
+// "MK(H1)" — and inserts a SPACE separator between ippons and the suffix
+// when both are present, e.g. "MK (H1)" (see engine/scoring.go:715-724).
+// Splitting the raw string would inject "(", "H", "1", ")" — plus a
+// stray " " for the spaced shape — as bogus ippon letters. This helper
+// strips the suffix AND the separator space first.
+function ipponsFromScore(scoreStr) {
+  if (!scoreStr) return [];
+  return scoreStr.replace(/\s*\(H\d+\)$/, "").split("");
+}
+
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
-// Returns something like "MM–K", "M–", "△", "H"
+// Returns something like "MM–K", "M–·", "△", "X", "BYE".
+// Hantei (judges' decision after tied encho) is NOT a separate return value;
+// it surfaces as an "HT" suffix appended by decisionSuffix when
+// decidedByHantei=true — e.g. "M–K (E) HT".
 //
 // FR-033: when `encho` carries a positive periodCount, append " (E)" to the
 // rendered string so operators and viewers see at a glance that the match
-// went to overtime. Argument is optional and ignored when undefined/null,
-// keeping all existing call sites valid.
+// went to overtime. Argument is optional and defaults to no-encho when absent.
 //
 // T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
 // encho marker — wired through decisionSuffix() so the same string is used
 // by display.jsx's hand-rolled score block. The decision-derived suffix
 // supersedes the bare " (E)" so we don't double-print "(E)" alongside
 // "Kiken (E)".
-function formatIpponsScore(ipponsA, ipponsB, score, decision, encho) {
-  const decSfx = decisionSuffix({ decision, encho });
+function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHantei) {
+  // decidedByHantei (positional) is the canonical flag. The `typeof` guard
+  // lets callers that omit the arg safely get false without sending undefined.
+  const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : false;
+  const decSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
   const enchoOnly = (encho && encho.periodCount > 0) ? " (E)" : "";
   const suffix = decSfx ? " " + decSfx : enchoOnly;
   if (score?.type === "bye") return "BYE";
-  if (score?.type === "hantei") return "H" + suffix;
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
   const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
@@ -128,8 +149,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const live = match.status === "running";
   const isBye = match.score?.type === "bye";
 
-  const ipponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
-  const ipponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
+  const ipponsA = match.ipponsA || ipponsFromScore(match.scoreA);
+  const ipponsB = match.ipponsB || ipponsFromScore(match.scoreB);
   const isDone = match.status === "completed";
   const aScore = isDone ? (ipponsA.join("") || null) : null;
   const bScore = isDone ? (ipponsB.join("") || null) : null;
@@ -152,8 +173,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {live ? <span className="bc-live">● LIVE</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
-        {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
+        {match.decidedByHantei ? <span className="bc-decision-chip">HT</span> : null}
         {isKikenDecisionBC(match.decision) ? (
           <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>
         ) : null}
@@ -279,5 +300,6 @@ window.roundLabel = roundLabel;
 window.formatIpponsScore = formatIpponsScore;
 window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
+window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore };

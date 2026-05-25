@@ -202,6 +202,15 @@ function decideDrawToggle({ isDrawToggled, aTotal, bTotal }) {
   return { action: "noop" };
 }
 
+// shouldBlockScoringKeys — pure predicate consumed by the onKeyDown handler.
+// Returns true when scoring keys (M/K/D/T/H/S and x/X draw toggle) must be
+// suppressed. Currently this happens when hantei is armed: the backend
+// requires a tied scoreline at that point, so any score mutation would
+// produce a 400 on submit.
+function shouldBlockScoringKeys({ decidedByHantei }) {
+  return !!decidedByHantei;
+}
+
 // EnchoControl — collapsed by default to a small "⏱ Overtime" pill so
 // it occupies <24px of vertical space in the live scoring modal. The
 // full counter UI mounts only when overtime is active (enchoPeriodCount
@@ -502,11 +511,16 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // round-trips the count via toBackendMatchResult; Slice 3 (T093+) layers
   // the decision/kiken UI on top.
   const initialEnchoPeriods = m.encho?.periodCount || 0;
+  const initialDecidedByHantei = !!m.decidedByHantei;
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
   const [aFouls, setAFouls] = useStateA(initialAFouls);
   const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // FIK Art. 7-5 / 29-6: an encho match that remains tied is decided by
+  // referee hantei. Persisting this on MatchResult so the UI / Excel can
+  // mark it distinctly (vs an ippon-derived win).
+  const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
   const [submitting, setSubmitting] = useStateA(false);
   // T104/CHK029: MaxEnchoPeriods cap from the competition config.
   // Fetched once on open so the warning banner can fire before the
@@ -541,6 +555,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [m.compId]);
+
+  // Auto-clear decidedByHantei when encho (overtime) period count is 0
+  useEffectA(() => {
+    if (enchoPeriodCount === 0 && decidedByHantei) {
+      setDecidedByHantei(false);
+    }
+  }, [enchoPeriodCount, decidedByHantei]);
 
   // T093/T094: shared decision-submit path for kiken & fusenpai.
   // - decisionBy is "shiro" or "aka" per the server contract.
@@ -637,18 +658,24 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // to non-"reset" patches. periodCount=0 means "no overtime"; emitting the
   // field as undefined keeps the wire payload clean (omitempty server-side).
   const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // decidedByHantei is only set via the dedicated submitHantei path
+  // (SHIRO/AKA hantei buttons). The regular Finish/Enter buildPatch
+  // explicitly clears the flag (sends false) when the match was previously
+  // hantei-decided, so a re-edit via the normal flow removes the stale HT
+  // marker rather than preserving it on the server.
+  const hanteiClear = initialDecidedByHantei ? { decidedByHantei: false } : {};
 
   const buildPatch = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
-    if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0 };
+    if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, ...hanteiClear };
     if (targetStatus === "running") return {
       status: "running", winner: null,
       ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"),
       hansokuA: aFouls, hansokuB: bFouls,
       score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
-      ...enchoBlock(),
+      ...enchoBlock(), ...hanteiClear,
     };
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
@@ -657,10 +684,33 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock() };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock() };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear };
+  };
+
+  // Hantei submit: tied at end of encho. Operator picks a side; we send a
+  // completed patch with the chosen side as winner, the *entered* ippon
+  // arrays preserved (so a 1–1 encho score stays visible alongside the HT
+  // marker — clearing them would lose the tied score history that the
+  // viewer/Excel renderers display under the hantei suffix), and the
+  // decidedByHantei flag set. This is a dedicated affordance because the
+  // regular flow assumes an ippon-derived win.
+  const submitHantei = (winnerSide) => {
+    const winner = winnerSide === "a" ? m.sideA : m.sideB;
+    const aFinal = aPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
+    const bFinal = bPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
+    return doSubmit(() => onSubmit({
+      winner,
+      ipponsA: aFinal,
+      ipponsB: bFinal,
+      hansokuA: aFouls,
+      hansokuB: bFouls,
+      status: "completed",
+      ...enchoBlock(),
+      decidedByHantei: true,
+    }));
   };
 
   const doSubmit = async (fn) => {
@@ -702,7 +752,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // buttons on BOTH sides (mirrors validateIpponCounts on the server).
   const boutDecided = isBoutDecided(aPts, bPts);
 
-  const canFinish = isDrawToggled || aTotal > 0 || bTotal > 0;
+  // While hantei is armed the operator must commit via the dedicated SHIRO /
+  // AKA buttons (which route through submitHantei). Disable the regular
+  // Finish/Enter so the patch can't accidentally mark an ippon-decided match
+  // as hantei-decided. Keyboard Enter is also gated on canFinish.
+  const canFinish = !decidedByHantei && (isDrawToggled || aTotal > 0 || bTotal > 0);
 
   const isDirty =
     !window.arraysEqual(aPts, initialAPts) ||
@@ -710,7 +764,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     aFouls !== initialAFouls ||
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled ||
-    enchoPeriodCount !== initialEnchoPeriods;
+    enchoPeriodCount !== initialEnchoPeriods ||
+    decidedByHantei !== initialDecidedByHantei;
   const handleDismiss = () => {
     // Don't close while any save/decision request is in flight — letting
     // the modal unmount would orphan the pending fetch and lose the
@@ -731,7 +786,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata };
+  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -758,6 +813,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
         else s.doSubmit(() => s.onSubmit(patch));
         return;
       }
+
+      // Scoring shortcuts (point keys + draw toggle) blocked while hantei is armed
+      // (backend requires a tied scoreline; any score mutation would produce a 400).
+      // Enter and arrow keys are handled above/before this guard and are unaffected.
+      if (shouldBlockScoringKeys(s)) return;
 
       const k = ev.key;
       const upper = k.toUpperCase();
@@ -813,6 +873,74 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             setEnchoPeriodCount={setEnchoPeriodCount}
             maxEnchoPeriods={maxEnchoPeriods}
           />
+          {/* FIK 7-5 / 29-6: in encho a still-tied match is decided by
+              referee hantei. Surface a dedicated affordance so the
+              winner is recorded with the hantei flag — distinguishable
+              from an ippon-derived win for stats, audit, and Excel. */}
+          {enchoPeriodCount > 0 && (
+            <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginBottom: 6, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
+              <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
+              <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
+              {!decidedByHantei && (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  data-testid="scoring-modal-hantei-arm"
+                  onClick={() => setDecidedByHantei(true)}
+                  // Hantei is only valid when the bout is genuinely tied
+                  // at end of encho (FIK 7-5 / 29-6). Disable the arm
+                  // button when totals are unequal (ippon-derived win already
+                  // decided), when the bout is already decided by ippons
+                  // (boutDecided), or when a draw is already toggled.
+                  // (0-0 is still a valid tied state.)
+                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled || enchoPeriodCount <= 0}
+                  title={
+                    submitting || decisionSubmitting
+                      ? "Saving…"
+                      : isDrawToggled
+                        ? "Cancel the draw toggle before using hantei"
+                        : aTotal !== bTotal || boutDecided || enchoPeriodCount <= 0
+                          ? "Hantei applies only to tied matches in encho"
+                          : "Record a judges' decision"
+                  }
+                  style={{ marginLeft: "auto" }}
+                >
+                  Decide by hantei…
+                </button>
+              )}
+              {decidedByHantei && (
+                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="scoring-modal-hantei-shiro"
+                    onClick={() => submitHantei("b")}
+                    disabled={submitting || decisionSubmitting}
+                  >
+                    SHIRO wins
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="scoring-modal-hantei-aka"
+                    onClick={() => submitHantei("a")}
+                    disabled={submitting || decisionSubmitting}
+                  >
+                    AKA wins
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    data-testid="scoring-modal-hantei-cancel"
+                    onClick={() => setDecidedByHantei(false)}
+                    disabled={submitting || decisionSubmitting}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="scoring-board">
               {/* Score slots + point buttons */}
               <div className="sb-match">
@@ -823,14 +951,14 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                       <div className="sb-dojo">{s.label}</div>
                       <div className="sb-slots">
                         {[0, 1].map((i) => (
-                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} title="Click to remove">
+                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : "Click to remove"}>
                             {s.pts[i] || "·"}
                           </button>
                         ))}
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
-                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided}>{cc}</button>
+                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei}>{cc}</button>
                         ))}
                       </div>
                     </div>
@@ -849,8 +977,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                             if (r.action === "cancel") setIsDrawToggled(false);
                             else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); }
                           }}
-                          disabled={!isDrawToggled && (aTotal > 0 || bTotal > 0)}
-                          title={!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")}
+                          disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0))}
+                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)"))}
                           aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
                         >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
                       </div>
@@ -869,7 +997,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                     setFouls={s.setFouls}
                     onIncrement={s.onIncrement}
                     color={s.color}
-                    disabled={boutDecided}
+                    disabled={boutDecided || decidedByHantei}
                   />
                 ))}
               </div>
@@ -1772,6 +1900,7 @@ export {
   nextEnchoPeriod,
   prevEnchoPeriod,
   decideDrawToggle,
+  shouldBlockScoringKeys,
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,

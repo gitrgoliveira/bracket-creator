@@ -584,9 +584,16 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           serializer and the schedule row exposes bout details, append an
           "FS" badge to each affected bout cell. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-        {m.status === "completed" && (
-          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)}</div>
-        )}
+        {m.status === "completed" && (() => {
+          // Bracket matches carry scoreA/scoreB rather than ipponsA/B.
+          // Derive per-side arrays so the score reads SHIRO–AKA correctly
+          // even when AKA wins (winnerPts–loserPts fallback inverts left/right).
+          // Use ipponsFromScore so the trailing "(HN)" hansoku suffix from
+          // Go's formatScore doesn't get split into bogus ippon letters.
+          const tIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
+          const tIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
+          return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(tIpponsB, tIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}</div>;
+        })()}
         {m.status === "running" && <span className="bc-live">●</span>}
         <CourtPicker
           value={m.court}
@@ -725,6 +732,12 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
           const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
           const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
           const isCorrection = m.status === "completed" && m.score?.corrected;
+          // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B
+          // arrays (see normalizeMatch). Apply the same fallback used in VSchedItem.
+          // Use ipponsFromScore so the trailing "(HN)" hansoku suffix from
+          // Go's formatScore doesn't get split into bogus ippon letters.
+          const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
+          const seIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
@@ -739,7 +752,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
                   <div className="score-edit-row__score">
-                    {m.status === "completed" && window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)}
+                    {m.status === "completed" && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
                     {m.status === "running" && <span className="bc-live">●</span>}
                     {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                   </div>

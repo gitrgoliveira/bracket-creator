@@ -1271,6 +1271,10 @@ function MatchDetailCard({ match, onClose }) {
   const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
   const isLive = match.status === "running";
   const isDone = match.status === "completed";
+  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
+  // same fallback used in VSchedItem so the score display is consistent.
+  const mdcIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
+  const mdcIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
 
   return (
     <div className="match-detail-card">
@@ -1294,10 +1298,9 @@ function MatchDetailCard({ match, onClose }) {
           <span className="match-detail-card__name">{bName}</span>
         </div>
         <div className="match-detail-card__score">
-          {isDone ? (() => {
-            const scoreStr = window.formatIpponsScore(match.ipponsB, match.ipponsA, match.score, match.decision, match.encho);
-            return <span>{scoreStr || "—"}</span>;
-          })() : <span className="match-detail-card__vs">vs</span>}
+          {isDone
+            ? <span>{window.formatIpponsScore(mdcIpponsB, mdcIpponsA, match.score, match.decision, match.encho, match.decidedByHantei) || "—"}</span>
+            : <span className="match-detail-card__vs">vs</span>}
         </div>
         <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
           <span className="match-detail-card__name">{aName}</span>
@@ -1308,15 +1311,15 @@ function MatchDetailCard({ match, onClose }) {
       {isDone && !isTeam && (
         <div className="match-detail-card__ippons">
           <div className="match-detail-card__ippons-side">
-            <span className="match-detail-card__ippons-val">{(match.ipponsB || []).filter(x => x && x !== "•").join("") || "—"}</span>
+            <span className="match-detail-card__ippons-val">{mdcIpponsB.filter(x => x && x !== "•").join("") || "—"}</span>
             {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
           </div>
           <div className="match-detail-card__ippons-center">
-            {match.score?.type === "hantei" && <span className="match-detail-card__decision">Hantei</span>}
+            {match.decidedByHantei && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
             {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
           </div>
           <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
-            <span className="match-detail-card__ippons-val">{(match.ipponsA || []).filter(x => x && x !== "•").join("") || "—"}</span>
+            <span className="match-detail-card__ippons-val">{mdcIpponsA.filter(x => x && x !== "•").join("") || "—"}</span>
             {match.hansokuA > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuA}</span>}
           </div>
         </div>
@@ -1458,7 +1461,13 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : null;
+  // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays.
+  // Fall back so the score string reflects per-side letters instead of the
+  // orientation-agnostic winnerPts–loserPts that formatIpponsScore uses when
+  // both ippon arrays are absent (which would invert left/right when AKA wins).
+  const vIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
+  const vIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(vIpponsB, vIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
   // FR-025: queue position is 1-indexed per court for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
@@ -1485,6 +1494,11 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
         )}
         {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
         {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
+        {m.status === "completed" && m.decidedByHantei && (
+          <span className="vsched-item__hantei" data-testid="vsched-hantei" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "var(--accent-soft, #eef)", color: "var(--accent, #36c)" }}>
+            HANTEI
+          </span>
+        )}
       </div>
       <div className="vsched-item__players">
         <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
@@ -1518,7 +1532,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
   const bWin = winnerName && winnerName === bName;
 
   const scoreStr = m.status === "completed"
-    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho)
+    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
     : null;
 
   return (
@@ -2042,7 +2056,12 @@ function ScheduleViewer({ tournament, tweaks }) {
 function TWMatch({ m, highlight, _tweaks, onClick }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : null;
+  // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays
+  // (see normalizeMatch). Apply the same fallback used in VSchedItem so the
+  // score cell renders the derived winnerPts–loserPts string instead of "—".
+  const twIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
+  const twIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
+  const scoreStr = m.status === "completed" ? window.formatIpponsScore(twIpponsB, twIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned
@@ -2319,6 +2338,10 @@ function MatchViewerModal({ match, onClose }) {
   const bName = match.sideB?.name || "TBD";
   const aWin = match.winner?.id === match.sideA?.id;
   const bWin = match.winner?.id === match.sideB?.id;
+  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
+  // same fallback used in MatchDetailCard and VSchedItem.
+  const mvmIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
+  const mvmIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
 
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2380,17 +2403,17 @@ function MatchViewerModal({ match, onClose }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flex: 1 }}>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>{(match.ipponsB || []).filter(x => x && x !== "•").join("") || "—"}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsB.filter(x => x && x !== "•").join("") || "—"}</div>
                   {match.hansokuB > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuB}</div>}
                </div>
                <div style={{ fontSize: 24, color: "var(--ink-3)", padding: "0 16px" }}>-</div>
                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flex: 1 }}>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>{(match.ipponsA || []).filter(x => x && x !== "•").join("") || "—"}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsA.filter(x => x && x !== "•").join("") || "—"}</div>
                   {match.hansokuA > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuA}</div>}
                </div>
             </div>
-            {match.score?.type === "hantei" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
+            {match.decidedByHantei && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
             {match.score?.type === "hikiwake" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Draw (<TermV name="hikiwake">Hikiwake</TermV>)</div>}
             {match.score?.type === "bye" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>BYE</div>}
           </div>

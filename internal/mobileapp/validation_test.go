@@ -10,6 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// boolPtr returns a pointer to b, allowing inline *bool literals in test structs.
+func boolPtr(b bool) *bool { return &b }
+
 // TestScoreRequestValidate covers the request-shape rules in
 // ScoreRequest.Validate (Slice 0 / T015 / NFR-004). Slice 3 (T077)
 // extends this with decision-type validation; rules here are the
@@ -656,5 +659,198 @@ func TestSuneIpponRoundTrips(t *testing.T) {
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
 		assert.Equal(t, "ipponsA", verr.Field)
+	})
+}
+
+func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
+	encho1 := &state.EnchoMetadata{PeriodCount: 1}
+
+	t.Run("valid hantei: completed with winner and encho", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("valid hantei: no status supplied (partial update) with encho", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("invalid hantei: no winner", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: status is running, not completed", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusRunning,
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: no encho set", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: encho period count is zero", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			Encho:           &state.EnchoMetadata{PeriodCount: 0},
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("valid hantei: tied 1-1 scoreline", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+			IpponsA:         []string{"M"},
+			IpponsB:         []string{"K"},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("invalid hantei: non-tied scoreline (2-0)", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+			IpponsA:         []string{"M", "K"},
+			IpponsB:         nil,
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	for _, decision := range []string{"hikiwake", "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen", "kachinuki-exhaustion"} {
+		decision := decision
+		t.Run("invalid hantei: decision "+decision+" incompatible", func(t *testing.T) {
+			req := ScoreRequest{
+				SideA:           "Alice",
+				SideB:           "Bob",
+				Winner:          "Alice",
+				Status:          state.MatchStatusCompleted,
+				DecidedByHantei: boolPtr(true),
+				Encho:           encho1,
+				Decision:        decision,
+			}
+			err := req.Validate()
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, "decidedByHantei", verr.Field)
+		})
+	}
+
+	t.Run("invalid hantei: decisionBy set", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+			DecisionBy:      "aka",
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("invalid hantei: decisionReason set", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+			DecisionReason:  "injury",
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "decidedByHantei", verr.Field)
+	})
+
+	t.Run("valid hantei: decision fought is compatible", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA:           "Alice",
+			SideB:           "Bob",
+			Winner:          "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			Encho:           encho1,
+			Decision:        "fought",
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("decidedByHantei false is always valid", func(t *testing.T) {
+		req := ScoreRequest{DecidedByHantei: boolPtr(false)}
+		assert.NoError(t, req.Validate())
 	})
 }

@@ -404,7 +404,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
-                      {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
+                      {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : m.status === "running" ? "● LIVE" : "—"}
                     </div>
                     <button className={getScoreBtnClass(m.status)} onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
                       {m.status === "completed" ? "Correct" : "Score"}
@@ -518,7 +518,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideA?.name || m.sideA}</span>
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-                          {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho) : m.status === "running" ? "● LIVE" : "—"}
+                          {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : m.status === "running" ? "● LIVE" : "—"}
                           <button className={getScoreBtnClass(m.status)} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
                         </div>
                       </div>

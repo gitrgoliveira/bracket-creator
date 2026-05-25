@@ -65,9 +65,21 @@ describe('API Utils', () => {
     });
 
     it('preserves decidedByHantei=true from the existing match when patch omits it', () => {
-      // Go uses a non-pointer bool so an omitted JSON field decodes as false,
-      // wiping a previously stored hantei decision. The serialiser must forward
-      // true from the existing match whenever the patch doesn't override it.
+      // The serialiser forwards `true` from the existing match whenever the
+      // patch doesn't override it, so non-hantei-touching edits (changing
+      // score, court, scheduledAt) keep the previously recorded hantei flag
+      // on the wire.
+      //
+      // The Go backend uses `*bool` for state.MatchResult.DecidedByHantei
+      // (see internal/state/models.go), so an OMITTED JSON field decodes as
+      // nil and the bracket-match engine preserves the stored value
+      // (recordBracketMatchResult / recordBracketMatchResultTx gate on
+      // `result.DecidedByHantei != nil`). The frontend still forwards true
+      // for two reasons: (a) defence-in-depth in case the backend
+      // preserve-on-nil contract regresses, (b) pool matches use `*r =
+      // *result` and WOULD clear on nil — although FIK doesn't permit
+      // hantei in pool play, the codepath exists so we keep the wire
+      // payload self-describing.
       const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
       const result = toBackendMatchResult({
         winner: 'A',

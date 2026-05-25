@@ -137,7 +137,7 @@ type StoreTx interface {
 // entire fn body and released exactly once on return (success OR
 // error).
 //
-// Crash-atomicity. Every save invoked through tx is STAGED into a
+// Crash-atomicity. Most saves invoked through tx are STAGED into a
 // per-transaction write-ahead log (see internal/state/wal) instead
 // of going straight to disk. After fn returns nil, this method
 // Commits the WAL (atomic-renames the intent file into <data>/.wal/),
@@ -149,6 +149,8 @@ type StoreTx interface {
 // Multi-file transactions that previously could land file A but not
 // file B now either land both or replay both — cross-file atomicity
 // across a process crash (closing the v3 review A1 finding).
+// Exception: UpdateParticipant is NOT WAL-staged (see WAL caveat
+// below); it writes immediately and is not rolled back on error.
 //
 // Lock semantics. Per-comp lock is held for the entire fn body AND
 // across Commit + Apply, so other writers see the WAL transition
@@ -160,10 +162,11 @@ type StoreTx interface {
 //
 // WAL caveat. StoreTx.UpdateParticipant writes directly via atomic
 // rename (not through the WAL). It is crash-safe per-file but is NOT
-// rolled back by a WAL replay. Do not mix UpdateParticipant with
-// WAL-staged tx saves (e.g. tx.SaveCompetition) and expect cross-file
-// crash-atomicity — each participant write and each WAL-staged write
-// land independently.
+// staged, so if fn returns an error after calling UpdateParticipant
+// the participant write is NOT rolled back. Do not mix
+// UpdateParticipant with WAL-staged tx saves (e.g. tx.SaveCompetition)
+// and expect cross-file crash-atomicity — each write lands
+// independently.
 //
 // fn read-after-write within the same tx. Tx-internal reads
 // (tx.LoadCompetition, tx.LoadBracket, etc.) read from disk via the

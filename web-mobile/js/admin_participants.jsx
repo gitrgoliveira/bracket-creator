@@ -366,7 +366,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
-    players.forEach(p => { map.set(p.id, participantSearchTarget(p)); });
+    players.forEach(p => { map.set(p.id ?? p.name, participantSearchTarget(p)); });
     return map;
   }, [players]);
   const visiblePlayers = useMemoA(() => {
@@ -374,7 +374,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     let out = players;
     if (tagFilter) out = out.filter(p => p.tag === tagFilter);
     if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
-    if (q) out = out.filter(p => playerSearchTargets.get(p.id)?.includes(q));
+    if (q) out = out.filter(p => playerSearchTargets.get(p.id ?? p.name)?.includes(q));
     return out;
   }, [players, tagFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
   const dojoFirstRowSet = useMemoA(() => {
@@ -1154,7 +1154,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 }
 
 function participantSearchTarget(p) {
-  return [p.name, p.displayName, p.dojo].filter(Boolean).join(" ").toLowerCase();
+  return [p.name, p.displayName, p.dojo, p.danGrade].filter(Boolean).join(" ").toLowerCase();
 }
 
 window.AdminParticipants = AdminParticipants;

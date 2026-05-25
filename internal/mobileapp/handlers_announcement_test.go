@@ -107,8 +107,8 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Duration must be 5, 10, 15, or 30 minutes")
 
 	// 7. POST /api/tournament/announce - oversized body (>AnnouncementMaxBodyBytes)
-	// returns 413 from the adminTinyBody group middleware (Content-Length fast
-	// path fires before AuthMiddleware and before ShouldBindJSON).
+	// returns 413: MaxBodyBytes fires before AuthMiddleware (Content-Length fast
+	// path) and before ShouldBindJSON can run.
 	hugeMsg := strings.Repeat("A", int(AnnouncementMaxBodyBytes)+10)
 	hugePayload := announcementRequest{
 		Message:         hugeMsg,

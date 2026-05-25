@@ -19,7 +19,7 @@ import (
 func TestRecordDecisionTx_BasicEquivalence(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-basic"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -71,7 +71,7 @@ func TestRecordDecisionTx_BasicEquivalence(t *testing.T) {
 func TestRecordDecisionTx_ConcurrentDoesNotDeadlock(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-deadlock"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -167,7 +167,7 @@ func TestRecordDecisionTx_ConcurrentDoesNotDeadlock(t *testing.T) {
 func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-undo"
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -215,7 +215,7 @@ func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-lock"
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -250,7 +250,7 @@ func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {
 func TestRecordMatchResultWithIneligibilityTx_Basic(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-score"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -294,7 +294,7 @@ func TestRecordMatchResultWithIneligibilityTx_Basic(t *testing.T) {
 func TestStartMatchTx_BlocksIneligibleParticipant(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "fr035-block"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -341,7 +341,7 @@ func TestStartMatchTx_BlocksIneligibleParticipant(t *testing.T) {
 func TestStoreTxUpdatePoolMatchByIDLockFree(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-pool-update"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "X", SideB: "Y", Status: state.MatchStatusScheduled},
 	}))
@@ -377,7 +377,7 @@ func TestStoreTxUpdatePoolMatchByIDLockFree(t *testing.T) {
 func TestRecordMatchResultWithIneligibilityTx_HansokuAutoAward(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-hansoku"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},

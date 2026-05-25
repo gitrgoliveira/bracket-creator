@@ -734,7 +734,8 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     URL.revokeObjectURL(url);
   };
 
-  const isStarted = c.status !== "setup";
+  const isSetup = !c.status || c.status === "setup";
+  const isStarted = !isSetup;
 
   return (
     <>
@@ -953,7 +954,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               ))}
             </div>
           )}
-          {c.status === "setup" && (
+          {isSetup && (
             <div style={{ padding: "0 16px 12px" }}>
               {!showAddForm ? (
                 <button className="btn btn--sm" type="button" onClick={() => setShowAddForm(true)}>+ Add participant</button>
@@ -1061,7 +1062,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       dragIdxRef.current = null;
                       setDragOverIdx(null);
                     }}
-                    style={{ cursor: reorderDisabled ? "default" : "grab" }}
+                    style={{
+                      cursor: reorderDisabled ? "default" : "grab",
+                      gridTemplateColumns: c.checkInEnabled ? undefined : "20px 36px 1fr 32px 64px",
+                    }}
                   >
                     {c.checkInEnabled && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
@@ -1094,7 +1098,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
-                      {c.status === "setup" && (
+                      {isSetup && (
                         <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 9 }} title={`Replace ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Replace ${p.name}`}>↔</button>
                       )}
                     </div>

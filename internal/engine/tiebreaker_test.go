@@ -139,7 +139,7 @@ func TestInjectTiebreakerMatches_NoTie(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "No Tie",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -167,7 +167,7 @@ func TestInjectTiebreakerMatches_TwoWayTie(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Two-way Tie",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -202,7 +202,7 @@ func TestInjectTiebreakerMatches_Idempotent(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Idempotent Test",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -243,7 +243,7 @@ func TestMaybeAutoCompletePools_TiesDetected(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Tie Detect",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -286,7 +286,7 @@ func TestMaybeAutoCompletePools_TiebreakersIncomplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "TB Pending",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -313,7 +313,7 @@ func TestMaybeAutoCompletePools_TiebreakersComplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "TB Done",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -344,7 +344,7 @@ func TestComputeStandings_TBExcludedFromStats(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "TB Excluded",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -384,7 +384,7 @@ func TestInjectTiebreakerMatches_PreservesExistingScheduledAt(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:        compID,
 		Name:      "Preserves Time",
-		Format:    state.CompFormatPools,
+		Format:    state.CompFormatMixed,
 		Status:    state.CompStatusPools,
 		Courts:    []string{"A"},
 		StartTime: "09:00",
@@ -434,7 +434,7 @@ func TestMaybeAutoCompletePools_NoTies(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "No Ties",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -479,7 +479,7 @@ func TestComputeStandings_MultiGroupTBSortIsolation(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Multi-Group Isolation",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -535,7 +535,7 @@ func TestComputeStandings_TBSecondarySort(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "TB Secondary Sort",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))

@@ -119,6 +119,16 @@ type StoreTx interface {
 	// (T128 / T156) so the lineup freeze happens under the same lock
 	// acquire as the score write.
 	LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error
+	// UpdateParticipant is the tx-aware twin of
+	// Store.updateParticipantNoLock. Applies transform to the target
+	// participant while the transaction lock is held, so the caller
+	// can serialise a competition-status pre-check (via LoadCompetition
+	// in the same tx body) and the participant write under one lock
+	// acquire. Participants.csv and seeds.csv are written directly via
+	// atomic rename — they are not staged through the WAL — but each
+	// write is individually crash-safe, and no other WAL-staged file
+	// is touched by this path, so cross-file atomicity is not required.
+	UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error)
 }
 
 // WithTransaction runs fn under the per-competition write lock for
@@ -127,7 +137,7 @@ type StoreTx interface {
 // entire fn body and released exactly once on return (success OR
 // error).
 //
-// Crash-atomicity. Every save invoked through tx is STAGED into a
+// Crash-atomicity. Most saves invoked through tx are STAGED into a
 // per-transaction write-ahead log (see internal/state/wal) instead
 // of going straight to disk. After fn returns nil, this method
 // Commits the WAL (atomic-renames the intent file into <data>/.wal/),
@@ -139,6 +149,8 @@ type StoreTx interface {
 // Multi-file transactions that previously could land file A but not
 // file B now either land both or replay both — cross-file atomicity
 // across a process crash (closing the v3 review A1 finding).
+// Exception: UpdateParticipant is NOT WAL-staged (see WAL caveat
+// below); it writes immediately and is not rolled back on error.
 //
 // Lock semantics. Per-comp lock is held for the entire fn body AND
 // across Commit + Apply, so other writers see the WAL transition
@@ -147,6 +159,14 @@ type StoreTx interface {
 // fn MUST call methods on tx, NOT on the underlying *Store directly.
 // The per-comp mutex is a non-recursive sync.RWMutex; a direct
 // s.Save* call from inside fn would re-acquire and deadlock.
+//
+// WAL caveat. StoreTx.UpdateParticipant writes directly via atomic
+// rename (not through the WAL). It is crash-safe per-file but is NOT
+// staged, so if fn returns an error after calling UpdateParticipant
+// the participant write is NOT rolled back. Do not mix
+// UpdateParticipant with WAL-staged tx saves (e.g. tx.SaveCompetition)
+// and expect cross-file crash-atomicity — each write lands
+// independently.
 //
 // fn read-after-write within the same tx. Tx-internal reads
 // (tx.LoadCompetition, tx.LoadBracket, etc.) read from disk via the
@@ -517,6 +537,13 @@ func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain
 		return nil, err
 	}
 	return t.store.loadParticipantsLocked(compID, withZekkenName)
+}
+
+func (t *storeTx) UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
+	return t.store.updateParticipantNoLock(compID, pid, withZekkenName, transform)
 }
 
 // UpdatePoolMatchByID dispatches to a lock-free body that mirrors

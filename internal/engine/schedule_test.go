@@ -122,15 +122,15 @@ func TestEstimateScheduleCourtsClampedToOne(t *testing.T) {
 	assert.Greater(t, result.TotalDurationMinutes, 0)
 }
 
-// TestGenerateSchedule_PoolsFormat verifies that GenerateSchedule produces
-// "pool" type entries for a pools competition.
-func TestGenerateSchedule_PoolsFormat(t *testing.T) {
+// TestGenerateSchedule_MixedFormat verifies that GenerateSchedule produces
+// "pool" type entries for a mixed (Pools + Knockout) competition.
+func TestGenerateSchedule_MixedFormat(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "gen-sched-pools"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "P1-0", Court: "A", Status: state.MatchStatusScheduled},

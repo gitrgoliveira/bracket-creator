@@ -151,7 +151,7 @@ func (e *Engine) resolveReservedSlots(compID string, players []domain.Player) ([
 		}
 
 		var real *domain.Player
-		if srcComp.Format == state.CompFormatPools || srcComp.Format == state.CompFormatLeague {
+		if srcComp.Format == state.CompFormatMixed || srcComp.Format == state.CompFormatLeague {
 			if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
 				return nil, false, validationErrorf("reserved slot source %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
 			}

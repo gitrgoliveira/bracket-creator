@@ -47,7 +47,7 @@ func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Auto Complete Test",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -76,7 +76,7 @@ func TestMaybeAutoCompletePools_OnePending(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Pending Test",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -132,7 +132,7 @@ func TestMaybeAutoCompletePools_AlreadyComplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Already Done",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusComplete,
 		Courts: []string{"A"},
 	}))

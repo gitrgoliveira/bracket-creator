@@ -55,7 +55,7 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 	compID := "concurrent-order"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 	}))
 	const N = 10

@@ -104,60 +104,60 @@ describe('validatePoolSettings', () => {
     });
   });
 
-  describe('format=pools, valid inputs pass', () => {
+  describe('format=mixed, valid inputs pass', () => {
     it('boundary: poolSize=3, winners=1 (smallest legal pool)', () => {
-      expect(validatePoolSettings('pools', 3, 1)).toEqual({ ok: true, error: null });
+      expect(validatePoolSettings('mixed', 3, 1)).toEqual({ ok: true, error: null });
     });
 
     it('typical: poolSize=4, winners=2', () => {
-      expect(validatePoolSettings('pools', 4, 2)).toEqual({ ok: true, error: null });
+      expect(validatePoolSettings('mixed', 4, 2)).toEqual({ ok: true, error: null });
     });
 
     it('large: poolSize=10, winners=4', () => {
-      expect(validatePoolSettings('pools', 10, 4)).toEqual({ ok: true, error: null });
+      expect(validatePoolSettings('mixed', 10, 4)).toEqual({ ok: true, error: null });
     });
   });
 
-  describe('format=pools, poolSize invalid (the Copilot finding)', () => {
+  describe('format=mixed, poolSize invalid (the Copilot finding)', () => {
     it('NaN poolSize (cleared input) → blocked', () => {
-      const r = validatePoolSettings('pools', NaN, 2);
+      const r = validatePoolSettings('mixed', NaN, 2);
       expect(r.ok).toBe(false);
       expect(r.error).toMatch(/Players per pool/);
     });
 
     it('fractional poolSize=2.5 → blocked (Number.isInteger guard)', () => {
-      const r = validatePoolSettings('pools', 2.5, 2);
+      const r = validatePoolSettings('mixed', 2.5, 2);
       expect(r.ok).toBe(false);
       expect(r.error).toMatch(/whole number/);
     });
 
     it('poolSize=2 below min → blocked', () => {
-      const r = validatePoolSettings('pools', 2, 2);
+      const r = validatePoolSettings('mixed', 2, 2);
       expect(r.ok).toBe(false);
       expect(r.error).toMatch(/≥ 3/);
     });
 
     it('negative poolSize → blocked', () => {
-      const r = validatePoolSettings('pools', -1, 2);
+      const r = validatePoolSettings('mixed', -1, 2);
       expect(r.ok).toBe(false);
     });
   });
 
-  describe('format=pools, winners invalid', () => {
+  describe('format=mixed, winners invalid', () => {
     it('NaN winners (cleared input) → blocked', () => {
-      const r = validatePoolSettings('pools', 4, NaN);
+      const r = validatePoolSettings('mixed', 4, NaN);
       expect(r.ok).toBe(false);
       expect(r.error).toMatch(/Winners per pool/);
     });
 
     it('fractional winners=1.5 → blocked', () => {
-      const r = validatePoolSettings('pools', 4, 1.5);
+      const r = validatePoolSettings('mixed', 4, 1.5);
       expect(r.ok).toBe(false);
       expect(r.error).toMatch(/whole number/);
     });
 
     it('winners=0 below min → blocked', () => {
-      const r = validatePoolSettings('pools', 4, 0);
+      const r = validatePoolSettings('mixed', 4, 0);
       expect(r.ok).toBe(false);
       expect(r.error).toMatch(/≥ 1/);
     });
@@ -169,7 +169,7 @@ describe('validatePoolSettings', () => {
       // the poolSize error first so the user fixes the higher-priority
       // field first. Pin the order so a refactor that flips the checks
       // doesn't silently change UX.
-      const r = validatePoolSettings('pools', NaN, NaN);
+      const r = validatePoolSettings('mixed', NaN, NaN);
       expect(r.error).toMatch(/Players per pool/);
     });
   });
@@ -187,8 +187,7 @@ describe('validateSwissSettings (T190 / FR-050a)', () => {
       expect(validateSwissSettings('playoffs', 0)).toEqual({ ok: true, error: null });
     });
 
-    it('format=pools / mixed / league all skip the guard', () => {
-      expect(validateSwissSettings('pools', NaN)).toEqual({ ok: true, error: null });
+    it('format=mixed / league all skip the guard', () => {
       expect(validateSwissSettings('mixed', NaN)).toEqual({ ok: true, error: null });
       expect(validateSwissSettings('league', NaN)).toEqual({ ok: true, error: null });
     });

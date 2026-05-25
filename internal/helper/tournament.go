@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"encoding/csv"
 	"fmt"
 	"strings"
 
@@ -47,17 +48,49 @@ type Match struct {
 }
 
 func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
-	players := make([]Player, 0, len(entries))
-	var errors []string
-	seenNames := make(map[string]int) // tracks composite key Name|DisplayName|Dojo -> line number
-	c := cases.Title(language.Und, cases.NoLower)
-
-	for i, entry := range entries {
+	records := make([][]string, 0, len(entries))
+	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
 		}
-		line := strings.Split(entry, ",")
+		if !strings.Contains(entry, `"`) {
+			records = append(records, strings.Split(entry, ","))
+			continue
+		}
+		r := csv.NewReader(strings.NewReader(entry))
+		r.LazyQuotes = true
+		r.TrimLeadingSpace = true
+		fields, err := r.Read()
+		if err != nil {
+			records = append(records, strings.Split(entry, ","))
+			continue
+		}
+		records = append(records, fields)
+	}
+	return CreatePlayersFromRecords(records, withZekkenName)
+}
+
+// CreatePlayersFromRecords builds players from pre-parsed CSV records
+// (each record is a slice of fields). Use this when the CSV has already
+// been parsed by encoding/csv so that quoted commas are handled correctly.
+func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player, error) {
+	players := make([]Player, 0, len(records))
+	var errors []string
+	seenNames := make(map[string]int)
+	c := cases.Title(language.Und, cases.NoLower)
+
+	for i, line := range records {
+		allEmpty := true
+		for _, f := range line {
+			if strings.TrimSpace(f) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
 		for j := range line {
 			line[j] = strings.TrimSpace(line[j])
 		}
@@ -68,12 +101,11 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 
 		if withZekkenName {
 			if len(line) < 2 {
-				errors = append(errors, fmt.Sprintf("entry %d: invalid format: expected at least 'Name, DisplayName, Dojo'", i+1))
+				errors = append(errors, fmt.Sprintf("entry %d: invalid format: expected 'Name, Dojo' or 'Name, DisplayName, Dojo'", i+1))
 				continue
 			}
 			player.Name = c.String(line[0])
 			if len(line) == 2 {
-				// Tolerate 2-column rows (Name, Dojo) written without a distinct display name.
 				player.DisplayName = SanitizeName(line[0])
 				player.Dojo = line[1]
 				if player.Dojo == "" {
@@ -81,7 +113,6 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 					continue
 				}
 			} else {
-				// 3+ columns: Name, DisplayName, Dojo
 				if line[2] == "" {
 					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
 					continue
@@ -103,7 +134,6 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 				}
 			}
 		} else {
-			// backward compatibility: Name, Dojo
 			player.Name = c.String(line[0])
 			player.DisplayName = SanitizeName(line[0])
 			player.Dojo = "NA"

@@ -3,7 +3,9 @@ package helper
 import (
 	"bufio"
 	"embed"
+	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -171,6 +173,54 @@ func ReadEntriesFromFile(filePath string) ([]string, error) {
 	}
 
 	return entries, nil
+}
+
+// ReadCSVFile reads a CSV file using encoding/csv, properly handling
+// RFC 4180 quoting (fields with commas, double-quotes, or newlines).
+func ReadCSVFile(filePath string) ([][]string, error) {
+	cleanPath := filepath.Clean(filePath)
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("invalid file path: %s", filePath)
+	}
+
+	// #nosec G304 - file path is validated above
+	file, err := os.Open(cleanPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing file: %v\n", err)
+		}
+	}()
+
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
+	reader.TrimLeadingSpace = true
+
+	var records [][]string
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		allEmpty := true
+		for _, f := range record {
+			if strings.TrimSpace(f) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if !allEmpty {
+			records = append(records, record)
+		}
+	}
+
+	return records, nil
 }
 
 // AssignPoolsToCourts distributes numPools pools across numCourts courts using

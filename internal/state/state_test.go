@@ -193,7 +193,7 @@ func TestStore_ParticipantsCSV(t *testing.T) {
 	path := filepath.Join(dir, "competitions", compID, "participants.csv")
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "Akira Tanaka, Mumeishi")
+	assert.Contains(t, string(data), "Akira Tanaka,Mumeishi")
 
 	loaded, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
@@ -263,6 +263,83 @@ func TestStore_ParticipantsCSV_Empty(t *testing.T) {
 	loaded, err := store.LoadParticipants("nonexistent", false)
 	require.NoError(t, err)
 	assert.Empty(t, loaded)
+}
+
+func TestStore_ParticipantsCSV_BlankLines(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "blank-lines"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	path := filepath.Join(dir, "competitions", compID, "participants.csv")
+	content := "550e8400-e29b-41d4-a716-446655440000,Alice,DojoA\n\n660e8400-e29b-41d4-a716-446655440001,Bob,DojoB\n"
+	err = os.WriteFile(path, []byte(content), 0600)
+	require.NoError(t, err)
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
+	assert.Equal(t, "Alice", loaded[0].Name)
+	assert.Equal(t, "660e8400-e29b-41d4-a716-446655440001", loaded[1].ID)
+	assert.Equal(t, "Bob", loaded[1].Name)
+}
+
+func TestStore_ParticipantsCSV_CommaInNameAndDojo(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "comma-test"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	players := []domain.Player{
+		{Name: "Smith, John", Dojo: "Kendo Club, Tokyo"},
+		{Name: "Yamada Taro", Dojo: "Plain Dojo"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "Smith, John", loaded[0].Name)
+	assert.Equal(t, "Kendo Club, Tokyo", loaded[0].Dojo)
+	assert.Equal(t, "Yamada Taro", loaded[1].Name)
+	assert.Equal(t, "Plain Dojo", loaded[1].Dojo)
+}
+
+func TestStore_SeedsCSV_CommaInName(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "seed-comma"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	seeds := []domain.SeedAssignment{
+		{Name: "Smith, John", SeedRank: 1},
+		{Name: "Yamada Taro", SeedRank: 2},
+	}
+	require.NoError(t, store.SaveSeeds(compID, seeds))
+
+	loaded, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "Smith, John", loaded[0].Name)
+	assert.Equal(t, 1, loaded[0].SeedRank)
+	assert.Equal(t, "Yamada Taro", loaded[1].Name)
+	assert.Equal(t, 2, loaded[1].SeedRank)
 }
 
 // --- Pools CSV ---

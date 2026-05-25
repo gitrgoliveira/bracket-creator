@@ -98,40 +98,65 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 		return []domain.Player{}, nil
 	}
 
-	lines, err := helper.ReadEntriesFromFile(path)
+	records, err := helper.ReadCSVFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	hasIDs := len(lines) > 0 && uuidRE(strings.TrimSpace(strings.SplitN(lines[0], ",", 2)[0]))
+	hasIDs := len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
 
 	var ids []string
-	var plainLines []string
-	if hasIDs {
-		for _, line := range lines {
-			id, rest, ok := strings.Cut(line, ",")
-			if !ok {
-				plainLines = append(plainLines, line)
-				ids = append(ids, "")
-				continue
-			}
-			ids = append(ids, strings.TrimSpace(id))
-			plainLines = append(plainLines, rest)
+	var checkedInFlags []bool
+	var playerRecords [][]string
+	for _, record := range records {
+		isCheckedIn := false
+		dataStart := 0
+		if hasIDs && len(record) > 0 && uuidRE(strings.TrimSpace(record[0])) {
+			dataStart = 1
 		}
-	} else {
-		plainLines = lines
+		dataFields := record[dataStart:]
+
+		allEmpty := true
+		for _, f := range dataFields {
+			if strings.TrimSpace(f) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
+
+		if len(dataFields) > 2 {
+			last := strings.TrimSpace(dataFields[len(dataFields)-1])
+			if strings.ToLower(last) == "checked_in" {
+				isCheckedIn = true
+				dataFields = dataFields[:len(dataFields)-1]
+			}
+		}
+
+		if hasIDs {
+			id := ""
+			if dataStart > 0 {
+				id = strings.TrimSpace(record[0])
+			}
+			ids = append(ids, id)
+		}
+		playerRecords = append(playerRecords, dataFields)
+		checkedInFlags = append(checkedInFlags, isCheckedIn)
 	}
 
-	players, err := helper.CreatePlayers(plainLines, withZekkenName)
+	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName)
 	if err != nil {
 		return nil, err
 	}
 
-	if hasIDs {
-		for i := range players {
-			if i < len(ids) {
-				players[i].ID = ids[i]
-			}
+	for i := range players {
+		if hasIDs && i < len(ids) {
+			players[i].ID = ids[i]
+		}
+		if i < len(checkedInFlags) {
+			players[i].CheckedIn = checkedInFlags[i]
 		}
 	}
 
@@ -158,24 +183,11 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 // for compID. Mirrors SaveParticipants.
 func (s *Store) saveParticipantsLocked(compID string, players []domain.Player) error {
 	path := s.compPath(compID, "participants.csv")
-	var sb strings.Builder
-	for _, p := range players {
-		id := p.ID
-		if id == "" {
-			id = newParticipantID()
-		}
-		var row string
-		if p.DisplayName != "" && p.DisplayName != p.Name {
-			row = fmt.Sprintf("%s, %s, %s", p.Name, p.DisplayName, p.Dojo)
-		} else {
-			row = fmt.Sprintf("%s, %s", p.Name, p.Dojo)
-		}
-		if p.Tag != "" {
-			row += ", " + p.Tag
-		}
-		sb.WriteString(id + ", " + row + "\n")
+	data, err := marshalParticipantsCSV(players)
+	if err != nil {
+		return err
 	}
-	if err := s.atomicWrite(path, []byte(sb.String()), 0600); err != nil {
+	if err := s.atomicWrite(path, data, 0600); err != nil {
 		return err
 	}
 	for _, key := range []string{"participants.csv", "participants_with_seeds.csv"} {

@@ -601,14 +601,13 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
-					// DecidedByHantei uses a non-pointer bool in ScoreRequest
-					// (= state.MatchResult), so an omitted JSON field decodes as false —
-					// indistinguishable from an explicit false. Callers must send this
-					// flag explicitly when they need to preserve or clear it. The
-					// frontend serialiser (toBackendMatchResult in api_serializers.jsx)
-					// forwards true when the existing match already has it set and the
-					// patch doesn't override it, so re-edits don't silently clear HT.
-					bracket.Rounds[rIdx][mIdx].DecidedByHantei = result.DecidedByHantei
+					// DecidedByHantei uses *bool so that a client that omits the
+					// field (nil) preserves the stored value, while an explicit
+					// true/false applies it. This prevents a re-score that doesn't
+					// mention the flag from silently clearing a recorded hantei win.
+					if result.DecidedByHantei != nil {
+						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei
+					}
 					// Echo the persisted scheduling fields back into the result so the
 					// caller (and SSE broadcast) sees the full, correct match state
 					// rather than the empty Court/ScheduledAt the scoring UI sends.

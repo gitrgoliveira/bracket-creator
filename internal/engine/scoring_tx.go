@@ -81,8 +81,10 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
-					// See scoring.go for the DecidedByHantei non-pointer bool note.
-					bracket.Rounds[rIdx][mIdx].DecidedByHantei = result.DecidedByHantei
+					// See scoring.go for the DecidedByHantei *bool semantics.
+					if result.DecidedByHantei != nil {
+						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei
+					}
 					if result.Court == "" {
 						result.Court = m.Court
 					}
@@ -323,7 +325,7 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 						DecisionBy:      bm.DecisionBy,
 						DecisionReason:  bm.DecisionReason,
 						Encho:           bm.Encho,
-						DecidedByHantei: bm.DecidedByHantei,
+						DecidedByHantei: &bm.DecidedByHantei,
 					}, nil
 				}
 			}

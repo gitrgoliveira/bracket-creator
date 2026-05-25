@@ -1264,8 +1264,8 @@ function MatchDetailCard({ match, onClose }) {
   const isDone = match.status === "completed";
   // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
   // same fallback used in VSchedItem so the score display is consistent.
-  const mdcIpponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
-  const mdcIpponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
+  const mdcIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
+  const mdcIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
 
   return (
     <div className="match-detail-card">
@@ -1456,8 +1456,8 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
   // Fall back so the score string reflects per-side letters instead of the
   // orientation-agnostic winnerPts–loserPts that formatIpponsScore uses when
   // both ippon arrays are absent (which would invert left/right when AKA wins).
-  const vIpponsA = m.ipponsA || (m.scoreA ? m.scoreA.split("") : []);
-  const vIpponsB = m.ipponsB || (m.scoreB ? m.scoreB.split("") : []);
+  const vIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
+  const vIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
   const scoreStr = m.status === "completed" ? window.formatIpponsScore(vIpponsB, vIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
   // FR-025: queue position is 1-indexed per court for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
@@ -2065,8 +2065,8 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays
   // (see normalizeMatch). Apply the same fallback used in VSchedItem so the
   // score cell renders the derived winnerPts–loserPts string instead of "—".
-  const twIpponsA = m.ipponsA || (m.scoreA ? m.scoreA.split("") : []);
-  const twIpponsB = m.ipponsB || (m.scoreB ? m.scoreB.split("") : []);
+  const twIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
+  const twIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
   const scoreStr = m.status === "completed" ? window.formatIpponsScore(twIpponsB, twIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
@@ -2339,8 +2339,8 @@ function MatchViewerModal({ match, onClose }) {
   const bWin = match.winner?.id === match.sideB?.id;
   // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
   // same fallback used in MatchDetailCard and VSchedItem.
-  const mvmIpponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
-  const mvmIpponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
+  const mvmIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
+  const mvmIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
 
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

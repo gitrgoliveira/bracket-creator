@@ -65,6 +65,15 @@ function decisionSuffix(match) {
   return suffix;
 }
 
+// Derive an ippon array from a Go-formatted scoreA/scoreB string.
+// The backend formatScore() appends "(HN)" for outstanding hansoku, e.g.
+// "MK(H1)". Splitting the raw string would inject "(", "H", "1", ")" as
+// bogus ippon letters. This helper strips the suffix first.
+function ipponsFromScore(scoreStr) {
+  if (!scoreStr) return [];
+  return scoreStr.replace(/\(H\d+\)$/, "").split("");
+}
+
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
 // Returns something like "MM–K", "M–·", "△", "X", "BYE".
 // Hantei (judges' decision after tied encho) is NOT a separate return value;
@@ -137,8 +146,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const live = match.status === "running";
   const isBye = match.score?.type === "bye";
 
-  const ipponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
-  const ipponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
+  const ipponsA = match.ipponsA || ipponsFromScore(match.scoreA);
+  const ipponsB = match.ipponsB || ipponsFromScore(match.scoreB);
   const isDone = match.status === "completed";
   const aScore = isDone ? (ipponsA.join("") || null) : null;
   const bScore = isDone ? (ipponsB.join("") || null) : null;
@@ -288,5 +297,6 @@ window.roundLabel = roundLabel;
 window.formatIpponsScore = formatIpponsScore;
 window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
+window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore };

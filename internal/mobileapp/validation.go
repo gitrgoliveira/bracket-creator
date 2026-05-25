@@ -285,7 +285,7 @@ func (r *ScoreRequest) Validate() error {
 	// supplied) must be completed, and encho must have been played (PeriodCount
 	// > 0) — rejecting decidedByHantei=true without overtime context prevents
 	// persisting an "HT" suffix outside a real encho-decided match.
-	if r.DecidedByHantei {
+	if r.DecidedByHantei != nil && *r.DecidedByHantei {
 		if r.Winner == "" {
 			return &ValidationError{
 				Field:   "decidedByHantei",

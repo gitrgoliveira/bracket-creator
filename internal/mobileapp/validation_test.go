@@ -10,6 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// boolPtr returns a pointer to b, allowing inline *bool literals in test structs.
+func boolPtr(b bool) *bool { return &b }
+
 // TestScoreRequestValidate covers the request-shape rules in
 // ScoreRequest.Validate (Slice 0 / T015 / NFR-004). Slice 3 (T077)
 // extends this with decision-type validation; rules here are the
@@ -668,7 +671,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 		}
 		assert.NoError(t, req.Validate())
@@ -679,7 +682,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideA:           "Alice",
 			SideB:           "Bob",
 			Winner:          "Alice",
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 		}
 		assert.NoError(t, req.Validate())
@@ -690,7 +693,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideA:           "Alice",
 			SideB:           "Bob",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 		}
 		err := req.Validate()
@@ -706,7 +709,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusRunning,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 		}
 		err := req.Validate()
@@ -722,7 +725,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 		}
 		err := req.Validate()
 		require.Error(t, err)
@@ -737,7 +740,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           &state.EnchoMetadata{PeriodCount: 0},
 		}
 		err := req.Validate()
@@ -753,7 +756,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 			IpponsA:         []string{"M"},
 			IpponsB:         []string{"K"},
@@ -767,7 +770,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 			IpponsA:         []string{"M", "K"},
 			IpponsB:         nil,
@@ -787,7 +790,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 				SideB:           "Bob",
 				Winner:          "Alice",
 				Status:          state.MatchStatusCompleted,
-				DecidedByHantei: true,
+				DecidedByHantei: boolPtr(true),
 				Encho:           encho1,
 				Decision:        decision,
 			}
@@ -805,7 +808,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 			DecisionBy:      "aka",
 		}
@@ -822,7 +825,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 			DecisionReason:  "injury",
 		}
@@ -839,7 +842,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			SideB:           "Bob",
 			Winner:          "Alice",
 			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			DecidedByHantei: boolPtr(true),
 			Encho:           encho1,
 			Decision:        "fought",
 		}
@@ -847,7 +850,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 	})
 
 	t.Run("decidedByHantei false is always valid", func(t *testing.T) {
-		req := ScoreRequest{DecidedByHantei: false}
+		req := ScoreRequest{DecidedByHantei: boolPtr(false)}
 		assert.NoError(t, req.Validate())
 	})
 }

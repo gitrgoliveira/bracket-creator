@@ -258,6 +258,12 @@ type MatchResult struct {
 	// Distinguishes a judges' decision from an ippon-derived win for
 	// stats, audit, and display. Zero value omitted from the wire.
 	//
+	// Pointer semantics at the API boundary: when a client omits the
+	// field (nil), the engine preserves whatever value is already stored;
+	// when the client explicitly sends true or false the engine applies
+	// it. This prevents a re-score that doesn't mention the flag from
+	// silently clearing a previously-recorded hantei decision.
+	//
 	// Persistence caveat: pool matches are stored in pool-matches.csv,
 	// whose column layout does NOT include this field — so a hantei
 	// decision on a pool match survives in-memory and on the SSE wire,
@@ -267,7 +273,7 @@ type MatchResult struct {
 	// pool-level hantei is a rare-enough case (FIK doesn't normally
 	// allow it in pool play) that the gap is acceptable. The yaml tag
 	// is retained for future YAML-serialised contexts.
-	DecidedByHantei bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+	DecidedByHantei *bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a

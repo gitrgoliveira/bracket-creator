@@ -599,11 +599,12 @@ func TestRecordBracketMatchResult_DecidedByHantei_RoundTrips(t *testing.T) {
 	require.NoError(t, err)
 
 	firstMatchID := bracket.Rounds[0][0].ID
+	hantei := true
 	err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
 		Winner:          "Alice",
 		Status:          state.MatchStatusCompleted,
 		Encho:           &state.EnchoMetadata{PeriodCount: 1},
-		DecidedByHantei: true,
+		DecidedByHantei: &hantei,
 	})
 	require.NoError(t, err)
 
@@ -612,6 +613,19 @@ func TestRecordBracketMatchResult_DecidedByHantei_RoundTrips(t *testing.T) {
 	assert.True(t, bracket.Rounds[0][0].DecidedByHantei, "BracketMatch.DecidedByHantei must reflect the MatchResult flag")
 	// Zero-value baseline: the un-scored second semi-final must NOT have the flag set.
 	assert.False(t, bracket.Rounds[0][1].DecidedByHantei, "untouched bracket match must remain non-hantei")
+
+	// A re-score that omits DecidedByHantei (nil *bool) must PRESERVE the stored
+	// flag rather than silently clearing it — the *bool tri-state API contract.
+	err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
+		Winner:          "Alice",
+		Status:          state.MatchStatusCompleted,
+		Encho:           &state.EnchoMetadata{PeriodCount: 1},
+		DecidedByHantei: nil, // intentionally omitted
+	})
+	require.NoError(t, err)
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.True(t, bracket.Rounds[0][0].DecidedByHantei, "nil DecidedByHantei must preserve the stored true value")
 }
 
 func TestRecordBracketMatchResult_SecondMatch_PropagatesAsSideB(t *testing.T) {

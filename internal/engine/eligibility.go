@@ -301,7 +301,7 @@ func (e *Engine) lookupExistingResult(compID, matchID string) (*state.MatchResul
 						DecisionBy:      bm.DecisionBy,
 						DecisionReason:  bm.DecisionReason,
 						Encho:           bm.Encho,
-						DecidedByHantei: bm.DecidedByHantei,
+						DecidedByHantei: &bm.DecidedByHantei,
 					}, nil
 				}
 			}

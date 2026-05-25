@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatIpponsScore } from '../bracket.jsx';
+import { formatIpponsScore, ipponsFromScore } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -152,5 +152,27 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E)');
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M–K (E) HT');
     });
+  });
+});
+
+// ipponsFromScore: strips the Go formatScore "(HN)" hansoku suffix before splitting
+describe('ipponsFromScore', () => {
+  it('splits plain letters', () => {
+    expect(ipponsFromScore('MK')).toEqual(['M', 'K']);
+  });
+
+  it('strips (HN) suffix before splitting', () => {
+    expect(ipponsFromScore('M(H1)')).toEqual(['M']);
+    expect(ipponsFromScore('MK(H2)')).toEqual(['M', 'K']);
+  });
+
+  it('handles suffix-only string (no ippons, just fouls)', () => {
+    expect(ipponsFromScore('(H1)')).toEqual([]);
+  });
+
+  it('returns [] for empty/null/undefined', () => {
+    expect(ipponsFromScore('')).toEqual([]);
+    expect(ipponsFromScore(null)).toEqual([]);
+    expect(ipponsFromScore(undefined)).toEqual([]);
   });
 });

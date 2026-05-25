@@ -162,6 +162,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
+        {match.decidedByHantei ? <span className="bc-decision-chip">HT</span> : null}
         {isKikenDecisionBC(match.decision) ? (
           <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>
         ) : null}

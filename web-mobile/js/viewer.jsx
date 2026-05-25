@@ -1629,7 +1629,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3></div>;
   }
-  const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
+  const isTeam = isTeamComp(competition);
   // FR-050 / FR-051: league competitions render Final standings instead of
   // pool standings, and surface a Winner badge once every match is complete.
   // Format check is value-based so older competitions without a Format
@@ -1869,7 +1869,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, crossPoolRank, addDojoToWatchlist };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, crossPoolRank, isTeamComp, addDojoToWatchlist };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2087,17 +2087,23 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   );
 }
 
+function isTeamComp(c) {
+  return !!(c && (c.kind === "team" || c.teamSize > 0));
+}
+
 // crossPoolRank merges all pools' standings into a single sorted list using
 // the canonical FIK tie-breaker chain. For individual: W→L→T→PW→PL.
 // For team: W→L→T→IV→IL→IT→PW→PL. Returns a new array (does not mutate).
 function crossPoolRank(standings, pools, isTeam) {
   const merged = pools.flatMap(pool => standings[pool.poolName] || []);
   merged.sort((a, b) => {
+    const base =
+      (b.wins || 0) - (a.wins || 0) ||
+      (a.losses || 0) - (b.losses || 0) ||
+      (b.draws || 0) - (a.draws || 0);
+    if (base !== 0) return base;
     if (isTeam) {
       return (
-        (b.wins || 0) - (a.wins || 0) ||
-        (a.losses || 0) - (b.losses || 0) ||
-        (b.draws || 0) - (a.draws || 0) ||
         (b.individualWins || 0) - (a.individualWins || 0) ||
         (a.individualLosses || 0) - (b.individualLosses || 0) ||
         (b.individualDraws || 0) - (a.individualDraws || 0) ||
@@ -2106,9 +2112,6 @@ function crossPoolRank(standings, pools, isTeam) {
       );
     }
     return (
-      (b.wins || 0) - (a.wins || 0) ||
-      (a.losses || 0) - (b.losses || 0) ||
-      (b.draws || 0) - (a.draws || 0) ||
       (b.ipponsGiven || 0) - (a.ipponsGiven || 0) ||
       (a.ipponsTaken || 0) - (b.ipponsTaken || 0)
     );
@@ -2237,7 +2240,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     return m;
   }, [players]);
 
-  const isTeam = (c?.kind === "team") || (c?.teamSize || 0) > 0;
+  const isTeam = isTeamComp(c);
   const effectiveStandings = c?.format === "swiss" ? swissStandings : standings;
   const isSwissLoading = c?.format === "swiss" && swissStandings === null;
   const awards = useMemo(
@@ -2327,10 +2330,13 @@ function AwardsView({ c, bracket, standings, pools, players }) {
 }
 
 function PoolWinnersTable({ pools, standings, poolWinners, isFs }) {
-  const rows = pools.map(pool => {
-    const top = (standings[pool.poolName] || []).slice(0, poolWinners);
-    return { poolName: pool.poolName, entries: top };
-  }).filter(r => r.entries.length > 0);
+  const rows = useMemo(() =>
+    pools.map(pool => {
+      const top = (standings[pool.poolName] || []).slice(0, poolWinners);
+      return { poolName: pool.poolName, entries: top };
+    }).filter(r => r.entries.length > 0),
+    [pools, standings, poolWinners]
+  );
 
   if (rows.length === 0) return null;
 

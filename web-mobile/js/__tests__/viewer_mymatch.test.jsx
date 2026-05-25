@@ -39,9 +39,9 @@ describe('buildPlayerMatchHighlight', () => {
 
   it('falls back to case-insensitive exact name match when UUID misses', () => {
     const matches = [{ id: 'm1', sideA: 'John Doe', sideB: 'Jane Smith' }];
-    const result = buildPlayerMatchHighlight('unknown-uuid', matches, 'John Doe');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('m1');
+    expect(buildPlayerMatchHighlight('unknown-uuid', matches, 'John Doe')).toHaveLength(1);
+    expect(buildPlayerMatchHighlight('unknown-uuid', matches, 'JOHN DOE')).toHaveLength(1);
+    expect(buildPlayerMatchHighlight('unknown-uuid', matches, 'john doe')).toHaveLength(1);
   });
 
   it('name fallback rejects substring-only matches', () => {

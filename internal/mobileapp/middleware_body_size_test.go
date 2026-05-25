@@ -121,3 +121,32 @@ func TestMaxBodyBytes_FiresBeforeAuth(t *testing.T) {
 	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
 		"oversized body must be rejected before auth runs; got %d (body: %s)", w.Code, w.Body.String())
 }
+
+// TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth pins the adminTinyBody
+// group wiring from server.go: POST /api/tournament/announce uses a 4 KB
+// cap that fires before AuthMiddleware, so an unauthenticated request with
+// a body larger than AnnouncementMaxBodyBytes gets 413, not 401.
+func TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth(t *testing.T) {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+
+	// Mirrors adminTinyBody setup in server.go.
+	g := r.Group("/api")
+	g.Use(MaxBodyBytes(AnnouncementMaxBodyBytes))
+	g.Use(func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	})
+	g.POST("/tournament/announce", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// Body just over 4 KB — exceeds announce cap but well under 1 MB default cap.
+	body := strings.Repeat("x", int(AnnouncementMaxBodyBytes)+1)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/tournament/announce", bytes.NewBufferString(body))
+	req.ContentLength = int64(len(body))
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
+		"4 KB announce cap must fire before auth; got %d", w.Code)
+}

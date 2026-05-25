@@ -106,12 +106,10 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "Duration must be 5, 10, 15, or 30 minutes")
 
-	// 7. POST /api/tournament/announce - oversized body (>maxAnnounceBodyBytes)
-	// returns 400 from MaxBytesReader unwinding through ShouldBindJSON.
-	// Build a JSON body whose `message` field alone exceeds the 4096-byte
-	// cap so we exercise the body-cap path (not the post-bind 200-char
-	// validation).
-	hugeMsg := strings.Repeat("A", maxAnnounceBodyBytes+10)
+	// 7. POST /api/tournament/announce - oversized body (>AnnouncementMaxBodyBytes)
+	// returns 413 from the adminTinyBody group middleware (Content-Length fast
+	// path fires before AuthMiddleware and before ShouldBindJSON).
+	hugeMsg := strings.Repeat("A", int(AnnouncementMaxBodyBytes)+10)
 	hugePayload := announcementRequest{
 		Message:         hugeMsg,
 		DurationMinutes: 30,
@@ -121,7 +119,7 @@ func TestAnnouncementHandlers(t *testing.T) {
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
 	req.Header.Set("X-Tournament-Password", "secret-password")
 	router.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code, "expected 400 for body over %d bytes", maxAnnounceBodyBytes)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "expected 413 for body over %d bytes", AnnouncementMaxBodyBytes)
 
 	// 8. POST /api/tournament/announce - happy path (200 OK)
 	body, _ = json.Marshal(payload)

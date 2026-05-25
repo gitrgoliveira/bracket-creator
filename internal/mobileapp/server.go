@@ -94,10 +94,13 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterResetHandlers(api, store, verifier, hub)
 	RegisterAuthConfigHandlers(api, verifier)
 
-	// Admin API endpoints (protected). Split into two sub-groups so the
-	// CSV-import route gets a larger body cap than the rest — every
-	// other admin endpoint takes small JSON, while /tournament/import
-	// legitimately uploads multi-MB CSVs.
+	// Admin API endpoints (protected). Split into three sub-groups by
+	// expected body size so the body cap fires BEFORE AuthMiddleware at
+	// the right granularity for each endpoint tier:
+	//
+	//   adminTinyBody  (4 KB)  — /tournament/announce
+	//   adminSmallBody (1 MB)  — all other admin JSON endpoints
+	//   adminLargeBody (64 MB) — /tournament/import (CSV upload)
 	//
 	// Middleware ordering: MaxBodyBytes runs BEFORE AuthMiddleware on
 	// purpose (mp-663 Phase 3). An unauthenticated attacker who streams
@@ -106,6 +109,13 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// fast path inside MaxBodyBytes is constant-time and reads no body
 	// bytes, so the order doesn't add measurable cost to the happy
 	// path either.
+	adminTinyBody := r.Group("/api")
+	adminTinyBody.Use(MaxBodyBytes(AnnouncementMaxBodyBytes))
+	adminTinyBody.Use(AuthMiddleware(verifier, store))
+	{
+		RegisterAnnouncementHandlers(adminTinyBody, store, hub)
+	}
+
 	adminSmallBody := r.Group("/api")
 	adminSmallBody.Use(MaxBodyBytes(DefaultMaxBodyBytes))
 	adminSmallBody.Use(AuthMiddleware(verifier, store))
@@ -120,11 +130,6 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		RegisterLineupHandlers(adminSmallBody, store, store, store)
 		RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
 		RegisterSwissHandlers(adminSmallBody, store, eng, hub)
-		// Announcement send is a small JSON payload (already further
-		// capped at 4 KB inside the handler via http.MaxBytesReader,
-		// per the earlier security review). Belongs in the small-body
-		// group with the rest of the admin JSON endpoints.
-		RegisterAnnouncementHandlers(adminSmallBody, store, hub)
 	}
 
 	adminLargeBody := r.Group("/api")

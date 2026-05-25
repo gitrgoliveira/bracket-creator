@@ -1022,7 +1022,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       dragIdxRef.current = null;
                       setDragOverIdx(null);
                     }}
-                    style={{ cursor: reorderDisabled ? "default" : "grab" }}
+                    style={{
+                      cursor: reorderDisabled ? "default" : "grab",
+                      gridTemplateColumns: c.checkInEnabled ? undefined : "20px 36px 1fr 32px 64px",
+                    }}
                   >
                     {c.checkInEnabled && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>

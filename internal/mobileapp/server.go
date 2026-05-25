@@ -102,42 +102,25 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	//   adminSmallBody (1 MB)  — all other admin JSON endpoints
 	//   adminLargeBody (64 MB) — /tournament/import (CSV upload)
 	//
-	// Middleware ordering: MaxBodyBytes runs BEFORE AuthMiddleware on
-	// purpose (mp-663 Phase 3). An unauthenticated attacker who streams
-	// a huge Content-Length should hit 413 immediately, not get a
-	// chance to consume an auth roundtrip first. The Content-Length
-	// fast path inside MaxBodyBytes is constant-time and reads no body
-	// bytes, so the order doesn't add measurable cost to the happy
-	// path either.
-	adminTinyBody := r.Group("/api")
-	adminTinyBody.Use(MaxBodyBytes(AnnouncementMaxBodyBytes))
-	adminTinyBody.Use(AuthMiddleware(verifier, store))
-	{
-		RegisterAnnouncementHandlers(adminTinyBody, store, hub)
-	}
+	// Use adminGroup() to wire each group: it enforces the cap→auth ordering
+	// so new groups can't accidentally reverse it.
+	adminTinyBody := adminGroup(r, AnnouncementMaxBodyBytes, verifier, store)
+	RegisterAnnouncementHandlers(adminTinyBody, store, hub)
 
-	adminSmallBody := r.Group("/api")
-	adminSmallBody.Use(MaxBodyBytes(DefaultMaxBodyBytes))
-	adminSmallBody.Use(AuthMiddleware(verifier, store))
-	{
-		RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
-		RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
-		RegisterParticipantHandlers(adminSmallBody, store, hub)
-		RegisterMatchHandlers(adminSmallBody, eng, store, store, hub)
-		RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
-		RegisterEligibilityHandlers(adminSmallBody, store, hub)
-		RegisterReinstateHandler(adminSmallBody, eng, hub)
-		RegisterLineupHandlers(adminSmallBody, store, store, store)
-		RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
-		RegisterSwissHandlers(adminSmallBody, store, eng, hub)
-	}
+	adminSmallBody := adminGroup(r, DefaultMaxBodyBytes, verifier, store)
+	RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
+	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
+	RegisterParticipantHandlers(adminSmallBody, store, hub)
+	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub)
+	RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
+	RegisterEligibilityHandlers(adminSmallBody, store, hub)
+	RegisterReinstateHandler(adminSmallBody, eng, hub)
+	RegisterLineupHandlers(adminSmallBody, store, store, store)
+	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
+	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
 
-	adminLargeBody := r.Group("/api")
-	adminLargeBody.Use(MaxBodyBytes(MaxImportBodyBytes))
-	adminLargeBody.Use(AuthMiddleware(verifier, store))
-	{
-		RegisterImportHandlers(adminLargeBody, store, hub)
-	}
+	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
+	RegisterImportHandlers(adminLargeBody, store, hub)
 
 	// Static files & SPA Fallback
 	mobileFS := res.GetMobileWebFS()

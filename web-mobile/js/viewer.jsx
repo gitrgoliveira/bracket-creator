@@ -2102,19 +2102,18 @@ function crossPoolRank(standings, pools, isTeam) {
       (a.losses || 0) - (b.losses || 0) ||
       (b.draws || 0) - (a.draws || 0);
     if (base !== 0) return base;
-    if (isTeam) {
-      return (
-        (b.individualWins || 0) - (a.individualWins || 0) ||
+    const tail = isTeam
+      ? (b.individualWins || 0) - (a.individualWins || 0) ||
         (a.individualLosses || 0) - (b.individualLosses || 0) ||
         (b.individualDraws || 0) - (a.individualDraws || 0) ||
         (b.pointsWon || 0) - (a.pointsWon || 0) ||
         (a.pointsLost || 0) - (b.pointsLost || 0)
-      );
-    }
-    return (
-      (b.ipponsGiven || 0) - (a.ipponsGiven || 0) ||
-      (a.ipponsTaken || 0) - (b.ipponsTaken || 0)
-    );
+      : (b.ipponsGiven || 0) - (a.ipponsGiven || 0) ||
+        (a.ipponsTaken || 0) - (b.ipponsTaken || 0);
+    if (tail !== 0) return tail;
+    const nameA = a.player?.name || "";
+    const nameB = b.player?.name || "";
+    return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
   });
   return merged;
 }
@@ -2180,9 +2179,8 @@ function deriveAwards(bracket, standings, pools, nameToPlayer, isTeam) {
   // Standings-based fallback. Two payload shapes are supported:
   //   - Swiss/`/swiss/standings`: a flat array of standings rows.
   //   - Pools/league: an object keyed by poolName → array of rows.
-  // We take the top four from the (single) leaderboard; for pools-only with
-  // multiple pools we use the first pool (consistent with PoolsViewer's
-  // leagueWinner pick).
+  // Single pool: use that pool's standings directly. Multiple pools: merge
+  // and re-rank via crossPoolRank using the canonical FIK tie-breaker chain.
   let list = null;
   if (Array.isArray(standings)) {
     list = standings;

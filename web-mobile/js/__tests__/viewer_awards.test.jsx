@@ -282,7 +282,7 @@ describe('deriveAwards (multi-pool cross-pool ranking)', () => {
     const standings = {
       'Pool A': [
         mkRow('Alice', 'Aoyama', 3, 0, 0, 6, 1),
-        mkRow('Ash', 'Aoyama', 1, 2, 0, 2, 4),
+        mkRow('Ash', 'Aoyama', 1, 2, 0, 3, 4),
       ],
       'Pool B': [
         mkRow('Bob', 'Bunkyo', 3, 0, 0, 5, 1),

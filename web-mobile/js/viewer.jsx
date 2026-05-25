@@ -2470,17 +2470,26 @@ function AnnouncementBanner({ announcements, onDismiss }) {
 
   useEffect(() => {
     if (!ann) return;
+    // intervalId and dismissed are captured in the closure so updateTimer can
+    // self-clear the interval on expiry and guard against repeated onDismiss
+    // calls if React state updates are delayed before cleanup runs.
+    let intervalId;
+    let dismissed = false;
     const updateTimer = () => {
       const diff = new Date(ann.expiresAt).getTime() - Date.now();
       if (diff <= 0) {
-        onDismiss(ann.id);
+        clearInterval(intervalId);
+        if (!dismissed) {
+          dismissed = true;
+          onDismiss(ann.id);
+        }
         return;
       }
       setTimerState({ id: ann.id, value: formatAnnouncementTimeLeft(ann.expiresAt) });
     };
     updateTimer();
-    const interval = setInterval(updateTimer, 1000);
-    return () => clearInterval(interval);
+    intervalId = setInterval(updateTimer, 1000);
+    return () => clearInterval(intervalId);
   }, [ann?.id, ann?.expiresAt, onDismiss]);
 
   if (!ann) return null;

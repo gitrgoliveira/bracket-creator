@@ -319,7 +319,8 @@ type BracketMatch struct {
 	DecisionReason string         `json:"decisionReason,omitempty"`
 	Encho          *EnchoMetadata `json:"encho,omitempty"`
 	// DecidedByHantei mirrors MatchResult.DecidedByHantei for bracket reads.
-	DecidedByHantei bool `json:"decidedByHantei,omitempty"`
+	// YAML tag included for parity with MatchResult and future YAML-serialised contexts.
+	DecidedByHantei bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 }
 
 type Bracket struct {

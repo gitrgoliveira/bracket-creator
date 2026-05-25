@@ -601,6 +601,12 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					// ScoreRequest (= state.MatchResult) uses a non-pointer bool, so an
+					// omitted JSON field decodes as false — identical to an explicit false.
+					// The score endpoint is a full-state replacement, not a PATCH; callers
+					// must send the complete desired state. The frontend serialiser
+					// (toBackendMatchResult in api_serializers.jsx) always includes this
+					// field explicitly, sending true to preserve or false to clear.
 					bracket.Rounds[rIdx][mIdx].DecidedByHantei = result.DecidedByHantei
 					// Echo the persisted scheduling fields back into the result so the
 					// caller (and SSE broadcast) sees the full, correct match state

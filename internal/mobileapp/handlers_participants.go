@@ -293,7 +293,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				switch {
 				case errors.Is(err, state.ErrParticipantNotFound):
 					httpStatus = http.StatusNotFound
-				case errors.Is(err, state.ErrDuplicateName), errors.Is(err, state.ErrCompetitionNotInSetup):
+				case errors.Is(err, state.ErrDuplicateName):
 					httpStatus = http.StatusConflict
 				}
 				httpMsg = err.Error()

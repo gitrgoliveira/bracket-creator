@@ -366,9 +366,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
-    players.forEach(p => {
-      map.set(p.id, `${p.name || ""} ${p.displayName || ""} ${p.dojo || ""}`.toLowerCase());
-    });
+    players.forEach(p => { map.set(p.id, participantSearchTarget(p)); });
     return map;
   }, [players]);
   const visiblePlayers = useMemoA(() => {
@@ -910,9 +908,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                   onChange={e => setSearchQuery(e.target.value)}
                   onKeyDown={e => e.key === "Escape" && setSearchQuery("")}
                   placeholder="Search name, dojo…"
-                  style={{ width: "100%", paddingRight: searchQuery ? 28 : undefined }}
+                  style={{ width: "100%", paddingRight: trimmedSearch ? 28 : undefined }}
                 />
-                {searchQuery && (
+                {trimmedSearch && (
                   <button
                     type="button"
                     onClick={() => setSearchQuery("")}
@@ -1148,8 +1146,12 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   );
 }
 
+function participantSearchTarget(p) {
+  return `${p.name || ""} ${p.displayName || ""} ${p.dojo || ""}`.toLowerCase();
+}
+
 window.AdminParticipants = AdminParticipants;
 
 // ES export for the vitest suite — pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
-export { mintParticipantIds, findSeedMatchIndex };
+export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget };

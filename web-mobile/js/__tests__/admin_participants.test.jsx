@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mintParticipantIds, findSeedMatchIndex } from '../admin_participants.jsx';
+import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget } from '../admin_participants.jsx';
 
 // Helper: parsed rows arrive from parseParticipantLines as
 // { name, displayName, dojo, danGrade, tag } objects. Test rows omit the
@@ -230,5 +230,40 @@ describe('findSeedMatchIndex', () => {
 
   it('handles empty roster without throwing', () => {
     expect(findSeedMatchIndex([], 'Alice')).toBe(-1);
+  });
+});
+
+describe('participantSearchTarget', () => {
+  const p = (name, displayName, dojo) => ({ name, displayName, dojo });
+
+  it('returns a lowercase string combining name, displayName, and dojo', () => {
+    const target = participantSearchTarget(p('Alice', 'ALI', 'Tokyo Dojo'));
+    expect(target).toBe('alice ali tokyo dojo');
+  });
+
+  it('matches by name substring (case-insensitive)', () => {
+    const target = participantSearchTarget(p('Alice Yamamoto', null, 'Shinjuku'));
+    expect(target.includes('alice')).toBe(true);
+    expect(target.includes('yamamoto')).toBe(true);
+  });
+
+  it('matches by dojo substring', () => {
+    const target = participantSearchTarget(p('Bob', null, 'Osaka Kendo Club'));
+    expect(target.includes('osaka')).toBe(true);
+  });
+
+  it('matches by displayName/zekken substring', () => {
+    const target = participantSearchTarget(p('Bob Tanaka', 'TANAKA', 'Shinjuku'));
+    expect(target.includes('tanaka')).toBe(true);
+  });
+
+  it('handles null/undefined fields without throwing', () => {
+    expect(() => participantSearchTarget(p(null, null, null))).not.toThrow();
+    expect(participantSearchTarget(p(null, null, null))).toBe('  ');
+  });
+
+  it('does not match a query that is not a substring of any field', () => {
+    const target = participantSearchTarget(p('Alice', null, 'Tokyo'));
+    expect(target.includes('bob')).toBe(false);
   });
 });

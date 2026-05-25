@@ -21,7 +21,9 @@
 //
 // Competition: one event within a tournament (e.g., "Men's Individual", "Women's Teams").
 //   - kind: "individual" | "team"  (only two kinds — gender/age tags are metadata)
-//   - format: "playoffs" (knockout only) | "pools" (pools + knockout) | "pools_only"
+//   - format: "playoffs" (knockout only) | "mixed" (pools + knockout) | "league" | "swiss"
+//     Note: the sample generator (applyFormat) only simulates "mixed" fully;
+//     "league" and "swiss" fall back to bracket-only display in demo data.
 //   - has its own list of competitors (players or teams).
 //   - has pools (optional) AND a bracket (optional). Both can coexist.
 //   - assigned to a subset of tournament courts.
@@ -203,7 +205,7 @@ function poolWinners(pools) {
 
 // ---------- Competition ----------
 // kind: "individual" | "team"
-// format: "playoffs" | "pools"  (pools format always implies pools followed by a bracket)
+// format: "playoffs" | "mixed" | "league" | "swiss"
 function buildEmptyCompetition(args) {
   if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
   const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled } = args;
@@ -232,7 +234,7 @@ function buildEmptyCompetition(args) {
 function applyFormat(c) {
   if (c.status === "setup") return c;
   console.log("buildCompetition: c before pools/bracket", c);
-  if (c.format === "pools") {
+  if (c.format === "mixed") {
     c.pools = buildPools(c.players, { poolMode: c.poolSizeMode, poolSize: c.poolSize, winnersPerPool: c.poolWinners, courts: c.courts });
     if (c.status === "pools") {
       simulatePools(c.pools, 0.6);
@@ -250,6 +252,7 @@ function applyFormat(c) {
       simulateRounds(c.bracket, c.bracket.length);
     }
   } else {
+    // "playoffs", "league", and "swiss" all use a knockout bracket for sample data.
     c.bracket = buildBracket(c.players, c.courts); advanceByes(c.bracket);
     if (c.status === "playoffs") simulateRounds(c.bracket, Math.max(1, Math.floor(c.bracket.length / 2)), true);
     if (c.status === "completed") simulateRounds(c.bracket, c.bracket.length);
@@ -282,17 +285,17 @@ const SAMPLE_TOURNAMENTS = [
     const comps = [
       buildCompetition({ id: "lc26-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "playoffs", sampleRoster: "medium", seedCount: 4, status: "playoffs", startTime: "09:00", courts: ["A","B"] }),
       buildCompetition({ id: "lc26-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "playoffs", sampleRoster: "small", seedCount: 2, status: "playoffs", startTime: "09:00", courts: ["C"] }),
-      buildCompetition({ id: "lc26-mt", name: "Men's Teams", kind: "team", format: "pools", sampleRoster: "small", seedCount: 0, status: "setup", startTime: "14:00", teamSize: 5, courts: ["A","B"] }),
+      buildCompetition({ id: "lc26-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "setup", startTime: "14:00", teamSize: 5, courts: ["A","B"] }),
     ];
     return buildTournament({ id: "lc2026", name: "London Cup 2026", date: "2026-05-12", venue: "Crystal Palace Sports Centre", courts, status: competitionStatus(comps), competitions: comps });
   })(),
   (() => {
     const courts = ["A", "B", "C", "D"];
     const comps = [
-      buildCompetition({ id: "ko-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "pools", sampleRoster: "large", seedCount: 4, status: "pools", startTime: "09:00", courts: ["A","B"] }),
-      buildCompetition({ id: "ko-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "pools", sampleRoster: "medium", seedCount: 4, status: "pools", startTime: "09:00", courts: ["C","D"] }),
-      buildCompetition({ id: "ko-mt", name: "Men's Teams", kind: "team", format: "pools", sampleRoster: "medium", seedCount: 0, status: "setup", startTime: "14:00", teamSize: 5, courts: ["A","B","C","D"] }),
-      buildCompetition({ id: "ko-wt", name: "Women's Teams", kind: "team", format: "pools", sampleRoster: "small", seedCount: 0, status: "setup", startTime: "16:00", teamSize: 5, courts: ["A","B"] }),
+      buildCompetition({ id: "ko-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "mixed", sampleRoster: "large", seedCount: 4, status: "pools", startTime: "09:00", courts: ["A","B"] }),
+      buildCompetition({ id: "ko-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "pools", startTime: "09:00", courts: ["C","D"] }),
+      buildCompetition({ id: "ko-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "medium", seedCount: 0, status: "setup", startTime: "14:00", teamSize: 5, courts: ["A","B","C","D"] }),
+      buildCompetition({ id: "ko-wt", name: "Women's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "setup", startTime: "16:00", teamSize: 5, courts: ["A","B"] }),
     ];
     return buildTournament({ id: "kanto-open", name: "Kanto Open Spring Shiai", date: "2026-04-28", venue: "Tokyo Budokan", courts, status: competitionStatus(comps), competitions: comps });
   })(),
@@ -307,9 +310,9 @@ const SAMPLE_TOURNAMENTS = [
   (() => {
     const courts = ["A", "B", "C"];
     const comps = [
-      buildCompetition({ id: "ek25-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "pools", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
-      buildCompetition({ id: "ek25-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "pools", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
-      buildCompetition({ id: "ek25-mt", name: "Men's Teams", kind: "team", format: "pools", sampleRoster: "small", seedCount: 0, status: "completed", teamSize: 5, courts: ["A","B","C"] }),
+      buildCompetition({ id: "ek25-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
+      buildCompetition({ id: "ek25-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
+      buildCompetition({ id: "ek25-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "completed", teamSize: 5, courts: ["A","B","C"] }),
     ];
     return buildTournament({ id: "european-2025", name: "European Kendo Championships 2025", date: "2025-11-08", venue: "Paris Bercy", courts, status: "completed", competitions: comps });
   })(),

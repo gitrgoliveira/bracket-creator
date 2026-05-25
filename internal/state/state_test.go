@@ -617,7 +617,7 @@ func TestStore_Competition_CRUD(t *testing.T) {
 		ID:           "mens-individual",
 		Name:         "Men's Individual",
 		Kind:         "individual",
-		Format:       "pools",
+		Format:       "mixed",
 		PoolSize:     3,
 		PoolSizeMode: "min",
 		PoolWinners:  2,
@@ -635,7 +635,7 @@ func TestStore_Competition_CRUD(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
 	assert.Equal(t, "Men's Individual", loaded.Name)
-	assert.Equal(t, "pools", loaded.Format)
+	assert.Equal(t, "mixed", loaded.Format)
 	assert.Equal(t, 3, loaded.PoolSize)
 	assert.Equal(t, true, loaded.RoundRobin)
 	assert.Equal(t, []string{"A", "B"}, loaded.Courts)

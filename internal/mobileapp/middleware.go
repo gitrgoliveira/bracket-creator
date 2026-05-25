@@ -16,6 +16,20 @@ import (
 // "64 MB" consistently — but the request-size cap lives here, in the
 // MaxBodyBytes middleware applied to the import group in server.go.
 const (
+	// AnnouncementMaxBodyBytes caps POST /api/tournament/announce.
+	// Worst-case JSON encoding: 200-char message × 6 bytes/escape + keys
+	// ≈ 1242 bytes; 4096 gives ≈3× headroom. Applied via MaxBodyBytes
+	// before AuthMiddleware on the /api announce route group in server.go.
+	AnnouncementMaxBodyBytes int64 = 4096
+
+	// ResetMaxBodyBytes caps POST /api/tournament/reset.
+	// Worst-case JSON: password 256 chars × 6 bytes/escape + originatorId
+	// 128 × 6 + overhead ≈ 2344 bytes; 4096 gives ≈1.7× headroom. Applied
+	// inside the handler (not as group middleware) to preserve the locked-mode
+	// 404 response before any body is read — a per-group cap would reveal the
+	// route's existence via 413 vs 404 on locked deployments.
+	ResetMaxBodyBytes int64 = 4096
+
 	// DefaultMaxBodyBytes caps non-import admin request bodies. 1 MB is
 	// far above any legitimate JSON payload on this server (the largest
 	// is a competition with embedded roster ~ a few KB per player ×
@@ -65,6 +79,18 @@ func MaxBodyBytes(n int64) gin.HandlerFunc {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, n)
 		c.Next()
 	}
+}
+
+// adminGroup creates an /api route group with MaxBodyBytes(capBytes) wired
+// BEFORE AuthMiddleware, enforcing the cap→auth ordering that prevents an
+// unauthenticated attacker from consuming auth overhead before hitting 413.
+// Use this for every protected admin sub-group so the ordering can't be
+// accidentally reversed when adding new groups.
+func adminGroup(r *gin.Engine, capBytes int64, verifier PasswordVerifier, store *state.Store) *gin.RouterGroup {
+	g := r.Group("/api")
+	g.Use(MaxBodyBytes(capBytes))
+	g.Use(AuthMiddleware(verifier, store))
+	return g
 }
 
 // requireValidCompID extracts the `:id` URL parameter and validates it

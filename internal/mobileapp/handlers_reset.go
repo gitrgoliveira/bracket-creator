@@ -149,22 +149,12 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			return
 		}
 
-		// Cap the request body before parsing so an attacker cannot
-		// send an arbitrarily large payload and force the server to
-		// allocate memory for it.
-		//
-		// Worst-case JSON encoding (all characters become \uXXXX escapes):
-		//   password    256 bytes × 6 chars/escape = 1536 chars
-		//   originatorId 128 bytes × 6 chars/escape =  768 chars
-		//   JSON overhead (keys, braces, quotes)    =   ~40 chars
-		//   Total                                   = ~2344 chars
-		//
-		// 4096 bytes gives a ×1.7 safety margin while still forming a
-		// meaningful per-request limit. MaxBytesReader wraps the body
-		// and causes ShouldBindJSON to return an error if the body
-		// exceeds the cap.
-		const maxResetBodyBytes = 4096
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxResetBodyBytes)
+		// Cap the request body before parsing. Applied here (not as group
+		// middleware) so that locked-mode deployments return 404 before any
+		// body is read — a group-level cap would return 413 for large bodies
+		// even in locked mode, leaking that the route exists. Size rationale
+		// is in ResetMaxBodyBytes in middleware.go.
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, ResetMaxBodyBytes)
 
 		var req resetPasswordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/resources"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newBodySizeTestRouter(limit int64) *gin.Engine {
@@ -120,4 +126,43 @@ func TestMaxBodyBytes_FiresBeforeAuth(t *testing.T) {
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
 		"oversized body must be rejected before auth runs; got %d (body: %s)", w.Code, w.Body.String())
+}
+
+// TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth exercises the real NewRouter
+// to confirm POST /api/tournament/announce rejects oversized bodies with 413
+// before AuthMiddleware runs (which would return 401). This pins the actual
+// server.go wiring rather than a hand-rolled stub.
+func TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "announce-cap-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+
+	// Tournament must exist so AuthMiddleware returns 401 (not 403), letting
+	// the test distinguish "cap fired first → 413" from "auth fired first → 401".
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Test",
+		Password: "secret",
+	}))
+
+	eng := engine.New(store)
+	mockFS := fstest.MapFS{
+		"web-mobile/index.html": {Data: []byte("<html></html>")},
+	}
+	res := resources.NewResources(nil, mockFS)
+	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+
+	// Body just over AnnouncementMaxBodyBytes — no auth header intentionally:
+	// if the body cap fires first (correct), we get 413; if auth fires first
+	// (regression), we get 401.
+	body := strings.Repeat("x", int(AnnouncementMaxBodyBytes)+1)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/tournament/announce", bytes.NewBufferString(body))
+	req.ContentLength = int64(len(body))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
+		"body cap must fire before auth on /api/tournament/announce; got %d", w.Code)
 }

@@ -2458,7 +2458,15 @@ function AnnouncementBanner({ announcements, onDismiss }) {
   const safeIdx = list.length > 0 ? idx % list.length : 0;
   const ann = list[safeIdx];
 
-  const [timeLeft, setTimeLeft] = useState(() => ann ? formatAnnouncementTimeLeft(ann.expiresAt) : '');
+  // Key timer state by ann.id so the displayed value is correct immediately
+  // on rotation, without waiting for the effect to fire after the first render.
+  const [timerState, setTimerState] = useState(() => ({
+    id: ann?.id ?? null,
+    value: ann ? formatAnnouncementTimeLeft(ann.expiresAt) : '',
+  }));
+  const timeLeft = timerState.id === ann?.id
+    ? timerState.value
+    : formatAnnouncementTimeLeft(ann?.expiresAt ?? '');
 
   useEffect(() => {
     if (!ann) return;
@@ -2468,7 +2476,7 @@ function AnnouncementBanner({ announcements, onDismiss }) {
         onDismiss(ann.id);
         return;
       }
-      setTimeLeft(formatAnnouncementTimeLeft(ann.expiresAt));
+      setTimerState({ id: ann.id, value: formatAnnouncementTimeLeft(ann.expiresAt) });
     };
     updateTimer();
     const interval = setInterval(updateTimer, 1000);

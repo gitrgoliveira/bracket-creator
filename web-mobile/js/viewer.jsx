@@ -2269,18 +2269,18 @@ function AwardsView({ c, bracket, standings, pools, players }) {
       </div>
       {isLeague && awards[0] && (
         <div className="winner-badge" style={{
-          padding: "10px 14px",
+          padding: isFs ? "14px 18px" : "10px 14px",
           background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
           color: "white",
           borderRadius: 8,
           fontWeight: 700,
-          fontSize: 14,
+          fontSize: isFs ? 18 : 14,
           display: "flex",
           alignItems: "center",
           gap: 8,
           marginBottom: 16,
         }}>
-          <span style={{ fontSize: 18 }}>🏆</span>
+          <span style={{ fontSize: isFs ? 28 : 18 }}>🏆</span>
           <span>Winner: {awards[0].name}</span>
         </div>
       )}

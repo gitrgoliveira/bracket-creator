@@ -1168,6 +1168,22 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     }
   };
 
+  const regenerateDraw = async () => {
+    setGenerating(true);
+    try {
+      await window.API.discardDraw(c.id, password);
+      await window.API.generateDraw(c.id, password);
+      if (!mountedRef.current) return;
+      showToast(`Draw regenerated for ${c.name}`);
+      onSection(c.format === "playoffs" || c.format === "mixed" ? "bracket" : "pools");
+    } catch (e) {
+      console.error("Regenerate draw failed:", e);
+      if (mountedRef.current) showToast(e.message, "error");
+    } finally {
+      if (mountedRef.current) setGenerating(false);
+    }
+  };
+
   const start = async () => {
     showToast(`Starting ${c.name}…`);
 
@@ -1281,7 +1297,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button className="btn btn--ghost" onClick={generateDraw} disabled={generating || starting || discarding}>
+                  <button className="btn btn--ghost" onClick={regenerateDraw} disabled={generating || starting || discarding}>
                     {generating && <span className="spinner" />}
                     {generating ? "Regenerating…" : "Regenerate draw"}
                   </button>

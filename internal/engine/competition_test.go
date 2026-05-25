@@ -399,8 +399,11 @@ func TestDiscardDraw_ResetsToSetup(t *testing.T) {
 	assert.Equal(t, state.CompStatusSetup, comp.Status, "DiscardDraw must reset status to setup")
 
 	// Draw artifacts should be deleted.
-	_, poolsErr := os.Stat(filepath.Join(dir, "competitions", compID, "pool-matches.csv"))
-	assert.True(t, os.IsNotExist(poolsErr), "pool-matches.csv must be deleted after DiscardDraw")
+	compDir := filepath.Join(dir, "competitions", compID)
+	for _, f := range []string{"pools.csv", "pool-matches.csv", "bracket.json"} {
+		_, ferr := os.Stat(filepath.Join(compDir, f))
+		assert.True(t, os.IsNotExist(ferr), "%s must be deleted after DiscardDraw", f)
+	}
 }
 
 // TestDiscardDraw_RejectsNonDrawReady ensures DiscardDraw errors when not in

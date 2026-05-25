@@ -317,6 +317,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		if !ok {
 			return
 		}
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify seeds while a draw is pending; discard the draw first"})
+			return
+		}
 		var assignments []domain.SeedAssignment
 		if err := c.ShouldBindJSON(&assignments); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

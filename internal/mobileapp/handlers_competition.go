@@ -545,6 +545,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// set HasParticipantIDs=true (saveParticipants writes UUID rows).
 		var nameErr error
 		var notFoundFlag bool
+		var drawReadyFlag bool
 		var changed bool
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
@@ -573,6 +574,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// settings-PUT and roster-PUT no longer step on each
 				// other's writes.
 				if comp.Players != nil {
+					if current.Status == state.CompStatusDrawReady {
+						drawReadyFlag = true
+						return nil, nil
+					}
 					// Roster-only PUT — do NOT flip HasParticipantIDs
 					// here. Pre-fix, the transform committed the flag
 					// (HasParticipantIDs=true) BEFORE the post-transform
@@ -654,6 +659,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// either flag escapes the transform unexpectedly.
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if drawReadyFlag {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
 			return
 		}
 		if nameErr != nil {

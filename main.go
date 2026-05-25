@@ -27,6 +27,8 @@ var webFiles embed.FS
 // exist on clean checkouts so this directive compiles before esbuild runs.
 //
 //go:embed web-mobile/index.html
+//go:embed web-mobile/favicon.jpeg
+//go:embed web-mobile/logo.jpeg
 //go:embed web-mobile/css
 //go:embed web-mobile/dist
 //go:embed web-mobile/vendor

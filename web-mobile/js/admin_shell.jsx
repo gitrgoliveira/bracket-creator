@@ -63,7 +63,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
     <div className="topbar-stack">
       <div className="topbar">
         <div className="topbar__brand">
-          <div className="topbar__logo">BC</div>
+          <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="topbar__logo" />
           <div>
             <div className="topbar__title">{tournament?.name || "Bracket Creator"}</div>
             <div className="topbar__sub">Admin console</div>

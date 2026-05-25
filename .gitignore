@@ -35,6 +35,14 @@ square_prep/*
 # !square_prep/lc2026/*
 # Universal and Go added by speckit
 vendor/
+# Go embed placeholders — these files ensure web-mobile/dist and
+# web-mobile/vendor exist on clean checkouts so the embed directive compiles.
+!web-mobile/dist/
+web-mobile/dist/*
+!web-mobile/dist/keep
+!web-mobile/vendor/
+web-mobile/vendor/*
+!web-mobile/vendor/keep
 Thumbs.db
 *.tmp
 *.swp
@@ -74,11 +82,4 @@ bracket-creator-webapp*
 # bd worktree
 bracket-creator-*
 bracket-creator-*/*
-# bd worktree
-bracket-creator-lvh/
-# bd worktree
-mp-h60/
-# bd worktree
-mp-k8x/
-# bd worktree
-mp-t3h/
+mp-*/

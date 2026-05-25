@@ -187,13 +187,11 @@ describe('deriveAwards (standings-based)', () => {
   });
 });
 
-// Helper to build a standings row for an individual player.
 const mkRow = (name, dojo, wins, losses, draws, ipponsGiven, ipponsTaken) => ({
   player: { name, dojo },
   wins, losses, draws, ipponsGiven, ipponsTaken,
 });
 
-// Helper to build a standings row for a team.
 const mkTeamRow = (name, dojo, wins, losses, draws, individualWins, individualLosses, individualDraws, pointsWon, pointsLost) => ({
   player: { name, dojo },
   wins, losses, draws, individualWins, individualLosses, individualDraws, pointsWon, pointsLost,
@@ -310,5 +308,22 @@ describe('deriveAwards (multi-pool cross-pool ranking)', () => {
     };
     const awards = deriveAwards(null, standings, pools, new Map(), false);
     expect(awards.map(a => a.name)).toEqual(['Alice', 'Bob']);
+  });
+
+  it('uses team chain (isTeam=true) for multi-pool team format', () => {
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }];
+    const standings = {
+      'Pool A': [
+        mkTeamRow('TeamA', 'Dojo1', 3, 0, 0, 6, 2, 0, 10, 3),
+        mkTeamRow('TeamC', 'Dojo1', 1, 2, 0, 3, 5, 0,  4, 8),
+      ],
+      'Pool B': [
+        mkTeamRow('TeamB', 'Dojo2', 3, 0, 0, 4, 2, 0, 10, 3),
+        mkTeamRow('TeamD', 'Dojo2', 0, 3, 0, 1, 6, 0,  2, 9),
+      ],
+    };
+    const awards = deriveAwards(null, standings, pools, new Map(), true);
+    expect(awards.map(a => a.name)).toEqual(['TeamA', 'TeamB', 'TeamC', 'TeamD']);
+    expect(awards.map(a => a.place)).toEqual([1, 2, 3, 3]);
   });
 });

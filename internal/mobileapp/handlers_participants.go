@@ -78,6 +78,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 		if len(req.Players) == 0 && req.Name != "" {
 			// Single player add workflow
+			if strings.TrimSpace(req.Name) == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "name must not be blank"})
+				return
+			}
+			if strings.TrimSpace(req.Dojo) == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "dojo must not be blank"})
+				return
+			}
 			metadata := req.Metadata
 			if len(metadata) == 0 && req.DanGrade != "" {
 				metadata = []string{req.DanGrade}
@@ -186,6 +194,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if strings.TrimSpace(req.Name) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name must not be blank"})
+			return
+		}
+		if strings.TrimSpace(req.Dojo) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "dojo must not be blank"})
 			return
 		}
 

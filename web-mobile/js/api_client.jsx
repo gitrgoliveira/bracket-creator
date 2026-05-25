@@ -162,7 +162,9 @@ const API = {
             body = {
                 ...config,
                 players: config.players.map(({ danGrade, ...p }) =>
-                    danGrade ? { ...p, metadata: [danGrade] } : p
+                    danGrade !== undefined
+                        ? { ...p, metadata: [danGrade, ...(p.metadata || []).slice(1)] }
+                        : p
                 ),
             };
         }

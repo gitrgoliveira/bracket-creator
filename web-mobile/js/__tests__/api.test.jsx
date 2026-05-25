@@ -698,6 +698,26 @@ describe('API Utils', () => {
         ).rejects.toThrow('Failed to estimate schedule');
       });
     });
+
+    describe('updateCompetition', () => {
+      it('converts danGrade → metadata[0] and preserves metadata[1+] slots', async () => {
+        let capturedBody;
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+          capturedBody = JSON.parse(opts.body);
+          return Promise.resolve({ ok: true, json: async () => ({}) });
+        });
+        const players = [
+          { name: 'Alice', dojo: 'Senbukan', danGrade: '3 Dan', metadata: ['3 Dan', 'registered'] },
+          { name: 'Bob', dojo: 'Kenshikan', danGrade: '2 Dan', metadata: ['2 Dan'] },
+          { name: 'Carol', dojo: 'Yoshinkan', danGrade: '', metadata: [] },
+        ];
+        await API.updateCompetition('c1', { players }, 'pw');
+        expect(capturedBody.players[0].metadata).toEqual(['3 Dan', 'registered']);
+        expect(capturedBody.players[0].danGrade).toBeUndefined();
+        expect(capturedBody.players[1].metadata).toEqual(['2 Dan']);
+        expect(capturedBody.players[2].metadata).toEqual(['']);
+      });
+    });
   });
 });
 

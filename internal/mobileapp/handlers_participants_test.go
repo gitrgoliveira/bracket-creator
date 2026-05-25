@@ -121,6 +121,57 @@ func TestSingleParticipantAddAndReplace(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+func TestBlankNameRejected(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-blank-name"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Blank Name Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	for _, tc := range []struct {
+		desc string
+		body map[string]interface{}
+	}{
+		{"whitespace name on add", map[string]interface{}{"name": "   ", "dojo": "Dojo"}},
+		{"empty name on add", map[string]interface{}{"name": "", "dojo": "Dojo"}},
+		{"whitespace dojo on add", map[string]interface{}{"name": "Alice", "dojo": "   "}},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			b, _ := json.Marshal(tc.body)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(b))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
+	}
+
+	// Add a valid participant to test PUT blank-name rejection.
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		desc string
+		body map[string]interface{}
+	}{
+		{"whitespace name on replace", map[string]interface{}{"name": "   ", "dojo": "Dojo"}},
+		{"whitespace dojo on replace", map[string]interface{}{"name": "Bob", "dojo": "   "}},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			b, _ := json.Marshal(tc.body)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(b))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
+	}
+}
+
 func TestSeedRenamingUnderReplace(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

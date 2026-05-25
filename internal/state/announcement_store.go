@@ -40,6 +40,7 @@ func (s *AnnouncementStore) Remove(id string) (bool, []Announcement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.pruneExpiredLocked(time.Now())
 	for i, a := range s.active {
 		if a.ID == id {
 			s.active = append(s.active[:i], s.active[i+1:]...)

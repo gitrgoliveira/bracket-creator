@@ -211,17 +211,6 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		}
 		pid := c.Param("pid")
 
-		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		}
-
-		if comp.Status != state.CompStatusSetup && comp.Status != "" {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
-			return
-		}
-
 		var req struct {
 			Name        string   `json:"name"`
 			DisplayName string   `json:"displayName"`
@@ -251,39 +240,69 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			metadata = []string{req.DanGrade}
 		}
 
-		// Strip displayName for non-zekken competitions — same CSV-corruption
-		// guard as the single-add path: a 3-column row written here would be
-		// mis-parsed on the next LoadParticipants(withZekkenName=false) read,
-		// shifting Dojo into Metadata. Empty DisplayName triggers SanitizeName
-		// re-derivation in saveParticipantsNoLock.
-		displayName := req.DisplayName
-		if !comp.WithZekkenName {
-			displayName = ""
-		}
+		// Run the status check and participant write under one lock acquire so
+		// a concurrent start-competition cannot flip status between the check
+		// and the file write (TOCTOU, mp-0lc).
+		var (
+			updatedPlayer *domain.Player
+			httpStatus    = http.StatusInternalServerError
+			httpMsg       string
+		)
+		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
+			comp, err := tx.LoadCompetition(id)
+			if err != nil {
+				return err
+			}
+			if comp == nil {
+				httpStatus = http.StatusNotFound
+				httpMsg = "competition not found"
+				return fmt.Errorf("competition not found")
+			}
+			if comp.Status != state.CompStatusSetup && comp.Status != "" {
+				httpStatus = http.StatusConflict
+				httpMsg = "cannot modify participants after competition has started"
+				return state.ErrCompetitionNotInSetup
+			}
 
-		if err := validatePlayerLengths(name, displayName, dojo, req.Tag, metadata); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
+			// Strip displayName for non-zekken competitions — same CSV-corruption
+			// guard as the single-add path: a 3-column row written here would be
+			// mis-parsed on the next LoadParticipants(withZekkenName=false) read,
+			// shifting Dojo into Metadata. Empty DisplayName triggers SanitizeName
+			// re-derivation in saveParticipantsNoLock.
+			displayName := req.DisplayName
+			if !comp.WithZekkenName {
+				displayName = ""
+			}
 
-		updatedPlayer, err := store.ReplaceParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
-			p.Name = name
-			p.DisplayName = displayName
-			p.Dojo = dojo
-			p.Metadata = metadata
-			p.Tag = req.Tag
+			if err := validatePlayerLengths(name, displayName, dojo, req.Tag, metadata); err != nil {
+				httpStatus = http.StatusBadRequest
+				httpMsg = err.Error()
+				return err
+			}
+
+			p, err := tx.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+				p.Name = name
+				p.DisplayName = displayName
+				p.Dojo = dojo
+				p.Metadata = metadata
+				p.Tag = req.Tag
+				return nil
+			})
+			if err != nil {
+				switch {
+				case errors.Is(err, state.ErrParticipantNotFound):
+					httpStatus = http.StatusNotFound
+				case errors.Is(err, state.ErrDuplicateName), errors.Is(err, state.ErrCompetitionNotInSetup):
+					httpStatus = http.StatusConflict
+				}
+				httpMsg = err.Error()
+				return err
+			}
+			updatedPlayer = p
 			return nil
 		})
-
-		if err != nil {
-			status := http.StatusInternalServerError
-			switch {
-			case errors.Is(err, state.ErrParticipantNotFound):
-				status = http.StatusNotFound
-			case errors.Is(err, state.ErrDuplicateName), errors.Is(err, state.ErrCompetitionNotInSetup):
-				status = http.StatusConflict
-			}
-			c.JSON(status, gin.H{"error": err.Error()})
+		if txErr != nil {
+			c.JSON(httpStatus, gin.H{"error": httpMsg})
 			return
 		}
 

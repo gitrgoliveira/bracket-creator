@@ -119,6 +119,16 @@ type StoreTx interface {
 	// (T128 / T156) so the lineup freeze happens under the same lock
 	// acquire as the score write.
 	LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error
+	// UpdateParticipant is the tx-aware twin of
+	// Store.updateParticipantNoLock. Applies transform to the target
+	// participant while the transaction lock is held, so the caller
+	// can serialise a competition-status pre-check (via LoadCompetition
+	// in the same tx body) and the participant write under one lock
+	// acquire. Participants.csv and seeds.csv are written directly via
+	// atomic rename — they are not staged through the WAL — but each
+	// write is individually crash-safe, and no other WAL-staged file
+	// is touched by this path, so cross-file atomicity is not required.
+	UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error)
 }
 
 // WithTransaction runs fn under the per-competition write lock for
@@ -517,6 +527,13 @@ func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain
 		return nil, err
 	}
 	return t.store.loadParticipantsLocked(compID, withZekkenName)
+}
+
+func (t *storeTx) UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
+	return t.store.updateParticipantNoLock(compID, pid, withZekkenName, transform)
 }
 
 // UpdatePoolMatchByID dispatches to a lock-free body that mirrors

@@ -22,6 +22,8 @@
 // Competition: one event within a tournament (e.g., "Men's Individual", "Women's Teams").
 //   - kind: "individual" | "team"  (only two kinds — gender/age tags are metadata)
 //   - format: "playoffs" (knockout only) | "mixed" (pools + knockout) | "league" | "swiss"
+//     Note: the sample generator (applyFormat) only simulates "mixed" fully;
+//     "league" and "swiss" fall back to bracket-only display in demo data.
 //   - has its own list of competitors (players or teams).
 //   - has pools (optional) AND a bracket (optional). Both can coexist.
 //   - assigned to a subset of tournament courts.

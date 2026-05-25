@@ -123,7 +123,7 @@ func TestEstimateScheduleCourtsClampedToOne(t *testing.T) {
 }
 
 // TestGenerateSchedule_MixedFormat verifies that GenerateSchedule produces
-// "pool" type entries for a mixed (pools + knockout) competition.
+// "pool" type entries for a mixed (Pools + Knockout) competition.
 func TestGenerateSchedule_MixedFormat(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "gen-sched-pools"

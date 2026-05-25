@@ -21,7 +21,7 @@ var validAnnouncementDurations = map[int]bool{5: true, 10: true, 15: true, 30: t
 
 func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
 	// POST /api/tournament/announce is protected (requires admin credentials).
-	// Body cap enforced by adminTinyBody in server.go (AnnouncementMaxBodyBytes), before AuthMiddleware.
+	// MaxBodyBytes(AnnouncementMaxBodyBytes) is applied before AuthMiddleware on the route group wiring this handler.
 	r.POST("/tournament/announce", func(c *gin.Context) {
 		var req announcementRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

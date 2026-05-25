@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/resources"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newBodySizeTestRouter(limit int64) *gin.Engine {
@@ -122,31 +128,41 @@ func TestMaxBodyBytes_FiresBeforeAuth(t *testing.T) {
 		"oversized body must be rejected before auth runs; got %d (body: %s)", w.Code, w.Body.String())
 }
 
-// TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth pins the adminTinyBody
-// group wiring from server.go: POST /api/tournament/announce uses a 4 KB
-// cap that fires before AuthMiddleware, so an unauthenticated request with
-// a body larger than AnnouncementMaxBodyBytes gets 413, not 401.
+// TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth exercises the real NewRouter
+// to confirm POST /api/tournament/announce rejects oversized bodies with 413
+// before AuthMiddleware runs (which would return 401). This pins the actual
+// server.go wiring rather than a hand-rolled stub.
 func TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth(t *testing.T) {
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.New()
+	tempDir, err := os.MkdirTemp("", "announce-cap-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
 
-	// Mirrors adminTinyBody setup in server.go.
-	g := r.Group("/api")
-	g.Use(MaxBodyBytes(AnnouncementMaxBodyBytes))
-	g.Use(func(c *gin.Context) {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-	})
-	g.POST("/tournament/announce", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
 
-	// Body just over 4 KB — exceeds announce cap but well under 1 MB default cap.
+	// Tournament must exist so AuthMiddleware returns 401 (not 403), letting
+	// the test distinguish "cap fired first → 413" from "auth fired first → 401".
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Test",
+		Password: "secret",
+	}))
+
+	eng := engine.New(store)
+	mockFS := fstest.MapFS{
+		"web-mobile/index.html": {Data: []byte("<html></html>")},
+	}
+	res := resources.NewResources(nil, mockFS)
+	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+
+	// Body just over AnnouncementMaxBodyBytes — no auth header intentionally:
+	// if the body cap fires first (correct), we get 413; if auth fires first
+	// (regression), we get 401.
 	body := strings.Repeat("x", int(AnnouncementMaxBodyBytes)+1)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/tournament/announce", bytes.NewBufferString(body))
 	req.ContentLength = int64(len(body))
-	r.ServeHTTP(w, req)
+	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
-		"4 KB announce cap must fire before auth; got %d", w.Code)
+		"body cap must fire before auth on /api/tournament/announce; got %d", w.Code)
 }

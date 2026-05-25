@@ -53,11 +53,11 @@ func saveTestParticipants(t *testing.T, store *state.Store, compID string, names
 
 // --- Pool Generation Tests ---
 
-func TestStartCompetition_PoolsFormat_BasicGeneration(t *testing.T) {
+func TestStartCompetition_MixedFormat_BasicGeneration(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "mens-individual"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
 	})
@@ -101,11 +101,11 @@ func TestStartCompetition_PoolsFormat_BasicGeneration(t *testing.T) {
 	}
 }
 
-func TestStartCompetition_PoolsFormat_WithSeeds(t *testing.T) {
+func TestStartCompetition_MixedFormat_WithSeeds(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "seeded-pools"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
 		"Grace", "Hank", "Ivy",
@@ -152,11 +152,11 @@ func TestStartCompetition_PoolsFormat_WithSeeds(t *testing.T) {
 	assert.Equal(t, 3, totalSeeds, "all seeds should be placed in pools")
 }
 
-func TestStartCompetition_PoolsFormat_DojoConflictAvoidance(t *testing.T) {
+func TestStartCompetition_MixedFormat_DojoConflictAvoidance(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "dojo-conflict"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 
 	// Create players with same-dojo groups
 	players := []domain.Player{
@@ -191,7 +191,7 @@ func TestStartCompetition_PoolsFormat_DojoConflictAvoidance(t *testing.T) {
 	}
 }
 
-func TestStartCompetition_PoolsFormat_MaxMode(t *testing.T) {
+func TestStartCompetition_MixedFormat_MaxMode(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "max-mode"
 
@@ -199,7 +199,7 @@ func TestStartCompetition_PoolsFormat_MaxMode(t *testing.T) {
 		ID:           compID,
 		Name:         "Max Mode Test",
 		Kind:         "individual",
-		Format:       "pools",
+		Format:       "mixed",
 		PoolSize:     4,
 		PoolSizeMode: "max",
 		PoolWinners:  2,
@@ -229,7 +229,7 @@ func TestStartCompetition_PoolsFormat_MaxMode(t *testing.T) {
 	assert.Equal(t, 7, totalPlayers)
 }
 
-func TestStartCompetition_PoolsFormat_NonRoundRobin(t *testing.T) {
+func TestStartCompetition_MixedFormat_NonRoundRobin(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "non-rr"
 
@@ -237,7 +237,7 @@ func TestStartCompetition_PoolsFormat_NonRoundRobin(t *testing.T) {
 		ID:           compID,
 		Name:         "Non RR Test",
 		Kind:         "individual",
-		Format:       "pools",
+		Format:       "mixed",
 		PoolSize:     4,
 		PoolSizeMode: "min",
 		PoolWinners:  2,
@@ -528,7 +528,7 @@ func TestStartCompetition_NoParticipants(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "empty"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	// Don't save any participants file
 
 	err := eng.StartCompetition(compID)
@@ -540,7 +540,7 @@ func TestStartCompetition_InvalidSeedName(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bad-seed"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 
 	seeds := []domain.SeedAssignment{
@@ -721,7 +721,7 @@ func TestRecordPoolMatchResult(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pool-score"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -764,7 +764,7 @@ func TestRecordPoolMatchResult_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pool-not-found"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -783,7 +783,7 @@ func TestCalculatePoolStandings_Basic(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "standings"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -830,7 +830,7 @@ func TestCalculatePoolStandings_AllDraws(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "all-draws"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -863,7 +863,7 @@ func TestCalculatePoolStandings_IpponDifferentialTiebreak(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tiebreak"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -917,7 +917,7 @@ func TestCalculatePoolStandings_IncompleteMatches(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "incomplete"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -940,7 +940,7 @@ func TestCalculatePoolStandings_WeightedScore(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "weighted-score"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -1016,7 +1016,7 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 		ID:           compID,
 		Name:         "Team Competition",
 		Kind:         "team",
-		Format:       "pools",
+		Format:       "mixed",
 		TeamSize:     3,
 		PoolSize:     3,
 		PoolSizeMode: "min",
@@ -1117,7 +1117,7 @@ func TestGenerateSchedule_Pools(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "schedule-pools"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C", "D", "E", "F"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1244,7 +1244,7 @@ func TestPoolMatchIDs_AreUnique(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "unique-pool-ids"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"A", "B", "C", "D", "E", "F",
 	})
@@ -1266,7 +1266,7 @@ func TestExportCompetitionXlsx(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "export-test"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1290,7 +1290,7 @@ func TestUpdateMatchCourt_Pool(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-pool"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1365,7 +1365,7 @@ func TestUpdateMatchCourt_Bracket(t *testing.T) {
 func TestUpdateMatchCourt_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-not-found"
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1468,7 +1468,7 @@ func TestCalculatePoolStandings_WithManualOverrides(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "standings-override"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1557,7 +1557,7 @@ func TestCalculatePoolStandings_EdgeCases(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "standings-edges"
 
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob"}) // Pool of 2
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1608,7 +1608,7 @@ func TestStartCompetition_NumberPrefix_Pools(t *testing.T) {
 	compID := "prefix-pools"
 
 	comp := &state.Competition{
-		ID: compID, Name: "Prefix Test", Kind: "individual", Format: "pools",
+		ID: compID, Name: "Prefix Test", Kind: "individual", Format: "mixed",
 		PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2, RoundRobin: true,
 		Courts: []string{"A"}, StartTime: "09:00", Status: "setup",
 		NumberPrefix: "K",
@@ -1662,7 +1662,7 @@ func TestUpdateMatchTime_Pool(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "time-pool"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1711,7 +1711,7 @@ func TestUpdateMatchTime_Bracket(t *testing.T) {
 func TestUpdateMatchTime_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "time-not-found"
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1727,7 +1727,7 @@ func TestStartCompetition_TeamSizeFallback(t *testing.T) {
 		ID:       compID,
 		Name:     "Team Competition",
 		Kind:     "team",
-		Format:   "pools",
+		Format:   "mixed",
 		PoolSize: 3,
 		Status:   "setup",
 		Courts:   []string{"A"},
@@ -1749,7 +1749,7 @@ func TestRecordMatchResult_PreservesSides(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "preservation-test"
 
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	// Create pool matches
 	matchID := "Pool A-0"
 	matches := []state.MatchResult{
@@ -1796,7 +1796,7 @@ func TestStartCompetition_PoolCourtDistribution(t *testing.T) {
 	compID := "court-dist-pools"
 
 	// createTestCompetition uses Courts: []string{"A", "B"}
-	createTestCompetition(t, store, compID, "pools", 3)
+	createTestCompetition(t, store, compID, "mixed", 3)
 	// 6 players → 2 pools. AssignPoolsToCourts(2, 2) → [0, 1]
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
@@ -1873,7 +1873,7 @@ func TestStartCompetition_SingleCourtFallback(t *testing.T) {
 		ID:           compID,
 		Name:         "Single Court",
 		Kind:         "individual",
-		Format:       "pools",
+		Format:       "mixed",
 		PoolSize:     3,
 		PoolSizeMode: "min",
 		PoolWinners:  2,
@@ -1919,7 +1919,7 @@ func TestStartCompetition_AutoDefaultsTeamSize(t *testing.T) {
 		ID:           compID,
 		Name:         "Team Test",
 		Kind:         "team",
-		Format:       "pools",
+		Format:       "mixed",
 		PoolSize:     2,
 		PoolSizeMode: "min",
 		PoolWinners:  1,
@@ -1962,7 +1962,7 @@ func TestStartCompetition_PreservesExplicitTeamSize(t *testing.T) {
 		ID:           compID,
 		Name:         "Team Preserve Test",
 		Kind:         "team",
-		Format:       "pools",
+		Format:       "mixed",
 		PoolSize:     2,
 		PoolSizeMode: "min",
 		PoolWinners:  1,
@@ -2000,7 +2000,7 @@ func TestStartCompetition_PreservesNumberPrefix(t *testing.T) {
 		ID:           compID,
 		Name:         "Prefix Test",
 		Kind:         "individual",
-		Format:       "pools",
+		Format:       "mixed",
 		PoolSize:     3,
 		PoolSizeMode: "min",
 		PoolWinners:  2,

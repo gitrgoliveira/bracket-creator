@@ -31,7 +31,7 @@ competitions:
   - id: "comp-1"
     name: "Competition 1"
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     courts: ["A", "B"]
     participants: "players.csv"
     seeds: "seeds.csv"
@@ -401,7 +401,7 @@ competitions:
   - id: "comp-trim"
     name: "  Padded Cup  "
     kind: "  individual  "
-    format: "  pools  "
+    format: "  mixed  "
     pool_size_mode: "  min  "
     number_prefix: "  A  "
     start_time: "  09:00  "
@@ -424,7 +424,7 @@ competitions:
 		require.NotNil(t, stored)
 		assert.Equal(t, "Padded Cup", stored.Name, "Name should be trimmed")
 		assert.Equal(t, "individual", stored.Kind, "Kind should be trimmed")
-		assert.Equal(t, "pools", stored.Format, "Format should be trimmed")
+		assert.Equal(t, "mixed", stored.Format, "Format should be trimmed")
 		assert.Equal(t, "min", stored.PoolSizeMode, "PoolSizeMode should be trimmed")
 		assert.Equal(t, "A", stored.NumberPrefix, "NumberPrefix should be trimmed")
 		assert.Equal(t, "09:00", stored.StartTime, "StartTime should be trimmed")
@@ -460,7 +460,7 @@ competitions:
   - id: "blank-name-import"
     name: "   "
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     courts: ["A"]
 `))
 		writer.Close()
@@ -505,7 +505,7 @@ competitions:
   - id: "duplicate-cup"
     name: "Cup Name"
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     courts: ["A"]
 `))
 		writer.Close()
@@ -554,7 +554,7 @@ competitions:
   - id: "id-collide"
     name: "Different Name"
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     courts: ["A"]
 `))
 		writer.Close()
@@ -592,7 +592,7 @@ competitions:
   - id: "iso-date-import"
     name: "ISO Date Import"
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     date: "2026-05-12"
     courts: ["A"]
 `))
@@ -633,7 +633,7 @@ competitions:
   - id: "bad-court-label"
     name: "Bad Court Label"
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     courts: ["AA"]
 `))
 		writer.Close()
@@ -662,7 +662,7 @@ competitions:
   - id: "too-many-courts"
     name: "Too Many Courts"
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     courts: ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","AA"]
 `))
 		writer2.Close()
@@ -694,7 +694,7 @@ competitions:
   - id: "dup-courts-import"
     name: "Dup Courts Import"
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     courts: ["A", "A"]
 `))
 		writerDup.Close()
@@ -793,7 +793,7 @@ competitions:
   - id: "year-out-of-range-import"
     name: "Year Out Of Range Import"
     kind: "individual"
-    format: "pools"
+    format: "mixed"
     date: "01-01-1800"
     courts: ["A"]
 `))

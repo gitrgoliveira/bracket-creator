@@ -262,7 +262,7 @@ func TestGetPoolRanking_Basic(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Pool Ranking",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusComplete,
 	}))
 
@@ -313,7 +313,7 @@ func TestGetPoolRanking_NotFound(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Empty",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 	}))
 
 	_, err := eng.GetPoolRanking(compID, 1)
@@ -329,7 +329,7 @@ func TestGetPoolRanking_OutOfRange(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "OOB",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusComplete,
 	}))
 
@@ -432,7 +432,7 @@ func TestCalculatePoolStandings_TeamSubDraw(t *testing.T) {
 		ID:       compID,
 		Name:     "Team Sub Draw",
 		Kind:     "team",
-		Format:   state.CompFormatPools,
+		Format:   state.CompFormatMixed,
 		Status:   state.CompStatusPools,
 		TeamSize: 3,
 	}))

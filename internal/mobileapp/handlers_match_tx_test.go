@@ -44,7 +44,7 @@ func TestScoreHandler_NoDeadlockUnderConcurrentLoad(t *testing.T) {
 	compID := "concurrent-score"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 	}))
 	const N = 8
@@ -133,7 +133,7 @@ func TestDecisionHandler_NoDeadlockOnConcurrentKiken(t *testing.T) {
 	compID := "concurrent-kiken-handler"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 	}))
 	aliceID := helper.NewUUID4()

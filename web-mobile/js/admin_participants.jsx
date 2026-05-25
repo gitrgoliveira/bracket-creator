@@ -1024,9 +1024,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     }}
                     style={{
                       cursor: reorderDisabled ? "default" : "grab",
-                      gridTemplateColumns: c.checkInEnabled
-                        ? "24px 20px 36px 1fr 32px 64px"
-                        : "20px 36px 1fr 32px 64px",
+                      gridTemplateColumns: c.checkInEnabled ? undefined : "20px 36px 1fr 32px 64px",
                     }}
                   >
                     {c.checkInEnabled && (

@@ -360,7 +360,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     <div className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head viewer__head--hero">
-          <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="topbar__logo viewer__logo" />
+          <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="topbar__logo viewer__logo" decoding="async" />
           <div className="viewer__title-block">
             <div className="viewer__eyebrow">{formatDate(t.date)} · {t.venue}</div>
             <div className="viewer__title viewer__title--lg">{t.name}</div>

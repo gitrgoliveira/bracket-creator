@@ -154,13 +154,25 @@ const API = {
         return res.json();
     },
     async updateCompetition(id, config, password) {
+        // Go's domain.Player uses json:"metadata" (array); the JS layer uses the
+        // friendlier danGrade string. Convert before encoding so the backend can
+        // unmarshal the dan grade into Player.Metadata.
+        let body = config;
+        if (config.players) {
+            body = {
+                ...config,
+                players: config.players.map(({ danGrade, ...p }) =>
+                    danGrade ? { ...p, metadata: [danGrade] } : p
+                ),
+            };
+        }
         const res = await fetch(`/api/competitions/${id}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify(config)
+            body: JSON.stringify(body)
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

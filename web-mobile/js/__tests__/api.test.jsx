@@ -101,8 +101,29 @@ describe('API Utils', () => {
         dojo: 'Dojo A',
         seed: 2,
         number: '',
-        tag: ''
+        tag: '',
+        danGrade: '',
       });
+    });
+
+    it('maps Go Metadata[0] → danGrade on PascalCase input', () => {
+      const p = { Name: 'Bob', Dojo: 'Kenshikan', Seed: 0, Metadata: ['3d'] };
+      expect(normalizePlayer(p).danGrade).toBe('3d');
+    });
+
+    it('backfills danGrade from metadata[0] on already-camelCase input', () => {
+      const p = { name: 'Carol', dojo: 'Yoshinkan', seed: 0, metadata: ['2d'] };
+      expect(normalizePlayer(p).danGrade).toBe('2d');
+    });
+
+    it('leaves danGrade unchanged when already set on camelCase input', () => {
+      const p = { name: 'Dave', dojo: 'Mumeishi', seed: 0, danGrade: '4d' };
+      expect(normalizePlayer(p).danGrade).toBe('4d');
+    });
+
+    it('returns empty danGrade when no metadata', () => {
+      const p = { Name: 'Eve', Dojo: 'Mumeishi', Seed: 0 };
+      expect(normalizePlayer(p).danGrade).toBe('');
     });
   });
 

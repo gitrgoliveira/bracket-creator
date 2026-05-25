@@ -224,6 +224,62 @@ func TestDuplicateNameRejection(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "PUT with unchanged name (dojo edit) must succeed")
 }
 
+// TestReplaceDoesNotInheritOldDisplayName ensures that replacing a participant
+// with displayName:"" (the corrected JS payload) writes a clean 2-column CSV
+// row, not a 3-column row that carries the old slot's stale SanitizeName value.
+//
+// Regression guard for the bug where the frontend was sending
+// displayName: replaceTarget.displayName (the old player's auto-derived
+// "A. SMITH") as part of the replace payload, causing saveParticipantsNoLock
+// to emit "Alice Yamamoto, A. SMITH, Senbukan" instead of
+// "Alice Yamamoto, Senbukan".
+func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-replace-dn"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Replace DisplayName Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	// Add Alice Smith — Go will auto-derive displayName = "A. SMITH".
+	addBody, _ := json.Marshal(map[string]interface{}{"name": "Alice Smith", "dojo": "Senbukan"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(addBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var alice domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &alice))
+
+	// Replace Alice Smith with Alice Yamamoto, explicitly clearing displayName
+	// to "" as the corrected frontend does.
+	replBody, _ := json.Marshal(map[string]interface{}{
+		"name":        "Alice Yamamoto",
+		"dojo":        "Senbukan",
+		"displayName": "",
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+alice.ID, bytes.NewBuffer(replBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Load and verify: displayName must be the SanitizeName of the NEW name,
+	// not the old "A. SMITH" inherited from the replaced slot.
+	players := mustLoad(t, store, compID)
+	require.Len(t, players, 1)
+	assert.Equal(t, "Alice Yamamoto", players[0].Name)
+	assert.Equal(t, "Senbukan", players[0].Dojo)
+	wantDisplay := helper.SanitizeName("Alice Yamamoto") // "A. YAMAMOTO"
+	assert.Equal(t, wantDisplay, players[0].DisplayName,
+		"displayName must be derived from the new name, not inherited from the old slot")
+	assert.NotEqual(t, "A. SMITH", players[0].DisplayName,
+		"stale A. SMITH from replaced slot must not carry over")
+}
+
 func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {
 	t.Helper()
 	players, err := store.LoadParticipants(compID, false)

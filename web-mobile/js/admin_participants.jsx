@@ -525,15 +525,16 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     if (!replaceName.trim() || !replaceDojo.trim()) { showToast("Name and dojo are required", "error"); return; }
     setReplaceLoading(true);
     try {
-      // Preserve fields the PUT handler would otherwise overwrite with empty
-      // values (displayName/Zekken, tag). Build metadata from replaceDanGrade
-      // so the edited grade actually persists — the backend prefers Metadata
-      // over danGrade when Metadata is non-empty, so forwarding the old
-      // replaceTarget.metadata blindly would discard any grade change.
-      // metadata[0] = danGrade; slots 1+ are preserved from the current value.
-      // Use "" as a placeholder when clearing the grade so positional slots
-      // 1+ stay at their original indices (existingMeta.slice(1) alone
-      // would shift them down by one).
+      // Build metadata from replaceDanGrade so the edited grade actually
+      // persists — the backend prefers Metadata over danGrade when Metadata
+      // is non-empty, so forwarding the old replaceTarget.metadata blindly
+      // would discard any grade change. metadata[0] = danGrade; slots 1+
+      // are preserved from the current value. Use "" as a placeholder when
+      // clearing the grade so positional slots 1+ stay at their original
+      // indices (existingMeta.slice(1) alone would shift them down by one).
+      // displayName is intentionally cleared: the new participant's display
+      // name should be derived from their new name, not inherited from the
+      // old slot (which would corrupt the CSV for non-zekken competitions).
       const existingMeta = replaceTarget.metadata || [];
       const metadata = replaceDanGrade.trim()
         ? [replaceDanGrade.trim(), ...existingMeta.slice(1)]
@@ -541,7 +542,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       const payload = {
         name: replaceName.trim(),
         dojo: replaceDojo.trim(),
-        displayName: replaceTarget.displayName || "",
+        displayName: "",
         tag: replaceTarget.tag || "",
         metadata,
       };

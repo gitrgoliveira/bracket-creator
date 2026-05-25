@@ -133,8 +133,16 @@ function buildPlayerMap(comp) {
 // Normalize a Go helper.Player (uppercase fields) to frontend shape (lowercase)
 function normalizePlayer(p) {
     if (!p) return p;
-    if (p.name !== undefined) return p;
-    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "" };
+    if (p.name !== undefined) {
+        // Already camelCase — backfill danGrade from metadata if the field is absent.
+        if (p.danGrade === undefined) {
+            const danGrade = (p.metadata && p.metadata[0]) || "";
+            return { ...p, danGrade };
+        }
+        return p;
+    }
+    const danGrade = (p.Metadata && p.Metadata[0]) || "";
+    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "", danGrade };
 }
 
 // Normalize an entire competition detail response from the viewer API.

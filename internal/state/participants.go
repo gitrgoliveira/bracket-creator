@@ -22,11 +22,18 @@ var ErrParticipantNotFound = errors.New("participant not found")
 // canonicalization applied by helper.CreatePlayers.
 var ErrDuplicateName = errors.New("participant name already exists")
 
-// ErrCompetitionNotInSetup is returned by AddParticipant and UpdateParticipant
-// when the competition has already advanced past the setup phase. The status
-// is re-checked under the per-competition lock so a concurrent
-// POST /competitions/:id/start landing between the handler's outer check and
-// the store call cannot leak a roster write into a started competition.
+// ErrCompetitionNotInSetup is returned by the setup-gated write paths
+// (Store.AddParticipant and Store.ReplaceParticipant — both call
+// requireSetupLocked) when the competition has already advanced past the
+// setup phase. The status is re-checked under the per-competition lock so a
+// concurrent POST /competitions/:id/start landing between the handler's
+// outer check and the store call cannot leak a roster write into a started
+// competition.
+//
+// Store.UpdateParticipant is intentionally NOT gated by this error — check-in
+// toggles must keep working while the competition is running. Future setup-
+// only write paths should call requireSetupLocked under the same lock as
+// AddParticipant/ReplaceParticipant do.
 var ErrCompetitionNotInSetup = errors.New("competition has already started")
 
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
@@ -195,11 +202,33 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	return res, nil
 }
 
+// SaveParticipants persists the roster. It loads the competition under the
+// per-comp lock to determine WithZekkenName so the on-disk CSV layout matches
+// what the next LoadParticipants(_, comp.WithZekkenName) call will read —
+// passing the wrong column count corrupts the file on the next round-trip.
 func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.saveParticipantsNoLock(compID, players)
+	withZekken, err := s.withZekkenNameLocked(compID)
+	if err != nil {
+		return err
+	}
+	return s.saveParticipantsNoLock(compID, players, withZekken)
+}
+
+// withZekkenNameLocked returns the WithZekkenName flag for compID. Caller MUST
+// hold the per-comp lock. Returns false when the competition record is missing
+// (matches the default zero value SaveParticipants would otherwise observe).
+func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
+	comp, err := s.loadCompetitionLocked(compID)
+	if err != nil {
+		return false, err
+	}
+	if comp == nil {
+		return false, nil
+	}
+	return comp.WithZekkenName, nil
 }
 
 // UpdateParticipant atomically loads the participant list, applies transform
@@ -322,7 +351,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		}
 	}
 
-	if err := s.saveParticipantsNoLock(compID, players); err != nil {
+	if err := s.saveParticipantsNoLock(compID, players, withZekkenName); err != nil {
 		return nil, err
 	}
 	return &players[foundIdx], nil
@@ -331,7 +360,21 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 // marshalParticipantsCSV serialises players into RFC 4180 CSV bytes.
 // Shared by saveParticipantsNoLock and saveParticipantsLocked so the
 // display-name and checked_in logic is defined once.
-func marshalParticipantsCSV(players []domain.Player) ([]byte, error) {
+//
+// withZekkenName MUST match the value the next LoadParticipants will use.
+// The on-disk column layout differs between the two modes:
+//   - non-zekken: [id, Name, Dojo, ...Metadata, Tag?, "checked_in"?]
+//   - zekken:    [id, Name, DisplayName, Dojo, ...Metadata, Tag?, "checked_in"?]
+//
+// Pre-fix the function tried to be clever by writing the 2-column form (id,
+// Name, Dojo) when DisplayName was empty or auto-derivable. That broke zekken
+// reloads as soon as Tag or Metadata were present — e.g. the manual-tag
+// default added by the single-add endpoint produced [id, Name, Dojo, "manual"]
+// for zekken comps, which CreatePlayersFromRecords(_, true) then read as
+// Name=Name, DisplayName=Dojo, Dojo="manual" (corrupted). Branch on
+// withZekkenName so each mode gets its canonical layout regardless of which
+// optional trailing fields are present.
+func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byte, error) {
 	var sb strings.Builder
 	w := csv.NewWriter(&sb)
 	for _, p := range players {
@@ -339,14 +382,17 @@ func marshalParticipantsCSV(players []domain.Player) ([]byte, error) {
 		if id == "" {
 			id = newParticipantID()
 		}
-		// Only write the 3-column form when DisplayName carries information
-		// beyond what helper.SanitizeName would derive from Name on load.
-		// Writing the auto-derived form would corrupt non-zekken loads:
-		// LoadParticipants(_, withZekkenName=false) reads column 2 as Dojo
-		// and pushes the real Dojo into Metadata.
 		var record []string
-		if p.DisplayName != "" && p.DisplayName != helper.SanitizeName(p.Name) {
-			record = []string{id, p.Name, p.DisplayName, p.Dojo}
+		if withZekkenName {
+			// Always include the DisplayName column so a subsequent
+			// LoadParticipants(_, true) reads [Name, DisplayName, Dojo, ...]
+			// — even when DisplayName equals SanitizeName(Name) and even when
+			// Tag/Metadata are present.
+			dn := p.DisplayName
+			if dn == "" {
+				dn = helper.SanitizeName(p.Name)
+			}
+			record = []string{id, p.Name, dn, p.Dojo}
 		} else {
 			record = []string{id, p.Name, p.Dojo}
 		}
@@ -431,7 +477,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 
 	players = append(players, p)
 
-	if err := s.saveParticipantsNoLock(compID, players); err != nil {
+	if err := s.saveParticipantsNoLock(compID, players, withZekkenName); err != nil {
 		return nil, err
 	}
 
@@ -456,10 +502,10 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 	return s.updateParticipantNoLock(compID, pid, withZekkenName, transform)
 }
 
-func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) error {
+func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool) error {
 	path := s.compPath(compID, "participants.csv")
 
-	data, err := marshalParticipantsCSV(players)
+	data, err := marshalParticipantsCSV(players, withZekkenName)
 	if err != nil {
 		return err
 	}

@@ -90,8 +90,11 @@ func TestParticipants(t *testing.T) {
 }
 
 func TestParticipantsWithZekkenNameRoundTrip(t *testing.T) {
-	// Regression: SaveParticipants writes 2 columns when DisplayName==Name or is empty.
-	// LoadParticipants with withZekkenName=true must tolerate this and not error.
+	// Regression: when WithZekkenName=true the CSV writer must always emit the
+	// DisplayName column (auto-deriving from Name when blank) so the next
+	// LoadParticipants(_, true) read consistently parses
+	// [Name, DisplayName, Dojo, ...] regardless of which optional trailing
+	// fields are present.
 	dir, err := os.MkdirTemp("", "participants-zekken-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -100,8 +103,10 @@ func TestParticipantsWithZekkenNameRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	compID := "comp-zekken"
-	err = os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700)
-	require.NoError(t, err)
+	// SaveParticipants now consults the competition record for WithZekkenName.
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Zekken RT", WithZekkenName: true,
+	}))
 
 	// Players where DisplayName is empty (will be omitted by SaveParticipants → 2-col row)
 	playersToSave := []domain.Player{
@@ -230,7 +235,12 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 	compID := "distinct-rt"
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+	// A distinct DisplayName only makes sense on a zekken competition. The new
+	// CSV writer keys layout off the comp's WithZekkenName flag, so the comp
+	// record must be saved before the participants are written.
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Distinct RT", WithZekkenName: true,
+	}))
 
 	players := []domain.Player{
 		// SanitizeName("Carol") == "CAROL", so "C. CAROL" carries new info.
@@ -464,6 +474,38 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 		return nil
 	})
 	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name must be rejected")
+}
+
+// TestZekkenWithTagDoesNotCorruptCSV pins the marshalParticipantsCSV column-
+// layout fix: a zekken competition where DisplayName equals SanitizeName(Name)
+// AND Tag is non-empty (e.g. the "manual" default applied by the single-add
+// endpoint) used to produce a 4-field row [id, Name, Dojo, Tag] that
+// CreatePlayersFromRecords(_, true) misparsed as
+// (Name, DisplayName=Dojo, Dojo=Tag) — silently corrupting the row.
+// The writer now always emits the DisplayName column for zekken comps.
+func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "zekken-tag"
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Zekken Tag", WithZekkenName: true,
+	}))
+
+	// DisplayName left blank — SaveParticipants must still write the
+	// DisplayName column for zekken comps so the row is round-trip safe.
+	// Tag="manual" mirrors what the single-add endpoint defaults to.
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Akira Tanaka", Dojo: "Mumeishi", Tag: "manual"},
+	}))
+
+	loaded, err := store.LoadParticipants(compID, true)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "Akira Tanaka", loaded[0].Name, "Name must round-trip")
+	assert.Equal(t, "Mumeishi", loaded[0].Dojo, "Dojo must NOT shift into DisplayName (regression)")
+	assert.Equal(t, "manual", loaded[0].Tag, "Tag must NOT shift into Dojo (regression)")
+	assert.NotEmpty(t, loaded[0].DisplayName, "auto-derived DisplayName must be present after reload")
 }
 
 // TestReplaceParticipant_SeedsCSVEscaping pins that seed rename writes

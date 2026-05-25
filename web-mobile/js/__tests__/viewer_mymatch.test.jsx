@@ -44,15 +44,15 @@ describe('buildPlayerMatchHighlight', () => {
     expect(result[0].id).toBe('m1');
   });
 
-  it('name fallback rejects substring-only matches (mp-egl)', () => {
+  it('name fallback rejects substring-only matches', () => {
     const matches = [{ id: 'm1', sideA: 'Banana', sideB: 'Charlie' }];
     expect(buildPlayerMatchHighlight('no-id', matches, 'Ana')).toEqual([]);
   });
 
-  it('name fallback trims whitespace', () => {
+  it('name fallback trims whitespace on both sides', () => {
     const matches = [{ id: 'm1', sideA: '  Alice  ', sideB: 'Bob' }];
-    const result = buildPlayerMatchHighlight('no-id', matches, 'Alice');
-    expect(result).toHaveLength(1);
+    expect(buildPlayerMatchHighlight('no-id', matches, 'Alice')).toHaveLength(1);
+    expect(buildPlayerMatchHighlight('no-id', matches, '  Alice  ')).toHaveLength(1);
   });
 
   it('does not fall back to name match when UUID hits at least once', () => {

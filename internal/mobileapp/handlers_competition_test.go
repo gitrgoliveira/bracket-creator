@@ -116,7 +116,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Rank", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-comp"}
+		comp := state.Competition{ID: "rank-comp", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
 		// Seed a pool so the new pool-size validation can find pool-1
 		// (rank within a pool is bounded by len(pool.Players)).
@@ -140,7 +140,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	t.Run("Override Rank Trims Whitespace From Player Name", func(t *testing.T) {
 		// Padded names must be stored under the trimmed key so subsequent
 		// lookups (which use the canonical participant name) match.
-		comp := state.Competition{ID: "rank-trim-comp"}
+		comp := state.Competition{ID: "rank-trim-comp", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
 		// Seed a pool with at least 7 players (rank=7 below).
 		players := make([]helper.Player, 8)
@@ -172,7 +172,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Rank Rejects Invalid Input", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-bad-comp"}
+		comp := state.Competition{ID: "rank-bad-comp", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
 		// Seed a pool so cases that pass the rank cap checks reach the
 		// pool-size validation (rank=99999 fails earlier at the absolute
@@ -213,7 +213,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// A bogus :poolId (no matching Pool.PoolName) returns 404.
 		// The JS frontend only offers existing pools; this is a
 		// defense-in-depth check against hand-crafted API callers.
-		comp := state.Competition{ID: "rank-unknown-pool"}
+		comp := state.Competition{ID: "rank-unknown-pool", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
 		require.NoError(t, store.SavePools("rank-unknown-pool", []helper.Pool{
 			{PoolName: "pool-a", Players: []helper.Player{{Name: "P1"}}},
@@ -228,6 +228,31 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			"override-rank against an unknown pool name must 404")
 		assert.Contains(t, w.Body.String(), "pool",
 			"error message should identify the missing pool")
+	})
+
+	t.Run("Override Rank Rejects Wrong Competition Status With 409", func(t *testing.T) {
+		validBody, _ := json.Marshal(map[string]any{"playerName": "P1", "rank": 1})
+		for _, status := range []state.CompetitionStatus{
+			state.CompStatusSetup,
+			state.CompStatusPlayoffs,
+			state.CompStatusComplete,
+			state.CompStatusInvalid,
+		} {
+			compID := "rank-status-" + string(status)
+			c := state.Competition{ID: compID, Status: status}
+			require.NoError(t, store.SaveCompetition(&c))
+			require.NoError(t, store.SavePools(compID, []helper.Pool{
+				{PoolName: "pool-1", Players: []helper.Player{{Name: "P1"}}},
+			}))
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/pools/pool-1/override-rank", bytes.NewBuffer(validBody))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusConflict, w.Code,
+				"status=%q should return 409", status)
+			assert.Contains(t, w.Body.String(), "pools stage",
+				"error body should mention pools stage for status=%q", status)
+		}
 	})
 
 	t.Run("Save Schedule", func(t *testing.T) {

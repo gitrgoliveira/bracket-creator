@@ -91,15 +91,13 @@ func TestSwissRoundsFieldPersists(t *testing.T) {
 
 // TestLeagueFormatHidesPlayoffs verifies FR-050 / FR-051:
 // IsPlayoffEnabled() reports whether the competition's format includes a
-// playoff phase. League and pure-pools formats return false; playoffs and
-// mixed return true.
+// playoff phase. League returns false; playoffs and mixed return true.
 func TestLeagueFormatHidesPlayoffs(t *testing.T) {
 	cases := []struct {
 		format string
 		want   bool
 	}{
 		{format: "league", want: false},
-		{format: "pools", want: false},
 		{format: "playoffs", want: true},
 		{format: "mixed", want: true},
 	}

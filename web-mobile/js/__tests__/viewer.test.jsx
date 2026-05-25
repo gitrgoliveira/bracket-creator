@@ -110,7 +110,7 @@ describe('Viewer Utils', () => {
     });
 
     it('false when format !== swiss', () => {
-      expect(isSwissFinalStandings(mkComp({ format: 'pools' }), completedR4)).toBe(false);
+      expect(isSwissFinalStandings(mkComp({ format: 'mixed' }), completedR4)).toBe(false);
       expect(isSwissFinalStandings(mkComp({ format: 'playoffs' }), completedR4)).toBe(false);
     });
 

@@ -126,7 +126,7 @@ func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *stat
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:       compID,
 		Name:     "Team Pool Test",
-		Format:   state.CompFormatPools,
+		Format:   state.CompFormatMixed,
 		Status:   state.CompStatusPools,
 		Courts:   []string{"A"},
 		TeamSize: 2, // 2-person teams keeps the SubResults simple
@@ -562,7 +562,7 @@ func TestInjectPoolDaihyosenMatches_PreservesExistingScheduledAt(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:        compID,
 		Name:      "DH Preserves Time",
-		Format:    state.CompFormatPools,
+		Format:    state.CompFormatMixed,
 		Status:    state.CompStatusPools,
 		Courts:    []string{"A"},
 		TeamSize:  2,

@@ -1375,7 +1375,7 @@ func TestCreatePlayoff_RejectsNameCollision(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     "source",
 		Name:   "Source",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 	}))
 	// Pre-existing competition with the same name the playoff would
@@ -1477,7 +1477,7 @@ func TestPlayoff_RejectsDerivedIDCollision(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     "source",
 		Name:   "Source",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 	}))
 
@@ -1536,7 +1536,7 @@ func TestPOSTCompetition_RollbackOnSaveParticipantsFailure(t *testing.T) {
 		"id":     cid,
 		"name":   "Rollback Test",
 		"kind":   "individual",
-		"format": "pools",
+		"format": "mixed",
 		"date":   "12-05-2026",
 		"courts": []string{"A"},
 		// Populated Players triggers the saveCompetitionWithPlayers
@@ -1583,7 +1583,7 @@ func TestCreatePlayoff_RollbackOnReservedSlotFailure(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     "rollback-src",
 		Name:   "Rollback Src",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants("rollback-src", []domain.Player{

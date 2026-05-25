@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -511,4 +512,93 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	assert.Equal(t, helper.SanitizeName("Kenji Sato"), loaded[0].DisplayName,
 		"empty displayName must be re-derived from the new name, not inherited")
 	assert.NotEqual(t, "YAMAMOTO", loaded[0].DisplayName)
+}
+
+// TestReplaceParticipant_ConcurrentStartRace verifies that the PUT replace
+// handler serialises the status check and the participant write under one
+// lock acquire (mp-0lc). A goroutine that concurrently flips status to
+// CompStatusPools must produce either a 200 (replace won the race) or a 409
+// (start-competition won the race) — never a 500 or a data-corrupt 200.
+func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const compID = "race-replace"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Race", Status: state.CompStatusSetup,
+	}))
+
+	addBody, _ := json.Marshal(map[string]interface{}{
+		"name": "Alice Smith", "dojo": "Dojo A",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(addBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var player domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &player))
+
+	const iterations = 30
+	for i := 0; i < iterations; i++ {
+		// Reset competition to setup before each iteration.
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: "Race", Status: state.CompStatusSetup,
+		}))
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		var replCode int
+		var replBody []byte
+		go func() {
+			defer wg.Done()
+			body, _ := json.Marshal(map[string]interface{}{
+				"name": "Alice Renamed", "dojo": "Dojo A",
+			})
+			rec := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+player.ID, bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(rec, req)
+			replCode = rec.Code
+			replBody = rec.Body.Bytes()
+		}()
+
+		startErrCh := make(chan error, 1)
+		go func() {
+			defer wg.Done()
+			startErrCh <- store.SaveCompetition(&state.Competition{
+				ID: compID, Name: "Race", Status: state.CompStatusPools,
+			})
+		}()
+
+		wg.Wait()
+		assert.NoError(t, <-startErrCh, "iteration %d: status-flip goroutine must not error", i)
+		assert.True(t, replCode == http.StatusOK || replCode == http.StatusConflict,
+			"iteration %d: replace must return 200 or 409, got %d", i, replCode)
+
+		// When replace succeeded, verify the persisted roster is readable
+		// and the returned player name matches what was requested.
+		if replCode == http.StatusOK {
+			var returned domain.Player
+			require.NoError(t, json.Unmarshal(replBody, &returned),
+				"iteration %d: 200 body must be a valid Player JSON", i)
+			assert.Equal(t, "Alice Renamed", returned.Name,
+				"iteration %d: returned player name must match request", i)
+
+			reloaded, err := store.LoadParticipants(compID, false)
+			require.NoError(t, err, "iteration %d: must be able to reload participants after 200", i)
+			found := false
+			for _, p := range reloaded {
+				if p.ID == player.ID {
+					assert.Equal(t, "Alice Renamed", p.Name,
+						"iteration %d: persisted participant name must match request", i)
+					found = true
+					break
+				}
+			}
+			assert.True(t, found, "iteration %d: replaced participant must still exist in roster", i)
+		}
+	}
 }

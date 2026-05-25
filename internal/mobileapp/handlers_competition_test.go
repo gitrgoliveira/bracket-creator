@@ -366,7 +366,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	t.Run("All String Fields Trimmed On Create", func(t *testing.T) {
 		comp := state.Competition{
 			ID: "trim-fields-create", Name: "Trim Fields Create",
-			Kind: "  individual  ", Format: "  pools  ",
+			Kind: "  individual  ", Format: "  mixed  ",
 			PoolSizeMode: "  min  ", StartTime: "  09:00  ", Date: "  12-05-2026  ",
 		}
 		body, _ := json.Marshal(comp)
@@ -379,14 +379,14 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, stored)
 		assert.Equal(t, "individual", stored.Kind, "Kind should be trimmed on POST")
-		assert.Equal(t, "pools", stored.Format, "Format should be trimmed on POST")
+		assert.Equal(t, "mixed", stored.Format, "Format should be trimmed on POST")
 		assert.Equal(t, "min", stored.PoolSizeMode, "PoolSizeMode should be trimmed on POST")
 		assert.Equal(t, "09:00", stored.StartTime, "StartTime should be trimmed on POST")
 		assert.Equal(t, "12-05-2026", stored.Date, "Date should be trimmed on POST")
 	})
 
 	t.Run("All String Fields Trimmed On Update", func(t *testing.T) {
-		seed := state.Competition{ID: "trim-fields-update", Name: "Trim Fields Update", Kind: "individual", Format: "pools"}
+		seed := state.Competition{ID: "trim-fields-update", Name: "Trim Fields Update", Kind: "individual", Format: "mixed"}
 		require.NoError(t, store.SaveCompetition(&seed))
 
 		update := state.Competition{
@@ -1028,7 +1028,7 @@ func TestPlayoff_ResponseIncludesPlayers(t *testing.T) {
 	src := state.Competition{
 		ID:          "src",
 		Name:        "Source",
-		Format:      state.CompFormatPools,
+		Format:      state.CompFormatMixed,
 		Status:      state.CompStatusPools,
 		PoolSize:    3,
 		PoolWinners: 2,

@@ -951,7 +951,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                       <div className="sb-dojo">{s.label}</div>
                       <div className="sb-slots">
                         {[0, 1].map((i) => (
-                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? "Locked — hantei already recorded" : "Click to remove"}>
+                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : "Click to remove"}>
                             {s.pts[i] || "·"}
                           </button>
                         ))}
@@ -978,7 +978,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                             else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); }
                           }}
                           disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0))}
-                          title={decidedByHantei ? "Locked — hantei already recorded" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)"))}
+                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)"))}
                           aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
                         >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
                       </div>

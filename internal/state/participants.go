@@ -213,9 +213,10 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 	return &players[foundIdx], nil
 }
 
-func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) error {
-	path := s.compPath(compID, "participants.csv")
-
+// marshalParticipantsCSV serialises players into RFC 4180 CSV bytes.
+// Shared by saveParticipantsNoLock and saveParticipantsLocked so the
+// display-name and checked_in logic is defined once.
+func marshalParticipantsCSV(players []domain.Player) ([]byte, error) {
 	var sb strings.Builder
 	w := csv.NewWriter(&sb)
 	for _, p := range players {
@@ -227,8 +228,7 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) e
 		// beyond what helper.SanitizeName would derive from Name on load.
 		// Writing the auto-derived form would corrupt non-zekken loads:
 		// LoadParticipants(_, withZekkenName=false) reads column 2 as Dojo
-		// and pushes the real Dojo into Metadata. See the round-trip
-		// regression test in participants_test.go.
+		// and pushes the real Dojo into Metadata.
 		var record []string
 		if p.DisplayName != "" && p.DisplayName != helper.SanitizeName(p.Name) {
 			record = []string{id, p.Name, p.DisplayName, p.Dojo}
@@ -242,15 +242,25 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) e
 			record = append(record, "checked_in")
 		}
 		if err := w.Write(record); err != nil {
-			return fmt.Errorf("writing participant CSV record: %w", err)
+			return nil, fmt.Errorf("writing participant CSV record: %w", err)
 		}
 	}
 	w.Flush()
 	if err := w.Error(); err != nil {
-		return fmt.Errorf("flushing participant CSV: %w", err)
+		return nil, fmt.Errorf("flushing participant CSV: %w", err)
+	}
+	return []byte(sb.String()), nil
+}
+
+func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) error {
+	path := s.compPath(compID, "participants.csv")
+
+	data, err := marshalParticipantsCSV(players)
+	if err != nil {
+		return err
 	}
 
-	if err := s.atomicWrite(path, []byte(sb.String()), 0600); err != nil {
+	if err := s.atomicWrite(path, data, 0600); err != nil {
 		return err
 	}
 

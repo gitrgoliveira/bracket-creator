@@ -105,6 +105,20 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		}
 		dataFields := record[dataStart:]
 
+		// Skip records that are empty after UUID stripping (e.g. a
+		// UUID-only row) — CreatePlayersFromRecords would skip these
+		// too, and the metadata slices must stay aligned.
+		allEmpty := true
+		for _, f := range dataFields {
+			if strings.TrimSpace(f) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
+
 		// Detect and strip checked_in marker from the last data field.
 		// Minimum valid data row is "Name,Dojo" (2 parts), so checked_in
 		// is only treated as a marker when at least 3 data parts are present.

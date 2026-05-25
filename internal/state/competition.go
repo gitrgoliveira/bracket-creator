@@ -262,6 +262,13 @@ func (s *Store) DeleteCompetitionFile(id, filename string) error {
 	if err := ValidateCompetitionID(id); err != nil {
 		return fmt.Errorf("invalid competition ID: %w", err)
 	}
+	// Validate filename to prevent path traversal. The allowedDrawFiles
+	// allowlist below is the primary guard; this check is a belt-and-
+	// suspenders defence that also catches empty strings and dotdot segments
+	// before reaching the map lookup.
+	if filename == "" || filepath.Base(filename) != filename {
+		return fmt.Errorf("invalid filename: %q", filename)
+	}
 	if _, ok := allowedDrawFiles[filename]; !ok {
 		return fmt.Errorf("DeleteCompetitionFile: filename %q is not an allowed draw artifact", filename)
 	}

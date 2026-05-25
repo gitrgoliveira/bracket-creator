@@ -306,7 +306,21 @@ func (e *Engine) GenerateDraw(id string) error {
 // DiscardDraw discards the generated draw for a draw-ready competition,
 // deleting the draw artifacts and resetting the competition to Setup.
 // Returns an error when the competition is not in draw-ready state.
+//
+// Ordering rationale: files are deleted BEFORE the status flip. While the
+// competition is still draw-ready, GenerateDraw rejects new requests, so no
+// concurrent caller can generate fresh artifacts during the deletion window.
+// If we flipped to Setup first, a concurrent GenerateDraw could start,
+// write new artifacts, commit draw-ready — and then our deferred deletes
+// would erase the freshly generated files, leaving draw-ready with no
+// artifacts.
 func (e *Engine) DiscardDraw(id string) error {
+	// Delete draw artifacts first while status is still draw-ready.
+	// GenerateDraw rejects requests in draw-ready state, so no concurrent
+	// caller can write new artifacts during this window.
+	_ = e.store.DeleteCompetitionFile(id, "pools.csv")
+	_ = e.store.DeleteCompetitionFile(id, "pool-matches.csv")
+	_ = e.store.DeleteCompetitionFile(id, "bracket.json")
 	_, err := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found", id)
@@ -317,17 +331,7 @@ func (e *Engine) DiscardDraw(id string) error {
 		current.Status = state.CompStatusSetup
 		return current, nil
 	})
-	if err != nil {
-		return err
-	}
-	// Delete draw artifacts so the next GenerateDraw starts clean.
-	// Ignore individual file errors — the competition config is already
-	// reset to Setup, so orphaned files are safe to leave (next
-	// GenerateDraw overwrites them).
-	_ = e.store.DeleteCompetitionFile(id, "pools.csv")
-	_ = e.store.DeleteCompetitionFile(id, "pool-matches.csv")
-	_ = e.store.DeleteCompetitionFile(id, "bracket.json")
-	return nil
+	return err
 }
 
 // transitionDrawToRunning atomically moves a draw-ready competition to
@@ -580,7 +584,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found (deleted during start)", id)
 		}
-		if current.Status != state.CompStatusSetup && current.Status != "" && current.Status != state.CompStatusDrawReady {
+		if current.Status != state.CompStatusSetup && current.Status != "" {
 			return nil, validationErrorf("competition %s started concurrently by another writer", id)
 		}
 		// Generation-relevant fields must match the SNAPSHOT we

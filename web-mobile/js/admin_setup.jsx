@@ -111,6 +111,19 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [announcementMessage, setAnnouncementMessage] = useStateA("");
   const [announcementDuration, setAnnouncementDuration] = useStateA(5);
   const [announcementInFlight, setAnnouncementInFlight] = useStateA(false);
+  const [activeAnnouncements, setActiveAnnouncements] = useStateA([]);
+
+  // Fetch active announcements on mount and after any change.
+  const refreshAnnouncements = async () => {
+    try {
+      const list = await window.API.fetchAnnouncements();
+      setActiveAnnouncements(list || []);
+    } catch (_e) {
+      // non-fatal
+    }
+  };
+
+  useEffectA(() => { refreshAnnouncements(); }, []);
 
   const handleSendAnnouncement = async () => {
     const trimmed = announcementMessage.trim();
@@ -122,12 +135,31 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       if (showToast) {
         showToast(`Announcement broadcast for ${announcementDuration} minutes!`, "success");
       }
+      await refreshAnnouncements();
     } catch (e) {
       if (showToast) {
         showToast(e.message, "error");
       }
     } finally {
       setAnnouncementInFlight(false);
+    }
+  };
+
+  const handleDismissAnnouncement = async (id) => {
+    try {
+      await window.API.deleteAnnouncement(id, password);
+      await refreshAnnouncements();
+    } catch (e) {
+      if (showToast) showToast(e.message, "error");
+    }
+  };
+
+  const handleClearAnnouncements = async () => {
+    try {
+      await window.API.clearAnnouncements(password);
+      await refreshAnnouncements();
+    } catch (e) {
+      if (showToast) showToast(e.message, "error");
     }
   };
 
@@ -233,6 +265,24 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
 
         <div className="page-head" style={{ marginTop: 32 }}><h1 className="page-head__title">Broadcast announcement</h1></div>
         <div className="card card--pad-lg">
+          {activeAnnouncements.length > 0 && (
+            <div className="field" style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label className="field__label" style={{ marginBottom: 0 }}>Active announcements</label>
+                <button className="btn btn--sm btn--danger" onClick={handleClearAnnouncements}>Clear all</button>
+              </div>
+              {activeAnnouncements.map(ann => (
+                <div key={ann.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", background: "var(--color-surface-raised, #f5f5f5)", borderRadius: 4, marginBottom: 4 }}>
+                  <span style={{ flex: 1, fontSize: "0.9em" }}>{ann.message}</span>
+                  <button
+                    className="btn btn--sm"
+                    onClick={() => handleDismissAnnouncement(ann.id)}
+                    aria-label="Dismiss announcement"
+                  >&times;</button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="field">
             <label className="field__label">Message</label>
             <textarea
@@ -244,7 +294,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               onChange={(e) => setAnnouncementMessage(e.target.value)}
             />
             <div className="field__hint" style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-              <span>Maximum 200 characters. Pushes a temporary announcement to all active viewer screens.</span>
+              <span>Maximum 200 characters. Adds to the active announcement queue on all viewer screens.</span>
               <span>{announcementMessage.length}/200</span>
             </div>
           </div>

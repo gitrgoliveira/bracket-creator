@@ -2435,44 +2435,59 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
-function AnnouncementBanner({ announcement, onDismiss }) {
-  // Initialize synchronously so the badge isn't blank on the first paint
-  // (Copilot finding on PR #128). The useEffect tick keeps it accurate.
-  const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(announcement.expiresAt));
+// AnnouncementBanner accepts either a single `announcement` (legacy) or an
+// `announcements` array. When multiple are active it rotates through them
+// every 8 seconds so all are visible without stacking vertically.
+function AnnouncementBanner({ announcement, announcements, onDismiss }) {
+  const list = announcements || (announcement ? [announcement] : []);
+  const [idx, setIdx] = useState(0);
+
+  // Rotate through items every 8 seconds when multiple are active.
+  useEffect(() => {
+    if (list.length <= 1) return;
+    const interval = setInterval(() => {
+      setIdx(i => (i + 1) % list.length);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [list.length]);
+
+  // Reset to first slot when the list shrinks and idx is out of bounds.
+  const safeIdx = list.length > 0 ? idx % list.length : 0;
+  const ann = list[safeIdx];
+
+  const [timeLeft, setTimeLeft] = useState(() => ann ? formatAnnouncementTimeLeft(ann.expiresAt) : '');
 
   useEffect(() => {
+    if (!ann) return;
     const updateTimer = () => {
-      const expiresAt = new Date(announcement.expiresAt).getTime();
-      const now = Date.now();
-      const diff = expiresAt - now;
-
+      const diff = new Date(ann.expiresAt).getTime() - Date.now();
       if (diff <= 0) {
-        onDismiss();
+        onDismiss(ann.id);
         return;
       }
-
-      setTimeLeft(formatAnnouncementTimeLeft(announcement.expiresAt));
+      setTimeLeft(formatAnnouncementTimeLeft(ann.expiresAt));
     };
-
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
-
     return () => clearInterval(interval);
-  }, [announcement.expiresAt, onDismiss]);
+  }, [ann?.id, ann?.expiresAt, onDismiss]);
+
+  if (!ann) return null;
 
   return (
     <div className="announcement-banner">
       <div className="announcement-banner__content">
         <div className="announcement-banner__icon" aria-hidden="true">📢</div>
-        <p className="announcement-banner__message">{announcement.message}</p>
+        <p className="announcement-banner__message">{ann.message}</p>
       </div>
       <div className="announcement-banner__meta">
-        <span className="announcement-banner__badge">
-          {timeLeft}
-        </span>
+        {list.length > 1 && (
+          <span className="announcement-banner__count">{safeIdx + 1}/{list.length}</span>
+        )}
+        <span className="announcement-banner__badge">{timeLeft}</span>
         <button
           className="announcement-banner__dismiss"
-          onClick={onDismiss}
+          onClick={() => onDismiss(ann.id)}
           aria-label="Dismiss announcement"
         >
           &times;

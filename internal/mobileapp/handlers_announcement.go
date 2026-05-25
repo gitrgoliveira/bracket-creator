@@ -20,8 +20,7 @@ type announcementRequest struct {
 var validAnnouncementDurations = map[int]bool{5: true, 10: true, 15: true, 30: true}
 
 func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
-	// POST /api/tournament/announce is protected (requires admin credentials).
-	// MaxBodyBytes(AnnouncementMaxBodyBytes) is applied before AuthMiddleware on the route group wiring this handler.
+	// POST /api/tournament/announce — add a new announcement to the queue.
 	r.POST("/tournament/announce", func(c *gin.Context) {
 		var req announcementRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -46,17 +45,45 @@ func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *H
 		}
 
 		duration := time.Duration(req.DurationMinutes) * time.Minute
-		ann := store.AnnouncementStore().Set(trimmedMsg, duration)
+		ann := store.AnnouncementStore().Add(trimmedMsg, duration)
 
-		// Broadcast new announcement to all connected SSE clients
-		hub.Broadcast(EventAnnouncement, ann)
+		// Broadcast full list snapshot so all clients stay in sync.
+		hub.Broadcast(EventAnnouncement, store.AnnouncementStore().List())
 
 		c.JSON(http.StatusOK, ann)
+	})
+
+	// DELETE /api/announcements/:id — dismiss a single announcement.
+	r.DELETE("/announcements/:id", func(c *gin.Context) {
+		id := c.Param("id")
+		if !store.AnnouncementStore().Remove(id) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Announcement not found"})
+			return
+		}
+		hub.Broadcast(EventAnnouncement, store.AnnouncementStore().List())
+		c.Status(http.StatusNoContent)
+	})
+
+	// DELETE /api/announcements — clear all announcements.
+	r.DELETE("/announcements", func(c *gin.Context) {
+		store.AnnouncementStore().Clear()
+		hub.Broadcast(EventAnnouncement, store.AnnouncementStore().List())
+		c.Status(http.StatusNoContent)
 	})
 }
 
 func RegisterPublicAnnouncementHandlers(r *gin.RouterGroup, store *state.Store) {
-	// GET /api/tournament/announcement is public
+	// GET /api/tournament/announcements — returns the full active list (public).
+	r.GET("/tournament/announcements", func(c *gin.Context) {
+		list := store.AnnouncementStore().List()
+		if list == nil {
+			list = []state.Announcement{}
+		}
+		c.JSON(http.StatusOK, list)
+	})
+
+	// GET /api/tournament/announcement — legacy single-slot endpoint; kept for
+	// any clients that haven't migrated to the list endpoint.
 	r.GET("/tournament/announcement", func(c *gin.Context) {
 		ann := store.AnnouncementStore().Get()
 		if ann == nil {

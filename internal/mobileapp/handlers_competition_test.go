@@ -240,7 +240,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		} {
 			compID := "rank-status-" + string(status)
 			c := state.Competition{ID: compID, Status: status}
-			store.SaveCompetition(&c)
+			require.NoError(t, store.SaveCompetition(&c))
 			require.NoError(t, store.SavePools(compID, []helper.Pool{
 				{PoolName: "pool-1", Players: []helper.Player{{Name: "P1"}}},
 			}))

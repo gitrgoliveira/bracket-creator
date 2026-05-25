@@ -26,10 +26,10 @@ func TestNewRouter(t *testing.T) {
 
 	// Mock FS
 	mockFS := fstest.MapFS{
-		"web-mobile/index.html":    {Data: []byte("<html><body>Mobile</body></html>")},
-		"web-mobile/main.js":       {Data: []byte("console.log('hello')")},
-		"web-mobile/favicon.jpeg":  {Data: []byte("fake-jpeg-favicon")},
-		"web-mobile/logo.jpeg":     {Data: []byte("fake-jpeg-logo")},
+		"web-mobile/index.html":   {Data: []byte("<html><body>Mobile</body></html>")},
+		"web-mobile/main.js":      {Data: []byte("console.log('hello')")},
+		"web-mobile/favicon.jpeg": {Data: []byte("fake-jpeg-favicon")},
+		"web-mobile/logo.jpeg":    {Data: []byte("fake-jpeg-logo")},
 	}
 	res := resources.NewResources(nil, mockFS)
 

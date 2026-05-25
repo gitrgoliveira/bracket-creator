@@ -401,7 +401,7 @@ competitions:
   - id: "comp-trim"
     name: "  Padded Cup  "
     kind: "  individual  "
-    format: "  pools  "
+    format: "  mixed  "
     pool_size_mode: "  min  "
     number_prefix: "  A  "
     start_time: "  09:00  "

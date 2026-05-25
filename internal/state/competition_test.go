@@ -110,27 +110,6 @@ func TestLeagueFormatHidesPlayoffs(t *testing.T) {
 	}
 }
 
-func TestLoadCompetition_MigratesPoolsToMixed(t *testing.T) {
-	dir, err := os.MkdirTemp("", "pools-migration-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-
-	comp := &Competition{
-		ID: "legacy-pools", Name: "Legacy", Kind: "individual",
-		Format: "pools", PoolSize: 3, Status: "setup",
-		Courts: []string{"A"},
-	}
-	require.NoError(t, store.SaveCompetition(comp))
-
-	loaded, loadErr := store.LoadCompetition("legacy-pools")
-	require.NoError(t, loadErr)
-	require.NotNil(t, loaded)
-	assert.Equal(t, CompFormatMixed, loaded.Format, "legacy format=pools should migrate to mixed on load")
-}
-
 // TestCopyCompetition_WithPlayersAndCourts exercises the Players and
 // Courts slice-copy branches in copyCompetition so mutations to the
 // copy don't alias back to the original.

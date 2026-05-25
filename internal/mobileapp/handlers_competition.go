@@ -125,12 +125,6 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	return 0, nil
 }
 
-func migratePoolsFormat(format string) string {
-	if format == "pools" {
-		return state.CompFormatMixed
-	}
-	return format
-}
 
 // validateSwissConfig enforces FR-050a: when Format == swiss, SwissRounds
 // must be at least 1. Returns nil for non-swiss competitions. The caller

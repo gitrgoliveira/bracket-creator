@@ -148,7 +148,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		ID:             entry.ID,
 		Name:           trimmedName,
 		Kind:           strings.TrimSpace(entry.Kind),
-		Format:         migratePoolsFormat(strings.TrimSpace(entry.Format)),
+		Format:         strings.TrimSpace(entry.Format),
 		Courts:         entry.Courts,
 		PoolSize:       entry.PoolSize,
 		PoolSizeMode:   strings.TrimSpace(entry.PoolSizeMode),

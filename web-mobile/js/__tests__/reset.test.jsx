@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { makeReactive } from './helpers/reactive_react.js';
 
 // reset.jsx ships:
 //   - ResetPasswordForm: the /reset SPA page. Renders either the
@@ -11,71 +12,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // returns [val, vi.fn()]) which is fine for asserting the static
 // render tree but useless for exercising the submit handler — that's
 // where the new password is sent, errors mapped, localStorage
-// updated, and onSuccess invoked. To cover submit-time behavior we
-// install a small per-test reactive React shim before importing
-// reset.jsx and restore the original stub afterwards.
-//
-// The shim is deliberately minimal (single-component, no diffing,
-// no batching) — just enough to make useState/useEffect/useRef
-// reactive so the onSubmit closure sees current input values.
+// updated, and onSuccess invoked. The shared makeReactive helper
+// installs a minimal reactive shim so useState mutations are
+// observable across renders.
 
 const realReact = global.React;
-
-// reactiveReact: a single-component stand-in that mimics the parts of
-// React the component actually uses. Each render call creates a fresh
-// per-component "instance" record holding hook slots; subsequent calls
-// reuse the slots so setState mutations are observable across renders.
-function makeReactive() {
-  let hookSlots = [];
-  let hookIndex = 0;
-  let scheduledRender = null;
-  let rootProps = null;
-  let rootFactory = null;
-
-  function rerender() {
-    hookIndex = 0;
-    scheduledRender = rootFactory(rootProps);
-    return scheduledRender;
-  }
-
-  const reactive = {
-    createElement: (type, props, ...children) => ({ type, props, children }),
-    useState: (initial) => {
-      const i = hookIndex++;
-      if (hookSlots.length <= i) {
-        hookSlots[i] = typeof initial === 'function' ? initial() : initial;
-      }
-      const setter = (v) => {
-        hookSlots[i] = typeof v === 'function' ? v(hookSlots[i]) : v;
-        rerender();
-      };
-      return [hookSlots[i], setter];
-    },
-    useEffect: () => {}, // ignore effects in tests — submit handler doesn't depend on them
-    useMemo: (fn) => fn(),
-    useRef: (initial) => {
-      const i = hookIndex++;
-      if (hookSlots.length <= i) {
-        hookSlots[i] = { current: initial };
-      }
-      return hookSlots[i];
-    },
-    useLayoutEffect: () => {},
-    memo: (c) => c,
-  };
-
-  return {
-    React: reactive,
-    mount: (factory, props) => {
-      hookSlots = [];
-      hookIndex = 0;
-      rootFactory = factory;
-      rootProps = props;
-      return rerender();
-    },
-    currentTree: () => scheduledRender,
-  };
-}
 
 function findInTree(node, predicate) {
   if (!node || typeof node !== 'object') return null;

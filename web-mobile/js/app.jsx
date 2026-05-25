@@ -130,7 +130,7 @@ class ErrorBoundary extends React.Component {
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
-  const [activeAnnouncement, setActiveAnnouncement] = useS(null);
+  const [announcements, setAnnouncements] = useS([]);
   // Hydrate the route state from the URL synchronously, BEFORE the first
   // render. The post-mount useEffect that previously did this ran AFTER
   // the URL-sync effect, so a direct load of /reset (or any non-`/`
@@ -318,22 +318,12 @@ function App() {
   useE(() => { load(); }, []);
 
   useE(() => {
-    window.API.fetchAnnouncement()
-      .then(ann => {
-        if (ann) {
-          let dismissedKey = null;
-          try {
-            dismissedKey = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
-          } catch (_e) {
-            // private-browsing modes can throw
-          }
-          if (isAnnouncementActive(ann, dismissedKey)) {
-            setActiveAnnouncement(ann);
-          }
-        }
+    window.API.fetchAnnouncements()
+      .then(list => {
+        setAnnouncements(filterActiveAnnouncements(list || []));
       })
       .catch(err => {
-        console.error("Failed to fetch initial announcement:", err);
+        console.error("Failed to fetch initial announcements:", err);
       });
   }, []);
 
@@ -476,18 +466,9 @@ function App() {
             }
             jitteredTimeout(load, jitter);
         } else if (event.type === "announcement") {
-            const ann = event.data;
-            if (ann) {
-                let dismissedKey = null;
-                try {
-                    dismissedKey = sessionStorage.getItem(`bc_dismissed_announcement_${ann.sentAt}`);
-                } catch (_e) {
-                    // private-browsing modes can throw
-                }
-                setActiveAnnouncement(isAnnouncementActive(ann, dismissedKey) ? ann : null);
-            } else {
-                setActiveAnnouncement(null);
-            }
+            // Payload is now the full list snapshot.
+            const list = Array.isArray(event.data) ? event.data : [];
+            setAnnouncements(filterActiveAnnouncements(list));
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can
@@ -537,17 +518,14 @@ function App() {
   // parent render (the effect lists onDismiss as a dependency, so an
   // inline arrow function would reset the interval on every re-render).
   // Must be declared before any conditional returns to satisfy Rules of Hooks.
-  const handleDismissAnnouncement = useC(() => {
-    setActiveAnnouncement(prev => {
-      if (prev?.sentAt) {
-        try {
-          sessionStorage.setItem(`bc_dismissed_announcement_${prev.sentAt}`, "true");
-        } catch (_e) {
-          // private-browsing modes can throw
-        }
-      }
-      return null;
-    });
+  // Viewer-side dismiss: hides announcement locally without calling server.
+  const handleDismissAnnouncement = useC((id) => {
+    try {
+      sessionStorage.setItem(`bc_dismissed_announcement_${id}`, "true");
+    } catch (_e) {
+      // private-browsing modes can throw
+    }
+    setAnnouncements(prev => prev.filter(a => a.id !== id));
   }, []);
 
   if (loading && !selectedCompData) return <div className="loading">Loading...</div>;
@@ -610,9 +588,9 @@ function App() {
   // viewer mode
   return (
     <>
-      {activeAnnouncement && window.AnnouncementBanner && (
+      {announcements.length > 0 && window.AnnouncementBanner && (
         <window.AnnouncementBanner
-          announcement={activeAnnouncement}
+          announcements={announcements}
           onDismiss={handleDismissAnnouncement}
         />
       )}
@@ -965,12 +943,24 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   </ErrorBoundary>
 );
 
-// Pure helper: returns true when an announcement should be shown.
-// `dismissedKey` is the sessionStorage value for this sentAt (truthy = dismissed).
+// Pure helper: returns true when a single announcement should be shown.
+// `dismissedKey` is the sessionStorage value for this id (truthy = dismissed).
 // `now` defaults to new Date() and can be overridden in tests for determinism.
 function isAnnouncementActive(ann, dismissedKey, now) {
   if (!ann || dismissedKey) return false;
   return (now || new Date()) < new Date(ann.expiresAt);
 }
 
-export { parsePath, pathFromState, ErrorBoundary, isAnnouncementActive };
+function filterActiveAnnouncements(list, now) {
+  return list.filter(ann => {
+    let dismissedKey = null;
+    try {
+      dismissedKey = sessionStorage.getItem(`bc_dismissed_announcement_${ann.id}`);
+    } catch (_e) {
+      // private-browsing modes can throw
+    }
+    return isAnnouncementActive(ann, dismissedKey, now);
+  });
+}
+
+export { parsePath, pathFromState, ErrorBoundary, isAnnouncementActive, filterActiveAnnouncements };

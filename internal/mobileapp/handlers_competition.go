@@ -1037,11 +1037,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank must be a positive integer ≤ %d", helper.MaxRankOverride)})
 			return
 		}
-		// Status guard: rank overrides are only meaningful while pools are
-		// active. Reject anything that arrives after the bracket has been
-		// seeded (playoffs, completed) or before pools exist (setup).
 		comp, err := store.LoadCompetition(id)
-		if err != nil {
+		if err != nil || comp == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load competition"})
 			return
 		}

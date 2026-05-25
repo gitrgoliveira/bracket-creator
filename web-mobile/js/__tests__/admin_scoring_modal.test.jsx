@@ -988,20 +988,10 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
     expect(shouldBlockScoringKeys({ decidedByHantei: null })).toBe(false);
   });
 
-  describe('keyboard guard does not affect Enter / arrow nav', () => {
-    // Enter and arrow keys are handled BEFORE the shouldBlockScoringKeys
-    // check in onKeyDown, so hantei arming must not suppress them.
-    // These tests document the intended ordering constraint as a contract.
-    it('Enter fires before the hantei guard (ordering contract documented)', () => {
-      // The guard is placed after the isInteractiveTarget gate and before
-      // the validKeys / x-toggle branches. Enter is handled before that
-      // section, so it is unaffected. This test records that fact.
-      // (The actual ordering is enforced by the source; this test is a
-      // living comment pinning the design intent.)
-      expect(shouldBlockScoringKeys({ decidedByHantei: true })).toBe(true);
-      // If the function returned false for Enter-related state, it would
-      // mean the guard had been accidentally widened. The function takes
-      // only decidedByHantei — it has no knowledge of key identity.
-    });
-  });
+  // Ordering contract: Enter and arrow keys are handled BEFORE
+  // shouldBlockScoringKeys in onKeyDown (see admin_scoring_modal.jsx line ~828
+  // comment "Enter and arrow keys are handled above/before this guard").
+  // Because shouldBlockScoringKeys only inspects decidedByHantei — not key
+  // identity — it cannot selectively suppress Enter; that invariant is
+  // enforced by source ordering, not by a predicate we can unit-test here.
 });

@@ -23,7 +23,7 @@
 // "alert: Unexpected end of JSON input" right after a successful save.
 // See __tests__/api.test.jsx for the regression coverage.
 
-import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult } from './api_serializers.jsx';
+import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 
 const API = {
     async fetchTournament() {
@@ -168,7 +168,7 @@ const API = {
                     // destructure it, rest would be empty and metadata[0] would be lost.
                     if (!('danGrade' in player)) return player;
                     const { danGrade, metadata: _m, ...p } = player;
-                    const metadata = window.buildPlayerMetadata(danGrade, player.metadata);
+                    const metadata = buildPlayerMetadata(danGrade, player.metadata);
                     return metadata === undefined ? p : { ...p, metadata };
                 }),
             };

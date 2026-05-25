@@ -155,7 +155,7 @@ function buildPlayerMatchHighlight(playerId, matches, fallbackName) {
     return (a && a === id) || (b && b === id);
   }) : [];
   if (byId.length > 0 || !fallbackName) return byId;
-  const needle = String(fallbackName).toLowerCase();
+  const needle = String(fallbackName).trim().toLowerCase();
   if (!needle) return byId;
   return list.filter((m) => {
     const [an, bn] = matchParticipantNames(m);

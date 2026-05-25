@@ -81,8 +81,7 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
-					// See scoring.go for the full-replacement contract note on
-					// DecidedByHantei and non-pointer bool semantics.
+					// See scoring.go for the DecidedByHantei non-pointer bool note.
 					bracket.Rounds[rIdx][mIdx].DecidedByHantei = result.DecidedByHantei
 					if result.Court == "" {
 						result.Court = m.Court

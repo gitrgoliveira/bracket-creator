@@ -45,7 +45,6 @@ describe('API Utils', () => {
       const result = toBackendMatchResult({
         winner: 'A',
         status: 'complete',
-        score: { type: 'hantei', fouls: {} },
         ipponsA: ['M'],
         ipponsB: ['K'],
         decidedByHantei: true,
@@ -58,7 +57,6 @@ describe('API Utils', () => {
       const result = toBackendMatchResult({
         winner: 'A',
         status: 'complete',
-        score: { type: 'ippon', fouls: {} },
         ipponsA: ['M'],
         ipponsB: [],
         decidedByHantei: false,
@@ -66,17 +64,42 @@ describe('API Utils', () => {
       expect(result.decidedByHantei).toBe(false);
     });
 
-    it('omits decidedByHantei when the patch does not set it', () => {
+    it('preserves decidedByHantei=true from the existing match when patch omits it', () => {
+      // Go uses a non-pointer bool so an omitted JSON field decodes as false,
+      // wiping a previously stored hantei decision. The serialiser must forward
+      // true from the existing match whenever the patch doesn't override it.
+      const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        ipponsA: ['M'],
+        ipponsB: ['K'],
+        // decidedByHantei intentionally omitted
+      }, match);
+      expect(result.decidedByHantei).toBe(true);
+    });
+
+    it('does not forward decidedByHantei when the existing match flag is false', () => {
+      const match = { sideA: 'A', sideB: 'B', decidedByHantei: false };
+      const result = toBackendMatchResult({
+        winner: 'A',
+        status: 'complete',
+        ipponsA: ['M'],
+        ipponsB: [],
+        // decidedByHantei intentionally omitted
+      }, match);
+      expect('decidedByHantei' in result).toBe(false);
+    });
+
+    it('omits decidedByHantei when neither patch nor existing match sets it', () => {
       const match = { sideA: 'A', sideB: 'B' };
       const result = toBackendMatchResult({
         winner: 'A',
         status: 'complete',
-        score: { type: 'ippon', fouls: {} },
         ipponsA: ['M'],
         ipponsB: [],
       }, match);
-      // No key — server-side omitempty drops it from the persisted record
-      // (pool-matches.csv columns / bracket.json fields).
+      // No key — server-side omitempty drops it from the persisted record.
       expect('decidedByHantei' in result).toBe(false);
     });
   });

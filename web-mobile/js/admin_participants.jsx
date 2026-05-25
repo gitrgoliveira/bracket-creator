@@ -381,7 +381,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     const seen = new Set();
     const first = new Set();
     visiblePlayers.forEach((p) => {
-      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(p.id); }
+      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(p.id ?? p.name); }
     });
     return first;
   }, [visiblePlayers]);
@@ -502,7 +502,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
     if (!confirm(`Mark all ${targets.length} participants from ${dojo} as checked-in?`)) return;
 
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id ?? p.name, true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -516,7 +516,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const bulkCheckInAll = async () => {
     const targets = (c.players || []).filter(p => !p.checkedIn);
     if (targets.length === 0) { showToast("All participants already checked in"); return; }
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id ?? p.name, true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -1050,7 +1050,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                 const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!trimmedSearch;
                 return (
                   <div
-                    key={p.id}
+                    key={p.id ?? p.name}
                     className={`seed-row ${p.seed ? "has-seed" : ""} ${p.checkedIn ? "is-checked-in" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
                     draggable={!reorderDisabled}
                     onDragStart={() => { dragIdxRef.current = i; }}
@@ -1072,7 +1072,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                         <input
                           type="checkbox"
                           checked={p.checkedIn}
-                          onChange={(e) => toggleCheckIn(p.id, e.target.checked)}
+                          onChange={(e) => toggleCheckIn(p.id ?? p.name, e.target.checked)}
                           style={{ width: 18, height: 18, cursor: "pointer" }}
                           aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
                         />
@@ -1084,7 +1084,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                       <div className="seed-row__dojo">
                         {p.dojo}
-                        {c.checkInEnabled && dojoFirstRowSet.has(p.id) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
+                        {c.checkInEnabled && dojoFirstRowSet.has(p.id ?? p.name) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}

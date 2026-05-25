@@ -122,9 +122,9 @@ func TestEstimateScheduleCourtsClampedToOne(t *testing.T) {
 	assert.Greater(t, result.TotalDurationMinutes, 0)
 }
 
-// TestGenerateSchedule_PoolsFormat verifies that GenerateSchedule produces
+// TestGenerateSchedule_MixedFormat verifies that GenerateSchedule produces
 // "pool" type entries for a pools competition.
-func TestGenerateSchedule_PoolsFormat(t *testing.T) {
+func TestGenerateSchedule_MixedFormat(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "gen-sched-pools"
 

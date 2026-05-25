@@ -786,7 +786,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                     <tr key={comp.id || comp.name}>
                       <td>{comp.id || "—"}</td>
                       <td>{comp.name || "—"}</td>
-                      <td>{comp.format || "mixed"}</td>
+                      <td>{comp.format || "—"}</td>
                       <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || "—"}</td>
                       <td>{comp.seeds || "—"}</td>
                     </tr>

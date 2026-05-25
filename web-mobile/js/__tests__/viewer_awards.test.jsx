@@ -1,7 +1,7 @@
 // Pure-logic tests for deriveAwards — the helper that maps bracket/standings
 // payloads into the 1/2/3/3 podium per FIK convention (no bronze match).
 import { describe, it, expect } from 'vitest';
-import { deriveAwards } from '../viewer.jsx';
+import { deriveAwards, crossPoolRank } from '../viewer.jsx';
 
 const playerMap = (...pairs) => {
   const m = new Map();
@@ -184,5 +184,131 @@ describe('deriveAwards (standings-based)', () => {
     const awards = deriveAwards(bracket, standings, pools, new Map());
     expect(awards.map((a) => a.name)).toEqual(['Alice', 'Bob', 'Carol', 'Dan']);
     expect(awards.map((a) => a.place)).toEqual([1, 2, 3, 3]);
+  });
+});
+
+// Helper to build a standings row for an individual player.
+const mkRow = (name, dojo, wins, losses, draws, ipponsGiven, ipponsTaken) => ({
+  player: { name, dojo },
+  wins, losses, draws, ipponsGiven, ipponsTaken,
+});
+
+// Helper to build a standings row for a team.
+const mkTeamRow = (name, dojo, wins, losses, draws, individualWins, individualLosses, individualDraws, pointsWon, pointsLost) => ({
+  player: { name, dojo },
+  wins, losses, draws, individualWins, individualLosses, individualDraws, pointsWon, pointsLost,
+});
+
+describe('crossPoolRank (individual)', () => {
+  it('merges 3 pools and sorts by canonical individual chain', () => {
+    const standings = {
+      'Pool A': [mkRow('Alice', 'Aoyama', 3, 0, 0, 6, 1)],
+      'Pool B': [mkRow('Bob', 'Bunkyo', 3, 0, 0, 5, 1)],
+      'Pool C': [mkRow('Carol', 'Chiba', 2, 1, 0, 4, 2)],
+    };
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }, { poolName: 'Pool C' }];
+    const result = crossPoolRank(standings, pools, false);
+    expect(result.map(r => r.player.name)).toEqual(['Alice', 'Bob', 'Carol']);
+  });
+
+  it('resolves W tie by losses asc', () => {
+    const standings = {
+      'Pool A': [mkRow('Alice', '', 2, 0, 0, 4, 0)],
+      'Pool B': [mkRow('Bob', '', 2, 1, 0, 4, 0)],
+    };
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }];
+    const result = crossPoolRank(standings, pools, false);
+    expect(result.map(r => r.player.name)).toEqual(['Alice', 'Bob']);
+  });
+
+  it('resolves W+L tie by draws desc', () => {
+    const standings = {
+      'Pool A': [mkRow('Alice', '', 2, 0, 1, 4, 0)],
+      'Pool B': [mkRow('Bob', '', 2, 0, 0, 4, 0)],
+    };
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }];
+    const result = crossPoolRank(standings, pools, false);
+    expect(result.map(r => r.player.name)).toEqual(['Alice', 'Bob']);
+  });
+
+  it('resolves W+L+T tie by ipponsGiven desc', () => {
+    const standings = {
+      'Pool A': [mkRow('Alice', '', 2, 0, 0, 5, 1)],
+      'Pool B': [mkRow('Bob', '', 2, 0, 0, 3, 1)],
+    };
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }];
+    const result = crossPoolRank(standings, pools, false);
+    expect(result.map(r => r.player.name)).toEqual(['Alice', 'Bob']);
+  });
+
+  it('resolves W+L+T+PW tie by ipponsTaken asc', () => {
+    const standings = {
+      'Pool A': [mkRow('Alice', '', 2, 0, 0, 4, 1)],
+      'Pool B': [mkRow('Bob', '', 2, 0, 0, 4, 2)],
+    };
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }];
+    const result = crossPoolRank(standings, pools, false);
+    expect(result.map(r => r.player.name)).toEqual(['Alice', 'Bob']);
+  });
+});
+
+describe('crossPoolRank (team)', () => {
+  it('uses team tie-breaker chain: IV desc after W/L/T', () => {
+    const standings = {
+      'Pool A': [mkTeamRow('TeamA', '', 2, 0, 0, 5, 1, 0, 8, 2)],
+      'Pool B': [mkTeamRow('TeamB', '', 2, 0, 0, 3, 1, 0, 8, 2)],
+    };
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }];
+    const result = crossPoolRank(standings, pools, true);
+    expect(result.map(r => r.player.name)).toEqual(['TeamA', 'TeamB']);
+  });
+
+  it('uses IL asc after IV tie', () => {
+    const standings = {
+      'Pool A': [mkTeamRow('TeamA', '', 2, 0, 0, 4, 1, 0, 8, 2)],
+      'Pool B': [mkTeamRow('TeamB', '', 2, 0, 0, 4, 2, 0, 8, 2)],
+    };
+    const pools = [{ poolName: 'Pool A' }, { poolName: 'Pool B' }];
+    const result = crossPoolRank(standings, pools, true);
+    expect(result.map(r => r.player.name)).toEqual(['TeamA', 'TeamB']);
+  });
+});
+
+describe('deriveAwards (multi-pool cross-pool ranking)', () => {
+  it('merges 3 pools for a pools-only format and returns top-4 podium', () => {
+    const pools = [
+      { poolName: 'Pool A' },
+      { poolName: 'Pool B' },
+      { poolName: 'Pool C' },
+    ];
+    const standings = {
+      'Pool A': [
+        mkRow('Alice', 'Aoyama', 3, 0, 0, 6, 1),
+        mkRow('Ash', 'Aoyama', 1, 2, 0, 2, 4),
+      ],
+      'Pool B': [
+        mkRow('Bob', 'Bunkyo', 3, 0, 0, 5, 1),
+        mkRow('Beth', 'Bunkyo', 1, 2, 0, 2, 4),
+      ],
+      'Pool C': [
+        mkRow('Carol', 'Chiba', 2, 1, 0, 4, 2),
+        mkRow('Chris', 'Chiba', 0, 3, 0, 1, 5),
+      ],
+    };
+    const awards = deriveAwards(null, standings, pools, new Map(), false);
+    expect(awards.map(a => a.name)).toEqual(['Alice', 'Bob', 'Carol', 'Ash']);
+    expect(awards.map(a => a.place)).toEqual([1, 2, 3, 3]);
+  });
+
+  it('still uses first-pool standings when only one pool exists (unchanged behaviour)', () => {
+    const pools = [{ poolName: 'Pool A' }];
+    const standings = {
+      'Pool A': [
+        { player: { name: 'Alice', dojo: 'Aoyama' } },
+        { player: { name: 'Bob', dojo: 'Bunkyo' } },
+      ],
+    };
+    const awards = deriveAwards(null, standings, pools, new Map(), false);
+    expect(awards.map(a => a.name)).toEqual(['Alice', 'Bob']);
   });
 });

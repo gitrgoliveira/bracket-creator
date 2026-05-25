@@ -1869,7 +1869,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, crossPoolRank, addDojoToWatchlist };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2087,6 +2087,35 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   );
 }
 
+// crossPoolRank merges all pools' standings into a single sorted list using
+// the canonical FIK tie-breaker chain. For individual: W→L→T→PW→PL.
+// For team: W→L→T→IV→IL→IT→PW→PL. Returns a new array (does not mutate).
+function crossPoolRank(standings, pools, isTeam) {
+  const merged = pools.flatMap(pool => standings[pool.poolName] || []);
+  merged.sort((a, b) => {
+    if (isTeam) {
+      return (
+        (b.wins || 0) - (a.wins || 0) ||
+        (a.losses || 0) - (b.losses || 0) ||
+        (b.draws || 0) - (a.draws || 0) ||
+        (b.individualWins || 0) - (a.individualWins || 0) ||
+        (a.individualLosses || 0) - (b.individualLosses || 0) ||
+        (b.individualDraws || 0) - (a.individualDraws || 0) ||
+        (b.pointsWon || 0) - (a.pointsWon || 0) ||
+        (a.pointsLost || 0) - (b.pointsLost || 0)
+      );
+    }
+    return (
+      (b.wins || 0) - (a.wins || 0) ||
+      (a.losses || 0) - (b.losses || 0) ||
+      (b.draws || 0) - (a.draws || 0) ||
+      (b.ipponsGiven || 0) - (a.ipponsGiven || 0) ||
+      (a.ipponsTaken || 0) - (b.ipponsTaken || 0)
+    );
+  });
+  return merged;
+}
+
 // deriveAwards returns up to four placements for the closing ceremony per
 // FIK convention: 1st, 2nd, and two 3rds (semi-final losers — no bronze match).
 // Returns [] when no podium data exists yet.
@@ -2097,7 +2126,8 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
 // normalizeMatch() in api_serializers.jsx — both shapes are handled.
 // `standings` may be either a flat array (Swiss-shape) or an object keyed by
 // pool name (pools/league shape).
-function deriveAwards(bracket, standings, pools, nameToPlayer) {
+// `isTeam` selects the team vs individual tie-breaker chain for cross-pool ranking.
+function deriveAwards(bracket, standings, pools, nameToPlayer, isTeam) {
   // Extract the name string from a match field that may be a string (raw
   // backend payload) or a normalized object ({id, name, dojo}) produced by
   // normalizeMatch() in api_serializers.jsx.
@@ -2154,7 +2184,9 @@ function deriveAwards(bracket, standings, pools, nameToPlayer) {
   if (Array.isArray(standings)) {
     list = standings;
   } else if (standings && pools && pools.length > 0) {
-    list = standings[pools[0].poolName] || [];
+    list = pools.length > 1
+      ? crossPoolRank(standings, pools, isTeam)
+      : (standings[pools[0].poolName] || []);
   }
   if (list && list.length > 0) {
     const slice = list.slice(0, 4).map((s, i) => ({
@@ -2205,11 +2237,12 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     return m;
   }, [players]);
 
+  const isTeam = (c?.kind === "team") || (c?.teamSize || 0) > 0;
   const effectiveStandings = c?.format === "swiss" ? swissStandings : standings;
   const isSwissLoading = c?.format === "swiss" && swissStandings === null;
   const awards = useMemo(
-    () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer),
-    [bracket, effectiveStandings, pools, nameToPlayer]
+    () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer, isTeam),
+    [bracket, effectiveStandings, pools, nameToPlayer, isTeam]
   );
 
   const toggleFs = () => {
@@ -2286,6 +2319,48 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           );
         })}
       </div>
+      {c?.format === "pools" && pools?.length > 1 && effectiveStandings && (
+        <PoolWinnersTable pools={pools} standings={effectiveStandings} poolWinners={c.poolWinners || 1} isFs={isFs} />
+      )}
+    </div>
+  );
+}
+
+function PoolWinnersTable({ pools, standings, poolWinners, isFs }) {
+  const rows = pools.map(pool => {
+    const top = (standings[pool.poolName] || []).slice(0, poolWinners);
+    return { poolName: pool.poolName, entries: top };
+  }).filter(r => r.entries.length > 0);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 24 }} data-testid="pool-winners-table">
+      <div className="section-title" style={{ fontSize: isFs ? 20 : 14, marginBottom: 8 }}>
+        Pool Winners
+      </div>
+      <table className="pool__table">
+        <thead>
+          <tr>
+            <th>Pool</th>
+            <th>#</th>
+            <th>Player</th>
+            <th>Dojo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.flatMap(r =>
+            r.entries.map((s, i) => (
+              <tr key={`${r.poolName}-${i}`} data-testid={`pool-winner-${r.poolName}-${i + 1}`}>
+                {i === 0 && <td rowSpan={r.entries.length} style={{ fontWeight: 600 }}>{r.poolName}</td>}
+                <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
+                <td style={{ fontWeight: 500 }}>{s.player?.name || ""}</td>
+                <td style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

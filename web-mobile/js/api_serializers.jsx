@@ -130,6 +130,21 @@ function buildPlayerMap(comp) {
     return map;
 }
 
+// buildPlayerMetadata composes the canonical metadata array sent to the
+// backend from a (danGrade, existingMeta) pair. Three-way logic:
+//   - grade present → [grade, ...rest]
+//   - no grade + rest exists → ["", ...rest] (preserves slot 1+ alignment)
+//   - no grade + no rest → undefined (caller should omit the field entirely
+//     so participants.csv doesn't gain a stray blank column)
+// Shared by updateCompetition and the replace-participant flow so the column
+// layout stays consistent across both write paths.
+function buildPlayerMetadata(danGrade, existingMeta) {
+    const rest = (existingMeta || []).slice(1);
+    if (danGrade) return [danGrade, ...rest];
+    if (rest.length > 0) return ["", ...rest];
+    return undefined;
+}
+
 // Normalize a Go helper.Player (uppercase fields) to frontend shape (lowercase)
 function normalizePlayer(p) {
     if (!p) return p;
@@ -200,7 +215,7 @@ function normalizeCompetitionDetail(data) {
     return result;
 }
 
-export { toBackendStatus, isHikiwake, isKikenDecision, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail };
+export { toBackendStatus, isHikiwake, isKikenDecision, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, buildPlayerMetadata };
 
 if (typeof window !== 'undefined') {
     window.toBackendStatus = toBackendStatus;
@@ -209,4 +224,5 @@ if (typeof window !== 'undefined') {
     window.normalizeMatch = normalizeMatch;
     window.normalizeCompetitionDetail = normalizeCompetitionDetail;
     window.buildPlayerMap = buildPlayerMap;
+    window.buildPlayerMetadata = buildPlayerMetadata;
 }

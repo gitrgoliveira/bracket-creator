@@ -391,3 +391,118 @@ func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {
 	require.NoError(t, err)
 	return players
 }
+
+// TestAddParticipant_DefaultsManualTag pins that an add via the single-add
+// endpoint without an explicit tag gets "manual" — so rows added via this UI
+// land in the same tag-filter bucket as rows the operator hand-edits into
+// the paste-box import.
+func TestAddParticipant_DefaultsManualTag(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-manual-tag"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Manual Tag Test", Status: state.CompStatusSetup,
+	}))
+
+	body, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var added domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
+	assert.Equal(t, "manual", added.Tag, "single-add without an explicit tag must default to manual")
+
+	// An explicit tag must be respected (not overwritten by the default).
+	body, _ = json.Marshal(map[string]interface{}{"name": "Bob", "dojo": "Dojo B", "tag": "registered"})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var bob domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &bob))
+	assert.Equal(t, "registered", bob.Tag, "explicit tag must override the manual default")
+}
+
+// TestZekkenAddAndReplace covers the previously-missing path for
+// withZekkenName=true comps: the operator must be able to set / change the
+// zekken via the single-add endpoint and the replace endpoint without
+// losing it to auto-derivation.
+func TestZekkenAddAndReplace(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-zekken"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:             compID,
+		Name:           "Zekken Test",
+		Status:         state.CompStatusSetup,
+		WithZekkenName: true,
+	}))
+
+	// Add with explicit zekken — must survive a save/load round trip.
+	body, _ := json.Marshal(map[string]interface{}{
+		"name":        "Akira Tanaka",
+		"displayName": "TANAKA",
+		"dojo":        "Mumeishi",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var added domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
+	assert.Equal(t, "TANAKA", added.DisplayName, "operator-supplied zekken must persist through add")
+
+	loaded, err := store.LoadParticipants(compID, true)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "TANAKA", loaded[0].DisplayName, "zekken must round-trip through participants.csv")
+	assert.Equal(t, "Mumeishi", loaded[0].Dojo)
+
+	// Replace forwarding a new zekken.
+	replBody, _ := json.Marshal(map[string]interface{}{
+		"name":        "Akira Yamamoto",
+		"displayName": "YAMAMOTO",
+		"dojo":        "Senbukan",
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(replBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	loaded, err = store.LoadParticipants(compID, true)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "YAMAMOTO", loaded[0].DisplayName, "operator-supplied zekken must persist through replace")
+	assert.Equal(t, "Akira Yamamoto", loaded[0].Name)
+	assert.Equal(t, "Senbukan", loaded[0].Dojo)
+
+	// Replace with empty displayName — the backend must re-derive from the new
+	// name (NOT inherit the previous "YAMAMOTO"), matching non-zekken behavior.
+	replBody, _ = json.Marshal(map[string]interface{}{
+		"name":        "Kenji Sato",
+		"displayName": "",
+		"dojo":        "Senbukan",
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(replBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	loaded, err = store.LoadParticipants(compID, true)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, helper.SanitizeName("Kenji Sato"), loaded[0].DisplayName,
+		"empty displayName must be re-derived from the new name, not inherited")
+	assert.NotEqual(t, "YAMAMOTO", loaded[0].DisplayName)
+}

@@ -93,7 +93,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				metadata = []string{req.DanGrade}
 			}
 
-			if err := validatePlayerLengths(name, req.DisplayName, dojo, req.Tag, metadata); err != nil {
+			// Default to "manual" so rows added via this UI carry the same
+			// provenance marker as rows the operator added by hand to the
+			// paste-box import — keeps tag-filter buckets coherent.
+			tag := req.Tag
+			if tag == "" {
+				tag = "manual"
+			}
+
+			if err := validatePlayerLengths(name, req.DisplayName, dojo, tag, metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -103,12 +111,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				DisplayName: req.DisplayName,
 				Dojo:        dojo,
 				Metadata:    metadata,
-				Tag:         req.Tag,
+				Tag:         tag,
 			}
 
 			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
 			if err != nil {
-				if errors.Is(err, state.ErrDuplicateName) {
+				if errors.Is(err, state.ErrDuplicateName) || errors.Is(err, state.ErrCompetitionNotInSetup) {
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 					return
 				}
@@ -220,7 +228,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+		updatedPlayer, err := store.ReplaceParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
 			p.Name = name
 			p.DisplayName = req.DisplayName
 			p.Dojo = dojo
@@ -234,7 +242,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			switch {
 			case errors.Is(err, state.ErrParticipantNotFound):
 				status = http.StatusNotFound
-			case errors.Is(err, state.ErrDuplicateName):
+			case errors.Is(err, state.ErrDuplicateName), errors.Is(err, state.ErrCompetitionNotInSetup):
 				status = http.StatusConflict
 			}
 			c.JSON(status, gin.H{"error": err.Error()})

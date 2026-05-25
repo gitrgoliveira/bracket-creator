@@ -190,11 +190,13 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const [addName, setAddName] = useStateA("");
   const [addDojo, setAddDojo] = useStateA("");
   const [addDanGrade, setAddDanGrade] = useStateA("");
+  const [addZekken, setAddZekken] = useStateA("");
   const [addLoading, setAddLoading] = useStateA(false);
   const [replaceLoading, setReplaceLoading] = useStateA(false);
   const [replaceName, setReplaceName] = useStateA("");
   const [replaceDojo, setReplaceDojo] = useStateA("");
   const [replaceDanGrade, setReplaceDanGrade] = useStateA("");
+  const [replaceZekken, setReplaceZekken] = useStateA("");
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
@@ -508,12 +510,19 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
   const handleAddParticipant = async () => {
     const name = addName.trim(), dojo = addDojo.trim(), danGrade = addDanGrade.trim();
+    const zekken = addZekken.trim();
     if (!name || !dojo) { showToast("Name and dojo are required", "error"); return; }
     setAddLoading(true);
     try {
-      await window.API.addParticipant(c.id, { name, dojo, danGrade: danGrade || undefined }, password);
+      // displayName is only forwarded for zekken-enabled competitions; for
+      // non-zekken comps the backend derives DisplayName = SanitizeName(Name)
+      // and we MUST send "" or omit the key so the operator can't accidentally
+      // poison the slot with a stale value (see TestReplaceDoesNotInherit…).
+      const payload = { name, dojo, danGrade: danGrade || undefined };
+      if (c.withZekkenName && zekken) payload.displayName = zekken;
+      await window.API.addParticipant(c.id, payload, password);
       if (!mountedRef.current) return;
-      setAddName(""); setAddDojo(""); setAddDanGrade(""); setShowAddForm(false);
+      setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); setShowAddForm(false);
       showToast(`${name} added`);
     } catch (err) {
       if (!mountedRef.current) return;
@@ -526,6 +535,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const handleReplaceParticipant = async () => {
     if (!replaceTarget) return;
     const name = replaceName.trim(), dojo = replaceDojo.trim(), danGrade = replaceDanGrade.trim();
+    const zekken = replaceZekken.trim();
     if (!name || !dojo) { showToast("Name and dojo are required", "error"); return; }
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
@@ -537,19 +547,16 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       // Build metadata from danGrade so the edited grade actually persists —
       // the backend prefers Metadata over danGrade when Metadata is non-empty,
       // so forwarding the old replaceTarget.metadata blindly would discard any
-      // grade change. metadata[0] = danGrade; slots 1+ are preserved from the
-      // current value. Use "" as a placeholder when clearing the grade so
-      // positional slots 1+ stay at their original indices.
-      // displayName is intentionally cleared: the new participant's display
-      // name should be derived from their new name, not inherited from the
-      // old slot (which would corrupt the CSV for non-zekken competitions).
-      const existingMeta = replaceTarget.metadata || [];
-      const rest = existingMeta.slice(1);
-      // Mirror the three-way logic in updateCompetition to avoid blank CSV columns:
-      // grade present → [grade, ...rest]; no grade + rest exists → ["", ...rest];
-      // no grade + no rest → [] (empty array clears the column without a blank slot).
-      const metadata = danGrade ? [danGrade, ...rest] : rest.length > 0 ? ["", ...rest] : [];
-      const payload = { name, dojo, displayName: "", tag: targetTag, metadata };
+      // grade change. Slots 1+ are preserved via the shared buildPlayerMetadata
+      // helper (mirrored from updateCompetition).
+      //
+      // displayName handling — zekken comps: forward the operator's value (or
+      // "" so the backend re-derives via SanitizeName(name)). Non-zekken comps:
+      // ALWAYS send "" — otherwise stale "A. SMITH" from the replaced slot
+      // would carry over and corrupt the 3-column CSV row.
+      const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
+      const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", tag: targetTag };
+      if (metadata !== undefined) payload.metadata = metadata;
       await window.API.replaceParticipant(c.id, targetId, payload, password);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
@@ -916,6 +923,12 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     <div className="field__label" style={{ fontSize: 11 }}>Name *</div>
                     <input className="input" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder="Full name" />
                   </div>
+                  {c.withZekkenName && (
+                    <div>
+                      <div className="field__label" style={{ fontSize: 11 }}>Zekken</div>
+                      <input className="input" style={{ width: 120 }} value={addZekken} onChange={e => setAddZekken(e.target.value)} placeholder="Auto if blank" />
+                    </div>
+                  )}
                   <div>
                     <div className="field__label" style={{ fontSize: 11 }}>Dojo *</div>
                     <input className="input" style={{ width: 140 }} value={addDojo} onChange={e => setAddDojo(e.target.value)} placeholder="Dojo" />
@@ -927,7 +940,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                   <button className="btn btn--sm btn--primary" disabled={addLoading || !addName.trim() || !addDojo.trim()} onClick={handleAddParticipant}>
                     {addLoading ? "Adding…" : "Add"}
                   </button>
-                  <button className="btn btn--sm" onClick={() => { setShowAddForm(false); setAddName(""); setAddDojo(""); setAddDanGrade(""); }}>Cancel</button>
+                  <button className="btn btn--sm" onClick={() => { setShowAddForm(false); setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); }}>Cancel</button>
                 </div>
               )}
             </div>
@@ -941,6 +954,12 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     <div className="field__label">Name *</div>
                     <input className="input" value={replaceName} onChange={e => setReplaceName(e.target.value)} placeholder="Replacement name" />
                   </div>
+                  {c.withZekkenName && (
+                    <div>
+                      <div className="field__label">Zekken</div>
+                      <input className="input" value={replaceZekken} onChange={e => setReplaceZekken(e.target.value)} placeholder="Auto-derived if blank" />
+                    </div>
+                  )}
                   <div>
                     <div className="field__label">Dojo *</div>
                     <input className="input" value={replaceDojo} onChange={e => setReplaceDojo(e.target.value)} placeholder="Dojo" />
@@ -1027,7 +1046,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
                       {c.status === "setup" && (
-                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 9 }} title={`Replace ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); }} aria-label={`Replace ${p.name}`}>↔</button>
+                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 9 }} title={`Replace ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Replace ${p.name}`}>↔</button>
                       )}
                     </div>
                      <window.StableInput

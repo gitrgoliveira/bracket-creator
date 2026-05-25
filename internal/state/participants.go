@@ -21,6 +21,13 @@ var ErrParticipantNotFound = errors.New("participant not found")
 // canonicalization applied by helper.CreatePlayers.
 var ErrDuplicateName = errors.New("participant name already exists")
 
+// ErrCompetitionNotInSetup is returned by AddParticipant and UpdateParticipant
+// when the competition has already advanced past the setup phase. The status
+// is re-checked under the per-competition lock so a concurrent
+// POST /competitions/:id/start landing between the handler's outer check and
+// the store call cannot leak a roster write into a started competition.
+var ErrCompetitionNotInSetup = errors.New("competition has already started")
+
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
 	WithSeeds bool  // set false to skip the seeds.csv read (hot list paths)
@@ -202,6 +209,14 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 	mu.Lock()
 	defer mu.Unlock()
 
+	return s.updateParticipantNoLock(compID, pid, withZekkenName, transform)
+}
+
+// updateParticipantNoLock contains the full mutate-load-rewrite body of
+// UpdateParticipant. Caller MUST hold the per-comp lock. Factored out so
+// ReplaceParticipant can wrap the same logic under a status-gated lock
+// without forcing the lock-only check-in callers to pay for that gate.
+func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
 	// Seeds are not merged here — check-in mutations don't need seed data.
 	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {
@@ -339,15 +354,42 @@ func marshalParticipantsCSV(players []domain.Player) ([]byte, error) {
 	return []byte(sb.String()), nil
 }
 
+// requireSetupLocked returns ErrCompetitionNotInSetup when the on-disk
+// competition status is past the setup phase. Caller MUST already hold the
+// per-comp lock. Treats "missing competition" and "empty status" as setup
+// (mirroring the handler-side check), so a fresh test fixture that doesn't
+// explicitly set Status still passes.
+func (s *Store) requireSetupLocked(compID string) error {
+	comp, err := s.loadCompetitionLocked(compID)
+	if err != nil {
+		return err
+	}
+	if comp == nil {
+		return nil // missing file: treat as fresh / setup (matches handler semantics)
+	}
+	if comp.Status != "" && comp.Status != CompStatusSetup {
+		return ErrCompetitionNotInSetup
+	}
+	return nil
+}
+
 // AddParticipant atomically loads the participant list, mints a UUIDv4 ID,
 // sets PoolPosition to the new tail index, appends the participant, and
 // saves the file. Matches the ID format used everywhere else
 // (see newParticipantID and saveParticipantsNoLock's ID-fill branch) so
 // the format-sniffer in loadParticipantsNoLock keeps a single contract.
+//
+// Re-checks the competition status under the per-comp lock — a concurrent
+// POST /competitions/:id/start landing between the handler's outer check and
+// this lock would otherwise leak a roster mutation into a started competition.
 func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bool) (*domain.Player, error) {
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
+
+	if err := s.requireSetupLocked(compID); err != nil {
+		return nil, err
+	}
 
 	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{})
 	if err != nil {
@@ -380,6 +422,24 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 	}
 
 	return &p, nil
+}
+
+// ReplaceParticipant is the setup-gated rename/replace path used by the
+// PUT /competitions/:id/participants/:pid handler. It applies transform under
+// the per-comp lock with the same status re-check as AddParticipant, so a
+// concurrent start can't sneak in between the handler's outer 409 check and
+// the file write. UpdateParticipant remains gateless because check-in toggles
+// must keep working after the competition is running.
+func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := s.requireSetupLocked(compID); err != nil {
+		return nil, err
+	}
+
+	return s.updateParticipantNoLock(compID, pid, withZekkenName, transform)
 }
 
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player) error {

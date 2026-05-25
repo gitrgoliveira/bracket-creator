@@ -465,3 +465,51 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name must be rejected")
 }
+
+// TestAddParticipant_RejectedAfterStart pins the in-lock status re-check.
+// The HTTP handler does the same check before calling AddParticipant, but a
+// concurrent POST /competitions/:id/start could land between that check and
+// the per-comp lock acquisition. The store-level guard catches the racing
+// write and returns ErrCompetitionNotInSetup → 409.
+func TestAddParticipant_RejectedAfterStart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "started-add"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Started", Status: CompStatusPools}))
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Late", Dojo: "Dojo X"}, false)
+	assert.ErrorIs(t, err, ErrCompetitionNotInSetup, "AddParticipant must reject when status has advanced past setup")
+}
+
+// TestReplaceParticipant_RejectedAfterStart pins the same in-lock guard for
+// the rename/replace path. UpdateParticipant (the check-in toggle path) must
+// stay unconditional — that's verified by the existing UpdateParticipant
+// tests, which never set Status to anything other than empty/setup.
+func TestReplaceParticipant_RejectedAfterStart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "started-replace"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Started", Status: CompStatusSetup}))
+
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+
+	// Advance the competition.
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Started", Status: CompStatusPools}))
+
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Alice Renamed"
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrCompetitionNotInSetup, "ReplaceParticipant must reject when status has advanced past setup")
+
+	// Sanity: UpdateParticipant (the check-in path) MUST still work after start,
+	// otherwise we've regressed the existing check-in toggle flow.
+	_, err = store.UpdateParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.CheckedIn = true
+		return nil
+	})
+	require.NoError(t, err, "UpdateParticipant must remain unconditional so check-in toggles work after start")
+}

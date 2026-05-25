@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake } from '../api_serializers.jsx';
+import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, buildPlayerMetadata } from '../api_serializers.jsx';
 import { API } from '../api_client.jsx';
 
 describe('API Utils', () => {
@@ -699,6 +699,20 @@ describe('API Utils', () => {
         await expect(
           API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 1 }, 'pw')
         ).rejects.toThrow('Failed to estimate schedule');
+      });
+    });
+
+    describe('buildPlayerMetadata', () => {
+      it('returns [grade, ...rest] when grade is present', () => {
+        expect(buildPlayerMetadata('3 Dan', ['3 Dan', 'registered'])).toEqual(['3 Dan', 'registered']);
+        expect(buildPlayerMetadata('2 Dan', [])).toEqual(['2 Dan']);
+      });
+      it('returns ["", ...rest] when grade is empty but slot 1+ exists', () => {
+        expect(buildPlayerMetadata('', ['old', 'registered'])).toEqual(['', 'registered']);
+      });
+      it('returns undefined when both grade and slot 1+ are absent', () => {
+        expect(buildPlayerMetadata('', [])).toBeUndefined();
+        expect(buildPlayerMetadata('', undefined)).toBeUndefined();
       });
     });
 

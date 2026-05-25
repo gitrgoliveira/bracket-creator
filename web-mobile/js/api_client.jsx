@@ -167,14 +167,9 @@ const API = {
                     // object without danGrade must be passed through unchanged — if we
                     // destructure it, rest would be empty and metadata[0] would be lost.
                     if (!('danGrade' in player)) return player;
-                    const { danGrade, ...p } = player;
-                    const rest = (p.metadata || []).slice(1);
-                    if (danGrade) return { ...p, metadata: [danGrade, ...rest] };
-                    if (rest.length > 0) return { ...p, metadata: ["", ...rest] };
-                    // No grade and no extra metadata — omit the field entirely
-                    // to avoid writing a blank column to participants.csv.
-                    const { metadata: _m, ...bare } = p;
-                    return bare;
+                    const { danGrade, metadata: _m, ...p } = player;
+                    const metadata = window.buildPlayerMetadata(danGrade, player.metadata);
+                    return metadata === undefined ? p : { ...p, metadata };
                 }),
             };
         }

@@ -101,14 +101,25 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				tag = "manual"
 			}
 
-			if err := validatePlayerLengths(name, req.DisplayName, dojo, tag, metadata); err != nil {
+			// Strip displayName for non-zekken competitions. Otherwise
+			// saveParticipantsNoLock writes a 3-column row (Name,DisplayName,Dojo)
+			// that LoadParticipants(withZekkenName=false) then mis-parses —
+			// displayName takes column 2, the real Dojo gets pushed into
+			// Metadata. Store.AddParticipant re-derives via SanitizeName(Name)
+			// when DisplayName is empty.
+			displayName := req.DisplayName
+			if !comp.WithZekkenName {
+				displayName = ""
+			}
+
+			if err := validatePlayerLengths(name, displayName, dojo, tag, metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 
 			player := domain.Player{
 				Name:        name,
-				DisplayName: req.DisplayName,
+				DisplayName: displayName,
 				Dojo:        dojo,
 				Metadata:    metadata,
 				Tag:         tag,
@@ -223,14 +234,24 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			metadata = []string{req.DanGrade}
 		}
 
-		if err := validatePlayerLengths(name, req.DisplayName, dojo, req.Tag, metadata); err != nil {
+		// Strip displayName for non-zekken competitions — same CSV-corruption
+		// guard as the single-add path: a 3-column row written here would be
+		// mis-parsed on the next LoadParticipants(withZekkenName=false) read,
+		// shifting Dojo into Metadata. Empty DisplayName triggers SanitizeName
+		// re-derivation in saveParticipantsNoLock.
+		displayName := req.DisplayName
+		if !comp.WithZekkenName {
+			displayName = ""
+		}
+
+		if err := validatePlayerLengths(name, displayName, dojo, req.Tag, metadata); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
 		updatedPlayer, err := store.ReplaceParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
 			p.Name = name
-			p.DisplayName = req.DisplayName
+			p.DisplayName = displayName
 			p.Dojo = dojo
 			p.Metadata = metadata
 			p.Tag = req.Tag

@@ -466,6 +466,43 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name must be rejected")
 }
 
+// TestReplaceParticipant_SeedsCSVEscaping pins that seed rename writes
+// participant names through encoding/csv so names containing commas or quotes
+// don't produce a broken seeds.csv. Pre-fix the rewrite used
+// fmt.Fprintf("%d,%s\n") and a name like "Smith, John" emitted an unescaped
+// extra column that ParseSeedsFile then misparsed (silently dropping the
+// seed). Use a non-zekken comp here so the name-with-comma round-trips
+// through participants.csv unchanged.
+func TestReplaceParticipant_SeedsCSVEscaping(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "seeds-escape"
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Seeds Escape", Status: CompStatusSetup,
+	}))
+
+	// Seed Alice with a name that requires CSV escaping when written.
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{{Name: "Alice", SeedRank: 1}}))
+
+	// Rename Alice → "Smith, John" — the comma MUST be CSV-escaped in seeds.csv,
+	// otherwise ParseSeedsFile splits "Smith" / " John" / "1" into the wrong slots.
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Smith, John"
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Verify seeds.csv reloads cleanly with the comma preserved.
+	seeds, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1, "seed must survive the rename — a broken CSV would drop it")
+	assert.Equal(t, "Smith, John", seeds[0].Name, "comma in renamed seed name must round-trip through CSV escaping")
+	assert.Equal(t, 1, seeds[0].SeedRank)
+}
+
 // TestAddParticipant_RejectedAfterStart pins the in-lock status re-check.
 // The HTTP handler does the same check before calling AddParticipant, but a
 // concurrent POST /competitions/:id/start could land between that check and

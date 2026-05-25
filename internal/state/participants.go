@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -297,10 +298,23 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 			}
 		}
 		if changed {
+			// Use encoding/csv so names containing commas / quotes (e.g.
+			// "Smith, John") are properly escaped — fmt.Fprintf("%d,%s\n")
+			// would emit broken CSV that ParseSeedsFile then mis-splits,
+			// silently dropping seeds. Mirrors Store.SaveSeeds.
 			var sb strings.Builder
-			sb.WriteString("Rank,Name\n")
+			w := csv.NewWriter(&sb)
+			if werr := w.Write([]string{"Rank", "Name"}); werr != nil {
+				return nil, fmt.Errorf("rename seed for %q: writing header: %w", oldName, werr)
+			}
 			for _, a := range seeds {
-				fmt.Fprintf(&sb, "%d,%s\n", a.SeedRank, a.Name)
+				if werr := w.Write([]string{strconv.Itoa(a.SeedRank), a.Name}); werr != nil {
+					return nil, fmt.Errorf("rename seed for %q: writing record: %w", oldName, werr)
+				}
+			}
+			w.Flush()
+			if werr := w.Error(); werr != nil {
+				return nil, fmt.Errorf("rename seed for %q: flushing: %w", oldName, werr)
 			}
 			if werr := s.atomicWrite(seedsPath, []byte(sb.String()), 0600); werr != nil {
 				return nil, fmt.Errorf("rename seed for %q: %w", oldName, werr)

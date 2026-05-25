@@ -20,10 +20,15 @@ func TestSingleParticipantAddAndReplace(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	compID := "comp-test-p"
+	// withZekkenName=true so the explicit displayName values in the payload
+	// are persisted as the bib/zekken column rather than stripped (the new
+	// handler enforces "displayName only honored for zekken comps" — without
+	// it, a 3-column row would be mis-parsed on the next load).
 	comp := state.Competition{
-		ID:     compID,
-		Name:   "Test Competition",
-		Status: state.CompStatusSetup,
+		ID:             compID,
+		Name:           "Test Competition",
+		Status:         state.CompStatusSetup,
+		WithZekkenName: true,
 	}
 	err := store.SaveCompetition(&comp)
 	require.NoError(t, err)
@@ -59,8 +64,9 @@ func TestSingleParticipantAddAndReplace(t *testing.T) {
 	assert.Equal(t, "Test Dojo", addedPlayer.Dojo)
 	assert.Equal(t, []string{"3 Dan"}, addedPlayer.Metadata)
 
-	// Verify player is stored in participants.csv
-	storedPlayers, err := store.LoadParticipants(compID, false)
+	// Verify player is stored in participants.csv — reload with the same
+	// withZekkenName=true used at save time so the column layout matches.
+	storedPlayers, err := store.LoadParticipants(compID, true)
 	require.NoError(t, err)
 	require.Len(t, storedPlayers, 1)
 	assert.Equal(t, addedPlayer.ID, storedPlayers[0].ID)

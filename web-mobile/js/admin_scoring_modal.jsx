@@ -698,17 +698,9 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // decidedByHantei flag set. This is a dedicated affordance because the
   // regular flow assumes an ippon-derived win.
   const submitHantei = (winnerSide) => {
-    const fouls = { a: aFouls, b: bFouls };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const aFinal = aPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
-    // Map ippon counts onto the winner/loser axes — without this swap, a
-    // hantei decision for SHIRO (side "b") would persist winnerPts =
-    // aFinal.length and loserPts = bFinal.length, which contradicts the
-    // recorded winner. For the canonical tied-in-encho case both lengths
-    // are equal and the swap is a no-op.
-    const winnerPts = winnerSide === "a" ? aFinal.length : bFinal.length;
-    const loserPts = winnerSide === "a" ? bFinal.length : aFinal.length;
     return doSubmit(() => onSubmit({
       winner,
       ipponsA: aFinal,
@@ -716,7 +708,6 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       hansokuA: aFouls,
       hansokuB: bFouls,
       status: "completed",
-      score: { type: "hantei", winnerPts, loserPts, fouls, corrected: isComplete },
       ...enchoBlock(),
       decidedByHantei: true,
     }));

@@ -42,10 +42,6 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], { type: 'bye' }, null)).toBe('BYE');
     });
 
-    it('returns H for hantei decision', () => {
-      expect(formatIpponsScore([], [], { type: 'hantei' }, null)).toBe('H');
-    });
-
     it('returns X for a no-score draw', () => {
       expect(formatIpponsScore([], [], { type: 'hikiwake' }, null)).toBe('X');
       expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
@@ -116,10 +112,6 @@ describe('formatIpponsScore', () => {
 
     it('appends (E) to a no-score draw', () => {
       expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E)');
-    });
-
-    it('appends (E) to a hantei result', () => {
-      expect(formatIpponsScore([], [], { type: 'hantei' }, null, { periodCount: 1 })).toBe('H (E)');
     });
 
     it('does not append (E) when periodCount is 0', () => {

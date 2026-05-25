@@ -1307,7 +1307,7 @@ function MatchDetailCard({ match, onClose }) {
             {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
           </div>
           <div className="match-detail-card__ippons-center">
-            {(match.decidedByHantei || match.score?.type === "hantei") && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
+            {match.decidedByHantei && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
             {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
           </div>
           <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
@@ -2409,7 +2409,7 @@ function MatchViewerModal({ match, onClose }) {
                   {match.hansokuA > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuA}</div>}
                </div>
             </div>
-            {match.score?.type === "hantei" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
+            {match.decidedByHantei && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
             {match.score?.type === "hikiwake" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Draw (<TermV name="hikiwake">Hikiwake</TermV>)</div>}
             {match.score?.type === "bye" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>BYE</div>}
           </div>

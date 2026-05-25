@@ -47,8 +47,8 @@ function toBackendMatchResult(patch, match) {
         winner: winnerName,
         ipponsA,
         ipponsB,
-        hansokuA: fouls.a || 0,
-        hansokuB: fouls.b || 0,
+        hansokuA: patch.hansokuA ?? fouls.a ?? 0,
+        hansokuB: patch.hansokuB ?? fouls.b ?? 0,
         decision: isHikiwake(score.type) ? "hikiwake" : "",
         status: toBackendStatus(patch.status || "scheduled"),
     };

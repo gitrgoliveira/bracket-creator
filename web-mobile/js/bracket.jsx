@@ -86,7 +86,6 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
   const enchoOnly = (encho && encho.periodCount > 0) ? " (E)" : "";
   const suffix = decSfx ? " " + decSfx : enchoOnly;
   if (score?.type === "bye") return "BYE";
-  if (score?.type === "hantei") return "H" + suffix;
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
   const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
@@ -160,7 +159,6 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {live ? <span className="bc-live">● LIVE</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
-        {match.score?.type === "hantei" ? <span className="bc-draw">H</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
         {isKikenDecisionBC(match.decision) ? (
           <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>

@@ -103,12 +103,15 @@ describe('API Utils', () => {
         number: '',
         tag: '',
         danGrade: '',
+        metadata: [],
       });
     });
 
-    it('maps Go Metadata[0] → danGrade on PascalCase input', () => {
-      const p = { Name: 'Bob', Dojo: 'Kenshikan', Seed: 0, Metadata: ['3d'] };
-      expect(normalizePlayer(p).danGrade).toBe('3d');
+    it('maps Go Metadata[0] → danGrade on PascalCase input and preserves full metadata array', () => {
+      const p = { Name: 'Bob', Dojo: 'Kenshikan', Seed: 0, Metadata: ['3d', 'registered'] };
+      const norm = normalizePlayer(p);
+      expect(norm.danGrade).toBe('3d');
+      expect(norm.metadata).toEqual(['3d', 'registered']);
     });
 
     it('backfills danGrade from metadata[0] on already-camelCase input', () => {

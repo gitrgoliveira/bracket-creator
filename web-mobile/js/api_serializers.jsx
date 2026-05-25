@@ -142,7 +142,10 @@ function normalizePlayer(p) {
         return p;
     }
     const danGrade = (p.Metadata && p.Metadata[0]) || "";
-    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "", danGrade };
+    // Include the full metadata array so updateCompetition/replaceParticipant
+    // can preserve metadata[1+] slots (e.g. "registered" tag) when the player
+    // round-trips through the JS layer.
+    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "", danGrade, metadata: p.Metadata || [] };
 }
 
 // Normalize an entire competition detail response from the viewer API.

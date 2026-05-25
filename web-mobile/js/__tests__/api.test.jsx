@@ -129,9 +129,9 @@ describe('API Utils', () => {
     });
 
     it('should build score object from ippons for pool matches', () => {
-      const match = { 
-        sideA: 'A', sideB: 'B', winner: 'A', 
-        status: 'completed', ipponsA: ['M'], ipponsB: [] 
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A',
+        status: 'completed', ipponsA: ['M'], ipponsB: []
       };
       const norm = normalizeMatch(match, {});
       expect(norm.score).toEqual({
@@ -140,6 +140,40 @@ describe('API Utils', () => {
         loserPts: 0,
         ippons: ['M']
       });
+    });
+
+    // Bracket matches carry scoreA/scoreB strings (no ipponsA/B arrays). The
+    // backend formatScore() emits "MK (H1)" when ippons coexist with an
+    // outstanding hansoku, so normalizeMatch must strip the suffix + leading
+    // space before splitting — otherwise score.ippons leaks " ", "(", "H",
+    // "1", ")" tokens. score.ippons seeds the admin scoring modal's slot
+    // editor when the modal opens on a bracket match.
+    it('strips hansoku "(HN)" suffix from bracket scoreA/scoreB when building score.ippons', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A',
+        status: 'completed',
+        scoreA: 'MK (H1)', scoreB: 'M',
+      };
+      const norm = normalizeMatch(match, {});
+      expect(norm.score).toEqual({
+        type: 'ippon',
+        winnerPts: 2,
+        loserPts: 1,
+        ippons: ['M', 'K'],
+      });
+    });
+
+    it('strips no-space "(HN)" suffix from bracket scoreA/scoreB too', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'B',
+        status: 'completed',
+        scoreA: '(H1)', scoreB: 'MD(H2)',
+      };
+      const norm = normalizeMatch(match, {});
+      // B wins: ippons come from cleaned scoreB
+      expect(norm.score.ippons).toEqual(['M', 'D']);
+      expect(norm.score.winnerPts).toBe(2);
+      expect(norm.score.loserPts).toBe(0);
     });
   });
 

@@ -78,11 +78,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 		if len(req.Players) == 0 && req.Name != "" {
 			// Single player add workflow
-			if strings.TrimSpace(req.Name) == "" {
+			name := strings.TrimSpace(req.Name)
+			dojo := strings.TrimSpace(req.Dojo)
+			if name == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "name must not be blank"})
 				return
 			}
-			if strings.TrimSpace(req.Dojo) == "" {
+			if dojo == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "dojo must not be blank"})
 				return
 			}
@@ -91,15 +93,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				metadata = []string{req.DanGrade}
 			}
 
-			if err := validatePlayerLengths(req.Name, req.DisplayName, req.Dojo, req.Tag, metadata); err != nil {
+			if err := validatePlayerLengths(name, req.DisplayName, dojo, req.Tag, metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 
 			player := domain.Player{
-				Name:        req.Name,
+				Name:        name,
 				DisplayName: req.DisplayName,
-				Dojo:        req.Dojo,
+				Dojo:        dojo,
 				Metadata:    metadata,
 				Tag:         req.Tag,
 			}
@@ -197,11 +199,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		if strings.TrimSpace(req.Name) == "" {
+		name := strings.TrimSpace(req.Name)
+		dojo := strings.TrimSpace(req.Dojo)
+		if name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name must not be blank"})
 			return
 		}
-		if strings.TrimSpace(req.Dojo) == "" {
+		if dojo == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "dojo must not be blank"})
 			return
 		}
@@ -211,15 +215,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			metadata = []string{req.DanGrade}
 		}
 
-		if err := validatePlayerLengths(req.Name, req.DisplayName, req.Dojo, req.Tag, metadata); err != nil {
+		if err := validatePlayerLengths(name, req.DisplayName, dojo, req.Tag, metadata); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
 		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
-			p.Name = req.Name
+			p.Name = name
 			p.DisplayName = req.DisplayName
-			p.Dojo = req.Dojo
+			p.Dojo = dojo
 			p.Metadata = metadata
 			p.Tag = req.Tag
 			return nil

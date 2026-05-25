@@ -1303,7 +1303,7 @@ function MatchDetailCard({ match, onClose }) {
       {isDone && !isTeam && (
         <div className="match-detail-card__ippons">
           <div className="match-detail-card__ippons-side">
-            <span className="match-detail-card__ippons-val">{(match.ipponsB || []).filter(x => x && x !== "•").join("") || "—"}</span>
+            <span className="match-detail-card__ippons-val">{mdcIpponsB.filter(x => x && x !== "•").join("") || "—"}</span>
             {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
           </div>
           <div className="match-detail-card__ippons-center">
@@ -1311,7 +1311,7 @@ function MatchDetailCard({ match, onClose }) {
             {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
           </div>
           <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
-            <span className="match-detail-card__ippons-val">{(match.ipponsA || []).filter(x => x && x !== "•").join("") || "—"}</span>
+            <span className="match-detail-card__ippons-val">{mdcIpponsA.filter(x => x && x !== "•").join("") || "—"}</span>
             {match.hansokuA > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuA}</span>}
           </div>
         </div>

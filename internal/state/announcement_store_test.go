@@ -115,6 +115,23 @@ func TestAnnouncementStoreRemove(t *testing.T) {
 	}
 }
 
+func TestAnnouncementStoreRemovePrunesExpired(t *testing.T) {
+	store := NewAnnouncementStore()
+
+	_, _ = store.Add("expires soon", 10*time.Millisecond)
+	a2, _ := store.Add("long-lived", 30*time.Minute)
+	time.Sleep(20 * time.Millisecond)
+
+	// Remove the long-lived item; snapshot must not include the expired one.
+	found, list := store.Remove(a2.ID)
+	if !found {
+		t.Fatal("expected Remove to find a2")
+	}
+	if len(list) != 0 {
+		t.Errorf("expected empty snapshot after remove + prune, got %d items: %v", len(list), list)
+	}
+}
+
 func TestAnnouncementStoreCapEvictsOldest(t *testing.T) {
 	store := NewAnnouncementStore()
 

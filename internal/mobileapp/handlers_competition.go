@@ -125,7 +125,6 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	return 0, nil
 }
 
-
 // validateSwissConfig enforces FR-050a: when Format == swiss, SwissRounds
 // must be at least 1. Returns nil for non-swiss competitions. The caller
 // surfaces the error as HTTP 400.

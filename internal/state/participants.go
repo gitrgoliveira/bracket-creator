@@ -267,11 +267,12 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 		}
 	}
 
-	if err := s.saveParticipantsNoLock(compID, players); err != nil {
-		return nil, err
-	}
-
-	// Update seeds.csv only if it existed and the name changed.
+	// Write seeds.csv BEFORE participants.csv so that a failure on the
+	// participants write leaves a retryable state: seeds already carries the
+	// new name, so a retry will see changed=false (oldName no longer in seeds)
+	// and skip the rename, then successfully write participants. The reverse
+	// order (participants first) is not retryable — oldName is gone from
+	// participants so the seeds rename can never be applied again.
 	if oldName != players[foundIdx].Name && seeds != nil {
 		changed := false
 		for i := range seeds {
@@ -290,6 +291,10 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 				return nil, fmt.Errorf("rename seed for %q: %w", oldName, werr)
 			}
 		}
+	}
+
+	if err := s.saveParticipantsNoLock(compID, players); err != nil {
+		return nil, err
 	}
 	return &players[foundIdx], nil
 }

@@ -143,8 +143,10 @@ function normalizePlayer(p) {
     }
     const danGrade = (p.Metadata && p.Metadata[0]) || "";
     // Include the full metadata array so updateCompetition/replaceParticipant
-    // can preserve metadata[1+] slots (e.g. "registered" tag) when the player
-    // round-trips through the JS layer.
+    // can preserve metadata[1+] slots (e.g. a second dan-grade notation or
+    // other extra CSV columns beyond the grade) when the player round-trips
+    // through the JS layer. Note: "registered"/"manual"/"transfer" are Tags,
+    // not metadata — they are mapped to p.Tag above.
     return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "", danGrade, metadata: p.Metadata || [] };
 }
 

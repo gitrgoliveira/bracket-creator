@@ -1037,6 +1037,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank must be a positive integer ≤ %d", helper.MaxRankOverride)})
 			return
 		}
+		// Status guard: rank overrides are only meaningful while pools are
+		// active. Reject anything that arrives after the bracket has been
+		// seeded (playoffs, completed) or before pools exist (setup).
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load competition"})
+			return
+		}
+		if comp.Status != state.CompStatusPools {
+			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage"})
+			return
+		}
 		// Pool-size validation: rank within a pool is bounded by the
 		// number of players in that pool. Load the comp's pools and
 		// look up the target pool by name (the URL :poolId matches

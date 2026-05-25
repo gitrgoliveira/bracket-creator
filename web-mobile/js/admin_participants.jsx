@@ -544,9 +544,11 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       // name should be derived from their new name, not inherited from the
       // old slot (which would corrupt the CSV for non-zekken competitions).
       const existingMeta = replaceTarget.metadata || [];
-      const metadata = danGrade
-        ? [danGrade, ...existingMeta.slice(1)]
-        : ["", ...existingMeta.slice(1)];
+      const rest = existingMeta.slice(1);
+      // Mirror the three-way logic in updateCompetition to avoid blank CSV columns:
+      // grade present → [grade, ...rest]; no grade + rest exists → ["", ...rest];
+      // no grade + no rest → [] (empty array clears the column without a blank slot).
+      const metadata = danGrade ? [danGrade, ...rest] : rest.length > 0 ? ["", ...rest] : [];
       const payload = { name, dojo, displayName: "", tag: targetTag, metadata };
       await window.API.replaceParticipant(c.id, targetId, payload, password);
       if (!mountedRef.current) return;

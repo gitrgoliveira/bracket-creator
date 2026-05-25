@@ -2322,51 +2322,6 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           );
         })}
       </div>
-      {c?.format === "pools" && pools?.length > 1 && effectiveStandings && (
-        <PoolWinnersTable pools={pools} standings={effectiveStandings} poolWinners={c.poolWinners || 1} isFs={isFs} />
-      )}
-    </div>
-  );
-}
-
-function PoolWinnersTable({ pools, standings, poolWinners, isFs }) {
-  const rows = useMemo(() =>
-    pools.map(pool => {
-      const top = (standings[pool.poolName] || []).slice(0, poolWinners);
-      return { poolName: pool.poolName, entries: top };
-    }).filter(r => r.entries.length > 0),
-    [pools, standings, poolWinners]
-  );
-
-  if (rows.length === 0) return null;
-
-  return (
-    <div style={{ marginTop: 24 }} data-testid="pool-winners-table">
-      <div className="section-title" style={{ fontSize: isFs ? 20 : 14, marginBottom: 8 }}>
-        Pool Winners
-      </div>
-      <table className="pool__table">
-        <thead>
-          <tr>
-            <th>Pool</th>
-            <th>#</th>
-            <th>Player</th>
-            <th>Dojo</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.flatMap(r =>
-            r.entries.map((s, i) => (
-              <tr key={`${r.poolName}-${i}`} data-testid={`pool-winner-${r.poolName}-${i + 1}`}>
-                {i === 0 && <td rowSpan={r.entries.length} style={{ fontWeight: 600 }}>{r.poolName}</td>}
-                <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
-                <td style={{ fontWeight: 500 }}>{s.player?.name || ""}</td>
-                <td style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
     </div>
   );
 }

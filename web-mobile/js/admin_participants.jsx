@@ -904,6 +904,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                 <input
                   className="input"
                   type="search"
+                  aria-label="Search participants"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   onKeyDown={e => e.key === "Escape" && setSearchQuery("")}
@@ -1038,7 +1039,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               )}
               {visiblePlayers.length === 0 && trimmedSearch && (
                 <div className="empty" style={{ padding: "16px 24px" }}>
-                  No match for "{trimmedSearch}".
+                  {(tagFilter || showOnlyUnchecked)
+                    ? "No participants match current filters."
+                    : `No match for "${trimmedSearch}".`}
                 </div>
               )}
               {visiblePlayers.map((p) => {
@@ -1147,7 +1150,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 }
 
 function participantSearchTarget(p) {
-  return `${p.name || ""} ${p.displayName || ""} ${p.dojo || ""}`.toLowerCase();
+  return [p.name, p.displayName, p.dojo].filter(Boolean).join(" ").toLowerCase();
 }
 
 window.AdminParticipants = AdminParticipants;

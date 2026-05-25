@@ -259,7 +259,13 @@ describe('participantSearchTarget', () => {
 
   it('handles null/undefined fields without throwing', () => {
     expect(() => participantSearchTarget(p(null, null, null))).not.toThrow();
-    expect(participantSearchTarget(p(null, null, null))).toBe('  ');
+    expect(participantSearchTarget(p(null, null, null))).toBe('');
+  });
+
+  it('omits empty displayName — no double-space in search target', () => {
+    const target = participantSearchTarget(p('Alice', null, 'Tokyo'));
+    expect(target).toBe('alice tokyo');
+    expect(target.includes('  ')).toBe(false);
   });
 
   it('does not match a query that is not a substring of any field', () => {

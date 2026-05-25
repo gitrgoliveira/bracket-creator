@@ -54,6 +54,10 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		if entry == "" {
 			continue
 		}
+		if !strings.Contains(entry, `"`) {
+			records = append(records, strings.Split(entry, ","))
+			continue
+		}
 		r := csv.NewReader(strings.NewReader(entry))
 		r.LazyQuotes = true
 		r.TrimLeadingSpace = true

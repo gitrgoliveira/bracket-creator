@@ -1,7 +1,6 @@
 package state
 
 import (
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -107,22 +106,35 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 	hasIDs := len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
 
 	var ids []string
+	var checkedInFlags []bool
 	var playerRecords [][]string
 	for _, record := range records {
+		isCheckedIn := false
+		dataStart := 0
+		if hasIDs {
+			if len(record) > 1 || (len(record) == 1 && uuidRE(strings.TrimSpace(record[0]))) {
+				dataStart = 1
+			}
+		}
+		dataFields := record[dataStart:]
+
+		if len(dataFields) > 2 {
+			last := strings.TrimSpace(dataFields[len(dataFields)-1])
+			if strings.ToLower(last) == "checked_in" {
+				isCheckedIn = true
+				dataFields = dataFields[:len(dataFields)-1]
+			}
+		}
+
 		if hasIDs {
 			id := ""
-			if len(record) > 0 {
+			if dataStart > 0 && len(record) > 0 {
 				id = strings.TrimSpace(record[0])
 			}
 			ids = append(ids, id)
-			if len(record) > 1 {
-				playerRecords = append(playerRecords, record[1:])
-			} else {
-				playerRecords = append(playerRecords, nil)
-			}
-		} else {
-			playerRecords = append(playerRecords, record)
 		}
+		playerRecords = append(playerRecords, dataFields)
+		checkedInFlags = append(checkedInFlags, isCheckedIn)
 	}
 
 	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName)
@@ -130,11 +142,12 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 		return nil, err
 	}
 
-	if hasIDs {
-		for i := range players {
-			if i < len(ids) {
-				players[i].ID = ids[i]
-			}
+	for i := range players {
+		if hasIDs && i < len(ids) {
+			players[i].ID = ids[i]
+		}
+		if i < len(checkedInFlags) {
+			players[i].CheckedIn = checkedInFlags[i]
 		}
 	}
 
@@ -161,31 +174,11 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 // for compID. Mirrors SaveParticipants.
 func (s *Store) saveParticipantsLocked(compID string, players []domain.Player) error {
 	path := s.compPath(compID, "participants.csv")
-	var sb strings.Builder
-	w := csv.NewWriter(&sb)
-	for _, p := range players {
-		id := p.ID
-		if id == "" {
-			id = newParticipantID()
-		}
-		var record []string
-		if p.DisplayName != "" && p.DisplayName != p.Name {
-			record = []string{id, p.Name, p.DisplayName, p.Dojo}
-		} else {
-			record = []string{id, p.Name, p.Dojo}
-		}
-		if p.Tag != "" {
-			record = append(record, p.Tag)
-		}
-		if err := w.Write(record); err != nil {
-			return fmt.Errorf("writing participant CSV record: %w", err)
-		}
+	data, err := marshalParticipantsCSV(players)
+	if err != nil {
+		return err
 	}
-	w.Flush()
-	if err := w.Error(); err != nil {
-		return fmt.Errorf("flushing participant CSV: %w", err)
-	}
-	if err := s.atomicWrite(path, []byte(sb.String()), 0600); err != nil {
+	if err := s.atomicWrite(path, data, 0600); err != nil {
 		return err
 	}
 	for _, key := range []string{"participants.csv", "participants_with_seeds.csv"} {

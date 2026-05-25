@@ -18,8 +18,8 @@ import (
 const (
 	// AnnouncementMaxBodyBytes caps POST /api/tournament/announce.
 	// Worst-case JSON encoding: 200-char message × 6 bytes/escape + keys
-	// ≈ 1242 bytes; 4096 gives ≈3× headroom. Used by adminTinyBody in
-	// server.go so the cap fires before AuthMiddleware.
+	// ≈ 1242 bytes; 4096 gives ≈3× headroom. Applied via MaxBodyBytes
+	// before AuthMiddleware on the /api announce route group in server.go.
 	AnnouncementMaxBodyBytes int64 = 4096
 
 	// ResetMaxBodyBytes caps POST /api/tournament/reset.

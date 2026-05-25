@@ -149,11 +149,39 @@ function buildPlayerMap(comp) {
     return map;
 }
 
+// buildPlayerMetadata composes the canonical metadata array sent to the
+// backend from a (danGrade, existingMeta) pair. Three-way logic:
+//   - grade present → [grade, ...rest]
+//   - no grade + rest exists → ["", ...rest] (preserves slot 1+ alignment)
+//   - no grade + no rest → undefined (caller should omit the field entirely
+//     so participants.csv doesn't gain a stray blank column)
+// Shared by updateCompetition and the replace-participant flow so the column
+// layout stays consistent across both write paths.
+function buildPlayerMetadata(danGrade, existingMeta) {
+    const rest = (existingMeta || []).slice(1);
+    if (danGrade) return [danGrade, ...rest];
+    if (rest.length > 0) return ["", ...rest];
+    return undefined;
+}
+
 // Normalize a Go helper.Player (uppercase fields) to frontend shape (lowercase)
 function normalizePlayer(p) {
     if (!p) return p;
-    if (p.name !== undefined) return p;
-    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "" };
+    if (p.name !== undefined) {
+        // Already camelCase — backfill danGrade from metadata if the field is absent.
+        if (p.danGrade === undefined) {
+            const danGrade = (p.metadata && p.metadata[0]) || "";
+            return { ...p, danGrade };
+        }
+        return p;
+    }
+    const danGrade = (p.Metadata && p.Metadata[0]) || "";
+    // Include the full metadata array so updateCompetition/replaceParticipant
+    // can preserve metadata[1+] slots (e.g. a second dan-grade notation or
+    // other extra CSV columns beyond the grade) when the player round-trips
+    // through the JS layer. Note: "registered"/"manual"/"transfer" are Tags,
+    // not metadata — they are mapped to p.Tag above.
+    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "", danGrade, metadata: p.Metadata || [] };
 }
 
 // Normalize an entire competition detail response from the viewer API.
@@ -206,7 +234,7 @@ function normalizeCompetitionDetail(data) {
     return result;
 }
 
-export { toBackendStatus, isHikiwake, isKikenDecision, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail };
+export { toBackendStatus, isHikiwake, isKikenDecision, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, buildPlayerMetadata };
 
 if (typeof window !== 'undefined') {
     window.toBackendStatus = toBackendStatus;
@@ -215,4 +243,5 @@ if (typeof window !== 'undefined') {
     window.normalizeMatch = normalizeMatch;
     window.normalizeCompetitionDetail = normalizeCompetitionDetail;
     window.buildPlayerMap = buildPlayerMap;
+    window.buildPlayerMetadata = buildPlayerMetadata;
 }

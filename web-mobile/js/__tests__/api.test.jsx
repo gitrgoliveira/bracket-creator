@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake } from '../api_serializers.jsx';
+import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, buildPlayerMetadata } from '../api_serializers.jsx';
 import { API } from '../api_client.jsx';
 
 describe('API Utils', () => {
@@ -212,8 +212,32 @@ describe('API Utils', () => {
         dojo: 'Dojo A',
         seed: 2,
         number: '',
-        tag: ''
+        tag: '',
+        danGrade: '',
+        metadata: [],
       });
+    });
+
+    it('maps Go Metadata[0] → danGrade on PascalCase input and preserves full metadata array', () => {
+      const p = { Name: 'Bob', Dojo: 'Kenshikan', Seed: 0, Metadata: ['3d', 'registered'] };
+      const norm = normalizePlayer(p);
+      expect(norm.danGrade).toBe('3d');
+      expect(norm.metadata).toEqual(['3d', 'registered']);
+    });
+
+    it('backfills danGrade from metadata[0] on already-camelCase input', () => {
+      const p = { name: 'Carol', dojo: 'Yoshinkan', seed: 0, metadata: ['2d'] };
+      expect(normalizePlayer(p).danGrade).toBe('2d');
+    });
+
+    it('leaves danGrade unchanged when already set on camelCase input', () => {
+      const p = { name: 'Dave', dojo: 'Mumeishi', seed: 0, danGrade: '4d' };
+      expect(normalizePlayer(p).danGrade).toBe('4d');
+    });
+
+    it('returns empty danGrade when no metadata', () => {
+      const p = { Name: 'Eve', Dojo: 'Mumeishi', Seed: 0 };
+      expect(normalizePlayer(p).danGrade).toBe('');
     });
   });
 
@@ -786,6 +810,55 @@ describe('API Utils', () => {
         await expect(
           API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 1 }, 'pw')
         ).rejects.toThrow('Failed to estimate schedule');
+      });
+    });
+
+    describe('buildPlayerMetadata', () => {
+      it('returns [grade, ...rest] when grade is present', () => {
+        expect(buildPlayerMetadata('3 Dan', ['3 Dan', 'registered'])).toEqual(['3 Dan', 'registered']);
+        expect(buildPlayerMetadata('2 Dan', [])).toEqual(['2 Dan']);
+      });
+      it('returns ["", ...rest] when grade is empty but slot 1+ exists', () => {
+        expect(buildPlayerMetadata('', ['old', 'registered'])).toEqual(['', 'registered']);
+      });
+      it('returns undefined when both grade and slot 1+ are absent', () => {
+        expect(buildPlayerMetadata('', [])).toBeUndefined();
+        expect(buildPlayerMetadata('', undefined)).toBeUndefined();
+      });
+    });
+
+    describe('updateCompetition', () => {
+      it('converts danGrade → metadata[0] and preserves metadata[1+] slots', async () => {
+        let capturedBody;
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+          capturedBody = JSON.parse(opts.body);
+          return Promise.resolve({ ok: true, json: async () => ({}) });
+        });
+        const players = [
+          // grade + extra slot: preserve both
+          { name: 'Alice', dojo: 'Senbukan', danGrade: '3 Dan', metadata: ['3 Dan', 'registered'] },
+          // grade, no extra slot
+          { name: 'Bob', dojo: 'Kenshikan', danGrade: '2 Dan', metadata: ['2 Dan'] },
+          // no grade, no metadata: metadata field must be omitted entirely
+          { name: 'Carol', dojo: 'Yoshinkan', danGrade: '', metadata: [] },
+          // no grade but has extra slot: emit ["", ...rest] to preserve slot
+          { name: 'Dave', dojo: 'Yoshinkan', danGrade: '', metadata: ['', 'registered'] },
+          // Go-sourced player (no danGrade key at all): pass through unchanged
+          // so metadata[0] (the grade) is NOT dropped
+          { name: 'Eve', dojo: 'Kenshikan', metadata: ['1 Dan'] },
+        ];
+        await API.updateCompetition('c1', { players }, 'pw');
+        expect(capturedBody.players[0].metadata).toEqual(['3 Dan', 'registered']);
+        expect(capturedBody.players[0].danGrade).toBeUndefined();
+        expect(capturedBody.players[1].metadata).toEqual(['2 Dan']);
+        // Carol has no grade and no extra slots — metadata must not appear at all
+        expect(capturedBody.players[2].metadata).toBeUndefined();
+        expect(capturedBody.players[2].danGrade).toBeUndefined();
+        // Dave has no grade but has extra slot: ["", "registered"]
+        expect(capturedBody.players[3].metadata).toEqual(['', 'registered']);
+        // Eve has no danGrade key — metadata must be passed through unchanged
+        expect(capturedBody.players[4].metadata).toEqual(['1 Dan']);
+        expect(capturedBody.players[4].danGrade).toBeUndefined();
       });
     });
   });

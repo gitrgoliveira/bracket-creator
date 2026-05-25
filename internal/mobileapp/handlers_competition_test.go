@@ -1206,3 +1206,44 @@ func TestValidateCompetitionFormat_UnknownPoolFormat(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, http.StatusBadRequest, code)
 }
+
+// TestPUTCompetition_CheckInEnabledPersists verifies that the settings-only
+// PUT handler copies CheckInEnabled from the request body to the stored
+// competition.  This was a regression: the settings merge path copied Naginata
+// but omitted CheckInEnabled, so toggling check-in tracking appeared to save
+// but reverted on refresh.
+func TestPUTCompetition_CheckInEnabledPersists(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "checkin-persist"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:   cid,
+		Name: "CheckIn Test",
+		Date: "12-05-2026",
+	}))
+
+	// Settings-only PUT — enable check-in tracking.
+	body := []byte(`{"id":"checkin-persist","name":"CheckIn Test","date":"12-05-2026","checkInEnabled":true}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	saved, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.True(t, saved.CheckInEnabled, "checkInEnabled must survive a settings-only PUT")
+
+	// Disable it.
+	body = []byte(`{"id":"checkin-persist","name":"CheckIn Test","date":"12-05-2026","checkInEnabled":false}`)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	saved, err = store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.False(t, saved.CheckInEnabled, "checkInEnabled=false must also persist")
+}

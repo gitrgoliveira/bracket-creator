@@ -175,6 +175,14 @@ func isParticipantTag(s string) bool {
 	return false
 }
 
+// TitleCaseName applies the same Unicode Title-casing that CreatePlayers uses
+// so names stored to participants.csv (and seeds.csv) match what is read back
+// on the next load, avoiding seed-merge mismatches. TrimSpace is applied first
+// to match CreatePlayers' per-column trim before title-casing.
+func TitleCaseName(name string) string {
+	return cases.Title(language.Und, cases.NoLower).String(strings.TrimSpace(name))
+}
+
 // SanitizeName returns the canonical display form derived from a participant
 // name: a single token uppercased ("KAZUKI") or "F. LAST" for multi-token
 // names. Exported so state.SaveParticipants can detect display names that

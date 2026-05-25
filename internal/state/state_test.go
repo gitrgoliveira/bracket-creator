@@ -237,7 +237,9 @@ func TestStore_ParticipantsCSV_WithZekkenName(t *testing.T) {
 	require.NoError(t, err)
 
 	compID := "zekken"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+	// SaveParticipants now consults the competition record for WithZekkenName
+	// to pick the canonical CSV column layout — must be set before the save.
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, WithZekkenName: true}))
 
 	players := []domain.Player{
 		{Name: "Akira Tanaka", DisplayName: "A. Tanaka", Dojo: "Mumeishi"},

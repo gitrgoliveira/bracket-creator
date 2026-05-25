@@ -181,9 +181,9 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 // saveParticipantsLocked writes participants without acquiring a lock and
 // invalidates the participant caches. Caller must hold the per-comp write lock
 // for compID. Mirrors SaveParticipants.
-func (s *Store) saveParticipantsLocked(compID string, players []domain.Player) error {
+func (s *Store) saveParticipantsLocked(compID string, players []domain.Player, withZekkenName bool) error {
 	path := s.compPath(compID, "participants.csv")
-	data, err := marshalParticipantsCSV(players)
+	data, err := marshalParticipantsCSV(players, withZekkenName)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (s *Store) AddReservedSlot(compID string, sourceCompID string, sourceRank i
 		return nil, err
 	}
 	players = append(players, placeholder)
-	if err := s.saveParticipantsLocked(compID, players); err != nil {
+	if err := s.saveParticipantsLocked(compID, players, withZekkenName); err != nil {
 		return nil, err
 	}
 
@@ -295,5 +295,5 @@ func (s *Store) RemoveReservedSlot(compID string, slotID string, withZekkenName 
 			filtered = append(filtered, p)
 		}
 	}
-	return s.saveParticipantsLocked(compID, filtered)
+	return s.saveParticipantsLocked(compID, filtered, withZekkenName)
 }

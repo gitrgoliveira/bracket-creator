@@ -90,8 +90,11 @@ func TestParticipants(t *testing.T) {
 }
 
 func TestParticipantsWithZekkenNameRoundTrip(t *testing.T) {
-	// Regression: SaveParticipants writes 2 columns when DisplayName==Name or is empty.
-	// LoadParticipants with withZekkenName=true must tolerate this and not error.
+	// Regression: when WithZekkenName=true the CSV writer must always emit the
+	// DisplayName column (auto-deriving from Name when blank) so the next
+	// LoadParticipants(_, true) read consistently parses
+	// [Name, DisplayName, Dojo, ...] regardless of which optional trailing
+	// fields are present.
 	dir, err := os.MkdirTemp("", "participants-zekken-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -100,8 +103,10 @@ func TestParticipantsWithZekkenNameRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	compID := "comp-zekken"
-	err = os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700)
-	require.NoError(t, err)
+	// SaveParticipants now consults the competition record for WithZekkenName.
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Zekken RT", WithZekkenName: true,
+	}))
 
 	// Players where DisplayName is empty (will be omitted by SaveParticipants → 2-col row)
 	playersToSave := []domain.Player{
@@ -230,7 +235,12 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 	compID := "distinct-rt"
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+	// A distinct DisplayName only makes sense on a zekken competition. The new
+	// CSV writer keys layout off the comp's WithZekkenName flag, so the comp
+	// record must be saved before the participants are written.
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Distinct RT", WithZekkenName: true,
+	}))
 
 	players := []domain.Player{
 		// SanitizeName("Carol") == "CAROL", so "C. CAROL" carries new info.
@@ -247,6 +257,38 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "C. CAROL", loaded[0].DisplayName)
 	assert.Equal(t, "Dojo C", loaded[0].Dojo)
+}
+
+func TestMetadataRoundTrip(t *testing.T) {
+	// Regression: saveParticipantsNoLock must write Metadata (danGrade and
+	// other extra CSV columns) so they survive a save→load cycle. Previously
+	// the write omitted p.Metadata entirely, silently dropping danGrade.
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "meta-rt"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A", Metadata: []string{"2d"}},
+		{Name: "Bob", Dojo: "Dojo B", Metadata: []string{"3d"}, Tag: "registered"},
+		{Name: "Carol", Dojo: "Dojo C"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	require.NoError(t, err)
+	rawStr := string(raw)
+	assert.Contains(t, rawStr, "2d", "danGrade must be written to CSV")
+	assert.Contains(t, rawStr, "3d", "danGrade must be written to CSV")
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 3)
+	assert.Equal(t, []string{"2d"}, loaded[0].Metadata, "Alice's danGrade must round-trip")
+	assert.Equal(t, []string{"3d"}, loaded[1].Metadata, "Bob's danGrade must round-trip")
+	assert.Equal(t, "registered", loaded[1].Tag, "Bob's tag must round-trip alongside danGrade")
+	assert.Empty(t, loaded[2].Metadata, "Carol with no metadata must stay empty")
 }
 
 func TestCheckedInRoundTrip(t *testing.T) {
@@ -378,4 +420,175 @@ func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
 	require.Len(t, loaded2, 1)
 	assert.True(t, loaded2[0].CheckedIn, "4-part UUID row must be detected as checked-in")
 	assert.Equal(t, "Kenshikan", loaded2[0].Dojo, "Dojo must survive after checked_in token is stripped")
+}
+
+func TestAddParticipant_WhitespaceDuplicateGuard(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "ws-dup-add"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "WS Dup"}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{{Name: "Alice", Dojo: "Dojo A"}}))
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Alice ", Dojo: "Dojo B"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space variant must be caught by duplicate guard")
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: " Alice", Dojo: "Dojo B"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "leading-space variant must be caught by duplicate guard")
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "alice", Dojo: "Dojo B"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "case-only variant must be caught by duplicate guard")
+}
+
+func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "ws-dup-upd"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "WS Dup Upd"}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A"},
+		{Name: "Bob", Dojo: "Dojo B"},
+	}))
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	var bobID string
+	for _, p := range loaded {
+		if p.Name == "Bob" {
+			bobID = p.ID
+		}
+	}
+	require.NotEmpty(t, bobID)
+
+	// Renaming Bob to "Alice " (trailing space) must be rejected.
+	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
+		p.Name = "Alice "
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space rename colliding with existing name must be rejected")
+
+	// Renaming Bob to "alice" (case variant) must also be rejected.
+	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
+		p.Name = "alice"
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name must be rejected")
+}
+
+// TestZekkenWithTagDoesNotCorruptCSV pins the marshalParticipantsCSV column-
+// layout fix: a zekken competition where DisplayName equals SanitizeName(Name)
+// AND Tag is non-empty (e.g. the "manual" default applied by the single-add
+// endpoint) used to produce a 4-field row [id, Name, Dojo, Tag] that
+// CreatePlayersFromRecords(_, true) misparsed as
+// (Name, DisplayName=Dojo, Dojo=Tag) — silently corrupting the row.
+// The writer now always emits the DisplayName column for zekken comps.
+func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "zekken-tag"
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Zekken Tag", WithZekkenName: true,
+	}))
+
+	// DisplayName left blank — SaveParticipants must still write the
+	// DisplayName column for zekken comps so the row is round-trip safe.
+	// Tag="manual" mirrors what the single-add endpoint defaults to.
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Akira Tanaka", Dojo: "Mumeishi", Tag: "manual"},
+	}))
+
+	loaded, err := store.LoadParticipants(compID, true)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "Akira Tanaka", loaded[0].Name, "Name must round-trip")
+	assert.Equal(t, "Mumeishi", loaded[0].Dojo, "Dojo must NOT shift into DisplayName (regression)")
+	assert.Equal(t, "manual", loaded[0].Tag, "Tag must NOT shift into Dojo (regression)")
+	assert.NotEmpty(t, loaded[0].DisplayName, "auto-derived DisplayName must be present after reload")
+}
+
+// TestReplaceParticipant_SeedsCSVEscaping pins that seed rename writes
+// participant names through encoding/csv so names containing commas or quotes
+// don't produce a broken seeds.csv. Pre-fix the rewrite used
+// fmt.Fprintf("%d,%s\n") and a name like "Smith, John" emitted an unescaped
+// extra column that ParseSeedsFile then misparsed (silently dropping the
+// seed). Use a non-zekken comp here so the name-with-comma round-trips
+// through participants.csv unchanged.
+func TestReplaceParticipant_SeedsCSVEscaping(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "seeds-escape"
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Seeds Escape", Status: CompStatusSetup,
+	}))
+
+	// Seed Alice with a name that requires CSV escaping when written.
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{{Name: "Alice", SeedRank: 1}}))
+
+	// Rename Alice → "Smith, John" — the comma MUST be CSV-escaped in seeds.csv,
+	// otherwise ParseSeedsFile splits "Smith" / " John" / "1" into the wrong slots.
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Smith, John"
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Verify seeds.csv reloads cleanly with the comma preserved.
+	seeds, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1, "seed must survive the rename — a broken CSV would drop it")
+	assert.Equal(t, "Smith, John", seeds[0].Name, "comma in renamed seed name must round-trip through CSV escaping")
+	assert.Equal(t, 1, seeds[0].SeedRank)
+}
+
+// TestAddParticipant_RejectedAfterStart pins the in-lock status re-check.
+// The HTTP handler does the same check before calling AddParticipant, but a
+// concurrent POST /competitions/:id/start could land between that check and
+// the per-comp lock acquisition. The store-level guard catches the racing
+// write and returns ErrCompetitionNotInSetup → 409.
+func TestAddParticipant_RejectedAfterStart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "started-add"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Started", Status: CompStatusPools}))
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Late", Dojo: "Dojo X"}, false)
+	assert.ErrorIs(t, err, ErrCompetitionNotInSetup, "AddParticipant must reject when status has advanced past setup")
+}
+
+// TestReplaceParticipant_RejectedAfterStart pins the same in-lock guard for
+// the rename/replace path. UpdateParticipant (the check-in toggle path) must
+// stay unconditional — that's verified by the existing UpdateParticipant
+// tests, which never set Status to anything other than empty/setup.
+func TestReplaceParticipant_RejectedAfterStart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "started-replace"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Started", Status: CompStatusSetup}))
+
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+
+	// Advance the competition.
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Started", Status: CompStatusPools}))
+
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Alice Renamed"
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrCompetitionNotInSetup, "ReplaceParticipant must reject when status has advanced past setup")
+
+	// Sanity: UpdateParticipant (the check-in path) MUST still work after start,
+	// otherwise we've regressed the existing check-in toggle flow.
+	_, err = store.UpdateParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.CheckedIn = true
+		return nil
+	})
+	require.NoError(t, err, "UpdateParticipant must remain unconditional so check-in toggles work after start")
 }

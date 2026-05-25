@@ -23,7 +23,7 @@
 // "alert: Unexpected end of JSON input" right after a successful save.
 // See __tests__/api.test.jsx for the regression coverage.
 
-import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult } from './api_serializers.jsx';
+import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 
 const API = {
     async fetchTournament() {
@@ -154,13 +154,32 @@ const API = {
         return res.json();
     },
     async updateCompetition(id, config, password) {
+        // Go's domain.Player uses json:"metadata" (array); the JS layer uses the
+        // friendlier danGrade string. Convert before encoding so the backend can
+        // unmarshal the dan grade into Player.Metadata.
+        let body = config;
+        if (config.players) {
+            body = {
+                ...config,
+                players: config.players.map((player) => {
+                    // Only transform players that have been through normalizePlayer
+                    // (which always adds an explicit danGrade key). A Go-sourced player
+                    // object without danGrade must be passed through unchanged — if we
+                    // destructure it, rest would be empty and metadata[0] would be lost.
+                    if (!('danGrade' in player)) return player;
+                    const { danGrade, metadata: _m, ...p } = player;
+                    const metadata = buildPlayerMetadata(danGrade, player.metadata);
+                    return metadata === undefined ? p : { ...p, metadata };
+                }),
+            };
+        }
         const res = await fetch(`/api/competitions/${id}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify(config)
+            body: JSON.stringify(body)
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -587,6 +606,30 @@ const API = {
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
+        }
+        return res.json();
+    },
+    async addParticipant(compID, payload, password) {
+        const res = await fetch(`/api/competitions/${compID}/participants`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to add participant');
+        }
+        return res.json();
+    },
+    async replaceParticipant(compID, pid, payload, password) {
+        const res = await fetch(`/api/competitions/${compID}/participants/${pid}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to replace participant');
         }
         return res.json();
     },

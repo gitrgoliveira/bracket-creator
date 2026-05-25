@@ -206,7 +206,7 @@ function poolWinners(pools) {
 // format: "playoffs" | "pools"  (pools format always implies pools followed by a bracket)
 function buildEmptyCompetition(args) {
   if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
-  const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix } = args;
+  const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled } = args;
   console.log("buildCompetition: args", args);
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount, gender) : [];
@@ -220,6 +220,7 @@ function buildEmptyCompetition(args) {
     mirror: true,
     withZekkenName: withZekkenName || false,
     numberPrefix: numberPrefix || "",
+    checkInEnabled: checkInEnabled || false,
     courts: courts || ["A", "B"],
     players,
     pools: null, bracket: null,

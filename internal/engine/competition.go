@@ -293,13 +293,14 @@ func (e *Engine) GenerateDraw(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-	if comp.Status != state.CompStatusSetup && comp.Status != "" {
-		if comp.Status == state.CompStatusDrawReady {
-			return validationErrorf("competition %s draw already generated; discard it first to regenerate", id)
-		}
+	switch comp.Status {
+	case state.CompStatusSetup, "":
+		return e.runDrawPipeline(id)
+	case state.CompStatusDrawReady:
+		return validationErrorf("competition %s draw already generated; discard it first to regenerate", id)
+	default:
 		return validationErrorf("competition %s cannot generate draw (status: %s)", id, comp.Status)
 	}
-	return e.runDrawPipeline(id)
 }
 
 // DiscardDraw discards the generated draw for a draw-ready competition,

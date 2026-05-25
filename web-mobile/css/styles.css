@@ -117,17 +117,11 @@ a:hover {
 }
 
 .topbar__logo {
+  display: block;
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  font-size: 14px;
-  letter-spacing: -0.5px;
+  object-fit: cover;
 }
 
 .topbar__title {
@@ -1426,18 +1420,12 @@ a:hover {
 }
 
 .auth__logo {
+  display: block;
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  font-size: 18px;
+  object-fit: cover;
   margin-bottom: 18px;
-  font-family: var(--font-mono);
-  letter-spacing: -0.5px;
 }
 
 .auth__title {
@@ -2022,8 +2010,6 @@ button.my-match__opp {
 }
 
 .viewer__logo {
-  background: rgba(255, 255, 255, 0.18);
-  color: white;
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 

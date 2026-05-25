@@ -1037,7 +1037,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                   Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
                 </div>
               )}
-              {visiblePlayers.length === 0 && trimmedSearch && (
+              {visiblePlayers.length === 0 && (trimmedSearch || tagFilter || showOnlyUnchecked) && (
                 <div className="empty" style={{ padding: "16px 24px" }}>
                   {(tagFilter || showOnlyUnchecked)
                     ? "No participants match current filters."

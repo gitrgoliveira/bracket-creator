@@ -67,6 +67,10 @@ describe('ResetPasswordForm', () => {
   });
 
   afterEach(() => {
+    // Fire captured effect cleanups (e.g. ResetPasswordForm's mountedRef
+    // unmount path) before swapping React back, so the cleanup runs against
+    // the same React the effect was registered with.
+    runtime.unmount();
     global.React = realReact;
     vi.resetModules();
   });

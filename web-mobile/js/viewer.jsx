@@ -2150,11 +2150,15 @@ function deriveAwards(bracket, standings, pools, nameToPlayer) {
           return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
         })
         .filter(Boolean);
+      const slot = (place, side) => {
+        const r = lookup(side);
+        return r ? { place, ...r } : null;
+      };
       return [
-        { place: 1, ...lookup(champion) },
-        runnerUp ? { place: 2, ...lookup(runnerUp) } : null,
-        thirds[0] ? { place: 3, ...lookup(thirds[0]) } : null,
-        thirds[1] ? { place: 3, ...lookup(thirds[1]) } : null,
+        slot(1, champion),
+        slot(2, runnerUp),
+        slot(3, thirds[0]),
+        slot(3, thirds[1]),
       ].filter(Boolean);
     }
   }

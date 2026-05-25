@@ -111,12 +111,21 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 	for _, record := range records {
 		isCheckedIn := false
 		dataStart := 0
-		if hasIDs {
-			if len(record) > 1 || (len(record) == 1 && uuidRE(strings.TrimSpace(record[0]))) {
-				dataStart = 1
-			}
+		if hasIDs && len(record) > 0 && uuidRE(strings.TrimSpace(record[0])) {
+			dataStart = 1
 		}
 		dataFields := record[dataStart:]
+
+		allEmpty := true
+		for _, f := range dataFields {
+			if strings.TrimSpace(f) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
 
 		if len(dataFields) > 2 {
 			last := strings.TrimSpace(dataFields[len(dataFields)-1])
@@ -128,7 +137,7 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 
 		if hasIDs {
 			id := ""
-			if dataStart > 0 && len(record) > 0 {
+			if dataStart > 0 {
 				id = strings.TrimSpace(record[0])
 			}
 			ids = append(ids, id)

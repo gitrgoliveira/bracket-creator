@@ -97,16 +97,27 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		isCheckedIn := false
 
 		// Determine data fields (everything after UUID if present).
-		// If hasIDs but this record's first field is not a UUID (mixed-
-		// format file, e.g. plain "Bob" line), treat the whole record as
-		// data with an empty ID.
+		// Per-record UUID check: only strip the first field as an ID
+		// when it actually matches the UUID pattern.
 		dataStart := 0
-		if hasIDs {
-			if len(record) > 1 || (len(record) == 1 && uuidRE(strings.TrimSpace(record[0]))) {
-				dataStart = 1
-			}
+		if hasIDs && len(record) > 0 && uuidRE(strings.TrimSpace(record[0])) {
+			dataStart = 1
 		}
 		dataFields := record[dataStart:]
+
+		// Skip all-empty records (e.g. blank CSV lines) before
+		// appending to metadata slices — CreatePlayersFromRecords
+		// also skips these, so the slices must stay aligned.
+		allEmpty := true
+		for _, f := range dataFields {
+			if strings.TrimSpace(f) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
 
 		// Detect and strip checked_in marker from the last data field.
 		// Minimum valid data row is "Name,Dojo" (2 parts), so checked_in
@@ -121,7 +132,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 
 		if hasIDs {
 			id := ""
-			if dataStart > 0 && len(record) > 0 {
+			if dataStart > 0 {
 				id = strings.TrimSpace(record[0])
 			}
 			ids = append(ids, id)

@@ -595,6 +595,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 
 				// Settings-only PUT (Players field absent in body).
+				// Block settings changes while a draw is pending — the
+				// draw artifacts (pools.csv / bracket.json) were generated
+				// from the current config; mutating PoolSize, Courts, or
+				// Format while draw-ready would leave config.md inconsistent
+				// with those artifacts when StartCompetition runs.
+				if current.Status == state.CompStatusDrawReady {
+					drawReadyFlag = true
+					return nil, nil
+				}
 				// Existence first, uniqueness second. Pre-fix order ran
 				// checkUniqueCompName BEFORE the transform, so a PUT to
 				// a missing :id whose body Name happened to collide with
@@ -871,6 +880,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
+			return
+		}
 		slot, err := store.AddReservedSlot(id, req.SourceCompID, req.SourceRank, comp.WithZekkenName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -889,6 +902,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
 			return
 		}
 		if err := store.RemoveReservedSlot(id, slotID, comp.WithZekkenName); err != nil {

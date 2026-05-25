@@ -245,11 +245,25 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	return s.saveCompetitionChangedLocked(desired, s.directWrite)
 }
 
-// DeleteCompetitionFile removes a single file from a competition directory.
-// Returns nil when the file does not exist (idempotent delete).
+// allowedDrawFiles is the set of artifact filenames that DiscardDraw may
+// delete. The allowlist prevents a future caller from passing a user-
+// controlled value and gaining an arbitrary-file-deletion primitive inside
+// the data directory.
+var allowedDrawFiles = map[string]struct{}{
+	"pools.csv":        {},
+	"pool-matches.csv": {},
+	"bracket.json":     {},
+}
+
+// DeleteCompetitionFile removes a single draw artifact from a competition
+// directory. Returns nil when the file does not exist (idempotent delete).
+// Only filenames in the allowedDrawFiles set are accepted.
 func (s *Store) DeleteCompetitionFile(id, filename string) error {
 	if err := ValidateCompetitionID(id); err != nil {
 		return fmt.Errorf("invalid competition ID: %w", err)
+	}
+	if _, ok := allowedDrawFiles[filename]; !ok {
+		return fmt.Errorf("DeleteCompetitionFile: filename %q is not an allowed draw artifact", filename)
 	}
 	mu := s.getCompLock(id)
 	mu.Lock()

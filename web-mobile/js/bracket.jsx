@@ -66,12 +66,14 @@ function decisionSuffix(match) {
 }
 
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
-// Returns something like "MM–K", "M–", "△", "H"
+// Returns something like "MM–K", "M–·", "△", "X", "BYE".
+// Hantei (judges' decision after tied encho) is NOT a separate return value;
+// it surfaces as an "HT" suffix appended by decisionSuffix when
+// decidedByHantei=true — e.g. "M–K (E) HT".
 //
 // FR-033: when `encho` carries a positive periodCount, append " (E)" to the
 // rendered string so operators and viewers see at a glance that the match
-// went to overtime. Argument is optional and ignored when undefined/null,
-// keeping all existing call sites valid.
+// went to overtime. Argument is optional and defaults to no-encho when absent.
 //
 // T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
 // encho marker — wired through decisionSuffix() so the same string is used

@@ -145,8 +145,10 @@ describe('formatIpponsScore', () => {
     });
 
     it('score.hantei is not read — only the decidedByHantei param controls HT', () => {
-      // The backend never emits score.hantei; the field is silently dropped by
-      // Go's JSON unmarshaller. Only the positional decidedByHantei arg matters.
+      // The `score` object is derived client-side by normalizeMatch from flat
+      // API fields (ipponsA/B, scoreA/B). The backend never emits a `score`
+      // object, so score.hantei can never appear in real match data. Only the
+      // positional decidedByHantei arg matters.
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E)');
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M–K (E) HT');
     });

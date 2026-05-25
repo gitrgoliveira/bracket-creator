@@ -53,7 +53,10 @@ function decisionSuffix(match) {
   if (!match) return "";
   const d = match.decision || "";
   const enchoOn = !!(match.encho && match.encho.periodCount > 0);
-  const hanteiOn = !!match.decidedByHantei;
+  // Fall back to match.score?.hantei for legacy payloads that carry the flag
+  // there; mirrors the same fallback in formatIpponsScore so display.jsx and
+  // other decisionSuffix callers produce consistent HT suffixes.
+  const hanteiOn = !!(match.decidedByHantei || match.score?.hantei);
   let suffix = "";
   if (isKikenDecisionBC(d)) suffix = "Kiken";
   else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;

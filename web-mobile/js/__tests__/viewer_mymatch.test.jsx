@@ -37,22 +37,30 @@ describe('buildPlayerMatchHighlight', () => {
     expect(result[0].id).toBe('m2');
   });
 
-  it('falls back to case-insensitive name match when UUID misses', () => {
+  it('falls back to case-insensitive exact name match when UUID misses', () => {
     const matches = [{ id: 'm1', sideA: 'John Doe', sideB: 'Jane Smith' }];
-    const result = buildPlayerMatchHighlight('unknown-uuid', matches, 'JOHN');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('m1');
+    expect(buildPlayerMatchHighlight('unknown-uuid', matches, 'John Doe')).toHaveLength(1);
+    expect(buildPlayerMatchHighlight('unknown-uuid', matches, 'JOHN DOE')).toHaveLength(1);
+    expect(buildPlayerMatchHighlight('unknown-uuid', matches, 'john doe')).toHaveLength(1);
+  });
+
+  it('name fallback rejects substring-only matches', () => {
+    const matches = [{ id: 'm1', sideA: 'Banana', sideB: 'Charlie' }];
+    expect(buildPlayerMatchHighlight('no-id', matches, 'Ana')).toEqual([]);
+  });
+
+  it('name fallback trims whitespace on both sides', () => {
+    const matches = [{ id: 'm1', sideA: '  Alice  ', sideB: 'Bob' }];
+    expect(buildPlayerMatchHighlight('no-id', matches, 'Alice')).toHaveLength(1);
+    expect(buildPlayerMatchHighlight('no-id', matches, '  Alice  ')).toHaveLength(1);
   });
 
   it('does not fall back to name match when UUID hits at least once', () => {
-    // FR-020: a UUID hit means we have a definitive answer — do not widen
-    // the result set with name substrings that could pull in unrelated
-    // people sharing a common surname.
     const matches = [
       { id: 'm1', sideA: { id: 'p1', name: 'John Doe' }, sideB: { id: 'p2', name: 'Jane Smith' } },
       { id: 'm2', sideA: { id: 'p3', name: 'Johnny Apple' }, sideB: { id: 'p4', name: 'Kim Lee' } },
     ];
-    const result = buildPlayerMatchHighlight('p1', matches, 'john');
+    const result = buildPlayerMatchHighlight('p1', matches, 'John Doe');
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('m1');
   });

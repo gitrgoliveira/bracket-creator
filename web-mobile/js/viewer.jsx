@@ -146,7 +146,7 @@ function isFollowedPlayer(p, followed) {
 // Return the subset of `matches` where the followed player participates.
 // Matching is by UUID first; if `fallbackName` is provided and no UUID hits
 // (e.g., legacy data that still keys by display name), fall back to a
-// case-insensitive substring match on either side's name.
+// case-insensitive exact match on either side's name.
 function buildPlayerMatchHighlight(playerId, matches, fallbackName) {
   const id = (playerId || "").toString();
   const list = Array.isArray(matches) ? matches : [];
@@ -155,12 +155,12 @@ function buildPlayerMatchHighlight(playerId, matches, fallbackName) {
     return (a && a === id) || (b && b === id);
   }) : [];
   if (byId.length > 0 || !fallbackName) return byId;
-  const needle = String(fallbackName).toLowerCase();
+  const needle = String(fallbackName).trim().toLowerCase();
   if (!needle) return byId;
   return list.filter((m) => {
     const [an, bn] = matchParticipantNames(m);
-    return (an && an.toLowerCase().includes(needle))
-        || (bn && bn.toLowerCase().includes(needle));
+    return (an && an.trim().toLowerCase() === needle)
+        || (bn && bn.trim().toLowerCase() === needle);
   });
 }
 

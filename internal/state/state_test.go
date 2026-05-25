@@ -265,6 +265,31 @@ func TestStore_ParticipantsCSV_Empty(t *testing.T) {
 	assert.Empty(t, loaded)
 }
 
+func TestStore_ParticipantsCSV_BlankLines(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "blank-lines"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	path := filepath.Join(dir, "competitions", compID, "participants.csv")
+	content := "550e8400-e29b-41d4-a716-446655440000,Alice,DojoA\n\n660e8400-e29b-41d4-a716-446655440001,Bob,DojoB\n"
+	err = os.WriteFile(path, []byte(content), 0600)
+	require.NoError(t, err)
+
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
+	assert.Equal(t, "Alice", loaded[0].Name)
+	assert.Equal(t, "660e8400-e29b-41d4-a716-446655440001", loaded[1].ID)
+	assert.Equal(t, "Bob", loaded[1].Name)
+}
+
 func TestStore_ParticipantsCSV_CommaInNameAndDojo(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-test-*")
 	require.NoError(t, err)

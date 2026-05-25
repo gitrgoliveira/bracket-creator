@@ -259,10 +259,25 @@ type MatchResult struct {
 	// stats, audit, and display. Zero value omitted from the wire.
 	//
 	// Pointer semantics at the API boundary: when a client omits the
-	// field (nil), the engine preserves whatever value is already stored;
-	// when the client explicitly sends true or false the engine applies
-	// it. This prevents a re-score that doesn't mention the flag from
-	// silently clearing a previously-recorded hantei decision.
+	// field (nil) on a BRACKET-match score request, the engine preserves
+	// whatever value is already stored; when the client explicitly sends
+	// true or false the engine applies it. This prevents a re-score that
+	// doesn't mention the flag from silently clearing a previously-
+	// recorded hantei decision.
+	//
+	// Preserve-on-nil applies ONLY to bracket matches (see
+	// engine/scoring.go:recordBracketMatchResult and
+	// engine/scoring_tx.go's bracket commit branch — both gate the
+	// assignment on result.DecidedByHantei != nil). Pool matches are
+	// merged with `*r = *result`, so a nil pointer there will clear any
+	// stored value. This is acceptable in practice because FIK rules
+	// don't permit hantei in pool play (see persistence caveat below).
+	//
+	// On READ paths that project BracketMatch.DecidedByHantei (bool) back
+	// into MatchResult for SSE / HTTP responses, use HanteiPtr below so
+	// non-hantei matches emit nil (omitempty), keeping the wire payload
+	// minimal and signalling "no hantei" by absence rather than an
+	// explicit false.
 	//
 	// Persistence caveat: pool matches are stored in pool-matches.csv,
 	// whose column layout does NOT include this field — so a hantei
@@ -274,6 +289,19 @@ type MatchResult struct {
 	// allow it in pool play) that the gap is acceptable. The yaml tag
 	// is retained for future YAML-serialised contexts.
 	DecidedByHantei *bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+}
+
+// HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths
+// that project a BracketMatch.DecidedByHantei (bool) into a MatchResult
+// (which uses *bool with omitempty) so the wire payload OMITS the field
+// for non-hantei matches rather than emitting an explicit "false".
+// Always assigning &bm.DecidedByHantei would leak a non-nil pointer for
+// every non-hantei match, defeating the omitempty contract.
+func HanteiPtr(b bool) *bool {
+	if !b {
+		return nil
+	}
+	return &b
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a

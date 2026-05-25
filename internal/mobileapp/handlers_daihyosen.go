@@ -199,7 +199,7 @@ func findMatchForDaihyosen(store DaihyosenStore, compID, matchID string) (*state
 					Decision:        bm.Decision,
 					DecisionBy:      bm.DecisionBy,
 					Encho:           bm.Encho,
-					DecidedByHantei: &bm.DecidedByHantei,
+					DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
 				}, true, nil
 			}
 		}

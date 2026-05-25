@@ -588,8 +588,10 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           // Bracket matches carry scoreA/scoreB rather than ipponsA/B.
           // Derive per-side arrays so the score reads SHIRO–AKA correctly
           // even when AKA wins (winnerPts–loserPts fallback inverts left/right).
-          const tIpponsA = m.ipponsA || (m.scoreA ? m.scoreA.split("") : []);
-          const tIpponsB = m.ipponsB || (m.scoreB ? m.scoreB.split("") : []);
+          // Use ipponsFromScore so the trailing "(HN)" hansoku suffix from
+          // Go's formatScore doesn't get split into bogus ippon letters.
+          const tIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
+          const tIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(tIpponsB, tIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}</div>;
         })()}
         {m.status === "running" && <span className="bc-live">●</span>}
@@ -732,8 +734,10 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
           const isCorrection = m.status === "completed" && m.score?.corrected;
           // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B
           // arrays (see normalizeMatch). Apply the same fallback used in VSchedItem.
-          const seIpponsA = m.ipponsA || (m.scoreA ? m.scoreA.split("") : []);
-          const seIpponsB = m.ipponsB || (m.scoreB ? m.scoreB.split("") : []);
+          // Use ipponsFromScore so the trailing "(HN)" hansoku suffix from
+          // Go's formatScore doesn't get split into bogus ippon letters.
+          const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
+          const seIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>

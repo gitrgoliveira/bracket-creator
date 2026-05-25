@@ -325,7 +325,7 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 						DecisionBy:      bm.DecisionBy,
 						DecisionReason:  bm.DecisionReason,
 						Encho:           bm.Encho,
-						DecidedByHantei: &bm.DecidedByHantei,
+						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
 					}, nil
 				}
 			}

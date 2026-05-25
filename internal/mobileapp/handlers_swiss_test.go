@@ -189,7 +189,7 @@ func TestSwissGenerateRound_NonSwissFormat(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     "pools-comp",
 		Name:   "Pools",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 	}))
 
 	w := httptest.NewRecorder()

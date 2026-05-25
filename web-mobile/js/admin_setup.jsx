@@ -55,18 +55,12 @@ function deriveCompetitionName(rawName, kind, gender) {
 // playoffs-only and league-only competitions don't use pool-size
 // settings (knockout has no pools; league runs a single round-robin
 // without user-configured size), so the guard short-circuits for those
-// formats. "pools" (pool-only) and "mixed" (pools + knockout) both
-// require valid pool size + winners-per-pool.
-//
-// FR-050 / T044: the format taxonomy split "pools" into two distinct
-// values — "pools" (legacy meaning in the old wire format kept for
-// back-compat) and "mixed" (new: pools followed by knockout in the new
-// taxonomy). Pool-size validation applies to both since both run pool
-// play; the difference is whether a knockout stage follows.
+// formats. "mixed" (pools + knockout) requires valid pool size +
+// winners-per-pool.
 //
 // Exported for vitest at __tests__/admin_setup.test.jsx.
 function validatePoolSettings(format, poolSize, winners) {
-  if (format !== "pools" && format !== "mixed") return { ok: true, error: null };
+  if (format !== "mixed") return { ok: true, error: null };
   if (!Number.isInteger(poolSize) || poolSize < 3) {
     return { ok: false, error: "Players per pool must be a whole number ≥ 3." };
   }
@@ -286,7 +280,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [gender, setGender] = useStateA("M"); // for individual: M/F/X
   const [format, setFormat] = useStateA("playoffs");
   // FR-050 / T044: per-phase round-robin shape selector. Only meaningful
-  // when the format runs pool play ("pools", "mixed", "league"); default
+  // when the format runs pool play ("mixed", "league"); default
   // "full" (every-vs-every) matches the historical behaviour. "partial"
   // (neighbour-only) is the new option for league-sized fields where a
   // full round-robin would not fit in the day's schedule.
@@ -409,7 +403,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // signature unchanged and lets the backend's JSON binding pick up
     // the camelCase key directly. Only emit for formats that run pool
     // play — knockout-only competitions have no pool phase.
-    if (format === "pools" || format === "mixed" || format === "league") {
+    if (format === "mixed" || format === "league") {
       c.poolFormat = poolFormat;
     }
     // T190 (FR-050a): persist swissRounds when format=swiss. Same
@@ -491,38 +485,21 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           <div className="field">
             <label className="field__label">Format</label>
-            {/* FR-050 / T044 / T190: five-option format taxonomy. */}
-            {/* - "playoffs" — knockout only (no pools). */}
-            {/* - "mixed"    — pools followed by knockout (the new */}
-            {/*               canonical value for what the old UI labelled */}
-            {/*               "Pools + Knockout"; old "pools" rows remain */}
-            {/*               readable but new competitions use "mixed"). */}
-            {/* - "pools"    — pool play only, no knockout phase. */}
-            {/* - "league"   — single round-robin, standings final, no */}
-            {/*               playoff phase. IsPlayoffEnabled returns */}
-            {/*               false on the backend, so the create-playoff */}
-            {/*               affordance is hidden for these (T045). */}
-            {/* - "swiss"    — Swiss-system pairing across N rounds */}
-            {/*               (FR-050a); no pools or bracket. The */}
-            {/*               swissRounds field below configures the */}
-            {/*               round count. */}
             <div className="radio-group">
               <button className={`radio-pill ${format === "playoffs" ? "is-active" : ""}`} type="button" onClick={() => setFormat("playoffs")}>Knockout only</button>
               <button className={`radio-pill ${format === "mixed" ? "is-active" : ""}`} type="button" onClick={() => setFormat("mixed")}>Pools + Knockout</button>
-              <button className={`radio-pill ${format === "pools" ? "is-active" : ""}`} type="button" onClick={() => setFormat("pools")}>Pools only</button>
               <button className={`radio-pill ${format === "league" ? "is-active" : ""}`} type="button" onClick={() => setFormat("league")}>League</button>
               <button className={`radio-pill ${format === "swiss" ? "is-active" : ""}`} type="button" onClick={() => setFormat("swiss")}>Swiss</button>
             </div>
             <div className="field__hint">
               {format === "playoffs" && "Direct single-elimination knockout."}
               {format === "mixed" && "Round-robin pools first, then top finishers advance to a knockout bracket."}
-              {format === "pools" && "Round-robin pool play; standings within each pool decide placements (no knockout)."}
               {format === "league" && "Single round-robin across all participants; final standings determine the winner (no knockout)."}
               {format === "swiss" && "Swiss-system: fixed number of rounds, pairing players with equal win counts; cumulative standings decide the winner."}
             </div>
           </div>
 
-          {(format === "pools" || format === "league") && (
+          {format === "league" && (
             <div className="field">
               <label className="field__label">Round-robin shape</label>
               <div className="radio-group">
@@ -580,7 +557,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Different competitions can share shiaijo (courts); the schedule prevents conflicts.</div>
           </div>
 
-          {(format === "pools" || format === "mixed") && (
+          {format === "mixed" && (
             <>
               <div className="field">
                 <label className="field__label">Pool size is a</label>
@@ -809,7 +786,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                     <tr key={comp.id || comp.name}>
                       <td>{comp.id || "—"}</td>
                       <td>{comp.name || "—"}</td>
-                      <td>{comp.format || "pools"}</td>
+                      <td>{comp.format || "mixed"}</td>
                       <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || "—"}</td>
                       <td>{comp.seeds || "—"}</td>
                     </tr>

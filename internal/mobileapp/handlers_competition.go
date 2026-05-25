@@ -110,7 +110,7 @@ func validateCompetitionDurations(comp *state.Competition) error {
 
 func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	switch format {
-	case "", state.CompFormatPools, state.CompFormatPlayoffs,
+	case "", state.CompFormatPlayoffs,
 		state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
 		// ok
 	default:
@@ -123,6 +123,13 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 		return http.StatusBadRequest, fmt.Errorf("unknown poolFormat %q", poolFormat)
 	}
 	return 0, nil
+}
+
+func migratePoolsFormat(format string) string {
+	if format == "pools" {
+		return state.CompFormatMixed
+	}
+	return format
 }
 
 // validateSwissConfig enforces FR-050a: when Format == swiss, SwissRounds
@@ -1126,7 +1133,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if src.Format != state.CompFormatPools {
+		if src.Format != state.CompFormatMixed {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "source competition must use pools format"})
 			return
 		}

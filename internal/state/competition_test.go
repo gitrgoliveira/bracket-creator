@@ -91,15 +91,13 @@ func TestSwissRoundsFieldPersists(t *testing.T) {
 
 // TestLeagueFormatHidesPlayoffs verifies FR-050 / FR-051:
 // IsPlayoffEnabled() reports whether the competition's format includes a
-// playoff phase. League and pure-pools formats return false; playoffs and
-// mixed return true.
+// playoff phase. League returns false; playoffs and mixed return true.
 func TestLeagueFormatHidesPlayoffs(t *testing.T) {
 	cases := []struct {
 		format string
 		want   bool
 	}{
 		{format: "league", want: false},
-		{format: "pools", want: false},
 		{format: "playoffs", want: true},
 		{format: "mixed", want: true},
 	}
@@ -110,6 +108,27 @@ func TestLeagueFormatHidesPlayoffs(t *testing.T) {
 			assert.Equal(t, tc.want, c.IsPlayoffEnabled(), "format=%q", tc.format)
 		})
 	}
+}
+
+func TestLoadCompetition_MigratesPoolsToMixed(t *testing.T) {
+	dir, err := os.MkdirTemp("", "pools-migration-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	comp := &Competition{
+		ID: "legacy-pools", Name: "Legacy", Kind: "individual",
+		Format: "pools", PoolSize: 3, Status: "setup",
+		Courts: []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	loaded, loadErr := store.LoadCompetition("legacy-pools")
+	require.NoError(t, loadErr)
+	require.NotNil(t, loaded)
+	assert.Equal(t, CompFormatMixed, loaded.Format, "legacy format=pools should migrate to mixed on load")
 }
 
 // TestCopyCompetition_WithPlayersAndCourts exercises the Players and

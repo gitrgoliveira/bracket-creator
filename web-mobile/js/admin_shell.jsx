@@ -270,7 +270,7 @@ function CompCard({ c, onOpen, onStart }) {
       <div className="tcard__stats">
         <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
         <div className="tcard__stat"><div className="v">{c.courts.length}</div><div className="l">{pluralize(c.courts.length, "Shiaijo", "Shiaijo")}</div></div>
-        <div className="tcard__stat"><div className="v">{c.format === "pools" ? "Pools" : "KO"}</div><div className="l">Format</div></div>
+        <div className="tcard__stat"><div className="v">{c.format === "mixed" ? "P+KO" : c.format === "league" ? "League" : c.format === "swiss" ? "Swiss" : "KO"}</div><div className="l">Format</div></div>
         {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Live</div></div>}
       </div>
       <div className="tcard__actions">

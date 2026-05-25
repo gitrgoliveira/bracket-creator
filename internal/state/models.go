@@ -172,7 +172,6 @@ const (
 
 // Competition.Format values.
 const (
-	CompFormatPools    = "pools"
 	CompFormatPlayoffs = "playoffs"
 	CompFormatMixed    = "mixed"  // FR-050
 	CompFormatLeague   = "league" // FR-050

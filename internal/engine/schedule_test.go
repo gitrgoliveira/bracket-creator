@@ -130,7 +130,7 @@ func TestGenerateSchedule_PoolsFormat(t *testing.T) {
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "P1-0", Court: "A", Status: state.MatchStatusScheduled},

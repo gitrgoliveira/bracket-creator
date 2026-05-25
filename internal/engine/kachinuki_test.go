@@ -414,7 +414,7 @@ func TestMaybeAdvanceKachinuki_NoOutcome(t *testing.T) {
 		ID:            compID,
 		TeamMatchType: state.TeamMatchTypeKachinuki,
 		TeamSize:      5,
-		Format:        state.CompFormatPools,
+		Format:        state.CompFormatMixed,
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
@@ -449,7 +449,7 @@ func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 		ID:            compID,
 		TeamMatchType: state.TeamMatchTypeKachinuki,
 		TeamSize:      5,
-		Format:        state.CompFormatPools,
+		Format:        state.CompFormatMixed,
 	}))
 	// Single hikiwake bout — both players are retired; remaining rosters empty.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -484,7 +484,7 @@ func TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate(t *testing.T) {
 		ID:            compID,
 		TeamMatchType: state.TeamMatchTypeKachinuki,
 		TeamSize:      5,
-		Format:        state.CompFormatPools,
+		Format:        state.CompFormatMixed,
 	}))
 	// After B-Senpo beats A-Senpo, A's remaining roster is empty → match ends.
 	// With kachinukiRemainingRoster: knownA={A-Senpo}, retiredA={A-Senpo},

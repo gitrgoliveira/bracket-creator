@@ -21,7 +21,7 @@ type ImportManifestComp struct {
 	ID             string   `yaml:"id"`
 	Name           string   `yaml:"name"`
 	Kind           string   `yaml:"kind"`   // "individual" or "team"
-	Format         string   `yaml:"format"` // "pools" or "playoffs" or "swiss"
+	Format         string   `yaml:"format"` // "mixed" or "playoffs" or "swiss"
 	Courts         []string `yaml:"courts"`
 	PoolSize       int      `yaml:"pool_size"`
 	PoolSizeMode   string   `yaml:"pool_size_mode"` // "max" or "min"
@@ -148,7 +148,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		ID:             entry.ID,
 		Name:           trimmedName,
 		Kind:           strings.TrimSpace(entry.Kind),
-		Format:         strings.TrimSpace(entry.Format),
+		Format:         migratePoolsFormat(strings.TrimSpace(entry.Format)),
 		Courts:         entry.Courts,
 		PoolSize:       entry.PoolSize,
 		PoolSizeMode:   strings.TrimSpace(entry.PoolSizeMode),

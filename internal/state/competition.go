@@ -39,7 +39,11 @@ func (s *Store) LoadCompetition(id string) (*Competition, error) {
 	if data == nil {
 		return nil, nil
 	}
-	return s.copyCompetition(data.(*Competition)), nil
+	c := s.copyCompetition(data.(*Competition))
+	if c.Format == "pools" {
+		c.Format = CompFormatMixed
+	}
+	return c, nil
 }
 
 func parseCompetitionFile(path string) (any, error) {
@@ -53,6 +57,9 @@ func parseCompetitionFile(path string) (any, error) {
 	var c Competition
 	if err := parseFrontMatter(raw, &c); err != nil {
 		return nil, err
+	}
+	if c.Format == "pools" {
+		c.Format = CompFormatMixed
 	}
 	return &c, nil
 }

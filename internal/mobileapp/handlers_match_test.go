@@ -303,7 +303,7 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 
 	comp := state.Competition{
 		ID:     "pools1",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
@@ -390,7 +390,7 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "bulk1", Format: state.CompFormatPools, Status: state.CompStatusPools,
+		ID: "bulk1", Format: state.CompFormatMixed, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants("bulk1", []domain.Player{
 		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
@@ -439,7 +439,7 @@ func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "qs1", Format: state.CompFormatPools, Status: state.CompStatusPools, TeamSize: 3,
+		ID: "qs1", Format: state.CompFormatMixed, Status: state.CompStatusPools, TeamSize: 3,
 	}))
 	require.NoError(t, store.SavePools("qs1", []helper.Pool{
 		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}, {Name: "TeamC"}}},
@@ -514,7 +514,7 @@ func TestPostScoreKikenAutoFillsRegulation(t *testing.T) {
 
 	compID := "kiken-reg"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice"}, {Name: "Bob"},
@@ -555,7 +555,7 @@ func TestPostScoreKikenInEncho(t *testing.T) {
 
 	compID := "kiken-encho"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice"}, {Name: "Bob"},
@@ -595,7 +595,7 @@ func TestPostScoreKikenInvalidScoreline(t *testing.T) {
 
 	compID := "kiken-bad"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice"}, {Name: "Bob"},
@@ -673,7 +673,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 
 	compID := "encho-cap-test"
 	require.NoError(t, realStore.SaveCompetition(&state.Competition{
-		ID: compID, Format: state.CompFormatPools, Status: state.CompStatusPools,
+		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools,
 		MaxEnchoPeriods: 2,
 	}))
 	require.NoError(t, realStore.SaveParticipants(compID, []domain.Player{

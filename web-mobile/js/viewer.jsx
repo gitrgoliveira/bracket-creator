@@ -450,7 +450,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                           <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
                           <div className="vlist-item__name">{c.name}</div>
                           <div className="vlist-item__meta">
-                            {c.players.length} {c.kind === "team" ? "teams" : "players"} · {c.format === "pools" ? "Pools + Knockout" : "Knockout"} · Starts {c.startTime}
+                            {c.players.length} {c.kind === "team" ? "teams" : "players"} · {c.format === "mixed" ? "Pools + Knockout" : c.format === "league" ? "League" : c.format === "swiss" ? "Swiss" : "Knockout"} · Starts {c.startTime}
                           </div>
                         </div>
                         <StatusBadge status={c.status} showLiveDot />
@@ -1139,7 +1139,7 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
 
   const derivedBracket = useMemo(() => {
     if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;
-    if (c.format === "pools" && pools && pools.length > 0) {
+    if (c.format === "mixed" && pools && pools.length > 0) {
       const placeholders = [];
       const winners = c.poolWinners || 2;
       pools.forEach(p => {

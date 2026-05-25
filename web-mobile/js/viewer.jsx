@@ -1262,6 +1262,10 @@ function MatchDetailCard({ match, onClose }) {
   const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
   const isLive = match.status === "running";
   const isDone = match.status === "completed";
+  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
+  // same fallback used in VSchedItem so the score display is consistent.
+  const mdcIpponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
+  const mdcIpponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
 
   return (
     <div className="match-detail-card">
@@ -1285,14 +1289,9 @@ function MatchDetailCard({ match, onClose }) {
           <span className="match-detail-card__name">{bName}</span>
         </div>
         <div className="match-detail-card__score">
-          {isDone ? (() => {
-            // Bracket matches use scoreA/scoreB strings; apply the same fallback
-            // used in VSchedItem so the score renders instead of falling back to "—".
-            const mdcIpponsA = match.ipponsA || (match.scoreA ? match.scoreA.split("") : []);
-            const mdcIpponsB = match.ipponsB || (match.scoreB ? match.scoreB.split("") : []);
-            const scoreStr = window.formatIpponsScore(mdcIpponsB, mdcIpponsA, match.score, match.decision, match.encho, match.decidedByHantei);
-            return <span>{scoreStr || "—"}</span>;
-          })() : <span className="match-detail-card__vs">vs</span>}
+          {isDone
+            ? <span>{window.formatIpponsScore(mdcIpponsB, mdcIpponsA, match.score, match.decision, match.encho, match.decidedByHantei) || "—"}</span>
+            : <span className="match-detail-card__vs">vs</span>}
         </div>
         <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
           <span className="match-detail-card__name">{aName}</span>

@@ -177,9 +177,10 @@ func isParticipantTag(s string) bool {
 
 // TitleCaseName applies the same Unicode Title-casing that CreatePlayers uses
 // so names stored to participants.csv (and seeds.csv) match what is read back
-// on the next load, avoiding seed-merge mismatches.
+// on the next load, avoiding seed-merge mismatches. TrimSpace is applied first
+// to match CreatePlayers' per-column trim before title-casing.
 func TitleCaseName(name string) string {
-	return cases.Title(language.Und, cases.NoLower).String(name)
+	return cases.Title(language.Und, cases.NoLower).String(strings.TrimSpace(name))
 }
 
 // SanitizeName returns the canonical display form derived from a participant

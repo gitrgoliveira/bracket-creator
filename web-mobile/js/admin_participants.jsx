@@ -933,9 +933,9 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
             </div>
           )}
           {replaceTarget && (
-            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
+            <div role="dialog" aria-modal="true" aria-labelledby="replace-modal-title" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }} onKeyDown={e => { if (e.key === "Escape") setReplaceTarget(null); }} tabIndex={-1}>
               <div className="card" style={{ minWidth: 320, maxWidth: 420, margin: 16 }}>
-                <div className="card__head"><div className="card__title">Replace {replaceTarget.name}</div></div>
+                <div className="card__head"><div id="replace-modal-title" className="card__title">Replace {replaceTarget.name}</div></div>
                 <div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div>
                     <div className="field__label">Name *</div>

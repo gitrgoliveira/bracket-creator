@@ -233,9 +233,9 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 
 	// Duplicate-name guard: when the transform renames the participant,
 	// reject if any OTHER participant already has that name. Trim both
-	// sides — LoadParticipants canonicalises via SanitizeName (TrimSpace
-	// + Title), so "Alice " collapses to "Alice" on the next load and
-	// would reintroduce ambiguous name-keyed lookups.
+	// sides — LoadParticipants canonicalises via helper.CreatePlayers
+	// (TrimSpace + cases.Title), so "Alice " collapses to "Alice" on
+	// the next load and would reintroduce ambiguous name-keyed lookups.
 	if players[foundIdx].Name != oldName {
 		newTrimmed := strings.TrimSpace(players[foundIdx].Name)
 		for i := range players {

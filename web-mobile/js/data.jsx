@@ -250,6 +250,7 @@ function applyFormat(c) {
       simulateRounds(c.bracket, c.bracket.length);
     }
   } else {
+    // "playoffs", "league", and "swiss" all use a knockout bracket for sample data.
     c.bracket = buildBracket(c.players, c.courts); advanceByes(c.bracket);
     if (c.status === "playoffs") simulateRounds(c.bracket, Math.max(1, Math.floor(c.bracket.length / 2)), true);
     if (c.status === "completed") simulateRounds(c.bracket, c.bracket.length);

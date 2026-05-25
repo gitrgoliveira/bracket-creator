@@ -21,7 +21,7 @@ type ImportManifestComp struct {
 	ID             string   `yaml:"id"`
 	Name           string   `yaml:"name"`
 	Kind           string   `yaml:"kind"`   // "individual" or "team"
-	Format         string   `yaml:"format"` // "mixed", "playoffs", "league", or "swiss"
+	Format         string   `yaml:"format"` // "mixed", "playoffs", "league", or "swiss"; omit/empty for default (playoffs)
 	Courts         []string `yaml:"courts"`
 	PoolSize       int      `yaml:"pool_size"`
 	PoolSizeMode   string   `yaml:"pool_size_mode"` // "max" or "min"

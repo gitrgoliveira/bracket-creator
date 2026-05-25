@@ -82,6 +82,25 @@ describe('deriveAwards (bracket-based)', () => {
     expect(awards[1]).toEqual({ place: 2, name: 'Y', dojo: '' });
   });
 
+  it('shrinks the podium for bye/placeholder sides without throwing', () => {
+    const placeholder = { id: '', name: '' };
+    const bracket = {
+      rounds: [
+        [
+          { sideA: 'Alice', sideB: placeholder, winner: 'Alice' },
+          { sideA: placeholder, sideB: 'Bob', winner: 'Bob' },
+        ],
+        [{ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' }],
+      ],
+    };
+    const m = playerMap(['Alice', 'Aoyama'], ['Bob', 'Bunkyo']);
+    const awards = deriveAwards(bracket, null, null, m);
+    expect(awards).toEqual([
+      { place: 1, name: 'Alice', dojo: 'Aoyama' },
+      { place: 2, name: 'Bob', dojo: 'Bunkyo' },
+    ]);
+  });
+
   it('omits a third place when only one semi-final exists (4-player bracket)', () => {
     const bracket = {
       rounds: [

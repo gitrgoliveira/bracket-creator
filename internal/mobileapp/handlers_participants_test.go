@@ -221,6 +221,60 @@ func TestSeedRenamingUnderReplace(t *testing.T) {
 	assert.Equal(t, "Alice Cooper", storedSeeds[0].Name)
 }
 
+// TestNameTitleCaseCanonicalization verifies that names submitted in non-canonical
+// casing (e.g. "alice cooper") are stored Title-cased so participants.csv and
+// seeds.csv always carry the same form that CreatePlayers produces on load,
+// preventing seed-merge mismatches.
+func TestNameTitleCaseCanonicalization(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-title-case"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Title Case Test", Status: state.CompStatusSetup,
+	}))
+
+	// POST with a lower-cased name.
+	body, _ := json.Marshal(map[string]interface{}{"name": "alice cooper", "dojo": "Test Dojo"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var added domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
+	assert.Equal(t, "Alice Cooper", added.Name, "AddParticipant must Title-case the stored name")
+
+	// Seed the stored name — it must match what LoadSeeds returns after a reload.
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{{Name: "Alice Cooper", SeedRank: 1}}))
+
+	// PUT with another non-canonical name — verify the seed is updated to Title-case.
+	replBody, _ := json.Marshal(map[string]interface{}{"name": "bob the builder", "dojo": "Builder Dojo"})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(replBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var updated domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &updated))
+	assert.Equal(t, "Bob The Builder", updated.Name, "UpdateParticipant must Title-case the stored name")
+
+	// Seed must be renamed to the Title-cased form.
+	seeds, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1)
+	assert.Equal(t, "Bob The Builder", seeds[0].Name, "seed name must match the Title-cased participant name")
+
+	// Reload participants — seed merge must succeed (seed rank != 0).
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, players, 1)
+	assert.Equal(t, "Bob The Builder", players[0].Name)
+	assert.Equal(t, 1, players[0].Seed, "seed must merge after reload because names are canonical on both sides")
+}
+
 // TestDuplicateNameRejection pins the bead acceptance criterion that
 // add/replace must reject a name already in the roster with 409. Without
 // the guard, name-keyed lookups (seeds, lineups) would silently key on

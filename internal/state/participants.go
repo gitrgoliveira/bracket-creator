@@ -225,6 +225,11 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 	if err := transform(&players[foundIdx]); err != nil {
 		return nil, err
 	}
+	// Canonicalize to match what CreatePlayers produces on load (Title-case),
+	// so participants.csv and seeds.csv store the same form that will be read
+	// back — otherwise a rename to "alice cooper" would be read as "Alice Cooper"
+	// while seeds.csv still holds "alice cooper", breaking seed merging.
+	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
 
 	// Duplicate-name guard: when the transform renames the participant,
 	// reject if any OTHER participant already has that name. Trim both
@@ -356,6 +361,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 		}
 	}
 
+	p.Name = helper.TitleCaseName(p.Name)
 	p.ID = newParticipantID()
 	p.PoolPosition = int64(len(players))
 	if p.DisplayName == "" {

@@ -2440,8 +2440,9 @@ function AnnouncementBanner({ announcements, onDismiss }) {
   const list = announcements || [];
   const [idx, setIdx] = useState(0);
 
-  // Reset to 0 whenever the list shrinks so the next item shown is
-  // deterministic (first/oldest) rather than wherever % lands.
+  // Reset to 0 on any list-length change (add or dismiss) so the viewer
+  // always restarts from item 0 — deterministic and prevents out-of-bounds
+  // after a dismiss.
   useEffect(() => {
     setIdx(0);
   }, [list.length]);

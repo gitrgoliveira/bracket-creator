@@ -359,15 +359,22 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   };
 
   const [tagFilter, setTagFilter] = useStateA(null);
+  const [searchQuery, setSearchQuery] = useStateA("");
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
   const players = useMemoA(() => c.players || [], [c.players]);
   const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
   const visiblePlayers = useMemoA(() => {
+    const q = searchQuery.trim().toLowerCase();
     let out = players;
     if (tagFilter) out = out.filter(p => p.tag === tagFilter);
     if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
+    if (q) out = out.filter(p =>
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.displayName || "").toLowerCase().includes(q) ||
+      (p.dojo || "").toLowerCase().includes(q)
+    );
     return out;
-  }, [players, tagFilter, showOnlyUnchecked]);
+  }, [players, tagFilter, showOnlyUnchecked, searchQuery]);
   const dojoFirstRowSet = useMemoA(() => {
     const seen = new Set();
     const first = new Set();
@@ -890,6 +897,27 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               Assign seed ranks (1, 2, 3…) to separate top players. Seeds 1 and 2 will be placed on opposite sides of the bracket.
               Drag rows to change order.
             </div>
+            {players.length > 0 && (
+              <div style={{ position: "relative", marginBottom: 8 }}>
+                <input
+                  className="input"
+                  type="search"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => e.key === "Escape" && setSearchQuery("")}
+                  placeholder="Search name, dojo…"
+                  style={{ width: "100%", paddingRight: searchQuery ? 28 : undefined }}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", fontSize: 14, padding: 2 }}
+                    aria-label="Clear search"
+                  >×</button>
+                )}
+              </div>
+            )}
           </div>
           {hasGaps && (
             <div className="alert alert--error" style={{ margin: "0 16px 16px" }}>
@@ -1000,14 +1028,20 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               {/* When a tag filter is active, reorder controls would operate on */}
               {/* full-list indices but rows are filtered — so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
-              {(tagFilter || showOnlyUnchecked) && (
+              {(tagFilter || showOnlyUnchecked || searchQuery.trim()) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
+                  {visiblePlayers.length < players.length && `Showing ${visiblePlayers.length} of ${players.length}. `}
                   Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
+                </div>
+              )}
+              {visiblePlayers.length === 0 && searchQuery.trim() && (
+                <div className="empty" style={{ padding: "16px 24px" }}>
+                  No match for "{searchQuery.trim()}".
                 </div>
               )}
               {visiblePlayers.map((p) => {
                 const i = players.indexOf(p);
-                const reorderDisabled = !!tagFilter || showOnlyUnchecked;
+                const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!searchQuery.trim();
                 return (
                   <div
                     key={p.id}

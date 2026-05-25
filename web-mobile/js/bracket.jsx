@@ -79,9 +79,11 @@ function decisionSuffix(match) {
 // supersedes the bare " (E)" so we don't double-print "(E)" alongside
 // "Kiken (E)".
 function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHantei) {
-  // decidedByHantei can be passed positionally (newer callers) or read from
-  // score.hantei (older callers / future-proofing). Either lights up "HT".
-  const hantei = !!(decidedByHantei || score?.hantei);
+  // decidedByHantei (positional, newer callers) takes precedence when it is an
+  // explicit boolean; fall back to score.hantei for older payloads that carry
+  // the flag there instead. Using typeof guards against undefined so that a
+  // caller that omits the arg still gets the fallback read.
+  const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : !!score?.hantei;
   const decSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
   const enchoOnly = (encho && encho.periodCount > 0) ? " (E)" : "";
   const suffix = decSfx ? " " + decSfx : enchoOnly;

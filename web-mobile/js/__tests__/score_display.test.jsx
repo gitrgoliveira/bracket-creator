@@ -155,5 +155,11 @@ describe('formatIpponsScore', () => {
     it('still emits HT for score.hantei=true (defensive read for older payloads)', () => {
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E) HT');
     });
+
+    it('explicit decidedByHantei=false overrides score.hantei=true', () => {
+      // Newer callers pass the flag positionally; an explicit false must win
+      // over a truthy score.hantei so the positional arg can suppress the suffix.
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, false)).toBe('M–K (E)');
+    });
   });
 });

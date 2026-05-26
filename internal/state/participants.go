@@ -241,8 +241,7 @@ type BulkCheckInResult struct {
 // BulkCheckIn atomically marks all participants in pids as checked-in under a
 // single lock acquire, writing participants.csv exactly once. Only participants
 // that were not already checked in count toward CheckedIn; the file is only
-// written when at least one participant was actually toggled. Returns the
-// aggregate counts so the caller can decide whether to broadcast an SSE event.
+// written when at least one participant was actually toggled.
 func (s *Store) BulkCheckIn(compID string, pids []string, withZekkenName bool) (BulkCheckInResult, error) {
 	mu := s.getCompLock(compID)
 	mu.Lock()

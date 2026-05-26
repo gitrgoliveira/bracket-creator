@@ -64,8 +64,8 @@ const isPoolDaihyosenID = id => id.includes('-DH-');
 function compMatches(c) {
   const out = [];
 
-  // Setup/draw-ready: no public data yet — draw is an admin-only preview
-  if (c.status === "setup" || c.status === "draw-ready") return out;
+  // Setup/draw-ready/empty status: no public data yet — draw is admin-only preview
+  if (!c.status || c.status === "setup" || c.status === "draw-ready") return out;
 
   const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
@@ -97,7 +97,7 @@ function compMatches(c) {
 
 function tournamentMatches(t) {
   return (t.competitions || [])
-    .filter(c => c.status !== "setup" && c.status !== "draw-ready")
+    .filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready")
     .flatMap(compMatches);
 }
 
@@ -334,7 +334,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
-  const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
+  const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
   // Apply hasBothSides here too — pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
   // placeholder would appear in the public LIVE NOW strip, even though
@@ -468,7 +468,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                         </div>
                         <StatusBadge status={c.status} showLiveDot />
                       </div>
-                      {c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
+                      {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                         <div className="vlist-item__progress">
                           <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
                           <div className="vlist-item__pct">
@@ -1160,8 +1160,9 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
     return null;
   }, [bracket, c, pools]);
 
-  const hasPools = !!pools && pools.length > 0;
-  const hasBracket = !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
+  const isPreStart = !c.status || c.status === "setup" || c.status === "draw-ready";
+  const hasPools = !isPreStart && !!pools && pools.length > 0;
+  const hasBracket = !isPreStart && !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
   // T192 (FR-050e): Swiss competitions surface a dedicated standings
   // tab in place of pools/bracket. The standings tab fetches its own
   // data via /swiss/standings (it's not part of the competition-detail
@@ -1354,7 +1355,7 @@ function MatchDetailCard({ match, onClose }) {
 function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
 
-  if (c.status === "setup" || c.status === "draw-ready") {
+  if (!c.status || c.status === "setup" || c.status === "draw-ready") {
     return (
       <div className="empty" style={{ padding: 32 }}>
         <div className="icon">⏳</div>

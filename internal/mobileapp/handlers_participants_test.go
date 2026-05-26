@@ -497,6 +497,11 @@ func TestBulkCheckIn(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
+	t.Run("oversized individual pid returns 400", func(t *testing.T) {
+		w := doPost(t, []string{string(make([]byte, MaxLenEntityID+1))})
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
 	t.Run("duplicate pids counted only once", func(t *testing.T) {
 		// Eve (added[4]) already checked in from "unknown pid" sub-test.
 		// Send her PID twice — must count as 1 already_checked_in, not 2.

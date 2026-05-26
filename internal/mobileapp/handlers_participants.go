@@ -404,6 +404,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("participantIds must not exceed %d entries", MaxBulkCheckInIDs)})
 			return
 		}
+		for i, pid := range req.ParticipantIDs {
+			if err := validateMaxLen(fmt.Sprintf("participantIds[%d]", i), pid, MaxLenEntityID); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
 
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {

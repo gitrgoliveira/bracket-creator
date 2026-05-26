@@ -575,10 +575,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
       const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", tag: targetTag };
       if (metadata !== undefined) payload.metadata = metadata;
-      await window.API.replaceParticipant(c.id, targetId, payload, password);
+      const updated = await window.API.replaceParticipant(c.id, targetId, payload, password);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
-      showToast(`${oldName} replaced with ${name}`);
+      showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);
     } catch (err) {
       if (!mountedRef.current) return;
       showToast(err.message, "error");
@@ -934,10 +934,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
             </div>
           )}
           {replaceTarget && (
-            <div role="dialog" aria-modal="true" aria-labelledby="replace-modal-title" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
+            <div role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
               <EscapeListener onClose={() => setReplaceTarget(null)} />
               <div className="card" style={{ minWidth: 320, maxWidth: 420, margin: 16 }}>
-                <div className="card__head"><div id="replace-modal-title" className="card__title">Replace {replaceTarget.name}</div></div>
+                <div className="card__head"><div id="edit-modal-title" className="card__title">Edit {replaceTarget.name}</div></div>
                 <div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div>
                     <div className="field__label">Name *</div>
@@ -957,11 +957,11 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     <div className="field__label">Dan grade</div>
                     <input className="input" value={replaceDanGrade} onChange={e => setReplaceDanGrade(e.target.value)} placeholder="Optional" />
                   </div>
-                  <div className="field__hint">The participant's ID and seed assignment are preserved. Any existing seeds for this name are renamed automatically.</div>
+                  <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     <button className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
                     <button className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
-                      {replaceLoading ? "Replacing…" : "Replace"}
+                      {replaceLoading ? "Saving…" : "Save"}
                     </button>
                   </div>
                 </div>
@@ -1046,7 +1046,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
                       {isSetup && (
-                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 9 }} title={`Replace ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Replace ${p.name}`}>↔</button>
+                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>
                      <window.StableInput

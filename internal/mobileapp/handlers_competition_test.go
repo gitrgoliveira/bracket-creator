@@ -711,6 +711,8 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			{"POST", "/api/competitions/%s/participants"},
 			{"GET", "/api/competitions/%s/seeds"},
 			{"PUT", "/api/competitions/%s/seeds"},
+			{"POST", "/api/competitions/%s/generate-draw"},
+			{"DELETE", "/api/competitions/%s/draw"},
 			// Match endpoints from handlers_match.go. Without a match
 			// route in this set, a regression that drops requireValidCompID
 			// from match.go would still ship green.
@@ -1246,4 +1248,88 @@ func TestPUTCompetition_CheckInEnabledPersists(t *testing.T) {
 	saved, err = store.LoadCompetition(cid)
 	require.NoError(t, err)
 	assert.False(t, saved.CheckInEnabled, "checkInEnabled=false must also persist")
+}
+
+func TestGenerateDrawHandler(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed 8 players in a playoffs competition so GenerateDraw can succeed.
+	players := make([]domain.Player, 8)
+	for i := range players {
+		players[i] = domain.Player{Name: fmt.Sprintf("P%d", i+1), Dojo: "Dojo"}
+	}
+	cid := "gen-draw-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     cid,
+		Name:   "Gen Draw",
+		Format: state.CompFormatPlayoffs,
+		Courts: []string{"A"},
+		Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, players))
+
+	t.Run("Success: setup → draw-ready", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/generate-draw", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		saved, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusDrawReady, saved.Status)
+	})
+
+	t.Run("Reject: already draw-ready", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/generate-draw", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Not found: unknown competition", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/no-such-comp/generate-draw", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+func TestDiscardDrawHandler(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "discard-draw-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     cid,
+		Name:   "Discard Draw",
+		Format: state.CompFormatPlayoffs,
+		Courts: []string{"A"},
+		Status: state.CompStatusDrawReady,
+	}))
+
+	t.Run("Success: draw-ready → setup", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/api/competitions/"+cid+"/draw", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code, "response: %s", w.Body.String())
+
+		saved, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusSetup, saved.Status)
+	})
+
+	t.Run("Reject: not draw-ready (setup)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/api/competitions/"+cid+"/draw", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Not found: unknown competition", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/api/competitions/no-such-comp/draw", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
 }

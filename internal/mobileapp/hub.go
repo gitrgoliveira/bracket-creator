@@ -41,6 +41,8 @@ const (
 	// ignore the event — their flow doesn't depend on the admin password.
 	EventPasswordReset EventType = "password_reset"
 	EventAnnouncement  EventType = "announcement"
+	EventDrawGenerated EventType = "draw_generated"
+	EventDrawDiscarded EventType = "draw_discarded"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the

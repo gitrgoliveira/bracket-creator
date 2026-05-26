@@ -3,11 +3,12 @@
 function StatusBadge({ status, showLiveDot }) {
   const map = {
     setup: ["badge--setup", "Pending"],
+    "draw-ready": ["badge--draw-ready", "Draw ready"],
     pools: ["badge--pools", "Pools"],
     playoffs: ["badge--playoffs", "Playoffs"],
     completed: ["badge--completed", "Completed"],
   };
-  const [cls, label] = map[status] || ["badge--setup", status];
+  const [cls, label] = map[status || "setup"] || ["badge--setup", status];
   const showLive = showLiveDot && (status === "pools" || status === "playoffs");
   return (
     <span className={`badge ${cls}`}>

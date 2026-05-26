@@ -681,6 +681,12 @@ a:hover {
   border-color: var(--line);
 }
 
+.badge--draw-ready {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
 .badge--pools {
   background: #fff7ed;
   color: #9a3412;

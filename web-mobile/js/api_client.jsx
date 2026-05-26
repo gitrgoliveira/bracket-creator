@@ -214,6 +214,28 @@ const API = {
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
+    async generateDraw(id, password) {
+        const res = await fetch(`/api/competitions/${id}/generate-draw`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to generate draw");
+        }
+        const data = await res.json();
+        return normalizeCompetitionDetail(data);
+    },
+    async discardDraw(id, password) {
+        const res = await fetch(`/api/competitions/${id}/draw`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to discard draw");
+        }
+    },
     // Subscribe to the server's SSE event stream. `callback` is fired
     // for each parsed event. `onStatus` (optional) is fired with
     // 'open' when the EventSource transitions to open and 'error' when

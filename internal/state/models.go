@@ -155,11 +155,12 @@ func (c Competition) IsPlayoffEnabled() bool {
 type CompetitionStatus string
 
 const (
-	CompStatusSetup    CompetitionStatus = "setup"
-	CompStatusPools    CompetitionStatus = "pools"
-	CompStatusPlayoffs CompetitionStatus = "playoffs"
-	CompStatusComplete CompetitionStatus = "completed"
-	CompStatusInvalid  CompetitionStatus = "invalid"
+	CompStatusSetup     CompetitionStatus = "setup"
+	CompStatusDrawReady CompetitionStatus = "draw-ready"
+	CompStatusPools     CompetitionStatus = "pools"
+	CompStatusPlayoffs  CompetitionStatus = "playoffs"
+	CompStatusComplete  CompetitionStatus = "completed"
+	CompStatusInvalid   CompetitionStatus = "invalid"
 )
 
 type MatchStatus string

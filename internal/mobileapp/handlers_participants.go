@@ -42,6 +42,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
+			return
+		}
 		if comp.Status != state.CompStatusSetup && comp.Status != "" {
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
 			return
@@ -127,8 +131,19 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
 			if err != nil {
-				if errors.Is(err, state.ErrDuplicateName) || errors.Is(err, state.ErrCompetitionNotInSetup) {
+				if errors.Is(err, state.ErrDuplicateName) {
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+					return
+				}
+				if errors.Is(err, state.ErrCompetitionNotInSetup) {
+					// Reload to distinguish draw-ready from a fully-started competition
+					// under TOCTOU: status could have flipped between our check above
+					// and AddParticipant acquiring the per-comp lock.
+					msg := "cannot modify participants after competition has started"
+					if reloaded, _ := store.LoadCompetition(id); reloaded != nil && reloaded.Status == state.CompStatusDrawReady {
+						msg = "cannot modify participants while a draw is pending; discard the draw first"
+					}
+					c.JSON(http.StatusConflict, gin.H{"error": msg})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add participant: " + err.Error()})
@@ -211,6 +226,21 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		}
 		pid := c.Param("pid")
 
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
+			return
+		}
+		if comp.Status != state.CompStatusSetup && comp.Status != "" {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
+			return
+		}
+
 		var req struct {
 			Name        string   `json:"name"`
 			DisplayName string   `json:"displayName"`
@@ -258,6 +288,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				httpStatus = http.StatusNotFound
 				httpMsg = "competition not found"
 				return fmt.Errorf("competition not found")
+			}
+			if comp.Status == state.CompStatusDrawReady {
+				httpStatus = http.StatusConflict
+				httpMsg = "cannot modify participants while a draw is pending; discard the draw first"
+				return state.ErrCompetitionNotInSetup
 			}
 			if comp.Status != state.CompStatusSetup && comp.Status != "" {
 				httpStatus = http.StatusConflict
@@ -331,6 +366,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 	r.PUT("/competitions/:id/seeds", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
+			return
+		}
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify seeds while a draw is pending; discard the draw first"})
 			return
 		}
 		var assignments []domain.SeedAssignment

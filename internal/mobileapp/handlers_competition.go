@@ -545,6 +545,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// set HasParticipantIDs=true (saveParticipants writes UUID rows).
 		var nameErr error
 		var notFoundFlag bool
+		var drawReadyFlag bool
 		var changed bool
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
@@ -573,6 +574,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// settings-PUT and roster-PUT no longer step on each
 				// other's writes.
 				if comp.Players != nil {
+					if current.Status == state.CompStatusDrawReady {
+						drawReadyFlag = true
+						return nil, nil
+					}
 					// Roster-only PUT — do NOT flip HasParticipantIDs
 					// here. Pre-fix, the transform committed the flag
 					// (HasParticipantIDs=true) BEFORE the post-transform
@@ -590,6 +595,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 
 				// Settings-only PUT (Players field absent in body).
+				// Block settings changes while a draw is pending — the
+				// draw artifacts (pools.csv / bracket.json) were generated
+				// from the current config; mutating PoolSize, Courts, or
+				// Format while draw-ready would leave config.md inconsistent
+				// with those artifacts when StartCompetition runs.
+				if current.Status == state.CompStatusDrawReady {
+					drawReadyFlag = true
+					return nil, nil
+				}
 				// Existence first, uniqueness second. Pre-fix order ran
 				// checkUniqueCompName BEFORE the transform, so a PUT to
 				// a missing :id whose body Name happened to collide with
@@ -654,6 +668,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// either flag escapes the transform unexpectedly.
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if drawReadyFlag {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify competition while a draw is pending; discard the draw first"})
 			return
 		}
 		if nameErr != nil {
@@ -862,6 +880,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
+			return
+		}
 		slot, err := store.AddReservedSlot(id, req.SourceCompID, req.SourceRank, comp.WithZekkenName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -880,6 +902,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if comp.Status == state.CompStatusDrawReady {
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
 			return
 		}
 		if err := store.RemoveReservedSlot(id, slotID, comp.WithZekkenName); err != nil {
@@ -933,6 +959,59 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		c.JSON(http.StatusOK, comp)
+	})
+
+	r.POST("/competitions/:id/generate-draw", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		if err := eng.GenerateDraw(id); err != nil {
+			var notFound *engine.NotFoundError
+			var validation *engine.ValidationError
+			switch {
+			case errors.As(err, &notFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validation):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
+			return
+		}
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "draw generated but failed to load updated state: " + err.Error()})
+			return
+		}
+		if comp == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "draw generated but competition no longer exists"})
+			return
+		}
+		hub.Broadcast(EventDrawGenerated, gin.H{"competitionId": id})
+		c.JSON(http.StatusOK, comp)
+	})
+
+	r.DELETE("/competitions/:id/draw", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		if err := eng.DiscardDraw(id); err != nil {
+			var notFound *engine.NotFoundError
+			var validation *engine.ValidationError
+			switch {
+			case errors.As(err, &notFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validation):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
+			return
+		}
+		hub.Broadcast(EventDrawDiscarded, gin.H{"competitionId": id})
+		c.Status(http.StatusNoContent)
 	})
 
 	r.POST("/competitions/:id/complete", func(c *gin.Context) {

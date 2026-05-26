@@ -1227,7 +1227,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // Show pools/bracket in nav when draw is ready (preview) or running.
         // Use .length checks: the state store returns [] / {rounds:[]} (never null)
         // when files are absent, so plain truthiness would always show the items.
-        (pools?.length || (isDrawReady && c.format !== "playoffs")) ? { id: "pools", label: isDrawReady ? "Pools — preview" : "Pools — live" } : null,
+        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: isDrawReady ? "Pools — preview" : "Pools — live" } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
         c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
@@ -1266,7 +1266,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             </div>
           </div>
           <div className="page-head__actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-            {c.status === "setup" && c.players.length >= 2 && (
+            {(!c.status || c.status === "setup") && c.players.length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <button className="btn btn--ghost" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>

@@ -257,8 +257,14 @@ func (s *Store) BulkCheckIn(compID string, pids []string, withZekkenName bool) (
 		byPID[players[i].ID] = i
 	}
 
+	seen := make(map[string]struct{}, len(pids))
 	result := BulkCheckInResult{NotFound: []string{}}
 	for _, pid := range pids {
+		if _, dup := seen[pid]; dup {
+			continue
+		}
+		seen[pid] = struct{}{}
+
 		idx, ok := byPID[pid]
 		if !ok {
 			result.NotFound = append(result.NotFound, pid)

@@ -58,6 +58,12 @@ const (
 	MaxLenSeedAssignmentName = 100
 
 	MaxLenCheckInWindow = 5 // "HH:MM"
+
+	// MaxBulkCheckInIDs is the upper bound on the participant_ids array
+	// accepted by POST /participants/check-in-bulk. A single per-comp
+	// write lock is held for the duration; 1000 matches the practical
+	// tournament roster ceiling used elsewhere in the project.
+	MaxBulkCheckInIDs = 1000
 )
 
 // hhmmRE matches HH:MM time strings (00:00–23:59).

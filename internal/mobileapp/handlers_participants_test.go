@@ -485,6 +485,28 @@ func TestBulkCheckIn(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
+
+	t.Run("oversized array returns 400", func(t *testing.T) {
+		over := make([]string, MaxBulkCheckInIDs+1)
+		for i := range over {
+			over[i] = added[0].ID
+		}
+		w := doPost(t, over)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("duplicate pids counted only once", func(t *testing.T) {
+		// Eve (added[4]) already checked in from "unknown pid" sub-test.
+		// Send her PID twice — must count as 1 already_checked_in, not 2.
+		pids := []string{added[4].ID, added[4].ID}
+		w := doPost(t, pids)
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 0, res.CheckedIn)
+		assert.Equal(t, 1, res.AlreadyCheckedIn)
+		assert.Empty(t, res.NotFound)
+	})
 }
 
 func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {

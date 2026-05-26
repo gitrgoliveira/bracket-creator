@@ -406,6 +406,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		if len(req.ParticipantIDs) > MaxBulkCheckInIDs {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("participant_ids must not exceed %d entries", MaxBulkCheckInIDs)})
+			return
+		}
+
 		result, err := store.BulkCheckIn(id, req.ParticipantIDs, comp.WithZekkenName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

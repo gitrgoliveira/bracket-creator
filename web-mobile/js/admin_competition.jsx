@@ -1343,7 +1343,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {/* onViewStandings is wired to the public viewer URL so the */}
             {/* operator can navigate into the viewer-mode standings */}
             {/* page when the competition completes. */}
-            {section === "swiss" && c.format === "swiss" && (
+            {section === "swiss" && c.format === "swiss" && !isDrawReady && (
               <AdminSwissRounds
                 c={c}
                 poolMatches={poolMatches}

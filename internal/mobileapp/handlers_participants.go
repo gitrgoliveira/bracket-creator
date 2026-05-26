@@ -131,8 +131,19 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 
 			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
 			if err != nil {
-				if errors.Is(err, state.ErrDuplicateName) || errors.Is(err, state.ErrCompetitionNotInSetup) {
+				if errors.Is(err, state.ErrDuplicateName) {
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+					return
+				}
+				if errors.Is(err, state.ErrCompetitionNotInSetup) {
+					// Reload to distinguish draw-ready from a fully-started competition
+					// under TOCTOU: status could have flipped between our check above
+					// and AddParticipant acquiring the per-comp lock.
+					msg := "cannot modify participants after competition has started"
+					if reloaded, _ := store.LoadCompetition(id); reloaded != nil && reloaded.Status == state.CompStatusDrawReady {
+						msg = "cannot modify participants while a draw is pending; discard the draw first"
+					}
+					c.JSON(http.StatusConflict, gin.H{"error": msg})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add participant: " + err.Error()})

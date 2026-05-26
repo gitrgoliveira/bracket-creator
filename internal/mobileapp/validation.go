@@ -101,6 +101,35 @@ func validateMaxLen(field, val string, max int) error {
 	return nil
 }
 
+// validateSubBoutHantei enforces the per-bout hantei invariants on a
+// single SubMatchResult. Called from both ScoreRequest.Validate and
+// validateBulkScoreLengths so the rule set stays in sync across both
+// submission paths.
+func validateSubBoutHantei(prefix string, sr *state.SubMatchResult) error {
+	if !sr.DecidedByHantei {
+		return nil
+	}
+	if sr.Winner == "" {
+		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
+	}
+	if sr.Encho == nil || sr.Encho.PeriodCount <= 0 {
+		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires encho with at least one period"}
+	}
+	if len(sr.IpponsA) != len(sr.IpponsB) {
+		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline — ippon counts must be equal"}
+	}
+	switch sr.Decision {
+	case "", "fought":
+		// compatible: bout was fought to tied encho, then decided by judges
+	default:
+		return &ValidationError{
+			Field:   prefix + "decidedByHantei",
+			Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '' or 'fought'", sr.Decision),
+		}
+	}
+	return nil
+}
+
 // validateBulkScoreLengths enforces persisted-string caps on a single
 // MatchResult before it lands in the engine. Used by the bulk-score
 // endpoint, which writes through RecordMatchResult and so bypasses
@@ -140,25 +169,8 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
-		if sr.DecidedByHantei {
-			if sr.Winner == "" {
-				return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
-			}
-			if sr.Encho == nil || sr.Encho.PeriodCount <= 0 {
-				return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires encho with at least one period"}
-			}
-			if len(sr.IpponsA) != len(sr.IpponsB) {
-				return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline — ippon counts must be equal"}
-			}
-			switch sr.Decision {
-			case "", "fought":
-				// compatible
-			default:
-				return &ValidationError{
-					Field:   prefix + "decidedByHantei",
-					Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '' or 'fought'", sr.Decision),
-				}
-			}
+		if err := validateSubBoutHantei(prefix, sr); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -306,36 +318,8 @@ func (r *ScoreRequest) Validate() error {
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
-		// Per-bout hantei: mirrors the top-level decidedByHantei rules but scoped
-		// to the sub-bout. Requires a winner, encho > 0, and a tied scoreline.
-		if sr.DecidedByHantei {
-			if sr.Winner == "" {
-				return &ValidationError{
-					Field:   prefix + "decidedByHantei",
-					Message: "requires winner to be set",
-				}
-			}
-			if sr.Encho == nil || sr.Encho.PeriodCount <= 0 {
-				return &ValidationError{
-					Field:   prefix + "decidedByHantei",
-					Message: "requires encho with at least one period",
-				}
-			}
-			if len(sr.IpponsA) != len(sr.IpponsB) {
-				return &ValidationError{
-					Field:   prefix + "decidedByHantei",
-					Message: "requires a tied scoreline — ippon counts must be equal",
-				}
-			}
-			switch sr.Decision {
-			case "", "fought":
-				// compatible: bout was fought to tied encho, then decided by judges
-			default:
-				return &ValidationError{
-					Field:   prefix + "decidedByHantei",
-					Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '' or 'fought'", sr.Decision),
-				}
-			}
+		if err := validateSubBoutHantei(prefix, sr); err != nil {
+			return err
 		}
 	}
 	// DecidedByHantei encodes a rules-level invariant: judges' decision after

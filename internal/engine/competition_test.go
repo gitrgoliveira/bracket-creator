@@ -339,6 +339,10 @@ func TestGenerateDraw_PoolsFormat(t *testing.T) {
 	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, pools, "pools must be written on GenerateDraw")
+
+	poolMatches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, poolMatches, "pool-matches must be written on GenerateDraw")
 }
 
 // TestGenerateDraw_PlayoffsFormat verifies GenerateDraw on a playoffs

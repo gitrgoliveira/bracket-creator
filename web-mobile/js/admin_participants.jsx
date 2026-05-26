@@ -1034,7 +1034,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     <span className="seed-row__handle" title={reorderDisabled ? "Clear all filters to reorder" : "Drag to reorder"}>⠿</span>
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
                         <div className="seed-row__name" title={p.name} style={{ minWidth: 0, flex: "0 1 auto" }}>{p.name}</div>
                         {p.tag && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.tag}</span>}
                       </div>

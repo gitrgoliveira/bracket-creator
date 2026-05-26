@@ -20,8 +20,6 @@ type announcementRequest struct {
 var validAnnouncementDurations = map[int]bool{5: true, 10: true, 15: true, 30: true}
 
 func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
-	// POST /api/tournament/announce is protected (requires admin credentials).
-	// MaxBodyBytes(AnnouncementMaxBodyBytes) is applied before AuthMiddleware on the route group wiring this handler.
 	r.POST("/tournament/announce", func(c *gin.Context) {
 		var req announcementRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -45,18 +43,35 @@ func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *H
 			return
 		}
 
-		duration := time.Duration(req.DurationMinutes) * time.Minute
-		ann := store.AnnouncementStore().Set(trimmedMsg, duration)
-
-		// Broadcast new announcement to all connected SSE clients
-		hub.Broadcast(EventAnnouncement, ann)
-
+		ann, list := store.AnnouncementStore().Add(trimmedMsg, time.Duration(req.DurationMinutes)*time.Minute)
+		hub.Broadcast(EventAnnouncement, list)
 		c.JSON(http.StatusOK, ann)
+	})
+
+	// DELETE /api/announcements/:id — dismiss a single announcement.
+	r.DELETE("/announcements/:id", func(c *gin.Context) {
+		found, list := store.AnnouncementStore().Remove(c.Param("id"))
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Announcement not found"})
+			return
+		}
+		hub.Broadcast(EventAnnouncement, list)
+		c.Status(http.StatusNoContent)
+	})
+
+	// DELETE /api/announcements — clear all announcements.
+	r.DELETE("/announcements", func(c *gin.Context) {
+		hub.Broadcast(EventAnnouncement, store.AnnouncementStore().Clear())
+		c.Status(http.StatusNoContent)
 	})
 }
 
 func RegisterPublicAnnouncementHandlers(r *gin.RouterGroup, store *state.Store) {
-	// GET /api/tournament/announcement is public
+	r.GET("/tournament/announcements", func(c *gin.Context) {
+		c.JSON(http.StatusOK, store.AnnouncementStore().List())
+	})
+
+	// GET /api/tournament/announcement — legacy single-slot endpoint.
 	r.GET("/tournament/announcement", func(c *gin.Context) {
 		ann := store.AnnouncementStore().Get()
 		if ann == nil {

@@ -56,6 +56,16 @@ describe('buildRoster check-in gating', () => {
     expect(roster).toHaveLength(1);
   });
 
+  it('upgrades checkedIn from false to true when a later enabled comp has the player checked in', () => {
+    const comps = [
+      { id: 'c1', checkInEnabled: true, players: [{ id: 'p1', name: 'Alice', checkedIn: false }] },
+      { id: 'c2', checkInEnabled: true, players: [{ id: 'p1', name: 'Alice', checkedIn: true }] },
+    ];
+    const roster = buildRoster(comps);
+    expect(roster).toHaveLength(1);
+    expect(roster[0].checkedIn).toBe(true);
+  });
+
   it('handles missing or empty competitions gracefully', () => {
     expect(buildRoster(null)).toEqual([]);
     expect(buildRoster([])).toEqual([]);

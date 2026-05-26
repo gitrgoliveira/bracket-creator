@@ -271,7 +271,7 @@ function buildRoster(competitions) {
   (competitions || []).forEach((c) => {
     (c.players || []).forEach((p) => {
       if (!p || !p.id) return;
-      const checkedIn = c.checkInEnabled && !!p.checkedIn;
+      const checkedIn = !!c.checkInEnabled && !!p.checkedIn;
       if (!map.has(p.id)) {
         map.set(p.id, checkedIn === !!p.checkedIn ? p : { ...p, checkedIn });
       } else if (checkedIn && !map.get(p.id).checkedIn) {

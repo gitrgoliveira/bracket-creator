@@ -750,9 +750,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
         {hasReservedSlotsContext && (
           <div className="card">
             <div className="card__head">
-              <div>
-                <div className="card__title">Reserved slots ({reservedSlots?.length || 0})</div>
-              </div>
+              <div className="card__title">Reserved slots ({reservedSlots?.length || 0})</div>
               {otherComps.length > 0 && !showSlotForm && (
                 <button className="btn btn--sm" onClick={() => setShowSlotForm(true)}>+ Reserved slot</button>
               )}

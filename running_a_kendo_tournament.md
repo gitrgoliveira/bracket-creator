@@ -375,10 +375,6 @@ Some tournament styles have teams of 10 or more.
 
 If a team is missing a player for a position, the opposing fighter at that position wins by default (fusensho) with a score of **2–0**. This counts as one individual victory and two points for the winning side when calculating the team match result.
 
-### Per-Bout Encho in Team Matches
-
-Each individual bout within a team encounter has its own regulation time and may go to **encho** (overtime) if the bout is tied at time-up. Tick **Overtime (E)** on the sub-bout row to mark that the bout went to encho — this is recorded for reference but does not change the scoring outcome. A bout that ends tied after encho remains a draw (contributing 0 IV) for that position; the encounter tie is broken at the team level via **Daihyosen**.
-
 ### How a Team Match Is Decided
 
 The result of each individual bout contributes to the team result. A team wins the encounter when it has:

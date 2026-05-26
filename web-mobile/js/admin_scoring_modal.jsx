@@ -1332,7 +1332,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         aFouls: reconA.outstandingFouls,
         bFouls: reconB.outstandingFouls,
         fusensho,
-        enchoPeriodCount: existing?.encho?.periodCount || 0,
       };
     });
   }
@@ -1388,7 +1387,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         hansokuB: s.bFouls,
         winner: w ? (typeof w === "object" ? w.name : w) : "",
         decision,
-        ...(s.enchoPeriodCount > 0 ? { encho: { periodCount: s.enchoPeriodCount } } : {}),
       };
     });
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
@@ -1723,20 +1721,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                       )}
                     </React.Fragment>
                   ))}
-                </div>
-                {/* Per-bout encho toggle. Tracks whether this sub-bout went to overtime. */}
-                <div className="tsm-encho-hantei" style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 6px", marginTop: 4, fontSize: 11, borderTop: s.enchoPeriodCount > 0 ? "1px solid var(--line, #eee)" : "none" }}>
-                  <label style={{ display: "flex", gap: 4, alignItems: "center", cursor: "pointer", color: "var(--ink-3)" }}>
-                    <input type="checkbox"
-                      data-testid={`scoring-modal-sub-encho-${idx}`}
-                      checked={s.enchoPeriodCount > 0}
-                      onChange={e => {
-                        const next = e.target.checked ? 1 : 0;
-                        updateSub(idx, prev => ({ ...prev, enchoPeriodCount: next }));
-                      }}
-                    />
-                    <span>Overtime (E)</span>
-                  </label>
                 </div>
               </div>
             );

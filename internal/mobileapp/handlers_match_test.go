@@ -774,9 +774,9 @@ func TestEnforceEnchoCapWithSubs(t *testing.T) {
 	}))
 
 	overCapSubResult := state.SubMatchResult{
-		Position: 1, SideA: "TeamA", SideB: "TeamB",
+		Position: -1, SideA: "TeamA", SideB: "TeamB",
 		IpponsA: []string{"M"}, Winner: "TeamA",
-		Encho: &state.EnchoMetadata{PeriodCount: 3}, // exceeds cap of 2
+		Encho: &state.EnchoMetadata{PeriodCount: 3}, // exceeds cap of 2; daihyosen is the only sub-bout with encho
 	}
 
 	t.Run("single-score: sub-bout encho over cap returns 400", func(t *testing.T) {

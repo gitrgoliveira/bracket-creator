@@ -397,6 +397,7 @@ func TestDiscardDraw_ResetsToSetup(t *testing.T) {
 	comp, err = store.LoadCompetition(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusSetup, comp.Status, "DiscardDraw must reset status to setup")
+	assert.Equal(t, 0, comp.SwissCurrentRound, "DiscardDraw must reset SwissCurrentRound to 0")
 
 	// Draw artifacts should be deleted.
 	compDir := filepath.Join(dir, "competitions", compID)

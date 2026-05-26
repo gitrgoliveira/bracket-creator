@@ -329,6 +329,7 @@ func (e *Engine) DiscardDraw(id string) error {
 			return nil, validationErrorf("competition %s is not in draw-ready state (status: %s)", id, current.Status)
 		}
 		current.Status = state.CompStatusSetup
+		current.SwissCurrentRound = 0 // reset so a fresh GenerateDraw can re-initialise it
 		return current, nil
 	})
 	return err

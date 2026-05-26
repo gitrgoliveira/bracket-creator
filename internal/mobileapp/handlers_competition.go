@@ -671,7 +671,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if drawReadyFlag {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify competition while a draw is pending; discard the draw first"})
 			return
 		}
 		if nameErr != nil {
@@ -982,6 +982,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "draw generated but failed to load updated state: " + err.Error()})
+			return
+		}
+		if comp == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "draw generated but competition no longer exists"})
 			return
 		}
 		hub.Broadcast(EventDrawGenerated, gin.H{"competitionId": id})

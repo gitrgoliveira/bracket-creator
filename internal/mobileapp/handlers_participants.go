@@ -411,7 +411,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		result, err := store.BulkCheckIn(id, req.ParticipantIDs, comp.WithZekkenName)
+		result, err := store.BulkCheckIn(id, req.ParticipantIDs)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

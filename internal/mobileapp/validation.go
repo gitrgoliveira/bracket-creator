@@ -60,9 +60,10 @@ const (
 	MaxLenCheckInWindow = 5 // "HH:MM"
 
 	// MaxBulkCheckInIDs is the upper bound on the participant_ids array
-	// accepted by POST /participants/check-in-bulk. A single per-comp
-	// write lock is held for the duration; 1000 is a practical ceiling
-	// for tournament rosters (no real competition has exceeded ~200).
+	// accepted by POST /competitions/:id/participants/check-in-bulk. A
+	// single per-comp write lock is held for the duration; 1000 is a
+	// practical ceiling for tournament rosters (no real competition has
+	// exceeded ~200).
 	MaxBulkCheckInIDs = 1000
 )
 

@@ -242,10 +242,15 @@ type BulkCheckInResult struct {
 // single lock acquire, writing participants.csv exactly once. Only participants
 // that were not already checked in count toward CheckedIn; the file is only
 // written when at least one participant was actually toggled.
-func (s *Store) BulkCheckIn(compID string, pids []string, withZekkenName bool) (BulkCheckInResult, error) {
+func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, error) {
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
+
+	withZekkenName, err := s.withZekkenNameLocked(compID)
+	if err != nil {
+		return BulkCheckInResult{}, err
+	}
 
 	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {

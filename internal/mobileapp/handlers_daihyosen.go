@@ -182,12 +182,9 @@ func findMatchForDaihyosen(store DaihyosenStore, compID, matchID string) (*state
 		for _, bm := range round {
 			if bm.ID == matchID {
 				// Re-shape into MatchResult so we can drive the same
-				// scoring path as pool matches. Bracket matches carry
-				// scores in ScoreA/ScoreB strings + the parent bracket
-				// doesn't currently hold SubResults — for daihyosen we
-				// only need SideA/SideB and SubResults, which are empty
-				// on the bracket side until the operator records team
-				// sub-bouts via /score.
+				// scoring path as pool matches. SubResults must be copied
+				// so TeamSummary is computed from recorded sub-bouts and
+				// the daihyosen append doesn't overwrite existing data.
 				return &state.MatchResult{
 					ID:              bm.ID,
 					SideA:           bm.SideA,
@@ -200,6 +197,7 @@ func findMatchForDaihyosen(store DaihyosenStore, compID, matchID string) (*state
 					DecisionBy:      bm.DecisionBy,
 					Encho:           bm.Encho,
 					DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
+					SubResults:      bm.SubResults,
 				}, true, nil
 			}
 		}

@@ -601,7 +601,8 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
-					if len(result.SubResults) > 0 {
+					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
+					if result.SubResults != nil {
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
 					}
 					// DecidedByHantei uses *bool so that a client that omits the

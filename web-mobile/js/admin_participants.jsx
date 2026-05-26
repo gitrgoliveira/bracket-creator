@@ -359,20 +359,29 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   };
 
   const [tagFilter, setTagFilter] = useStateA(null);
+  const [searchQuery, setSearchQuery] = useStateA("");
+  const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
   const players = useMemoA(() => c.players || [], [c.players]);
   const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
+  const playerSearchTargets = useMemoA(() => {
+    const map = new Map();
+    players.forEach(p => { map.set(p.id ?? p.name, participantSearchTarget(p)); });
+    return map;
+  }, [players]);
   const visiblePlayers = useMemoA(() => {
+    const q = trimmedSearch.toLowerCase();
     let out = players;
     if (tagFilter) out = out.filter(p => p.tag === tagFilter);
     if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
+    if (q) out = out.filter(p => playerSearchTargets.get(p.id ?? p.name)?.includes(q));
     return out;
-  }, [players, tagFilter, showOnlyUnchecked]);
+  }, [players, tagFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
   const dojoFirstRowSet = useMemoA(() => {
     const seen = new Set();
     const first = new Set();
     visiblePlayers.forEach((p) => {
-      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(p.id); }
+      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(p.id ?? p.name); }
     });
     return first;
   }, [visiblePlayers]);
@@ -493,7 +502,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
     if (!confirm(`Mark all ${targets.length} participants from ${dojo} as checked-in?`)) return;
 
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id ?? p.name, true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -507,7 +516,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const bulkCheckInAll = async () => {
     const targets = (c.players || []).filter(p => !p.checkedIn);
     if (targets.length === 0) { showToast("All participants already checked in"); return; }
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id, true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id ?? p.name, true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -725,7 +734,8 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     URL.revokeObjectURL(url);
   };
 
-  const isStarted = c.status !== "setup";
+  const isSetup = !c.status || c.status === "setup";
+  const isStarted = !isSetup;
 
   return (
     <>
@@ -890,6 +900,28 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               Assign seed ranks (1, 2, 3…) to separate top players. Seeds 1 and 2 will be placed on opposite sides of the bracket.
               Drag rows to change order.
             </div>
+            {players.length > 0 && (
+              <div style={{ position: "relative", marginBottom: 8 }}>
+                <input
+                  className="input"
+                  type="search"
+                  aria-label="Search participants"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => e.key === "Escape" && setSearchQuery("")}
+                  placeholder="Search name, dojo…"
+                  style={{ width: "100%", paddingRight: trimmedSearch ? 28 : undefined }}
+                />
+                {trimmedSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", fontSize: 14, padding: 2 }}
+                    aria-label="Clear search"
+                  >×</button>
+                )}
+              </div>
+            )}
           </div>
           {hasGaps && (
             <div className="alert alert--error" style={{ margin: "0 16px 16px" }}>
@@ -922,7 +954,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               ))}
             </div>
           )}
-          {c.status === "setup" && (
+          {isSetup && (
             <div style={{ padding: "0 16px 12px" }}>
               {!showAddForm ? (
                 <button className="btn btn--sm" type="button" onClick={() => setShowAddForm(true)}>+ Add participant</button>
@@ -1000,17 +1032,25 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
               {/* When a tag filter is active, reorder controls would operate on */}
               {/* full-list indices but rows are filtered — so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
-              {(tagFilter || showOnlyUnchecked) && (
+              {(tagFilter || showOnlyUnchecked || trimmedSearch) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
+                  {visiblePlayers.length < players.length && `Showing ${visiblePlayers.length} of ${players.length}. `}
                   Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
+                </div>
+              )}
+              {visiblePlayers.length === 0 && (trimmedSearch || tagFilter || showOnlyUnchecked) && (
+                <div className="empty" style={{ padding: "16px 24px" }}>
+                  {(tagFilter || showOnlyUnchecked)
+                    ? "No participants match current filters."
+                    : `No match for "${trimmedSearch}".`}
                 </div>
               )}
               {visiblePlayers.map((p) => {
                 const i = players.indexOf(p);
-                const reorderDisabled = !!tagFilter || showOnlyUnchecked;
+                const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!trimmedSearch;
                 return (
                   <div
-                    key={p.id}
+                    key={p.id ?? p.name}
                     className={`seed-row ${p.seed ? "has-seed" : ""} ${p.checkedIn ? "is-checked-in" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
                     draggable={!reorderDisabled}
                     onDragStart={() => { dragIdxRef.current = i; }}
@@ -1022,14 +1062,17 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       dragIdxRef.current = null;
                       setDragOverIdx(null);
                     }}
-                    style={{ cursor: reorderDisabled ? "default" : "grab" }}
+                    style={{
+                      cursor: reorderDisabled ? "default" : "grab",
+                      gridTemplateColumns: c.checkInEnabled ? undefined : "20px 36px 1fr 32px 64px",
+                    }}
                   >
                     {c.checkInEnabled && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
                         <input
                           type="checkbox"
                           checked={p.checkedIn}
-                          onChange={(e) => toggleCheckIn(p.id, e.target.checked)}
+                          onChange={(e) => toggleCheckIn(p.id ?? p.name, e.target.checked)}
                           style={{ width: 18, height: 18, cursor: "pointer" }}
                           aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
                         />
@@ -1041,7 +1084,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       <div className="seed-row__name" title={p.name}>{p.name}{p.tag && <span className="tag-badge">{p.tag}</span>}</div>
                       <div className="seed-row__dojo">
                         {p.dojo}
-                        {c.checkInEnabled && dojoFirstRowSet.has(p.id) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
+                        {c.checkInEnabled && dojoFirstRowSet.has(p.id ?? p.name) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}
@@ -1055,7 +1098,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
-                      {c.status === "setup" && (
+                      {isSetup && (
                         <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 9 }} title={`Replace ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Replace ${p.name}`}>↔</button>
                       )}
                     </div>
@@ -1110,8 +1153,12 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   );
 }
 
+function participantSearchTarget(p) {
+  return [p.name, p.displayName, p.dojo, p.danGrade].filter(Boolean).join(" ").toLowerCase();
+}
+
 window.AdminParticipants = AdminParticipants;
 
 // ES export for the vitest suite — pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
-export { mintParticipantIds, findSeedMatchIndex };
+export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget };

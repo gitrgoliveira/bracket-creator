@@ -649,12 +649,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
         <div className="field__hint">Concurrency = number of shiaijo (courts) assigned. Schedule prevents double-booking with other competitions.</div>
       </div>
-      {/* Pool-size controls apply to formats that run multiple pools: */}
-      {/* legacy "pools" (back-compat: pools-then-playoff in the old */}
-      {/* taxonomy) and the new "mixed" (pools + knockout). "league" */}
-      {/* uses a single round-robin and so doesn't expose pool-size; */}
-      {/* "playoffs" has no pool phase. FR-050 / T044. */}
-      {(local.format === "pools" || local.format === "mixed") && (
+      {local.format === "mixed" && (
         <>
           <div className="field">
             <label className="field__label">Pool size is a</label>
@@ -686,21 +681,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       {/* FR-052..FR-054 / T047: per-phase match-duration inputs. */}
       {/* Render rules: */}
-      {/*   - poolMatchDuration: any format that runs pool play */}
-      {/*     ("pools", "mixed", "league", "swiss") — swiss rounds */}
-      {/*     reuse the pool-match-duration knob since each round is */}
-      {/*     a flat set of matches. */}
-      {/*   - playoffMatchDuration: any format with a knockout phase */}
-      {/*     ("playoffs", "mixed"). */}
-      {/* Both fields use the NaN-as-"" + updateNumber pattern; */}
-      {/* zero/empty means "fall through to the legacy matchDuration */}
-      {/* default" per backend ApplyCompetitionDefaults. The legacy */}
-      {/* `matchDuration` field is no longer exposed in the UI — it */}
-      {/* round-trips invisibly via the mirror/safeInt path so existing */}
-      {/* on-disk values are preserved. */}
-      {(local.format === "pools" || local.format === "mixed" || local.format === "league" || local.format === "playoffs" || local.format === "swiss") && (
+      {(local.format === "mixed" || local.format === "league" || local.format === "playoffs" || local.format === "swiss") && (
         <div className="row">
-          {(local.format === "pools" || local.format === "mixed" || local.format === "league" || local.format === "swiss") && (
+          {(local.format === "mixed" || local.format === "league" || local.format === "swiss") && (
             <div className="field">
               <label className="field__label">{local.format === "swiss" ? "Round match duration (min)" : "Pool match duration (min)"}</label>
               <input
@@ -1314,15 +1297,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start when ready</div>
               </div>
             )}
-            {/* FR-050 / FR-051 / T045: the create-playoff affordance */}
-            {/* is gated by format. Legacy "pools" rows kept their old */}
-            {/* pools-then-playoff semantics, so they still show the */}
-            {/* button. "league" runs standings-only — show an inline */}
-            {/* note instead of the button so operators know the */}
-            {/* competition completes via pool standings. Other formats */}
-            {/* ("playoffs", "mixed") build their bracket up front and */}
-            {/* don't need the create-playoff button at all. */}
-            {(c.format === "pools" || c.format === "league") && c.status !== "setup" && onCreatePlayoff && (() => {
+            {(c.format === "mixed" || c.format === "league") && c.status !== "setup" && onCreatePlayoff && (() => {
               if (c.format === "league") {
                 return <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>League: standings determine the winner</div>;
               }

@@ -4,6 +4,7 @@
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
+const formatLabel = window.formatLabel;
 
 // TermV — kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.
@@ -450,7 +451,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                           <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
                           <div className="vlist-item__name">{c.name}</div>
                           <div className="vlist-item__meta">
-                            {c.players.length} {c.kind === "team" ? "teams" : "players"} · {c.format === "pools" ? "Pools + Knockout" : "Knockout"} · Starts {c.startTime}
+                            {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
                           </div>
                         </div>
                         <StatusBadge status={c.status} showLiveDot />
@@ -1139,7 +1140,7 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
 
   const derivedBracket = useMemo(() => {
     if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;
-    if (c.format === "pools" && pools && pools.length > 0) {
+    if (c.format === "mixed" && pools && pools.length > 0) {
       const placeholders = [];
       const winners = c.poolWinners || 2;
       pools.forEach(p => {
@@ -2435,44 +2436,79 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
-function AnnouncementBanner({ announcement, onDismiss }) {
-  // Initialize synchronously so the badge isn't blank on the first paint
-  // (Copilot finding on PR #128). The useEffect tick keeps it accurate.
-  const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(announcement.expiresAt));
+function AnnouncementBanner({ announcements, onDismiss }) {
+  const list = announcements || [];
+  const [idx, setIdx] = useState(0);
+
+  // Reset to 0 on any list-length change (add or dismiss) so the viewer
+  // always restarts from item 0 — deterministic and prevents out-of-bounds
+  // after a dismiss.
+  useEffect(() => {
+    setIdx(0);
+  }, [list.length]);
 
   useEffect(() => {
-    const updateTimer = () => {
-      const expiresAt = new Date(announcement.expiresAt).getTime();
-      const now = Date.now();
-      const diff = expiresAt - now;
+    if (list.length <= 1) return;
+    const len = list.length;
+    const interval = setInterval(() => {
+      setIdx(i => (i + 1) % len);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [list.length]);
 
+  const safeIdx = list.length > 0 ? idx % list.length : 0;
+  const ann = list[safeIdx];
+
+  // Key timer state by ann.id so the displayed value is correct immediately
+  // on rotation, without waiting for the effect to fire after the first render.
+  const [timerState, setTimerState] = useState(() => ({
+    id: ann?.id ?? null,
+    value: ann ? formatAnnouncementTimeLeft(ann.expiresAt) : '',
+  }));
+  const timeLeft = timerState.id === ann?.id
+    ? timerState.value
+    : formatAnnouncementTimeLeft(ann?.expiresAt ?? '');
+
+  useEffect(() => {
+    if (!ann) return;
+    // intervalId and dismissed are captured in the closure so updateTimer can
+    // self-clear the interval on expiry and guard against repeated onDismiss
+    // calls if React state updates are delayed before cleanup runs.
+    let intervalId;
+    let dismissed = false;
+    const updateTimer = () => {
+      const diff = new Date(ann.expiresAt).getTime() - Date.now();
       if (diff <= 0) {
-        onDismiss();
+        clearInterval(intervalId);
+        if (!dismissed) {
+          dismissed = true;
+          onDismiss(ann.id);
+        }
         return;
       }
-
-      setTimeLeft(formatAnnouncementTimeLeft(announcement.expiresAt));
+      setTimerState({ id: ann.id, value: formatAnnouncementTimeLeft(ann.expiresAt) });
     };
-
     updateTimer();
-    const interval = setInterval(updateTimer, 1000);
+    intervalId = setInterval(updateTimer, 1000);
+    return () => clearInterval(intervalId);
+  }, [ann?.id, ann?.expiresAt, onDismiss]);
 
-    return () => clearInterval(interval);
-  }, [announcement.expiresAt, onDismiss]);
+  if (!ann) return null;
 
   return (
     <div className="announcement-banner">
       <div className="announcement-banner__content">
         <div className="announcement-banner__icon" aria-hidden="true">📢</div>
-        <p className="announcement-banner__message">{announcement.message}</p>
+        <p className="announcement-banner__message">{ann.message}</p>
       </div>
       <div className="announcement-banner__meta">
-        <span className="announcement-banner__badge">
-          {timeLeft}
-        </span>
+        {list.length > 1 && (
+          <span className="announcement-banner__count">{safeIdx + 1}/{list.length}</span>
+        )}
+        <span className="announcement-banner__badge">{timeLeft}</span>
         <button
           className="announcement-banner__dismiss"
-          onClick={onDismiss}
+          onClick={() => onDismiss(ann.id)}
           aria-label="Dismiss announcement"
         >
           &times;

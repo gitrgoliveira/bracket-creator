@@ -156,7 +156,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 
 	// No ties (or ties already resolved). Transition to complete.
 	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
-		if comp == nil || (comp.Format != state.CompFormatPools && comp.Format != state.CompFormatLeague) || comp.Status != state.CompStatusPools {
+		if comp == nil || (comp.Format != state.CompFormatMixed && comp.Format != state.CompFormatLeague) || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
 		// Re-check under the lock.
@@ -346,7 +346,7 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 			return nil, validationErrorf("competition %s not in draw-ready state (status: %s); concurrent modification?", id, current.Status)
 		}
 		switch current.Format {
-		case state.CompFormatPools, state.CompFormatLeague, state.CompFormatSwiss:
+		case state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
 			current.Status = state.CompStatusPools
 		default:
 			current.Status = state.CompStatusPlayoffs
@@ -487,7 +487,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// skips the redundant write (the HasParticipantIDs flip still runs).
 	earlyParticipantsSaved := false
 	switch comp.Format {
-	case state.CompFormatPools, state.CompFormatLeague:
+	case state.CompFormatMixed, state.CompFormatLeague:
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
@@ -568,7 +568,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// save changed any of those between our outer Load (the basis
 	// for the pools/playoffs files we just generated) and this atomic
 	// commit, the generated artifacts no longer match the new config
-	// — e.g. a Format change from "pools" to "playoffs" would leave
+	// — e.g. a Format change from "mixed" to "playoffs" would leave
 	// pools.csv on disk while Status committed to "playoffs". Better
 	// to abort with a 409-style conflict than to commit inconsistent
 	// state. Note: TeamSize and PoolWinners are deliberately NOT in

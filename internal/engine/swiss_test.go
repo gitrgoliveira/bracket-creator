@@ -571,7 +571,7 @@ func TestAdvanceSwissRound(t *testing.T) {
 	t.Run("non-swiss format returns validation error", func(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: "pools-comp", Format: state.CompFormatPools, Status: state.CompStatusPools,
+			ID: "pools-comp", Format: state.CompFormatMixed, Status: state.CompStatusPools,
 		}))
 		_, _, err := eng.AdvanceSwissRound("pools-comp")
 		assert.Error(t, err)
@@ -791,7 +791,7 @@ func TestMaybeLockTeamLineupsForRoundViaRecordResult(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "mlttr-nonteam-team"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, TeamSize: 5, Format: "pools",
+		ID: compID, TeamSize: 5, Format: "mixed",
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusScheduled},

@@ -21,7 +21,7 @@ func TestStartMatchBlockedByIneligibleCompetitor(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "elig-blocked"
 
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	// Seed participants with explicit UUIDs — state.LoadParticipants
 	// only treats the first column as an ID when it parses as UUID v4.
@@ -70,7 +70,7 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 		t.Helper()
 		eng, store, _ := setupTestEngine(t)
 		compID := "undo-test"
-		createTestCompetition(t, store, compID, "pools", 3)
+		createTestCompetition(t, store, compID, "mixed", 3)
 
 		aliceID := helper.NewUUID4()
 		bobID := helper.NewUUID4()
@@ -181,7 +181,7 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "concurrent-kiken"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -234,7 +234,7 @@ func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 func TestRecordDecision_ConcurrentKikenRace(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "race-kiken"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -299,7 +299,7 @@ func TestRecordDecision_ConcurrentKikenRace(t *testing.T) {
 func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "fusensho-bypass"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -329,7 +329,7 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 func TestCheckEligibility_AllEligible(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "elig-all"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	err := eng.CheckEligibility(compID, []string{"pid1", "pid2", ""})
 	assert.NoError(t, err)
@@ -341,7 +341,7 @@ func TestCheckEligibility_AllEligible(t *testing.T) {
 func TestCheckEligibility_OneIneligible(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "elig-one"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
 		PlayerID: "ineligible-pid",
@@ -364,7 +364,7 @@ func TestCheckEligibility_OneIneligible(t *testing.T) {
 func TestCheckEligibility_EmptyIDsSkipped(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "elig-empty"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	err := eng.CheckEligibility(compID, []string{"", ""})
 	assert.NoError(t, err)
@@ -703,7 +703,7 @@ func TestRecordDecision_KikenReinstateable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			eng, store, _ := setupTestEngine(t)
 			compID := "reinstateable-test-" + tc.decision
-			createTestCompetition(t, store, compID, "pools", 2)
+			createTestCompetition(t, store, compID, "mixed", 2)
 
 			aliceID := helper.NewUUID4()
 			require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -731,7 +731,7 @@ func TestRecordDecision_KikenReinstateable(t *testing.T) {
 func TestReinstateCompetitor(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "reinstate-test"
-	createTestCompetition(t, store, compID, "pools", 2)
+	createTestCompetition(t, store, compID, "mixed", 2)
 
 	playerID := helper.NewUUID4()
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{

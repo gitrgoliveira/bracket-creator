@@ -226,7 +226,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 
 	compID := "auto-complete"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Auto", Format: state.CompFormatPools, Status: state.CompStatusPools,
+		ID: compID, Name: "Auto", Format: state.CompFormatMixed, Status: state.CompStatusPools,
 	}))
 
 	t.Run("no transition while a pool match is still scheduled", func(t *testing.T) {
@@ -279,7 +279,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		// Without this branch the competition would be stuck in `pools` forever.
 		emptyID := "auto-complete-empty"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: emptyID, Name: "Empty", Format: state.CompFormatPools, Status: state.CompStatusPools,
+			ID: emptyID, Name: "Empty", Format: state.CompFormatMixed, Status: state.CompStatusPools,
 		}))
 		require.NoError(t, store.SavePoolMatches(emptyID, []state.MatchResult{}))
 		outcome, err := eng.MaybeAutoCompletePools(emptyID)
@@ -558,7 +558,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		compID := "auto-vs-invalidate"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: compID, Name: "Auto vs Invalidate",
-			Format: state.CompFormatPools, Status: state.CompStatusPools,
+			Format: state.CompFormatMixed, Status: state.CompStatusPools,
 		}))
 		// All matches already completed — auto-complete is eligible.
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -661,7 +661,7 @@ func TestMaybeLockTeamLineupsForRound_TeamComp(t *testing.T) {
 		ID:       compID,
 		Name:     "Team Lock",
 		Kind:     "team",
-		Format:   state.CompFormatPools,
+		Format:   state.CompFormatMixed,
 		TeamSize: 3,
 		Status:   state.CompStatusPools,
 		Courts:   []string{"A"},

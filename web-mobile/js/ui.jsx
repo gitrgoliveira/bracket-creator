@@ -129,6 +129,20 @@ function pluralize(count, singular, plural) {
   return count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`;
 }
 
+function formatLabel(format) {
+  if (format === "mixed")   return "Pools + Knockout";
+  if (format === "league")  return "League";
+  if (format === "swiss")   return "Swiss";
+  return "Knockout";
+}
+
+function formatLabelShort(format) {
+  if (format === "mixed")   return "P+KO";
+  if (format === "league")  return "League";
+  if (format === "swiss")   return "Swiss";
+  return "KO";
+}
+
 // Hook: register an Escape key listener that always calls the latest onClose
 // without re-registering on every render (listener registered once, ref kept fresh).
 function useEscapeToClose(onClose) {
@@ -171,6 +185,8 @@ if (typeof window !== "undefined") {
   window.Toast = Toast;
   window.StableInput = StableInput;
   window.pluralize = pluralize;
+  window.formatLabel = formatLabel;
+  window.formatLabelShort = formatLabelShort;
   window.useEscapeToClose = useEscapeToClose;
   window.isTextEntry = isTextEntry;
   window.isInteractiveTarget = isInteractiveTarget;

@@ -47,7 +47,7 @@ func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Auto Complete Test",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -76,7 +76,7 @@ func TestMaybeAutoCompletePools_OnePending(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Pending Test",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -132,7 +132,7 @@ func TestMaybeAutoCompletePools_AlreadyComplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Already Done",
-		Format: state.CompFormatPools,
+		Format: state.CompFormatMixed,
 		Status: state.CompStatusComplete,
 		Courts: []string{"A"},
 	}))
@@ -327,7 +327,7 @@ func TestGenerateDraw_PoolsFormat(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "generate-draw-pools"
 
-	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -367,7 +367,7 @@ func TestGenerateDraw_RejectsDrawReady(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "generate-draw-already-ready"
 
-	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -384,7 +384,7 @@ func TestDiscardDraw_ResetsToSetup(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
 	compID := "discard-draw"
 
-	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -413,7 +413,7 @@ func TestDiscardDraw_RejectsNonDrawReady(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "discard-draw-guard"
 
-	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 
 	err := eng.DiscardDraw(compID)
@@ -428,7 +428,7 @@ func TestStartCompetition_FromDrawReady(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "start-from-draw-ready"
 
-	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -464,7 +464,7 @@ func TestGenerateDraw_ThenDiscardThenRegenerateAndStart(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "full-preview-flow"
 
-	createTestCompetition(t, store, compID, state.CompFormatPools, 3)
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 
 	require.NoError(t, eng.GenerateDraw(compID))

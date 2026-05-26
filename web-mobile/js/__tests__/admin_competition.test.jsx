@@ -727,7 +727,7 @@ describe('canGenerateNextSwissRound', () => {
   });
 
   it('false when format !== swiss', () => {
-    expect(canGenerateNextSwissRound(mkComp({ format: 'pools' }), completedR1)).toBe(false);
+    expect(canGenerateNextSwissRound(mkComp({ format: 'mixed' }), completedR1)).toBe(false);
     expect(canGenerateNextSwissRound(mkComp({ format: 'playoffs' }), completedR1)).toBe(false);
   });
 
@@ -785,6 +785,6 @@ describe('isSwissCompetitionComplete', () => {
   });
 
   it('false when format !== swiss', () => {
-    expect(isSwissCompetitionComplete(mkComp({ format: 'pools' }), completedR4)).toBe(false);
+    expect(isSwissCompetitionComplete(mkComp({ format: 'mixed' }), completedR4)).toBe(false);
   });
 });

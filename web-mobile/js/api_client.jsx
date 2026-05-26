@@ -670,16 +670,33 @@ const API = {
         }
         return res.json();
     },
-    async fetchAnnouncement() {
-        const res = await fetch('/api/tournament/announcement');
-        if (res.status === 204) {
-            return null;
-        }
+    async fetchAnnouncements() {
+        const res = await fetch('/api/tournament/announcements');
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to fetch announcement (Status ${res.status})`);
+            throw new Error(err.error || `Failed to fetch announcements (Status ${res.status})`);
         }
         return res.json();
+    },
+    async deleteAnnouncement(id, password) {
+        const res = await fetch(`/api/announcements/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to delete announcement (Status ${res.status})`);
+        }
+    },
+    async clearAnnouncements(password) {
+        const res = await fetch('/api/announcements', {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to clear announcements (Status ${res.status})`);
+        }
     }
 };
 

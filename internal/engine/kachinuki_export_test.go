@@ -180,7 +180,7 @@ func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:            compID,
 		Name:          "Kachinuki Collect",
-		Format:        state.CompFormatPools,
+		Format:        state.CompFormatMixed,
 		TeamMatchType: state.TeamMatchTypeKachinuki,
 		TeamSize:      5,
 		Status:        state.CompStatusPools,

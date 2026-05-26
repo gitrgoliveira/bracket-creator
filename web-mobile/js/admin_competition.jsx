@@ -1127,7 +1127,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       // waiting for SSE (which may be slow or temporarily disconnected).
       onRefreshCompetition?.();
       showToast(`Draw generated for ${c.name}`);
-      onSection(c.format === "playoffs" || c.format === "mixed" ? "bracket" : "pools");
+      onSection(c.format === "playoffs" ? "bracket" : "pools");
     } catch (e) {
       console.error("Generate draw failed:", e);
       if (mountedRef.current) showToast(e.message, "error");
@@ -1165,7 +1165,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`Draw regenerated for ${c.name}`);
-      onSection(c.format === "playoffs" || c.format === "mixed" ? "bracket" : "pools");
+      onSection(c.format === "playoffs" ? "bracket" : "pools");
     } catch (e) {
       console.error("Regenerate draw failed:", e);
       if (mountedRef.current) {
@@ -1227,11 +1227,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // Show pools/bracket in nav when draw is ready (preview) or running.
         // Use .length checks: the state store returns [] / {rounds:[]} (never null)
         // when files are absent, so plain truthiness would always show the items.
-        (pools?.length || isDrawReady) ? { id: "pools", label: isDrawReady ? "Pools — preview" : "Pools — live" } : null,
+        (pools?.length || (isDrawReady && c.format !== "playoffs")) ? { id: "pools", label: isDrawReady ? "Pools — preview" : "Pools — live" } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
         c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
-        (bracket?.rounds?.length || isDrawReady) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — live" } : null,
+        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — live" } : null,
         !isDrawReady ? { id: "scores", label: "Scores — edit" } : null,
       ].filter(Boolean)
     },

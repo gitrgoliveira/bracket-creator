@@ -85,27 +85,64 @@ The dashboard lists all competitions. Each card shows the competition type, numb
 
 ### Setting up a competition
 
-Each competition goes through a **Setup → Pools → Playoffs** lifecycle.
+Each competition goes through a **Setup → Draw Preview (status `draw-ready`) → Live play (Pools/Playoffs/Swiss)** lifecycle.
 
-1. **Participants & seeds** — Paste or upload a CSV. The participant textarea shows numbered lines for easy error spotting. Format:
-   - Without zekken: `Name, Dojo[, Dan grade]`
-   - With zekken: `Name, Zekken display name, Dojo[, Dan grade]`
+#### The 3-Column Participant Dashboard
 
-   Enable **Use Zekken display name** in Settings first when using the 4-column format.
+The participant setup view has a modern, highly productive 3-column layout:
+* **Left Column (Check-in List)**: Only visible when **Enable check-in** is turned on in the competition settings. Displays the list of imported participants with real-time check-in check-boxes. Provides quick filters (such as "Show only unchecked") and action buttons like "Check-in all".
+* **Centre Column (Participants & Seeds)**: Displays the roster of all saved players. This column is drag-and-drop enabled, allowing the operator to drag rows to assign seeding ranks. Ranks can also be typed manually in the seed column, and a "Shuffle unseeded" button is available to randomize the initial starting positions of unseeded competitors.
+* **Right Column (Bulk Import & Textarea)**: Contains a `LinedTextarea` with line numbers, where operators can paste newline-separated CSV participant rosters.
 
-   After pasting, click **Apply** to save. Optionally import a seeds CSV or type seed numbers per row.
+Format for bulk paste:
+* Without Zekken: `Name, Dojo[, Dan grade]`
+* With Zekken: `Name, Zekken display name, Dojo[, Dan grade]`
 
-2. **Settings** — Adjust pool size, winners per pool, shiai-jo assignment, start time, round-robin mode, and zekken display.
+To save the bulk import, click the **Apply** button at the bottom of the right column.
 
-3. **Start competition** — Click **Start competition →** to draw pools. The status moves to `pools`.
+#### Participant Edit Modal
 
-### Pools (live)
+To edit details of a single competitor (for spelling corrections, dojo transfers, or dan grade updates) without wiping the bulk list:
+1. Click the edit pencil icon next to the participant's name in the Centre Column.
+2. In the modal that appears, modify the name, dojo, dan grade, display name, or seed.
+3. Click **Save Changes** to commit. The edits are persisted atomically to `participants.csv` (and `seeds.csv` if the seed was changed) without disrupting existing check-in or seeding states.
 
-Once pools are drawn, the **Pools** tab shows all pools and their current standings. Scorers can use the **Scores — edit** tab or the dedicated score editor to record match results.
+#### Optional Check-in Workflow
 
-### Bracket (live)
+You can enable check-in for any competition in its **Settings** tab. When check-in is enabled:
+- A check-in panel displays in the viewer roster screen.
+- A **Check-in window** (configurable via tournament settings as `Check-in window start/end`) displays a status banner indicating if the window is pending, open, or closed.
+- Operators can check in players individually by checking their checkbox, bulk check in all players from a specific dojo, or click **Check-in all** to check in everyone.
+- *Rule invariant*: Competitors who are not checked in by the time the draw is generated are excluded from the draw.
+
+#### The Draw-Preview (status `draw-ready`) Workflow
+
+To prevent mistakes and allow manual inspection of the draw before matches are locked and started, the application uses a multi-step **Draw-Preview** workflow:
+
+1. Under the setup tab, after importing and checking in all players, click **Generate Draw**.
+2. The competition transitions to the **`draw-ready`** status.
+3. An interactive draw preview appears, showing the generated pools, bracket structure, or Swiss Round 1 pairings. 
+4. While a draw is in the `draw-ready` status, **participant edits and check-ins are locked** to prevent TOCTOU data corruption.
+5. If the draw is satisfactory, click **Start Competition**. This transitions the status to `pools` (for mixed), `playoffs` (for playoffs-only), or `swiss` (for Swiss format) and exposes the matches to scorers and the public viewer.
+6. If the draw needs changes (e.g., a late-arriving player needs to be added, or a seed rank must be corrected), click **Discard Draw**. This deletes the draft pools and bracket files, unlocks the participant list, and returns the competition to the `setup` phase so you can edit and regenerate.
+
+### Live tournament play
+
+#### Pools (live)
+
+Once the competition has started, the **Pools** tab shows all pools and their current standings. Scorers can use the **Scores — edit** tab or the dedicated score editor to record match results.
+
+#### Bracket (live)
 
 After all pool matches are complete, advance the pool winners to the elimination bracket. The bracket updates live as scores come in.
+
+#### Swiss format tournament flow
+
+For large individual tournaments using the **Swiss** format:
+1. **Round Generation**: Click **Generate Round 1** (or the next round) to pair players with equal or similar win records (winners face winners). The competition status moves to `swiss`, and current Swiss round matches are generated.
+2. **Match Completion**: Scorers record match outcomes. A Swiss round must have all matches completed before the operator can generate the next round.
+3. **Cumulative Standings**: Standings are calculated in real time based on wins, points scored, head-to-head records, and stable alphabetical sorting. This cumulative standings view is public (no authentication required) so spectators can track who is leading the field at any point.
+4. **Advancement**: Click **Generate next round** to compute pairings for the subsequent round. This updates `swissCurrentRound` and broadcasts `swiss_round_generated` SSE events to refresh all screens.
 
 ### Export & print
 

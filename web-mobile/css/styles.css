@@ -364,6 +364,15 @@ a:hover {
   border-color: transparent;
 }
 
+.btn--ghost.btn--danger {
+  color: var(--red);
+  border-color: transparent;
+}
+
+.btn--ghost.btn--danger:hover {
+  background: var(--red-soft);
+}
+
 .btn--sm {
   padding: 5px 10px;
   font-size: 12.5px;

@@ -82,4 +82,14 @@ describe('buildRoster check-in gating', () => {
     expect(roster).toHaveLength(1);
     expect(roster[0].id).toBe('p1');
   });
+
+  it('treats missing checkedIn field as false even when checkInEnabled is true', () => {
+    const comps = [{
+      id: 'c1',
+      checkInEnabled: true,
+      players: [{ id: 'p1', name: 'Alice' }],
+    }];
+    const roster = buildRoster(comps);
+    expect(roster[0].checkedIn).toBe(false);
+  });
 });

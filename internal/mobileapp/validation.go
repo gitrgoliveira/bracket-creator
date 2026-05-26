@@ -101,13 +101,18 @@ func validateMaxLen(field, val string, max int) error {
 	return nil
 }
 
-// validateSubBoutHantei enforces the per-bout hantei invariants on a
-// single SubMatchResult. Called from both ScoreRequest.Validate and
-// validateBulkScoreLengths so the rule set stays in sync across both
-// submission paths.
+// validateSubBoutHantei enforces hantei invariants on a single SubMatchResult.
+// Hantei is only valid for the daihyosen representative bout (Position == -1).
+// Regular numbered bouts are never decided by hantei under FIK rules.
 func validateSubBoutHantei(prefix string, sr *state.SubMatchResult) error {
 	if !sr.DecidedByHantei {
 		return nil
+	}
+	if sr.Position != -1 {
+		return &ValidationError{
+			Field:   prefix + "decidedByHantei",
+			Message: "hantei is only valid for the daihyosen representative bout (position -1)",
+		}
 	}
 	if sr.Winner == "" {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}

@@ -444,23 +444,29 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 	var sb strings.Builder
 	w := csv.NewWriter(&sb)
 	for _, p := range players {
-		// mp-p7n: only UUIDv4 IDs survive the round-trip cleanly. The
-		// loader's per-record id-strip at participants.go:125 gates on
-		// uuidRE — a non-UUID id (e.g. the `${compID}-p${N}` shape the
-		// JS-side mintParticipantIds was generating, or anything a
-		// client/import path supplies) leaves dataStart=0 on load, so
-		// the row's columns get parsed as [Name, Dojo, Metadata]
-		// instead of [id, Name, Dojo, Metadata] — every field shifts
-		// one column right and the id ends up title-cased in Name.
-		// Normalise non-UUID ids to a fresh UUIDv4 at write time so
-		// subsequent reads always strip the first column correctly.
-		// (`uuidRE` is helper.IsUUIDv4 via internal/state/ids.go.)
+		// mp-p7n: only canonical-UUID-shaped ids (lowercase 8-4-4-4-12 hex)
+		// survive the round-trip cleanly. The loader's per-record id-strip
+		// at participants.go:125 gates on uuidRE — a non-UUID-shaped id
+		// (e.g. the `${compID}-p${N}` shape the JS-side mintParticipantIds
+		// was generating, or anything a client/import path supplies) leaves
+		// dataStart=0 on load, so the row's columns get parsed as
+		// [Name, Dojo, Metadata] instead of [id, Name, Dojo, Metadata] —
+		// every field shifts one column right and the id ends up
+		// title-cased in Name. Normalise non-conforming ids to a fresh
+		// UUIDv4 (via uuid.New()) at write time so subsequent reads always
+		// strip the first column correctly.
+		//
+		// `uuidRE` is helper.IsUUIDv4 via internal/state/ids.go — note
+		// that despite the name it's a shape check (doesn't enforce the
+		// v4 version nibble or 89ab variant nibble); any lowercase
+		// 8-4-4-4-12 hex string passes. The shape match is what the
+		// loader cares about, so save + load stay symmetric.
 		//
 		// Copilot PR #185 finding: uuidRE only matches lowercase hex,
-		// so a client-supplied valid UUID with uppercase digits
+		// so a client-supplied UUID with uppercase digits
 		// (e.g. "85CDEB35-...") would be replaced with a fresh id.
 		// Canonicalise via TrimSpace + ToLower before the check so
-		// otherwise-valid UUIDs round-trip unchanged.
+		// otherwise-conforming UUIDs round-trip unchanged.
 		id := strings.ToLower(strings.TrimSpace(p.ID))
 		if id == "" || !uuidRE(id) {
 			id = newParticipantID()

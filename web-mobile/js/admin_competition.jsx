@@ -1127,7 +1127,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       // waiting for SSE (which may be slow or temporarily disconnected).
       onRefreshCompetition?.();
       showToast(`Draw generated for ${c.name}`);
-      onSection(c.format === "playoffs" ? "bracket" : "pools");
+      onSection(c.format === "playoffs" ? "bracket" : c.format === "swiss" ? "overview" : "pools");
     } catch (e) {
       console.error("Generate draw failed:", e);
       if (mountedRef.current) showToast(e.message, "error");
@@ -1165,7 +1165,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`Draw regenerated for ${c.name}`);
-      onSection(c.format === "playoffs" ? "bracket" : "pools");
+      onSection(c.format === "playoffs" ? "bracket" : c.format === "swiss" ? "overview" : "pools");
     } catch (e) {
       console.error("Regenerate draw failed:", e);
       if (mountedRef.current) {

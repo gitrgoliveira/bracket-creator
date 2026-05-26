@@ -140,6 +140,26 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
+		if sr.DecidedByHantei {
+			if sr.Winner == "" {
+				return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
+			}
+			if sr.Encho == nil || sr.Encho.PeriodCount <= 0 {
+				return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires encho with at least one period"}
+			}
+			if len(sr.IpponsA) != len(sr.IpponsB) {
+				return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline — ippon counts must be equal"}
+			}
+			switch sr.Decision {
+			case "", "fought":
+				// compatible
+			default:
+				return &ValidationError{
+					Field:   prefix + "decidedByHantei",
+					Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '' or 'fought'", sr.Decision),
+				}
+			}
+		}
 	}
 	return nil
 }

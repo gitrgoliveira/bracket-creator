@@ -977,3 +977,65 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 		assert.Equal(t, "subResults[1].decidedByHantei", verr.(*ValidationError).Field)
 	})
 }
+
+func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
+	enchoOne := &state.EnchoMetadata{PeriodCount: 1}
+
+	t.Run("valid: sub-bout hantei accepted on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, validateBulkScoreLengths(r))
+	})
+
+	t.Run("invalid: sub-bout hantei without winner rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: sub-bout hantei without encho rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: nil,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: sub-bout hantei with non-tied scoreline rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+}

@@ -1337,10 +1337,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     });
   }
   const [subs, setSubs] = useStateA(initSubsRef.current);
-  // Tracks which sub-bout (by index) has the hantei affordance armed —
-  // i.e. the operator has clicked "Decide by hantei…" and is choosing
-  // SHIRO or AKA. Kept outside subs so isDirty's JSON.stringify
-  // comparison doesn't fire on the arm gesture alone.
   const updateSub = (idx, fn) => setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s));
 
   // T096/FR-031: per-bout Fusensho — award a 2-0 default win to the

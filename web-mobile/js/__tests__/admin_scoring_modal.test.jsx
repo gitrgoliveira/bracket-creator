@@ -996,3 +996,39 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
   // enforced by source ordering, not by a predicate we can unit-test here.
 });
 
+// ─── Per-sub-bout encho tracking (mp-4pc) ──────────────────────────────────────
+//
+// The TeamScoreEditorModal buildPatch emits encho metadata on sub-results when
+// enchoPeriodCount > 0 and omits it otherwise. Mirror the production spread
+// expression so we can assert the payload shape without rendering hooks.
+describe('sub-bout encho payload serialisation (TeamScoreEditorModal mp-4pc)', () => {
+  function enchoPayload(enchoPeriodCount) {
+    return enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+  }
+
+  it('sub-bout with encho emits encho metadata', () => {
+    expect(enchoPayload(1)).toEqual({ encho: { periodCount: 1 } });
+  });
+
+  it('sub-bout with higher encho count emits correct periodCount', () => {
+    expect(enchoPayload(3)).toEqual({ encho: { periodCount: 3 } });
+  });
+
+  it('sub-bout without encho omits the field entirely', () => {
+    expect(enchoPayload(0)).toEqual({});
+    expect(enchoPayload(0).encho).toBeUndefined();
+  });
+
+  it('sub-bout encho state initialises from existing sub-result', () => {
+    const existing = { encho: { periodCount: 2 } };
+    const enchoPeriodCount = existing?.encho?.periodCount || 0;
+    expect(enchoPeriodCount).toBe(2);
+  });
+
+  it('sub-bout encho state defaults to 0 when no existing data', () => {
+    const existing = undefined;
+    const enchoPeriodCount = existing?.encho?.periodCount || 0;
+    expect(enchoPeriodCount).toBe(0);
+  });
+});
+

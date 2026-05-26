@@ -947,6 +947,19 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
 
+	t.Run("valid: daihyosen hantei with decision daihyosen is compatible", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "daihyosen", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
 	t.Run("valid: daihyosen hantei with decision fought is compatible", func(t *testing.T) {
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{

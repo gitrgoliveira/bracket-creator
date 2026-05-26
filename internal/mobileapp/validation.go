@@ -124,12 +124,12 @@ func validateSubBoutHantei(prefix string, sr *state.SubMatchResult) error {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline — ippon counts must be equal"}
 	}
 	switch sr.Decision {
-	case "", "fought":
-		// compatible: bout was fought to tied encho, then decided by judges
+	case "", "fought", "daihyosen":
+		// compatible: daihyosen placeholders carry decision="daihyosen"
 	default:
 		return &ValidationError{
 			Field:   prefix + "decidedByHantei",
-			Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '' or 'fought'", sr.Decision),
+			Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '', 'fought', or 'daihyosen'", sr.Decision),
 		}
 	}
 	return nil

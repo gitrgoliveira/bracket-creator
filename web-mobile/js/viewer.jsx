@@ -262,6 +262,26 @@ function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX)
   return upcoming.slice(0, max);
 }
 
+// buildRoster — merge competition player lists into one deduped array.
+// Masks checkedIn to false for players from competitions where
+// checkInEnabled is false; when a player appears in multiple competitions,
+// checkedIn=true wins if ANY check-in-enabled competition has them checked in.
+function buildRoster(competitions) {
+  const map = new Map();
+  (competitions || []).forEach((c) => {
+    (c.players || []).forEach((p) => {
+      if (!p || !p.id) return;
+      const checkedIn = c.checkInEnabled && !!p.checkedIn;
+      if (!map.has(p.id)) {
+        map.set(p.id, checkedIn === !!p.checkedIn ? p : { ...p, checkedIn });
+      } else if (checkedIn && !map.get(p.id).checkedIn) {
+        map.set(p.id, { ...map.get(p.id), checkedIn: true });
+      }
+    });
+  });
+  return Array.from(map.values());
+}
+
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -292,13 +312,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // history is later changed in-app via route(). When the UUID hits a
   // participant we set the followed-player; if the UUID misses we fall
   // back to a name match (FR-020 / acceptance scenario 5).
-  const roster = useMemo(() => {
-    const map = new Map();
-    (t.competitions || []).forEach((c) => {
-      (c.players || []).forEach((p) => { if (p && p.id && !map.has(p.id)) map.set(p.id, p); });
-    });
-    return Array.from(map.values());
-  }, [t]);
+  const roster = useMemo(() => buildRoster(t.competitions), [t]);
 
   const deepLinkApplied = useRefV(false);
   React.useEffect(() => {
@@ -778,13 +792,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
     if (watchlist.find((w) => w.id === p.id)) return;
     setWatchlist([...watchlist, { id: p.id, name: p.name, dojo: p.dojo || "" }]);
   };
-  const roster = useMemo(() => {
-    const map = new Map();
-    (tournament.competitions || []).forEach((c) => {
-      (c.players || []).forEach((p) => { if (p && p.id && !map.has(p.id)) map.set(p.id, p); });
-    });
-    return Array.from(map.values());
-  }, [tournament]);
+  const roster = useMemo(() => buildRoster(tournament.competitions), [tournament]);
   const rosterById = useMemo(() => new Map(roster.map(p => [p.id, p])), [roster]);
 
   // Unique sorted dojos from the roster, excluding empty values.
@@ -1878,7 +1886,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

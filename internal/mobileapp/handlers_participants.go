@@ -386,6 +386,39 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		c.JSON(http.StatusOK, updatedPlayer)
 	})
 
+	r.POST("/competitions/:id/participants/check-in-bulk", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+
+		var req struct {
+			ParticipantIDs []string `json:"participant_ids"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		result, err := store.BulkCheckIn(id, req.ParticipantIDs, comp.WithZekkenName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		if result.CheckedIn > 0 {
+			hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		}
+
+		c.JSON(http.StatusOK, result)
+	})
+
 	r.DELETE("/competitions/:id/participants/:pid/checkin", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

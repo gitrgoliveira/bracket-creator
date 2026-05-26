@@ -392,6 +392,101 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 		"stale A. SMITH from replaced slot must not carry over")
 }
 
+// TestBulkCheckIn exercises the POST /competitions/:id/participants/check-in-bulk endpoint.
+func TestBulkCheckIn(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-bulk-checkin"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Bulk Check-in Test", Status: state.CompStatusSetup,
+	}))
+
+	// Seed five participants via the store directly.
+	names := []string{"Alice", "Bob", "Carol", "Dave", "Eve"}
+	added := make([]domain.Player, 0, len(names))
+	for _, n := range names {
+		p, err := store.AddParticipant(compID, domain.Player{Name: n, Dojo: "Dojo"}, false)
+		require.NoError(t, err)
+		added = append(added, *p)
+	}
+
+	doPost := func(t *testing.T, pids []string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]interface{}{"participant_ids": pids})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/check-in-bulk", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("empty array returns zero counts", func(t *testing.T) {
+		w := doPost(t, []string{})
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 0, res.CheckedIn)
+		assert.Equal(t, 0, res.AlreadyCheckedIn)
+		assert.Empty(t, res.NotFound)
+	})
+
+	t.Run("checks in 3 unchecked participants", func(t *testing.T) {
+		pids := []string{added[0].ID, added[1].ID, added[2].ID}
+		w := doPost(t, pids)
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 3, res.CheckedIn)
+		assert.Equal(t, 0, res.AlreadyCheckedIn)
+		assert.Empty(t, res.NotFound)
+
+		// Verify persisted state.
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		checkedByID := make(map[string]bool, len(players))
+		for _, p := range players {
+			checkedByID[p.ID] = p.CheckedIn
+		}
+		assert.True(t, checkedByID[added[0].ID], "Alice must be checked in")
+		assert.True(t, checkedByID[added[1].ID], "Bob must be checked in")
+		assert.True(t, checkedByID[added[2].ID], "Carol must be checked in")
+		assert.False(t, checkedByID[added[3].ID], "Dave must NOT be checked in yet")
+	})
+
+	t.Run("already-checked-in participants counted separately", func(t *testing.T) {
+		// Alice, Bob, Carol already checked in from previous sub-test; check in Alice again + Dave (new).
+		pids := []string{added[0].ID, added[3].ID}
+		w := doPost(t, pids)
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 1, res.CheckedIn)
+		assert.Equal(t, 1, res.AlreadyCheckedIn)
+		assert.Empty(t, res.NotFound)
+	})
+
+	t.Run("unknown pid appears in not_found", func(t *testing.T) {
+		pids := []string{added[4].ID, "00000000-0000-0000-0000-000000000099"}
+		w := doPost(t, pids)
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 1, res.CheckedIn)
+		assert.Equal(t, 0, res.AlreadyCheckedIn)
+		assert.Equal(t, []string{"00000000-0000-0000-0000-000000000099"}, res.NotFound)
+	})
+
+	t.Run("competition not found returns 404", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]interface{}{"participant_ids": []string{}})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/nonexistent/participants/check-in-bulk", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
 func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {
 	t.Helper()
 	players, err := store.LoadParticipants(compID, false)

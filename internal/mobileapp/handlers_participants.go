@@ -386,14 +386,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		c.JSON(http.StatusOK, updatedPlayer)
 	})
 
-	r.POST("/competitions/:id/participants/check-in-bulk", func(c *gin.Context) {
+	r.POST("/competitions/:id/participants/checkin-bulk", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
 		}
 
 		var req struct {
-			ParticipantIDs []string `json:"participant_ids"`
+			ParticipantIDs []string `json:"participantIds"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -401,7 +401,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		}
 
 		if len(req.ParticipantIDs) > MaxBulkCheckInIDs {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("participant_ids must not exceed %d entries", MaxBulkCheckInIDs)})
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("participantIds must not exceed %d entries", MaxBulkCheckInIDs)})
 			return
 		}
 

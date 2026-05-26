@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -393,7 +394,7 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 		"stale A. SMITH from replaced slot must not carry over")
 }
 
-// TestBulkCheckIn exercises the POST /competitions/:id/participants/check-in-bulk endpoint.
+// TestBulkCheckIn exercises the POST /competitions/:id/participants/checkin-bulk endpoint.
 func TestBulkCheckIn(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -414,9 +415,9 @@ func TestBulkCheckIn(t *testing.T) {
 
 	doPost := func(t *testing.T, pids []string) *httptest.ResponseRecorder {
 		t.Helper()
-		body, _ := json.Marshal(map[string]interface{}{"participant_ids": pids})
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": pids})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/check-in-bulk", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		return w
@@ -479,9 +480,9 @@ func TestBulkCheckIn(t *testing.T) {
 	})
 
 	t.Run("competition not found returns 404", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]interface{}{"participant_ids": []string{}})
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{}})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/competitions/nonexistent/participants/check-in-bulk", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("POST", "/api/competitions/nonexistent/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -507,6 +508,37 @@ func TestBulkCheckIn(t *testing.T) {
 		assert.Equal(t, 0, res.CheckedIn)
 		assert.Equal(t, 1, res.AlreadyCheckedIn)
 		assert.Empty(t, res.NotFound)
+	})
+
+	t.Run("no file write when nothing toggles", func(t *testing.T) {
+		csvPath := filepath.Join(tempDir, "competitions", compID, "participants.csv")
+
+		// Snapshot mtime before a no-op call (empty array).
+		before, err := os.Stat(csvPath)
+		require.NoError(t, err)
+
+		w := doPost(t, []string{})
+		require.Equal(t, http.StatusOK, w.Code)
+
+		after, err := os.Stat(csvPath)
+		require.NoError(t, err)
+		assert.Equal(t, before.ModTime(), after.ModTime(), "participants.csv must not be written for an empty-array call")
+
+		// All participants already checked in — file must also not be written.
+		// At this point Alice, Bob, Carol, Dave, Eve are all checked in.
+		allPIDs := make([]string, len(added))
+		for i, p := range added {
+			allPIDs[i] = p.ID
+		}
+		before2, err := os.Stat(csvPath)
+		require.NoError(t, err)
+
+		w = doPost(t, allPIDs)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		after2, err := os.Stat(csvPath)
+		require.NoError(t, err)
+		assert.Equal(t, before2.ModTime(), after2.ModTime(), "participants.csv must not be written when all participants are already checked-in")
 	})
 }
 
@@ -553,9 +585,9 @@ func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
 	require.NoError(t, err)
 
 	doPost := func(pids []string) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(map[string]any{"participant_ids": pids})
+		body, _ := json.Marshal(map[string]any{"participantIds": pids})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/check-in-bulk", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		return w

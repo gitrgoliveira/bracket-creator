@@ -233,9 +233,9 @@ func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
 
 // BulkCheckInResult carries the outcome of a BulkCheckIn call.
 type BulkCheckInResult struct {
-	CheckedIn        int      `json:"checked_in"`
-	AlreadyCheckedIn int      `json:"already_checked_in"`
-	NotFound         []string `json:"not_found"`
+	CheckedIn        int      `json:"checkedIn"`
+	AlreadyCheckedIn int      `json:"alreadyCheckedIn"`
+	NotFound         []string `json:"notFound"`
 }
 
 // BulkCheckIn atomically marks all participants in pids as checked-in under a

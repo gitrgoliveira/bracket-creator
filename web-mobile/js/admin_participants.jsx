@@ -734,13 +734,19 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     URL.revokeObjectURL(url);
   };
 
-  const isSetup = !c.status || c.status === "setup" || c.status === "draw-ready";
-  const isStarted = !isSetup;
+  const isSetup = !c.status || c.status === "setup";
+  const isDrawReady = c.status === "draw-ready";
+  const isStarted = !isSetup && !isDrawReady;
   const hasReservedSlotsContext = otherComps.length > 0 || (reservedSlots != null && reservedSlots.length > 0);
 
   return (
     <>
       {c.checkInEnabled && <CheckInBanner tournament={tournament} players={players} />}
+      {isDrawReady && (
+        <div className="notice notice--info" style={{ marginBottom: 12 }}>
+          Draw pending — participant edits are locked. Discard the draw to make changes.
+        </div>
+      )}
       {isStarted && (
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
           <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>

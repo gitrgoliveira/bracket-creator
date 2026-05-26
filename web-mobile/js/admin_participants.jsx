@@ -575,10 +575,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
       const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", tag: targetTag };
       if (metadata !== undefined) payload.metadata = metadata;
-      await window.API.replaceParticipant(c.id, targetId, payload, password);
+      const updated = await window.API.replaceParticipant(c.id, targetId, payload, password);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
-      showToast(`${oldName} replaced with ${name}`);
+      showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);
     } catch (err) {
       if (!mountedRef.current) return;
       showToast(err.message, "error");
@@ -736,6 +736,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
 
   const isSetup = !c.status || c.status === "setup";
   const isStarted = !isSetup;
+  const hasReservedSlotsContext = otherComps.length > 0 || (reservedSlots != null && reservedSlots.length > 0);
 
   return (
     <>
@@ -745,133 +746,79 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
           <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
         </div>
       )}
-      <div className="row row--equal" style={{ alignItems: "start" }}>
-        <div className="card">
-          <div className="card__head">
-            <div>
-              <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
-              <div className="card__sub">
-                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Mumeishi, 3</span>
-              </div>
-              <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
-                Format: "{c.kind === "team" ? "Team name, Dojo" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
-                <br />* Dan = kendo grade (optional)
-                <br /><button className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn btn--sm" type="button" onClick={pasteFromExcel} title="Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV">Paste clipboard</button>
-              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps}>Apply changes</button>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-            <div
-              className={`dropzone ${dragOver ? "dropzone--active" : ""}`}
-              onClick={() => fileRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={onDrop}
-              style={{ flex: 1, height: 80, minHeight: 80 }}
-            >
-              <div className="dropzone__icon">📥</div>
-              <div>
-                <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
-                <div className="dropzone__sub">
-                  {c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Mumeishi, 3)"}
-                </div>
-              </div>
-              <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
-            </div>
-          </div>
-
-          {importSummary && (
-            <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>✔ Loaded <strong>{importSummary.newCount}</strong> entries. {importSummary.existingCount > 0 ? `This will replace ${importSummary.existingCount} existing ${c.kind === "team" ? "teams" : "players"} on Apply.` : ""}</span>
-              <button className="btn btn--sm btn--ghost" onClick={() => setImportSummary(null)}>Dismiss</button>
-            </div>
-          )}
-
-          <LinedTextarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onFocus={() => { textFocusRef.current = true; }}
-            onBlur={() => { textFocusRef.current = false; }}
-            rows={14}
-            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Mumeishi" : "Akira Tanaka, Mumeishi"}
-          />
-          <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by name match (case-insensitive), so you can reorder rows freely.</div>
-          {otherComps.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              {!showSlotForm ? (
+      <div className={hasReservedSlotsContext ? "row-3" : "row"} style={{ alignItems: "start" }}>
+        {hasReservedSlotsContext && (
+          <div className="card">
+            <div className="card__head">
+              <div className="card__title">Reserved slots ({reservedSlots?.length || 0})</div>
+              {otherComps.length > 0 && !showSlotForm && (
                 <button className="btn btn--sm" onClick={() => setShowSlotForm(true)}>+ Reserved slot</button>
-              ) : (
-                <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>Add reserved slot</div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                    <div style={{ flex: 2 }}>
-                      <div className="field__label">Source competition</div>
-                      <select className="field__select" value={slotSrcComp} onChange={e => setSlotSrcComp(e.target.value)}>
-                        <option value="">Select…</option>
-                        {otherComps.map(cc => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
-                      </select>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div className="field__label">Rank</div>
-                      {/* Render NaN as "" so clearing the input stays empty */}
-                      {/* instead of triggering React's "Received NaN for the */}
-                      {/* value attribute" warning. decideNumericUpdate keeps */}
-                      {/* state at NaN when input is empty/non-integer, so the */}
-                      {/* slotRankValid guard above keeps Add disabled until the */}
-                      {/* user re-enters a positive integer. */}
-                      <input
-                        className="field__input"
-                        type="number"
-                        min={1}
-                        step="1"
-                        value={Number.isFinite(slotRank) ? slotRank : ""}
-                        onChange={e => setSlotRank(decideNumericUpdate(e.target.value, 1).value)}
-                      />
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn--sm btn--primary" onClick={addSlot} disabled={!slotSrcComp || !slotRankValid || slotLoading}>Add</button>
-                      <button className="btn btn--sm" onClick={() => setShowSlotForm(false)}>Cancel</button>
-                    </div>
-                  </div>
-                  <div className="field__hint">The placeholder participant will be replaced with the real player when the source competition reaches playoffs.</div>
-                </div>
               )}
             </div>
-          )}
-          {lines.length > 0 && (() => {
-            const previewLimit = showAllPreview ? lines.length : 10;
-            const preview = window.parseParticipantLines(lines.slice(0, previewLimit), c.withZekkenName);
-            const cols = c.withZekkenName ? ["Name", "Zekken", "Dojo", "Dan"] : ["Name", "Dojo", "Dan"];
-            return (
-              <div style={{ marginTop: 8, overflowX: "auto" }}>
-                <table className="parse-preview">
-                  <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
-                  <tbody>{preview.map((p, i) => (
-                    <tr key={i}>
-                      <td className={!p.name ? "cell--missing" : ""}>{p.name || "—"}</td>
-                      {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "—"}</td>}
-                      <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "—"}</td>
-                      <td>{p.danGrade || "—"}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                  <div className="field__hint">Preview of {Math.min(lines.length, previewLimit)} of {lines.length} rows</div>
-                  {lines.length > 10 && (
-                    <button className="btn btn--ghost btn--sm" style={{ color: "var(--accent)", padding: "2px 6px" }} onClick={() => setShowAllPreview(!showAllPreview)}>
-                      {showAllPreview ? "Show less" : "Show all"}
-                    </button>
-                  )}
+            {otherComps.length > 0 && showSlotForm && (
+              <div style={{ padding: "0 16px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Add reserved slot</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div style={{ flex: 2 }}>
+                    <div className="field__label">Source competition</div>
+                    <select className="field__select" value={slotSrcComp} onChange={e => setSlotSrcComp(e.target.value)}>
+                      <option value="">Select…</option>
+                      {otherComps.map(cc => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="field__label">Rank</div>
+                    {/* Render NaN as "" so clearing the input stays empty */}
+                    {/* instead of triggering React's "Received NaN for the */}
+                    {/* value attribute" warning. decideNumericUpdate keeps */}
+                    {/* state at NaN when input is empty/non-integer, so the */}
+                    {/* slotRankValid guard above keeps Add disabled until the */}
+                    {/* user re-enters a positive integer. */}
+                    <input
+                      className="field__input"
+                      type="number"
+                      min={1}
+                      step="1"
+                      value={Number.isFinite(slotRank) ? slotRank : ""}
+                      onChange={e => setSlotRank(decideNumericUpdate(e.target.value, 1).value)}
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn btn--sm btn--primary" onClick={addSlot} disabled={!slotSrcComp || !slotRankValid || slotLoading}>Add</button>
+                    <button className="btn btn--sm" onClick={() => setShowSlotForm(false)}>Cancel</button>
+                  </div>
                 </div>
+                <div className="field__hint">The placeholder participant will be replaced with the real player when the source competition reaches playoffs.</div>
               </div>
-            );
-          })()}
-        </div>
+            )}
+            {reservedSlots && reservedSlots.length > 0 && (
+              <div className="card__body" style={{ padding: "0 0 8px" }}>
+                {reservedSlots.map(slot => {
+                  const srcComp = (tournament?.competitions || []).find(cc => cc.id === slot.sourceCompID);
+                  const ready = srcComp && (srcComp.status === "playoffs" || srcComp.status === "completed");
+                  return (
+                    <div key={slot.id} style={{ display: "flex", alignItems: "center", padding: "8px 16px", gap: 8, borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 500, fontSize: 13 }}>
+                          {srcComp?.name || slot.sourceCompID} — rank {slot.sourceRank}
+                        </div>
+                        <span className={`tag-badge ${ready ? "" : "tag-badge--warn"}`}>
+                          {ready ? "✓ Source ready" : "⚠ Source not yet in playoffs"}
+                        </span>
+                      </div>
+                      <button className="btn btn--sm btn--danger" onClick={() => removeSlot(slot.id)} title="Remove reserved slot">✕</button>
+                    </div>
+                  );
+                })}
+                {reservedSlots.some(s => { const src = (tournament?.competitions || []).find(cc => cc.id === s.sourceCompID); return !src || (src.status !== "playoffs" && src.status !== "completed"); }) && (
+                  <div className="alert alert--warn" style={{ margin: "12px 16px 4px" }}>
+                    ⚠ Some reserved slots cannot be resolved yet. The competition cannot be started until all source competitions have reached playoffs.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <div className="card">
           <div className="card__head">
             <div>
@@ -987,10 +934,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
             </div>
           )}
           {replaceTarget && (
-            <div role="dialog" aria-modal="true" aria-labelledby="replace-modal-title" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
+            <div role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
               <EscapeListener onClose={() => setReplaceTarget(null)} />
               <div className="card" style={{ minWidth: 320, maxWidth: 420, margin: 16 }}>
-                <div className="card__head"><div id="replace-modal-title" className="card__title">Replace {replaceTarget.name}</div></div>
+                <div className="card__head"><div id="edit-modal-title" className="card__title">Edit {replaceTarget.name}</div></div>
                 <div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div>
                     <div className="field__label">Name *</div>
@@ -1010,11 +957,11 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                     <div className="field__label">Dan grade</div>
                     <input className="input" value={replaceDanGrade} onChange={e => setReplaceDanGrade(e.target.value)} placeholder="Optional" />
                   </div>
-                  <div className="field__hint">The participant's ID and seed assignment are preserved. Any existing seeds for this name are renamed automatically.</div>
+                  <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     <button className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
                     <button className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
-                      {replaceLoading ? "Replacing…" : "Replace"}
+                      {replaceLoading ? "Saving…" : "Save"}
                     </button>
                   </div>
                 </div>
@@ -1025,7 +972,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
             <div className="empty" style={{ padding: 24 }}>
               <div className="icon">🌱</div>
               <h3>No participants yet</h3>
-              <div style={{ fontSize: 12 }}>Add names on the left, then "Apply".</div>
+              <div style={{ fontSize: 12 }}>Add names on the right, then "Apply".</div>
             </div>
           ) : (
             <div className="seed-list">
@@ -1099,7 +1046,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
                       {isSetup && (
-                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 9 }} title={`Replace ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Replace ${p.name}`}>↔</button>
+                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>
                      <window.StableInput
@@ -1117,38 +1064,91 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
             </div>
           )}
         </div>
-      </div>
-      {reservedSlots && reservedSlots.length > 0 && (
-        <div className="card" style={{ marginTop: 12 }}>
+        <div className="card">
           <div className="card__head">
-            <div className="card__title">Reserved slots ({reservedSlots.length})</div>
-          </div>
-          <div className="card__body" style={{ padding: "0 0 8px" }}>
-            {reservedSlots.map(slot => {
-              const srcComp = (tournament?.competitions || []).find(cc => cc.id === slot.sourceCompID);
-              const ready = srcComp && (srcComp.status === "playoffs" || srcComp.status === "completed");
-              return (
-                <div key={slot.id} style={{ display: "flex", alignItems: "center", padding: "8px 16px", gap: 8, borderBottom: "1px solid var(--border)" }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 500, fontSize: 13 }}>
-                      {srcComp?.name || slot.sourceCompID} — rank {slot.sourceRank}
-                    </div>
-                    <span className={`tag-badge ${ready ? "" : "tag-badge--warn"}`}>
-                      {ready ? "✓ Source ready" : "⚠ Source not yet in playoffs"}
-                    </span>
-                  </div>
-                  <button className="btn btn--sm btn--danger" onClick={() => removeSlot(slot.id)} title="Remove reserved slot">✕</button>
-                </div>
-              );
-            })}
-            {reservedSlots.some(s => { const src = (tournament?.competitions || []).find(cc => cc.id === s.sourceCompID); return !src || (src.status !== "playoffs" && src.status !== "completed"); }) && (
-              <div className="alert alert--warn" style={{ margin: "12px 16px 4px" }}>
-                ⚠ Some reserved slots cannot be resolved yet. The competition cannot be started until all source competitions have reached playoffs.
+            <div>
+              <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
+              <div className="card__sub">
+                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Mumeishi, 3</span>
               </div>
-            )}
+              <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
+                Format: "{c.kind === "team" ? "Team name, Dojo" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
+                <br />* Dan = kendo grade (optional)
+                <br /><button className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button className="btn btn--sm" type="button" onClick={pasteFromExcel} title="Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV">Paste clipboard</button>
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps}>Apply changes</button>
+            </div>
           </div>
+
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            <div
+              className={`dropzone ${dragOver ? "dropzone--active" : ""}`}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              style={{ flex: 1, height: 80, minHeight: 80 }}
+            >
+              <div className="dropzone__icon">📥</div>
+              <div>
+                <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
+                <div className="dropzone__sub">
+                  {c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Mumeishi, 3)"}
+                </div>
+              </div>
+              <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
+            </div>
+          </div>
+
+          {importSummary && (
+            <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>✔ Loaded <strong>{importSummary.newCount}</strong> entries. {importSummary.existingCount > 0 ? `This will replace ${importSummary.existingCount} existing ${c.kind === "team" ? "teams" : "players"} on Apply.` : ""}</span>
+              <button className="btn btn--sm btn--ghost" onClick={() => setImportSummary(null)}>Dismiss</button>
+            </div>
+          )}
+
+          <LinedTextarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onFocus={() => { textFocusRef.current = true; }}
+            onBlur={() => { textFocusRef.current = false; }}
+            rows={14}
+            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Mumeishi" : "Akira Tanaka, Mumeishi"}
+          />
+          <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by name match (case-insensitive), so you can reorder rows freely.</div>
+          {lines.length > 0 && (() => {
+            const previewLimit = showAllPreview ? lines.length : 10;
+            const preview = window.parseParticipantLines(lines.slice(0, previewLimit), c.withZekkenName);
+            const cols = c.withZekkenName ? ["Name", "Zekken", "Dojo", "Dan"] : ["Name", "Dojo", "Dan"];
+            return (
+              <div style={{ marginTop: 8, overflowX: "auto" }}>
+                <table className="parse-preview">
+                  <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
+                  <tbody>{preview.map((p, i) => (
+                    <tr key={i}>
+                      <td className={!p.name ? "cell--missing" : ""}>{p.name || "—"}</td>
+                      {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "—"}</td>}
+                      <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "—"}</td>
+                      <td>{p.danGrade || "—"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                  <div className="field__hint">Preview of {Math.min(lines.length, previewLimit)} of {lines.length} rows</div>
+                  {lines.length > 10 && (
+                    <button className="btn btn--ghost btn--sm" style={{ color: "var(--accent)", padding: "2px 6px" }} onClick={() => setShowAllPreview(!showAllPreview)}>
+                      {showAllPreview ? "Show less" : "Show all"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
-      )}
+      </div>
     </>
   );
 }

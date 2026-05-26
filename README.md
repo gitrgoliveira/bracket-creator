@@ -36,7 +36,17 @@
 </p>
 <br/>
 
-A CLI to create kendo tournament brackets
+This project lets any club or organisation run kendo tournaments in three ways:
+
+* **Offline** — no internet required; relies entirely on printed brackets and score sheets.
+* **Partially connected** — internet available but no display screens; some printed material still needed.
+* **Fully digital** — complete setup with multiple monitors and live score tracking.
+
+I've been using this application to organise the London Cup since ~2023. It reflects everything I've learned from running real tournaments and the feedback I've received. 
+
+For the guidelines this application is based on, see [running_a_kendo_tournament.md](running_a_kendo_tournament.md).
+
+See the [project documentation website](https://gitrgoliveira.github.io/bracket-creator/) for full details on each mode.
 
 <!-- BEGIN __DO_NOT_INCLUDE__ -->
 

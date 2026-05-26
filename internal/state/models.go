@@ -372,6 +372,7 @@ type ReservedSlot struct {
 }
 
 type Announcement struct {
+	ID        string    `json:"id" yaml:"id"`
 	Message   string    `json:"message" yaml:"message"`
 	SentAt    time.Time `json:"sentAt" yaml:"sent_at"`
 	ExpiresAt time.Time `json:"expiresAt" yaml:"expires_at"`

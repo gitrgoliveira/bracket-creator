@@ -234,11 +234,17 @@ describe('findSeedMatchIndex', () => {
 });
 
 describe('participantSearchTarget', () => {
-  const p = (name, displayName, dojo) => ({ name, displayName, dojo });
+  const p = (name, displayName, dojo, danGrade) => ({ name, displayName, dojo, danGrade });
 
-  it('returns a lowercase string combining name, displayName, and dojo', () => {
+  it('returns a lowercase string combining name, displayName, dojo, and danGrade', () => {
     const target = participantSearchTarget(p('Alice', 'ALI', 'Tokyo Dojo'));
     expect(target).toBe('alice ali tokyo dojo');
+  });
+
+  it('includes danGrade (dojo club for withZekken competitions) in search target', () => {
+    const target = participantSearchTarget(p('men-up-to-2d-p1', 'Alice Smith', 'SMITH', 'Team Alpha'));
+    expect(target.includes('team alpha')).toBe(true);
+    expect(target.includes('alpha')).toBe(true);
   });
 
   it('matches by name substring (case-insensitive)', () => {

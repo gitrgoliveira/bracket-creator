@@ -790,7 +790,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </div>
         )}
         <button className="btn btn--danger btn--ghost" disabled={deleting || invalidating} onClick={async () => {
-          const started = local.status && local.status !== "setup";
+          const started = local.status && local.status !== "setup" && local.status !== "draw-ready";
           const msg = started
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
             : `Are you sure you want to delete "${local.name}"? This action cannot be undone.`;
@@ -1304,7 +1304,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start when ready</div>
               </div>
             )}
-            {(c.format === "mixed" || c.format === "league") && c.status !== "setup" && onCreatePlayoff && (() => {
+            {(c.format === "mixed" || c.format === "league") && c.status !== "setup" && c.status !== "draw-ready" && onCreatePlayoff && (() => {
               if (c.format === "league") {
                 return <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>League: standings determine the winner</div>;
               }

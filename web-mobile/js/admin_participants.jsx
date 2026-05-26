@@ -734,7 +734,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     URL.revokeObjectURL(url);
   };
 
-  const isSetup = !c.status || c.status === "setup";
+  const isSetup = !c.status || c.status === "setup" || c.status === "draw-ready";
   const isStarted = !isSetup;
   const hasReservedSlotsContext = otherComps.length > 0 || (reservedSlots != null && reservedSlots.length > 0);
 

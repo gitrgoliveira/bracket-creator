@@ -64,8 +64,8 @@ const isPoolDaihyosenID = id => id.includes('-DH-');
 function compMatches(c) {
   const out = [];
 
-  // Setup-mode: no backend data yet, return empty (no client-side preview)
-  if (c.status === "setup") return out;
+  // Setup/draw-ready: no public data yet — draw is an admin-only preview
+  if (c.status === "setup" || c.status === "draw-ready") return out;
 
   const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
@@ -97,7 +97,7 @@ function compMatches(c) {
 
 function tournamentMatches(t) {
   return (t.competitions || [])
-    .filter(c => c.status !== "setup")
+    .filter(c => c.status !== "setup" && c.status !== "draw-ready")
     .flatMap(compMatches);
 }
 
@@ -334,7 +334,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
-  const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status !== "setup").map(c => c.id)), [t.competitions]);
+  const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
   // Apply hasBothSides here too — pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
   // placeholder would appear in the public LIVE NOW strip, even though
@@ -468,7 +468,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                         </div>
                         <StatusBadge status={c.status} showLiveDot />
                       </div>
-                      {c.status !== "setup" && total > 0 && (
+                      {c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                         <div className="vlist-item__progress">
                           <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
                           <div className="vlist-item__pct">
@@ -1354,7 +1354,7 @@ function MatchDetailCard({ match, onClose }) {
 function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
 
-  if (c.status === "setup") {
+  if (c.status === "setup" || c.status === "draw-ready") {
     return (
       <div className="empty" style={{ padding: 32 }}>
         <div className="icon">⏳</div>

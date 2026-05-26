@@ -755,10 +755,26 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if comp.Players != nil {
-			// Roster-PUT: reflect what we just saved. AdminParticipants's
-			// clear-roster path sends [] and expects the response to
-			// reflect the cleared roster — preserve that shape.
-			updated.Players = comp.Players
+			// Roster-PUT: re-load from disk so the response reflects what
+			// actually landed in participants.csv — including any IDs
+			// marshalParticipantsCSV normalised to UUIDv4 (mp-p7n: the
+			// JS layer's mintParticipantIds historically minted non-UUID
+			// ids in the `${compID}-p${N}` shape; the saver rewrites
+			// those to UUIDs so the loader's per-record id-strip works,
+			// and the response must surface those normalised ids so the
+			// client's next round-trip doesn't resend the old non-UUID
+			// values).
+			//
+			// AdminParticipants's clear-roster path sends [] and the
+			// re-loaded roster will also be [] (LoadParticipants returns
+			// an empty slice for an empty file), so the cleared-roster
+			// contract still holds.
+			if players, lerr := store.LoadParticipants(id, updated.WithZekkenName); lerr == nil {
+				updated.Players = players
+			} else {
+				fmt.Printf("Warning: failed to re-load participants for roster-PUT response: %v\n", lerr)
+				updated.Players = comp.Players // fallback: echo body
+			}
 		} else {
 			// Settings-only PUT — load the on-disk roster for the
 			// response so the merge doesn't push null into local state.

@@ -445,7 +445,18 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 	w := csv.NewWriter(&sb)
 	for _, p := range players {
 		id := p.ID
-		if id == "" {
+		// mp-p7n: only UUIDv4 IDs survive the round-trip cleanly. The
+		// loader's per-record id-strip at participants.go:125 gates on
+		// uuidRE — a non-UUID id (e.g. the `${compID}-p${N}` shape the
+		// JS-side mintParticipantIds was generating, or anything a
+		// client/import path supplies) leaves dataStart=0 on load, so
+		// the row's columns get parsed as [Name, Dojo, Metadata]
+		// instead of [id, Name, Dojo, Metadata] — every field shifts
+		// one column right and the id ends up title-cased in Name.
+		// Normalise non-UUID ids to a fresh UUIDv4 at write time so
+		// subsequent reads always strip the first column correctly.
+		// (`uuidRE` is helper.IsUUIDv4 via internal/state/ids.go.)
+		if id == "" || !uuidRE(id) {
 			id = newParticipantID()
 		}
 		var record []string

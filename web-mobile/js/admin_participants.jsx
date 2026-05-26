@@ -575,10 +575,10 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
       const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", tag: targetTag };
       if (metadata !== undefined) payload.metadata = metadata;
-      await window.API.replaceParticipant(c.id, targetId, payload, password);
+      const updated = await window.API.replaceParticipant(c.id, targetId, payload, password);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
-      showToast(oldName === name ? `Saved changes for ${name}` : `Renamed ${oldName} → ${name}`);
+      showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);
     } catch (err) {
       if (!mountedRef.current) return;
       showToast(err.message, "error");

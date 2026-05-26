@@ -31,7 +31,6 @@ func TestAnnouncementHandlers(t *testing.T) {
 	}
 	res := resources.NewResources(nil, mockFS)
 
-	// Save tournament config with a password so AuthMiddleware doesn't run in bootstrap mode
 	tourney := state.Tournament{
 		Name:     "Test Tournament",
 		Password: "secret-password",
@@ -39,7 +38,6 @@ func TestAnnouncementHandlers(t *testing.T) {
 	err = store.SaveTournament(&tourney)
 	require.NoError(t, err)
 
-	// Construct router using NewRouter so we test full middleware integration
 	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
 
 	// 1. GET /api/tournament/announcement - initially empty (204 No Content)
@@ -48,7 +46,16 @@ func TestAnnouncementHandlers(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNoContent, w.Code)
 
-	// 2. POST /api/tournament/announce - unauthorized without header
+	// 2. GET /api/tournament/announcements - initially empty list
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/tournament/announcements", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var emptyList []state.Announcement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &emptyList))
+	assert.Empty(t, emptyList)
+
+	// 3. POST /api/tournament/announce - unauthorized without header
 	payload := announcementRequest{
 		Message:         "Lunch break for 30 minutes",
 		DurationMinutes: 30,
@@ -59,18 +66,15 @@ func TestAnnouncementHandlers(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	// 3. POST /api/tournament/announce - unauthorized with wrong password
+	// 4. POST /api/tournament/announce - wrong password
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
 	req.Header.Set("X-Tournament-Password", "wrong-password")
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	// 4. POST /api/tournament/announce - bad request with empty message
-	badPayload := announcementRequest{
-		Message:         "   ",
-		DurationMinutes: 30,
-	}
+	// 5. POST /api/tournament/announce - empty message
+	badPayload := announcementRequest{Message: "   ", DurationMinutes: 30}
 	body, _ = json.Marshal(badPayload)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
@@ -79,12 +83,8 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "cannot be empty")
 
-	// 5. POST /api/tournament/announce - bad request with too long message (>200 chars)
-	tooLongMsg := strings.Repeat("A", 201)
-	badPayload = announcementRequest{
-		Message:         tooLongMsg,
-		DurationMinutes: 30,
-	}
+	// 6. POST /api/tournament/announce - message too long (>200 chars)
+	badPayload = announcementRequest{Message: strings.Repeat("A", 201), DurationMinutes: 30}
 	body, _ = json.Marshal(badPayload)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
@@ -93,11 +93,8 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "cannot exceed 200 characters")
 
-	// 6. POST /api/tournament/announce - bad request with invalid duration (e.g. 7 minutes)
-	badPayload = announcementRequest{
-		Message:         "Valid message",
-		DurationMinutes: 7,
-	}
+	// 7. POST /api/tournament/announce - invalid duration
+	badPayload = announcementRequest{Message: "Valid message", DurationMinutes: 7}
 	body, _ = json.Marshal(badPayload)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
@@ -106,22 +103,16 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "Duration must be 5, 10, 15, or 30 minutes")
 
-	// 7. POST /api/tournament/announce - oversized body (>AnnouncementMaxBodyBytes)
-	// returns 413: MaxBodyBytes fires before AuthMiddleware (Content-Length fast
-	// path) and before ShouldBindJSON can run.
+	// 8. POST /api/tournament/announce - oversized body (>AnnouncementMaxBodyBytes)
 	hugeMsg := strings.Repeat("A", int(AnnouncementMaxBodyBytes)+10)
-	hugePayload := announcementRequest{
-		Message:         hugeMsg,
-		DurationMinutes: 30,
-	}
-	body, _ = json.Marshal(hugePayload)
+	body, _ = json.Marshal(announcementRequest{Message: hugeMsg, DurationMinutes: 30})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
 	req.Header.Set("X-Tournament-Password", "secret-password")
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "expected 413 for body over %d bytes", AnnouncementMaxBodyBytes)
 
-	// 8. POST /api/tournament/announce - happy path (200 OK)
+	// 9. POST first announcement — happy path
 	body, _ = json.Marshal(payload)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
@@ -129,22 +120,89 @@ func TestAnnouncementHandlers(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response state.Announcement
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-	assert.Equal(t, "Lunch break for 30 minutes", response.Message)
-	assert.False(t, response.SentAt.IsZero())
-	assert.False(t, response.ExpiresAt.IsZero())
-	assert.True(t, response.ExpiresAt.After(response.SentAt))
+	var first state.Announcement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &first))
+	assert.Equal(t, "Lunch break for 30 minutes", first.Message)
+	assert.NotEmpty(t, first.ID)
+	assert.False(t, first.SentAt.IsZero())
+	assert.True(t, first.ExpiresAt.After(first.SentAt))
 
-	// 9. GET /api/tournament/announcement - should now return the active announcement (200 OK)
+	// 10. POST second announcement — both should coexist
+	body, _ = json.Marshal(announcementRequest{Message: "Court 3 paused", DurationMinutes: 5})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "secret-password")
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var second state.Announcement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &second))
+	assert.Equal(t, "Court 3 paused", second.Message)
+	assert.NotEmpty(t, second.ID)
+	assert.NotEqual(t, first.ID, second.ID)
+
+	// 11. GET /api/tournament/announcements — should list both
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/tournament/announcements", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var list []state.Announcement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	assert.Len(t, list, 2)
+	assert.Equal(t, first.ID, list[0].ID)
+	assert.Equal(t, second.ID, list[1].ID)
+
+	// 12. GET /api/tournament/announcement — legacy endpoint returns most recent
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/api/tournament/announcement", nil)
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+	var single state.Announcement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &single))
+	assert.Equal(t, second.ID, single.ID)
 
-	var retrieved state.Announcement
-	err = json.Unmarshal(w.Body.Bytes(), &retrieved)
-	require.NoError(t, err)
-	assert.Equal(t, "Lunch break for 30 minutes", retrieved.Message)
+	// 13. DELETE /api/announcements/:id — dismiss first
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/announcements/"+first.ID, nil)
+	req.Header.Set("X-Tournament-Password", "secret-password")
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/tournament/announcements", nil)
+	router.ServeHTTP(w, req)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	assert.Len(t, list, 1)
+	assert.Equal(t, second.ID, list[0].ID)
+
+	// 14. DELETE /api/announcements/:id — not found
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/announcements/doesnotexist", nil)
+	req.Header.Set("X-Tournament-Password", "secret-password")
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// 15. DELETE /api/announcements — clear all
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/announcements", nil)
+	req.Header.Set("X-Tournament-Password", "secret-password")
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/tournament/announcements", nil)
+	router.ServeHTTP(w, req)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	assert.Empty(t, list)
+
+	// 16. DELETE admin endpoints require auth
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/announcements/someid", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/announcements", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }

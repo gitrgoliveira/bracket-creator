@@ -375,6 +375,18 @@ Some tournament styles have teams of 10 or more.
 
 If a team is missing a player for a position, the opposing fighter at that position wins by default (fusensho) with a score of **2–0**. This counts as one individual victory and two points for the winning side when calculating the team match result.
 
+### Per-Bout Encho and Hantei in Team Matches
+
+Each individual bout within a team encounter has its own regulation time and may go to **encho** (overtime) if the bout is tied at time-up. Under some federation rules, if the bout remains tied after encho, the referees make a **hantei** decision for that individual bout (FIK Art. 7-5 / 29-6) — just as they would in a standalone individual match.
+
+A hantei-decided sub-bout still counts as one individual victory (IV) for the winning team. The pre-hantei scoreline is preserved (displayed with an **(HT)** suffix in the score grid). To record it in the operator interface:
+
+1. Tick **Overtime (E)** on the sub-bout row to mark that the bout went to encho.
+2. If the scores remain tied, click **Decide by hantei…** to arm the affordance.
+3. Click **SHIRO wins** or **AKA wins** — the bout is committed with `decidedByHantei: true` and the chosen team credited with one IV.
+
+Not all federations allow per-bout hantei within team matches. Check your tournament rules before using this affordance; if the tie is to be broken at the encounter level instead, use the **Daihyosen** (representative bout) button after all bouts are scored.
+
 ### How a Team Match Is Decided
 
 The result of each individual bout contributes to the team result. A team wins the encounter when it has:

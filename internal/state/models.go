@@ -226,15 +226,17 @@ func IsDraw(decision string) bool {
 }
 
 type SubMatchResult struct {
-	Position int      `json:"position"`
-	SideA    string   `json:"sideA"`
-	SideB    string   `json:"sideB"`
-	IpponsA  []string `json:"ipponsA"`
-	IpponsB  []string `json:"ipponsB"`
-	HansokuA int      `json:"hansokuA"`
-	HansokuB int      `json:"hansokuB"`
-	Winner   string   `json:"winner"`
-	Decision string   `json:"decision"`
+	Position        int            `json:"position"`
+	SideA           string         `json:"sideA"`
+	SideB           string         `json:"sideB"`
+	IpponsA         []string       `json:"ipponsA"`
+	IpponsB         []string       `json:"ipponsB"`
+	HansokuA        int            `json:"hansokuA"`
+	HansokuB        int            `json:"hansokuB"`
+	Winner          string         `json:"winner"`
+	Decision        string         `json:"decision"`
+	DecidedByHantei bool           `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+	Encho           *EnchoMetadata `json:"encho,omitempty"           yaml:"encho,omitempty"`
 }
 
 type MatchResult struct {

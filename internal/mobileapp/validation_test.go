@@ -854,3 +854,126 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 		assert.NoError(t, req.Validate())
 	})
 }
+
+func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
+	enchoOne := &state.EnchoMetadata{PeriodCount: 1}
+
+	t.Run("valid: sub-bout hantei with winner, encho, tied scoreline", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("invalid: sub-bout hantei without winner", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: sub-bout hantei without encho", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: nil,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: sub-bout hantei with non-tied scoreline", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: sub-bout hantei incompatible with hikiwake decision", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "hikiwake", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("valid: sub-bout hantei with decision fought is compatible", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "fought", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("valid: 0-0 tied encho decided by hantei", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: nil, IpponsB: nil,
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("error prefix uses correct subResults index", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+				{
+					Position: 2, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: nil, // invalid: no encho
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[1].decidedByHantei", verr.(*ValidationError).Field)
+	})
+}

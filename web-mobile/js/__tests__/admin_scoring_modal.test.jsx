@@ -995,3 +995,117 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
   // identity — it cannot selectively suppress Enter; that invariant is
   // enforced by source ordering, not by a predicate we can unit-test here.
 });
+
+// ─── Per-bout hantei in team matches (mp-4pc) ─────────────────────────────────
+//
+// TeamScoreEditorModal uses subTotals to derive IV/PW for the encounter header.
+// The hanteiWinner field on a sub-bout overrides the ippon-count winner so that
+// a tied-encho sub-bout decided by hantei is counted as a victory, not a draw.
+//
+// Mirror the production subTotals derivation inline — component rendering is not
+// feasible in vitest (hooks stubbed), so we test the pure derivation expression.
+describe('subTotals derivation with per-bout hantei (TeamScoreEditorModal mp-4pc)', () => {
+  function subTotalFrom(s) {
+    const aT = s.aPts.length;
+    const bT = s.bPts.length;
+    if (s.hanteiWinner) return { aTotal: aT, bTotal: bT, winner: s.hanteiWinner };
+    const winner = aT > bT ? "a" : bT > aT ? "b" : null;
+    return { aTotal: aT, bTotal: bT, winner };
+  }
+
+  it('hantei-won 1-1 tied sub-bout: winner is hanteiWinner, not null', () => {
+    const s = { aPts: ["M"], bPts: ["K"], hanteiWinner: "a" };
+    const t = subTotalFrom(s);
+    expect(t.winner).toBe("a");
+    expect(t.aTotal).toBe(1);
+    expect(t.bTotal).toBe(1);
+  });
+
+  it('hantei-won 0-0 tied sub-bout: AKA wins by hantei', () => {
+    const s = { aPts: [], bPts: [], hanteiWinner: "a" };
+    expect(subTotalFrom(s).winner).toBe("a");
+  });
+
+  it('hantei-won 0-0 tied sub-bout: SHIRO wins by hantei', () => {
+    const s = { aPts: [], bPts: [], hanteiWinner: "b" };
+    expect(subTotalFrom(s).winner).toBe("b");
+  });
+
+  it('non-hantei sub-bout: ippon-count derivation unchanged', () => {
+    const s = { aPts: ["M", "K"], bPts: ["D"], hanteiWinner: null };
+    expect(subTotalFrom(s).winner).toBe("a");
+  });
+
+  it('hanteiWinner null: tied bout stays a draw', () => {
+    const s = { aPts: ["M"], bPts: ["K"], hanteiWinner: null };
+    expect(subTotalFrom(s).winner).toBe(null);
+  });
+
+  it('3-bout encounter with 1 per-bout hantei: IV and PW tallied correctly', () => {
+    // Bout 1: AKA wins 2-0 (normal ippon)
+    // Bout 2: SHIRO wins 2-1 (normal)
+    // Bout 3: Tied 1-1 in encho, decided by hantei for AKA
+    const subs = [
+      { aPts: ["M", "K"], bPts: [],        hanteiWinner: null },
+      { aPts: ["M"],      bPts: ["K", "D"], hanteiWinner: null },
+      { aPts: ["M"],      bPts: ["K"],      hanteiWinner: "a"  },
+    ];
+    const totals = subs.map(subTotalFrom);
+    const ivA = totals.filter(t => t.winner === "a").length;
+    const ivB = totals.filter(t => t.winner === "b").length;
+    const pwA = totals.reduce((sum, t) => sum + t.aTotal, 0);
+    const pwB = totals.reduce((sum, t) => sum + t.bTotal, 0);
+    expect(ivA).toBe(2);  // bouts 1 + 3 (hantei)
+    expect(ivB).toBe(1);  // bout 2
+    expect(pwA).toBe(4);  // 2 + 1 + 1
+    expect(pwB).toBe(3);  // 0 + 2 + 1
+    // encounter winner derived from IV
+    const teamWinner = ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null;
+    expect(teamWinner).toBe("a");
+  });
+
+  it('hantei winner does not affect IV when it is a draw case (both teams IV equal, PW tiebreak)', () => {
+    // Bout 1: AKA wins  (normal)
+    // Bout 2: SHIRO wins (normal)
+    // Bout 3: Tied, decided by hantei for AKA → AKA wins encounter on IV 2-1
+    const subs = [
+      { aPts: ["M"], bPts: [],    hanteiWinner: null },
+      { aPts: [],    bPts: ["K"], hanteiWinner: null },
+      { aPts: ["M"], bPts: ["K"], hanteiWinner: "a"  },
+    ];
+    const totals = subs.map(subTotalFrom);
+    const ivA = totals.filter(t => t.winner === "a").length;
+    const ivB = totals.filter(t => t.winner === "b").length;
+    expect(ivA).toBe(2);
+    expect(ivB).toBe(1);
+  });
+});
+
+describe('sub-bout patch fields for per-bout hantei (mp-4pc)', () => {
+  // Mirror the buildPatch spread expression for sub-result serialization so
+  // we can assert decidedByHantei and encho are emitted when expected.
+  function subPatch(s) {
+    return {
+      ...(s.enchoPeriodCount > 0 ? { encho: { periodCount: s.enchoPeriodCount } } : {}),
+      ...(s.hanteiWinner ? { decidedByHantei: true } : {}),
+    };
+  }
+
+  it('hantei-decided sub-bout emits decidedByHantei:true and encho', () => {
+    const patch = subPatch({ enchoPeriodCount: 1, hanteiWinner: "a" });
+    expect(patch.decidedByHantei).toBe(true);
+    expect(patch.encho).toEqual({ periodCount: 1 });
+  });
+
+  it('regular sub-bout emits neither decidedByHantei nor encho', () => {
+    const patch = subPatch({ enchoPeriodCount: 0, hanteiWinner: null });
+    expect(patch.decidedByHantei).toBeUndefined();
+    expect(patch.encho).toBeUndefined();
+  });
+
+  it('sub-bout with encho but no hantei emits only encho', () => {
+    const patch = subPatch({ enchoPeriodCount: 2, hanteiWinner: null });
+    expect(patch.encho).toEqual({ periodCount: 2 });
+    expect(patch.decidedByHantei).toBeUndefined();
+  });
+});

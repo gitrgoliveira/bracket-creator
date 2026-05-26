@@ -1306,43 +1306,43 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // affordance shown as active.
   const sideAName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
   const sideBName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
-  const initSubs = positions.map((_, idx) => {
-    const existing = existingSub.find(s => s.position === idx + 1);
-    let fusensho = "";
-    if (existing?.decision === "fusensho") {
-      if (existing.winner === sideAName) fusensho = "a";
-      else if (existing.winner === sideBName) fusensho = "b";
-    }
-    // reconcileFoulsAtOpen mirrors ScoreEditorModal: pre-fix builds
-    // stored the cumulative raw foul count alongside the already-awarded
-    // H in the opponent's ippon array. The counter now means "outstanding
-    // fouls not yet discharged" and any missing discharged H's in the
-    // opponent's pts are topped up (defensive against legacy/imported data).
-    const rawAFouls = existing ? existing.hansokuA || 0 : 0;
-    const rawBFouls = existing ? existing.hansokuB || 0 : 0;
-    const seedAPts = existing ? (existing.ipponsA || []).filter(x => x && x !== "•") : [];
-    const seedBPts = existing ? (existing.ipponsB || []).filter(x => x && x !== "•") : [];
-    const reconA = reconcileFoulsAtOpen(rawAFouls, seedBPts);
-    const reconB = reconcileFoulsAtOpen(rawBFouls, seedAPts);
-    // Restore per-bout hantei winner side from the stored sub-result so a
-    // re-opened completed bout shows the correct hantei state.
-    const hanteiWinner = (() => {
-      if (!existing?.decidedByHantei || !existing?.winner) return null;
-      if (existing.winner === sideAName) return "a";
-      if (existing.winner === sideBName) return "b";
-      return null;
-    })();
-    return {
-      aPts: reconB.opponentPts,
-      bPts: reconA.opponentPts,
-      aFouls: reconA.outstandingFouls,
-      bFouls: reconB.outstandingFouls,
-      fusensho,
-      enchoPeriodCount: existing?.encho?.periodCount || 0,
-      hanteiWinner,
-    };
-  });
-  const [subs, setSubs] = useStateA(initSubs);
+  const initSubsRef = React.useRef(null);
+  if (initSubsRef.current === null) {
+    initSubsRef.current = positions.map((_, idx) => {
+      const existing = existingSub.find(s => s.position === idx + 1);
+      let fusensho = "";
+      if (existing?.decision === "fusensho") {
+        if (existing.winner === sideAName) fusensho = "a";
+        else if (existing.winner === sideBName) fusensho = "b";
+      }
+      // reconcileFoulsAtOpen mirrors ScoreEditorModal: pre-fix builds
+      // stored the cumulative raw foul count alongside the already-awarded
+      // H in the opponent's ippon array. The counter now means "outstanding
+      // fouls not yet discharged" and any missing discharged H's in the
+      // opponent's pts are topped up (defensive against legacy/imported data).
+      const rawAFouls = existing ? existing.hansokuA || 0 : 0;
+      const rawBFouls = existing ? existing.hansokuB || 0 : 0;
+      const seedAPts = existing ? (existing.ipponsA || []).filter(x => x && x !== "•") : [];
+      const seedBPts = existing ? (existing.ipponsB || []).filter(x => x && x !== "•") : [];
+      const reconA = reconcileFoulsAtOpen(rawAFouls, seedBPts);
+      const reconB = reconcileFoulsAtOpen(rawBFouls, seedAPts);
+      let hanteiWinner = null;
+      if (existing?.decidedByHantei && existing?.winner) {
+        if (existing.winner === sideAName) hanteiWinner = "a";
+        else if (existing.winner === sideBName) hanteiWinner = "b";
+      }
+      return {
+        aPts: reconB.opponentPts,
+        bPts: reconA.opponentPts,
+        aFouls: reconA.outstandingFouls,
+        bFouls: reconB.outstandingFouls,
+        fusensho,
+        enchoPeriodCount: existing?.encho?.periodCount || 0,
+        hanteiWinner,
+      };
+    });
+  }
+  const [subs, setSubs] = useStateA(initSubsRef.current);
   // Tracks which sub-bout (by index) has the hantei affordance armed —
   // i.e. the operator has clicked "Decide by hantei…" and is choosing
   // SHIRO or AKA. Kept outside subs so isDirty's JSON.stringify
@@ -1455,7 +1455,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // the comparison robust against array identity drift from setSubs.
   // Encho toggle is included so an operator-only encho change still
   // triggers the discard confirm.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubs) || enchoPeriodCount !== initialEnchoPeriods;
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods;
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has
@@ -1666,6 +1666,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               if (t.winner === null) return <span className="tsm-draw">X</span>;
               return <span>{`${t.bTotal}–${t.aTotal}`}</span>;
             })();
+            const scoreWinner = s.hanteiWinner || t.winner;
+            const isArmed = hanteiArmedIdx === idx;
+            const boutTied = t.aTotal === t.bTotal && !s.fusensho && !s.hanteiWinner;
 
             return (
               <div key={idx} className="team-sub-match">
@@ -1748,86 +1751,77 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                           </div>
                         </div>
                       </div>
-                      {rsIdx === 0 && (() => {
-                        const scoreWinner = s.hanteiWinner || t.winner;
-                        return (
-                          <div className={`team-sub-match__score ${scoreWinner === "b" ? "team-sub-match__score--a-win" : scoreWinner === "a" ? "team-sub-match__score--b-win" : ""}`}>
-                            {scoreDisplay}
-                          </div>
-                        );
-                      })()}
+                      {rsIdx === 0 && (
+                        <div className={`team-sub-match__score ${scoreWinner === "b" ? "team-sub-match__score--a-win" : scoreWinner === "a" ? "team-sub-match__score--b-win" : ""}`}>
+                          {scoreDisplay}
+                        </div>
+                      )}
                     </React.Fragment>
                   ))}
                 </div>
                 {/* Per-bout encho toggle + hantei affordance. Encho tracks whether
                     this individual sub-bout went to overtime; hantei is available
                     once encho is marked and the bout is tied (FIK 7-5 / 29-6). */}
-                {(() => {
-                  const isArmed = hanteiArmedIdx === idx;
-                  const boutTied = t.aTotal === t.bTotal && !s.fusensho && !s.hanteiWinner;
-                  return (
-                    <div className="tsm-encho-hantei" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "4px 6px", marginTop: 4, fontSize: 11, borderTop: (s.enchoPeriodCount > 0 || s.hanteiWinner) ? "1px solid var(--line, #eee)" : "none" }}>
-                      <label style={{ display: "flex", gap: 4, alignItems: "center", cursor: s.hanteiWinner ? "default" : "pointer", color: "var(--ink-3)" }}>
-                        <input type="checkbox"
-                          data-testid={`scoring-modal-sub-encho-${idx}`}
-                          checked={s.enchoPeriodCount > 0}
-                          onChange={e => {
-                            const next = e.target.checked ? 1 : 0;
-                            if (!e.target.checked) setHanteiArmedIdx(n => n === idx ? null : n);
-                            updateSub(idx, prev => ({ ...prev, enchoPeriodCount: next, hanteiWinner: next === 0 ? null : prev.hanteiWinner }));
-                          }}
-                          disabled={!!s.hanteiWinner}
-                        />
-                        <span>Overtime (E)</span>
-                      </label>
-                      {s.enchoPeriodCount > 0 && !s.hanteiWinner && !isArmed && (
-                        <button type="button" className="btn btn--sm"
-                          data-testid={`scoring-modal-sub-hantei-arm-${idx}`}
-                          onClick={() => setHanteiArmedIdx(idx)}
-                          disabled={!boutTied || isBoutDecided(s.aPts, s.bPts) || !!s.fusensho}
-                          title={
-                            s.fusensho
-                              ? "Cancel fusensho before using hantei"
-                              : !boutTied
-                                ? "Hantei applies only to tied bouts in encho"
-                                : "Record a judges' decision for this bout"
-                          }
-                          style={{ marginLeft: "auto" }}
-                        >
-                          Decide by hantei…
-                        </button>
-                      )}
-                      {isArmed && (
-                        <div style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
-                          <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
-                          <button type="button" className="btn btn--sm"
-                            data-testid={`scoring-modal-sub-hantei-shiro-${idx}`}
-                            onClick={() => { updateSub(idx, prev => ({ ...prev, hanteiWinner: "b" })); setHanteiArmedIdx(null); }}
-                          >SHIRO wins</button>
-                          <button type="button" className="btn btn--sm"
-                            data-testid={`scoring-modal-sub-hantei-aka-${idx}`}
-                            onClick={() => { updateSub(idx, prev => ({ ...prev, hanteiWinner: "a" })); setHanteiArmedIdx(null); }}
-                          >AKA wins</button>
-                          <button type="button" className="btn btn--ghost btn--sm"
-                            data-testid={`scoring-modal-sub-hantei-cancel-${idx}`}
-                            onClick={() => setHanteiArmedIdx(null)}
-                          >Cancel</button>
-                        </div>
-                      )}
-                      {s.hanteiWinner && !isArmed && (
-                        <div style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
-                          <span style={{ fontWeight: 600 }}>
-                            Hantei: {s.hanteiWinner === "b" ? "SHIRO" : "AKA"} wins
-                          </span>
-                          <button type="button" className="btn btn--ghost btn--sm"
-                            data-testid={`scoring-modal-sub-hantei-change-${idx}`}
-                            onClick={() => updateSub(idx, prev => ({ ...prev, hanteiWinner: null }))}
-                          >Change</button>
-                        </div>
-                      )}
+                <div className="tsm-encho-hantei" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "4px 6px", marginTop: 4, fontSize: 11, borderTop: (s.enchoPeriodCount > 0 || s.hanteiWinner) ? "1px solid var(--line, #eee)" : "none" }}>
+                  <label style={{ display: "flex", gap: 4, alignItems: "center", cursor: s.hanteiWinner ? "default" : "pointer", color: "var(--ink-3)" }}>
+                    <input type="checkbox"
+                      data-testid={`scoring-modal-sub-encho-${idx}`}
+                      checked={s.enchoPeriodCount > 0}
+                      onChange={e => {
+                        const next = e.target.checked ? 1 : 0;
+                        if (!e.target.checked) setHanteiArmedIdx(n => n === idx ? null : n);
+                        updateSub(idx, prev => ({ ...prev, enchoPeriodCount: next, hanteiWinner: next === 0 ? null : prev.hanteiWinner }));
+                      }}
+                      disabled={!!s.hanteiWinner}
+                    />
+                    <span>Overtime (E)</span>
+                  </label>
+                  {s.enchoPeriodCount > 0 && !s.hanteiWinner && !isArmed && (
+                    <button type="button" className="btn btn--sm"
+                      data-testid={`scoring-modal-sub-hantei-arm-${idx}`}
+                      onClick={() => setHanteiArmedIdx(idx)}
+                      disabled={!boutTied || isBoutDecided(s.aPts, s.bPts) || !!s.fusensho}
+                      title={
+                        s.fusensho
+                          ? "Cancel fusensho before using hantei"
+                          : !boutTied
+                            ? "Hantei applies only to tied bouts in encho"
+                            : "Record a judges' decision for this bout"
+                      }
+                      style={{ marginLeft: "auto" }}
+                    >
+                      Decide by hantei…
+                    </button>
+                  )}
+                  {isArmed && (
+                    <div style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
+                      <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
+                      <button type="button" className="btn btn--sm"
+                        data-testid={`scoring-modal-sub-hantei-shiro-${idx}`}
+                        onClick={() => { updateSub(idx, prev => ({ ...prev, hanteiWinner: "b" })); setHanteiArmedIdx(null); }}
+                      >SHIRO wins</button>
+                      <button type="button" className="btn btn--sm"
+                        data-testid={`scoring-modal-sub-hantei-aka-${idx}`}
+                        onClick={() => { updateSub(idx, prev => ({ ...prev, hanteiWinner: "a" })); setHanteiArmedIdx(null); }}
+                      >AKA wins</button>
+                      <button type="button" className="btn btn--ghost btn--sm"
+                        data-testid={`scoring-modal-sub-hantei-cancel-${idx}`}
+                        onClick={() => setHanteiArmedIdx(null)}
+                      >Cancel</button>
                     </div>
-                  );
-                })()}
+                  )}
+                  {s.hanteiWinner && !isArmed && (
+                    <div style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
+                      <span style={{ fontWeight: 600 }}>
+                        Hantei: {s.hanteiWinner === "b" ? "SHIRO" : "AKA"} wins
+                      </span>
+                      <button type="button" className="btn btn--ghost btn--sm"
+                        data-testid={`scoring-modal-sub-hantei-change-${idx}`}
+                        onClick={() => updateSub(idx, prev => ({ ...prev, hanteiWinner: null }))}
+                      >Change</button>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}

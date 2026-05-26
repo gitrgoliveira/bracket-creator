@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -390,6 +392,221 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 		"displayName must be derived from the new name, not inherited from the old slot")
 	assert.NotEqual(t, "A. SMITH", players[0].DisplayName,
 		"stale A. SMITH from replaced slot must not carry over")
+}
+
+// TestBulkCheckIn exercises the POST /competitions/:id/participants/checkin-bulk endpoint.
+func TestBulkCheckIn(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-bulk-checkin"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Bulk Check-in Test", Status: state.CompStatusSetup,
+	}))
+
+	// Seed five participants via the store directly.
+	names := []string{"Alice", "Bob", "Carol", "Dave", "Eve"}
+	added := make([]domain.Player, 0, len(names))
+	for _, n := range names {
+		p, err := store.AddParticipant(compID, domain.Player{Name: n, Dojo: "Dojo"}, false)
+		require.NoError(t, err)
+		added = append(added, *p)
+	}
+
+	doPost := func(t *testing.T, pids []string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": pids})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("empty array returns zero counts", func(t *testing.T) {
+		w := doPost(t, []string{})
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 0, res.CheckedIn)
+		assert.Equal(t, 0, res.AlreadyCheckedIn)
+		assert.Empty(t, res.NotFound)
+	})
+
+	t.Run("checks in 3 unchecked participants", func(t *testing.T) {
+		pids := []string{added[0].ID, added[1].ID, added[2].ID}
+		w := doPost(t, pids)
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 3, res.CheckedIn)
+		assert.Equal(t, 0, res.AlreadyCheckedIn)
+		assert.Empty(t, res.NotFound)
+
+		// Verify persisted state.
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		checkedByID := make(map[string]bool, len(players))
+		for _, p := range players {
+			checkedByID[p.ID] = p.CheckedIn
+		}
+		assert.True(t, checkedByID[added[0].ID], "Alice must be checked in")
+		assert.True(t, checkedByID[added[1].ID], "Bob must be checked in")
+		assert.True(t, checkedByID[added[2].ID], "Carol must be checked in")
+		assert.False(t, checkedByID[added[3].ID], "Dave must NOT be checked in yet")
+	})
+
+	t.Run("already-checked-in participants counted separately", func(t *testing.T) {
+		// Alice, Bob, Carol already checked in from previous sub-test; check in Alice again + Dave (new).
+		pids := []string{added[0].ID, added[3].ID}
+		w := doPost(t, pids)
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 1, res.CheckedIn)
+		assert.Equal(t, 1, res.AlreadyCheckedIn)
+		assert.Empty(t, res.NotFound)
+	})
+
+	t.Run("unknown pid appears in not_found", func(t *testing.T) {
+		pids := []string{added[4].ID, "00000000-0000-0000-0000-000000000099"}
+		w := doPost(t, pids)
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 1, res.CheckedIn)
+		assert.Equal(t, 0, res.AlreadyCheckedIn)
+		assert.Equal(t, []string{"00000000-0000-0000-0000-000000000099"}, res.NotFound)
+	})
+
+	t.Run("competition not found returns 404", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{}})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/nonexistent/participants/checkin-bulk", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("oversized array returns 400", func(t *testing.T) {
+		over := make([]string, MaxBulkCheckInIDs+1)
+		for i := range over {
+			over[i] = added[0].ID
+		}
+		w := doPost(t, over)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("oversized individual pid returns 400", func(t *testing.T) {
+		w := doPost(t, []string{string(make([]byte, MaxLenEntityID+1))})
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("duplicate pids counted only once", func(t *testing.T) {
+		// Eve (added[4]) already checked in from "unknown pid" sub-test.
+		// Send her PID twice — must count as 1 already_checked_in, not 2.
+		pids := []string{added[4].ID, added[4].ID}
+		w := doPost(t, pids)
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 0, res.CheckedIn)
+		assert.Equal(t, 1, res.AlreadyCheckedIn)
+		assert.Empty(t, res.NotFound)
+	})
+
+	t.Run("no file write when nothing toggles", func(t *testing.T) {
+		csvPath := filepath.Join(tempDir, "competitions", compID, "participants.csv")
+
+		// Snapshot mtime before a no-op call (empty array).
+		before, err := os.Stat(csvPath)
+		require.NoError(t, err)
+
+		w := doPost(t, []string{})
+		require.Equal(t, http.StatusOK, w.Code)
+
+		after, err := os.Stat(csvPath)
+		require.NoError(t, err)
+		assert.Equal(t, before.ModTime(), after.ModTime(), "participants.csv must not be written for an empty-array call")
+
+		// All participants already checked in — file must also not be written.
+		// At this point Alice, Bob, Carol, Dave, Eve are all checked in.
+		allPIDs := make([]string, len(added))
+		for i, p := range added {
+			allPIDs[i] = p.ID
+		}
+		before2, err := os.Stat(csvPath)
+		require.NoError(t, err)
+
+		w = doPost(t, allPIDs)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		after2, err := os.Stat(csvPath)
+		require.NoError(t, err)
+		assert.Equal(t, before2.ModTime(), after2.ModTime(), "participants.csv must not be written when all participants are already checked-in")
+	})
+}
+
+// spyBroadcaster counts Broadcast calls for asserting SSE fan-out behaviour.
+type spyBroadcaster struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (s *spyBroadcaster) Broadcast(_ EventType, _ any) {
+	s.mu.Lock()
+	s.calls++
+	s.mu.Unlock()
+}
+
+func (s *spyBroadcaster) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// TestBulkCheckIn_BroadcastBehaviour verifies the conditional SSE broadcast:
+// exactly one event when at least one participant is toggled, zero events when
+// all participants are already checked-in.
+func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "mobileapp-test-broadcast-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+
+	spy := &spyBroadcaster{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	RegisterParticipantHandlers(admin, store, spy)
+
+	compID := "comp-broadcast-test"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Broadcast Test", Status: state.CompStatusSetup,
+	}))
+	p, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo"}, false)
+	require.NoError(t, err)
+
+	doPost := func(pids []string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"participantIds": pids})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// First call: toggles Alice → exactly 1 broadcast.
+	w := doPost([]string{p.ID})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, spy.count(), "one broadcast expected when a participant is newly checked-in")
+
+	// Second call: Alice already checked-in → zero additional broadcasts.
+	w = doPost([]string{p.ID})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, spy.count(), "no additional broadcast expected when participant is already checked-in")
 }
 
 func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {

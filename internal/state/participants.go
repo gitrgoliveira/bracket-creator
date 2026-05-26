@@ -231,6 +231,72 @@ func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
 	return comp.WithZekkenName, nil
 }
 
+// BulkCheckInResult carries the outcome of a BulkCheckIn call.
+type BulkCheckInResult struct {
+	CheckedIn        int      `json:"checkedIn"`
+	AlreadyCheckedIn int      `json:"alreadyCheckedIn"`
+	NotFound         []string `json:"notFound"`
+}
+
+// BulkCheckIn atomically marks all participants in pids as checked-in under a
+// single lock acquire, writing participants.csv exactly once. Only participants
+// that were not already checked in count toward CheckedIn; the file is only
+// written when at least one participant was actually toggled.
+func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, error) {
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	withZekkenName, err := s.withZekkenNameLocked(compID)
+	if err != nil {
+		return BulkCheckInResult{}, err
+	}
+
+	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
+	if err != nil {
+		return BulkCheckInResult{}, err
+	}
+
+	byPID := make(map[string]int, len(players))
+	for i := range players {
+		if players[i].ID != "" {
+			byPID[players[i].ID] = i
+		}
+	}
+
+	seen := make(map[string]struct{}, len(pids))
+	result := BulkCheckInResult{NotFound: []string{}}
+	for _, pid := range pids {
+		if pid == "" {
+			continue
+		}
+		if _, dup := seen[pid]; dup {
+			continue
+		}
+		seen[pid] = struct{}{}
+
+		idx, ok := byPID[pid]
+		if !ok {
+			result.NotFound = append(result.NotFound, pid)
+			continue
+		}
+		if players[idx].CheckedIn {
+			result.AlreadyCheckedIn++
+		} else {
+			players[idx].CheckedIn = true
+			result.CheckedIn++
+		}
+	}
+
+	if result.CheckedIn > 0 {
+		if err := s.saveParticipantsNoLock(compID, players, withZekkenName); err != nil {
+			return BulkCheckInResult{}, err
+		}
+	}
+
+	return result, nil
+}
+
 // UpdateParticipant atomically loads the participant list, applies transform
 // to the target player, and persists the result. Used to avoid TOCTOU races
 // on concurrent check-ins.

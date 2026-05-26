@@ -1157,6 +1157,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     setGenerating(true);
     try {
       await window.API.discardDraw(c.id, password);
+      if (!mountedRef.current) return;
+      // Refresh after discard so the UI reflects setup status immediately;
+      // if generateDraw then fails the UI is consistent with the server.
+      onRefreshCompetition?.();
       await window.API.generateDraw(c.id, password);
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
@@ -1164,7 +1168,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       onSection(c.format === "playoffs" || c.format === "mixed" ? "bracket" : "pools");
     } catch (e) {
       console.error("Regenerate draw failed:", e);
-      if (mountedRef.current) showToast(e.message, "error");
+      if (mountedRef.current) {
+        onRefreshCompetition?.();
+        showToast(e.message, "error");
+      }
     } finally {
       if (mountedRef.current) setGenerating(false);
     }

@@ -315,15 +315,31 @@ func (e *Engine) GenerateDraw(id string) error {
 // would erase the freshly generated files, leaving draw-ready with no
 // artifacts.
 func (e *Engine) DiscardDraw(id string) error {
-	// Delete draw artifacts first while status is still draw-ready.
-	// GenerateDraw rejects requests in draw-ready state, so no concurrent
-	// caller can write new artifacts during this window.
+	// Pre-check: verify draw-ready status before touching the filesystem.
+	// This prevents deleting artifacts from a running competition when the
+	// caller is wrong. The authoritative check is the status CAS below; this
+	// early return is the common-case guard.
+	comp, err := e.store.LoadCompetition(id)
+	if err != nil {
+		return err
+	}
+	if comp == nil {
+		return notFoundErrorf("competition %s not found", id)
+	}
+	if comp.Status != state.CompStatusDrawReady {
+		return validationErrorf("competition %s is not in draw-ready state (status: %s)", id, comp.Status)
+	}
+
+	// Delete draw artifacts while status is still draw-ready (verified above).
+	// GenerateDraw rejects draw-ready state, so no concurrent GenerateDraw can
+	// write new artifacts here. The final status CAS below is the authoritative
+	// guard.
 	for _, f := range []string{"pools.csv", "pool-matches.csv", "bracket.json"} {
 		if err := e.store.DeleteCompetitionFile(id, f); err != nil {
 			return fmt.Errorf("DiscardDraw: failed to delete %s: %w", f, err)
 		}
 	}
-	_, err := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found", id)
 		}

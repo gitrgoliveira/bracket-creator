@@ -318,9 +318,11 @@ func (e *Engine) DiscardDraw(id string) error {
 	// Delete draw artifacts first while status is still draw-ready.
 	// GenerateDraw rejects requests in draw-ready state, so no concurrent
 	// caller can write new artifacts during this window.
-	_ = e.store.DeleteCompetitionFile(id, "pools.csv")
-	_ = e.store.DeleteCompetitionFile(id, "pool-matches.csv")
-	_ = e.store.DeleteCompetitionFile(id, "bracket.json")
+	for _, f := range []string{"pools.csv", "pool-matches.csv", "bracket.json"} {
+		if err := e.store.DeleteCompetitionFile(id, f); err != nil {
+			return fmt.Errorf("DiscardDraw: failed to delete %s: %w", f, err)
+		}
+	}
 	_, err := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found", id)

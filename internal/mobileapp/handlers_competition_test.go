@@ -1015,6 +1015,131 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 		"response must not ship `players: null` — clients merge this into local state")
 }
 
+// mp-p7n: Copilot PR #185 finding — pin the roster-PUT response contract.
+// When a client sends players with non-UUID ids (the JS-side
+// mintParticipantIds shape `${compID}-p${N}` or arbitrary import-supplied
+// ids), the saver normalises them to UUIDv4 on disk. The PUT response
+// must reflect those normalised ids so the next round-trip is stable;
+// otherwise the client keeps resending the old non-UUID ids and the
+// server keeps minting new UUIDs on every save — disk ids would churn
+// silently and tooling that joins by id would break.
+//
+// Also exercises Name/Dojo preservation as a defence against the original
+// column-shift corruption: pre-fix the load would have returned
+// Name="Asddasd-P1", Dojo="Aaron Adams", Metadata=["Team Alpha"].
+func TestPUTCompetition_RosterPUTResponseSurfacesNormalisedUUIDs(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "asddasd"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Asddasd", Date: "12-05-2026",
+		WithZekkenName: false, HasParticipantIDs: true,
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	// PUT body carries the bug-prone id shape that mintParticipantIds
+	// historically minted.
+	body := []byte(`{
+		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
+		"format":"playoffs","kind":"individual","courts":["A"],
+		"withZekkenName":false,
+		"players":[
+			{"id":"asddasd-p1","name":"Aaron Adams","dojo":"Team Alpha"},
+			{"id":"asddasd-p2","name":"Albus Blake","dojo":"Team Delta"}
+		]
+	}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Players, 2)
+
+	// Response ids MUST be UUIDv4, not the request-body's "asddasd-p1"
+	// shape. Otherwise the client would keep resending the un-normalised
+	// id on every save.
+	for i, p := range resp.Players {
+		assert.True(t, helper.IsUUIDv4(p.ID),
+			"resp.Players[%d].ID must be a UUIDv4 after the server normalises non-UUID ids; got %q", i, p.ID)
+		assert.NotEqual(t, "asddasd-p1", p.ID, "resp.Players[%d] must not echo the un-normalised id", i)
+		assert.NotEqual(t, "asddasd-p2", p.ID, "resp.Players[%d] must not echo the un-normalised id", i)
+	}
+
+	// Name and Dojo MUST round-trip without column shift.
+	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
+	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
+	assert.Empty(t, resp.Players[0].Metadata,
+		"Metadata must be empty — pre-fix column shift dumped Dojo into Metadata[0]")
+	assert.Equal(t, "Albus Blake", resp.Players[1].Name)
+	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
+
+	// Sanity: a second PUT with the SAME (now-normalised) ids returned
+	// in the previous response should re-save without churning the on-
+	// disk ids. This guards against the regression where the response
+	// echoed the body and the next save kept re-normalising.
+	firstID := resp.Players[0].ID
+	body2 := fmt.Appendf(nil, `{
+		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
+		"format":"playoffs","kind":"individual","courts":["A"],
+		"withZekkenName":false,
+		"players":[
+			{"id":%q,"name":"Aaron Adams","dojo":"Team Alpha"},
+			{"id":%q,"name":"Albus Blake","dojo":"Team Delta"}
+		]
+	}`, resp.Players[0].ID, resp.Players[1].ID)
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	require.Equal(t, http.StatusOK, w2.Code)
+	var resp2 state.Competition
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+	assert.Equal(t, firstID, resp2.Players[0].ID,
+		"ids must be stable across save round-trips once normalised")
+}
+
+// mp-p7n: Copilot PR #185 finding — a client-supplied valid UUID with
+// uppercase hex digits must round-trip unchanged (canonicalised to
+// lowercase, but not replaced with a fresh id). Pre-canonicalisation
+// uuidRE only matched lowercase, so the upper-case variant would be
+// treated as a non-UUID and replaced.
+func TestPUTCompetition_RosterPUTAcceptsUppercaseUUID(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "upper-uuid"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Upper UUID", Date: "12-05-2026",
+		WithZekkenName: false, HasParticipantIDs: true,
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	// Uppercase UUID, valid otherwise.
+	upperUUID := "85CDEB35-C066-4667-B7FD-43EBAE8A9F13"
+	lowerUUID := "85cdeb35-c066-4667-b7fd-43ebae8a9f13"
+	body := fmt.Appendf(nil, `{
+		"id":"upper-uuid","name":"Upper UUID","date":"12-05-2026",
+		"format":"playoffs","kind":"individual","courts":["A"],
+		"withZekkenName":false,
+		"players":[{"id":%q,"name":"Aaron Adams","dojo":"Team Alpha"}]
+	}`, upperUUID)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Players, 1)
+	assert.Equal(t, lowerUUID, resp.Players[0].ID,
+		"uppercase UUID must canonicalise to lowercase, not be replaced with a fresh id")
+}
+
 // TestPlayoff_ResponseIncludesPlayers pins the Copilot round-12
 // finding (#6) server-side: POST /playoffs used to ship `players: null`
 // in the create response (Go nil slice → JSON null). admin.jsx's

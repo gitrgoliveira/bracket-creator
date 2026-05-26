@@ -772,7 +772,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if players, lerr := store.LoadParticipants(id, updated.WithZekkenName); lerr == nil {
 				updated.Players = players
 			} else {
-				fmt.Printf("Warning: failed to re-load participants for roster-PUT response: %v\n", lerr)
+				fmt.Printf("Warning: PUT /api/competitions/%s — failed to re-load participants for roster-PUT response (falling back to request body, client may see un-normalised ids): %v\n", id, lerr)
 				updated.Players = comp.Players // fallback: echo body
 			}
 		} else {

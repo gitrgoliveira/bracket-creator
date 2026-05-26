@@ -444,7 +444,6 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 	var sb strings.Builder
 	w := csv.NewWriter(&sb)
 	for _, p := range players {
-		id := p.ID
 		// mp-p7n: only UUIDv4 IDs survive the round-trip cleanly. The
 		// loader's per-record id-strip at participants.go:125 gates on
 		// uuidRE — a non-UUID id (e.g. the `${compID}-p${N}` shape the
@@ -456,6 +455,13 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 		// Normalise non-UUID ids to a fresh UUIDv4 at write time so
 		// subsequent reads always strip the first column correctly.
 		// (`uuidRE` is helper.IsUUIDv4 via internal/state/ids.go.)
+		//
+		// Copilot PR #185 finding: uuidRE only matches lowercase hex,
+		// so a client-supplied valid UUID with uppercase digits
+		// (e.g. "85CDEB35-...") would be replaced with a fresh id.
+		// Canonicalise via TrimSpace + ToLower before the check so
+		// otherwise-valid UUIDs round-trip unchanged.
+		id := strings.ToLower(strings.TrimSpace(p.ID))
 		if id == "" || !uuidRE(id) {
 			id = newParticipantID()
 		}

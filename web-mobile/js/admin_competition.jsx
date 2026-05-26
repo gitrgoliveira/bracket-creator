@@ -1235,11 +1235,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     {
       sec: "Run", items: [
         // Show pools/bracket in nav when draw is ready (preview) or running.
-        (pools || isDrawReady) ? { id: "pools", label: isDrawReady ? "Pools — preview" : "Pools — live" } : null,
+        // Use .length checks: the state store returns [] / {rounds:[]} (never null)
+        // when files are absent, so plain truthiness would always show the items.
+        (pools?.length || isDrawReady) ? { id: "pools", label: isDrawReady ? "Pools — preview" : "Pools — live" } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
         c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
-        (bracket || isDrawReady) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — live" } : null,
+        (bracket?.rounds?.length || isDrawReady) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — live" } : null,
         !isDrawReady ? { id: "scores", label: "Scores — edit" } : null,
       ].filter(Boolean)
     },

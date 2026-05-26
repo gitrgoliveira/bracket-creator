@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -507,6 +508,68 @@ func TestBulkCheckIn(t *testing.T) {
 		assert.Equal(t, 1, res.AlreadyCheckedIn)
 		assert.Empty(t, res.NotFound)
 	})
+}
+
+// spyBroadcaster counts Broadcast calls for asserting SSE fan-out behaviour.
+type spyBroadcaster struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (s *spyBroadcaster) Broadcast(_ EventType, _ any) {
+	s.mu.Lock()
+	s.calls++
+	s.mu.Unlock()
+}
+
+func (s *spyBroadcaster) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// TestBulkCheckIn_BroadcastBehaviour verifies the conditional SSE broadcast:
+// exactly one event when at least one participant is toggled, zero events when
+// all participants are already checked-in.
+func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "mobileapp-test-broadcast-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+
+	spy := &spyBroadcaster{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	RegisterParticipantHandlers(admin, store, spy)
+
+	compID := "comp-broadcast-test"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Broadcast Test", Status: state.CompStatusSetup,
+	}))
+	p, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo"}, false)
+	require.NoError(t, err)
+
+	doPost := func(pids []string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"participant_ids": pids})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/check-in-bulk", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// First call: toggles Alice → exactly 1 broadcast.
+	w := doPost([]string{p.ID})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, spy.count(), "one broadcast expected when a participant is newly checked-in")
+
+	// Second call: Alice already checked-in → zero additional broadcasts.
+	w = doPost([]string{p.ID})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, spy.count(), "no additional broadcast expected when participant is already checked-in")
 }
 
 func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {

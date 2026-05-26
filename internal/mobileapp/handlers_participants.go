@@ -400,14 +400,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+		if len(req.ParticipantIDs) > MaxBulkCheckInIDs {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("participant_ids must not exceed %d entries", MaxBulkCheckInIDs)})
 			return
 		}
 
-		if len(req.ParticipantIDs) > MaxBulkCheckInIDs {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("participant_ids must not exceed %d entries", MaxBulkCheckInIDs)})
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
 

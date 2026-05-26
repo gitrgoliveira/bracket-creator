@@ -259,12 +259,17 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 
 	byPID := make(map[string]int, len(players))
 	for i := range players {
-		byPID[players[i].ID] = i
+		if players[i].ID != "" {
+			byPID[players[i].ID] = i
+		}
 	}
 
 	seen := make(map[string]struct{}, len(pids))
 	result := BulkCheckInResult{NotFound: []string{}}
 	for _, pid := range pids {
+		if pid == "" {
+			continue
+		}
 		if _, dup := seen[pid]; dup {
 			continue
 		}

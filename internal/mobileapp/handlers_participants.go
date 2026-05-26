@@ -278,6 +278,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				httpMsg = "competition not found"
 				return fmt.Errorf("competition not found")
 			}
+			if comp.Status == state.CompStatusDrawReady {
+				httpStatus = http.StatusConflict
+				httpMsg = "cannot modify participants while a draw is pending; discard the draw first"
+				return state.ErrCompetitionNotInSetup
+			}
 			if comp.Status != state.CompStatusSetup && comp.Status != "" {
 				httpStatus = http.StatusConflict
 				httpMsg = "cannot modify participants after competition has started"

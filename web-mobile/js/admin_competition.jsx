@@ -1288,7 +1288,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {isDrawReady && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting}>
+                  <button className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting || generating}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>

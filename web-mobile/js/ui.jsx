@@ -8,7 +8,7 @@ function StatusBadge({ status, showLiveDot }) {
     playoffs: ["badge--playoffs", "Playoffs"],
     completed: ["badge--completed", "Completed"],
   };
-  const [cls, label] = map[status] || ["badge--setup", status];
+  const [cls, label] = map[status || "setup"] || ["badge--setup", status];
   const showLive = showLiveDot && (status === "pools" || status === "playoffs");
   return (
     <span className={`badge ${cls}`}>

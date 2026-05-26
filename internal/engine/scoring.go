@@ -601,6 +601,9 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					if len(result.SubResults) > 0 {
+						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
+					}
 					// DecidedByHantei uses *bool so that a client that omits the
 					// field (nil) preserves the stored value, while an explicit
 					// true/false applies it. This prevents a re-score that doesn't

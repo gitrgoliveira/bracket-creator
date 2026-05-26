@@ -81,6 +81,9 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					if len(result.SubResults) > 0 {
+						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
+					}
 					// See scoring.go for the DecidedByHantei *bool semantics.
 					if result.DecidedByHantei != nil {
 						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei

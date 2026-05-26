@@ -359,6 +359,9 @@ type BracketMatch struct {
 	// DecidedByHantei mirrors MatchResult.DecidedByHantei for bracket reads.
 	// YAML tag included for parity with MatchResult and future YAML-serialised contexts.
 	DecidedByHantei bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+	// SubResults persists per-bout results for team bracket matches so the
+	// score editor can restore hantei state and bout-level detail on re-open.
+	SubResults []SubMatchResult `json:"subResults,omitempty"`
 }
 
 type Bracket struct {

@@ -1817,7 +1817,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                       </span>
                       <button type="button" className="btn btn--ghost btn--sm"
                         data-testid={`scoring-modal-sub-hantei-change-${idx}`}
-                        onClick={() => updateSub(idx, prev => ({ ...prev, hanteiWinner: null }))}
+                        onClick={() => { updateSub(idx, prev => ({ ...prev, hanteiWinner: null })); setHanteiArmedIdx(idx); }}
                       >Change</button>
                     </div>
                   )}

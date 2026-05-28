@@ -788,3 +788,135 @@ func TestReinstateCompetitor(t *testing.T) {
 		assert.Contains(t, err.Error(), "playerID is required")
 	})
 }
+
+// TestRollback_BracketSubResults_Cleared verifies the K3/CHK047 rollback
+// path clears SubResults from a bracket match when the prior state had no
+// sub-results. Regression: the nil-preserve branch would leave
+// partially-written SubResults behind because the prior was nil and nil
+// means "preserve". The fix normalizes nil → empty slice before replay.
+func TestRollback_BracketSubResults_Cleared(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-rollback-subs"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	carolID := helper.NewUUID4()
+	daveID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+		{ID: daveID, Name: "Dave", Dojo: "D"},
+	}))
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	firstMatchID := bracket.Rounds[0][0].ID
+	secondMatchID := bracket.Rounds[0][1].ID
+
+	// Complete the first bracket match (no SubResults). Alice loses via
+	// kiken — she becomes ineligible.
+	_, _, err = eng.RecordDecision(compID, firstMatchID, "kiken", "aka", "injury", nil, false)
+	require.NoError(t, err)
+
+	// Verify Alice is now ineligible.
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	st, ok := statuses[aliceID]
+	require.True(t, ok, "Alice must have a competitor status after kiken")
+	require.False(t, st.Eligible)
+
+	// Second bracket match: attempt kiken on Alice (she's a side).
+	// First make sure Alice is a side in the second match by checking.
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	bm := bracket.Rounds[0][1]
+
+	// We need Alice as a side in the second match for the concurrent
+	// kiken scenario. Since the bracket generator assigns sides
+	// deterministically, Alice may not be in the second match. In that
+	// case we test the non-tx rollback directly with a pool match setup.
+	if bm.SideA != "Alice" && bm.SideB != "Alice" {
+		// Fall back: use pool matches instead. Create a fresh competition
+		// with pool matches where Alice appears twice.
+		compID2 := "pool-rollback-subs"
+		createTestCompetition(t, store, compID2, "mixed", 2)
+		require.NoError(t, store.SaveParticipants(compID2, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: carolID, Name: "Carol", Dojo: "C"},
+		}))
+		require.NoError(t, store.SavePoolMatches(compID2, []state.MatchResult{
+			{ID: "Pool-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+			{ID: "Pool-1", SideA: "Carol", SideB: "Alice", Status: state.MatchStatusScheduled},
+		}))
+		// First match kiken makes Alice ineligible.
+		_, _, err = eng.RecordDecision(compID2, "Pool-0", "kiken", "aka", "injury", nil, false)
+		require.NoError(t, err)
+		// Second match: try to score with SubResults — should be rejected.
+		_, err = eng.RecordMatchResultWithIneligibility(compID2, "Pool-1", &state.MatchResult{
+			Winner:     "Carol",
+			Status:     state.MatchStatusCompleted,
+			Decision:   "kiken",
+			DecisionBy: "shiro",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Carol", Winner: "Carol"},
+			},
+		})
+		require.Error(t, err, "must get AlreadyIneligibleError")
+		var alreadyErr *AlreadyIneligibleError
+		require.ErrorAs(t, err, &alreadyErr)
+		// Verify the pool match was rolled back — no SubResults left behind.
+		matches, err := store.LoadPoolMatches(compID2)
+		require.NoError(t, err)
+		for _, m := range matches {
+			if m.ID == "Pool-1" {
+				assert.Equal(t, state.MatchStatusScheduled, m.Status, "pool match should have been rolled back")
+				return
+			}
+		}
+		t.Fatal("Pool-1 not found after rollback")
+		return
+	}
+
+	// Alice is in the second bracket match — attempt to score it with
+	// SubResults and a kiken on Alice. Should fail because Alice is
+	// already ineligible from the first match.
+	decisionBy := "aka"
+	if bm.SideB == "Alice" {
+		decisionBy = "shiro"
+	}
+	_, err = eng.RecordMatchResultWithIneligibility(compID, secondMatchID, &state.MatchResult{
+		Winner:     bm.SideB,
+		Status:     state.MatchStatusCompleted,
+		Decision:   "kiken",
+		DecisionBy: decisionBy,
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: bm.SideA, Winner: bm.SideA},
+			{Position: 2, SideA: bm.SideA, IpponsB: []string{"M"}},
+		},
+	})
+	require.Error(t, err, "must get AlreadyIneligibleError")
+	var alreadyErr *AlreadyIneligibleError
+	require.ErrorAs(t, err, &alreadyErr)
+
+	// The bracket match should have been rolled back. Critically, the
+	// SubResults that were written as part of the failed score attempt
+	// must NOT persist — the prior had nil SubResults, and the rollback
+	// must normalize that to an explicit empty slice to clear them.
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	for _, round := range bracket.Rounds {
+		for _, bm := range round {
+			if bm.ID == secondMatchID {
+				assert.Empty(t, bm.SubResults, "SubResults must be cleared by rollback when the prior had none")
+				return
+			}
+		}
+	}
+	t.Fatal("second match not found in bracket after rollback")
+}

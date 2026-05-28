@@ -230,6 +230,13 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 			// to its prior state before returning 409 so the operator
 			// sees a clean rejection rather than a mutated match.
 			if prior != nil {
+				// Normalize nil SubResults to an explicit empty slice so the
+				// nil-preserve branch in recordBracketMatchResult treats
+				// this as "clear sub-results" rather than "leave the
+				// partially-written SubResults in place".
+				if prior.SubResults == nil {
+					prior.SubResults = []state.SubMatchResult{}
+				}
 				_ = e.writeMatchResult(compId, matchId, prior)
 			}
 			return nil, err

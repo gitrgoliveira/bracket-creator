@@ -1165,8 +1165,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // FR-033: encho counter for team matches (overtime period count rides
   // alongside the score on the wire — same shape as ScoreEditorModal).
   // mp-4pc: derive from the daihyosen sub when present — see
-  // initialEnchoPeriodsForMatch for why.
-  const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriodsForMatch(m));
+  // initialEnchoPeriodsForMatch for why. Captured in a const so isDirty
+  // can compare against the initial value (the function is not idempotent
+  // across re-renders because m may mutate).
+  const initialEnchoPeriods = initialEnchoPeriodsForMatch(m);
+  const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
   const [submitting, setSubmitting] = useStateA(false);
   // T093–T098: decision state — same shape as the individual editor. See the
   // ScoreEditorModal copy for the contract.

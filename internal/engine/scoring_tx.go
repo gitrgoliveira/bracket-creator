@@ -260,6 +260,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			// but the intended loser is already ineligible from a
 			// different match — revert before returning 409.
 			if prior != nil {
+				// Normalize nil SubResults to an explicit empty slice so
+				// the nil-preserve branch in recordBracketMatchResultTx
+				// treats this as "clear sub-results" rather than "leave
+				// the partially-written SubResults in place".
+				if prior.SubResults == nil {
+					prior.SubResults = []state.SubMatchResult{}
+				}
 				if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
 					log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
 				}

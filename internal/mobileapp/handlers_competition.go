@@ -780,14 +780,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			//
 			// mp-p7n / Copilot PR #185 round-5: pass HasIDs=&true
 			// explicitly when we just persisted a non-empty roster.
-			// The deferred HasParticipantIDs=true flip above is
-			// best-effort (failures only log); if it failed, the
-			// loader's default branch would read the still-stale
-			// flag (false), fall back to uuidRE-on-row-0, mis-classify
-			// non-UUID ids as "no ids", and return the same shifted
-			// roster this PR is fixing. The hint is authoritative here
-			// because SaveParticipants succeeded — every row on disk
-			// carries an id in column 0.
+			// The hint is authoritative at this call site —
+			// SaveParticipants just succeeded and (per round-6) the
+			// deferred HasParticipantIDs=true flip is now part of the
+			// roster-write contract: on flip failure the handler
+			// returns 500 above, so by the time we reach this reload
+			// the flag is set on disk. Belt-and-suspenders: the
+			// explicit hint also defends against any future load path
+			// that reaches here before a hypothetical flag-write race
+			// resolves, and makes the call-site intent ("we just wrote
+			// a non-empty roster with ids in column 0") explicit at
+			// the reader.
 			loadOpts := state.LoadParticipantsOpts{WithSeeds: true}
 			if len(comp.Players) > 0 {
 				trueP := true

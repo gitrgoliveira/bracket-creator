@@ -14,6 +14,23 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// flipHasParticipantIDs sets Competition.HasParticipantIDs=true after a
+// successful non-empty roster save. It's a package var (not an inline
+// closure) so tests can inject a deterministic failure without relying
+// on filesystem-race timing — see
+// TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500. mp-p7n /
+// Copilot PR #185 round-9.
+var flipHasParticipantIDs = func(store *state.Store, id string) error {
+	_, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+		if current == nil {
+			return nil, nil
+		}
+		current.HasParticipantIDs = true
+		return current, nil
+	})
+	return err
+}
+
 // slugifyID derives a valid competition ID from a name: lowercase, non-alphanumeric
 // runs become a single hyphen, leading/trailing hyphens stripped, max 64 chars.
 func slugifyID(name string) string {
@@ -731,13 +748,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// re-applied will re-save the file and re-attempt the
 			// flip).
 			if len(comp.Players) > 0 {
-				if _, fierr := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
-					if current == nil {
-						return nil, nil
-					}
-					current.HasParticipantIDs = true
-					return current, nil
-				}); fierr != nil {
+				if fierr := flipHasParticipantIDs(store, id); fierr != nil {
 					fmt.Printf("Warning: PUT /api/competitions/%s — failed to flip HasParticipantIDs after SaveParticipants: %v\n", id, fierr)
 					c.JSON(http.StatusInternalServerError, gin.H{
 						"error": "roster saved but failed to update HasParticipantIDs flag; retry the request (idempotent): " + fierr.Error(),

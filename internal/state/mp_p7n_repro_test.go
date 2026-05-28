@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -128,9 +127,9 @@ func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 		"original id must survive the round-trip — regenerating it would orphan competitor_status / reserved-slot references")
 }
 
-// mp-p7n / Copilot PR #185 round-4: closes the cache-poisoning race
-// between a roster save (non-UUID ids on disk) and the deferred
-// HasParticipantIDs=true flip.
+// mp-p7n / Copilot PR #185 round-4 + round-9: closes the cache-
+// poisoning race between a roster save (non-UUID ids on disk) and the
+// deferred HasParticipantIDs=true flip.
 //
 // Pre-fix sequence:
 //  1. SaveParticipants writes `${compID}-pN` rows; participants.csv mtime updates.
@@ -141,9 +140,13 @@ func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 //     participants.csv mtime is unchanged → cache still serves the
 //     shifted players.
 //
-// Fix: include config.md's mtime in the participants-cache key so any
-// config write (notably the HasParticipantIDs flip) invalidates the
-// cache.
+// Fix: saveCompetitionChangedLocked explicitly invalidates the
+// participant cache variants on every config write (round-9). This is
+// deterministic regardless of filesystem timestamp granularity — note
+// this test does NOT sleep between the roster save and the flag flip,
+// so a coarse-mtime filesystem that left the summed cache mtime
+// unchanged would still pass (pre-round-9, this test needed a 20ms
+// sleep to force a distinct config.md mtime; that crutch is gone).
 func TestMpP7nRepro_CacheInvalidatedOnHasParticipantIDsFlip(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -168,21 +171,18 @@ func TestMpP7nRepro_CacheInvalidatedOnHasParticipantIDsFlip(t *testing.T) {
 	assert.Equal(t, "Race-P1", loadedPre[0].Name,
 		"pre-flip load takes the auto-detect path and mis-loads (column shift)")
 
-	// Wait at least 10ms so the next config.md write produces a
-	// distinct mtime — os.Stat resolution on macOS is millisecond on
-	// some filesystems, and back-to-back writes can collide.
-	time.Sleep(20 * time.Millisecond)
-
 	// Flip the flag — simulating the deferred HasParticipantIDs=true
-	// that lands after the first roster save succeeds.
+	// that lands after the first roster save succeeds. NO sleep: the
+	// round-9 explicit cache invalidation must work even when this
+	// config write shares participants.csv's coarse mtime.
 	current, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	current.HasParticipantIDs = true
 	require.NoError(t, store.SaveCompetition(current))
 
-	// Post-flip load: the cache MUST be invalidated (we fold config.md
-	// mtime into the cache key). The loader now takes the trustHint
-	// branch and correctly strips column 0.
+	// Post-flip load: the participant cache MUST have been invalidated
+	// by the config write. The loader now takes the trustHint branch
+	// and correctly strips column 0.
 	loadedPost, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, loadedPost, 1)

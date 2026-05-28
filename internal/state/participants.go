@@ -692,6 +692,29 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// subsequent Load (regardless of HasIDs hint / WithSeeds) re-parses
 	// from the freshly-written file. See participantsCacheKey for the
 	// matrix mp-p7n round-6 split into.
+	s.invalidateParticipantCaches(compID)
+
+	return nil
+}
+
+// invalidateParticipantCaches drops every parse-mode variant of the
+// participant cache for compID. Called after a participants.csv write
+// (saveParticipantsNoLock) AND after a competition config write
+// (saveCompetitionChangedLocked) — the latter is load-bearing because
+// the load decision depends on Competition.HasParticipantIDs, so a flag
+// flip must force a re-parse even when participants.csv is untouched.
+//
+// mp-p7n / Copilot PR #185 round-9: this replaces sole reliance on
+// config.md's mtime in the cache key. On a filesystem with coarse
+// timestamp resolution, a save + flag-flip in quick succession can
+// land the same summed mtime and leave the auto-detect cache serving
+// the shifted parse. Explicit invalidation on the config write is
+// deterministic regardless of timestamp granularity. The config.md
+// mtime stays in the cache key as cheap cross-process defense.
+//
+// Each variant uses its own cache.mu; this is safe to call while the
+// per-comp lock is held (different lock) and acquires no other lock.
+func (s *Store) invalidateParticipantCaches(compID string) {
 	for _, key := range allParticipantsCacheKeys() {
 		cache := s.getFileCache(compID, key)
 		cache.mu.Lock()
@@ -699,6 +722,4 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		cache.mtime = 0
 		cache.mu.Unlock()
 	}
-
-	return nil
 }

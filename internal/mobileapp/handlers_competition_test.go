@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -1129,30 +1128,28 @@ func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
 	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
 }
 
-// mp-p7n / Copilot PR #185 round-8: exercises the round-6
-// 500-on-flag-flip-failure branch end-to-end.
+// mp-p7n / Copilot PR #185 round-9: exercises the round-6
+// 500-on-flag-flip-failure branch end-to-end, deterministically.
 //
-// The handler's flow is:
-//  1. SaveParticipants writes participants.csv (atomic-rename)
-//  2. SaveSeeds writes seeds.csv (best-effort log)
-//  3. UpdateCompetitionChanged flips HasParticipantIDs=true
-//     — on failure the handler returns 500 (round-6 contract)
-//
-// To inject failure between (1) and (3) without breaking (1), a
-// watcher goroutine polls for participants.csv to appear (signalling
-// step 1 completed), then replaces config.md with a directory so
-// step 3's loadCompetitionLocked → parseCompetitionFile → os.ReadFile
-// errors out. The race is tight but reliable in practice — the
-// polling loop is microsecond-grained and SaveSeeds + lock-handoff
-// gives the watcher enough scheduling time to act before
-// UpdateCompetitionChanged acquires the per-comp lock again.
-//
-// If the race ever proves flaky in CI we can refactor by extracting
-// the flip into a hookable helper. For now the goroutine approach
-// avoids changing production code purely for testability.
+// Round-8 used a watcher-goroutine filesystem race to inject the
+// failure between SaveParticipants and the flip; Copilot flagged that
+// as nondeterministic (if the watcher lost the race it could observe
+// participants.csv after the handler already returned 200, then assert
+// 500). Replaced with a package-level test seam: flipHasParticipantIDs
+// is a var, so the test swaps in a stub that returns an error with no
+// timing dependency.
 func TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
+
+	// Inject a deterministic flip failure; restore on exit. These
+	// handler tests do not run in parallel, so mutating the package
+	// var is safe.
+	orig := flipHasParticipantIDs
+	flipHasParticipantIDs = func(_ *state.Store, _ string) error {
+		return fmt.Errorf("injected flag-flip failure")
+	}
+	defer func() { flipHasParticipantIDs = orig }()
 
 	cid := "flip-fails"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -1160,30 +1157,6 @@ func TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500(t *testing.T) {
 		HasParticipantIDs: false,
 		Format:            state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
 	}))
-
-	partPath := filepath.Join(tempDir, "competitions", cid, "participants.csv")
-	cfgPath := filepath.Join(tempDir, "competitions", cid, "config.md")
-
-	corrupted := make(chan struct{})
-	stop := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(50 * time.Microsecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-			}
-			if _, err := os.Stat(partPath); err == nil {
-				_ = os.Remove(cfgPath)
-				_ = os.MkdirAll(cfgPath, 0o700)
-				close(corrupted)
-				return
-			}
-		}
-	}()
-	defer close(stop)
 
 	body, _ := json.Marshal(state.Competition{
 		ID: cid, Name: "Flip Fails", Date: "12-05-2026",
@@ -1197,21 +1170,28 @@ func TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	// Confirm the watcher fired — if it didn't, the test wasn't
-	// exercising the failure path even if the assertion below passes.
-	select {
-	case <-corrupted:
-	case <-time.After(2 * time.Second):
-		t.Skip("watcher goroutine did not catch the SaveParticipants → flip window; skipping flaky test")
-	}
-
-	// The flip's UpdateCompetitionChanged → loadCompetitionLocked
-	// failed because config.md is now a directory, so the handler
-	// returns 500 from the round-6 branch.
+	// Round-6 contract: a flip failure surfaces as 500, NOT a 200 with
+	// a stale flag.
 	require.Equal(t, http.StatusInternalServerError, w.Code,
 		"flip failure must surface as 500 (round-6 contract) — got %d: %s", w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "HasParticipantIDs",
 		"error body must mention HasParticipantIDs (round-6 flip-failure branch); got %s", w.Body.String())
+
+	// The roster file itself DID land before the flip — confirm the
+	// participants were saved (the failure is only in the metadata flip,
+	// which is why the operator's retry is idempotent). Read with an
+	// explicit HasIDs hint: a no-hint read would reproduce the column
+	// shift precisely BECAUSE the flag flip failed (HasParticipantIDs is
+	// still false on disk, so the loader auto-detects "no ids" for the
+	// non-UUID first column). The hinted read proves the on-disk bytes
+	// are correct and a successful retry (which lands the flip) recovers.
+	trueP := true
+	saved, lerr := store.LoadParticipantsOpt(cid, false, state.LoadParticipantsOpts{HasIDs: &trueP})
+	require.NoError(t, lerr)
+	require.Len(t, saved, 1)
+	assert.Equal(t, "Aaron Adams", saved[0].Name)
+	assert.Equal(t, "Team Alpha", saved[0].Dojo)
+	assert.Equal(t, "flip-fails-p1", saved[0].ID)
 }
 
 // mp-p7n / Copilot PR #185 round-5: when the roster-PUT response

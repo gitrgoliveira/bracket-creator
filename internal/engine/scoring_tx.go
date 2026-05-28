@@ -267,6 +267,15 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 				if prior.SubResults == nil {
 					prior.SubResults = []state.SubMatchResult{}
 				}
+				// Same nil-collision on the sibling field: lookupExistingResultTx
+				// projects DecidedByHantei through HanteiPtr, which collapses a
+				// stored false to nil. nil then hits the nil-preserve branch in
+				// recordBracketMatchResultTx, leaving a partially-written hantei
+				// flag in place. Force an explicit false so rollback clears it.
+				if prior.DecidedByHantei == nil {
+					clearHantei := false
+					prior.DecidedByHantei = &clearHantei
+				}
 				if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
 					log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
 				}

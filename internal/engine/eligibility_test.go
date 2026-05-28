@@ -891,10 +891,11 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 		decisionBy = "shiro"
 	}
 	_, err = eng.RecordMatchResultWithIneligibility(compID, secondMatchID, &state.MatchResult{
-		Winner:     bm.SideB,
-		Status:     state.MatchStatusCompleted,
-		Decision:   "kiken",
-		DecisionBy: decisionBy,
+		Winner:          bm.SideB,
+		Status:          state.MatchStatusCompleted,
+		Decision:        "kiken",
+		DecisionBy:      decisionBy,
+		DecidedByHantei: state.HanteiPtr(true),
 		SubResults: []state.SubMatchResult{
 			{Position: 1, SideA: bm.SideA, Winner: bm.SideA},
 			{Position: 2, SideA: bm.SideA, IpponsB: []string{"M"}},
@@ -904,16 +905,18 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	var alreadyErr *AlreadyIneligibleError
 	require.ErrorAs(t, err, &alreadyErr)
 
-	// The bracket match should have been rolled back. Critically, the
-	// SubResults that were written as part of the failed score attempt
-	// must NOT persist — the prior had nil SubResults, and the rollback
-	// must normalize that to an explicit empty slice to clear them.
+	// The bracket match should have been rolled back. Critically, both
+	// nil-preserve fields written as part of the failed score attempt
+	// must NOT persist — the prior had nil SubResults and (via HanteiPtr)
+	// nil DecidedByHantei, and the rollback must normalize those to an
+	// explicit empty slice / false to clear them.
 	bracket, err = store.LoadBracket(compID)
 	require.NoError(t, err)
 	for _, round := range bracket.Rounds {
 		for _, bm := range round {
 			if bm.ID == secondMatchID {
 				assert.Empty(t, bm.SubResults, "SubResults must be cleared by rollback when the prior had none")
+				assert.False(t, bm.DecidedByHantei, "DecidedByHantei must be cleared by rollback when the prior was false")
 				return
 			}
 		}

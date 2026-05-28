@@ -756,14 +756,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if comp.Players != nil {
 			// Roster-PUT: re-load from disk so the response reflects what
-			// actually landed in participants.csv — including any IDs
-			// marshalParticipantsCSV normalised to UUIDv4 (mp-p7n: the
-			// JS layer's mintParticipantIds historically minted non-UUID
-			// ids in the `${compID}-p${N}` shape; the saver rewrites
-			// those to UUIDs so the loader's per-record id-strip works,
-			// and the response must surface those normalised ids so the
-			// client's next round-trip doesn't resend the old non-UUID
-			// values).
+			// actually landed in participants.csv — the canonical on-disk
+			// shape after the save round-trip (merged seeds, tag column,
+			// any empty-id rows that the saver minted a fresh UUID for).
+			// mp-p7n: client-supplied ids (UUID or not) are preserved
+			// verbatim on save, and the loader strips column 0 by trusting
+			// HasParticipantIDs, so the re-loaded ids match what the client
+			// sent — no normalisation churn.
 			//
 			// AdminParticipants's clear-roster path sends [] and the
 			// re-loaded roster will also be [] (LoadParticipants returns
@@ -772,7 +771,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if players, lerr := store.LoadParticipants(id, updated.WithZekkenName); lerr == nil {
 				updated.Players = players
 			} else {
-				fmt.Printf("Warning: PUT /api/competitions/%s — failed to re-load participants for roster-PUT response (falling back to request body, client may see un-normalised ids): %v\n", id, lerr)
+				fmt.Printf("Warning: PUT /api/competitions/%s — failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
 				updated.Players = comp.Players // fallback: echo body
 			}
 		} else {

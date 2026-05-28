@@ -103,12 +103,40 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		return nil, err
 	}
 
-	// Detect new format: first field is a UUID. Use cached flag if provided.
-	var hasIDs bool
-	if opts.HasIDs != nil {
+	// Detect ID column: when callers pass an explicit HasIDs hint we
+	// trust it; otherwise consult Competition.HasParticipantIDs (set on
+	// disk the first time participants are saved with IDs) and fall
+	// back to a UUID-shape sniff on the first row only when no comp
+	// record is available.
+	//
+	// mp-p7n: previously this path used only uuidRE on records[0][0],
+	// which mis-classified non-UUID-shaped ids (e.g. the JS-side
+	// `${compID}-p${N}` shape) as "no IDs" → column shift on load. The
+	// HasParticipantIDs flag is the authoritative signal: when set,
+	// every row has an id in column 0 regardless of its textual shape,
+	// and the loader must strip it. Auto-detect against the file is
+	// only used when we have no comp record (e.g. a stand-alone CSV
+	// loaded outside the normal handler flow).
+	// hasIDs: there is an id column in the file at all.
+	// trustHint: strip column 0 from EVERY row unconditionally — set
+	// only when the caller (or the comp's HasParticipantIDs flag)
+	// asserts "every row has an id". Without this signal, the auto-
+	// detect path falls back to a per-record UUID-shape check below
+	// to preserve mixed-format legacy support (TestStore_ParticipantsCSV_MixedIDs:
+	// a file with one UUID row and one bare-name row must load both).
+	var hasIDs, trustHint bool
+	switch {
+	case opts.HasIDs != nil:
 		hasIDs = *opts.HasIDs
-	} else {
-		hasIDs = len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
+		trustHint = *opts.HasIDs
+	default:
+		if comp, _ := s.loadCompetitionLocked(compID); comp != nil && comp.HasParticipantIDs {
+			hasIDs = true
+			trustHint = true
+		} else {
+			hasIDs = len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
+			trustHint = false
+		}
 	}
 
 	var ids []string
@@ -118,12 +146,40 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	for _, record := range records {
 		isCheckedIn := false
 
-		// Determine data fields (everything after UUID if present).
-		// Per-record UUID check: only strip the first field as an ID
-		// when it actually matches the UUID pattern.
+		// Determine data fields (everything after the id if present).
+		//
+		// mp-p7n: pre-fix, this branch gated on `uuidRE(record[0])` —
+		// a per-record check that only stripped the first field when
+		// it matched the canonical-UUID shape. That broke any roster
+		// whose ids weren't UUID-shaped (e.g. the `${compID}-p${N}`
+		// shape the JS-side mintParticipantIds was generating, or
+		// arbitrary client-supplied ids): dataStart stayed 0, the
+		// row was parsed as [Name, Dojo, Metadata] instead of
+		// [id, Name, Dojo, Metadata], every field shifted one column
+		// right, and the id got title-cased into Name on load
+		// (producing the user-reported "Asddasd-P1, Aaron Adams,
+		// Team Alpha" corruption).
+		//
+		// Fix:
+		//   - `trustHint` (caller-supplied or comp.HasParticipantIDs=true):
+		//     strip column 0 unconditionally — every row has an id of
+		//     whatever shape. Preserves non-UUID ids (a client/import
+		//     path may carry one) and keeps them joinable with other
+		//     persisted state that references the player by id —
+		//     CompetitorStatus.PlayerID, ReservedSlot.ParticipantID,
+		//     team-lineup PlayerIDs (Copilot PR #185 round-3: an
+		//     alternative that regenerated non-UUID ids at save time
+		//     would silently orphan all those references).
+		//   - Auto-detected `hasIDs` (UUID-shape sniff on the first
+		//     row): keep the per-record uuidRE check so mixed-format
+		//     legacy files (some rows with UUID ids, some without)
+		//     load both kinds correctly — TestStore_ParticipantsCSV_MixedIDs
+		//     pins this contract.
 		dataStart := 0
-		if hasIDs && len(record) > 0 && uuidRE(strings.TrimSpace(record[0])) {
-			dataStart = 1
+		if hasIDs && len(record) > 0 {
+			if trustHint || uuidRE(strings.TrimSpace(record[0])) {
+				dataStart = 1
+			}
 		}
 		dataFields := record[dataStart:]
 
@@ -444,31 +500,8 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 	var sb strings.Builder
 	w := csv.NewWriter(&sb)
 	for _, p := range players {
-		// mp-p7n: only canonical-UUID-shaped ids (lowercase 8-4-4-4-12 hex)
-		// survive the round-trip cleanly. The loader's per-record id-strip
-		// at participants.go:125 gates on uuidRE — a non-UUID-shaped id
-		// (e.g. the `${compID}-p${N}` shape the JS-side mintParticipantIds
-		// was generating, or anything a client/import path supplies) leaves
-		// dataStart=0 on load, so the row's columns get parsed as
-		// [Name, Dojo, Metadata] instead of [id, Name, Dojo, Metadata] —
-		// every field shifts one column right and the id ends up
-		// title-cased in Name. Normalise non-conforming ids to a fresh
-		// UUIDv4 (via uuid.New()) at write time so subsequent reads always
-		// strip the first column correctly.
-		//
-		// `uuidRE` is helper.IsUUIDv4 via internal/state/ids.go — note
-		// that despite the name it's a shape check (doesn't enforce the
-		// v4 version nibble or 89ab variant nibble); any lowercase
-		// 8-4-4-4-12 hex string passes. The shape match is what the
-		// loader cares about, so save + load stay symmetric.
-		//
-		// Copilot PR #185 finding: uuidRE only matches lowercase hex,
-		// so a client-supplied UUID with uppercase digits
-		// (e.g. "85CDEB35-...") would be replaced with a fresh id.
-		// Canonicalise via TrimSpace + ToLower before the check so
-		// otherwise-conforming UUIDs round-trip unchanged.
-		id := strings.ToLower(strings.TrimSpace(p.ID))
-		if id == "" || !uuidRE(id) {
+		id := p.ID
+		if id == "" {
 			id = newParticipantID()
 		}
 		var record []string

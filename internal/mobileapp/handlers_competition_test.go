@@ -1015,19 +1015,20 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 		"response must not ship `players: null` — clients merge this into local state")
 }
 
-// mp-p7n: Copilot PR #185 finding — pin the roster-PUT response contract.
-// When a client sends players with non-UUID ids (the JS-side
-// mintParticipantIds shape `${compID}-p${N}` or arbitrary import-supplied
-// ids), the saver normalises them to UUIDv4 on disk. The PUT response
-// must reflect those normalised ids so the next round-trip is stable;
-// otherwise the client keeps resending the old non-UUID ids and the
-// server keeps minting new UUIDs on every save — disk ids would churn
-// silently and tooling that joins by id would break.
+// mp-p7n: Copilot PR #185 round-3 finding — regenerating ids on save
+// would orphan CompetitorStatus.PlayerID / ReservedSlot.ParticipantID /
+// team-lineup PlayerIDs that reference the original ids. Fix: keep the
+// id verbatim on save; the loader (consulting Competition.HasParticipantIDs
+// for the strip decision) handles any shape.
 //
-// Also exercises Name/Dojo preservation as a defence against the original
-// column-shift corruption: pre-fix the load would have returned
-// Name="Asddasd-P1", Dojo="Aaron Adams", Metadata=["Team Alpha"].
-func TestPUTCompetition_RosterPUTResponseSurfacesNormalisedUUIDs(t *testing.T) {
+// This test pins the contract:
+//   - The PUT body's non-UUID ids round-trip to the response intact
+//     (no regeneration).
+//   - Name/Dojo are correctly aligned in the response (no column shift
+//     on load — the loader trusts HasParticipantIDs).
+//   - A second PUT with the same body produces an idempotent round-trip
+//     (ids don't churn).
+func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
@@ -1038,8 +1039,6 @@ func TestPUTCompetition_RosterPUTResponseSurfacesNormalisedUUIDs(t *testing.T) {
 		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
 	}))
 
-	// PUT body carries the bug-prone id shape that mintParticipantIds
-	// historically minted.
 	body := []byte(`{
 		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
 		"format":"playoffs","kind":"individual","courts":["A"],
@@ -1059,17 +1058,12 @@ func TestPUTCompetition_RosterPUTResponseSurfacesNormalisedUUIDs(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Players, 2)
 
-	// Response ids MUST be UUIDv4, not the request-body's "asddasd-p1"
-	// shape. Otherwise the client would keep resending the un-normalised
-	// id on every save.
-	for i, p := range resp.Players {
-		assert.True(t, helper.IsUUIDv4(p.ID),
-			"resp.Players[%d].ID must be a UUIDv4 after the server normalises non-UUID ids; got %q", i, p.ID)
-		assert.NotEqual(t, "asddasd-p1", p.ID, "resp.Players[%d] must not echo the un-normalised id", i)
-		assert.NotEqual(t, "asddasd-p2", p.ID, "resp.Players[%d] must not echo the un-normalised id", i)
-	}
+	// Ids preserved — regeneration would orphan dependent stores.
+	assert.Equal(t, "asddasd-p1", resp.Players[0].ID,
+		"non-UUID id must round-trip intact; regeneration orphans competitor_status/reserved_slot refs")
+	assert.Equal(t, "asddasd-p2", resp.Players[1].ID)
 
-	// Name and Dojo MUST round-trip without column shift.
+	// Name and Dojo correctly aligned — no column shift on load.
 	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
 	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
 	assert.Empty(t, resp.Players[0].Metadata,
@@ -1077,11 +1071,7 @@ func TestPUTCompetition_RosterPUTResponseSurfacesNormalisedUUIDs(t *testing.T) {
 	assert.Equal(t, "Albus Blake", resp.Players[1].Name)
 	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
 
-	// Sanity: a second PUT with the SAME (now-normalised) ids returned
-	// in the previous response should re-save without churning the on-
-	// disk ids. This guards against the regression where the response
-	// echoed the body and the next save kept re-normalising.
-	firstID := resp.Players[0].ID
+	// Idempotent second PUT — ids stay stable.
 	body2 := fmt.Appendf(nil, `{
 		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
 		"format":"playoffs","kind":"individual","courts":["A"],
@@ -1098,16 +1088,14 @@ func TestPUTCompetition_RosterPUTResponseSurfacesNormalisedUUIDs(t *testing.T) {
 	require.Equal(t, http.StatusOK, w2.Code)
 	var resp2 state.Competition
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
-	assert.Equal(t, firstID, resp2.Players[0].ID,
-		"ids must be stable across save round-trips once normalised")
+	assert.Equal(t, "asddasd-p1", resp2.Players[0].ID, "ids must be stable across save round-trips")
 }
 
-// mp-p7n: Copilot PR #185 finding — a client-supplied valid UUID with
-// uppercase hex digits must round-trip unchanged (canonicalised to
-// lowercase, but not replaced with a fresh id). Pre-canonicalisation
-// uuidRE only matched lowercase, so the upper-case variant would be
-// treated as a non-UUID and replaced.
-func TestPUTCompetition_RosterPUTAcceptsUppercaseUUID(t *testing.T) {
+// mp-p7n: uppercase-UUID id round-trips intact (no canonicalisation,
+// no regeneration). The loader's HasParticipantIDs-based strip handles
+// any shape — case isn't load-bearing for the id-strip decision once
+// the flag is consulted.
+func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
@@ -1118,9 +1106,7 @@ func TestPUTCompetition_RosterPUTAcceptsUppercaseUUID(t *testing.T) {
 		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
 	}))
 
-	// Uppercase UUID, valid otherwise.
 	upperUUID := "85CDEB35-C066-4667-B7FD-43EBAE8A9F13"
-	lowerUUID := "85cdeb35-c066-4667-b7fd-43ebae8a9f13"
 	body := fmt.Appendf(nil, `{
 		"id":"upper-uuid","name":"Upper UUID","date":"12-05-2026",
 		"format":"playoffs","kind":"individual","courts":["A"],
@@ -1136,8 +1122,10 @@ func TestPUTCompetition_RosterPUTAcceptsUppercaseUUID(t *testing.T) {
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Players, 1)
-	assert.Equal(t, lowerUUID, resp.Players[0].ID,
-		"uppercase UUID must canonicalise to lowercase, not be replaced with a fresh id")
+	assert.Equal(t, upperUUID, resp.Players[0].ID,
+		"client-supplied id must round-trip intact (case preserved, no regeneration)")
+	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
+	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
 }
 
 // TestPlayoff_ResponseIncludesPlayers pins the Copilot round-12

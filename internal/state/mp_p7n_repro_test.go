@@ -89,31 +89,42 @@ func TestMpP7nRepro_NonUUIDIDCausesColumnShift(t *testing.T) {
 		"Metadata must be empty — pre-bug it contains ['Team Alpha'] (shifted from the Dojo column)")
 }
 
-func TestMpP7nRepro_NonUUIDID_AutoDetect(t *testing.T) {
-	// Same shape but without the HasIDs hint — the auto-detect path
-	// from participants.go:111. uuidRE on a non-UUID first field
-	// returns false, so hasIDs=false, every column becomes data, same
-	// column-shift outcome.
+func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
+	// mp-p7n: the loader now trusts the HasIDs hint and strips column
+	// 0 regardless of UUID shape. Together with the no-regeneration
+	// save path, that means a client-supplied non-UUID id round-trips
+	// intact — important for joining with other persisted state that
+	// references the player by id (CompetitorStatus.PlayerID,
+	// ReservedSlot.ParticipantID, team lineup PlayerIDs). Copilot
+	// PR #185 round-3 finding: regenerating ids would silently orphan
+	// those references.
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 	compID := "asddasd"
 
 	require.NoError(t, store.SaveCompetition(&Competition{
-		ID: compID, Name: "Asddasd", WithZekkenName: false, HasParticipantIDs: false,
+		ID: compID, Name: "Asddasd", WithZekkenName: false, HasParticipantIDs: true,
 	}))
 	players := []domain.Player{
 		{ID: "asddasd-p1", Name: "Aaron Adams", Dojo: "Team Alpha"},
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	loaded, err := store.LoadParticipants(compID, false)
+	trueP := true
+	loaded, err := store.LoadParticipantsOpt(compID, false, LoadParticipantsOpts{
+		WithSeeds: false, HasIDs: &trueP,
+	})
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 
+	// Name / Dojo align correctly (no column shift) AND the original
+	// non-UUID id is preserved (no regeneration on save).
 	assert.Equal(t, "Aaron Adams", loaded[0].Name)
 	assert.Equal(t, "Team Alpha", loaded[0].Dojo)
 	assert.Empty(t, loaded[0].Metadata)
+	assert.Equal(t, "asddasd-p1", loaded[0].ID,
+		"original id must survive the round-trip — regenerating it would orphan competitor_status / reserved-slot references")
 }
 
 func TestMpP7nRepro_UUIDIDIsFine(t *testing.T) {

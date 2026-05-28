@@ -232,6 +232,8 @@ Withdrawal rules for team members differ from pre-tournament absences (fusensho)
 
 For non-standard team sizes (3, 7, 10+), the tournament rules will specify which positions may be left vacant. The general principle is that the first and last positions cannot be forfeited.
 
+Team order and players can change between each team match
+
 ### Recording
 
 On the scoreboard, a kiken is recorded the same way as fusensho — the opponent receives the default score (2–0 for regulation, 1–0 for encho). The court manager notes the withdrawal for the tournament manager.

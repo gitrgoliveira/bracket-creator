@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
 func (s *Store) LoadReservedSlots(compID string) ([]ReservedSlot, error) {
@@ -90,114 +88,39 @@ func (s *Store) saveReservedSlotsLocked(compID string, slots []ReservedSlot) err
 	return nil
 }
 
-// loadParticipantsLocked reads participants without acquiring a lock.
-// Caller must hold the per-comp lock for compID. Mirrors LoadParticipants.
+// loadParticipantsLocked reads participants (with seeds merged) without
+// acquiring a lock. Caller must hold the per-comp lock for compID.
+//
+// mp-p7n / Copilot PR #185 round-9 follow-up: this used to be a
+// hand-rolled copy of loadParticipantsNoLock's parse loop, but the copy
+// only had the auto-detect (uuidRE-on-row-0) path — it never consulted
+// Competition.HasParticipantIDs. That meant a roster with non-UUID ids
+// (the JS-side `${compID}-p${N}` shape) loaded here would column-shift
+// (id→Name, Name→Dojo, Dojo→Metadata) and, because AddReservedSlot /
+// RemoveReservedSlot load→modify→save the whole roster, the shift would
+// be PERSISTED. Delegating to the canonical loadParticipantsNoLock
+// (WithSeeds:true, no HasIDs hint → it consults HasParticipantIDs and
+// keeps the per-record uuidRE fallback for mixed legacy files) fixes
+// the divergence in one place. Both functions share the same
+// "caller-holds-the-per-comp-lock" contract, so this is a safe
+// substitution; the only added behaviour is caching, which is keyed by
+// parse mode + config.md mtime and invalidated on every write.
 func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]domain.Player, error) {
-	path := s.compPath(compID, "participants.csv")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return []domain.Player{}, nil
-	}
-
-	records, err := helper.ReadCSVFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	hasIDs := len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
-
-	var ids []string
-	var checkedInFlags []bool
-	var playerRecords [][]string
-	for _, record := range records {
-		isCheckedIn := false
-		dataStart := 0
-		if hasIDs && len(record) > 0 && uuidRE(strings.TrimSpace(record[0])) {
-			dataStart = 1
-		}
-		dataFields := record[dataStart:]
-
-		allEmpty := true
-		for _, f := range dataFields {
-			if strings.TrimSpace(f) != "" {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
-			continue
-		}
-
-		if len(dataFields) > 2 {
-			last := strings.TrimSpace(dataFields[len(dataFields)-1])
-			if strings.ToLower(last) == "checked_in" {
-				isCheckedIn = true
-				dataFields = dataFields[:len(dataFields)-1]
-			}
-		}
-
-		if hasIDs {
-			id := ""
-			if dataStart > 0 {
-				id = strings.TrimSpace(record[0])
-			}
-			ids = append(ids, id)
-		}
-		playerRecords = append(playerRecords, dataFields)
-		checkedInFlags = append(checkedInFlags, isCheckedIn)
-	}
-
-	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range players {
-		if hasIDs && i < len(ids) {
-			players[i].ID = ids[i]
-		}
-		if i < len(checkedInFlags) {
-			players[i].CheckedIn = checkedInFlags[i]
-		}
-	}
-
-	seeds, _ := helper.ParseSeedsFile(s.compPath(compID, "seeds.csv"))
-	if len(seeds) > 0 {
-		seedMap := make(map[string]int, len(seeds))
-		for _, sd := range seeds {
-			seedMap[sd.Name] = sd.SeedRank
-		}
-		for i := range players {
-			if seed, ok := seedMap[players[i].Name]; ok {
-				players[i].Seed = seed
-			}
-		}
-	}
-
-	// helper.Player is a type alias for domain.Player (NFR-007); the
-	// parser output is already []domain.Player.
-	return players, nil
+	return s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: true})
 }
 
 // saveParticipantsLocked writes participants without acquiring a lock and
 // invalidates the participant caches. Caller must hold the per-comp write lock
-// for compID. Mirrors SaveParticipants.
+// for compID.
+//
+// mp-p7n / Copilot PR #185 round-9 follow-up: delegates to
+// saveParticipantsNoLock so the marshal + write + cache-invalidation
+// logic lives in exactly one place. The pre-delegation copy invalidated
+// only 2 of the 6 parse-mode cache-key variants (the same stale-key bug
+// fixed in saveParticipantsNoLock at round-6), which could leave a
+// hinted-mode cache entry stale after a reserved-slot add/remove.
 func (s *Store) saveParticipantsLocked(compID string, players []domain.Player, withZekkenName bool) error {
-	path := s.compPath(compID, "participants.csv")
-	data, err := marshalParticipantsCSV(players, withZekkenName)
-	if err != nil {
-		return err
-	}
-	if err := s.atomicWrite(path, data, 0600); err != nil {
-		return err
-	}
-	for _, key := range []string{"participants.csv", "participants_with_seeds.csv"} {
-		cache := s.getFileCache(compID, key)
-		cache.mu.Lock()
-		cache.data = nil
-		cache.mtime = 0
-		cache.mu.Unlock()
-	}
-	return nil
+	return s.saveParticipantsNoLock(compID, players, withZekkenName)
 }
 
 // AddReservedSlot creates a placeholder participant and a reserved-slot entry

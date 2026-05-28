@@ -42,6 +42,43 @@ type LoadParticipantsOpts struct {
 	HasIDs    *bool // nil = auto-detect from first line; non-nil uses cached Competition.HasParticipantIDs
 }
 
+// participantsCacheKey returns a virtual filename used as the cache key
+// for a participants load. Splits by both WithSeeds and HasIDs parse
+// mode so the three mutually-exclusive parses don't poison each other's
+// cache entries (mp-p7n Copilot PR #185 round-6).
+func participantsCacheKey(opts LoadParticipantsOpts) string {
+	base := "participants"
+	if opts.WithSeeds {
+		base += "_with_seeds"
+	}
+	switch {
+	case opts.HasIDs == nil:
+		base += "_auto"
+	case *opts.HasIDs:
+		base += "_hint_true"
+	default:
+		base += "_hint_false"
+	}
+	return base + ".csv"
+}
+
+// allParticipantsCacheKeys enumerates every cache key that
+// participantsCacheKey can produce. Used by saveParticipantsNoLock to
+// invalidate all parse-mode variants in one pass on write.
+func allParticipantsCacheKeys() []string {
+	keys := make([]string, 0, 6)
+	for _, withSeeds := range []bool{false, true} {
+		trueP, falseP := true, false
+		for _, hint := range []*bool{nil, &trueP, &falseP} {
+			keys = append(keys, participantsCacheKey(LoadParticipantsOpts{
+				WithSeeds: withSeeds,
+				HasIDs:    hint,
+			}))
+		}
+	}
+	return keys
+}
+
 // LoadParticipants loads participants with seeds merged (default behavior).
 func (s *Store) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {
 	return s.loadParticipants(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: true})
@@ -60,11 +97,18 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 }
 
 func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
-	// Use a virtual filename for cache to distinguish between with/without seeds.
-	cacheKey := "participants.csv"
-	if opts.WithSeeds {
-		cacheKey = "participants_with_seeds.csv"
-	}
+	// Use a virtual filename for cache to distinguish between with/without
+	// seeds AND between the three possible parse modes
+	// (HasIDs=&true / HasIDs=&false / nil → auto-detect).
+	//
+	// mp-p7n / Copilot PR #185 round-6: without the parse-mode suffix,
+	// a no-hint auto-detect call that lands a "no-IDs" parse can poison
+	// the same cache key that a later HasIDs=&true call reads — the
+	// hinted call would return the cached shifted rows instead of
+	// stripping column 0. Splitting the cache key by parse mode means
+	// each mode's parse is cached independently. saveParticipantsNoLock
+	// invalidates all variants below to keep them coherent on write.
+	cacheKey := participantsCacheKey(opts)
 
 	cache := s.getFileCache(compID, cacheKey)
 	cache.mu.RLock()
@@ -644,9 +688,11 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		return err
 	}
 
-	// Invalidate participant caches (with and without seeds) so the next Load
-	// sees the fresh data without a disk re-read.
-	for _, key := range []string{"participants.csv", "participants_with_seeds.csv"} {
+	// Invalidate every parse-mode variant of the participant cache so a
+	// subsequent Load (regardless of HasIDs hint / WithSeeds) re-parses
+	// from the freshly-written file. See participantsCacheKey for the
+	// matrix mp-p7n round-6 split into.
+	for _, key := range allParticipantsCacheKeys() {
 		cache := s.getFileCache(compID, key)
 		cache.mu.Lock()
 		cache.data = nil

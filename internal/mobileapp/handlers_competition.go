@@ -715,6 +715,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// failed). A second transform here is cheap (metadata-only)
 			// and runs under the per-comp lock, so subsequent loads see
 			// a consistent (flag, file) pair.
+			//
+			// mp-p7n / Copilot PR #185 round-6: this flip is now part
+			// of the roster-write contract — not best-effort. With
+			// loadParticipantsNoLock's default branch keyed off
+			// Competition.HasParticipantIDs, a stale `false` flag on
+			// disk causes every subsequent no-hint reader (viewer
+			// list/detail, engine StartCompetition, etc.) to fall back
+			// to uuidRE-on-row-0 and mis-classify preserved non-UUID
+			// ids as "no ids" → column shift. The previous "log and
+			// continue" rationale was based on the older readers that
+			// derived the hint per-record from uuidRE; that's no
+			// longer how the load works. If the flip fails, return
+			// 500 so the operator retries (idempotent — the same body
+			// re-applied will re-save the file and re-attempt the
+			// flip).
 			if len(comp.Players) > 0 {
 				if _, fierr := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 					if current == nil {
@@ -723,17 +738,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					current.HasParticipantIDs = true
 					return current, nil
 				}); fierr != nil {
-					// Log only — the file save succeeded (load-bearing
-					// write). A stale `false` flag is safe because every
-					// reader (handlers_viewer.go list + detail,
-					// engine StartCompetition) uses the conditional hint
-					// pattern: pass &true only when HasParticipantIDs is
-					// true; otherwise pass nil and let
-					// LoadParticipantsOpt auto-detect from the first
-					// line's UUID prefix. Aborting the PUT here after a
-					// successful save would mislead the caller into
-					// thinking the roster save failed.
-					fmt.Printf("Warning: failed to flip HasParticipantIDs after SaveParticipants: %v\n", fierr)
+					fmt.Printf("Warning: PUT /api/competitions/%s — failed to flip HasParticipantIDs after SaveParticipants: %v\n", id, fierr)
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"error": "roster saved but failed to update HasParticipantIDs flag; retry the request (idempotent): " + fierr.Error(),
+					})
+					return
 				}
 			}
 			participantsChanged = true

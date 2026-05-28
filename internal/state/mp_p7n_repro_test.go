@@ -193,6 +193,52 @@ func TestMpP7nRepro_CacheInvalidatedOnHasParticipantIDsFlip(t *testing.T) {
 		"original non-UUID id must be preserved (no regeneration)")
 }
 
+// mp-p7n / Copilot PR #185 round-6: the participant cache key must
+// split by HasIDs parse mode. Without the split, a no-hint
+// auto-detect load that lands a "no-IDs" parse can poison the same
+// cache entry that a later HasIDs=&true call reads — the hinted call
+// would return the cached shifted rows instead of stripping column 0.
+func TestMpP7nRepro_CacheKeySplitsByParseMode(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "cache-mode"
+
+	// HasParticipantIDs=false on disk — auto-detect path will fall back
+	// to uuidRE-on-row-0, which fails for the non-UUID id below and
+	// returns the column-shifted view.
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Cache Mode", WithZekkenName: false, HasParticipantIDs: false,
+	}))
+	players := []domain.Player{
+		{ID: "cache-mode-p1", Name: "Aaron Adams", Dojo: "Team Alpha"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// First: no-hint load lands the shifted parse and caches it.
+	loadedAuto, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loadedAuto, 1)
+	assert.Equal(t, "Cache-Mode-P1", loadedAuto[0].Name,
+		"no-hint load takes the auto-detect path and mis-loads (column shift)")
+
+	// Second: hinted load against the SAME on-disk file (no mtime
+	// change) MUST not hit the auto-detect cache entry. Pre-fix this
+	// would have returned the same shifted parse from the shared cache;
+	// post-fix the parse-mode-keyed cache forces a fresh parse with
+	// the hint, which correctly strips column 0.
+	trueP := true
+	loadedHint, err := store.LoadParticipantsOpt(compID, false, LoadParticipantsOpts{
+		WithSeeds: true, HasIDs: &trueP,
+	})
+	require.NoError(t, err)
+	require.Len(t, loadedHint, 1)
+	assert.Equal(t, "Aaron Adams", loadedHint[0].Name,
+		"hinted load must NOT serve the auto-detect cache entry — distinct cache key per parse mode")
+	assert.Equal(t, "Team Alpha", loadedHint[0].Dojo)
+	assert.Equal(t, "cache-mode-p1", loadedHint[0].ID)
+}
+
 func TestMpP7nRepro_UUIDIDIsFine(t *testing.T) {
 	// Sanity: with proper UUIDv4 IDs, the round-trip is clean. This
 	// test should PASS both pre-fix and post-fix — it isolates the bug

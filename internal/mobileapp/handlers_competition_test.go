@@ -1015,6 +1015,246 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 		"response must not ship `players: null` — clients merge this into local state")
 }
 
+// mp-p7n: Copilot PR #185 round-3 finding — regenerating ids on save
+// would orphan CompetitorStatus.PlayerID / ReservedSlot.ParticipantID /
+// team-lineup PlayerIDs that reference the original ids. Fix: keep the
+// id verbatim on save; the loader (consulting Competition.HasParticipantIDs
+// for the strip decision) handles any shape.
+//
+// This test pins the contract:
+//   - The PUT body's non-UUID ids round-trip to the response intact
+//     (no regeneration).
+//   - Name/Dojo are correctly aligned in the response (no column shift
+//     on load — the loader trusts HasParticipantIDs).
+//   - A second PUT with the same body produces an idempotent round-trip
+//     (ids don't churn).
+func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "asddasd"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Asddasd", Date: "12-05-2026",
+		WithZekkenName: false, HasParticipantIDs: true,
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	body := []byte(`{
+		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
+		"format":"playoffs","kind":"individual","courts":["A"],
+		"withZekkenName":false,
+		"players":[
+			{"id":"asddasd-p1","name":"Aaron Adams","dojo":"Team Alpha"},
+			{"id":"asddasd-p2","name":"Albus Blake","dojo":"Team Delta"}
+		]
+	}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Players, 2)
+
+	// Ids preserved — regeneration would orphan dependent stores.
+	assert.Equal(t, "asddasd-p1", resp.Players[0].ID,
+		"non-UUID id must round-trip intact; regeneration orphans competitor_status/reserved_slot refs")
+	assert.Equal(t, "asddasd-p2", resp.Players[1].ID)
+
+	// Name and Dojo correctly aligned — no column shift on load.
+	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
+	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
+	assert.Empty(t, resp.Players[0].Metadata,
+		"Metadata must be empty — pre-fix column shift dumped Dojo into Metadata[0]")
+	assert.Equal(t, "Albus Blake", resp.Players[1].Name)
+	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
+
+	// Idempotent second PUT — ids stay stable.
+	body2 := fmt.Appendf(nil, `{
+		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
+		"format":"playoffs","kind":"individual","courts":["A"],
+		"withZekkenName":false,
+		"players":[
+			{"id":%q,"name":"Aaron Adams","dojo":"Team Alpha"},
+			{"id":%q,"name":"Albus Blake","dojo":"Team Delta"}
+		]
+	}`, resp.Players[0].ID, resp.Players[1].ID)
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	require.Equal(t, http.StatusOK, w2.Code)
+	var resp2 state.Competition
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+	assert.Equal(t, "asddasd-p1", resp2.Players[0].ID, "ids must be stable across save round-trips")
+}
+
+// mp-p7n: uppercase-UUID id round-trips intact (no canonicalisation,
+// no regeneration). The loader's HasParticipantIDs-based strip handles
+// any shape — case isn't load-bearing for the id-strip decision once
+// the flag is consulted.
+func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "upper-uuid"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Upper UUID", Date: "12-05-2026",
+		WithZekkenName: false, HasParticipantIDs: true,
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	upperUUID := "85CDEB35-C066-4667-B7FD-43EBAE8A9F13"
+	body := fmt.Appendf(nil, `{
+		"id":"upper-uuid","name":"Upper UUID","date":"12-05-2026",
+		"format":"playoffs","kind":"individual","courts":["A"],
+		"withZekkenName":false,
+		"players":[{"id":%q,"name":"Aaron Adams","dojo":"Team Alpha"}]
+	}`, upperUUID)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Players, 1)
+	assert.Equal(t, upperUUID, resp.Players[0].ID,
+		"client-supplied id must round-trip intact (case preserved, no regeneration)")
+	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
+	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
+}
+
+// mp-p7n / Copilot PR #185 round-9: exercises the round-6
+// 500-on-flag-flip-failure branch end-to-end, deterministically.
+//
+// Round-8 used a watcher-goroutine filesystem race to inject the
+// failure between SaveParticipants and the flip; Copilot flagged that
+// as nondeterministic (if the watcher lost the race it could observe
+// participants.csv after the handler already returned 200, then assert
+// 500). Replaced with a package-level test seam: flipHasParticipantIDs
+// is a var, so the test swaps in a stub that returns an error with no
+// timing dependency.
+func TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Inject a deterministic flip failure; restore on exit. These
+	// handler tests do not run in parallel, so mutating the package
+	// var is safe.
+	orig := flipHasParticipantIDs
+	flipHasParticipantIDs = func(_ *state.Store, _ string) error {
+		return fmt.Errorf("injected flag-flip failure")
+	}
+	defer func() { flipHasParticipantIDs = orig }()
+
+	cid := "flip-fails"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Flip Fails", Date: "12-05-2026",
+		HasParticipantIDs: false,
+		Format:            state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	body, _ := json.Marshal(state.Competition{
+		ID: cid, Name: "Flip Fails", Date: "12-05-2026",
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+		Players: []domain.Player{
+			{ID: "flip-fails-p1", Name: "Aaron Adams", Dojo: "Team Alpha"},
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	// Round-6 contract: a flip failure surfaces as 500, NOT a 200 with
+	// a stale flag.
+	require.Equal(t, http.StatusInternalServerError, w.Code,
+		"flip failure must surface as 500 (round-6 contract) — got %d: %s", w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "HasParticipantIDs",
+		"error body must mention HasParticipantIDs (round-6 flip-failure branch); got %s", w.Body.String())
+
+	// The roster file itself DID land before the flip — confirm the
+	// participants were saved (the failure is only in the metadata flip,
+	// which is why the operator's retry is idempotent). Read with an
+	// explicit HasIDs hint: a no-hint read would reproduce the column
+	// shift precisely BECAUSE the flag flip failed (HasParticipantIDs is
+	// still false on disk, so the loader auto-detects "no ids" for the
+	// non-UUID first column). The hinted read proves the on-disk bytes
+	// are correct and a successful retry (which lands the flip) recovers.
+	trueP := true
+	saved, lerr := store.LoadParticipantsOpt(cid, false, state.LoadParticipantsOpts{HasIDs: &trueP})
+	require.NoError(t, lerr)
+	require.Len(t, saved, 1)
+	assert.Equal(t, "Aaron Adams", saved[0].Name)
+	assert.Equal(t, "Team Alpha", saved[0].Dojo)
+	assert.Equal(t, "flip-fails-p1", saved[0].ID)
+}
+
+// mp-p7n / Copilot PR #185 round-5: when the roster-PUT response
+// re-loads participants, the deferred HasParticipantIDs=true flip is
+// best-effort (failures only log). If the flip never lands — or simply
+// hasn't landed yet — the loader's default branch reads the stale flag
+// (false) and falls back to uuidRE-on-row-0, mis-classifying non-UUID
+// ids as "no ids" and returning the column-shifted roster.
+//
+// Simulate the failure mode by forcing HasParticipantIDs=false on
+// disk BEFORE the PUT, then asserting the response still surfaces
+// correctly-aligned Name/Dojo. The handler now passes HasIDs=&true
+// explicitly when re-loading a non-empty roster, so the loader trusts
+// the call site (we just saved a non-empty roster, every row has an
+// id) regardless of the metadata flag's state.
+func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "stale-flag"
+	// Note: HasParticipantIDs explicitly FALSE — simulating either the
+	// pre-flip window (race) or a failed deferred flip (logged but not
+	// surfaced). The reload must not trust this flag.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Stale Flag", Date: "12-05-2026",
+		WithZekkenName: false, HasParticipantIDs: false,
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	body := []byte(`{
+		"id":"stale-flag","name":"Stale Flag","date":"12-05-2026",
+		"format":"playoffs","kind":"individual","courts":["A"],
+		"withZekkenName":false,
+		"players":[
+			{"id":"stale-flag-p1","name":"Aaron Adams","dojo":"Team Alpha"},
+			{"id":"stale-flag-p2","name":"Albus Blake","dojo":"Team Delta"}
+		]
+	}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Players, 2)
+
+	// Response MUST surface correctly-aligned Name/Dojo even if the
+	// deferred HasParticipantIDs flip failed. Pre-fix, the reload
+	// would have returned Name="Stale-Flag-P1", Dojo="Aaron Adams",
+	// metadata=["Team Alpha"] (column shift).
+	assert.Equal(t, "Aaron Adams", resp.Players[0].Name,
+		"reload must use HasIDs=&true hint, not the stale comp flag — non-UUID id must be stripped from column 0")
+	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
+	assert.Empty(t, resp.Players[0].Metadata)
+	assert.Equal(t, "stale-flag-p1", resp.Players[0].ID,
+		"original non-UUID id preserved across the round-trip")
+	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
+	assert.Equal(t, "Albus Blake", resp.Players[1].Name)
+	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
+}
+
 // TestPlayoff_ResponseIncludesPlayers pins the Copilot round-12
 // finding (#6) server-side: POST /playoffs used to ship `players: null`
 // in the create response (Go nil slice → JSON null). admin.jsx's

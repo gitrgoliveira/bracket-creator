@@ -768,7 +768,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// re-loaded roster will also be [] (LoadParticipants returns
 			// an empty slice for an empty file), so the cleared-roster
 			// contract still holds.
-			if players, lerr := store.LoadParticipants(id, updated.WithZekkenName); lerr == nil {
+			//
+			// mp-p7n / Copilot PR #185 round-5: pass HasIDs=&true
+			// explicitly when we just persisted a non-empty roster.
+			// The deferred HasParticipantIDs=true flip above is
+			// best-effort (failures only log); if it failed, the
+			// loader's default branch would read the still-stale
+			// flag (false), fall back to uuidRE-on-row-0, mis-classify
+			// non-UUID ids as "no ids", and return the same shifted
+			// roster this PR is fixing. The hint is authoritative here
+			// because SaveParticipants succeeded — every row on disk
+			// carries an id in column 0.
+			loadOpts := state.LoadParticipantsOpts{WithSeeds: true}
+			if len(comp.Players) > 0 {
+				trueP := true
+				loadOpts.HasIDs = &trueP
+			}
+			if players, lerr := store.LoadParticipantsOpt(id, updated.WithZekkenName, loadOpts); lerr == nil {
 				updated.Players = players
 			} else {
 				fmt.Printf("Warning: PUT /api/competitions/%s — failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)

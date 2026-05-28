@@ -1128,6 +1128,67 @@ func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
 	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
 }
 
+// mp-p7n / Copilot PR #185 round-5: when the roster-PUT response
+// re-loads participants, the deferred HasParticipantIDs=true flip is
+// best-effort (failures only log). If the flip never lands — or simply
+// hasn't landed yet — the loader's default branch reads the stale flag
+// (false) and falls back to uuidRE-on-row-0, mis-classifying non-UUID
+// ids as "no ids" and returning the column-shifted roster.
+//
+// Simulate the failure mode by forcing HasParticipantIDs=false on
+// disk BEFORE the PUT, then asserting the response still surfaces
+// correctly-aligned Name/Dojo. The handler now passes HasIDs=&true
+// explicitly when re-loading a non-empty roster, so the loader trusts
+// the call site (we just saved a non-empty roster, every row has an
+// id) regardless of the metadata flag's state.
+func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "stale-flag"
+	// Note: HasParticipantIDs explicitly FALSE — simulating either the
+	// pre-flip window (race) or a failed deferred flip (logged but not
+	// surfaced). The reload must not trust this flag.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Stale Flag", Date: "12-05-2026",
+		WithZekkenName: false, HasParticipantIDs: false,
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	body := []byte(`{
+		"id":"stale-flag","name":"Stale Flag","date":"12-05-2026",
+		"format":"playoffs","kind":"individual","courts":["A"],
+		"withZekkenName":false,
+		"players":[
+			{"id":"stale-flag-p1","name":"Aaron Adams","dojo":"Team Alpha"},
+			{"id":"stale-flag-p2","name":"Albus Blake","dojo":"Team Delta"}
+		]
+	}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Players, 2)
+
+	// Response MUST surface correctly-aligned Name/Dojo even if the
+	// deferred HasParticipantIDs flip failed. Pre-fix, the reload
+	// would have returned Name="Stale-Flag-P1", Dojo="Aaron Adams",
+	// metadata=["Team Alpha"] (column shift).
+	assert.Equal(t, "Aaron Adams", resp.Players[0].Name,
+		"reload must use HasIDs=&true hint, not the stale comp flag — non-UUID id must be stripped from column 0")
+	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
+	assert.Empty(t, resp.Players[0].Metadata)
+	assert.Equal(t, "stale-flag-p1", resp.Players[0].ID,
+		"original non-UUID id preserved across the round-trip")
+	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
+	assert.Equal(t, "Albus Blake", resp.Players[1].Name)
+	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
+}
+
 // TestPlayoff_ResponseIncludesPlayers pins the Copilot round-12
 // finding (#6) server-side: POST /playoffs used to ship `players: null`
 // in the create response (Go nil slice → JSON null). admin.jsx's

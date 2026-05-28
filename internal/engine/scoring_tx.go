@@ -85,6 +85,10 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					if result.SubResults != nil {
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
 					}
+					// Project persisted sub-results back so the SSE/HTTP response
+					// reflects committed state (see scoring.go for the full
+					// rationale — mirrors the DecidedByHantei projection below).
+					result.SubResults = bracket.Rounds[rIdx][mIdx].SubResults
 					// See scoring.go for the DecidedByHantei *bool semantics.
 					if result.DecidedByHantei != nil {
 						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei

@@ -109,21 +109,7 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 			res[i].IpponsB = make([]string, len(r.IpponsB))
 			copy(res[i].IpponsB, r.IpponsB)
 		}
-		if r.SubResults != nil {
-			res[i].SubResults = make([]SubMatchResult, len(r.SubResults))
-			for j, sr := range r.SubResults {
-				res[i].SubResults[j] = sr
-				if sr.IpponsA != nil {
-					res[i].SubResults[j].IpponsA = make([]string, len(sr.IpponsA))
-					copy(res[i].SubResults[j].IpponsA, sr.IpponsA)
-				}
-				if sr.IpponsB != nil {
-					res[i].SubResults[j].IpponsB = make([]string, len(sr.IpponsB))
-					copy(res[i].SubResults[j].IpponsB, sr.IpponsB)
-				}
-				res[i].SubResults[j].Encho = sr.Encho.Clone()
-			}
-		}
+		res[i].SubResults = cloneSubResults(r.SubResults)
 	}
 	return res
 }

@@ -605,6 +605,12 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					if result.SubResults != nil {
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
 					}
+					// Project the persisted sub-results back into result so the
+					// HTTP response and SSE broadcast reflect committed state —
+					// mirrors the DecidedByHantei projection below. Without this a
+					// nil-preserve re-score would keep the stored bouts on disk but
+					// emit an omitted subResults payload in the same turn.
+					result.SubResults = bracket.Rounds[rIdx][mIdx].SubResults
 					// DecidedByHantei uses *bool so that a client that omits the
 					// field (nil) preserves the stored value, while an explicit
 					// true/false applies it. This prevents a re-score that doesn't

@@ -2231,6 +2231,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubMatchResult'
+        decidedByHantei:
+          type: boolean
+          description: >
+            True when the winner was declared by referee hantei after a tied encho
+            (FIK Art. 7-5 / 29-6). On a bracket-match score request, omitting the field
+            preserves the stored value; sending an explicit true/false applies it.
 
     SubMatchResult:
       type: object
@@ -2264,6 +2270,14 @@ components:
           description: >
             Decision code for this individual sub-match. Same values as `MatchResult.decision`:
             `""` (normal victory) or `"hikiwake"` (draw/tie).
+        decidedByHantei:
+          type: boolean
+          description: >
+            True when this sub-bout's winner was declared by referee hantei after a
+            tied encho. Valid ONLY for the daihyosen representative bout (`position: -1`);
+            regular numbered bouts have fixed regulation time and are never decided by hantei.
+        encho:
+          $ref: '#/components/schemas/EnchoMetadata'
 
     BracketMatch:
       type: object
@@ -2294,6 +2308,29 @@ components:
           type: string
         isOverridden:
           type: boolean
+        queuePosition:
+          type: integer
+        decision:
+          type: string
+          description: Decision code persisted for an elimination-stage match. Same values as `MatchResult.decision`.
+        decisionBy:
+          type: string
+          enum: [shiro, aka]
+        decisionReason:
+          type: string
+          maxLength: 200
+        encho:
+          $ref: '#/components/schemas/EnchoMetadata'
+        decidedByHantei:
+          type: boolean
+          description: True when the match winner was declared by referee hantei after a tied encho.
+        subResults:
+          type: array
+          description: >
+            Per-bout results for a team bracket match, persisted so the score editor
+            can restore hantei state and bout-level detail on re-open.
+          items:
+            $ref: '#/components/schemas/SubMatchResult'
 
     Bracket:
       type: object

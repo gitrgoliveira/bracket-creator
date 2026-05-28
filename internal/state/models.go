@@ -329,6 +329,31 @@ func (e *EnchoMetadata) Clone() *EnchoMetadata {
 	return &c
 }
 
+// cloneSubResults deep-copies a sub-result slice so cached state never shares
+// the IpponsA/IpponsB slices or nested Encho pointers with a returned value.
+// Used by both the pool match copy path (copyMatchResults) and the bracket
+// copy path (copyBracket) — keep them aligned. Returns nil for a nil input so
+// the omitempty/preserve semantics round-trip unchanged.
+func cloneSubResults(subs []SubMatchResult) []SubMatchResult {
+	if subs == nil {
+		return nil
+	}
+	out := make([]SubMatchResult, len(subs))
+	for i, sr := range subs {
+		out[i] = sr
+		if sr.IpponsA != nil {
+			out[i].IpponsA = make([]string, len(sr.IpponsA))
+			copy(out[i].IpponsA, sr.IpponsA)
+		}
+		if sr.IpponsB != nil {
+			out[i].IpponsB = make([]string, len(sr.IpponsB))
+			copy(out[i].IpponsB, sr.IpponsB)
+		}
+		out[i].Encho = sr.Encho.Clone()
+	}
+	return out
+}
+
 type PlayerStanding struct {
 	Player           domain.Player `json:"player"`
 	Wins             int           `json:"wins"`

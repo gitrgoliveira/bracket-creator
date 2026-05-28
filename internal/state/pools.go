@@ -121,6 +121,7 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 					res[i].SubResults[j].IpponsB = make([]string, len(sr.IpponsB))
 					copy(res[i].SubResults[j].IpponsB, sr.IpponsB)
 				}
+				res[i].SubResults[j].Encho = sr.Encho.Clone()
 			}
 		}
 	}

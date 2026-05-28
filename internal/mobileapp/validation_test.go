@@ -865,13 +865,28 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: 1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: true,
 				},
 			},
 		}
 		verr := req.Validate()
 		require.IsType(t, &ValidationError{}, verr)
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: encho on regular bout position", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: enchoOne,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
 	})
 
 	t.Run("valid: daihyosen hantei with winner, encho, tied scoreline", func(t *testing.T) {
@@ -1016,13 +1031,28 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: 1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: true,
 				},
 			},
 		}
 		verr := validateBulkScoreLengths(r)
 		require.IsType(t, &ValidationError{}, verr)
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: encho on regular position rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: enchoOne,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
 	})
 
 	t.Run("valid: daihyosen hantei accepted on bulk path", func(t *testing.T) {

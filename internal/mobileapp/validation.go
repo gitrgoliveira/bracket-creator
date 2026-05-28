@@ -101,15 +101,24 @@ func validateMaxLen(field, val string, max int) error {
 	return nil
 }
 
-// validateSubBoutHantei enforces hantei invariants on a single SubMatchResult.
-// Hantei is only valid for the daihyosen representative bout (Position == -1).
-// Regular numbered bouts are never decided by hantei under FIK rules.
+// validateSubBout enforces FIK sub-bout invariants on a single SubMatchResult.
+// Both encho and hantei are valid ONLY for the daihyosen representative bout
+// (Position == -1): regular numbered bouts have fixed regulation time (no
+// overtime) and are never decided by hantei.
 //
 // The winner/encho/tied-scoreline/decision checks here intentionally mirror the
 // top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
-// the sub-bout variant adds the Position guard and omits the top-level-only
+// the sub-bout variant adds the Position guards and omits the top-level-only
 // Status/DecisionBy checks (SubMatchResult has no such fields).
-func validateSubBoutHantei(prefix string, sr *state.SubMatchResult) error {
+func validateSubBout(prefix string, sr *state.SubMatchResult) error {
+	// Encho is rejected on any non-daihyosen bout regardless of the hantei
+	// flag — a numbered bout cannot go to overtime.
+	if sr.Position != -1 && sr.Encho != nil && sr.Encho.PeriodCount > 0 {
+		return &ValidationError{
+			Field:   prefix + "encho",
+			Message: "encho is only valid for the daihyosen representative bout (position -1)",
+		}
+	}
 	if !sr.DecidedByHantei {
 		return nil
 	}
@@ -179,7 +188,7 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
-		if err := validateSubBoutHantei(prefix, sr); err != nil {
+		if err := validateSubBout(prefix, sr); err != nil {
 			return err
 		}
 	}
@@ -328,7 +337,7 @@ func (r *ScoreRequest) Validate() error {
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
-		if err := validateSubBoutHantei(prefix, sr); err != nil {
+		if err := validateSubBout(prefix, sr); err != nil {
 			return err
 		}
 	}
@@ -337,7 +346,7 @@ func (r *ScoreRequest) Validate() error {
 	// supplied) must be completed, and encho must have been played (PeriodCount
 	// > 0) — rejecting decidedByHantei=true without overtime context prevents
 	// persisting an "HT" suffix outside a real encho-decided match.
-	// The winner/encho/tied/decision checks below mirror validateSubBoutHantei;
+	// The winner/encho/tied/decision checks below mirror validateSubBout;
 	// keep both in sync.
 	if r.DecidedByHantei != nil && *r.DecidedByHantei {
 		if r.Winner == "" {

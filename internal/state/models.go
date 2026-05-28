@@ -318,6 +318,17 @@ type EnchoMetadata struct {
 	PeriodCount int `json:"periodCount" yaml:"periodCount"`
 }
 
+// Clone returns a deep copy of the encho metadata, or nil if e is nil.
+// Used by the match/bracket copy paths so cached state never shares an
+// Encho pointer with a returned value.
+func (e *EnchoMetadata) Clone() *EnchoMetadata {
+	if e == nil {
+		return nil
+	}
+	c := *e
+	return &c
+}
+
 type PlayerStanding struct {
 	Player           domain.Player `json:"player"`
 	Wins             int           `json:"wins"`

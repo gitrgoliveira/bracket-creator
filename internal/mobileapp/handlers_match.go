@@ -142,6 +142,19 @@ func anySubBoutEnchoExceedsCap(subResults []state.SubMatchResult, comp *state.Co
 	return false
 }
 
+// anySubBoutHasEncho reports whether any sub-result carries encho with at
+// least one period. Used to decide whether the cap check needs to load the
+// competition at all — ordinary team scoring (every bout has SubResults but
+// no encho) must not pay that store load.
+func anySubBoutHasEncho(subResults []state.SubMatchResult) bool {
+	for i := range subResults {
+		if subResults[i].Encho != nil && subResults[i].Encho.PeriodCount > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // enforceEnchoCap is the gin-handler wrapper around enchoExceedsCap for
 // the single-result score / decision endpoints. Loads the competition
 // once, checks the top-level encho and every sub-bout encho against the
@@ -155,7 +168,7 @@ func enforceEnchoCap(c *gin.Context, store CompetitionStore, id string, encho *s
 // checks both the top-level encho and each sub-result's encho against the
 // competition cap in a single competition load.
 func enforceEnchoCapWithSubs(c *gin.Context, store CompetitionStore, id string, encho *state.EnchoMetadata, subs []state.SubMatchResult, force bool) bool {
-	needsCheck := (encho != nil && encho.PeriodCount > 0) || len(subs) > 0
+	needsCheck := (encho != nil && encho.PeriodCount > 0) || anySubBoutHasEncho(subs)
 	if !needsCheck {
 		return true
 	}

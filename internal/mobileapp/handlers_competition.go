@@ -14,6 +14,23 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// flipHasParticipantIDs sets Competition.HasParticipantIDs=true after a
+// successful non-empty roster save. It's a package var (not an inline
+// closure) so tests can inject a deterministic failure without relying
+// on filesystem-race timing — see
+// TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500. mp-p7n /
+// Copilot PR #185 round-9.
+var flipHasParticipantIDs = func(store *state.Store, id string) error {
+	_, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+		if current == nil {
+			return nil, nil
+		}
+		current.HasParticipantIDs = true
+		return current, nil
+	})
+	return err
+}
+
 // slugifyID derives a valid competition ID from a name: lowercase, non-alphanumeric
 // runs become a single hyphen, leading/trailing hyphens stripped, max 64 chars.
 func slugifyID(name string) string {
@@ -715,25 +732,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// failed). A second transform here is cheap (metadata-only)
 			// and runs under the per-comp lock, so subsequent loads see
 			// a consistent (flag, file) pair.
+			//
+			// mp-p7n / Copilot PR #185 round-6: this flip is now part
+			// of the roster-write contract — not best-effort. With
+			// loadParticipantsNoLock's default branch keyed off
+			// Competition.HasParticipantIDs, a stale `false` flag on
+			// disk causes every subsequent no-hint reader (viewer
+			// list/detail, engine StartCompetition, etc.) to fall back
+			// to uuidRE-on-row-0 and mis-classify preserved non-UUID
+			// ids as "no ids" → column shift. The previous "log and
+			// continue" rationale was based on the older readers that
+			// derived the hint per-record from uuidRE; that's no
+			// longer how the load works. If the flip fails, return
+			// 500 so the operator retries (idempotent — the same body
+			// re-applied will re-save the file and re-attempt the
+			// flip).
 			if len(comp.Players) > 0 {
-				if _, fierr := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
-					if current == nil {
-						return nil, nil
-					}
-					current.HasParticipantIDs = true
-					return current, nil
-				}); fierr != nil {
-					// Log only — the file save succeeded (load-bearing
-					// write). A stale `false` flag is safe because every
-					// reader (handlers_viewer.go list + detail,
-					// engine StartCompetition) uses the conditional hint
-					// pattern: pass &true only when HasParticipantIDs is
-					// true; otherwise pass nil and let
-					// LoadParticipantsOpt auto-detect from the first
-					// line's UUID prefix. Aborting the PUT here after a
-					// successful save would mislead the caller into
-					// thinking the roster save failed.
-					fmt.Printf("Warning: failed to flip HasParticipantIDs after SaveParticipants: %v\n", fierr)
+				if fierr := flipHasParticipantIDs(store, id); fierr != nil {
+					fmt.Printf("Warning: PUT /api/competitions/%s — failed to flip HasParticipantIDs after SaveParticipants: %v\n", id, fierr)
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"error": "roster saved but failed to update HasParticipantIDs flag; retry the request (idempotent): " + fierr.Error(),
+					})
+					return
 				}
 			}
 			participantsChanged = true
@@ -755,10 +775,43 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if comp.Players != nil {
-			// Roster-PUT: reflect what we just saved. AdminParticipants's
-			// clear-roster path sends [] and expects the response to
-			// reflect the cleared roster — preserve that shape.
-			updated.Players = comp.Players
+			// Roster-PUT: re-load from disk so the response reflects what
+			// actually landed in participants.csv — the canonical on-disk
+			// shape after the save round-trip (merged seeds, tag column,
+			// any empty-id rows that the saver minted a fresh UUID for).
+			// mp-p7n: client-supplied ids (UUID or not) are preserved
+			// verbatim on save, and the loader strips column 0 by trusting
+			// HasParticipantIDs, so the re-loaded ids match what the client
+			// sent — no normalisation churn.
+			//
+			// AdminParticipants's clear-roster path sends [] and the
+			// re-loaded roster will also be [] (LoadParticipants returns
+			// an empty slice for an empty file), so the cleared-roster
+			// contract still holds.
+			//
+			// mp-p7n: pass HasIDs=&true explicitly when we just
+			// persisted a non-empty roster. We can rely on the
+			// HasParticipantIDs flag being already set on disk by
+			// this point (round-6 made the flip part of the contract
+			// — flip failures return 500 above and never reach this
+			// reload), so the loader's default branch would resolve
+			// the same way. The explicit hint is purely declarative:
+			// it pins the call-site invariant ("we just wrote a non-
+			// empty roster — every row has an id in column 0") at
+			// the reader, so future refactors that move or weaken
+			// the flip guarantee can't silently regress this reload
+			// to the no-hint auto-detect path.
+			loadOpts := state.LoadParticipantsOpts{WithSeeds: true}
+			if len(comp.Players) > 0 {
+				trueP := true
+				loadOpts.HasIDs = &trueP
+			}
+			if players, lerr := store.LoadParticipantsOpt(id, updated.WithZekkenName, loadOpts); lerr == nil {
+				updated.Players = players
+			} else {
+				fmt.Printf("Warning: PUT /api/competitions/%s — failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
+				updated.Players = comp.Players // fallback: echo body
+			}
 		} else {
 			// Settings-only PUT — load the on-disk roster for the
 			// response so the merge doesn't push null into local state.

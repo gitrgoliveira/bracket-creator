@@ -21,5 +21,33 @@
 * In the scoring you can do an impossible results like 2-2
 
 
+******
+* Participants that do not check-in, are not part of the draw, when the competition starts (Start competition button).
+
+* you can't seed the reserved slots. We'll enter those manually. Remove the "reserved slots" feature.
+
+
+
+* need another password to run the dangerous operations: Reset competition, change participants. And we should be able to change that password in the config.
+
+* When generating the draw, the brackets should also be visible. Viewers will need access to these. The admins will also be able to export the XLSX file.
+
+* A tournament can span multiple days
+* By default, the competition date is one of the tournament days.
+
+* schedule estimator is per competition.
+* We need to have pool match times, playoff match times, and also take into consideration breaks
+
+* in the viewer UI, the announcements should stagger on top of the UI. the webapp will also need to support browser notifications for announcements.
+
+* As an admin I need a button to create announcement and not go into "Edit tournament details"
+
+* Team order and players can change between each team match
+
+
+
 Some match rules:
 https://www.kendo-guide.com/match-in-kendo-shiai.html
+
+
+

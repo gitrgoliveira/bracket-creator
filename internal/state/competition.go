@@ -169,6 +169,15 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 	cache.mtime = s.FileMtime(c.ID, "config.md")
 	cache.mu.Unlock()
 
+	// mp-p7n / Copilot PR #185 round-9: the participant loader derives
+	// its id-strip decision from Competition.HasParticipantIDs, so a
+	// config write (notably the deferred HasParticipantIDs=true flip)
+	// must invalidate the participant caches — otherwise a coarse-
+	// timestamp filesystem could leave the summed cache mtime unchanged
+	// and keep serving a stale "no-IDs" (column-shifted) parse.
+	// Deterministic regardless of mtime granularity.
+	s.invalidateParticipantCaches(c.ID)
+
 	return true, nil
 }
 

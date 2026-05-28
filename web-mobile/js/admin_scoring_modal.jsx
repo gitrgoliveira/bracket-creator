@@ -190,6 +190,18 @@ function prevEnchoPeriod(current) {
   return Math.max(1, current - 1);
 }
 
+// mp-4pc: once a daihyosen (rep bout, wire position -1) exists, the encho
+// rides on that sub, not the top-level match (enchoBlock suppresses the
+// match-level encho when hasDaihyosen). On re-open we must restore the
+// period count from the sub — else a persisted decidedByHantei replays
+// without encho and the backend rejects the next save
+// ("requires encho with at least one period"). Exported for vitest.
+function initialEnchoPeriodsForMatch(m) {
+  const daihyosen = (m.subResults || []).find(s => s.position === -1);
+  if (daihyosen) return daihyosen.encho?.periodCount || 0;
+  return m.encho?.periodCount || 0;
+}
+
 // Pure decision for the draw-toggle action (button and keyboard shortcut).
 // Returns:
 //   {action: "enter"}  — set draw=true, clear pts (only when no scores exist)
@@ -1137,11 +1149,24 @@ function renderPositionLabel(label) {
 function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
   const m = match;
   const isComplete = m.status === "completed";
-  const positions = TEAM_POSITIONS.slice(0, teamSize);
+  const numberedPositions = TEAM_POSITIONS.slice(0, teamSize);
+  // mp-4pc: a persisted daihyosen (representative bout) lives in
+  // SubResults at wire position -1. It is scored "like any other
+  // sub-match" (handlers_daihyosen.go) but is NOT an individual victory —
+  // it breaks an IV/PW tie. Render it as a trailing scoreable row,
+  // exclude it from the IV/PW tally, and let its winner decide the
+  // encounter. The "daihyosen" slot sentinel maps to position -1 in
+  // buildPatch. It is the ONLY team sub-bout that may carry encho/hantei
+  // (validation.go validateSubBout).
+  const existingDaihyosen = (m.subResults || []).find(s => s.position === -1);
+  const hasDaihyosen = !!existingDaihyosen;
+  const positions = hasDaihyosen ? [...numberedPositions, "daihyosen"] : numberedPositions;
+  const daihyosenIdx = hasDaihyosen ? numberedPositions.length : -1;
   // FR-033: encho counter for team matches (overtime period count rides
   // alongside the score on the wire — same shape as ScoreEditorModal).
-  const initialEnchoPeriods = m.encho?.periodCount || 0;
-  const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // mp-4pc: derive from the daihyosen sub when present — see
+  // initialEnchoPeriodsForMatch for why.
+  const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriodsForMatch(m));
   const [submitting, setSubmitting] = useStateA(false);
   // T093–T098: decision state — same shape as the individual editor. See the
   // ScoreEditorModal copy for the contract.
@@ -1164,6 +1189,15 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // handlers_daihyosen.go for the canonical strings.
   const [daihyosenErr, setDaihyosenErr] = useStateA("");
   const [daihyosenBusy, setDaihyosenBusy] = useStateA(false);
+  // mp-4pc: the daihyosen is the only team sub-bout that may be decided
+  // by hantei (judges' decision after a tied encho, FIK 7-5 / 29-6).
+  // Mirrors the individual ScoreEditorModal hantei flow but scoped to the
+  // position -1 row. "" = score-decided; "a"/"b" = hantei winner side.
+  const initialDaihyosenHantei = existingDaihyosen?.decidedByHantei
+    ? (existingDaihyosen.winner === (typeof m.sideA === "object" ? m.sideA?.name : m.sideA) ? "a" : "b")
+    : "";
+  const [daihyosenHantei, setDaihyosenHantei] = useStateA(initialDaihyosenHantei);
+  const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(!!initialDaihyosenHantei);
   // Same teardown-race guard as ScoreEditorModal — covers external/
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
@@ -1309,7 +1343,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const initSubsRef = React.useRef(null);
   if (initSubsRef.current === null) {
     initSubsRef.current = positions.map((_, idx) => {
-      const existing = existingSub.find(s => s.position === idx + 1);
+      const pos = idx === daihyosenIdx ? -1 : idx + 1;
+      const existing = existingSub.find(s => s.position === pos);
       let fusensho = "";
       if (existing?.decision === "fusensho") {
         if (existing.winner === sideAName) fusensho = "a";
@@ -1357,28 +1392,48 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     return { aTotal: aT, bTotal: bT, winner };
   });
 
-  const ivA = subTotals.filter(s => s.winner === "a").length;
-  const ivB = subTotals.filter(s => s.winner === "b").length;
-  const pwA = subTotals.reduce((sum, s) => sum + s.aTotal, 0);
-  const pwB = subTotals.reduce((sum, s) => sum + s.bTotal, 0);
-  const teamWinner = ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null;
+  // mp-4pc: the daihyosen row (when present) is excluded from IV/PW — it
+  // is a tiebreaker, not an individual victory. Its own winner (hantei
+  // side first, then score) decides the encounter.
+  const ivA = subTotals.filter((s, i) => i !== daihyosenIdx && s.winner === "a").length;
+  const ivB = subTotals.filter((s, i) => i !== daihyosenIdx && s.winner === "b").length;
+  const pwA = subTotals.reduce((sum, s, i) => i === daihyosenIdx ? sum : sum + s.aTotal, 0);
+  const pwB = subTotals.reduce((sum, s, i) => i === daihyosenIdx ? sum : sum + s.bTotal, 0);
+  // Hantei applies only to a tied daihyosen scoreline (FIK 7-5 / 29-6);
+  // otherwise the bout is decided by ippons like any other.
+  const daihyosenTied = hasDaihyosen && subTotals[daihyosenIdx].aTotal === subTotals[daihyosenIdx].bTotal;
+  const daihyosenWinner = hasDaihyosen
+    ? ((daihyosenTied && daihyosenHantei) ? daihyosenHantei : subTotals[daihyosenIdx].winner)
+    : null;
+  const teamWinner = hasDaihyosen
+    ? (daihyosenWinner || null)
+    : (ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null);
 
-  const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // mp-4pc: when a daihyosen exists the encho counter belongs to that
+  // sub-bout (attached per-sub in buildPatch), so suppress the top-level
+  // encho to avoid duplicate/ambiguous semantics on the team match.
+  const enchoBlock = () => (enchoPeriodCount > 0 && !hasDaihyosen) ? { encho: { periodCount: enchoPeriodCount } } : {};
 
   const buildPatch = (targetStatus) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
     const subResults = subs.map((s, idx) => {
       const t = subTotals[idx];
+      const isDaihyo = idx === daihyosenIdx;
       // Hansoku Hs already in pts arrays via applyFoulIncrement — no fold.
       const aAll = s.aPts.slice(0, MAX_IPPONS_PER_SIDE);
       const bAll = s.bPts.slice(0, MAX_IPPONS_PER_SIDE);
-      const w = t.winner === "a" ? m.sideA : t.winner === "b" ? m.sideB : null;
-      // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought mapping.
+      // The daihyosen winner may come from hantei (tied encho); fall back
+      // to the score-derived winner otherwise.
+      const wKey = isDaihyo ? daihyosenWinner : t.winner;
+      const w = wKey === "a" ? m.sideA : wKey === "b" ? m.sideB : null;
+      // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought
+      // mapping. The daihyosen always carries decision="daihyosen".
       let decision = "";
-      if (s.fusensho) decision = "fusensho";
+      if (isDaihyo) decision = "daihyosen";
+      else if (s.fusensho) decision = "fusensho";
       else if (t.winner === null) decision = "hikiwake";
-      return {
-        position: idx + 1,
+      const entry = {
+        position: isDaihyo ? -1 : idx + 1,
         sideA: typeof m.sideA === "object" ? m.sideA?.name : m.sideA,
         sideB: typeof m.sideB === "object" ? m.sideB?.name : m.sideB,
         ipponsA: aAll,
@@ -1388,6 +1443,15 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         winner: w ? (typeof w === "object" ? w.name : w) : "",
         decision,
       };
+      // mp-4pc: encho + hantei are valid ONLY on the daihyosen
+      // (validation.go validateSubBout). The match-level encho counter
+      // rides onto this bout; hantei marks a judges' decision from a
+      // tied encho.
+      if (isDaihyo) {
+        if (enchoPeriodCount > 0) entry.encho = { periodCount: enchoPeriodCount };
+        if (daihyosenTied && daihyosenHantei) entry.decidedByHantei = true;
+      }
+      return entry;
     });
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
     // When transitioning to "running" (▶ Start), teamWinner is typically
@@ -1429,7 +1493,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // the comparison robust against array identity drift from setSubs.
   // Encho toggle is included so an operator-only encho change still
   // triggers the discard confirm.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods;
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods || daihyosenHantei !== initialDaihyosenHantei;
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has
@@ -1570,8 +1634,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             // T131: pull the per-side player + position label. existingSub
             // (from the match) and lineup data are both consulted so the
             // bout cell shows e.g. "Match 1 (Senpo) — A. Tanaka vs B. Sato".
-            const existingSubAtIdx = (m.subResults || []).find(sr => sr.position === idx + 1);
-            const posLabel = positionLabelFor(teamSize, idx, existingSubAtIdx);
+            const isDaihyoRow = idx === daihyosenIdx;
+            const existingSubAtIdx = (m.subResults || []).find(sr => sr.position === (isDaihyoRow ? -1 : idx + 1));
+            const posLabel = isDaihyoRow ? "Daihyosen" : positionLabelFor(teamSize, idx, existingSubAtIdx);
             // Resolve the player name occupying this position on each
             // side: lineup data first (canonical when present), then the
             // SubMatchResult.SideA/SideB strings from a prior score.
@@ -1628,6 +1693,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             const subBoutDecided = isBoutDecided(s.aPts, s.bPts);
 
             const scoreDisplay = (() => {
+              // mp-4pc: a hantei-decided daihyosen has a tied scoreline but
+              // a declared winner — show the winner + (HT) rather than X.
+              if (isDaihyoRow && daihyosenTied && daihyosenHantei) {
+                return <span>{`${t.bTotal}–${t.aTotal}`} <span style={{ fontSize: 11, opacity: 0.7 }}>(HT)</span></span>;
+              }
               if (t.winner === null && t.aTotal === 0 && t.bTotal === 0) return <span style={{ color: "var(--ink-3)" }}>–</span>;
               if (t.winner === null) return <span className="tsm-draw">X</span>;
               return <span>{`${t.bTotal}–${t.aTotal}`}</span>;
@@ -1748,6 +1818,46 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             ))}
           </div>
 
+          {/* mp-4pc: hantei affordance for the daihyosen — the rep bout is
+              the only team sub-bout that may be decided by judges after a
+              tied encho (FIK 7-5 / 29-6). Mounts only when a daihyosen
+              exists and overtime is active; arming requires a tied
+              scoreline. The chosen winner rides onto the position -1 sub
+              (decidedByHantei) when the operator saves. */}
+          {hasDaihyosen && enchoPeriodCount > 0 && (() => {
+            const dt = subTotals[daihyosenIdx];
+            const tiedScore = dt.aTotal === dt.bTotal;
+            return (
+              <div className="hantei-row" data-testid="team-daihyosen-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 12, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
+                <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Daihyosen hantei</span>
+                <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
+                {!daihyosenHanteiArmed && (
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="team-daihyosen-hantei-arm"
+                    onClick={() => setDaihyosenHanteiArmed(true)}
+                    disabled={submitting || decisionSubmitting || !tiedScore}
+                    title={!tiedScore ? "Hantei applies only to a tied daihyosen in encho" : "Record a judges' decision"}
+                    style={{ marginLeft: "auto" }}
+                  >
+                    Decide by hantei…
+                  </button>
+                )}
+                {daihyosenHanteiArmed && (
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                    <button type="button" className={`btn btn--sm ${daihyosenHantei === "b" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-shiro"
+                      onClick={() => setDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
+                    <button type="button" className={`btn btn--sm ${daihyosenHantei === "a" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-aka"
+                      onClick={() => setDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
+                    <button type="button" className="btn btn--ghost btn--sm" data-testid="team-daihyosen-hantei-cancel"
+                      onClick={() => { setDaihyosenHanteiArmed(false); setDaihyosenHantei(""); }} disabled={submitting || decisionSubmitting}>Cancel</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* T141: daihyosen (representative bout) affordance. Visible
               when the match is in the knockout stage AND all positions
               have been scored AND IV/PW tie. Click POSTs to /daihyosen;
@@ -1758,7 +1868,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           {(() => {
             const allComplete = subTotals.every(t => t.aTotal > 0 || t.bTotal > 0 || t.winner !== null);
             const tied = ivA === ivB && pwA === pwB && (ivA + pwA + ivB + pwB) > 0;
-            if (!isKnockoutPhase || !allComplete || !tied) return null;
+            // mp-4pc: once a daihyosen exists, it is rendered as a scoreable
+            // row above — don't offer to add a second one.
+            if (hasDaihyosen || !isKnockoutPhase || !allComplete || !tied) return null;
             const onDaihyosen = async () => {
               setDaihyosenErr("");
               setDaihyosenBusy(true);
@@ -1896,6 +2008,7 @@ export {
   canIncrementEncho,
   nextEnchoPeriod,
   prevEnchoPeriod,
+  initialEnchoPeriodsForMatch,
   decideDrawToggle,
   shouldBlockScoringKeys,
   DecisionPrompt,

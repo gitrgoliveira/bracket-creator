@@ -9,6 +9,7 @@ import {
   canIncrementEncho,
   nextEnchoPeriod,
   prevEnchoPeriod,
+  initialEnchoPeriodsForMatch,
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
@@ -248,6 +249,42 @@ describe('prevEnchoPeriod (the − button)', () => {
 
   it('clamps negative values to 1 (defensive)', () => {
     expect(prevEnchoPeriod(-3)).toBe(1);
+  });
+});
+
+describe('initialEnchoPeriodsForMatch (mp-4pc daihyosen re-open)', () => {
+  // Regression: a hantei-decided daihyosen persists encho on the rep-bout
+  // sub (wire position -1), NOT the top-level match. On re-open the count
+  // must be restored from the sub — else decidedByHantei replays without
+  // encho and the backend rejects the next save.
+
+  it('reads encho from the daihyosen sub when one exists', () => {
+    const m = {
+      encho: { periodCount: 0 },
+      subResults: [
+        { position: 1, ipponsA: ['M'], ipponsB: ['M'], decision: 'hikiwake' },
+        { position: -1, winner: 'Red Team', decidedByHantei: true, encho: { periodCount: 1 } },
+      ],
+    };
+    expect(initialEnchoPeriodsForMatch(m)).toBe(1);
+  });
+
+  it('falls back to the top-level match encho when no daihyosen', () => {
+    expect(initialEnchoPeriodsForMatch({ encho: { periodCount: 2 } })).toBe(2);
+  });
+
+  it('returns 0 when neither sub nor match carries encho', () => {
+    expect(initialEnchoPeriodsForMatch({})).toBe(0);
+    expect(initialEnchoPeriodsForMatch({ subResults: [{ position: 1 }] })).toBe(0);
+    expect(initialEnchoPeriodsForMatch({ subResults: [{ position: -1 }] })).toBe(0);
+  });
+
+  it('prefers the sub even if the top-level match also has a stale encho', () => {
+    const m = {
+      encho: { periodCount: 3 },
+      subResults: [{ position: -1, encho: { periodCount: 1 } }],
+    };
+    expect(initialEnchoPeriodsForMatch(m)).toBe(1);
   });
 });
 

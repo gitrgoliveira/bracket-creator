@@ -339,6 +339,10 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 						DecisionReason:  bm.DecisionReason,
 						Encho:           bm.Encho,
 						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
+						// Include the persisted sub-results so a rollback replay
+						// restores the full team-bout state. LoadBracket deep-copies,
+						// so this slice is safe to hand back without aliasing cache.
+						SubResults: bm.SubResults,
 					}, nil
 				}
 			}

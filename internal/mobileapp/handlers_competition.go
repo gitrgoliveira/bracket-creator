@@ -778,19 +778,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// an empty slice for an empty file), so the cleared-roster
 			// contract still holds.
 			//
-			// mp-p7n / Copilot PR #185 round-5: pass HasIDs=&true
-			// explicitly when we just persisted a non-empty roster.
-			// The hint is authoritative at this call site —
-			// SaveParticipants just succeeded and (per round-6) the
-			// deferred HasParticipantIDs=true flip is now part of the
-			// roster-write contract: on flip failure the handler
-			// returns 500 above, so by the time we reach this reload
-			// the flag is set on disk. Belt-and-suspenders: the
-			// explicit hint also defends against any future load path
-			// that reaches here before a hypothetical flag-write race
-			// resolves, and makes the call-site intent ("we just wrote
-			// a non-empty roster with ids in column 0") explicit at
-			// the reader.
+			// mp-p7n: pass HasIDs=&true explicitly when we just
+			// persisted a non-empty roster. We can rely on the
+			// HasParticipantIDs flag being already set on disk by
+			// this point (round-6 made the flip part of the contract
+			// — flip failures return 500 above and never reach this
+			// reload), so the loader's default branch would resolve
+			// the same way. The explicit hint is purely declarative:
+			// it pins the call-site invariant ("we just wrote a non-
+			// empty roster — every row has an id in column 0") at
+			// the reader, so future refactors that move or weaken
+			// the flip guarantee can't silently regress this reload
+			// to the no-hint auto-detect path.
 			loadOpts := state.LoadParticipantsOpts{WithSeeds: true}
 			if len(comp.Players) > 0 {
 				trueP := true

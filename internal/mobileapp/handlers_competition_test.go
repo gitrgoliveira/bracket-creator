@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -1126,6 +1127,91 @@ func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
 		"client-supplied id must round-trip intact (case preserved, no regeneration)")
 	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
 	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
+}
+
+// mp-p7n / Copilot PR #185 round-8: exercises the round-6
+// 500-on-flag-flip-failure branch end-to-end.
+//
+// The handler's flow is:
+//  1. SaveParticipants writes participants.csv (atomic-rename)
+//  2. SaveSeeds writes seeds.csv (best-effort log)
+//  3. UpdateCompetitionChanged flips HasParticipantIDs=true
+//     — on failure the handler returns 500 (round-6 contract)
+//
+// To inject failure between (1) and (3) without breaking (1), a
+// watcher goroutine polls for participants.csv to appear (signalling
+// step 1 completed), then replaces config.md with a directory so
+// step 3's loadCompetitionLocked → parseCompetitionFile → os.ReadFile
+// errors out. The race is tight but reliable in practice — the
+// polling loop is microsecond-grained and SaveSeeds + lock-handoff
+// gives the watcher enough scheduling time to act before
+// UpdateCompetitionChanged acquires the per-comp lock again.
+//
+// If the race ever proves flaky in CI we can refactor by extracting
+// the flip into a hookable helper. For now the goroutine approach
+// avoids changing production code purely for testability.
+func TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "flip-fails"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Flip Fails", Date: "12-05-2026",
+		HasParticipantIDs: false,
+		Format:            state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	partPath := filepath.Join(tempDir, "competitions", cid, "participants.csv")
+	cfgPath := filepath.Join(tempDir, "competitions", cid, "config.md")
+
+	corrupted := make(chan struct{})
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(50 * time.Microsecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+			if _, err := os.Stat(partPath); err == nil {
+				_ = os.Remove(cfgPath)
+				_ = os.MkdirAll(cfgPath, 0o700)
+				close(corrupted)
+				return
+			}
+		}
+	}()
+	defer close(stop)
+
+	body, _ := json.Marshal(state.Competition{
+		ID: cid, Name: "Flip Fails", Date: "12-05-2026",
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+		Players: []domain.Player{
+			{ID: "flip-fails-p1", Name: "Aaron Adams", Dojo: "Team Alpha"},
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	// Confirm the watcher fired — if it didn't, the test wasn't
+	// exercising the failure path even if the assertion below passes.
+	select {
+	case <-corrupted:
+	case <-time.After(2 * time.Second):
+		t.Skip("watcher goroutine did not catch the SaveParticipants → flip window; skipping flaky test")
+	}
+
+	// The flip's UpdateCompetitionChanged → loadCompetitionLocked
+	// failed because config.md is now a directory, so the handler
+	// returns 500 from the round-6 branch.
+	require.Equal(t, http.StatusInternalServerError, w.Code,
+		"flip failure must surface as 500 (round-6 contract) — got %d: %s", w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "HasParticipantIDs",
+		"error body must mention HasParticipantIDs (round-6 flip-failure branch); got %s", w.Body.String())
 }
 
 // mp-p7n / Copilot PR #185 round-5: when the roster-PUT response

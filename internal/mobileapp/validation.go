@@ -104,6 +104,11 @@ func validateMaxLen(field, val string, max int) error {
 // validateSubBoutHantei enforces hantei invariants on a single SubMatchResult.
 // Hantei is only valid for the daihyosen representative bout (Position == -1).
 // Regular numbered bouts are never decided by hantei under FIK rules.
+//
+// The winner/encho/tied-scoreline/decision checks here intentionally mirror the
+// top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
+// the sub-bout variant adds the Position guard and omits the top-level-only
+// Status/DecisionBy checks (SubMatchResult has no such fields).
 func validateSubBoutHantei(prefix string, sr *state.SubMatchResult) error {
 	if !sr.DecidedByHantei {
 		return nil
@@ -332,6 +337,8 @@ func (r *ScoreRequest) Validate() error {
 	// supplied) must be completed, and encho must have been played (PeriodCount
 	// > 0) — rejecting decidedByHantei=true without overtime context prevents
 	// persisting an "HT" suffix outside a real encho-decided match.
+	// The winner/encho/tied/decision checks below mirror validateSubBoutHantei;
+	// keep both in sync.
 	if r.DecidedByHantei != nil && *r.DecidedByHantei {
 		if r.Winner == "" {
 			return &ValidationError{

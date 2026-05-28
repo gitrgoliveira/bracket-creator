@@ -996,4 +996,3 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
   // enforced by source ordering, not by a predicate we can unit-test here.
 });
 
-

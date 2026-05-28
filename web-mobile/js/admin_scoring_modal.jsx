@@ -1632,7 +1632,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               if (t.winner === null) return <span className="tsm-draw">X</span>;
               return <span>{`${t.bTotal}–${t.aTotal}`}</span>;
             })();
-            const scoreWinner = t.winner;
 
             return (
               <div key={idx} className="team-sub-match">
@@ -1715,7 +1714,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                         </div>
                       </div>
                       {rsIdx === 0 && (
-                        <div className={`team-sub-match__score ${scoreWinner === "b" ? "team-sub-match__score--a-win" : scoreWinner === "a" ? "team-sub-match__score--b-win" : ""}`}>
+                        <div className={`team-sub-match__score ${t.winner === "b" ? "team-sub-match__score--a-win" : t.winner === "a" ? "team-sub-match__score--b-win" : ""}`}>
                           {scoreDisplay}
                         </div>
                       )}

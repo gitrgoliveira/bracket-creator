@@ -133,13 +133,13 @@ func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 // HasParticipantIDs=true flip.
 //
 // Pre-fix sequence:
-//   1. SaveParticipants writes `${compID}-pN` rows; participants.csv mtime updates.
-//   2. Reader A loads BEFORE HasParticipantIDs is set; falls back to
-//      auto-detect, uuidRE-on-row-0 fails on the non-UUID first column,
-//      hasIDs=false, the row is parsed as data (column shift), cached.
-//   3. The deferred HasParticipantIDs=true flip lands in config.md, but
-//      participants.csv mtime is unchanged → cache still serves the
-//      shifted players.
+//  1. SaveParticipants writes `${compID}-pN` rows; participants.csv mtime updates.
+//  2. Reader A loads BEFORE HasParticipantIDs is set; falls back to
+//     auto-detect, uuidRE-on-row-0 fails on the non-UUID first column,
+//     hasIDs=false, the row is parsed as data (column shift), cached.
+//  3. The deferred HasParticipantIDs=true flip lands in config.md, but
+//     participants.csv mtime is unchanged → cache still serves the
+//     shifted players.
 //
 // Fix: include config.md's mtime in the participants-cache key so any
 // config write (notably the HasParticipantIDs flip) invalidates the

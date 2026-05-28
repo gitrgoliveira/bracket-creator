@@ -72,6 +72,14 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	if opts.WithSeeds {
 		mtime += s.FileMtime(compID, "seeds.csv")
 	}
+	// mp-p7n / Copilot PR #185 round-4: the load decision now depends
+	// on Competition.HasParticipantIDs (see the trustHint branch below).
+	// That flag lives in config.md, NOT participants.csv, so a flag flip
+	// (e.g. the deferred HasParticipantIDs=true after the first roster
+	// save) wouldn't bump participants.csv's mtime and would leave a
+	// stale "no-IDs" parse in the cache. Fold config.md's mtime into
+	// the cache key so any config write invalidates the cached players.
+	mtime += s.FileMtime(compID, "config.md")
 
 	if cache.data != nil && cache.mtime == mtime {
 		p := cache.data.([]domain.Player)

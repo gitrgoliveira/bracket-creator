@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -125,6 +126,71 @@ func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 	assert.Empty(t, loaded[0].Metadata)
 	assert.Equal(t, "asddasd-p1", loaded[0].ID,
 		"original id must survive the round-trip — regenerating it would orphan competitor_status / reserved-slot references")
+}
+
+// mp-p7n / Copilot PR #185 round-4: closes the cache-poisoning race
+// between a roster save (non-UUID ids on disk) and the deferred
+// HasParticipantIDs=true flip.
+//
+// Pre-fix sequence:
+//   1. SaveParticipants writes `${compID}-pN` rows; participants.csv mtime updates.
+//   2. Reader A loads BEFORE HasParticipantIDs is set; falls back to
+//      auto-detect, uuidRE-on-row-0 fails on the non-UUID first column,
+//      hasIDs=false, the row is parsed as data (column shift), cached.
+//   3. The deferred HasParticipantIDs=true flip lands in config.md, but
+//      participants.csv mtime is unchanged → cache still serves the
+//      shifted players.
+//
+// Fix: include config.md's mtime in the participants-cache key so any
+// config write (notably the HasParticipantIDs flip) invalidates the
+// cache.
+func TestMpP7nRepro_CacheInvalidatedOnHasParticipantIDsFlip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "race"
+
+	// HasParticipantIDs=false initially (simulating the pre-flip window).
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Race", WithZekkenName: false, HasParticipantIDs: false,
+	}))
+	players := []domain.Player{
+		{ID: "race-p1", Name: "Aaron Adams", Dojo: "Team Alpha"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// First load: HasParticipantIDs=false, non-UUID first column,
+	// falls into the auto-detect path → uuidRE-on-row-0 fails → no
+	// strip → column shift. The corrupted view gets cached.
+	loadedPre, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loadedPre, 1)
+	assert.Equal(t, "Race-P1", loadedPre[0].Name,
+		"pre-flip load takes the auto-detect path and mis-loads (column shift)")
+
+	// Wait at least 10ms so the next config.md write produces a
+	// distinct mtime — os.Stat resolution on macOS is millisecond on
+	// some filesystems, and back-to-back writes can collide.
+	time.Sleep(20 * time.Millisecond)
+
+	// Flip the flag — simulating the deferred HasParticipantIDs=true
+	// that lands after the first roster save succeeds.
+	current, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	current.HasParticipantIDs = true
+	require.NoError(t, store.SaveCompetition(current))
+
+	// Post-flip load: the cache MUST be invalidated (we fold config.md
+	// mtime into the cache key). The loader now takes the trustHint
+	// branch and correctly strips column 0.
+	loadedPost, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loadedPost, 1)
+	assert.Equal(t, "Aaron Adams", loadedPost[0].Name,
+		"post-flip load must reflect the new flag, not the cached pre-flip parse")
+	assert.Equal(t, "Team Alpha", loadedPost[0].Dojo)
+	assert.Equal(t, "race-p1", loadedPost[0].ID,
+		"original non-UUID id must be preserved (no regeneration)")
 }
 
 func TestMpP7nRepro_UUIDIDIsFine(t *testing.T) {

@@ -117,15 +117,19 @@ func (e *Engine) GetPoolRanking(compID string, rank int) (*domain.Player, error)
 
 // resolvePoolWinners builds the roster for a playoffs competition that was
 // created from a mixed (Pools + Knockout) source via POST /playoffs. It reads
-// playoffsComp.SourceCompID, verifies the source's pools are final, and
-// resolves the qualifying pool winners (ranks 1..totalWinners) into real
-// players via GetPoolRanking. Returns the resolved roster.
+// playoffsComp.SourceCompID, verifies the source is a finalized mixed
+// competition, and resolves the qualifying pool winners (ranks
+// 1..totalWinners) into real players via GetPoolRanking. Returns the resolved
+// roster.
 //
-// totalWinners is recomputed from the source's final pool configuration
-// (numPools × PoolWinners, with the same defaults the POST /playoffs handler
-// uses) rather than stored at playoffs-creation time, so it always reflects
-// the source as drawn — immune to source-roster edits made between playoffs
-// creation and the source draw.
+// totalWinners is derived from the source's PERSISTED pools — the actual
+// finalized pool count (len(pools)) × PoolWinners — NOT recomputed from
+// participant count and PoolSize. The recomputation would use a fixed
+// ceiling-division formula, but helper.CreatePools picks the pool count
+// differently depending on PoolSizeMode (floor division in "min" mode), so a
+// recomputation can disagree with the finalized draw and over-promote
+// non-qualifiers. The source is required to be final here, so pools.csv is
+// authoritative.
 //
 // The returned roster carries the source players' identities; the caller
 // persists it (participants.csv was empty on disk for a source-linked playoffs
@@ -137,26 +141,30 @@ func (e *Engine) resolvePoolWinners(playoffsComp *state.Competition) ([]domain.P
 	if err != nil || srcComp == nil {
 		return nil, notFoundErrorf("playoffs source competition %q not found", srcID)
 	}
+	// Enforce the POST /playoffs API contract: the source is a mixed
+	// (Pools + Knockout) competition. GetPoolRanking ranks pool standings, so
+	// a non-pool source would silently mis-resolve.
+	if srcComp.Format != state.CompFormatMixed {
+		return nil, validationErrorf("playoffs source %q must be a mixed (Pools + Knockout) competition (got %q)", srcComp.Name, srcComp.Format)
+	}
 	if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
 		return nil, validationErrorf("source competition %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
 	}
 
-	// Mirror the POST /playoffs handler's sizing: numPools × winnersPerPool
-	// with the same poolSize/winners defaults.
-	parts, err := e.store.LoadParticipants(srcID, srcComp.WithZekkenName)
+	// Pool count from the finalized pools.csv (authoritative), not recomputed
+	// from participant count — see the function comment for why.
+	pools, err := e.store.LoadPools(srcID)
 	if err != nil {
-		return nil, fmt.Errorf("cannot load source participants for %q: %w", srcID, err)
+		return nil, fmt.Errorf("cannot load source pools for %q: %w", srcID, err)
 	}
-	poolSize := srcComp.PoolSize
-	if poolSize <= 0 {
-		poolSize = 3
+	if len(pools) == 0 {
+		return nil, validationErrorf("source competition %q has no pools to promote from", srcComp.Name)
 	}
-	numPools := (len(parts) + poolSize - 1) / poolSize
 	winnersPerPool := srcComp.PoolWinners
 	if winnersPerPool <= 0 {
 		winnersPerPool = 2
 	}
-	totalWinners := numPools * winnersPerPool
+	totalWinners := len(pools) * winnersPerPool
 
 	players := make([]domain.Player, 0, totalWinners)
 	for rank := 1; rank <= totalWinners; rank++ {

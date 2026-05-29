@@ -447,6 +447,22 @@ func TestEstimateForCounts_BufferIncreasesTotal(t *testing.T) {
 		largeBuffer.TotalDurationMinutes, smallBuffer.TotalDurationMinutes)
 }
 
+// TestEstimateForCounts_BufferExcludesFixedBlocks verifies the slowest-court
+// buffer is applied to MATCH time only — never to the fixed OpeningBlock offset.
+// 1 court, 30m opening, 10 matches × (4min×1.5=6min) = 60 match-min, 10% buffer:
+//
+//	total = 30 (unbuffered opening) + round(60 × 1.10) = 30 + 66 = 96.
+//
+// A naive "buffer everything" would give round((30+60)×1.10) = 99, so 96 vs 99
+// is the discriminating assertion (Copilot review #3326905303).
+func TestEstimateForCounts_BufferExcludesFixedBlocks(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 4, 4, "09:00")
+	tourn := newTournament(1.5, 10, "30m", "", "") // 1.5x, 10% buffer, 30m opening
+	est := EstimateForCounts(10, 0, comp, tourn)
+	assert.Equal(t, 96, est.TotalDurationMinutes,
+		"buffer must apply to match time only (expect 30+round(60*1.1)=96, not round(90*1.1)=99)")
+}
+
 // TestEstimateForCounts_NilComp verifies that a nil competition returns a zero estimate.
 func TestEstimateForCounts_NilComp(t *testing.T) {
 	est := EstimateForCounts(10, 5, nil, nil)

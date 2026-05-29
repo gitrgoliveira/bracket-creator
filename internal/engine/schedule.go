@@ -147,10 +147,13 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 //
 // Buffer divergence (intentional): EstimateForCounts applies
 // tournament.SlowestCourtBufferPct because it is a predictive, pre-draw estimate
-// — the slowest court will likely run over the mean. The post-draw slot assigners
-// (assignPoolMatchSlots / assignBracketMatchSlots) do NOT apply the buffer because
-// a real, assigned schedule needs no extra padding. Do NOT assert cross-regime
-// equality for buffered inputs.
+// — the slowest court will likely run over the mean. The buffer is applied to
+// MATCH time only (matchMin), not to the fixed OpeningBlock offset or LunchBlock
+// dead-time, which have no runtime variance to pad — matching EstimateSchedule's
+// semantics. The post-draw slot assigners (assignPoolMatchSlots /
+// assignBracketMatchSlots) do NOT apply the buffer at all because a real,
+// assigned schedule needs no extra padding. Do NOT assert cross-regime equality
+// for buffered inputs.
 //
 // CeremonyMinutes is populated from tournament.ClosingBlock. The OpeningBlock is
 // applied as a pre-loop per-court start offset (cursor initialised to
@@ -214,6 +217,11 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	for i := range courtCursor {
 		courtCursor[i] = dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
+	// Pure match minutes per court, tracked separately from the cursor so the
+	// slowest-court buffer can be applied to match time ONLY — never to the
+	// fixed OpeningBlock offset or LunchBlock dead-time (those have no runtime
+	// variance to pad). Mirrors EstimateSchedule, which buffers match time alone.
+	matchMin := make([]float64, numCourts)
 
 	// --- Pool phase ---
 	base := poolCount / numCourts
@@ -227,6 +235,7 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 			courtCursor[ci] = skipCeremonyBlocks(courtCursor[ci], lunchStart, lunchMin)
 			courtCursor[ci] = courtCursor[ci].Add(time.Duration(poolPerMatch) * time.Minute)
 		}
+		matchMin[ci] += float64(n * poolPerMatch)
 	}
 
 	// --- Playoff phase ---
@@ -241,6 +250,7 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 			courtCursor[ci] = skipCeremonyBlocks(courtCursor[ci], lunchStart, lunchMin)
 			courtCursor[ci] = courtCursor[ci].Add(time.Duration(playoffPerMatch) * time.Minute)
 		}
+		matchMin[ci] += float64(n * playoffPerMatch)
 	}
 
 	// Convert clock times back to durations from dayStart.
@@ -254,7 +264,11 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	var maxDuration float64
 	for ci, cur := range courtCursor {
 		raw := cur.Sub(dayStart).Minutes()
-		buffered := raw * bufferMultiplier
+		// fixedOverhead = OpeningBlock offset + any LunchBlock dead-time
+		// (raw minus pure match time). Buffer the match time only; add the
+		// fixed overhead back unbuffered.
+		fixedOverhead := raw - matchMin[ci]
+		buffered := fixedOverhead + matchMin[ci]*bufferMultiplier
 		perCourtList[ci] = int(math.Round(buffered))
 		if buffered > maxDuration {
 			maxDuration = buffered

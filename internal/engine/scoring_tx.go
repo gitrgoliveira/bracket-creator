@@ -81,6 +81,14 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
+					if result.SubResults != nil {
+						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
+					}
+					// Project persisted sub-results back so the SSE/HTTP response
+					// reflects committed state (see scoring.go for the full
+					// rationale — mirrors the DecidedByHantei projection below).
+					result.SubResults = bracket.Rounds[rIdx][mIdx].SubResults
 					// See scoring.go for the DecidedByHantei *bool semantics.
 					if result.DecidedByHantei != nil {
 						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei
@@ -252,6 +260,22 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			// but the intended loser is already ineligible from a
 			// different match — revert before returning 409.
 			if prior != nil {
+				// Normalize nil SubResults to an explicit empty slice so
+				// the nil-preserve branch in recordBracketMatchResultTx
+				// treats this as "clear sub-results" rather than "leave
+				// the partially-written SubResults in place".
+				if prior.SubResults == nil {
+					prior.SubResults = []state.SubMatchResult{}
+				}
+				// Same nil-collision on the sibling field: lookupExistingResultTx
+				// projects DecidedByHantei through HanteiPtr, which collapses a
+				// stored false to nil. nil then hits the nil-preserve branch in
+				// recordBracketMatchResultTx, leaving a partially-written hantei
+				// flag in place. Force an explicit false so rollback clears it.
+				if prior.DecidedByHantei == nil {
+					clearHantei := false
+					prior.DecidedByHantei = &clearHantei
+				}
 				if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
 					log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
 				}
@@ -331,6 +355,10 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 						DecisionReason:  bm.DecisionReason,
 						Encho:           bm.Encho,
 						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
+						// Include the persisted sub-results so a rollback replay
+						// restores the full team-bout state. LoadBracket deep-copies,
+						// so this slice is safe to hand back without aliasing cache.
+						SubResults: bm.SubResults,
 					}, nil
 				}
 			}

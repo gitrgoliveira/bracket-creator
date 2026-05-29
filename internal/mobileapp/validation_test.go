@@ -854,3 +854,310 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 		assert.NoError(t, req.Validate())
 	})
 }
+
+func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
+	enchoOne := &state.EnchoMetadata{PeriodCount: 1}
+
+	// Hantei is only valid on the daihyosen representative bout (Position == -1).
+	t.Run("invalid: hantei on regular bout position", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: encho on regular bout position", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: enchoOne,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: negative encho on regular bout position", func(t *testing.T) {
+		// A negative period count would slip past the > 0 guard and be
+		// silently treated as "no encho", bypassing the cap check. It must
+		// be rejected outright.
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: &state.EnchoMetadata{PeriodCount: -1},
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
+		assert.Contains(t, verr.Error(), "must not be negative")
+	})
+
+	t.Run("invalid: negative encho on daihyosen position", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: &state.EnchoMetadata{PeriodCount: -3},
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
+		assert.Contains(t, verr.Error(), "must not be negative")
+	})
+
+	t.Run("valid: zero encho on regular bout position is a no-op", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: &state.EnchoMetadata{PeriodCount: 0},
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("valid: daihyosen hantei with winner, encho, tied scoreline", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("invalid: daihyosen hantei without winner", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: daihyosen hantei without encho", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: nil,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: daihyosen hantei with non-tied scoreline", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: daihyosen hantei incompatible with hikiwake decision", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "hikiwake", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("valid: daihyosen hantei with decision daihyosen is compatible", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "daihyosen", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("valid: daihyosen hantei with decision fought is compatible", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "fought", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("valid: daihyosen 0-0 tied encho decided by hantei", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: nil, IpponsB: nil,
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("error prefix uses correct subResults index", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: nil, // invalid: no encho
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[1].decidedByHantei", verr.(*ValidationError).Field)
+	})
+}
+
+func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
+	enchoOne := &state.EnchoMetadata{PeriodCount: 1}
+
+	t.Run("invalid: hantei on regular position rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: encho on regular position rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: enchoOne,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
+	})
+
+	t.Run("valid: daihyosen hantei accepted on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		assert.NoError(t, validateBulkScoreLengths(r))
+	})
+
+	t.Run("invalid: daihyosen hantei without winner rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: daihyosen hantei without encho rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: nil,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+
+	t.Run("invalid: daihyosen hantei with non-tied scoreline rejected on bulk path", func(t *testing.T) {
+		r := &state.MatchResult{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+				},
+			},
+		}
+		verr := validateBulkScoreLengths(r)
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+}

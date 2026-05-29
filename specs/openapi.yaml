@@ -2431,6 +2431,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubMatchResult'
+        decidedByHantei:
+          type: boolean
+          description: >
+            True when the winner was declared by referee hantei after a tied encho
+            (FIK Art. 7-5 / 29-6). On a bracket-match score request, omitting the field
+            preserves the stored value; sending an explicit true/false applies it.
 
     SubMatchResult:
       type: object
@@ -2462,8 +2468,31 @@ components:
         decision:
           type: string
           description: >
-            Decision code for this individual sub-match. Same values as `MatchResult.decision`:
-            `""` (normal victory) or `"hikiwake"` (draw/tie).
+            Decision code for this individual sub-match. For numbered bouts:
+            `""` (normal victory), `"hikiwake"` (draw/tie), or `"fusensho"`
+            (per-bout default win). The daihyosen representative bout
+            (`position: -1`) always carries `"daihyosen"` — including when its
+            winner is declared by hantei after a tied encho (the frontend emits
+            `decision: "daihyosen"` together with `decidedByHantei: true`). The
+            server also tolerates `""` or `"fought"` alongside hantei, but
+            `"daihyosen"` is the canonical persisted value for the rep bout.
+        decidedByHantei:
+          type: boolean
+          description: >
+            True when this sub-bout's winner was declared by referee hantei after a
+            tied encho. Valid ONLY for the daihyosen representative bout (`position: -1`)
+            AND only when `encho.periodCount > 0`; regular numbered bouts have fixed
+            regulation time and are never decided by hantei. The accompanying `decision`
+            is `"daihyosen"` (the value the frontend persists for the rep bout); the
+            server additionally accepts `""` or `"fought"`. `winner` must be set — the
+            server rejects hantei without encho or with any other decision code.
+        encho:
+          allOf:
+            - $ref: '#/components/schemas/EnchoMetadata'
+          description: >
+            Overtime metadata for this sub-bout. Valid ONLY for the daihyosen
+            representative bout (`position: -1`); the server rejects a non-zero
+            `periodCount` on any numbered bout (fixed regulation time, no overtime).
 
     BracketMatch:
       type: object
@@ -2494,6 +2523,29 @@ components:
           type: string
         isOverridden:
           type: boolean
+        queuePosition:
+          type: integer
+        decision:
+          type: string
+          description: Decision code persisted for an elimination-stage match. Same values as `MatchResult.decision`.
+        decisionBy:
+          type: string
+          enum: [shiro, aka]
+        decisionReason:
+          type: string
+          maxLength: 200
+        encho:
+          $ref: '#/components/schemas/EnchoMetadata'
+        decidedByHantei:
+          type: boolean
+          description: True when the match winner was declared by referee hantei after a tied encho.
+        subResults:
+          type: array
+          description: >
+            Per-bout results for a team bracket match, persisted so the score editor
+            can restore hantei state and bout-level detail on re-open.
+          items:
+            $ref: '#/components/schemas/SubMatchResult'
 
     Bracket:
       type: object

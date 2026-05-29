@@ -101,6 +101,66 @@ func validateMaxLen(field, val string, max int) error {
 	return nil
 }
 
+// validateSubBout enforces FIK sub-bout invariants on a single SubMatchResult.
+// Both encho and hantei are valid ONLY for the daihyosen representative bout
+// (Position == -1): regular numbered bouts have fixed regulation time (no
+// overtime) and are never decided by hantei.
+//
+// The winner/encho/tied-scoreline/decision checks here intentionally mirror the
+// top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
+// the sub-bout variant adds the Position guards and omits the top-level-only
+// Status/DecisionBy checks (SubMatchResult has no such fields).
+func validateSubBout(prefix string, sr *state.SubMatchResult) error {
+	// Encho period counts are bounded two ways. A negative count is never
+	// valid on any bout (it would slip past the > 0 guards below and be
+	// silently treated as "no encho", bypassing the cap check). On a
+	// numbered bout, ANY non-zero count is rejected — a regular bout has
+	// fixed regulation time and cannot go to overtime; only the daihyosen
+	// representative bout (Position == -1) may carry encho.
+	if sr.Encho != nil {
+		if sr.Encho.PeriodCount < 0 {
+			return &ValidationError{
+				Field:   prefix + "encho",
+				Message: "encho period count must not be negative",
+			}
+		}
+		if sr.Position != -1 && sr.Encho.PeriodCount != 0 {
+			return &ValidationError{
+				Field:   prefix + "encho",
+				Message: "encho is only valid for the daihyosen representative bout (position -1)",
+			}
+		}
+	}
+	if !sr.DecidedByHantei {
+		return nil
+	}
+	if sr.Position != -1 {
+		return &ValidationError{
+			Field:   prefix + "decidedByHantei",
+			Message: "hantei is only valid for the daihyosen representative bout (position -1)",
+		}
+	}
+	if sr.Winner == "" {
+		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
+	}
+	if sr.Encho == nil || sr.Encho.PeriodCount <= 0 {
+		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires encho with at least one period"}
+	}
+	if len(sr.IpponsA) != len(sr.IpponsB) {
+		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline — ippon counts must be equal"}
+	}
+	switch sr.Decision {
+	case "", "fought", "daihyosen":
+		// compatible: daihyosen placeholders carry decision="daihyosen"
+	default:
+		return &ValidationError{
+			Field:   prefix + "decidedByHantei",
+			Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '', 'fought', or 'daihyosen'", sr.Decision),
+		}
+	}
+	return nil
+}
+
 // validateBulkScoreLengths enforces persisted-string caps on a single
 // MatchResult before it lands in the engine. Used by the bulk-score
 // endpoint, which writes through RecordMatchResult and so bypasses
@@ -138,6 +198,9 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 			return err
 		}
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
+			return err
+		}
+		if err := validateSubBout(prefix, sr); err != nil {
 			return err
 		}
 	}
@@ -286,12 +349,17 @@ func (r *ScoreRequest) Validate() error {
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
+		if err := validateSubBout(prefix, sr); err != nil {
+			return err
+		}
 	}
 	// DecidedByHantei encodes a rules-level invariant: judges' decision after
 	// tied encho (FIK 7-5 / 29-6). A winner must be present, the status (if
 	// supplied) must be completed, and encho must have been played (PeriodCount
 	// > 0) — rejecting decidedByHantei=true without overtime context prevents
 	// persisting an "HT" suffix outside a real encho-decided match.
+	// The winner/encho/tied/decision checks below mirror validateSubBout;
+	// keep both in sync.
 	if r.DecidedByHantei != nil && *r.DecidedByHantei {
 		if r.Winner == "" {
 			return &ValidationError{

@@ -788,3 +788,98 @@ func TestReinstateCompetitor(t *testing.T) {
 		assert.Contains(t, err.Error(), "playerID is required")
 	})
 }
+
+// TestRollback_BracketSubResults_Cleared verifies the K3/CHK047 rollback
+// path clears SubResults from a bracket match when the prior state had no
+// sub-results. Regression: the nil-preserve branch would leave
+// partially-written SubResults behind because the prior was nil and nil
+// means "preserve". The fix normalizes nil → empty slice before replay.
+func TestRollback_BracketSubResults_Cleared(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-rollback-subs"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	carolID := helper.NewUUID4()
+	daveID := helper.NewUUID4()
+	players := []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+		{ID: daveID, Name: "Dave", Dojo: "D"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	idByName := make(map[string]string, len(players))
+	for _, p := range players {
+		idByName[p.Name] = p.ID
+	}
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	firstMatchID := bracket.Rounds[0][0].ID
+	secondMatch := bracket.Rounds[0][1]
+	secondMatchID := secondMatch.ID
+
+	// Deterministically target whoever the generator placed as SideA of the
+	// SECOND bracket match, and pre-mark that competitor ineligible from a
+	// DIFFERENT match (the first match). This is what makes the test always
+	// exercise the BRACKET rollback path (recordBracketMatchResultTx) — the
+	// path the nil-preserve bug lives in — regardless of how the generator
+	// seeds sides. (The earlier version fell back to a pool-match rollback
+	// when Alice happened not to land in the second match, which silently
+	// stopped proving the bracket behaviour.)
+	targetName := secondMatch.SideA
+	targetID := idByName[targetName]
+	require.NotEmpty(t, targetID, "second bracket match SideA must map to a known participant")
+
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: targetID,
+		Eligible: false,
+		Reason:   "kiken in an earlier match",
+		MatchID:  firstMatchID,
+	}))
+
+	// Score the second bracket match with a kiken on the target (SideA →
+	// decisionBy "aka" makes SideA the loser) plus SubResults and a hantei
+	// flag. The engine writes the partial bracket result, then
+	// recordIneligibilityFromDecisionTx detects the target is already
+	// ineligible from firstMatchID and returns *AlreadyIneligibleError,
+	// triggering the rollback.
+	_, err = eng.RecordMatchResultWithIneligibility(compID, secondMatchID, &state.MatchResult{
+		Winner:          secondMatch.SideB,
+		Status:          state.MatchStatusCompleted,
+		Decision:        "kiken",
+		DecisionBy:      "aka",
+		DecidedByHantei: state.HanteiPtr(true),
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: secondMatch.SideA, Winner: secondMatch.SideA},
+			{Position: 2, SideA: secondMatch.SideA, IpponsB: []string{"M"}},
+		},
+	})
+	require.Error(t, err, "must get AlreadyIneligibleError")
+	var alreadyErr *AlreadyIneligibleError
+	require.ErrorAs(t, err, &alreadyErr)
+
+	// The bracket match must have been rolled back. Critically, both
+	// nil-preserve fields written as part of the failed score attempt
+	// must NOT persist — the prior had nil SubResults and (via HanteiPtr)
+	// nil DecidedByHantei, and the rollback must normalize those to an
+	// explicit empty slice / false to clear them.
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	found := false
+	for _, round := range bracket.Rounds {
+		for _, bm := range round {
+			if bm.ID == secondMatchID {
+				found = true
+				assert.Empty(t, bm.SubResults, "SubResults must be cleared by rollback when the prior had none")
+				assert.False(t, bm.DecidedByHantei, "DecidedByHantei must be cleared by rollback when the prior was false")
+			}
+		}
+	}
+	require.True(t, found, "second match must exist in bracket after rollback")
+}

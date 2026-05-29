@@ -748,6 +748,117 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 	})
 }
 
+// TestEnforceEnchoCapWithSubs covers the sub-bout encho cap path added in mp-4pc.
+// anySubBoutEnchoExceedsCap inspects each subResults[].encho.periodCount; the
+// single-score and bulk-score handlers must both enforce it (same cap, same 400
+// response shape). force=true bypasses the cap for both paths.
+func TestEnforceEnchoCapWithSubs(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sub-encho-cap-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	realStore, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(realStore)
+	hub := NewHub()
+
+	compID := "sub-encho-cap-test"
+	require.NoError(t, realStore.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		MaxEnchoPeriods: 2,
+	}))
+	require.NoError(t, realStore.SaveParticipants(compID, []domain.Player{
+		{Name: "TeamA"}, {Name: "TeamB"},
+	}))
+	require.NoError(t, realStore.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB"},
+	}))
+
+	overCapSubResult := state.SubMatchResult{
+		Position: -1, SideA: "TeamA", SideB: "TeamB",
+		IpponsA: []string{"M"}, Winner: "TeamA",
+		Encho: &state.EnchoMetadata{PeriodCount: 3}, // exceeds cap of 2; daihyosen is the only sub-bout with encho
+	}
+
+	t.Run("single-score: sub-bout encho over cap returns 400", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		admin := r.Group("/api")
+		registerScoreHandler(admin, eng, realStore, realStore, hub)
+
+		body, _ := json.Marshal(state.MatchResult{
+			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
+			Winner: "TeamA", Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{overCapSubResult},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		var resp struct {
+			Error string `json:"error"`
+			Limit int    `json:"limit"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "max_encho_exceeded", resp.Error)
+		assert.Equal(t, 2, resp.Limit)
+	})
+
+	t.Run("single-score: force=true bypasses sub-bout encho cap", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		admin := r.Group("/api")
+		registerScoreHandler(admin, eng, realStore, realStore, hub)
+
+		body, _ := json.Marshal(state.MatchResult{
+			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
+			Winner: "TeamA", Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{overCapSubResult},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score?force=true", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	})
+
+	t.Run("bulk-score: sub-bout encho over cap is recorded as per-item error", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		admin := r.Group("/api")
+		RegisterMatchHandlers(admin, eng, realStore, realStore, hub)
+
+		body, _ := json.Marshal([]state.MatchResult{
+			{
+				ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
+				Winner: "TeamA", Status: state.MatchStatusCompleted,
+				SubResults: []state.SubMatchResult{overCapSubResult},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		// Bulk-score always returns 200; cap violations land in the errors array.
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		var resp struct {
+			Succeeded int `json:"succeeded"`
+			Errors    []struct {
+				MatchID string `json:"matchId"`
+				Error   string `json:"error"`
+			} `json:"errors"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, 0, resp.Succeeded)
+		require.Len(t, resp.Errors, 1)
+		assert.Equal(t, "PoolA-1", resp.Errors[0].MatchID)
+		assert.Equal(t, "max_encho_exceeded", resp.Errors[0].Error)
+	})
+}
+
 // TestBulkScore_FailsClosedOnLoadError — when the cap-check load
 // fails for a bulk-score request, the entire batch is rejected with
 // 500 rather than silently bypassing the MaxEnchoPeriods cap on every

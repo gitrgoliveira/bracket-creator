@@ -9,6 +9,8 @@ import {
   canIncrementEncho,
   nextEnchoPeriod,
   prevEnchoPeriod,
+  initialEnchoPeriodsForMatch,
+  daihyosenEnchoFields,
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
@@ -248,6 +250,72 @@ describe('prevEnchoPeriod (the − button)', () => {
 
   it('clamps negative values to 1 (defensive)', () => {
     expect(prevEnchoPeriod(-3)).toBe(1);
+  });
+});
+
+describe('initialEnchoPeriodsForMatch (mp-4pc daihyosen re-open)', () => {
+  // Regression: a hantei-decided daihyosen persists encho on the rep-bout
+  // sub (wire position -1), NOT the top-level match. On re-open the count
+  // must be restored from the sub — else decidedByHantei replays without
+  // encho and the backend rejects the next save.
+
+  it('reads encho from the daihyosen sub when one exists', () => {
+    const m = {
+      encho: { periodCount: 0 },
+      subResults: [
+        { position: 1, ipponsA: ['M'], ipponsB: ['M'], decision: 'hikiwake' },
+        { position: -1, winner: 'Red Team', decidedByHantei: true, encho: { periodCount: 1 } },
+      ],
+    };
+    expect(initialEnchoPeriodsForMatch(m)).toBe(1);
+  });
+
+  it('falls back to the top-level match encho when no daihyosen', () => {
+    expect(initialEnchoPeriodsForMatch({ encho: { periodCount: 2 } })).toBe(2);
+  });
+
+  it('returns 0 when neither sub nor match carries encho', () => {
+    expect(initialEnchoPeriodsForMatch({})).toBe(0);
+    expect(initialEnchoPeriodsForMatch({ subResults: [{ position: 1 }] })).toBe(0);
+    expect(initialEnchoPeriodsForMatch({ subResults: [{ position: -1 }] })).toBe(0);
+  });
+
+  it('prefers the sub even if the top-level match also has a stale encho', () => {
+    const m = {
+      encho: { periodCount: 3 },
+      subResults: [{ position: -1, encho: { periodCount: 1 } }],
+    };
+    expect(initialEnchoPeriodsForMatch(m)).toBe(1);
+  });
+});
+
+describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
+  // Backend invariant (validation.go validateSubBout): hantei is rejected
+  // without encho.periodCount > 0. The builder must mirror that so a
+  // reduced-to-0 counter never replays a now-invalid decidedByHantei.
+
+  it('emits encho + decidedByHantei when armed and encho > 0', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 2, daihyosenTied: true, daihyosenHantei: 'a' }))
+      .toEqual({ encho: { periodCount: 2 }, decidedByHantei: true });
+  });
+
+  it('emits encho only (no hantei) when not tied or not armed', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 1, daihyosenTied: false, daihyosenHantei: 'a' }))
+      .toEqual({ encho: { periodCount: 1 } });
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 1, daihyosenTied: true, daihyosenHantei: '' }))
+      .toEqual({ encho: { periodCount: 1 } });
+  });
+
+  it('emits NEITHER field when encho is reduced to 0 even with hantei armed', () => {
+    // The regression: operator arms hantei, then drops the counter to 0.
+    // decidedByHantei must NOT survive — the backend would 400 it.
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a' }))
+      .toEqual({});
+  });
+
+  it('emits nothing for negative/NaN encho (defensive)', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: -1, daihyosenTied: true, daihyosenHantei: 'a' })).toEqual({});
+    expect(daihyosenEnchoFields({ enchoPeriodCount: NaN, daihyosenTied: true, daihyosenHantei: 'a' })).toEqual({});
   });
 });
 
@@ -995,3 +1063,4 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
   // identity — it cannot selectively suppress Enter; that invariant is
   // enforced by source ordering, not by a predicate we can unit-test here.
 });
+

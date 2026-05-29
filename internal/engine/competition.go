@@ -462,8 +462,14 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// atomic Status commit) — keeping the write out of this pre-generation
 	// phase so the transform's participants.csv mtime-drift check does not
 	// false-trip on our own write.
+	//
+	// Guard tightly: only a PLAYOFFS comp whose roster is still EMPTY should
+	// auto-resolve. A non-playoffs comp must never source-resolve, and an
+	// already-populated roster (operator manually added participants, or a
+	// SourceCompID set by accident) must NOT be clobbered — fall through to
+	// generation with the existing players instead.
 	rosterPopulated := false
-	if comp.SourceCompID != "" {
+	if comp.Format == state.CompFormatPlayoffs && comp.SourceCompID != "" && len(players) == 0 {
 		resolved, rerr := e.resolvePoolWinners(comp)
 		if rerr != nil {
 			return rerr

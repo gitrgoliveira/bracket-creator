@@ -396,3 +396,103 @@ func TestStartCompetition_PlayoffsFromSource_NotFinal(t *testing.T) {
 		assert.Empty(t, bracket.Rounds, "no bracket on a failed start")
 	}
 }
+
+// TestResolvePoolWinners_NonMixedSource verifies the API-contract guard: a
+// source competition that is not mixed format is rejected even if it has
+// finalized pools (GetPoolRanking would otherwise mis-resolve a non-pool
+// source).
+func TestResolvePoolWinners_NonMixedSource(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "src-league"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "League Src", Format: state.CompFormatLeague,
+		Status: state.CompStatusComplete,
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+	}))
+	playoff := &state.Competition{ID: "p", Name: "P", Format: state.CompFormatPlayoffs, SourceCompID: srcID}
+
+	_, err := eng.resolvePoolWinners(playoff)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be a mixed")
+}
+
+// TestResolvePoolWinners_PoolCountFromPersistedPools pins the fix for the
+// over-promotion bug: totalWinners must come from the ACTUAL finalized pool
+// count, not a ceiling-division recomputation from participant count. Here 5
+// participants are split into 2 pools on disk; with PoolWinners=1 the result
+// must be exactly 2 winners (one per real pool), regardless of PoolSize/Mode.
+func TestResolvePoolWinners_PoolCountFromPersistedPools(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "src-2pools"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Two Pools", Format: state.CompFormatMixed,
+		Status:      state.CompStatusComplete,
+		PoolSize:    5, // ceiling math on 5 parts would give numPools=1 → wrong
+		PoolWinners: 1,
+	}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
+		{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"},
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A"}, {Name: "B"}, {Name: "C"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "D"}, {Name: "E"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A", SideB: "B", Winner: "A", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "A", SideB: "C", Winner: "A", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-2", SideA: "B", SideB: "C", Winner: "B", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "D", SideB: "E", Winner: "D", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	playoff := &state.Competition{ID: "p2", Name: "P2", Format: state.CompFormatPlayoffs, SourceCompID: srcID}
+	roster, err := eng.resolvePoolWinners(playoff)
+	require.NoError(t, err)
+	assert.Len(t, roster, 2, "2 real pools × 1 winner = 2 (NOT ceil(5/5)=1 pool)")
+}
+
+// TestStartCompetition_PlayoffsFromSource_ExistingRosterNotClobbered verifies
+// the anti-clobber guard: a playoffs comp that has a SourceCompID link BUT an
+// already-populated roster must keep that roster (no source resolution), so a
+// manual roster or an accidental SourceCompID can't silently wipe participants.
+func TestStartCompetition_PlayoffsFromSource_ExistingRosterNotClobbered(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	// Source is deliberately NOT final — if resolution ran it would error.
+	srcID := "src-unfinished"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Unfinished", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools,
+	}))
+
+	playoffID := "manual-roster-playoffs"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: playoffID, Name: "Manual - Playoffs",
+		Format: state.CompFormatPlayoffs, SourceCompID: srcID,
+	}))
+	require.NoError(t, store.SaveParticipants(playoffID, []domain.Player{
+		{Name: "Manual1", Dojo: "D1"}, {Name: "Manual2", Dojo: "D2"},
+		{Name: "Manual3", Dojo: "D3"}, {Name: "Manual4", Dojo: "D4"},
+	}))
+
+	require.NoError(t, eng.StartCompetition(playoffID),
+		"existing roster must be used directly — no source resolution, no error")
+
+	roster, err := store.LoadParticipants(playoffID, false)
+	require.NoError(t, err)
+	require.Len(t, roster, 4)
+	names := make([]string, len(roster))
+	for i, p := range roster {
+		names[i] = p.Name
+	}
+	assert.ElementsMatch(t, []string{"Manual1", "Manual2", "Manual3", "Manual4"}, names,
+		"manual roster preserved, not replaced by source pool winners")
+
+	bracket, err := store.LoadBracket(playoffID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket)
+	assert.NotEmpty(t, bracket.Rounds, "bracket built from the manual roster")
+}

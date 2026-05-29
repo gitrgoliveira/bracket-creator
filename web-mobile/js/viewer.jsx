@@ -1900,7 +1900,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, AnnouncementCard, AnnouncementBanner };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2459,41 +2459,13 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
-function AnnouncementBanner({ announcements, onDismiss }) {
-  const list = announcements || [];
-  const [idx, setIdx] = useState(0);
-
-  // Reset to 0 on any list-length change (add or dismiss) so the viewer
-  // always restarts from item 0 — deterministic and prevents out-of-bounds
-  // after a dismiss.
-  useEffect(() => {
-    setIdx(0);
-  }, [list.length]);
+// AnnouncementCard — renders a single announcement card with its own
+// independent per-card countdown and auto-dismiss timer.
+// Exported for unit testing; consumed only by AnnouncementBanner below.
+function AnnouncementCard({ ann, onDismiss }) {
+  const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(ann.expiresAt));
 
   useEffect(() => {
-    if (list.length <= 1) return;
-    const len = list.length;
-    const interval = setInterval(() => {
-      setIdx(i => (i + 1) % len);
-    }, 8000);
-    return () => clearInterval(interval);
-  }, [list.length]);
-
-  const safeIdx = list.length > 0 ? idx % list.length : 0;
-  const ann = list[safeIdx];
-
-  // Key timer state by ann.id so the displayed value is correct immediately
-  // on rotation, without waiting for the effect to fire after the first render.
-  const [timerState, setTimerState] = useState(() => ({
-    id: ann?.id ?? null,
-    value: ann ? formatAnnouncementTimeLeft(ann.expiresAt) : '',
-  }));
-  const timeLeft = timerState.id === ann?.id
-    ? timerState.value
-    : formatAnnouncementTimeLeft(ann?.expiresAt ?? '');
-
-  useEffect(() => {
-    if (!ann) return;
     // intervalId and dismissed are captured in the closure so updateTimer can
     // self-clear the interval on expiry and guard against repeated onDismiss
     // calls if React state updates are delayed before cleanup runs.
@@ -2509,14 +2481,12 @@ function AnnouncementBanner({ announcements, onDismiss }) {
         }
         return;
       }
-      setTimerState({ id: ann.id, value: formatAnnouncementTimeLeft(ann.expiresAt) });
+      setTimeLeft(formatAnnouncementTimeLeft(ann.expiresAt));
     };
     updateTimer();
     intervalId = setInterval(updateTimer, 1000);
     return () => clearInterval(intervalId);
-  }, [ann?.id, ann?.expiresAt, onDismiss]);
-
-  if (!ann) return null;
+  }, [ann.id, ann.expiresAt, onDismiss]);
 
   return (
     <div className="announcement-banner">
@@ -2525,9 +2495,6 @@ function AnnouncementBanner({ announcements, onDismiss }) {
         <p className="announcement-banner__message">{ann.message}</p>
       </div>
       <div className="announcement-banner__meta">
-        {list.length > 1 && (
-          <span className="announcement-banner__count">{safeIdx + 1}/{list.length}</span>
-        )}
         <span className="announcement-banner__badge">{timeLeft}</span>
         <button
           className="announcement-banner__dismiss"
@@ -2541,6 +2508,24 @@ function AnnouncementBanner({ announcements, onDismiss }) {
   );
 }
 
+// AnnouncementBanner — fixed-position overlay that stacks ALL active
+// announcements as independent cards. Does NOT rotate; each card owns
+// its own countdown and auto-dismiss timer. Public props unchanged so
+// app.jsx needs no edit.
+function AnnouncementBanner({ announcements, onDismiss }) {
+  const list = announcements || [];
+  if (list.length === 0) return null;
+
+  return (
+    <div className="announcement-overlay" role="region" aria-label="Announcements">
+      {list.map(ann => (
+        <AnnouncementCard key={ann.id} ann={ann} onDismiss={onDismiss} />
+      ))}
+    </div>
+  );
+}
+
+window.AnnouncementCard = AnnouncementCard;
 window.AnnouncementBanner = AnnouncementBanner;
 window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;

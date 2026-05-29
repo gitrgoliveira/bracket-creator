@@ -735,7 +735,11 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
     }
   };
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    // zIndex 1000 matches MatchViewerModal's modal layer (the shared
+    // .modal-backdrop default of 100 sits below viewer chrome at 200/500 and
+    // below the mp-udb announcement overlay at 900); without this the sign-in
+    // dialog could be obscured by chrome or by announcement cards.
+    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
         <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="auth__logo" decoding="async" />
         <div className="auth__title">Admin sign in</div>

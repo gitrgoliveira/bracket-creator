@@ -17,6 +17,29 @@ function collectText(node) {
   return '';
 }
 
+// Depth-first search for the first vnode matching predicate. Mirrors the
+// helper in reset.test.jsx; used to assert props (e.g. style) on a rendered
+// element, which collectText (text-only) can't see.
+function findInTree(node, predicate) {
+  if (!node || typeof node !== 'object') return null;
+  // Arrays appear wherever the component renders a .map() (e.g. the sub-rows),
+  // so recurse into them rather than treating the array itself as a vnode.
+  if (Array.isArray(node)) {
+    for (const k of node) {
+      const found = findInTree(k, predicate);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (predicate(node)) return node;
+  const kids = node.children || node.props?.children || [];
+  for (const k of [].concat(kids)) {
+    const found = findInTree(k, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
 describe('Viewer Utils', () => {
   describe('formatDate', () => {
     it('should format canonical DD-MM-YYYY correctly', () => {
@@ -252,6 +275,12 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   const realReact = global.React;
   let runtime;
   let MatchDetailCard;
+  // Preserve any pre-existing window globals we stub so we can restore exact
+  // state in afterEach. vi.restoreAllMocks() only undoes vi.spyOn, NOT direct
+  // `global.window.x = vi.fn()` assignments — without this the mocked globals
+  // leak into later suites and make failures order-dependent.
+  const savedGlobals = {};
+  const STUBBED = ['formatIpponsScore', 'ipponsFromScore'];
 
   const mkTeamMatch = (subs) => ({
     compKind: 'team',
@@ -271,6 +300,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     runtime = makeReactive();
     global.React = runtime.React;
     global.window = global.window || {};
+    STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
     // Only globals MatchDetailCard executes on the team path. The non-team
     // ippons block (which calls window.isHikiwake) is gated out for teams.
     global.window.formatIpponsScore = vi.fn(() => '3-2');
@@ -282,6 +312,13 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   afterEach(() => {
     runtime.unmount();
     global.React = realReact;
+    // Restore the exact prior state of the window globals we stubbed so they
+    // don't leak into other suites (vi.restoreAllMocks does not cover direct
+    // property assignments).
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
     vi.restoreAllMocks();
     vi.resetModules();
   });
@@ -299,6 +336,11 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     expect(text).toContain('Daihyosen');
     expect(text).not.toContain('Match -1');
     expect(text).toContain('Hantei');
+    // The marker must carry left spacing so it does not render flush against
+    // the label as "DaihyosenHantei" (Copilot review on #192).
+    const marker = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei');
+    expect(marker).toBeTruthy();
+    expect(marker.props.style?.marginLeft).toBeTruthy();
   });
 
   it('omits the "Hantei" marker when no sub was decided by hantei', () => {

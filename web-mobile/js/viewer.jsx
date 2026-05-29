@@ -1355,7 +1355,7 @@ function MatchDetailCard({ match, onClose }) {
                 <span className="match-detail-card__sub-score">{sB}</span>
                 <span className="match-detail-card__sub-pos">
                   {subBoutLabel(sub, i)}
-                  {sub.decidedByHantei && <span className="match-detail-card__decision" data-testid="sub-row-hantei">Hantei</span>}
+                  {sub.decidedByHantei && <span className="match-detail-card__decision" data-testid="sub-row-hantei" style={{ marginLeft: 6 }}>Hantei</span>}
                 </span>
                 <span className="match-detail-card__sub-score match-detail-card__sub-score--right">{sA}</span>
               </div>

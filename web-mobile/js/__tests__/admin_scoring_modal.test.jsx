@@ -10,6 +10,7 @@ import {
   nextEnchoPeriod,
   prevEnchoPeriod,
   initialEnchoPeriodsForMatch,
+  daihyosenEnchoFields,
   DecisionPrompt,
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
@@ -285,6 +286,36 @@ describe('initialEnchoPeriodsForMatch (mp-4pc daihyosen re-open)', () => {
       subResults: [{ position: -1, encho: { periodCount: 1 } }],
     };
     expect(initialEnchoPeriodsForMatch(m)).toBe(1);
+  });
+});
+
+describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
+  // Backend invariant (validation.go validateSubBout): hantei is rejected
+  // without encho.periodCount > 0. The builder must mirror that so a
+  // reduced-to-0 counter never replays a now-invalid decidedByHantei.
+
+  it('emits encho + decidedByHantei when armed and encho > 0', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 2, daihyosenTied: true, daihyosenHantei: 'a' }))
+      .toEqual({ encho: { periodCount: 2 }, decidedByHantei: true });
+  });
+
+  it('emits encho only (no hantei) when not tied or not armed', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 1, daihyosenTied: false, daihyosenHantei: 'a' }))
+      .toEqual({ encho: { periodCount: 1 } });
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 1, daihyosenTied: true, daihyosenHantei: '' }))
+      .toEqual({ encho: { periodCount: 1 } });
+  });
+
+  it('emits NEITHER field when encho is reduced to 0 even with hantei armed', () => {
+    // The regression: operator arms hantei, then drops the counter to 0.
+    // decidedByHantei must NOT survive — the backend would 400 it.
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a' }))
+      .toEqual({});
+  });
+
+  it('emits nothing for negative/NaN encho (defensive)', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: -1, daihyosenTied: true, daihyosenHantei: 'a' })).toEqual({});
+    expect(daihyosenEnchoFields({ enchoPeriodCount: NaN, daihyosenTied: true, daihyosenHantei: 'a' })).toEqual({});
   });
 });
 

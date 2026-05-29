@@ -2268,16 +2268,30 @@ components:
         decision:
           type: string
           description: >
-            Decision code for this individual sub-match. Same values as `MatchResult.decision`:
-            `""` (normal victory) or `"hikiwake"` (draw/tie).
+            Decision code for this individual sub-match. For numbered bouts:
+            `""` (normal victory), `"hikiwake"` (draw/tie), or `"fusensho"`
+            (per-bout default win). The daihyosen representative bout
+            (`position: -1`) carries `"daihyosen"`; when its winner comes from
+            a tied encho the bout uses `""` or `"fought"` alongside
+            `decidedByHantei: true` (hantei is incompatible with any other
+            decision code — see `decidedByHantei`).
         decidedByHantei:
           type: boolean
           description: >
             True when this sub-bout's winner was declared by referee hantei after a
-            tied encho. Valid ONLY for the daihyosen representative bout (`position: -1`);
-            regular numbered bouts have fixed regulation time and are never decided by hantei.
+            tied encho. Valid ONLY for the daihyosen representative bout (`position: -1`)
+            AND only when `encho.periodCount > 0`; regular numbered bouts have fixed
+            regulation time and are never decided by hantei. The accompanying `decision`
+            must be `""` or `"fought"` (or `"daihyosen"` for the rep bout) and `winner`
+            must be set — the server rejects hantei without encho or with a conflicting
+            decision.
         encho:
-          $ref: '#/components/schemas/EnchoMetadata'
+          allOf:
+            - $ref: '#/components/schemas/EnchoMetadata'
+          description: >
+            Overtime metadata for this sub-bout. Valid ONLY for the daihyosen
+            representative bout (`position: -1`); the server rejects a non-zero
+            `periodCount` on any numbered bout (fixed regulation time, no overtime).
 
     BracketMatch:
       type: object

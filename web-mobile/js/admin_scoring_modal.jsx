@@ -202,6 +202,21 @@ function initialEnchoPeriodsForMatch(m) {
   return m.encho?.periodCount || 0;
 }
 
+// daihyosenEnchoFields — pure builder for the encho/decidedByHantei wire
+// fields on the daihyosen representative bout (position -1). The backend
+// invariant (validation.go validateSubBout) is: encho and hantei are valid
+// ONLY on the daihyosen, and decidedByHantei REQUIRES encho.periodCount > 0.
+// So if the operator arms hantei then reduces the counter back to 0, we must
+// emit NEITHER field — otherwise the save 400s ("requires encho with at least
+// one period"). Returns the fields to merge into the entry (possibly empty).
+// Exported for vitest.
+function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
+  if (!(enchoPeriodCount > 0)) return {};
+  const fields = { encho: { periodCount: enchoPeriodCount } };
+  if (daihyosenTied && daihyosenHantei) fields.decidedByHantei = true;
+  return fields;
+}
+
 // Pure decision for the draw-toggle action (button and keyboard shortcut).
 // Returns:
 //   {action: "enter"}  — set draw=true, clear pts (only when no scores exist)
@@ -1447,12 +1462,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         decision,
       };
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
-      // (validation.go validateSubBout). The match-level encho counter
-      // rides onto this bout; hantei marks a judges' decision from a
-      // tied encho.
+      // (validation.go validateSubBout). daihyosenEnchoFields encodes the
+      // backend invariant (hantei requires encho > 0) so a reduced-to-0
+      // counter doesn't replay a now-invalid decidedByHantei.
       if (isDaihyo) {
-        if (enchoPeriodCount > 0) entry.encho = { periodCount: enchoPeriodCount };
-        if (daihyosenTied && daihyosenHantei) entry.decidedByHantei = true;
+        Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
       }
       return entry;
     });
@@ -2012,6 +2026,7 @@ export {
   nextEnchoPeriod,
   prevEnchoPeriod,
   initialEnchoPeriodsForMatch,
+  daihyosenEnchoFields,
   decideDrawToggle,
   shouldBlockScoringKeys,
   DecisionPrompt,

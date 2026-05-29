@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"math"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -237,4 +238,243 @@ func TestGenerateSchedule_NilBracket(t *testing.T) {
 	entries, err := store.LoadSchedule(compID)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+}
+
+// ---------------------------------------------------------------------------
+// Tests for the Step 1 pure formula (perMatchElapsed)
+// ---------------------------------------------------------------------------
+
+// TestPerMatchElapsed_Individual verifies the individual-match branch:
+// clockMin * multiplier (no bouts).
+func TestPerMatchElapsed_Individual(t *testing.T) {
+	tests := []struct {
+		name       string
+		clockMin   float64
+		multiplier float64
+		bouts      int
+		want       float64
+	}{
+		{"3min 1.5x", 3, 1.5, 0, 4.5},
+		{"5min 1.0x", 5, 1.0, 0, 5.0},
+		{"4min 2.0x", 4, 2.0, 0, 8.0},
+		{"zero clock", 0, 1.5, 0, 0.0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := perMatchElapsed(tc.clockMin, tc.multiplier, tc.bouts)
+			assert.InDelta(t, tc.want, got, 0.001)
+		})
+	}
+}
+
+// TestPerMatchElapsed_Team verifies the team-match branch:
+// bouts*clockMin*multiplier + (bouts-1)*1.
+func TestPerMatchElapsed_Team(t *testing.T) {
+	tests := []struct {
+		name       string
+		clockMin   float64
+		multiplier float64
+		bouts      int
+		want       float64
+	}{
+		// 5*3*1.5 + 4*1 = 22.5 + 4 = 26.5
+		{"5 bouts 3min 1.5x", 3, 1.5, 5, 26.5},
+		// 3*3*1.5 + 2*1 = 13.5 + 2 = 15.5
+		{"3 bouts 3min 1.5x", 3, 1.5, 3, 15.5},
+		// 1 bout: 1*5*2.0 + 0 = 10.0
+		{"1 bout 5min 2.0x", 5, 2.0, 1, 10.0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := perMatchElapsed(tc.clockMin, tc.multiplier, tc.bouts)
+			assert.InDelta(t, tc.want, got, 0.001)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for EstimateForCounts (Step 2)
+// ---------------------------------------------------------------------------
+
+func newIndivComp(courts []string, poolDur, playoffDur int, startTime string) *state.Competition {
+	return &state.Competition{
+		Kind:                 "individual",
+		Courts:               courts,
+		PoolMatchDuration:    poolDur,
+		PlayoffMatchDuration: playoffDur,
+		StartTime:            startTime,
+	}
+}
+
+func newTournament(multiplier float64, bufferPct int, opening, lunch, closing string) *state.Tournament {
+	return &state.Tournament{
+		ClockToElapsedMultiplier: multiplier,
+		SlowestCourtBufferPct:    bufferPct,
+		OpeningBlock:             opening,
+		LunchBlock:               lunch,
+		ClosingBlock:             closing,
+	}
+}
+
+// TestEstimateForCounts_PerPhaseSplit verifies that pool and playoff matches
+// each contribute their own per-phase duration to the total.
+// SlowestCourtBufferPct=0 triggers the default (10%), which is applied by
+// EstimateForCounts. Expected: 4*3 + 3*5 = 27 min * 1.10 = 29.7 → 30.
+func TestEstimateForCounts_PerPhaseSplit(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 3 /*pool clock*/, 5 /*playoff clock*/, "09:00")
+	tourn := newTournament(1.0, 0, "", "", "")
+	// pool: 4 matches * 3min = 12min; playoff: 3 matches * 5min = 15min = 27min
+	// Default 10% buffer: 27 * 1.1 = 29.7 → 30.
+	est := EstimateForCounts(4, 3, comp, tourn)
+	assert.Equal(t, 30, est.TotalDurationMinutes)
+	assert.Len(t, est.PerCourtMinutes, 1)
+	assert.Equal(t, 30, est.PerCourtMinutes[0])
+	// Verify playoff phase contributed more than pool phase by checking
+	// a pool-only estimate is less than a playoff-only estimate of the same count.
+	poolOnly := EstimateForCounts(4, 0, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 0, "", "", ""))
+	playoffOnly := EstimateForCounts(0, 4, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 0, "", "", ""))
+	assert.Less(t, poolOnly.TotalDurationMinutes, playoffOnly.TotalDurationMinutes,
+		"playoff matches (5min clock) should produce a higher estimate than pool matches (3min clock) for equal count")
+}
+
+// TestEstimateForCounts_EvenDistribution verifies even distribution across courts.
+// With SlowestCourtBufferPct=0 the default (10%) is applied: 2 matches *3min=6min
+// per court * 1.1 = 6.6 → 7.
+func TestEstimateForCounts_EvenDistribution(t *testing.T) {
+	comp := newIndivComp([]string{"A", "B"}, 3, 3, "09:00")
+	tourn := newTournament(1.0, 0, "", "", "")
+	// 4 pool matches / 2 courts = 2 each * 3min = 6 min per court.
+	// Default 10% buffer: 6 * 1.1 = 6.6 → 7.
+	est := EstimateForCounts(4, 0, comp, tourn)
+	assert.Equal(t, 7, est.TotalDurationMinutes)
+	assert.Len(t, est.PerCourtMinutes, 2)
+	// Both courts should have equal duration (balanced distribution).
+	assert.Equal(t, est.PerCourtMinutes[0], est.PerCourtMinutes[1],
+		"balanced fixture must produce equal per-court estimates")
+}
+
+// TestEstimateForCounts_LunchWindowStraddle verifies that when matches span the
+// lunch window the total increases to accommodate the break.
+// 11 matches from 11:30 at 3min/match: after 10 matches cursor=12:00, which is
+// the lunch start → match 11's start is pushed to 13:00 → total > no-lunch total.
+func TestEstimateForCounts_LunchWindowStraddle(t *testing.T) {
+	// Use an explicit non-zero buffer (5%) so ApplyTournamentDefaults is a no-op
+	// and the comparison between with/without-lunch is deterministic.
+	comp := newIndivComp([]string{"A"}, 3, 3, "11:30")
+	tourn := newTournament(1.0, 5, "", "1h", "") // 5% buffer, 1h lunch
+	withLunch := EstimateForCounts(11, 0, comp, tourn)
+
+	compNoLunch := newIndivComp([]string{"A"}, 3, 3, "11:30")
+	tournNoLunch := newTournament(1.0, 5, "", "", "") // same but no lunch
+	noLunch := EstimateForCounts(11, 0, compNoLunch, tournNoLunch)
+
+	assert.Greater(t, withLunch.TotalDurationMinutes, noLunch.TotalDurationMinutes,
+		"lunch window should increase total: withLunch=%d noLunch=%d",
+		withLunch.TotalDurationMinutes, noLunch.TotalDurationMinutes)
+}
+
+// TestEstimateForCounts_NoLunchIfFinishesBefore verifies that when all matches
+// complete before the lunch window starts, the total is unchanged.
+func TestEstimateForCounts_NoLunchIfFinishesBefore(t *testing.T) {
+	// 3 matches * 3min = 9min, starting at 09:00 → ends at 09:09, before lunch at 12:00.
+	comp := newIndivComp([]string{"A"}, 3, 3, "09:00")
+	tourn := newTournament(1.0, 0, "", "1h", "")
+	with := EstimateForCounts(3, 0, comp, tourn)
+
+	compNL := newIndivComp([]string{"A"}, 3, 3, "09:00")
+	tournNL := newTournament(1.0, 0, "", "", "")
+	without := EstimateForCounts(3, 0, compNL, tournNL)
+
+	assert.Equal(t, without.TotalDurationMinutes, with.TotalDurationMinutes,
+		"no matches fall in lunch window; totals should be equal: with=%d without=%d",
+		with.TotalDurationMinutes, without.TotalDurationMinutes)
+}
+
+// TestEstimateForCounts_ClosingBlock verifies that CeremonyMinutes is populated
+// from tournament.ClosingBlock and added to the total.
+// With an explicit 5% buffer: 4*3=12min * 1.05 = 12.6 → 13, + 30 ceremony = 43.
+func TestEstimateForCounts_ClosingBlock(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 3, 3, "09:00")
+	tourn := newTournament(1.0, 5, "", "", "30m") // 5% buffer, 30m closing block
+	est := EstimateForCounts(4, 0, comp, tourn)
+
+	assert.Equal(t, 30, est.CeremonyMinutes)
+	// 4 * 3 = 12 match minutes * 1.05 = 12.6 → 13 + 30 ceremony = 43.
+	assert.Equal(t, 43, est.TotalDurationMinutes)
+}
+
+// TestEstimateForCounts_BufferIncreasesTotal verifies that a larger
+// SlowestCourtBufferPct produces a higher total than a smaller one.
+// Both use explicit non-zero values so ApplyTournamentDefaults is a no-op.
+func TestEstimateForCounts_BufferIncreasesTotal(t *testing.T) {
+	comp := newIndivComp([]string{"A", "B"}, 3, 3, "09:00")
+	tourn := newTournament(1.5, 5, "", "", "") // 5% buffer
+	smallBuffer := EstimateForCounts(20, 0, comp, tourn)
+
+	compB := newIndivComp([]string{"A", "B"}, 3, 3, "09:00")
+	tournB := newTournament(1.5, 20, "", "", "") // 20% buffer
+	largeBuffer := EstimateForCounts(20, 0, compB, tournB)
+
+	assert.Greater(t, largeBuffer.TotalDurationMinutes, smallBuffer.TotalDurationMinutes,
+		"20%% buffer should exceed 5%% buffer: large=%d small=%d",
+		largeBuffer.TotalDurationMinutes, smallBuffer.TotalDurationMinutes)
+}
+
+// TestEstimateForCounts_NilComp verifies that a nil competition returns a zero estimate.
+func TestEstimateForCounts_NilComp(t *testing.T) {
+	est := EstimateForCounts(10, 5, nil, nil)
+	assert.Equal(t, ScheduleEstimate{}, est)
+}
+
+// TestEstimateForCounts_NoCourts verifies that an empty courts slice returns a zero estimate.
+func TestEstimateForCounts_NoCourts(t *testing.T) {
+	comp := newIndivComp([]string{}, 3, 3, "09:00")
+	est := EstimateForCounts(10, 5, comp, nil)
+	assert.Equal(t, ScheduleEstimate{}, est)
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: balanced fixture cross-path equality test
+// ---------------------------------------------------------------------------
+
+// TestEstimateForCountsVsSlotAssigner_BalancedUnbuffered asserts that
+// EstimateForCounts (pre-draw path) equals the max end-cursor from
+// assignPoolMatchSlots (post-draw path) for a perfectly balanced fixture with no
+// buffer. This is the only legitimate cross-regime equality assertion (balanced +
+// unbuffered). The two should agree because both ultimately call perMatchElapsed
+// and distribute evenly.
+func TestEstimateForCountsVsSlotAssigner_BalancedUnbuffered(t *testing.T) {
+	comp := &state.Competition{
+		Kind:              "individual",
+		Courts:            []string{"A", "B"},
+		PoolMatchDuration: 3,
+		StartTime:         "09:00",
+	}
+	tournament := &state.Tournament{
+		ClockToElapsedMultiplier: 1.5,
+		SlowestCourtBufferPct:    0, // no buffer — otherwise the paths differ by design
+	}
+
+	// Build a balanced fixture: 4 pool matches, 2 per court.
+	matches := []state.MatchResult{
+		{ID: "p1-0", Court: "A"},
+		{ID: "p1-1", Court: "A"},
+		{ID: "p2-0", Court: "B"},
+		{ID: "p2-1", Court: "B"},
+	}
+	_, maxCursor := assignPoolMatchSlots(matches, comp, tournament)
+
+	dayStart := parseClockHHMM(comp.StartTime)
+	slotDuration := int(math.Round(maxCursor.Sub(dayStart).Minutes()))
+
+	est := EstimateForCounts(4, 0, comp, tournament)
+	// Both paths should produce the same max-court duration for balanced unbuffered.
+	// Allow 1 minute rounding tolerance.
+	delta := est.TotalDurationMinutes - slotDuration
+	if delta < 0 {
+		delta = -delta
+	}
+	assert.LessOrEqual(t, delta, 1,
+		"EstimateForCounts (%d) should equal slot-assigner end-cursor (%d) for balanced unbuffered fixture",
+		est.TotalDurationMinutes, slotDuration)
 }

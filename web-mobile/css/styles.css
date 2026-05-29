@@ -373,6 +373,13 @@ a:hover {
   background: var(--red-soft);
 }
 
+/* Disabled buttons can still match :hover in browsers — suppress the
+   soft-red hover feedback so a disabled destructive action never looks
+   interactive. */
+.btn--ghost.btn--danger:disabled:hover {
+  background: transparent;
+}
+
 .btn--sm {
   padding: 5px 10px;
   font-size: 12.5px;

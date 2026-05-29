@@ -1,7 +1,7 @@
 // Tournament-edit, competition-create, and bulk-import pages. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useCallback: useCallbackA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
@@ -101,60 +101,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [checkInEnd, setCheckInEnd] = useStateA(tournament.checkInWindowEnd || "");
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
-
-  const [announcementMessage, setAnnouncementMessage] = useStateA("");
-  const [announcementDuration, setAnnouncementDuration] = useStateA(5);
-  const [announcementInFlight, setAnnouncementInFlight] = useStateA(false);
-  const [activeAnnouncements, setActiveAnnouncements] = useStateA([]);
-
-  const refreshAnnouncements = useCallbackA(async () => {
-    try {
-      const list = await window.API.fetchAnnouncements();
-      setActiveAnnouncements(list || []);
-    } catch (_e) {
-      // non-fatal
-    }
-  }, []);
-
-  useEffectA(() => { refreshAnnouncements(); }, [refreshAnnouncements]);
-
-  const handleSendAnnouncement = async () => {
-    const trimmed = announcementMessage.trim();
-    if (!trimmed) return;
-    setAnnouncementInFlight(true);
-    try {
-      await window.API.sendAnnouncement(trimmed, announcementDuration, password);
-      setAnnouncementMessage("");
-      if (showToast) {
-        showToast(`Announcement broadcast for ${announcementDuration} minutes!`, "success");
-      }
-      await refreshAnnouncements();
-    } catch (e) {
-      if (showToast) {
-        showToast(e.message, "error");
-      }
-    } finally {
-      setAnnouncementInFlight(false);
-    }
-  };
-
-  const handleDismissAnnouncement = async (id) => {
-    try {
-      await window.API.deleteAnnouncement(id, password);
-      await refreshAnnouncements();
-    } catch (e) {
-      if (showToast) showToast(e.message, "error");
-    }
-  };
-
-  const handleClearAnnouncements = async () => {
-    try {
-      await window.API.clearAnnouncements(password);
-      await refreshAnnouncements();
-    } catch (e) {
-      if (showToast) showToast(e.message, "error");
-    }
-  };
 
   const handleSave = () => {
     // Trim early and send the trimmed value. The empty-name check below
@@ -258,65 +204,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
 
         <div className="page-head" style={{ marginTop: 32 }}><h1 className="page-head__title">Broadcast announcement</h1></div>
         <div className="card card--pad-lg">
-          {activeAnnouncements.length > 0 && (
-            <div className="field" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <label className="field__label" style={{ marginBottom: 0 }}>Active announcements</label>
-                <button className="btn btn--sm btn--danger" onClick={handleClearAnnouncements}>Clear all</button>
-              </div>
-              {activeAnnouncements.map(ann => (
-                <div key={ann.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", background: "var(--color-surface-raised, #f5f5f5)", borderRadius: 4, marginBottom: 4 }}>
-                  <span style={{ flex: 1, fontSize: "0.9em" }}>{ann.message}</span>
-                  <button
-                    className="btn btn--sm"
-                    onClick={() => handleDismissAnnouncement(ann.id)}
-                    aria-label="Dismiss announcement"
-                  >&times;</button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="field">
-            <label className="field__label">Message</label>
-            <textarea
-              className="input"
-              style={{ width: "100%", height: 80, boxSizing: "border-box", padding: "8px 12px", resize: "vertical" }}
-              maxLength={200}
-              placeholder="e.g. Lunch break for 30 minutes, Delay on court B..."
-              value={announcementMessage}
-              onChange={(e) => setAnnouncementMessage(e.target.value)}
-            />
-            <div className="field__hint" style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-              <span>Maximum 200 characters. Adds to the active announcement queue on all viewer screens.</span>
-              <span>{announcementMessage.length}/200</span>
-            </div>
-          </div>
-          <div className="field">
-            <label className="field__label">Duration</label>
-            <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
-              {[5, 10, 15, 30].map((m) => (
-                <label key={m} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 500 }}>
-                  <input
-                    type="radio"
-                    name="duration"
-                    value={m}
-                    checked={announcementDuration === m}
-                    onChange={() => setAnnouncementDuration(m)}
-                  />
-                  <span>{m} min</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-            <button
-              className="btn btn--primary"
-              disabled={isSendAnnouncementDisabled(announcementMessage, announcementInFlight)}
-              onClick={handleSendAnnouncement}
-            >
-              {sendAnnouncementLabel(announcementInFlight)}
-            </button>
-          </div>
+          <window.AnnouncementComposer password={password} showToast={showToast} />
         </div>
       </div>
     </div>
@@ -885,16 +773,9 @@ window.AdminEditTournament = AdminEditTournament;
 window.AdminCreateCompetition = AdminCreateCompetition;
 window.AdminImportPage = AdminImportPage;
 
-// Pure helpers for the announcement-broadcast controls.
-// isSendDisabled drives the button's `disabled` attribute.
-// sendLabel drives the button's text (inFlight → "Sending…").
-function isSendAnnouncementDisabled(message, inFlight) {
-  return !message.trim() || inFlight;
-}
-function sendAnnouncementLabel(inFlight) {
-  return inFlight ? "Sending..." : "Send announcement";
-}
-
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, isSendAnnouncementDisabled, sendAnnouncementLabel };
+// The announcement-broadcast helpers (isSendAnnouncementDisabled /
+// sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
+// AnnouncementComposer component they drive (mp-djc).
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };

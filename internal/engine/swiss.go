@@ -196,7 +196,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5
 	}
-	matches = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
 
 	return matches, nil
 }

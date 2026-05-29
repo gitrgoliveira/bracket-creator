@@ -246,7 +246,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	}
 	state.ApplyTournamentDefaults(tournament)
 	state.ApplyCompetitionDefaults(comp)
-	allMatches = assignPoolMatchSlots(allMatches, comp, tournament)
+	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
 	for i := range allMatches {
 		if t, ok := existingTimes[allMatches[i].ID]; ok {
 			allMatches[i].ScheduledAt = t

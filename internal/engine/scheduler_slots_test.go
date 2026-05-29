@@ -44,7 +44,7 @@ func TestAssignSlotsSequentialPerCourt(t *testing.T) {
 		{ID: "p1-4", Court: "A"},
 		{ID: "p1-5", Court: "A"},
 	}
-	matches = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
 
 	// 3 minutes * 1.5 multiplier = 4.5 → rounds to 5. Each slot
 	// should be 5 minutes after the previous.
@@ -82,7 +82,7 @@ func TestAssignSlotsParallelAcrossCourts(t *testing.T) {
 		{ID: "p2-1", Court: "B"},
 		{ID: "p2-2", Court: "B"},
 	}
-	matches = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
 
 	// Both courts start at 09:00.
 	assert.Equal(t, "09:00", matches[0].ScheduledAt, "court A first match")
@@ -138,7 +138,7 @@ func TestAssignSlotsSkipsOpeningBlock(t *testing.T) {
 		{ID: "p1-0", Court: "A"},
 		{ID: "p1-1", Court: "A"},
 	}
-	matches = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
 
 	assert.Equal(t, "09:30", matches[0].ScheduledAt,
 		"opening 30m should push first slot to 09:30")
@@ -168,7 +168,7 @@ func TestAssignSlotsSkipsLunchBlock(t *testing.T) {
 		{ID: "p1-3", Court: "A"}, // 11:57 → inside lunch (12:00–13:00) → 13:00
 		{ID: "p1-4", Court: "A"}, // 13:09
 	}
-	matches = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
 
 	assert.Equal(t, "11:30", matches[0].ScheduledAt)
 	assert.Equal(t, "11:39", matches[1].ScheduledAt)
@@ -212,7 +212,7 @@ func TestAssignSlotsNoMatchInsideCeremony(t *testing.T) {
 		}
 		matches = append(matches, state.MatchResult{ID: "m", Court: court})
 	}
-	matches = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
 
 	lunchStart := parseClockHHMM("12:00")
 	lunchEnd := parseClockHHMM("13:00")
@@ -248,8 +248,8 @@ func TestAssignSlotsRespectsClockToElapsedMultiplier(t *testing.T) {
 	matchesB := []state.MatchResult{
 		{Court: "A"}, {Court: "A"}, {Court: "A"},
 	}
-	assignPoolMatchSlots(matchesA, comp, mult1)
-	assignPoolMatchSlots(matchesB, comp, mult2)
+	matchesA, _ = assignPoolMatchSlots(matchesA, comp, mult1)
+	matchesB, _ = assignPoolMatchSlots(matchesB, comp, mult2)
 
 	gapA := minutesBetween(t, matchesA[0].ScheduledAt, matchesA[1].ScheduledAt)
 	gapB := minutesBetween(t, matchesB[0].ScheduledAt, matchesB[1].ScheduledAt)
@@ -273,7 +273,7 @@ func TestAssignSlotsZeroDurationFallback(t *testing.T) {
 	matches := []state.MatchResult{
 		{Court: "A"}, {Court: "A"},
 	}
-	matches = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
 
 	// Default 3 clock min * 1.5 multiplier = 4.5 → 5.
 	per := perMatchElapsedMinutes(comp, tournament, false)

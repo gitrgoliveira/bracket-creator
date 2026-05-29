@@ -111,12 +111,24 @@ func validateMaxLen(field, val string, max int) error {
 // the sub-bout variant adds the Position guards and omits the top-level-only
 // Status/DecisionBy checks (SubMatchResult has no such fields).
 func validateSubBout(prefix string, sr *state.SubMatchResult) error {
-	// Encho is rejected on any non-daihyosen bout regardless of the hantei
-	// flag — a numbered bout cannot go to overtime.
-	if sr.Position != -1 && sr.Encho != nil && sr.Encho.PeriodCount > 0 {
-		return &ValidationError{
-			Field:   prefix + "encho",
-			Message: "encho is only valid for the daihyosen representative bout (position -1)",
+	// Encho period counts are bounded two ways. A negative count is never
+	// valid on any bout (it would slip past the > 0 guards below and be
+	// silently treated as "no encho", bypassing the cap check). On a
+	// numbered bout, ANY non-zero count is rejected — a regular bout has
+	// fixed regulation time and cannot go to overtime; only the daihyosen
+	// representative bout (Position == -1) may carry encho.
+	if sr.Encho != nil {
+		if sr.Encho.PeriodCount < 0 {
+			return &ValidationError{
+				Field:   prefix + "encho",
+				Message: "encho period count must not be negative",
+			}
+		}
+		if sr.Position != -1 && sr.Encho.PeriodCount != 0 {
+			return &ValidationError{
+				Field:   prefix + "encho",
+				Message: "encho is only valid for the daihyosen representative bout (position -1)",
+			}
 		}
 	}
 	if !sr.DecidedByHantei {

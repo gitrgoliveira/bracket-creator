@@ -889,6 +889,54 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
 	})
 
+	t.Run("invalid: negative encho on regular bout position", func(t *testing.T) {
+		// A negative period count would slip past the > 0 guard and be
+		// silently treated as "no encho", bypassing the cap check. It must
+		// be rejected outright.
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: &state.EnchoMetadata{PeriodCount: -1},
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
+		assert.Contains(t, verr.Error(), "must not be negative")
+	})
+
+	t.Run("invalid: negative encho on daihyosen position", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: &state.EnchoMetadata{PeriodCount: -3},
+				},
+			},
+		}
+		verr := req.Validate()
+		require.IsType(t, &ValidationError{}, verr)
+		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
+		assert.Contains(t, verr.Error(), "must not be negative")
+	})
+
+	t.Run("valid: zero encho on regular bout position is a no-op", func(t *testing.T) {
+		req := ScoreRequest{
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1, SideA: "TeamA", SideB: "TeamB",
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: &state.EnchoMetadata{PeriodCount: 0},
+				},
+			},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
 	t.Run("valid: daihyosen hantei with winner, encho, tied scoreline", func(t *testing.T) {
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{

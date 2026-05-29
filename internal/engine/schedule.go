@@ -134,8 +134,10 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 
 // EstimateForCounts returns a ScheduleEstimate for a pre-draw competition
 // (no generated matches yet) given the expected number of pool matches and
-// playoff matches. It uses the slot-model primitives (perMatchElapsedMinutes,
-// skipCeremonyBlocks) so it stays in exact agreement with the post-draw path.
+// playoff matches. It reuses the slot-model primitives (perMatchElapsedMinutes,
+// skipCeremonyBlocks) so per-match and break math match the post-draw path —
+// but the aggregate intentionally diverges in two documented ways (the buffer
+// and phase-sequencing notes below), so it is NOT a byte-for-byte equal.
 //
 // Unit reconciliation: the slot model advances clock times (time.Time), while
 // ScheduleEstimate.TotalDurationMinutes is a duration in minutes. This function

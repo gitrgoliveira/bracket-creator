@@ -266,16 +266,21 @@ func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 	first, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	first.Rounds[0][0].Encho.PeriodCount = 99
+	// Scalar field on an existing element: only stays isolated if the
+	// SubResults backing array itself was copied (a shallow slice copy would
+	// share the element and leak this write). append() can't prove this — it
+	// reallocates when cap==len, so an aliased slice's length wouldn't change.
+	first.Rounds[0][0].SubResults[0].SideA = "MUTATED"
 	first.Rounds[0][0].SubResults[0].IpponsA[0] = "MUTATED"
 	first.Rounds[0][0].SubResults[0].IpponsB[0] = "MUTATED"
 	first.Rounds[0][0].SubResults[0].Encho.PeriodCount = 99
-	first.Rounds[0][0].SubResults = append(first.Rounds[0][0].SubResults, SubMatchResult{SideA: "leak"})
 
 	// A fresh load must reflect the saved state, not the in-place mutation.
 	second, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	require.Len(t, second.Rounds[0][0].SubResults, 1, "appended sub-result must not leak into cache")
+	require.Len(t, second.Rounds[0][0].SubResults, 1)
 	assert.Equal(t, 1, second.Rounds[0][0].Encho.PeriodCount)
+	assert.Equal(t, "A1", second.Rounds[0][0].SubResults[0].SideA)
 	assert.Equal(t, []string{"M"}, second.Rounds[0][0].SubResults[0].IpponsA)
 	assert.Equal(t, []string{"K"}, second.Rounds[0][0].SubResults[0].IpponsB)
 	assert.Equal(t, 2, second.Rounds[0][0].SubResults[0].Encho.PeriodCount)

@@ -322,6 +322,7 @@ func TestCopyMatchResults_WithSubResults(t *testing.T) {
 	compID := "pools-sub"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Sub"}))
 
+	hantei := true
 	matches := []MatchResult{
 		{
 			ID:      "P1-0",
@@ -339,7 +340,9 @@ func TestCopyMatchResults_WithSubResults(t *testing.T) {
 					Winner:   "A1",
 				},
 			},
-			Status: MatchStatusCompleted,
+			Encho:           &EnchoMetadata{PeriodCount: 1},
+			DecidedByHantei: &hantei,
+			Status:          MatchStatusCompleted,
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
@@ -350,6 +353,26 @@ func TestCopyMatchResults_WithSubResults(t *testing.T) {
 	require.Len(t, loaded[0].SubResults, 1)
 	assert.Equal(t, "A1", loaded[0].SubResults[0].Winner)
 	assert.Equal(t, "M", loaded[0].IpponsA[0])
+
+	// Deep-copy isolation: mutating the returned value (including the Encho
+	// and DecidedByHantei pointers and the nested slices) in place must not
+	// corrupt the store's cached copy. Mirrors copyMatchResults' deep-copy.
+	loaded[0].IpponsA[0] = "MUTATED"
+	loaded[0].SubResults[0].SideA = "MUTATED"
+	loaded[0].SubResults[0].IpponsA[0] = "MUTATED"
+	loaded[0].Encho.PeriodCount = 99
+	*loaded[0].DecidedByHantei = false
+
+	fresh, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, fresh, 1)
+	assert.Equal(t, "M", fresh[0].IpponsA[0])
+	assert.Equal(t, "A1", fresh[0].SubResults[0].SideA)
+	assert.Equal(t, "M", fresh[0].SubResults[0].IpponsA[0])
+	require.NotNil(t, fresh[0].Encho)
+	assert.Equal(t, 1, fresh[0].Encho.PeriodCount)
+	require.NotNil(t, fresh[0].DecidedByHantei)
+	assert.True(t, *fresh[0].DecidedByHantei)
 }
 
 func TestLoadPoolMatches_InvalidCompID(t *testing.T) {

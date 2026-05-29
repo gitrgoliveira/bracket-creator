@@ -110,6 +110,14 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 			copy(res[i].IpponsB, r.IpponsB)
 		}
 		res[i].SubResults = cloneSubResults(r.SubResults)
+		// Deep-copy the pointer fields so a caller mutating a returned
+		// result through *Encho / *DecidedByHantei cannot corrupt cached
+		// state. Mirrors copyBracket, which already clones its Encho pointer.
+		res[i].Encho = r.Encho.Clone()
+		if r.DecidedByHantei != nil {
+			v := *r.DecidedByHantei
+			res[i].DecidedByHantei = &v
+		}
 	}
 	return res
 }

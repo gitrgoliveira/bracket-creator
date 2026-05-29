@@ -1,6 +1,44 @@
-import { describe, it, expect } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches } from '../viewer.jsx';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
+import { makeReactive } from './helpers/reactive_react.js';
+
+// Walks a vnode tree and concatenates all string/number leaves. Child
+// component vnodes (e.g. <TermV>) are NOT executed by the reactive shim,
+// but their literal children (the term text) still live in props.children,
+// so this captures everything MatchDetailCard renders itself. Mirrors the
+// collectText helper in reset.test.jsx.
+function collectText(node) {
+  if (node == null) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(collectText).join('');
+  if (node.children) return collectText(node.children);
+  if (node.props?.children) return collectText(node.props.children);
+  return '';
+}
+
+// Depth-first search for the first vnode matching predicate. Mirrors the
+// helper in reset.test.jsx; used to assert props (e.g. style) on a rendered
+// element, which collectText (text-only) can't see.
+function findInTree(node, predicate) {
+  if (!node || typeof node !== 'object') return null;
+  // Arrays appear wherever the component renders a .map() (e.g. the sub-rows),
+  // so recurse into them rather than treating the array itself as a vnode.
+  if (Array.isArray(node)) {
+    for (const k of node) {
+      const found = findInTree(k, predicate);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (predicate(node)) return node;
+  const kids = node.children || node.props?.children || [];
+  for (const k of [].concat(kids)) {
+    const found = findInTree(k, predicate);
+    if (found) return found;
+  }
+  return null;
+}
 
 describe('Viewer Utils', () => {
   describe('formatDate', () => {
@@ -203,6 +241,119 @@ describe('Viewer Utils', () => {
       const c = { format: 'swiss', swissRounds: 4, swissCurrentRound: 0 };
       expect(swissStandingsHeading(c, [])).toBe('Standings — pending');
     });
+  });
+
+  // mp-8sw — subBoutLabel: the team sub-bout center label. The daihyosen
+  // (rep bout) is stored with sentinel position -1 and must render as
+  // "Daihyosen", not the literal "Match -1" the position||index fallback
+  // would produce. Shared by both viewer sub-row sites; the Hantei marker
+  // beside it is a trivial `sub.decidedByHantei` gate verified manually.
+  describe('subBoutLabel', () => {
+    it('renders "Daihyosen" for the sentinel position -1 (not "Match -1")', () => {
+      expect(subBoutLabel({ position: -1 }, 0)).toBe('Daihyosen');
+      expect(subBoutLabel({ position: -1 }, 4)).toBe('Daihyosen');
+    });
+
+    it('renders "Match N" using the stored position for normal bouts', () => {
+      expect(subBoutLabel({ position: 1 }, 0)).toBe('Match 1');
+      expect(subBoutLabel({ position: 3 }, 0)).toBe('Match 3');
+    });
+
+    it('falls back to index+1 when position is missing/zero', () => {
+      expect(subBoutLabel({}, 0)).toBe('Match 1');
+      expect(subBoutLabel({ position: 0 }, 2)).toBe('Match 3');
+      expect(subBoutLabel(undefined, 1)).toBe('Match 2');
+    });
+  });
+});
+
+// mp-8sw — MatchDetailCard team sub-rows: render-level proof that the
+// daihyosen row labels as "Daihyosen" (not "Match -1") and shows the
+// "Hantei" marker only when sub.decidedByHantei. Asserts the actual
+// rendered tree, complementing the subBoutLabel unit tests above.
+describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
+  const realReact = global.React;
+  let runtime;
+  let MatchDetailCard;
+  // Preserve any pre-existing window globals we stub so we can restore exact
+  // state in afterEach. vi.restoreAllMocks() only undoes vi.spyOn, NOT direct
+  // `global.window.x = vi.fn()` assignments — without this the mocked globals
+  // leak into later suites and make failures order-dependent.
+  const savedGlobals = {};
+  const STUBBED = ['formatIpponsScore', 'ipponsFromScore'];
+
+  const mkTeamMatch = (subs) => ({
+    compKind: 'team',
+    status: 'completed',
+    court: 'A',
+    phase: 'bracket',
+    round: 'Final',
+    sideA: { id: 'tA', name: 'Team A' },
+    sideB: { id: 'tB', name: 'Team B' },
+    // Present (truthy) so the component skips window.ipponsFromScore.
+    ipponsA: [],
+    ipponsB: [],
+    subResults: subs,
+  });
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
+    // Only globals MatchDetailCard executes on the team path. The non-team
+    // ippons block (which calls window.isHikiwake) is gated out for teams.
+    global.window.formatIpponsScore = vi.fn(() => '3-2');
+    global.window.ipponsFromScore = vi.fn(() => []);
+    vi.resetModules();
+    ({ MatchDetailCard } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    // Restore the exact prior state of the window globals we stubbed so they
+    // don't leak into other suites (vi.restoreAllMocks does not cover direct
+    // property assignments).
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('labels the daihyosen row "Daihyosen" and shows "Hantei" when decidedByHantei', () => {
+    const tree = runtime.mount(MatchDetailCard, {
+      match: mkTeamMatch([
+        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
+        { position: -1, ipponsA: ['K'], ipponsB: [], decidedByHantei: true },
+      ]),
+      onClose: null,
+    });
+    const text = collectText(tree);
+    expect(text).toContain('Match 1');
+    expect(text).toContain('Daihyosen');
+    expect(text).not.toContain('Match -1');
+    expect(text).toContain('Hantei');
+    // The marker must carry left spacing so it does not render flush against
+    // the label as "DaihyosenHantei" (Copilot review on #192).
+    const marker = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei');
+    expect(marker).toBeTruthy();
+    expect(marker.props.style?.marginLeft).toBeTruthy();
+  });
+
+  it('omits the "Hantei" marker when no sub was decided by hantei', () => {
+    const tree = runtime.mount(MatchDetailCard, {
+      match: mkTeamMatch([
+        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
+        { position: -1, ipponsA: ['K'], ipponsB: ['K'], decidedByHantei: false },
+      ]),
+      onClose: null,
+    });
+    const text = collectText(tree);
+    expect(text).toContain('Daihyosen');
+    expect(text).not.toContain('Hantei');
   });
 });
 

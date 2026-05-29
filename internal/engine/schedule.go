@@ -140,8 +140,10 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // Unit reconciliation: the slot model advances clock times (time.Time), while
 // ScheduleEstimate.TotalDurationMinutes is a duration in minutes. This function
 // defines TotalDurationMinutes = round(maxCourtCursor − dayStart), where dayStart
-// is comp.StartTime + tournament.OpeningBlock (the same anchor the slot assigners
-// use). PerCourtMinutes entries are each court's individual duration.
+// is comp.StartTime (the same anchor the slot assigners use). Each court's cursor
+// is initialised to dayStart+OpeningBlock, so the returned duration INCLUDES the
+// opening-block offset. PerCourtMinutes entries are each court's individual
+// duration.
 //
 // Buffer divergence (intentional): EstimateForCounts applies
 // tournament.SlowestCourtBufferPct because it is a predictive, pre-draw estimate
@@ -150,8 +152,11 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // a real, assigned schedule needs no extra padding. Do NOT assert cross-regime
 // equality for buffered inputs.
 //
-// CeremonyMinutes is populated from tournament.ClosingBlock. The opening and lunch
-// blocks are applied via the shared skipCeremonyBlocks helper.
+// CeremonyMinutes is populated from tournament.ClosingBlock. The OpeningBlock is
+// applied as a pre-loop per-court start offset (cursor initialised to
+// dayStart+OpeningBlock); the LunchBlock is applied per match via the shared
+// skipCeremonyBlocks helper. ClosingBlock is not entered by the cursor — it is
+// surfaced only as CeremonyMinutes.
 //
 // Phase sequencing (intentional, and a SECOND divergence from the post-draw
 // path): each court runs its pool matches and THEN its playoff matches on the

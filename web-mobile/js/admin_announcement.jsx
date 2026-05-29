@@ -8,7 +8,8 @@ const { useState: useStateAn, useEffect: useEffectAn, useCallback: useCallbackAn
 
 // Pure helpers for the announcement-broadcast controls.
 // isSendDisabled drives the button's `disabled` attribute.
-// sendLabel drives the button's text (inFlight → "Sending…").
+// sendLabel drives the button's text (inFlight → "Sending...", three
+// dots — kept ASCII to match the literal the tests assert on).
 function isSendAnnouncementDisabled(message, inFlight) {
   return !message.trim() || inFlight;
 }

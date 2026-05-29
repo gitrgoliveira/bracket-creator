@@ -105,8 +105,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const [adminCompData, setAdminCompData] = useStateA(null);
   const [adminLoading, setAdminLoading] = useStateA(false);
   // mp-djc: dashboard "📣 Announce" button opens the broadcast composer
-  // in a modal. State lives here (alongside other AdminApp UI state) so
-  // the modal overlays whichever screen is rendered.
+  // in a modal. State lives here (alongside other AdminApp UI state); the
+  // modal is rendered only in the dashboard branch below, since that's the
+  // sole screen exposing the Announce button. (Other screens reach the
+  // composer via the Edit-details page.)
   const [announceOpen, setAnnounceOpen] = useStateA(false);
 
   // Expose a navigation helper used by AdminTopbar's live-strip chips,

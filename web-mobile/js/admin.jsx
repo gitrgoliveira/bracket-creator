@@ -104,6 +104,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // Hooks must be declared unconditionally before any conditional returns.
   const [adminCompData, setAdminCompData] = useStateA(null);
   const [adminLoading, setAdminLoading] = useStateA(false);
+  // mp-djc: dashboard "📣 Announce" button opens the broadcast composer
+  // in a modal. State lives here (alongside other AdminApp UI state) so
+  // the modal overlays whichever screen is rendered.
+  const [announceOpen, setAnnounceOpen] = useStateA(false);
 
   // Expose a navigation helper used by AdminTopbar's live-strip chips,
   // avoiding prop-drilling through every screen. Set once per mount.
@@ -512,20 +516,28 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   }, [view.id, view.kind]); // t and onUpdate accessed via refs to avoid churn
 
   if (view.kind === "dashboard") {
-    return <AdminDashboard
-      tournament={t}
-      onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
-      onCreateCompetition={() => setView({ kind: "createComp" })}
-      onEditTournament={() => setView({ kind: "editTournament" })}
-      onOpenSchedule={() => setView({ kind: "schedule" })}
-      onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
-      onOpenImport={() => setView({ kind: "import" })}
-      onStartAll={startAllCompetitions}
-      onStartCompetition={startCompetition}
-      onLogout={onLogout}
-      onViewerMode={onViewerMode}
-      onUpdate={onUpdate}
-    />;
+    return <>
+      <AdminDashboard
+        tournament={t}
+        onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
+        onCreateCompetition={() => setView({ kind: "createComp" })}
+        onEditTournament={() => setView({ kind: "editTournament" })}
+        onAnnounce={() => setAnnounceOpen(true)}
+        onOpenSchedule={() => setView({ kind: "schedule" })}
+        onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
+        onOpenImport={() => setView({ kind: "import" })}
+        onStartAll={startAllCompetitions}
+        onStartCompetition={startCompetition}
+        onLogout={onLogout}
+        onViewerMode={onViewerMode}
+        onUpdate={onUpdate}
+      />
+      {announceOpen && <window.AnnouncementModal
+        password={password}
+        showToast={showToast}
+        onClose={() => setAnnounceOpen(false)}
+      />}
+    </>;
   }
 
   if (view.kind === "createComp") {

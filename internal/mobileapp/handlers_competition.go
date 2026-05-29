@@ -898,77 +898,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, compOut)
 	})
 
-	r.GET("/competitions/:id/reserved-slots", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		slots, err := store.LoadReservedSlots(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, slots)
-	})
-
-	r.POST("/competitions/:id/reserved-slots", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		var req struct {
-			SourceCompID string `json:"sourceCompID"`
-			SourceRank   int    `json:"sourceRank"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if req.SourceCompID == "" || req.SourceRank < 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "sourceCompID and sourceRank (>= 1) are required"})
-			return
-		}
-		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		}
-		if comp.Status == state.CompStatusDrawReady {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
-			return
-		}
-		slot, err := store.AddReservedSlot(id, req.SourceCompID, req.SourceRank, comp.WithZekkenName)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.JSON(http.StatusCreated, slot)
-	})
-
-	r.DELETE("/competitions/:id/reserved-slots/:slotID", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		slotID := c.Param("slotID")
-		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		}
-		if comp.Status == state.CompStatusDrawReady {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
-			return
-		}
-		if err := store.RemoveReservedSlot(id, slotID, comp.WithZekkenName); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.Status(http.StatusNoContent)
-	})
-
 	r.POST("/competitions/:id/start", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -1263,19 +1192,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Calculate number of pools to determine how many reserved slots we need.
-		parts, _ := store.LoadParticipants(id, src.WithZekkenName)
-		poolSize := src.PoolSize
-		if poolSize <= 0 {
-			poolSize = 3 // default
-		}
-		numPools := (len(parts) + poolSize - 1) / poolSize
-		winnersPerPool := src.PoolWinners
-		if winnersPerPool <= 0 {
-			winnersPerPool = 2 // default
-		}
-		totalWinners := numPools * winnersPerPool
-
+		// The playoffs competition is linked back to its source via
+		// SourceCompID and starts with an EMPTY roster. The source's pool
+		// winners are resolved into the roster at draw time by
+		// engine.resolvePoolWinners (see StartCompetition) — recomputed from
+		// the source's final pool configuration rather than snapshotted here,
+		// so the bracket always reflects the source as drawn.
 		playoff := state.Competition{
 			Name:           src.Name + " - Playoffs",
 			Format:         state.CompFormatPlayoffs,
@@ -1284,6 +1206,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			NumberPrefix:   src.NumberPrefix,
 			StartTime:      src.StartTime,
 			Status:         state.CompStatusSetup,
+			SourceCompID:   id,
 		}
 		playoff.ID = slugifyID(playoff.Name)
 
@@ -1319,35 +1242,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Link reserved slots (this will also add placeholder participants).
-		// Rollback on failure: SaveCompetitionChanged above already wrote
-		// config.md for the playoff. If any AddReservedSlot iteration
-		// fails (I/O error, EISDIR, etc.) the playoff is half-created —
-		// config on disk, slots/placeholders partial or absent — and the
-		// ID-collision guard inside WithCompetitionRenameLock above would
-		// block a retry with "derived playoff ID already exists". Mirror
-		// the import handler's rollback pattern (handlers_import.go).
-		for i := 1; i <= totalWinners; i++ {
-			if _, err := store.AddReservedSlot(playoff.ID, id, i, playoff.WithZekkenName); err != nil {
-				_ = store.DeleteCompetition(playoff.ID) // best-effort rollback
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to add reserved slot %d: %v", i, err)})
-				return
-			}
-		}
-
-		// Populate Players on the response from disk (the playoff has
-		// reserved-slot placeholders persisted by AddReservedSlot above,
-		// but `playoff` is the pre-save struct with Players: nil → JSON
-		// null. The frontend's refreshCompsAfterCreate fallback merges
-		// this record into local state, and a null Players field crashes
-		// render paths reading `c.players.length`. Mirror the PUT
-		// settings-PUT response fix.
-		if players, lerr := store.LoadParticipants(playoff.ID, playoff.WithZekkenName); lerr == nil {
-			playoff.Players = players
-		} else {
-			fmt.Printf("Warning: failed to load participants for POST /playoffs response: %v\n", lerr)
-			playoff.Players = []domain.Player{}
-		}
+		// The playoff starts with no participants (the roster is resolved
+		// from the source's pool winners at draw time). Return an empty but
+		// non-nil Players slice so the frontend's refreshCompsAfterCreate
+		// fallback can merge this record without a null-Players crash in
+		// render paths reading `c.players.length`.
+		playoff.Players = []domain.Player{}
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusCreated, playoff)
 	})

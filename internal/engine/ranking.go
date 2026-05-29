@@ -115,108 +115,56 @@ func (e *Engine) GetPoolRanking(compID string, rank int) (*domain.Player, error)
 		rank, poolName, rankInPool, compID)
 }
 
-// resolveReservedSlots replaces placeholder participants (Tag="reserved") with
-// real players from source competition results (bracket or pools). Returns
-// the (possibly-mutated) players slice, a bool indicating whether ANY
-// mutation actually happened (in-place field update OR placeholder removal),
-// and any error encountered. The mutated flag lets callers gate a trailing
-// SaveParticipants on real changes only — re-saving an unmutated snapshot
-// would clobber a concurrent participants upload.
-func (e *Engine) resolveReservedSlots(compID string, players []domain.Player) ([]domain.Player, bool, error) {
-	// LoadReservedSlots returns ([]ReservedSlot{}, nil) for the "file does
-	// not exist" case (see parseReservedSlotsFile). Any other error from
-	// LoadReservedSlots is a genuine I/O / parse failure (corrupt JSON,
-	// permission, etc.). Previously this swallowed the error and returned
-	// (players, false, nil), making the caller think "no slots, no save
-	// needed" — but a corrupt slots file would silently proceed to generate
-	// pools / bracket with the placeholder "Reserved: rank N" entries left
-	// in `players`, since the resolution step was skipped. Propagate the
-	// error so StartCompetition aborts before generating broken artifacts.
-	slots, err := e.store.LoadReservedSlots(compID)
+// resolvePoolWinners builds the roster for a playoffs competition that was
+// created from a mixed (Pools + Knockout) source via POST /playoffs. It reads
+// playoffsComp.SourceCompID, verifies the source's pools are final, and
+// resolves the qualifying pool winners (ranks 1..totalWinners) into real
+// players via GetPoolRanking. Returns the resolved roster.
+//
+// totalWinners is recomputed from the source's final pool configuration
+// (numPools × PoolWinners, with the same defaults the POST /playoffs handler
+// uses) rather than stored at playoffs-creation time, so it always reflects
+// the source as drawn — immune to source-roster edits made between playoffs
+// creation and the source draw.
+//
+// The returned roster carries the source players' identities; the caller
+// persists it (participants.csv was empty on disk for a source-linked playoffs
+// comp) and flips HasParticipantIDs. Resolution is read-only against the
+// source competition, so it never contends with the playoffs comp's own lock.
+func (e *Engine) resolvePoolWinners(playoffsComp *state.Competition) ([]domain.Player, error) {
+	srcID := playoffsComp.SourceCompID
+	srcComp, err := e.store.LoadCompetition(srcID)
+	if err != nil || srcComp == nil {
+		return nil, notFoundErrorf("playoffs source competition %q not found", srcID)
+	}
+	if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
+		return nil, validationErrorf("source competition %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
+	}
+
+	// Mirror the POST /playoffs handler's sizing: numPools × winnersPerPool
+	// with the same poolSize/winners defaults.
+	parts, err := e.store.LoadParticipants(srcID, srcComp.WithZekkenName)
 	if err != nil {
-		return nil, false, fmt.Errorf("cannot load reserved slots for %q: %w", compID, err)
+		return nil, fmt.Errorf("cannot load source participants for %q: %w", srcID, err)
 	}
-	if len(slots) == 0 {
-		return players, false, nil
+	poolSize := srcComp.PoolSize
+	if poolSize <= 0 {
+		poolSize = 3
 	}
+	numPools := (len(parts) + poolSize - 1) / poolSize
+	winnersPerPool := srcComp.PoolWinners
+	if winnersPerPool <= 0 {
+		winnersPerPool = 2
+	}
+	totalWinners := numPools * winnersPerPool
 
-	slotsChanged := false
-	playersMutated := false
-	var toRemove []string
-
-	for sIdx, slot := range slots {
-		srcComp, err := e.store.LoadCompetition(slot.SourceCompID)
-		if err != nil || srcComp == nil {
-			return nil, false, notFoundErrorf("reserved slot source competition %q not found", slot.SourceCompID)
-		}
-
-		var real *domain.Player
-		if srcComp.Format == state.CompFormatMixed || srcComp.Format == state.CompFormatLeague {
-			if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
-				return nil, false, validationErrorf("reserved slot source %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
-			}
-			real, err = e.GetPoolRanking(slot.SourceCompID, slot.SourceRank)
-		} else {
-			if srcComp.Status != state.CompStatusPlayoffs && srcComp.Status != state.CompStatusComplete {
-				return nil, false, validationErrorf("reserved slot source %q has not reached playoffs yet (status: %s)", srcComp.Name, srcComp.Status)
-			}
-			real, err = e.GetBracketRanking(slot.SourceCompID, slot.SourceRank)
-		}
-
+	players := make([]domain.Player, 0, totalWinners)
+	for rank := 1; rank <= totalWinners; rank++ {
+		p, err := e.GetPoolRanking(srcID, rank)
 		if err != nil {
-			return nil, false, fmt.Errorf("cannot resolve rank %d from %q: %w", slot.SourceRank, slot.SourceCompID, err)
+			return nil, fmt.Errorf("cannot resolve pool winner rank %d from %q: %w", rank, srcID, err)
 		}
-
-		// Find placeholder and check for existing name
-		var existingIdx = -1
-		var placeholderIdx = -1
-		for i := range players {
-			if players[i].ID == slot.ParticipantID {
-				placeholderIdx = i
-			} else if players[i].Name == real.Name {
-				existingIdx = i
-			}
-		}
-
-		if placeholderIdx == -1 {
-			continue // Already resolved or removed?
-		}
-
-		if existingIdx != -1 {
-			// Player already exists! Link slot to existing player and remove placeholder
-			slots[sIdx].ParticipantID = players[existingIdx].ID
-			slotsChanged = true
-			toRemove = append(toRemove, slot.ParticipantID)
-		} else {
-			// Update placeholder with real player info
-			players[placeholderIdx].Name = real.Name
-			players[placeholderIdx].DisplayName = real.DisplayName
-			players[placeholderIdx].Dojo = real.Dojo
-			players[placeholderIdx].Tag = "" // no longer a placeholder
-			playersMutated = true
-		}
+		players = append(players, *p)
 	}
-
-	if slotsChanged {
-		if err := e.store.SaveReservedSlots(compID, slots); err != nil {
-			return nil, false, fmt.Errorf("failed to save updated reserved slots: %w", err)
-		}
-	}
-
-	if len(toRemove) > 0 {
-		filtered := make([]domain.Player, 0, len(players))
-		removeMap := make(map[string]bool)
-		for _, id := range toRemove {
-			removeMap[id] = true
-		}
-		for _, p := range players {
-			if !removeMap[p.ID] {
-				filtered = append(filtered, p)
-			}
-		}
-		players = filtered
-		playersMutated = true
-	}
-
-	return players, playersMutated, nil
+	return players, nil
 }

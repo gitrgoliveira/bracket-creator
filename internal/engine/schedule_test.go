@@ -337,6 +337,32 @@ func TestEstimateForCounts_PerPhaseSplit(t *testing.T) {
 		"playoff matches (5min clock) should produce a higher estimate than pool matches (3min clock) for equal count")
 }
 
+// TestEstimateForCounts_PoolThenPlayoffSequential pins the intentional
+// pools-then-playoffs sequencing: a court runs its pool matches AND its playoff
+// matches on the same advancing cursor, so the combined estimate is the SUM of
+// the two phases — not the max() of them. This is the contract a post-draw
+// estimate (mp-zoh) must reproduce by summing the two slot-assigner cursors
+// rather than maxing them. See the EstimateForCounts doc comment.
+func TestEstimateForCounts_PoolThenPlayoffSequential(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 3 /*pool clock*/, 5 /*playoff clock*/, "09:00")
+	tourn := newTournament(1.0, 10, "", "", "") // 1.0x, explicit 10% buffer
+
+	// pool: 2*3=6 ; playoff: 2*5=10 ; sequential sum = 16 ; *1.10 = 17.6 → 18.
+	combined := EstimateForCounts(2, 2, comp, tourn)
+	poolOnly := EstimateForCounts(2, 0, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))
+	playoffOnly := EstimateForCounts(0, 2, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))
+
+	assert.Equal(t, 18, combined.TotalDurationMinutes)
+	// The defining anti-max assertion: combined must exceed the larger single
+	// phase. max() semantics would yield only playoffOnly (11).
+	assert.Greater(t, combined.TotalDurationMinutes, playoffOnly.TotalDurationMinutes,
+		"combined estimate must SUM the phases, not max them (combined=%d playoffOnly=%d)",
+		combined.TotalDurationMinutes, playoffOnly.TotalDurationMinutes)
+	assert.Equal(t, poolOnly.TotalDurationMinutes+playoffOnly.TotalDurationMinutes,
+		combined.TotalDurationMinutes,
+		"with no opening/lunch blocks the buffer is linear, so combined == poolOnly + playoffOnly")
+}
+
 // TestEstimateForCounts_EvenDistribution verifies even distribution across courts.
 // With SlowestCourtBufferPct=0 the default (10%) is applied: 2 matches *3min=6min
 // per court * 1.1 = 6.6 → 7.

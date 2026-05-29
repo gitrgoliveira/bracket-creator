@@ -153,6 +153,16 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // CeremonyMinutes is populated from tournament.ClosingBlock. The opening and lunch
 // blocks are applied via the shared skipCeremonyBlocks helper.
 //
+// Phase sequencing (intentional, and a SECOND divergence from the post-draw
+// path): each court runs its pool matches and THEN its playoff matches on the
+// same advancing cursor — pools-then-playoffs, which is the realistic order
+// (playoff seeding needs pool results). The post-draw slot assigners
+// (assignPoolMatchSlots / assignBracketMatchSlots) are invoked as two separate
+// calls that EACH re-anchor to dayStart+OpeningBlock, so they OVERLAP the two
+// phases in clock time. A post-draw estimate must therefore SEQUENCE (sum) the
+// two assigner cursors rather than max() them to match EstimateForCounts for a
+// mixed-format competition. See mp-zoh.
+//
 // Returns a zero ScheduleEstimate when comp is nil or has no courts.
 func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tournament *state.Tournament) ScheduleEstimate {
 	if comp == nil {

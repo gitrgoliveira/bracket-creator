@@ -2271,10 +2271,11 @@ components:
             Decision code for this individual sub-match. For numbered bouts:
             `""` (normal victory), `"hikiwake"` (draw/tie), or `"fusensho"`
             (per-bout default win). The daihyosen representative bout
-            (`position: -1`) carries `"daihyosen"`; when its winner comes from
-            a tied encho the bout uses `""` or `"fought"` alongside
-            `decidedByHantei: true` (hantei is incompatible with any other
-            decision code — see `decidedByHantei`).
+            (`position: -1`) always carries `"daihyosen"` — including when its
+            winner is declared by hantei after a tied encho (the frontend emits
+            `decision: "daihyosen"` together with `decidedByHantei: true`). The
+            server also tolerates `""` or `"fought"` alongside hantei, but
+            `"daihyosen"` is the canonical persisted value for the rep bout.
         decidedByHantei:
           type: boolean
           description: >
@@ -2282,9 +2283,9 @@ components:
             tied encho. Valid ONLY for the daihyosen representative bout (`position: -1`)
             AND only when `encho.periodCount > 0`; regular numbered bouts have fixed
             regulation time and are never decided by hantei. The accompanying `decision`
-            must be `""` or `"fought"` (or `"daihyosen"` for the rep bout) and `winner`
-            must be set — the server rejects hantei without encho or with a conflicting
-            decision.
+            is `"daihyosen"` (the value the frontend persists for the rep bout); the
+            server additionally accepts `""` or `"fought"`. `winner` must be set — the
+            server rejects hantei without encho or with any other decision code.
         encho:
           allOf:
             - $ref: '#/components/schemas/EnchoMetadata'

@@ -109,7 +109,7 @@ function initialSectionFor(status) {
   return "overview";
 }
 
-function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate }) {
+function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate }) {
   const t = tournament;
   const comps = t.competitions || [];
 
@@ -185,6 +185,7 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
             </div>
           </div>
           <div className="page-head__actions">
+            <button className="btn" onClick={onAnnounce}>📣 Announce</button>
             <button className="btn" onClick={onEditTournament}>Edit details</button>
             {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
               <button className="btn btn--danger" onClick={onStartAll}>Start all</button>

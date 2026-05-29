@@ -224,12 +224,16 @@ describe('AnnouncementCard dismiss and per-card timer', () => {
 
     expect(capturedCallbacks.length).toBeGreaterThanOrEqual(1);
     // Run each captured callback; the expired card must trigger onDismiss.
-    // The timer callback returns a cleanup fn; we don't need to call it here.
+    // The timer effect creates a real setInterval and returns a clearInterval
+    // cleanup — capture and run every cleanup so no live interval leaks past
+    // this test (a leaked interval can hang Vitest or fire stray callbacks).
     let dismissed = false;
+    const cleanups = [];
     for (const cb of capturedCallbacks) {
-      cb();
+      cleanups.push(cb());
       if (onDismiss.mock.calls.length > 0) { dismissed = true; break; }
     }
+    cleanups.forEach(fn => { if (typeof fn === 'function') fn(); });
     expect(dismissed).toBe(true);
     expect(onDismiss).toHaveBeenCalledWith('expire-me');
   });
@@ -245,9 +249,12 @@ describe('AnnouncementCard dismiss and per-card timer', () => {
     React.useEffect.mockImplementation(() => {});
 
     // Run all captured callbacks (the timer effect sets up the interval but
-    // the first tick should NOT dismiss since diff > 0)
+    // the first tick should NOT dismiss since diff > 0). A future card's
+    // interval never self-clears, so run the returned cleanup to clear it —
+    // otherwise the live setInterval leaks past this test.
     for (const cb of capturedCallbacks) {
-      cb(); // returns the cleanup fn (clearInterval call) — ignore it
+      const cleanup = cb();
+      if (typeof cleanup === 'function') cleanup();
     }
     // onDismiss must NOT have been called immediately (card is not expired)
     expect(onDismiss).not.toHaveBeenCalled();
@@ -268,8 +275,10 @@ describe('AnnouncementCard dismiss and per-card timer', () => {
     // Restore before assertions
     React.useEffect.mockImplementation(() => {});
 
-    for (const cb of capturedForCard1) cb();
-    for (const cb of capturedForCard2) cb();
+    // Run each effect and immediately run its returned cleanup so no live
+    // interval leaks past the test.
+    for (const cb of capturedForCard1) { const c = cb(); if (typeof c === 'function') c(); }
+    for (const cb of capturedForCard2) { const c = cb(); if (typeof c === 'function') c(); }
 
     // Each callback fires for its own card id only
     expect(onDismiss1).toHaveBeenCalledWith('c1');

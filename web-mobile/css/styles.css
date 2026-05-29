@@ -5211,7 +5211,10 @@ button.my-match__opp {
 /* Announcement overlay - Feature mp-udb */
 /* Fixed-position container stacks all active announcement cards in the top-right
    corner. pointer-events:none on the container means empty space never blocks
-   bracket/score affordances behind it; each card re-enables pointer events. */
+   bracket/score affordances behind it; each card re-enables pointer events.
+   z-index 900 sits ABOVE normal viewer chrome (max 500) but BELOW the modal
+   layer (.modal-backdrop dialogs at 1000) so open dialogs stay modal and are
+   never obscured by announcement cards. */
 @keyframes announcement-slide-in {
   from {
     opacity: 0;
@@ -5227,7 +5230,7 @@ button.my-match__opp {
   position: fixed;
   top: 16px;
   right: 16px;
-  z-index: 1001;
+  z-index: 900;
   display: flex;
   flex-direction: column;
   gap: 8px;

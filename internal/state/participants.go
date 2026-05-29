@@ -42,6 +42,43 @@ type LoadParticipantsOpts struct {
 	HasIDs    *bool // nil = auto-detect from first line; non-nil uses cached Competition.HasParticipantIDs
 }
 
+// participantsCacheKey returns a virtual filename used as the cache key
+// for a participants load. Splits by both WithSeeds and HasIDs parse
+// mode so the three mutually-exclusive parses don't poison each other's
+// cache entries (mp-p7n Copilot PR #185 round-6).
+func participantsCacheKey(opts LoadParticipantsOpts) string {
+	base := "participants"
+	if opts.WithSeeds {
+		base += "_with_seeds"
+	}
+	switch {
+	case opts.HasIDs == nil:
+		base += "_auto"
+	case *opts.HasIDs:
+		base += "_hint_true"
+	default:
+		base += "_hint_false"
+	}
+	return base + ".csv"
+}
+
+// allParticipantsCacheKeys enumerates every cache key that
+// participantsCacheKey can produce. Used by saveParticipantsNoLock to
+// invalidate all parse-mode variants in one pass on write.
+func allParticipantsCacheKeys() []string {
+	keys := make([]string, 0, 6)
+	for _, withSeeds := range []bool{false, true} {
+		trueP, falseP := true, false
+		for _, hint := range []*bool{nil, &trueP, &falseP} {
+			keys = append(keys, participantsCacheKey(LoadParticipantsOpts{
+				WithSeeds: withSeeds,
+				HasIDs:    hint,
+			}))
+		}
+	}
+	return keys
+}
+
 // LoadParticipants loads participants with seeds merged (default behavior).
 func (s *Store) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {
 	return s.loadParticipants(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: true})
@@ -60,11 +97,18 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 }
 
 func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
-	// Use a virtual filename for cache to distinguish between with/without seeds.
-	cacheKey := "participants.csv"
-	if opts.WithSeeds {
-		cacheKey = "participants_with_seeds.csv"
-	}
+	// Use a virtual filename for cache to distinguish between with/without
+	// seeds AND between the three possible parse modes
+	// (HasIDs=&true / HasIDs=&false / nil → auto-detect).
+	//
+	// mp-p7n / Copilot PR #185 round-6: without the parse-mode suffix,
+	// a no-hint auto-detect call that lands a "no-IDs" parse can poison
+	// the same cache key that a later HasIDs=&true call reads — the
+	// hinted call would return the cached shifted rows instead of
+	// stripping column 0. Splitting the cache key by parse mode means
+	// each mode's parse is cached independently. saveParticipantsNoLock
+	// invalidates all variants below to keep them coherent on write.
+	cacheKey := participantsCacheKey(opts)
 
 	cache := s.getFileCache(compID, cacheKey)
 	cache.mu.RLock()
@@ -72,6 +116,14 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	if opts.WithSeeds {
 		mtime += s.FileMtime(compID, "seeds.csv")
 	}
+	// mp-p7n / Copilot PR #185 round-4: the load decision now depends
+	// on Competition.HasParticipantIDs (see the trustHint branch below).
+	// That flag lives in config.md, NOT participants.csv, so a flag flip
+	// (e.g. the deferred HasParticipantIDs=true after the first roster
+	// save) wouldn't bump participants.csv's mtime and would leave a
+	// stale "no-IDs" parse in the cache. Fold config.md's mtime into
+	// the cache key so any config write invalidates the cached players.
+	mtime += s.FileMtime(compID, "config.md")
 
 	if cache.data != nil && cache.mtime == mtime {
 		p := cache.data.([]domain.Player)
@@ -103,12 +155,40 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		return nil, err
 	}
 
-	// Detect new format: first field is a UUID. Use cached flag if provided.
-	var hasIDs bool
-	if opts.HasIDs != nil {
+	// Detect ID column: when callers pass an explicit HasIDs hint we
+	// trust it; otherwise consult Competition.HasParticipantIDs (set on
+	// disk the first time participants are saved with IDs) and fall
+	// back to a UUID-shape sniff on the first row only when no comp
+	// record is available.
+	//
+	// mp-p7n: previously this path used only uuidRE on records[0][0],
+	// which mis-classified non-UUID-shaped ids (e.g. the JS-side
+	// `${compID}-p${N}` shape) as "no IDs" → column shift on load. The
+	// HasParticipantIDs flag is the authoritative signal: when set,
+	// every row has an id in column 0 regardless of its textual shape,
+	// and the loader must strip it. Auto-detect against the file is
+	// only used when we have no comp record (e.g. a stand-alone CSV
+	// loaded outside the normal handler flow).
+	// hasIDs: there is an id column in the file at all.
+	// trustHint: strip column 0 from EVERY row unconditionally — set
+	// only when the caller (or the comp's HasParticipantIDs flag)
+	// asserts "every row has an id". Without this signal, the auto-
+	// detect path falls back to a per-record UUID-shape check below
+	// to preserve mixed-format legacy support (TestStore_ParticipantsCSV_MixedIDs:
+	// a file with one UUID row and one bare-name row must load both).
+	var hasIDs, trustHint bool
+	switch {
+	case opts.HasIDs != nil:
 		hasIDs = *opts.HasIDs
-	} else {
-		hasIDs = len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
+		trustHint = *opts.HasIDs
+	default:
+		if comp, _ := s.loadCompetitionLocked(compID); comp != nil && comp.HasParticipantIDs {
+			hasIDs = true
+			trustHint = true
+		} else {
+			hasIDs = len(records) > 0 && len(records[0]) > 0 && uuidRE(strings.TrimSpace(records[0][0]))
+			trustHint = false
+		}
 	}
 
 	var ids []string
@@ -118,12 +198,40 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	for _, record := range records {
 		isCheckedIn := false
 
-		// Determine data fields (everything after UUID if present).
-		// Per-record UUID check: only strip the first field as an ID
-		// when it actually matches the UUID pattern.
+		// Determine data fields (everything after the id if present).
+		//
+		// mp-p7n: pre-fix, this branch gated on `uuidRE(record[0])` —
+		// a per-record check that only stripped the first field when
+		// it matched the canonical-UUID shape. That broke any roster
+		// whose ids weren't UUID-shaped (e.g. the `${compID}-p${N}`
+		// shape the JS-side mintParticipantIds was generating, or
+		// arbitrary client-supplied ids): dataStart stayed 0, the
+		// row was parsed as [Name, Dojo, Metadata] instead of
+		// [id, Name, Dojo, Metadata], every field shifted one column
+		// right, and the id got title-cased into Name on load
+		// (producing the user-reported "Asddasd-P1, Aaron Adams,
+		// Team Alpha" corruption).
+		//
+		// Fix:
+		//   - `trustHint` (caller-supplied or comp.HasParticipantIDs=true):
+		//     strip column 0 unconditionally — every row has an id of
+		//     whatever shape. Preserves non-UUID ids (a client/import
+		//     path may carry one) and keeps them joinable with other
+		//     persisted state that references the player by id —
+		//     CompetitorStatus.PlayerID, ReservedSlot.ParticipantID,
+		//     team-lineup PlayerIDs (Copilot PR #185 round-3: an
+		//     alternative that regenerated non-UUID ids at save time
+		//     would silently orphan all those references).
+		//   - Auto-detected `hasIDs` (UUID-shape sniff on the first
+		//     row): keep the per-record uuidRE check so mixed-format
+		//     legacy files (some rows with UUID ids, some without)
+		//     load both kinds correctly — TestStore_ParticipantsCSV_MixedIDs
+		//     pins this contract.
 		dataStart := 0
-		if hasIDs && len(record) > 0 && uuidRE(strings.TrimSpace(record[0])) {
-			dataStart = 1
+		if hasIDs && len(record) > 0 {
+			if trustHint || uuidRE(strings.TrimSpace(record[0])) {
+				dataStart = 1
+			}
 		}
 		dataFields := record[dataStart:]
 
@@ -580,15 +688,38 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		return err
 	}
 
-	// Invalidate participant caches (with and without seeds) so the next Load
-	// sees the fresh data without a disk re-read.
-	for _, key := range []string{"participants.csv", "participants_with_seeds.csv"} {
+	// Invalidate every parse-mode variant of the participant cache so a
+	// subsequent Load (regardless of HasIDs hint / WithSeeds) re-parses
+	// from the freshly-written file. See participantsCacheKey for the
+	// matrix mp-p7n round-6 split into.
+	s.invalidateParticipantCaches(compID)
+
+	return nil
+}
+
+// invalidateParticipantCaches drops every parse-mode variant of the
+// participant cache for compID. Called after a participants.csv write
+// (saveParticipantsNoLock) AND after a competition config write
+// (saveCompetitionChangedLocked) — the latter is load-bearing because
+// the load decision depends on Competition.HasParticipantIDs, so a flag
+// flip must force a re-parse even when participants.csv is untouched.
+//
+// mp-p7n / Copilot PR #185 round-9: this replaces sole reliance on
+// config.md's mtime in the cache key. On a filesystem with coarse
+// timestamp resolution, a save + flag-flip in quick succession can
+// land the same summed mtime and leave the auto-detect cache serving
+// the shifted parse. Explicit invalidation on the config write is
+// deterministic regardless of timestamp granularity. The config.md
+// mtime stays in the cache key as cheap cross-process defense.
+//
+// Each variant uses its own cache.mu; this is safe to call while the
+// per-comp lock is held (different lock) and acquires no other lock.
+func (s *Store) invalidateParticipantCaches(compID string) {
+	for _, key := range allParticipantsCacheKeys() {
 		cache := s.getFileCache(compID, key)
 		cache.mu.Lock()
 		cache.data = nil
 		cache.mtime = 0
 		cache.mu.Unlock()
 	}
-
-	return nil
 }

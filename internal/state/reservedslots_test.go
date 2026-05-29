@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -149,6 +150,55 @@ func TestStore_ReservedSlots_LoadParticipantsLocked_WithSeeds(t *testing.T) {
 		}
 	}
 	assert.NotNil(t, slot)
+}
+
+// mp-p7n / Copilot PR #185 round-9 follow-up: AddReservedSlot loads the
+// whole roster via loadParticipantsLocked, appends the placeholder, then
+// saves it all back. Before delegating loadParticipantsLocked to the
+// canonical loader, that path used auto-detect only (no HasParticipantIDs
+// consultation), so a roster with non-UUID ids (the JS `${compID}-p${N}`
+// shape) would column-shift on load and the shift would be PERSISTED by
+// the subsequent save. This test pins the fix: adding a reserved slot to
+// such a roster must NOT corrupt the existing participants.
+func TestStore_AddReservedSlot_PreservesNonUUIDIDRoster(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "asddasd"
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Asddasd", WithZekkenName: false, HasParticipantIDs: true,
+	}))
+
+	// Roster with non-UUID ids in column 0 (the bug-prone shape).
+	participantsPath := filepath.Join(dir, "competitions", compID, "participants.csv")
+	require.NoError(t, os.WriteFile(participantsPath,
+		[]byte("asddasd-p1,Aaron Adams,Team Alpha\nasddasd-p2,Albus Blake,Team Delta\n"), 0600))
+
+	// Add a reserved slot — this triggers loadParticipantsLocked →
+	// (append placeholder) → saveParticipantsLocked.
+	_, err = store.AddReservedSlot(compID, "source", 1, false)
+	require.NoError(t, err)
+
+	// The two real participants must still be correctly aligned after
+	// the load→modify→save round-trip. Pre-fix loadParticipantsLocked
+	// would have shifted them (Name="Asddasd-P1", Dojo="Aaron Adams",
+	// Metadata=["Team Alpha"]) and persisted that.
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, players, 3) // 2 real + 1 reserved placeholder
+
+	byID := map[string]domain.Player{}
+	for _, p := range players {
+		byID[p.ID] = p
+	}
+	require.Contains(t, byID, "asddasd-p1", "original non-UUID id must be preserved")
+	assert.Equal(t, "Aaron Adams", byID["asddasd-p1"].Name)
+	assert.Equal(t, "Team Alpha", byID["asddasd-p1"].Dojo)
+	assert.Empty(t, byID["asddasd-p1"].Metadata,
+		"Metadata must be empty — a column shift would have dumped the dojo here")
+	assert.Equal(t, "Albus Blake", byID["asddasd-p2"].Name)
+	assert.Equal(t, "Team Delta", byID["asddasd-p2"].Dojo)
 }
 
 func TestStore_AddReservedSlot_Idempotency(t *testing.T) {

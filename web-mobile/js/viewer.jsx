@@ -619,6 +619,18 @@ export function mymatchQueueLabel(m) {
   return `${qp - 1} before yours`;
 }
 
+// subBoutLabel — center label for a team sub-bout row. The daihyosen
+// (representative bout) is stored with the sentinel position -1 (see
+// admin_scoring_modal.jsx buildPatch); render it as "Daihyosen" (matching
+// admin_pools.jsx wording) rather than the literal "Match -1" the
+// `position || index+1` fallback would otherwise produce. Shared by both
+// viewer sub-row sites (MatchDetailCard, MatchViewerModal). Exported for
+// unit-testing.
+export function subBoutLabel(sub, index) {
+  if (sub && sub.position === -1) return "Daihyosen";
+  return `Match ${(sub && sub.position) || index + 1}`;
+}
+
 // MyMatchPanel — "Find my matches" entry point + active "Your next match"
 // card. Two states:
 //   1) No followed player yet → render a picker; selecting persists to
@@ -1341,7 +1353,10 @@ function MatchDetailCard({ match, onClose }) {
             return (
               <div key={i} className="match-detail-card__sub-row">
                 <span className="match-detail-card__sub-score">{sB}</span>
-                <span className="match-detail-card__sub-pos">Match {sub.position || i + 1}</span>
+                <span className="match-detail-card__sub-pos">
+                  {subBoutLabel(sub, i)}
+                  {sub.decidedByHantei && <span className="match-detail-card__decision" data-testid="sub-row-hantei" style={{ marginLeft: 6 }}>Hantei</span>}
+                </span>
                 <span className="match-detail-card__sub-score match-detail-card__sub-score--right">{sA}</span>
               </div>
             );
@@ -1885,7 +1900,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2394,7 +2409,8 @@ function MatchViewerModal({ match, onClose }) {
                      {hansokuB > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuB}</span>}
                    </div>
                    <div style={{ flex: 1, textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>
-                     Match {sub.position || i+1}
+                     {subBoutLabel(sub, i)}
+                     {sub.decidedByHantei && <span data-testid="sub-pool-hantei" style={{ marginLeft: 6, fontWeight: 600 }}>Hantei</span>}
                    </div>
                    <div style={{ width: 80, textAlign: "right", display: "flex", flexDirection: "column" }}>
                      <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsA || "—"}</span>

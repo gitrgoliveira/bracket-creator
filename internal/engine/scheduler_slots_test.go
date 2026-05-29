@@ -422,3 +422,23 @@ func TestParseClockHHMM_FallbackTo0900(t *testing.T) {
 	assert.Equal(t, "09:00", fallback("not-a-time"), "malformed must fall back to 09:00")
 	assert.Equal(t, "09:00", fallback("9:00"), "missing leading zero must fall back to 09:00")
 }
+
+// TestAssignSlots_EmptyReturnsDayStartNotZero pins the hardened contract: with a
+// valid comp but no matches/rounds, the returned end-cursor is the dayStart
+// anchor (so a post-draw consumer's cursor.Sub(dayStart) yields 0, not a bogus
+// ~1-year duration from a year-zero time.Time). A zero time.Time is returned
+// only when comp is nil.
+func TestAssignSlots_EmptyReturnsDayStartNotZero(t *testing.T) {
+	comp := &state.Competition{Courts: []string{"A"}, StartTime: "09:00"}
+	dayStart := parseClockHHMM(comp.StartTime)
+
+	_, poolCur := assignPoolMatchSlots(nil, comp, nil)
+	assert.True(t, poolCur.Equal(dayStart), "empty pool slots should return dayStart")
+	assert.Equal(t, 0.0, poolCur.Sub(dayStart).Minutes(), "empty pool duration must be 0")
+
+	brkCur := assignBracketMatchSlots(nil, comp, nil)
+	assert.True(t, brkCur.Equal(dayStart), "empty bracket slots should return dayStart")
+
+	_, nilCur := assignPoolMatchSlots(nil, nil, nil)
+	assert.True(t, nilCur.IsZero(), "nil comp should return zero time.Time")
+}

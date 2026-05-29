@@ -243,6 +243,7 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
 function CompCard({ c, onOpen, onStart }) {
   const { live: liveCount } = compMatchStats(c);
   const playerCount = (c.players || []).length;
+  const courts = c.courts || [];
 
   return (
     <div
@@ -264,14 +265,14 @@ function CompCard({ c, onOpen, onStart }) {
             {c.date && c.startTime && " · "}
             {c.startTime && `Starts ${c.startTime}`}
             {" · "}
-            {c.courts.join(", ")}
+            {courts.join(", ")}
           </div>
         </div>
         <StatusBadge status={c.status} />
       </div>
       <div className="tcard__stats">
         <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
-        <div className="tcard__stat"><div className="v">{c.courts.length}</div><div className="l">{pluralize(c.courts.length, "Shiaijo", "Shiaijo")}</div></div>
+        <div className="tcard__stat"><div className="v">{courts.length}</div><div className="l">{pluralize(courts.length, "Shiaijo", "Shiaijo")}</div></div>
         <div className="tcard__stat"><div className="v">{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
         {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Live</div></div>}
       </div>
@@ -324,4 +325,5 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
 window.Breadcrumbs = Breadcrumbs;
 window.AdminTopbar = AdminTopbar;
 window.AdminDashboard = AdminDashboard;
+window.CompCard = CompCard;
 window.CourtPicker = CourtPicker;

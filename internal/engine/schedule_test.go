@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -463,44 +464,51 @@ func TestEstimateForCounts_NoCourts(t *testing.T) {
 // Step 3: balanced fixture cross-path equality test
 // ---------------------------------------------------------------------------
 
-// TestEstimateForCountsVsSlotAssigner_BalancedUnbuffered asserts that
-// EstimateForCounts (pre-draw path) equals the max end-cursor from
-// assignPoolMatchSlots (post-draw path) for a perfectly balanced fixture with no
-// buffer. This is the only legitimate cross-regime equality assertion (balanced +
-// unbuffered). The two should agree because both ultimately call perMatchElapsed
-// and distribute evenly.
-func TestEstimateForCountsVsSlotAssigner_BalancedUnbuffered(t *testing.T) {
+// TestEstimateForCountsVsSlotAssigner_Balanced asserts the cross-path
+// relationship between EstimateForCounts (pre-draw) and assignPoolMatchSlots'
+// end-cursor (post-draw) for a perfectly balanced fixture: they differ ONLY by
+// the slowest-court buffer, which EstimateForCounts applies and the slot
+// assigner does not. So EstimateForCounts.Total == round(slotDuration × (1 +
+// buffer/100)).
+//
+// NOTE the buffer is set explicitly to 10 here: a zero buffer is unreachable
+// because EstimateForCounts runs ApplyTournamentDefaults, which rewrites 0 → 10%
+// (a true unbuffered EstimateForCounts cannot exist). The fixture uses
+// integer-clean durations (4min × 1.5 = 6min/match) and a meaningful magnitude
+// (10 matches/court = 60min) so the relationship is exercised, not coincidental.
+func TestEstimateForCountsVsSlotAssigner_Balanced(t *testing.T) {
+	const bufferPct = 10
 	comp := &state.Competition{
 		Kind:              "individual",
 		Courts:            []string{"A", "B"},
-		PoolMatchDuration: 3,
+		PoolMatchDuration: 4,
 		StartTime:         "09:00",
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
-		SlowestCourtBufferPct:    0, // no buffer — otherwise the paths differ by design
+		SlowestCourtBufferPct:    bufferPct, // explicit so ApplyTournamentDefaults is a no-op
 	}
 
-	// Build a balanced fixture: 4 pool matches, 2 per court.
-	matches := []state.MatchResult{
-		{ID: "p1-0", Court: "A"},
-		{ID: "p1-1", Court: "A"},
-		{ID: "p2-0", Court: "B"},
-		{ID: "p2-1", Court: "B"},
+	// Balanced fixture: 20 pool matches, 10 per court.
+	matches := make([]state.MatchResult, 0, 20)
+	for i := range 10 {
+		matches = append(matches,
+			state.MatchResult{ID: fmt.Sprintf("A-%d", i), Court: "A"},
+			state.MatchResult{ID: fmt.Sprintf("B-%d", i), Court: "B"})
 	}
 	_, maxCursor := assignPoolMatchSlots(matches, comp, tournament)
 
 	dayStart := parseClockHHMM(comp.StartTime)
-	slotDuration := int(math.Round(maxCursor.Sub(dayStart).Minutes()))
+	slotDuration := maxCursor.Sub(dayStart).Minutes() // unbuffered (slot assigner ignores buffer)
+	expected := int(math.Round(slotDuration * (1 + float64(bufferPct)/100)))
 
-	est := EstimateForCounts(4, 0, comp, tournament)
-	// Both paths should produce the same max-court duration for balanced unbuffered.
-	// Allow 1 minute rounding tolerance.
-	delta := est.TotalDurationMinutes - slotDuration
+	est := EstimateForCounts(20, 0, comp, tournament)
+	// EstimateForCounts == buffered slot duration. Allow 1 minute rounding tolerance.
+	delta := est.TotalDurationMinutes - expected
 	if delta < 0 {
 		delta = -delta
 	}
 	assert.LessOrEqual(t, delta, 1,
-		"EstimateForCounts (%d) should equal slot-assigner end-cursor (%d) for balanced unbuffered fixture",
-		est.TotalDurationMinutes, slotDuration)
+		"EstimateForCounts (%d) should equal buffered slot-assigner duration (%d) for balanced fixture",
+		est.TotalDurationMinutes, expected)
 }

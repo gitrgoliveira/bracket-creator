@@ -226,15 +226,17 @@ func IsDraw(decision string) bool {
 }
 
 type SubMatchResult struct {
-	Position int      `json:"position"`
-	SideA    string   `json:"sideA"`
-	SideB    string   `json:"sideB"`
-	IpponsA  []string `json:"ipponsA"`
-	IpponsB  []string `json:"ipponsB"`
-	HansokuA int      `json:"hansokuA"`
-	HansokuB int      `json:"hansokuB"`
-	Winner   string   `json:"winner"`
-	Decision string   `json:"decision"`
+	Position        int            `json:"position"`
+	SideA           string         `json:"sideA"`
+	SideB           string         `json:"sideB"`
+	IpponsA         []string       `json:"ipponsA"`
+	IpponsB         []string       `json:"ipponsB"`
+	HansokuA        int            `json:"hansokuA"`
+	HansokuB        int            `json:"hansokuB"`
+	Winner          string         `json:"winner"`
+	Decision        string         `json:"decision"`
+	DecidedByHantei bool           `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+	Encho           *EnchoMetadata `json:"encho,omitempty"           yaml:"encho,omitempty"`
 }
 
 type MatchResult struct {
@@ -316,6 +318,42 @@ type EnchoMetadata struct {
 	PeriodCount int `json:"periodCount" yaml:"periodCount"`
 }
 
+// Clone returns a deep copy of the encho metadata, or nil if e is nil.
+// Used by the match/bracket copy paths so cached state never shares an
+// Encho pointer with a returned value.
+func (e *EnchoMetadata) Clone() *EnchoMetadata {
+	if e == nil {
+		return nil
+	}
+	c := *e
+	return &c
+}
+
+// cloneSubResults deep-copies a sub-result slice so cached state never shares
+// the IpponsA/IpponsB slices or nested Encho pointers with a returned value.
+// Used by both the pool match copy path (copyMatchResults) and the bracket
+// copy path (copyBracket) — keep them aligned. Returns nil for a nil input so
+// the omitempty/preserve semantics round-trip unchanged.
+func cloneSubResults(subs []SubMatchResult) []SubMatchResult {
+	if subs == nil {
+		return nil
+	}
+	out := make([]SubMatchResult, len(subs))
+	for i, sr := range subs {
+		out[i] = sr
+		if sr.IpponsA != nil {
+			out[i].IpponsA = make([]string, len(sr.IpponsA))
+			copy(out[i].IpponsA, sr.IpponsA)
+		}
+		if sr.IpponsB != nil {
+			out[i].IpponsB = make([]string, len(sr.IpponsB))
+			copy(out[i].IpponsB, sr.IpponsB)
+		}
+		out[i].Encho = sr.Encho.Clone()
+	}
+	return out
+}
+
 type PlayerStanding struct {
 	Player           domain.Player `json:"player"`
 	Wins             int           `json:"wins"`
@@ -357,6 +395,9 @@ type BracketMatch struct {
 	// DecidedByHantei mirrors MatchResult.DecidedByHantei for bracket reads.
 	// YAML tag included for parity with MatchResult and future YAML-serialised contexts.
 	DecidedByHantei bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+	// SubResults persists per-bout results for team bracket matches so the
+	// score editor can restore hantei state and bout-level detail on re-open.
+	SubResults []SubMatchResult `json:"subResults,omitempty"`
 }
 
 type Bracket struct {

@@ -230,6 +230,22 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 			// to its prior state before returning 409 so the operator
 			// sees a clean rejection rather than a mutated match.
 			if prior != nil {
+				// Normalize nil SubResults to an explicit empty slice so the
+				// nil-preserve branch in recordBracketMatchResult treats
+				// this as "clear sub-results" rather than "leave the
+				// partially-written SubResults in place".
+				if prior.SubResults == nil {
+					prior.SubResults = []state.SubMatchResult{}
+				}
+				// Same nil-collision on the sibling field: lookupExistingResult
+				// projects DecidedByHantei through HanteiPtr, which collapses a
+				// stored false to nil. nil then hits the nil-preserve branch in
+				// recordBracketMatchResult, leaving a partially-written hantei
+				// flag in place. Force an explicit false so rollback clears it.
+				if prior.DecidedByHantei == nil {
+					clearHantei := false
+					prior.DecidedByHantei = &clearHantei
+				}
 				_ = e.writeMatchResult(compId, matchId, prior)
 			}
 			return nil, err
@@ -601,6 +617,16 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
+					if result.SubResults != nil {
+						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
+					}
+					// Project the persisted sub-results back into result so the
+					// HTTP response and SSE broadcast reflect committed state —
+					// mirrors the DecidedByHantei projection below. Without this a
+					// nil-preserve re-score would keep the stored bouts on disk but
+					// emit an omitted subResults payload in the same turn.
+					result.SubResults = bracket.Rounds[rIdx][mIdx].SubResults
 					// DecidedByHantei uses *bool so that a client that omits the
 					// field (nil) preserves the stored value, while an explicit
 					// true/false applies it. This prevents a re-score that doesn't

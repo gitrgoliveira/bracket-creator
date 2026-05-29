@@ -635,6 +635,61 @@ func TestRecordBracketMatchResult_DecidedByHantei_RoundTrips(t *testing.T) {
 	assert.True(t, *rescore.DecidedByHantei, "projected value must reflect the preserved stored true")
 }
 
+func TestRecordBracketMatchResult_SubResults_RoundTrips(t *testing.T) {
+	// mp-4pc: team bracket matches carry per-bout SubResults that must
+	// survive the disk round-trip so the score editor can restore bout-level
+	// detail on re-open. The persistence uses nil-vs-empty semantics: a nil
+	// SubResults slice preserves the stored bouts; a non-nil empty slice
+	// explicitly clears them.
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-subresults"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	firstMatchID := bracket.Rounds[0][0].ID
+	sideA := bracket.Rounds[0][0].SideA
+
+	subs := []state.SubMatchResult{
+		{Position: 1, SideA: sideA, IpponsA: []string{"M", "K"}, Winner: sideA},
+		{Position: 2, SideA: sideA, IpponsB: []string{"D"}},
+	}
+	require.NoError(t, eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
+		Winner:     sideA,
+		Status:     state.MatchStatusCompleted,
+		SubResults: subs,
+	}))
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, bracket.Rounds[0][0].SubResults, 2, "SubResults must persist across the disk round-trip")
+	assert.Equal(t, sideA, bracket.Rounds[0][0].SubResults[0].Winner)
+	assert.Equal(t, []string{"M", "K"}, bracket.Rounds[0][0].SubResults[0].IpponsA)
+
+	// nil SubResults on re-score preserves the stored bouts.
+	require.NoError(t, eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
+		Winner:     sideA,
+		Status:     state.MatchStatusCompleted,
+		SubResults: nil,
+	}))
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Len(t, bracket.Rounds[0][0].SubResults, 2, "nil SubResults must preserve the stored bouts")
+
+	// A non-nil empty slice explicitly clears the stored bouts.
+	require.NoError(t, eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
+		Winner:     sideA,
+		Status:     state.MatchStatusCompleted,
+		SubResults: []state.SubMatchResult{},
+	}))
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Empty(t, bracket.Rounds[0][0].SubResults, "explicit empty SubResults must clear the stored bouts")
+}
+
 func TestRecordBracketMatchResult_SecondMatch_PropagatesAsSideB(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-sideb"

@@ -225,6 +225,62 @@ func TestCopyBracket_Nil(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+// TestLoadBracket_DeepCopyIsolation guards copyBracket's deep-copy of the
+// reference-type fields on BracketMatch (Encho pointer, SubResults slice and
+// each SubMatchResult's IpponsA/IpponsB/Encho). A shallow copy would alias the
+// cached backing array/pointers, so a caller mutating a returned match in place
+// could silently corrupt cached state without going through Save/UpdateBracket.
+// Mirrors the pool-match copy path (copyMatchResults / cloneSubResults).
+func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	initial := &Bracket{
+		Rounds: [][]BracketMatch{
+			{
+				{
+					ID:    "M1",
+					SideA: "Team A",
+					SideB: "Team B",
+					Encho: &EnchoMetadata{PeriodCount: 1},
+					SubResults: []SubMatchResult{
+						{
+							SideA:   "A1",
+							SideB:   "B1",
+							IpponsA: []string{"M"},
+							IpponsB: []string{"K"},
+							Encho:   &EnchoMetadata{PeriodCount: 2},
+						},
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, initial))
+
+	// First load, then mutate every reference field on the returned copy in
+	// place — without calling Save/UpdateBracket.
+	first, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	first.Rounds[0][0].Encho.PeriodCount = 99
+	first.Rounds[0][0].SubResults[0].IpponsA[0] = "MUTATED"
+	first.Rounds[0][0].SubResults[0].IpponsB[0] = "MUTATED"
+	first.Rounds[0][0].SubResults[0].Encho.PeriodCount = 99
+	first.Rounds[0][0].SubResults = append(first.Rounds[0][0].SubResults, SubMatchResult{SideA: "leak"})
+
+	// A fresh load must reflect the saved state, not the in-place mutation.
+	second, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, second.Rounds[0][0].SubResults, 1, "appended sub-result must not leak into cache")
+	assert.Equal(t, 1, second.Rounds[0][0].Encho.PeriodCount)
+	assert.Equal(t, []string{"M"}, second.Rounds[0][0].SubResults[0].IpponsA)
+	assert.Equal(t, []string{"K"}, second.Rounds[0][0].SubResults[0].IpponsB)
+	assert.Equal(t, 2, second.Rounds[0][0].SubResults[0].Encho.PeriodCount)
+}
+
 // TestParseBracketFile_MalformedJSON covers the parseBracketBytes error
 // branch inside parseBracketFile.
 func TestParseBracketFile_MalformedJSON(t *testing.T) {

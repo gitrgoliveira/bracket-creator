@@ -218,10 +218,9 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		//     whatever shape. Preserves non-UUID ids (a client/import
 		//     path may carry one) and keeps them joinable with other
 		//     persisted state that references the player by id —
-		//     CompetitorStatus.PlayerID, ReservedSlot.ParticipantID,
-		//     team-lineup PlayerIDs (Copilot PR #185 round-3: an
-		//     alternative that regenerated non-UUID ids at save time
-		//     would silently orphan all those references).
+		//     CompetitorStatus.PlayerID, team-lineup PlayerIDs (Copilot
+		//     PR #185 round-3: an alternative that regenerated non-UUID
+		//     ids at save time would silently orphan all those references).
 		//   - Auto-detected `hasIDs` (UUID-shape sniff on the first
 		//     row): keep the per-record uuidRE check so mixed-format
 		//     legacy files (some rows with UUID ids, some without)
@@ -531,8 +530,21 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	return &players[foundIdx], nil
 }
 
+// loadParticipantsLocked reads participants (with seeds merged) without
+// acquiring a lock. Caller must hold the per-comp lock for compID. Used by
+// the StoreTx transaction handle (transactions.go), which already holds the
+// per-comp lock across its load/save sequence.
+//
+// Delegates to the canonical loadParticipantsNoLock (WithSeeds:true, no HasIDs
+// hint → it consults Competition.HasParticipantIDs and keeps the per-record
+// uuidRE fallback for mixed legacy files) so the parse logic lives in one
+// place.
+func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]domain.Player, error) {
+	return s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: true})
+}
+
 // marshalParticipantsCSV serialises players into RFC 4180 CSV bytes.
-// Shared by saveParticipantsNoLock and saveParticipantsLocked so the
+// Shared by saveParticipantsNoLock and the single-add endpoint so the
 // display-name and checked_in logic is defined once.
 //
 // withZekkenName MUST match the value the next LoadParticipants will use.

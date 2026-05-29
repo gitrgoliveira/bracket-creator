@@ -626,7 +626,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       poolMatches={detail?.poolMatches}
       standings={detail?.standings}
       bracket={detail?.bracket}
-      reservedSlots={detail?.reservedSlots || []}
       section={view.section}
       onSection={(section) => setView({ ...view, section })}
       onBack={() => setView({ kind: "dashboard" })}

@@ -312,12 +312,3 @@ func TestNaginataJSONAlwaysPresent(t *testing.T) {
 		assert.NotContains(t, string(data), "naginata", "YAML tag keeps omitempty: false must not appear in config.md")
 	})
 }
-
-// TestLoadReservedSlots_InvalidCompID covers the ValidateCompetitionID
-// error branch in LoadReservedSlots.
-func TestLoadReservedSlots_InvalidCompID(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-	_, err = store.LoadReservedSlots("")
-	assert.Error(t, err)
-}

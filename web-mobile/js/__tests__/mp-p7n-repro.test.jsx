@@ -99,24 +99,6 @@ describe('mp-p7n: Apply with clean 2-col paste does not introduce a phantom lead
     expect(afterLines).toEqual(lines);
   });
 
-  it('Reserved-slot players (Tag=reserved) round-trip without phantom column', () => {
-    // The screenshot shows reserved slots as 2-col entries
-    // "Reserved: Naginata-Test Rank 1, TBD". Verify the serialiser
-    // produces that shape and the parse/mint chain preserves it.
-    const reserved = {
-      id: 'rsv-1',
-      name: 'Reserved: Naginata-Test Rank 1',
-      dojo: 'TBD',
-      displayName: 'Rsv Naginata-Test #1',
-      danGrade: '',
-      tag: 'reserved',
-      seed: null,
-      checkedIn: false,
-    };
-    const text = generateText([reserved], false);
-    expect(text).toBe('Reserved: Naginata-Test Rank 1, TBD');
-  });
-
   it('regression: simulating a corrupted starting state where p.name = id-shaped, p.dojo = real name, p.danGrade = team', () => {
     // If the user's c.players is ALREADY corrupt (3-col shift), what
     // does generateText render? This codifies the post-bug state from

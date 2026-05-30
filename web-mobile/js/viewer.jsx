@@ -1146,7 +1146,7 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   );
 }
 
-function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, _onAdminClick, tweaks }) {
+function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, tweaks }) {
   const [tab, setTab] = useState("overview");
   const c = competition;
 
@@ -1443,13 +1443,20 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 
   // draw-ready: the draw is published but no match has been called yet.
   // The comp is not live, so the Overview has no live/recent matches to
-  // show — point spectators to the now-available Pools/Bracket tabs.
+  // show — point spectators to the now-available tabs. Swiss comps render a
+  // Standings tab instead of Pools/Bracket (same isSwiss signal as the tab
+  // logic in ViewerCompetition), so the pointer text must match.
   if (c.status === "draw-ready") {
+    const isSwiss = c.format === "swiss";
     return (
       <div className="empty" style={{ padding: 32 }}>
         <div className="icon">📋</div>
         <h3>Draw is ready</h3>
-        <div style={{ fontSize: 13 }}>Starts at {c.startTime}. Browse the Pools and Bracket tabs to see the draw.</div>
+        <div style={{ fontSize: 13 }}>
+          Starts at {c.startTime}. {isSwiss
+            ? "Check the Standings tab to follow the rounds."
+            : "Browse the Pools and Bracket tabs to see the draw."}
+        </div>
       </div>
     );
   }

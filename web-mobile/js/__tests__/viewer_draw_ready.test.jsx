@@ -286,6 +286,16 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
     expect(text).toContain('Not started yet');
     expect(text).not.toContain('Draw is ready');
   });
+
+  it('draw-ready SWISS comp points to the Standings tab, NOT Pools/Bracket', () => {
+    // Swiss renders a Standings tab instead of Pools/Bracket, so the
+    // "browse the Pools and Bracket tabs" wording would be misleading.
+    const tree = runtime.mount(ViewerOverview, { c: { status: 'draw-ready', format: 'swiss', startTime: '09:00' }, ...baseProps });
+    const text = collectText(tree);
+    expect(text).toContain('Draw is ready');
+    expect(text).toContain('Standings');
+    expect(text).not.toContain('Pools and Bracket');
+  });
 });
 
 // mp-rrd: the home page must NOT treat a draw-ready comp as live. liveCompIds

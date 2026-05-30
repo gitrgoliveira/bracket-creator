@@ -423,22 +423,47 @@ func TestParseClockHHMM_FallbackTo0900(t *testing.T) {
 	assert.Equal(t, "09:00", fallback("9:00"), "missing leading zero must fall back to 09:00")
 }
 
-// TestAssignSlots_EmptyReturnsDayStartNotZero pins the hardened contract: with a
-// valid comp but no matches/rounds, the returned end-cursor is the dayStart
-// anchor (so a post-draw consumer's cursor.Sub(dayStart) yields 0, not a bogus
-// ~1-year duration from a year-zero time.Time). A zero time.Time is returned
-// only when comp is nil.
-func TestAssignSlots_EmptyReturnsDayStartNotZero(t *testing.T) {
+// TestAssignSlots_EmptyReturnsStartAnchorNotZero pins the hardened contract:
+// with a valid comp but no matches/rounds, the returned end-cursor is the
+// per-court start anchor (dayStart + OpeningBlock) — matching where the first
+// match would have started and EstimateForCounts(0,…) — so a post-draw
+// consumer's cursor.Sub(dayStart) yields the opening offset (0 with no opening),
+// never a bogus ~1-year duration. A zero time.Time is returned only when comp
+// is nil.
+func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	comp := &state.Competition{Courts: []string{"A"}, StartTime: "09:00"}
 	dayStart := parseClockHHMM(comp.StartTime)
 
+	// No opening block (nil tournament) → anchor == dayStart, duration 0.
 	_, poolCur := assignPoolMatchSlots(nil, comp, nil)
-	assert.True(t, poolCur.Equal(dayStart), "empty pool slots should return dayStart")
+	assert.True(t, poolCur.Equal(dayStart), "empty pool slots (no opening) should return dayStart")
 	assert.Equal(t, 0.0, poolCur.Sub(dayStart).Minutes(), "empty pool duration must be 0")
 
 	brkCur := assignBracketMatchSlots(nil, comp, nil)
-	assert.True(t, brkCur.Equal(dayStart), "empty bracket slots should return dayStart")
+	assert.True(t, brkCur.Equal(dayStart), "empty bracket slots (no opening) should return dayStart")
 
+	// With a 30m opening block → anchor == dayStart + 30m (consistent with the
+	// non-empty path, where the first match starts at dayStart+OpeningBlock).
+	tourn := &state.Tournament{OpeningBlock: "30m"}
+	_, poolCurOpen := assignPoolMatchSlots(nil, comp, tourn)
+	assert.Equal(t, 30.0, poolCurOpen.Sub(dayStart).Minutes(), "empty pool with 30m opening must anchor at +30m")
+	brkCurOpen := assignBracketMatchSlots(nil, comp, tourn)
+	assert.Equal(t, 30.0, brkCurOpen.Sub(dayStart).Minutes(), "empty bracket with 30m opening must anchor at +30m")
+
+	// nil comp → zero time.Time (dayStart cannot be derived).
 	_, nilCur := assignPoolMatchSlots(nil, nil, nil)
 	assert.True(t, nilCur.IsZero(), "nil comp should return zero time.Time")
+}
+
+// TestEstimateForCounts_NegativeCountsClamped verifies negative match counts are
+// clamped to 0 rather than producing negative/nonsensical durations
+// (Copilot review #3326935837).
+func TestEstimateForCounts_NegativeCountsClamped(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 4, 4, "09:00")
+	tourn := newTournament(1.5, 10, "", "", "")
+	neg := EstimateForCounts(-5, -3, comp, tourn)
+	zero := EstimateForCounts(0, 0, comp, tourn)
+	assert.Equal(t, zero.TotalDurationMinutes, neg.TotalDurationMinutes,
+		"negative counts must clamp to 0 (same as the empty estimate)")
+	assert.GreaterOrEqual(t, neg.TotalDurationMinutes, 0, "duration must never be negative")
 }

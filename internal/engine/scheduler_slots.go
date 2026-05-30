@@ -159,26 +159,25 @@ func skipCeremonyBlocks(t, lunchStart time.Time, lunchDurationMin int) time.Time
 // end. Any match whose start would fall inside LunchBlock is pushed
 // past the block before its ScheduledAt is recorded. T150, T151.
 //
-// Mutates `matches` in place (pointer semantics on slice header,
-// since MatchResult values are kept by value). Returns the mutated
-// slice for ergonomic chaining, and the maximum per-court end-cursor
+// Mutates `matches` in place: the slice header is passed by value, but
+// element writes via indexing reach the caller's underlying array. Returns
+// the same slice for ergonomic chaining, and the maximum per-court end-cursor
 // (i.e. the clock time when the last match on the busiest court
 // finishes). The end-cursor is used by EstimateForCounts to derive a
 // duration for the post-draw regime. Callers that only want the
 // mutated slice may discard the second return value.
 //
-// The end-cursor is the dayStart anchor (comp.StartTime) when there are no
-// matches — so a post-draw consumer computing cursor.Sub(dayStart) gets a
-// 0-minute duration rather than a bogus year-from-zero value. A zero time.Time
+// The end-cursor is the per-court start anchor (comp.StartTime + OpeningBlock)
+// when there are no matches — matching where the first match on each court
+// would have started, and consistent with EstimateForCounts(0,…). So a
+// post-draw consumer computing cursor.Sub(dayStart) gets the opening offset (or
+// 0 with no OpeningBlock), never a bogus year-from-zero value. A zero time.Time
 // is returned ONLY when comp is nil (dayStart cannot be derived).
 func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) ([]state.MatchResult, time.Time) {
 	if comp == nil {
 		return matches, time.Time{}
 	}
 	dayStart := parseClockHHMM(comp.StartTime)
-	if len(matches) == 0 {
-		return matches, dayStart
-	}
 	openingMin := 0
 	lunchMin := 0
 	var lunchStart time.Time
@@ -186,6 +185,9 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 		openingMin = parseDurationMinutes(tournament.OpeningBlock)
 		lunchMin = parseDurationMinutes(tournament.LunchBlock)
 		lunchStart = parseClockHHMM(defaultLunchStartClock)
+	}
+	if len(matches) == 0 {
+		return matches, dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
 
 	courtCursor := map[string]time.Time{}
@@ -239,16 +241,14 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 // last match on the busiest court finishes). Callers that only want
 // the in-place mutation may discard the return value.
 //
-// As with assignPoolMatchSlots, the end-cursor is the dayStart anchor when
-// there are no rounds, and a zero time.Time only when comp is nil.
+// As with assignPoolMatchSlots, the end-cursor is the per-court start anchor
+// (comp.StartTime + OpeningBlock) when there are no rounds, and a zero
+// time.Time only when comp is nil.
 func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competition, tournament *state.Tournament) time.Time {
 	if comp == nil {
 		return time.Time{}
 	}
 	dayStart := parseClockHHMM(comp.StartTime)
-	if len(rounds) == 0 {
-		return dayStart
-	}
 	openingMin := 0
 	lunchMin := 0
 	var lunchStart time.Time
@@ -256,6 +256,9 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 		openingMin = parseDurationMinutes(tournament.OpeningBlock)
 		lunchMin = parseDurationMinutes(tournament.LunchBlock)
 		lunchStart = parseClockHHMM(defaultLunchStartClock)
+	}
+	if len(rounds) == 0 {
+		return dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
 
 	courtCursor := map[string]time.Time{}

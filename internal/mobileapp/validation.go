@@ -37,6 +37,10 @@ const (
 	MaxLenTournamentPassword = 256 // not trimmed; cap prevents megabyte payloads
 	MaxLenCeremonyBlock      = 16  // "1h30m" etc.
 
+	// MaxTournamentDurationDays is the upper bound on Tournament.DurationDays.
+	// 30 days covers the longest conceivable multi-day open tournament.
+	MaxTournamentDurationDays = 30
+
 	MaxLenCompetitionName         = 200
 	MaxLenCompetitionNumberPrefix = 3 // matches admin UI maxLength="3"
 	MaxLenCompetitionStartTime    = 8 // "HH:MM"

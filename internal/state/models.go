@@ -14,6 +14,14 @@ type Tournament struct {
 	Courts   []string `yaml:"courts" json:"courts"`
 	Password string   `yaml:"password" json:"password"`
 
+	// DurationDays is the number of consecutive calendar days this
+	// tournament spans, starting from Date (Day 1). Default 1 (single-day).
+	// Maximum 30. Use Days() to obtain the derived per-day DD-MM-YYYY list.
+	// Stored as omitempty so single-day tournaments (value 1) written by
+	// older code read back cleanly via the zero-→-default migration in
+	// ApplyTournamentDefaults.
+	DurationDays int `yaml:"duration_days,omitempty" json:"durationDays,omitempty"`
+
 	// AdminPassword gates destructive operations (spec 004 / mp-e21):
 	// competition delete, draw/override/invalidate, and participant roster
 	// mutations. It is a SEPARATE, higher-privilege credential from
@@ -60,8 +68,9 @@ type Tournament struct {
 }
 
 // ApplyTournamentDefaults fills zero-valued schedule-estimator tuning
-// fields on t with their canonical defaults: ClockToElapsedMultiplier=1.5
-// and SlowestCourtBufferPct=10. Idempotent; safe to call repeatedly.
+// fields on t with their canonical defaults: ClockToElapsedMultiplier=1.5,
+// SlowestCourtBufferPct=10, and DurationDays=1. Idempotent; safe to call
+// repeatedly.
 // FR-055, FR-057, R9.
 func ApplyTournamentDefaults(t *Tournament) {
 	if t == nil {
@@ -73,6 +82,34 @@ func ApplyTournamentDefaults(t *Tournament) {
 	if t.SlowestCourtBufferPct == 0 {
 		t.SlowestCourtBufferPct = 10
 	}
+	if t.DurationDays == 0 {
+		t.DurationDays = 1
+	}
+}
+
+// Days returns the ordered list of DD-MM-YYYY calendar day strings
+// covered by the tournament, derived from Date + DurationDays. The list
+// has exactly DurationDays entries (Day 1 = Date, Day 2 = Date+1, …).
+//
+// Edge cases — never panics:
+//   - If Date is empty or unparseable, returns nil (no day list available).
+//   - If DurationDays < 1, returns nil.
+//
+// Consumers should call ApplyTournamentDefaults before Days() to ensure
+// DurationDays has its correct minimum of 1.
+func (t *Tournament) Days() []string {
+	if t == nil || t.DurationDays < 1 || t.Date == "" {
+		return nil
+	}
+	base, err := time.Parse("02-01-2006", t.Date)
+	if err != nil {
+		return nil
+	}
+	days := make([]string, t.DurationDays)
+	for i := range days {
+		days[i] = base.AddDate(0, 0, i).Format("02-01-2006")
+	}
+	return days
 }
 
 type Competition struct {

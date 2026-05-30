@@ -7,7 +7,9 @@ const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
+const deriveTournamentDays = window.deriveTournamentDays;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
+const MAX_TOURNAMENT_DURATION_DAYS = window.MAX_TOURNAMENT_DURATION_DAYS;
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
 // Canonical courts cap (admin_helpers.jsx) — mirrors helper.MaxCourts
@@ -96,6 +98,9 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [name, setName] = useStateA(tournament.name);
   const [venue, setVenue] = useStateA(tournament.venue);
   const [date, setDate] = useStateA(tournament.date);
+  // DurationDays: default 1 for tournaments that predate this field
+  // (tournament.durationDays is undefined / 0 for older records).
+  const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
   const [courts, setCourts] = useStateA(tournament.courts.length);
   const [checkInStart, setCheckInStart] = useStateA(tournament.checkInWindowStart || "");
   const [checkInEnd, setCheckInEnd] = useStateA(tournament.checkInWindowEnd || "");
@@ -141,6 +146,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     if (!trimmedName) { setError("Tournament name is required."); return; }
     const { norm, error: dateError } = validateAndNormalizeDate(date);
     if (dateError) { setError(dateError); return; }
+    if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > MAX_TOURNAMENT_DURATION_DAYS) {
+      setError(`Number of days must be a whole number between 1 and ${MAX_TOURNAMENT_DURATION_DAYS}.`);
+      return;
+    }
     if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
     if ((checkInStart && !checkInEnd) || (!checkInStart && checkInEnd)) { setError("Both check-in start and end must be set together, or both must be empty."); return; }
     if (checkInStart && checkInEnd && checkInStart >= checkInEnd) { setError("Check-in start must be before check-in end."); return; }
@@ -149,6 +158,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       name: trimmedName,
       venue: venue.trim(),
       date: norm,
+      durationDays,
       password: pass || undefined,
       courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
       checkInWindowStart: checkInStart || undefined,
@@ -170,14 +180,30 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           <div className="row">
             <div className="field"><label className="field__label">Name</label><input className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} /></div>
             <div className="field">
-              <label className="field__label">Date</label>
+              <label className="field__label">Start date (Day 1)</label>
               {/* Picker bounds mirror AdminSettings's date input in */}
               {/* admin_competition.jsx and the MIN_YEAR/MAX_YEAR range */}
               {/* that validateAndNormalizeDate enforces at handleSave — */}
               {/* keeps the picker from offering years the validator */}
               {/* will then reject on submit. */}
               <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
-              <div className="field__hint">Pick the tournament day.</div>
+              <div className="field__hint">Pick the first day of the tournament.</div>
+            </div>
+            <div className="field">
+              <label className="field__label">Number of days</label>
+              {/* decideNumericUpdate stores NaN for cleared input so render */}
+              {/* side can use Number.isFinite check (same pattern as courts). */}
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max={MAX_TOURNAMENT_DURATION_DAYS}
+                step="1"
+                value={Number.isFinite(durationDays) ? durationDays : ""}
+                onChange={(e) => { setDurationDays(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
+                style={{ maxWidth: 100 }}
+              />
+              <div className="field__hint">{`Duration in days (1–${MAX_TOURNAMENT_DURATION_DAYS}). Multi-day tournaments constrain competitions to their day.`}</div>
             </div>
           </div>
           <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
@@ -459,12 +485,32 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           <div className="row">
             <div className="field">
-              <label className="field__label">Date</label>
-              {/* Picker bounds match validateAndNormalizeDate at create() — */}
-              {/* see the equivalent comment on AdminEditTournament's date */}
-              {/* field above and AdminSettings's date input in */}
-              {/* admin_competition.jsx. */}
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
+              <label className="field__label">Day</label>
+              {/* When the tournament has a start date and durationDays, offer */}
+              {/* a select over the derived day list so the competition date */}
+              {/* is always within the tournament's range. For a single-day */}
+              {/* tournament (or when the tournament has no date yet) a single- */}
+              {/* option select is shown so the label matches the day. */}
+              {(() => {
+                const days = deriveTournamentDays(tournament.date, tournament.durationDays || 1);
+                if (days.length > 0) {
+                  return (
+                    <select
+                      className="input"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                    >
+                      {days.map((d, i) => (
+                        <option key={d} value={d}>Day {i + 1} — {d}</option>
+                      ))}
+                    </select>
+                  );
+                }
+                // Fallback: tournament has no date yet — free date picker.
+                return (
+                  <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
+                );
+              })()}
               <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">

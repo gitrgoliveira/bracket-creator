@@ -97,6 +97,95 @@ func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
 	})
 }
 
+// --- Tournament.Days() ---
+
+func TestTournament_Days(t *testing.T) {
+	tests := []struct {
+		name         string
+		date         string
+		durationDays int
+		want         []string
+	}{
+		{
+			name:         "single day",
+			date:         "05-06-2026",
+			durationDays: 1,
+			want:         []string{"05-06-2026"},
+		},
+		{
+			name:         "three days",
+			date:         "05-06-2026",
+			durationDays: 3,
+			want:         []string{"05-06-2026", "06-06-2026", "07-06-2026"},
+		},
+		{
+			name:         "month boundary",
+			date:         "30-06-2026",
+			durationDays: 3,
+			want:         []string{"30-06-2026", "01-07-2026", "02-07-2026"},
+		},
+		{
+			name:         "year boundary",
+			date:         "31-12-2025",
+			durationDays: 2,
+			want:         []string{"31-12-2025", "01-01-2026"},
+		},
+		{
+			name:         "empty date returns nil",
+			date:         "",
+			durationDays: 3,
+			want:         nil,
+		},
+		{
+			name:         "unparseable date returns nil",
+			date:         "not-a-date",
+			durationDays: 1,
+			want:         nil,
+		},
+		{
+			name:         "durationDays zero returns nil",
+			date:         "05-06-2026",
+			durationDays: 0,
+			want:         nil,
+		},
+		{
+			name:         "durationDays negative returns nil",
+			date:         "05-06-2026",
+			durationDays: -1,
+			want:         nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tour := &Tournament{Date: tc.date, DurationDays: tc.durationDays}
+			got := tour.Days()
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestTournament_Days_NilReceiver(t *testing.T) {
+	var tour *Tournament
+	// Must not panic
+	got := tour.Days()
+	assert.Nil(t, got)
+}
+
+// --- ApplyTournamentDefaults DurationDays ---
+
+func TestApplyTournamentDefaults_DurationDays(t *testing.T) {
+	t.Run("zero defaults to 1", func(t *testing.T) {
+		tour := &Tournament{}
+		ApplyTournamentDefaults(tour)
+		assert.Equal(t, 1, tour.DurationDays)
+	})
+	t.Run("non-zero preserved", func(t *testing.T) {
+		tour := &Tournament{DurationDays: 5}
+		ApplyTournamentDefaults(tour)
+		assert.Equal(t, 5, tour.DurationDays)
+	})
+}
+
 func TestValidateTeamMatchType(t *testing.T) {
 	tests := []struct {
 		name     string

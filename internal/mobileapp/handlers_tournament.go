@@ -125,6 +125,18 @@ func validateCompetitionCourts(courts []string) error {
 // keeps the handler's errors.Is check stable across refactors.
 var errPasswordRequired = errors.New("tournament password is required")
 
+// validateTournamentDurationDays returns an error when durationDays is
+// outside the accepted range. 0 is allowed (treated as "default to 1" by
+// ApplyTournamentDefaults); values 1–MaxTournamentDurationDays are
+// accepted; negative values and values > MaxTournamentDurationDays are
+// rejected with a clear 400-bound error.
+func validateTournamentDurationDays(durationDays int) error {
+	if durationDays < 0 || durationDays > MaxTournamentDurationDays {
+		return fmt.Errorf("durationDays must be between 1 and %d", MaxTournamentDurationDays)
+	}
+	return nil
+}
+
 // validateTournamentLengths enforces the persisted-string caps from
 // validation.go on every string field of t. Called after trim and
 // after the required-field checks so error messages report the
@@ -241,6 +253,15 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if err := validateTournamentLengths(&t); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+
+		if err := validateTournamentDurationDays(t.DurationDays); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// Default 0 → 1 before persisting so round-trips are consistent.
+		if t.DurationDays == 0 {
+			t.DurationDays = 1
 		}
 
 		if err := validateCourts(t.Courts); err != nil {
@@ -396,6 +417,15 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if err := validateDateDMY(t.Date); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+
+		// Same DurationDays guard as the PUT handler.
+		if err := validateTournamentDurationDays(t.DurationDays); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if t.DurationDays == 0 {
+			t.DurationDays = 1
 		}
 
 		if err := validateCourts(t.Courts); err != nil {

@@ -249,14 +249,22 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 			return
 		}
 
-		// Self-run mode (mp-7h7): skip the main-password gate entirely.
-		// Constructive admin routes (scoring, check-in, start, complete,
-		// generate draw, etc.) become public — there is no table operator.
-		// Destructive routes (delete competition, invalidate, draw, overrides,
-		// participant roster mutations, import) remain gated by the
+		// Self-run mode (mp-7h7): skip the main-password gate for operational
+		// routes (scoring, check-in, start, complete, generate draw, etc.) —
+		// there is no dedicated table operator, so participants drive their own
+		// flow. Destructive routes (delete competition, invalidate, draw,
+		// overrides, participant roster mutations, import) remain gated by the
 		// EXISTING RequireElevatedPassword / enforceElevated decorators that
 		// already fire downstream on those specific routes. No new allowlist
-		// is needed — the elevated-decorator set IS the allowlist (DRY).
+		// needed — the elevated-decorator set IS the allowlist (DRY).
+		//
+		// Exception — tournament configuration routes (PUT /api/tournament):
+		// these mutate setup data including the main password, courts, and
+		// check-in windows. In self-run mode there is no separate main-password
+		// gate, so these routes fall through to the standard auth path below.
+		// The SPA always sends the main password as X-Tournament-Password on
+		// PUT /api/tournament even in self-run mode, so this is transparent to
+		// existing clients.
 		//
 		// Officiated mode (the default) skips this block entirely → no regression.
 		//
@@ -267,7 +275,8 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		// mutations. Comparing explicitly against TournamentModeSelfRun is safe:
 		// the empty string (old files) and "officiated" both fall through to the
 		// standard auth path below.
-		if t.Mode == state.TournamentModeSelfRun {
+		isTournamentConfigMutation := c.Request.Method == http.MethodPut && c.FullPath() == "/api/tournament"
+		if t.Mode == state.TournamentModeSelfRun && !isTournamentConfigMutation {
 			c.Next()
 			return
 		}

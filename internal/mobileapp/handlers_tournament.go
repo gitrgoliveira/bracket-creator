@@ -286,6 +286,18 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
+		// Validate Mode before entering the update transform. Mode is
+		// immutable after creation (mp-7h7) — the transform enforces that
+		// invariant — but it must also be a known value so an invalid string
+		// never lands on disk via a direct API call. Empty is accepted here
+		// (the transform normalises "" → preserved-stored-value or
+		// "officiated" for a new record). ValidateTournamentMode is the
+		// canonical check; POST already calls it for the same reason.
+		if err := state.ValidateTournamentMode(t.Mode); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Preserve the stored Password when the incoming body omits it
 		// or sends "". The frontend AdminEditTournament uses
 		// `password: pass || undefined` (admin_setup.jsx:89) so an

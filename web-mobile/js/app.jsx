@@ -1050,7 +1050,23 @@ function CreateTournament({ onCreated, authConfig }) {
       // lets it through unauthenticated).
       const t = await window.API.createTournament(config, locked ? pass : undefined);
       if (!mountedRef.current) return;
-      // Wait for backend to broadcast or just pass it up
+      // Refresh the elevated-password auth config so promptAdminPassword()
+      // reads the correct gate state before the admin view mounts (mp-7h7).
+      // For a self-run tournament the admin password is set atomically in the
+      // same POST, so the /api/auth-config response changes: elevatedRequired
+      // flips from false to true. Without this refresh, the stale cached value
+      // would cause promptAdminPassword() to return "" and destructive actions
+      // would 401 without ever prompting the operator.
+      try {
+        const freshCfg = await window.API.fetchAuthConfig();
+        if (mountedRef.current && freshCfg && typeof freshCfg === "object") {
+          setCachedAuthConfig(freshCfg);
+        }
+      } catch (_) {
+        // Non-fatal: the cache update is best-effort; the operator can still
+        // retry destructive actions which will re-prompt after a 401.
+      }
+      if (!mountedRef.current) return;
       onCreated(t, pass);
     } catch (err) {
       alert(err.message);

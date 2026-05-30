@@ -2499,13 +2499,28 @@ export function NotificationSettings() {
   // handler branch aligned with the visible checkbox state.
   const [enabled, setEnabled] = useState(storedOptIn && initialPermission === "granted");
 
-  // Phase 4: secure-context warning. Only show when the API would exist but
-  // the context is insecure (plain http:// non-localhost). In production the
-  // TLS proxy ensures this block is never reached.
+  // Phase 4: secure-context warning. In production the TLS proxy makes this
+  // false; it only matters for bare http:// (no proxy) access.
   const insecure = typeof window !== "undefined" && window.isSecureContext === false;
 
-  // Phase 3: API unavailable — hide entirely.
-  if (permission === "unavailable") return null;
+  // Phase 3 / Phase 4 ordering: when the API is unavailable we normally hide
+  // the panel entirely. BUT some browsers expose `Notification` only in a
+  // secure context, so a bare http:// page can have BOTH no API AND
+  // isSecureContext === false — which is the exact situation this panel is
+  // meant to explain. In that case render the warning (no toggle) instead of
+  // hiding. Only hide outright when the API is unavailable for some OTHER
+  // reason (secure context but an old/unsupported browser).
+  if (permission === "unavailable") {
+    if (!insecure) return null;
+    return (
+      <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
+        <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
+        <div style={{ fontSize: 12, color: "var(--amber, #b45309)" }} data-testid="notification-insecure-warning">
+          Browser notifications require a secure connection (https or localhost).
+        </div>
+      </div>
+    );
+  }
 
   const handleToggle = async () => {
     if (enabled) {
@@ -2522,8 +2537,17 @@ export function NotificationSettings() {
     } else {
       setPermission(Notification.permission);
     }
-    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) { /* storage unavailable */ }
-    setEnabled(true);
+    // Only mark the toggle ON if the preference actually persisted.
+    // fireBrowserNotifications() reads this localStorage flag at fire time, so
+    // an unpersisted "on" would render a checked box that never fires (storage
+    // throwing → flag missing → firing path reads opt-out). Keep the UI honest
+    // with the firing path: if persistence failed, leave the toggle off.
+    let persisted = false;
+    try {
+      window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true");
+      persisted = true;
+    } catch (_e) { /* storage unavailable — keep toggle off */ }
+    setEnabled(persisted);
   };
 
   const denied = permission === "denied";

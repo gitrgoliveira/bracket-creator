@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotifications, diffAnnouncementSnapshot } from '../app.jsx';
 import { AnnouncementBanner, AnnouncementCard, NotificationSettings, notificationSupported } from '../viewer.jsx';
+import { makeReactive } from './helpers/reactive_react.js';
 
 // Helper: recursively search a React element tree (mock objects) for all
 // elements matching a predicate, returning them as a flat list.
@@ -620,5 +621,88 @@ describe('NotificationSettings', () => {
     await toggle.props.onChange();
     expect(requestPermission).not.toHaveBeenCalled();
     expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('false');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NotificationSettings — reactive runtime, for behaviours that need a real
+// re-render after a state change (Copilot round-2 comments 3328780111 /
+// 3328780129). Uses the makeReactive() shim like reset.test.jsx.
+// ---------------------------------------------------------------------------
+
+describe('NotificationSettings (reactive)', () => {
+  let runtime, RS, realReact, origNotif, origSecure, origLS;
+
+  beforeEach(async () => {
+    realReact = global.React;
+    runtime = makeReactive();
+    global.React = runtime.React;
+    vi.resetModules();
+    ({ NotificationSettings: RS } = await import('../viewer.jsx'));
+    origNotif = global.Notification;
+    origSecure = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
+    origLS = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    global.Notification = origNotif;
+    if (origSecure) Object.defineProperty(window, 'isSecureContext', origSecure);
+    if (origLS) Object.defineProperty(window, 'localStorage', origLS);
+    vi.resetModules();
+  });
+
+  const findToggle = () => findAll(runtime.currentTree(), n => n.props && n.props['data-testid'] === 'notification-toggle')[0];
+  const findWarn = () => findAll(runtime.currentTree(), n => n.props && n.props['data-testid'] === 'notification-insecure-warning');
+
+  it('shows the insecure-context warning even when the Notification API is unavailable', () => {
+    // Bare http:// browser that gates `Notification` on a secure context:
+    // both no API AND isSecureContext === false. The panel must still explain.
+    global.Notification = undefined;
+    Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
+    const tree = runtime.mount(RS, {});
+    expect(tree).not.toBeNull();
+    expect(findWarn().length).toBe(1);
+  });
+
+  it('hides entirely when the API is unavailable AND the context is secure', () => {
+    global.Notification = undefined;
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+    const tree = runtime.mount(RS, {});
+    expect(tree).toBeNull();
+  });
+
+  it('leaves the toggle OFF when enabling succeeds at the prompt but localStorage.setItem throws', async () => {
+    // Storage that throws on write — fireBrowserNotifications reads the flag at
+    // fire time, so an unpersisted "on" would be a checked box that never fires.
+    Object.defineProperty(window, 'localStorage', {
+      value: { getItem: () => null, setItem: () => { throw new Error('quota exceeded'); }, removeItem: () => {} },
+      writable: true, configurable: true,
+    });
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+    global.Notification = { permission: 'default', requestPermission: vi.fn().mockResolvedValue('granted') };
+
+    runtime.mount(RS, {});
+    expect(findToggle().props.checked).toBe(false);
+    await findToggle().props.onChange();
+    // Permission was granted, but persistence failed → keep the box OFF so the
+    // UI stays consistent with the (storage-backed) firing path.
+    expect(findToggle().props.checked).toBe(false);
+  });
+
+  it('marks the toggle ON when enabling succeeds and storage persists', async () => {
+    const store = {};
+    Object.defineProperty(window, 'localStorage', {
+      value: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
+      writable: true, configurable: true,
+    });
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+    global.Notification = { permission: 'default', requestPermission: vi.fn().mockResolvedValue('granted') };
+
+    runtime.mount(RS, {});
+    await findToggle().props.onChange();
+    expect(findToggle().props.checked).toBe(true);
+    expect(store['viewer.notifications.enabled']).toBe('true');
   });
 });

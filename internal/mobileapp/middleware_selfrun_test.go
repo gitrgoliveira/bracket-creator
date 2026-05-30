@@ -168,6 +168,42 @@ func TestSelfRun_SelfRunMode_ConstructiveRoutesArePublic(t *testing.T) {
 	}
 }
 
+// PUT /api/tournament is a tournament-configuration mutation (password, courts,
+// check-in windows). In self-run mode the operational pass-through does NOT
+// apply to it — the main gate fires normally so anonymous callers cannot
+// tamper with tournament setup. The SPA always sends X-Tournament-Password
+// on PUT /api/tournament even in self-run mode, so this is transparent.
+func TestSelfRun_SelfRunMode_PUTTournament_RequiresMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	putBody := map[string]any{
+		"name":   "SelfRun Test",
+		"date":   "01-06-2026",
+		"venue":  "Dojo",
+		"courts": []string{"A"},
+	}
+
+	t.Run("no_pw_returns_401", func(t *testing.T) {
+		req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+		// No X-Tournament-Password — must be rejected (configuration mutation).
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"PUT /api/tournament must return 401 without main password even in self-run mode")
+	})
+
+	t.Run("correct_pw_succeeds", func(t *testing.T) {
+		req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+		req.Header.Set("X-Tournament-Password", "main-pw")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code,
+			"PUT /api/tournament must succeed with correct main password in self-run mode")
+	})
+}
+
 // Destructive routes still require X-Admin-Password in self-run mode.
 // The main gate is skipped but RequireElevatedPassword still fires.
 func TestSelfRun_SelfRunMode_DestructiveRoutes_Require_AdminPassword(t *testing.T) {
@@ -677,10 +713,12 @@ func TestSelfRun_LockedMode_PUTEdit_NotRejectedByFailOpenGuard(t *testing.T) {
 
 	r := setupSelfRunRouter(t, store, lockedV)
 
-	// PUT editing the venue. Self-run skips the main gate, so no header is
-	// needed; password rotation is omitted (disabled in locked mode); mode is
-	// omitted (preserved). This must NOT be rejected by the file-mode-only
-	// fail-open guard.
+	// PUT editing the venue. Tournament-configuration routes (PUT /api/tournament)
+	// require the main password even in self-run mode (mp-7h7: only operational
+	// scoring/check-in routes bypass the main gate). In locked mode the bcrypt
+	// verifier requires the env-var password. Password rotation is omitted
+	// (disabled in locked mode); mode is omitted (preserved). This must NOT be
+	// rejected by the file-mode-only fail-open guard.
 	putBody := map[string]any{
 		"name":   "LockedSelfRun",
 		"date":   "01-06-2026",
@@ -688,6 +726,7 @@ func TestSelfRun_LockedMode_PUTEdit_NotRejectedByFailOpenGuard(t *testing.T) {
 		"courts": []string{"A"},
 	}
 	req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+	req.Header.Set("X-Tournament-Password", "main-pw") // required: PUT /tournament is always main-gated
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code,

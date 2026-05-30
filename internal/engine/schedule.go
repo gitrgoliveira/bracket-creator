@@ -230,8 +230,9 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	// Distribute pool matches evenly across courts, then advance each
 	// court's cursor by poolPerMatch per match (with lunch skipping).
 	// We use integer division; the remainder matches are spread across
-	// the first courts, mirroring the round-robin distribution that
-	// assignPoolMatchSlots uses in practice.
+	// the first courts — an intentional even-distribution heuristic for this
+	// pre-draw estimate. (The post-draw assigner does NO distribution of its
+	// own: it schedules matches that already carry a Court assignment.)
 	courtCursor := make([]time.Time, numCourts)
 	for i := range courtCursor {
 		courtCursor[i] = dayStart.Add(time.Duration(openingMin) * time.Minute)

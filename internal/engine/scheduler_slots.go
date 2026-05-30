@@ -163,9 +163,12 @@ func skipCeremonyBlocks(t, lunchStart time.Time, lunchDurationMin int) time.Time
 // element writes via indexing reach the caller's underlying array. Returns
 // the same slice for ergonomic chaining, and the maximum per-court end-cursor
 // (i.e. the clock time when the last match on the busiest court
-// finishes). The end-cursor is used by EstimateForCounts to derive a
-// duration for the post-draw regime. Callers that only want the
-// mutated slice may discard the second return value.
+// finishes). The end-cursor lets a post-draw consumer derive a real schedule
+// duration — the mp-zoh per-comp endpoint (future) and
+// TestEstimateForCountsVsSlotAssigner_Balanced (today). Note EstimateForCounts
+// itself is pre-draw and does NOT call this assigner; it computes its own
+// per-court cursors. Callers that only want the mutated slice may discard the
+// second return value.
 //
 // The end-cursor is the per-court start anchor (comp.StartTime + OpeningBlock)
 // when there are no matches — matching where the first match on each court

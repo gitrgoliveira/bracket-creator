@@ -173,10 +173,20 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // two assigner cursors rather than max() them to match EstimateForCounts for a
 // mixed-format competition. See mp-zoh.
 //
+// Negative counts are clamped to 0 — the helper is exported and likely fed
+// derived/user inputs (mp-zoh), and a negative count would otherwise make
+// matchMin negative and yield a nonsensical (even negative) duration.
+//
 // Returns a zero ScheduleEstimate when comp is nil or has no courts.
 func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tournament *state.Tournament) ScheduleEstimate {
 	if comp == nil {
 		return ScheduleEstimate{}
+	}
+	if poolCount < 0 {
+		poolCount = 0
+	}
+	if playoffCount < 0 {
+		playoffCount = 0
 	}
 
 	courts := comp.Courts

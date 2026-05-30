@@ -610,6 +610,15 @@ function App() {
       )}
       {selectedCompData ? (
         <window.ViewerCompetition
+          // key on the competition id so switching comps (notably the
+          // mp-rrd pools<->playoffs cross-link, which calls
+          // onSelectCompetition without unmounting) remounts the
+          // component and resets its per-comp UI state (active tab,
+          // open match modal, bracket scroll target). Otherwise a tab
+          // that doesn't exist in the destination comp (e.g. "pools"
+          // when navigating to a playoffs comp) would leave the body
+          // rendering empty.
+          key={selectedCompData.config.id}
           tournament={tournament}
           competition={selectedCompData.config}
           pools={selectedCompData.pools}

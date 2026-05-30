@@ -16,8 +16,8 @@
     <img src="https://pkg.go.dev/badge/github.com/gitrgoliveira/bracket-creator.svg" alt="Go reference" style="max-width:100%;">
   </a>
 
-  <a href="https://github.com/gojp/goreportcard/blob/master/LICENSE" rel="nofollow">
-    <img src="https://img.shields.io/badge/license-Apache 2.0-blue.svg" alt="License Apache 2.0" style="max-width:100%;">
+  <a href="https://github.com/gitrgoliveira/bracket-creator/blob/main/LICENSE" rel="nofollow">
+    <img src="https://img.shields.io/badge/license-MPL 2.0-blue.svg" alt="License MPL 2.0" style="max-width:100%;">
   </a>
 
   <br/>

@@ -409,10 +409,18 @@ describe('fireBrowserNotifications', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Snapshot-diff logic — exercises the REAL diffAnnouncementSnapshot helper
-// (the exact code app.jsx's SSE handler and initial-fetch effect call), rather
-// than a re-implementation. A ref is modelled as a plain { current } object,
-// matching the useRef shape the component passes in.
+// Snapshot-diff logic — exercises the REAL diffAnnouncementSnapshot helper.
+// Models a plain { current } object for the ref, matching the useRef shape.
+//
+// Intended call sequence (app.jsx):
+//   1. fetchAnnouncements() HTTP success → first call (null ref) → seeds.
+//   2. Any SSE snapshot that arrived before step 1 is BUFFERED externally in
+//      pendingSseAnnouncements and replayed (second call) after step 1. This
+//      allows announcements added in the mount→fetch race window to fire.
+//   3. fetchAnnouncements() HTTP failure + buffered SSE → first call → seeds
+//      from SSE (no notifications — pre-existing from SSE perspective).
+//   4. HTTP failure + nothing buffered → ref stays null; first subsequent SSE
+//      call seeds (original spam-prevention fallback).
 // ---------------------------------------------------------------------------
 
 describe('diffAnnouncementSnapshot', () => {
@@ -454,27 +462,57 @@ describe('diffAnnouncementSnapshot', () => {
     expect(diffAnnouncementSnapshot(ref, snapshot)).toHaveLength(0); // already seen
   });
 
-  // --- Seeding race (Copilot comment 3328483813) ---------------------------
+  // --- Seeding (null-ref first-call behaviour) ---
 
-  it('treats the FIRST snapshot against an unseeded (null) ref as a seed — no additions', () => {
-    const ref = { current: null }; // initial fetch has not seeded yet
+  it('the first call against an unseeded (null) ref always seeds — no additions returned', () => {
+    // In app.jsx this first call comes from fetchAnnouncements() HTTP success.
+    // SSE snapshots that arrive before this point are buffered externally and
+    // replayed after seeding.
+    const ref = { current: null };
     const additions = diffAnnouncementSnapshot(ref, [
       { id: 'ann-1', message: 'Active at load' },
       { id: 'ann-2', message: 'Also active at load' },
     ]);
-    // No notifications on page load even though the SSE snapshot won the race.
-    expect(additions).toHaveLength(0);
-    // ...but both IDs are now recorded, so they never re-fire later.
+    expect(additions).toHaveLength(0); // no notifications on page load
     expect(ref.current.has('ann-1')).toBe(true);
     expect(ref.current.has('ann-2')).toBe(true);
   });
 
-  it('after the first snapshot seeds, a genuinely new announcement fires', () => {
+  it('after HTTP seeds, a subsequent diff (replayed buffered SSE) fires for the new announcement', () => {
+    // Models the race-window case: fetchAnnouncements() HTTP response contains
+    // [ann-1] (snapshot taken before NEW was posted); the buffered SSE snapshot
+    // contains [ann-1, NEW]. Replaying it after HTTP seeding fires for NEW.
+    const ref = { current: null };
+    const httpList = [{ id: 'ann-1', message: 'Pre-existing' }];
+    const sseList  = [{ id: 'ann-1', message: 'Pre-existing' }, { id: 'new-1', message: 'Added in race window' }];
+    diffAnnouncementSnapshot(ref, httpList); // step 1: HTTP seeds (returns [])
+    const additions = diffAnnouncementSnapshot(ref, sseList); // step 2: replay buffered SSE
+    expect(additions).toHaveLength(1);
+    expect(additions[0].id).toBe('new-1');
+  });
+
+  it('after the seed, a genuinely new announcement in the next snapshot fires', () => {
     const ref = { current: null };
     diffAnnouncementSnapshot(ref, [{ id: 'ann-1', message: 'At load' }]); // seed
     const additions = diffAnnouncementSnapshot(ref, [
       { id: 'ann-1', message: 'At load' },
       { id: 'ann-2', message: 'Arrived after load' },
+    ]);
+    expect(additions).toHaveLength(1);
+    expect(additions[0].id).toBe('ann-2');
+  });
+
+  it('HTTP-failure fallback: seeding from buffered SSE (no notifications) leaves ref usable', () => {
+    // Models sequence 3: HTTP fails, the buffered SSE snapshot seeds the ref
+    // instead. The seed call returns [] (no notifications). A subsequent SSE
+    // diff correctly identifies new arrivals.
+    const ref = { current: null };
+    const sseSeed = [{ id: 'ann-1', message: 'Pre-existing via SSE fallback' }];
+    diffAnnouncementSnapshot(ref, sseSeed); // HTTP failed; caller seeds from buffered SSE
+    expect(ref.current).toBeInstanceOf(Set);
+    const additions = diffAnnouncementSnapshot(ref, [
+      { id: 'ann-1', message: 'Pre-existing' },
+      { id: 'ann-2', message: 'New' },
     ]);
     expect(additions).toHaveLength(1);
     expect(additions[0].id).toBe('ann-2');

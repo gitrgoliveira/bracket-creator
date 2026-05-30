@@ -157,13 +157,18 @@ export function fireBrowserNotifications(additions) {
 // a new full-list announcement snapshot, returns the additions that should
 // fire a notification and updates the ref's Set in place.
 //
-// The FIRST snapshot to encounter an unseeded (null) ref is treated as the
-// SEED: every ID is recorded and NO additions are returned. This closes the
-// race where an SSE `announcement` snapshot arrives before the initial
-// fetchAnnouncements() seed resolves (or after it fails) — without it, every
-// already-active announcement in that first snapshot would be misread as new
-// and spam the user on page load. Dismiss/clear snapshots (shrinking lists)
-// never produce additions because their remaining IDs are all already seen.
+// The FIRST call with an unseeded (null) ref is always treated as the SEED:
+// every ID is recorded and NO additions are returned. The intended caller flow:
+//   1. fetchAnnouncements() HTTP success → first call → seeds from HTTP response.
+//   2. SSE snapshots that arrive before the HTTP seed → buffered externally in
+//      pendingSseAnnouncements; replayed (second call) AFTER step 1 to detect
+//      announcements added in the race window.
+//   3. fetchAnnouncements() HTTP failure + buffered SSE → first call → seeds
+//      from SSE (no notifications for pre-fetch announcements).
+//   4. fetchAnnouncements() HTTP failure + nothing buffered → ref stays null;
+//      first subsequent SSE call seeds (original fallback).
+// Dismiss/clear snapshots (shrinking lists) never produce additions because
+// their remaining IDs are all already seen.
 export function diffAnnouncementSnapshot(seenRef, list) {
   const arr = Array.isArray(list) ? list : [];
   if (!seenRef.current) {
@@ -255,11 +260,14 @@ function App() {
       : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
   // mp-cw1: Set of announcement IDs already seen by this session.
-  // Seeded from the initial fetchAnnouncements snapshot so page-reload
-  // does NOT re-fire notifications for already-active announcements.
-  // Updated on every SSE snapshot: all current IDs are added so that
-  // remove/clear snapshots (smaller lists) never re-fire.
+  // Seeded by the initial HTTP fetchAnnouncements response (source of truth
+  // for pre-existing announcements). SSE snapshots that arrive before the HTTP
+  // seed are buffered in pendingSseAnnouncements and replayed after seeding to
+  // detect announcements added in the race window.
   const seenAnnouncementIds = useR(null); // lazily initialised to a Set below
+  // Holds the latest SSE announcement snapshot received before the HTTP seed
+  // has settled. Full snapshots are idempotent: only the latest matters.
+  const pendingSseAnnouncements = useR(null);
 
   // Auth-mode discovery (file vs. locked). Fetched once on App mount
   // from GET /api/auth-config. Starts as null ("loading") so that
@@ -381,14 +389,32 @@ function App() {
       .then(list => {
         const active = filterActiveAnnouncements(list || []);
         setAnnouncements(active);
-        // Seed the seen-IDs set so a page reload does NOT re-fire
-        // notifications for already-active announcements. Routed through the
-        // same helper as the SSE path: if this fetch wins the race it seeds;
-        // if an SSE snapshot already seeded, these IDs are simply re-marked.
+        // mp-cw1: Seed from the HTTP response — the canonical list of
+        // announcements that existed when the viewer mounted.
         diffAnnouncementSnapshot(seenAnnouncementIds, list || []);
+        // Replay any SSE snapshot that beat the HTTP seed. These arrived
+        // after mount and may contain genuinely new announcements added in
+        // the race window; diff them to fire the appropriate notifications.
+        const buffered = pendingSseAnnouncements.current;
+        pendingSseAnnouncements.current = null;
+        if (buffered !== null) {
+          const additions = diffAnnouncementSnapshot(seenAnnouncementIds, buffered);
+          if (additions.length > 0) {
+            fireBrowserNotifications(additions);
+          }
+        }
       })
       .catch(err => {
         console.error("Failed to fetch initial announcements:", err);
+        // Fall back: if an SSE snapshot was buffered while the HTTP request
+        // was in flight, seed from it so the next SSE diff works correctly.
+        // If nothing was buffered, leave the ref null so the first subsequent
+        // SSE snapshot becomes the seed (original spam-prevention fallback).
+        const buffered = pendingSseAnnouncements.current;
+        pendingSseAnnouncements.current = null;
+        if (buffered !== null && seenAnnouncementIds.current === null) {
+          diffAnnouncementSnapshot(seenAnnouncementIds, buffered); // seed, no notifications
+        }
       });
   }, []);
 
@@ -549,12 +575,18 @@ function App() {
             setAnnouncements(filterActiveAnnouncements(list));
 
             // mp-cw1: diff against seen IDs to fire browser notifications ONLY
-            // for genuinely new announcements. diffAnnouncementSnapshot handles
-            // the seeding race (first snapshot seeds + fires nothing) and the
-            // dismiss/clear case (shrinking lists produce no additions).
-            const additions = diffAnnouncementSnapshot(seenAnnouncementIds, list);
-            if (additions.length > 0) {
-              fireBrowserNotifications(additions);
+            // for genuinely new announcements.
+            // If the HTTP seed hasn't arrived yet, buffer this snapshot and let
+            // fetchAnnouncements replay it — so an announcement added in the
+            // mount→fetch race window still fires a notification (the HTTP seed
+            // records only pre-existing IDs; the replay surfaces the new one).
+            if (seenAnnouncementIds.current === null) {
+              pendingSseAnnouncements.current = list; // keep latest; seed pending
+            } else {
+              const additions = diffAnnouncementSnapshot(seenAnnouncementIds, list);
+              if (additions.length > 0) {
+                fireBrowserNotifications(additions);
+              }
             }
         }
     }, (status) => {

@@ -253,8 +253,4 @@ if (typeof window !== 'undefined') {
     window.normalizeCompetitionDetail = normalizeCompetitionDetail;
     window.buildPlayerMap = buildPlayerMap;
     window.buildPlayerMetadata = buildPlayerMetadata;
-    // mp-bkg: expose normalizePlayer so MatchLineupPanel can normalise the
-    // raw PascalCase server response from listParticipants into camelCase
-    // before passing team objects to MatchLineupSideEditor / rosterFor().
-    window.normalizePlayer = normalizePlayer;
 }

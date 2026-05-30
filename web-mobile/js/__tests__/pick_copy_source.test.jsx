@@ -64,6 +64,24 @@ describe('pickCopySource', () => {
     expect(pickCopySource([m1], CURRENT, TEAM, saved)?.id).toBe('m1');
   });
 
+  it('REGRESSION: matches a name-keyed side when teamKeys = [uuid, name]', () => {
+    // Real data path: a participant's id is a UUID, but the match side is
+    // keyed by team NAME (api_serializers name-as-id fallback). Matching the
+    // UUID alone found zero candidates, so copy-from-previous silently
+    // no-opped. teamKeys carries BOTH keys so the name-keyed side resolves.
+    const m1 = {
+      id: 'm1',
+      sideA: { id: 'Red Dojo', name: 'Red Dojo' },
+      sideB: { id: 'Blue Dojo', name: 'Blue Dojo' },
+      scheduledAt: '09:00',
+      court: 'A',
+    };
+    const saved = { m1: { positions: { senpo: 'Aka Ichi' } } };
+    expect(pickCopySource([m1], CURRENT, ['uuid-red-123', 'Red Dojo'], saved)?.id).toBe('m1');
+    // UUID-only (the pre-fix behaviour) finds nothing — the side is name-keyed.
+    expect(pickCopySource([m1], CURRENT, 'uuid-red-123', saved)).toBeNull();
+  });
+
   describe('sort rule 1: scheduledAt DESC (most recent first)', () => {
     it('picks the match with the later scheduledAt', () => {
       const m1 = mkMatch('m1', { sideAId: TEAM, scheduledAt: '09:00' });

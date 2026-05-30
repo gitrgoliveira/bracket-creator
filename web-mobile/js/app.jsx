@@ -397,27 +397,38 @@ function App() {
       .then(list => {
         const active = filterActiveAnnouncements(list || []);
         setAnnouncements(active);
-        // mp-cw1: Seed from the HTTP response, but only for pre-mount
-        // announcements (sentAt ≤ mount time). Announcements created after
-        // the viewer mounted (sentAt > mount time) are intentionally excluded
-        // so the buffered SSE replay below still fires notifications for them
-        // even when the HTTP GET response happened to capture them too.
-        // Date.parse() is used for numeric comparison because Go's RFC3339Nano
-        // serialisation may omit fractional seconds ("…Z" vs "….500Z") and
-        // lexicographic string comparison would give the wrong order in that
-        // case ('Z' > '.' in ASCII). Missing/unparseable sentAt → pre-existing.
-        const preMountList = (list || []).filter(a => {
-          if (!a || !a.id) return false;
-          if (!a.sentAt) return true;
-          const ms = Date.parse(a.sentAt);
-          return isNaN(ms) || ms <= mountTimeRef.current;
-        });
-        diffAnnouncementSnapshot(seenAnnouncementIds, preMountList);
-        // Replay any SSE snapshot that beat the HTTP seed. These arrived
-        // after mount and may contain genuinely new announcements added in
-        // the race window; diff them to fire the appropriate notifications.
+        // mp-cw1: Consume any SSE snapshot buffered before the HTTP seed arrived.
         const buffered = pendingSseAnnouncements.current;
         pendingSseAnnouncements.current = null;
+
+        // Seed strategy depends on whether we have a buffered SSE to replay:
+        //
+        // • WITH buffered SSE: seed only pre-mount IDs (sentAt ≤ mountMs) so
+        //   the replay below can fire notifications for post-mount IDs even
+        //   when the HTTP GET happened to capture them. Date.parse() for numeric
+        //   comparison — Go's RFC3339Nano may omit fractional seconds, making
+        //   lexicographic comparison wrong ('Z' > '.' in ASCII).
+        //   Missing/unparseable sentAt → treated as pre-existing (no spam risk).
+        //
+        // • WITHOUT buffered SSE: seed the full HTTP list. Excluding post-mount
+        //   IDs with no SSE to replay would leave them unseeded, causing a later
+        //   unrelated SSE snapshot to treat them as new and fire stale
+        //   notifications for announcements the viewer already sees on screen.
+        let seedList;
+        if (buffered !== null) {
+          seedList = (list || []).filter(a => {
+            if (!a || !a.id) return false;
+            if (!a.sentAt) return true;
+            const ms = Date.parse(a.sentAt);
+            return isNaN(ms) || ms <= mountTimeRef.current;
+          });
+        } else {
+          seedList = list || [];
+        }
+        diffAnnouncementSnapshot(seenAnnouncementIds, seedList);
+
+        // Replay the buffered SSE (if any) to fire for announcements added in
+        // the mount→fetch race window.
         if (buffered !== null) {
           const additions = diffAnnouncementSnapshot(seenAnnouncementIds, buffered);
           if (additions.length > 0) {

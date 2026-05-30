@@ -75,12 +75,9 @@ func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournamen
 		bouts = comp.TeamSize
 	}
 
-	if bouts > 0 {
-		perMatch := float64(bouts)*float64(clockMin)*multiplier + float64(bouts-1)*1.0
-		return int(math.Round(perMatch))
-	}
-
-	return int(math.Round(float64(clockMin) * multiplier))
+	// Delegate to the shared pure core so this function and
+	// EstimateSchedule stay in exact agreement (FR-059).
+	return int(math.Round(perMatchElapsed(float64(clockMin), multiplier, bouts)))
 }
 
 // parseDurationMinutes converts a Go-style duration string ("30m",
@@ -162,14 +159,27 @@ func skipCeremonyBlocks(t, lunchStart time.Time, lunchDurationMin int) time.Time
 // end. Any match whose start would fall inside LunchBlock is pushed
 // past the block before its ScheduledAt is recorded. T150, T151.
 //
-// Mutates `matches` in place (pointer semantics on slice header,
-// since MatchResult values are kept by value). Returns the same
-// slice for ergonomic chaining at the call site.
-func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) []state.MatchResult {
-	if len(matches) == 0 || comp == nil {
-		return matches
+// Mutates `matches` in place: the slice header is passed by value, but
+// element writes via indexing reach the caller's underlying array. Returns
+// the same slice for ergonomic chaining, and the maximum per-court end-cursor
+// (i.e. the clock time when the last match on the busiest court
+// finishes). The end-cursor lets a post-draw consumer derive a real schedule
+// duration — the mp-zoh per-comp endpoint (future) and
+// TestEstimateForCountsVsSlotAssigner_Balanced (today). Note EstimateForCounts
+// itself is pre-draw and does NOT call this assigner; it computes its own
+// per-court cursors. Callers that only want the mutated slice may discard the
+// second return value.
+//
+// The end-cursor is the per-court start anchor (comp.StartTime + OpeningBlock)
+// when there are no matches — matching where the first match on each court
+// would have started, and consistent with EstimateForCounts(0,…). So a
+// post-draw consumer computing cursor.Sub(dayStart) gets the opening offset (or
+// 0 with no OpeningBlock), never a bogus year-from-zero value. A zero time.Time
+// is returned ONLY when comp is nil (dayStart cannot be derived).
+func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) ([]state.MatchResult, time.Time) {
+	if comp == nil {
+		return matches, time.Time{}
 	}
-
 	dayStart := parseClockHHMM(comp.StartTime)
 	openingMin := 0
 	lunchMin := 0
@@ -178,6 +188,9 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 		openingMin = parseDurationMinutes(tournament.OpeningBlock)
 		lunchMin = parseDurationMinutes(tournament.LunchBlock)
 		lunchStart = parseClockHHMM(defaultLunchStartClock)
+	}
+	if len(matches) == 0 {
+		return matches, dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
 
 	courtCursor := map[string]time.Time{}
@@ -203,7 +216,17 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 		courtCursor[court] = cursor
 	}
 
-	return matches
+	// Find the maximum end-cursor across all courts (the busiest court
+	// determines the soonest the tournament phase can finish).
+	// Seed with dayStart so the comparison baseline stays in the same
+	// date epoch as the cursors produced by parseClockHHMM (year 0000).
+	maxCursor := dayStart
+	for _, c := range courtCursor {
+		if c.After(maxCursor) {
+			maxCursor = c
+		}
+	}
+	return matches, maxCursor
 }
 
 // assignBracketMatchSlots is the bracket analogue of
@@ -216,11 +239,18 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 // still receive a ScheduledAt for UI consistency — the operator-
 // facing schedule lists them even though no play happens. The court
 // cursor is NOT advanced for byes (they consume no court time).
-func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competition, tournament *state.Tournament) {
-	if len(rounds) == 0 || comp == nil {
-		return
+//
+// Returns the maximum per-court end-cursor (the clock time when the
+// last match on the busiest court finishes). Callers that only want
+// the in-place mutation may discard the return value.
+//
+// As with assignPoolMatchSlots, the end-cursor is the per-court start anchor
+// (comp.StartTime + OpeningBlock) when there are no rounds, and a zero
+// time.Time only when comp is nil.
+func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competition, tournament *state.Tournament) time.Time {
+	if comp == nil {
+		return time.Time{}
 	}
-
 	dayStart := parseClockHHMM(comp.StartTime)
 	openingMin := 0
 	lunchMin := 0
@@ -229,6 +259,9 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 		openingMin = parseDurationMinutes(tournament.OpeningBlock)
 		lunchMin = parseDurationMinutes(tournament.LunchBlock)
 		lunchStart = parseClockHHMM(defaultLunchStartClock)
+	}
+	if len(rounds) == 0 {
+		return dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
 
 	courtCursor := map[string]time.Time{}
@@ -259,4 +292,16 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 			courtCursor[court] = cursor
 		}
 	}
+
+	// Find the maximum end-cursor across all courts. Seed with dayStart
+	// so the comparison stays in the same date epoch as parseClockHHMM
+	// cursors (year 0000), avoiding false comparisons against the Go
+	// zero Time (year 0001).
+	maxCursor := dayStart
+	for _, c := range courtCursor {
+		if c.After(maxCursor) {
+			maxCursor = c
+		}
+	}
+	return maxCursor
 }

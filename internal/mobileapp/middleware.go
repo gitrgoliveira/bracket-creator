@@ -125,6 +125,70 @@ func requireValidCompID(c *gin.Context) (string, bool) {
 	return id, true
 }
 
+// RequireElevatedPassword gates destructive operations behind a SECOND
+// password supplied in the X-Admin-Password header (spec 004 / mp-e21). It
+// is layered on top of AuthMiddleware — the route group already verified the
+// main password, so this only adds the second factor. Attach it per-route to
+// the gated subset (competition delete / invalidate / draw / overrides,
+// participant roster mutations, CSV import) rather than to the whole group,
+// since most admin routes stay single-factor.
+//
+// Three outcomes, driven by the ElevatedVerifier contract:
+//
+//   - GateActive() == false  → c.Next(). File mode with no admin password
+//     set: the feature is opt-in, so destructive ops behave exactly as
+//     before (main password only). This is the back-compat path.
+//   - Configured() == false  → 503. Locked mode with no/invalid
+//     TOURNAMENT_ADMIN_PASSWORD_HASH: fail closed rather than silently
+//     allowing destructive ops with the main password alone.
+//   - otherwise               → Verify(X-Admin-Password); 401 on mismatch.
+//
+// Per the product decision (re-prompt every time) there is no elevation
+// token or session — the password travels on each gated request.
+func RequireElevatedPassword(ev ElevatedVerifier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !enforceElevated(c, ev) {
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// enforceElevated runs the elevated-password gate decision and returns true
+// when the request may proceed. On a blocked request it writes the
+// appropriate response (503 unconfigured / 401 wrong / 500 verify-error) and
+// returns false — the caller must stop (Abort in middleware, or `return` in a
+// handler).
+//
+// It exists as a standalone function — not just the middleware closure —
+// because some gated mutations can't be caught by route-level middleware:
+// PUT /api/competitions/:id persists the roster (SaveParticipants/SaveSeeds)
+// only when the bound body has a non-nil Players field, so its gate must run
+// INSIDE the handler after binding. Sharing this one decision keeps the
+// inline check and the middleware byte-for-byte identical (same status codes,
+// same fail-closed semantics) — Copilot PR #193 caught that gating only the
+// dedicated participant endpoints left the bulk-PUT roster path open.
+func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
+	if !ev.GateActive() {
+		return true
+	}
+	if !ev.Configured() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "admin password not configured"})
+		return false
+	}
+	ok, err := ev.Verify(c.GetHeader("X-Admin-Password"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "admin auth verification failed"})
+		return false
+	}
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin password"})
+		return false
+	}
+	return true
+}
+
 // AuthMiddleware gates admin endpoints behind the X-Tournament-Password
 // header. The actual credential check is delegated to the PasswordVerifier
 // so file-based and locked (bcrypt-env-var) modes share a single middleware.

@@ -188,7 +188,7 @@ func checkUniqueCompName(store *state.Store, name, excludeID string) error {
 	return nil
 }
 
-func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
+func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
 		ids, err := store.ListCompetitions()
 		if err != nil {
@@ -414,6 +414,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		comp.ID = id // ensure ID matches URL (also for empty-body case)
+
+		// Elevated-password gate for the ROSTER-mutation path (spec 004 /
+		// mp-e21; Copilot PR #193). This handler doubles as a roster writer:
+		// a non-nil Players field below triggers SaveParticipants/SaveSeeds.
+		// That is the SPA's PRIMARY roster flow (paste/import, seed edits via
+		// API.updateCompetition), so gating only the dedicated
+		// POST/PUT /participants endpoints would leave the gate bypassable.
+		// Route-level middleware can't see Players (it runs before binding),
+		// so enforce inline now that the body is decoded. Settings-only PUTs
+		// (Players == nil) are unaffected and stay single-factor.
+		if comp.Players != nil && !enforceElevated(c, elevated) {
+			return
+		}
+
 		comp.Name = strings.TrimSpace(comp.Name)
 		// See POST handler comment — same trim is needed here so the
 		// SETTINGS edit path can't persist whitespace-padded prefixes.
@@ -827,7 +841,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, updated)
 	})
 
-	r.DELETE("/competitions/:id", func(c *gin.Context) {
+	r.DELETE("/competitions/:id", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -851,7 +865,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
-	r.POST("/competitions/:id/invalidate", func(c *gin.Context) {
+	r.POST("/competitions/:id/invalidate", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -974,7 +988,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, comp)
 	})
 
-	r.DELETE("/competitions/:id/draw", func(c *gin.Context) {
+	r.DELETE("/competitions/:id/draw", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -1252,7 +1266,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusCreated, playoff)
 	})
 
-	r.DELETE("/competitions/:id/overrides", func(c *gin.Context) {
+	r.DELETE("/competitions/:id/overrides", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return

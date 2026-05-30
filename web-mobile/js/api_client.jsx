@@ -25,6 +25,16 @@
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 
+// adminHdr returns the X-Admin-Password header object for the elevated
+// (destructive-ops) password (spec 004 / mp-e21), or an empty object when no
+// admin password is supplied. Destructive methods spread it into their
+// headers so a request can carry BOTH X-Tournament-Password (main) and
+// X-Admin-Password (elevated). When the gate is inactive on the server
+// (file mode, no admin pw set) callers pass "" and the header is omitted.
+function adminHdr(adminPassword) {
+    return adminPassword ? { 'X-Admin-Password': adminPassword } : {};
+}
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -83,6 +93,29 @@ const API = {
         // body throws SyntaxError per the Fetch spec (same pattern as
         // overridePoolRank etc. above).
         return true;
+    },
+    // Set or rotate the elevated (destructive-ops) admin password (spec 004
+    // / mp-e21). File mode only — locked mode 404s (credential is the
+    // TOURNAMENT_ADMIN_PASSWORD_HASH env var). `password` is the MAIN
+    // tournament password (gates the endpoint via AuthMiddleware).
+    // `currentAdminPassword` is required only when an admin password is
+    // already set (rotation); on first-time set (TOFU) the server ignores it.
+    // The endpoint never echoes any password back.
+    async setAdminPassword(newPassword, currentAdminPassword, password) {
+        const body = { newPassword };
+        if (currentAdminPassword) body.currentPassword = currentAdminPassword;
+        const res = await fetch('/api/auth/admin-password', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to set admin password (Status ${res.status})`);
+            e.status = res.status;
+            throw e;
+        }
+        return res.json();
     },
     async fetchCompetitions() {
         const res = await fetch('/api/viewer/competitions');
@@ -153,7 +186,7 @@ const API = {
         }
         return res.json();
     },
-    async updateCompetition(id, config, password) {
+    async updateCompetition(id, config, password, adminPassword) {
         // Go's domain.Player uses json:"metadata" (array); the JS layer uses the
         // friendlier danGrade string. Convert before encoding so the backend can
         // unmarshal the dan grade into Player.Metadata.
@@ -177,7 +210,11 @@ const API = {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'X-Tournament-Password': password
+                'X-Tournament-Password': password,
+                // Roster-bearing updates (non-null players) hit the server's
+                // elevated-password gate (spec 004); the caller threads the
+                // admin password for those. Settings-only saves omit it.
+                ...adminHdr(adminPassword)
             },
             body: JSON.stringify(body)
         });
@@ -226,10 +263,10 @@ const API = {
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
-    async discardDraw(id, password) {
+    async discardDraw(id, password, adminPassword) {
         const res = await fetch(`/api/competitions/${id}/draw`, {
             method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
+            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -374,10 +411,10 @@ const API = {
         // Backend returns 200 with empty body — see overridePoolRank.
         return true;
     },
-    async resetOverrides(compID, password) {
+    async resetOverrides(compID, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {
             method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
+            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -448,10 +485,10 @@ const API = {
         }
         return true;
     },
-    async importCompetitions(formData, password) {
+    async importCompetitions(formData, password, adminPassword) {
         const res = await fetch('/api/tournament/import', {
             method: 'POST',
-            headers: { 'X-Tournament-Password': password },
+            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
             body: formData
         });
         if (!res.ok) {
@@ -471,10 +508,10 @@ const API = {
         }
         return res.json();
     },
-    async deleteCompetition(id, password) {
+    async deleteCompetition(id, password, adminPassword) {
         const res = await fetch(`/api/competitions/${id}`, {
             method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
+            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -485,10 +522,10 @@ const API = {
     // Returns the updated competition JSON (including the new `status`) so
     // callers can apply it to local state immediately instead of waiting for
     // the SSE refresh / tournament refetch to land.
-    async invalidateCompetition(id, password) {
+    async invalidateCompetition(id, password, adminPassword) {
         const res = await fetch(`/api/competitions/${id}/invalidate`, {
             method: 'POST',
-            headers: { 'X-Tournament-Password': password }
+            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -605,10 +642,10 @@ const API = {
         }
         return res.json();
     },
-    async addParticipant(compID, payload, password) {
+    async addParticipant(compID, payload, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/participants`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
             body: JSON.stringify(payload)
         });
         if (!res.ok) {
@@ -617,10 +654,10 @@ const API = {
         }
         return res.json();
     },
-    async replaceParticipant(compID, pid, payload, password) {
+    async replaceParticipant(compID, pid, payload, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/participants/${pid}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
             body: JSON.stringify(payload)
         });
         if (!res.ok) {

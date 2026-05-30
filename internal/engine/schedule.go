@@ -24,6 +24,11 @@ const MaxCourts = 26
 // plus CeremonyMinutes — i.e. the earliest the operator can expect the
 // final medal ceremony to begin.
 //
+// NOTE the "excluding ceremonies" wording above describes the EstimateSchedule
+// producer (raw scalars, no break model). The other producer, EstimateForCounts,
+// fills PerCourtMinutes from a per-court clock cursor that INCLUDES the
+// OpeningBlock offset and any LunchBlock dead-time — see its doc comment.
+//
 // data-model §5/§6.
 type ScheduleEstimate struct {
 	TotalDurationMinutes int   `json:"totalDurationMinutes"`
@@ -147,7 +152,11 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // is comp.StartTime (the same anchor the slot assigners use). Each court's cursor
 // is initialised to dayStart+OpeningBlock, so the returned duration INCLUDES the
 // opening-block offset. PerCourtMinutes entries are each court's individual
-// duration.
+// elapsed duration — and, NOTE, unlike the ScheduleEstimate struct docstring
+// ("match play (excluding ceremonies)", which describes the EstimateSchedule
+// producer), these entries INCLUDE the OpeningBlock offset and any LunchBlock
+// dead-time. They are NOT match-time-only. (Only the slowest-court buffer is
+// applied to match time alone; see below.)
 //
 // Buffer divergence (intentional): EstimateForCounts applies
 // tournament.SlowestCourtBufferPct because it is a predictive, pre-draw estimate

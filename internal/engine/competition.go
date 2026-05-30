@@ -384,6 +384,80 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 	return err
 }
 
+// filterCheckedIn applies the mp-w7x check-in filter with opt-in semantics:
+// if at least one player is checked in, return only the checked-in players;
+// if nobody is checked in, the operator never used check-in for this
+// competition, so return the roster unchanged. This guarantees the filter can
+// never silently empty the field. The input slice is not mutated.
+func filterCheckedIn(players []domain.Player) []domain.Player {
+	anyCheckedIn := false
+	for _, p := range players {
+		if p.CheckedIn {
+			anyCheckedIn = true
+			break
+		}
+	}
+	if !anyCheckedIn {
+		return players
+	}
+	eligible := make([]domain.Player, 0, len(players))
+	for _, p := range players {
+		if p.CheckedIn {
+			eligible = append(eligible, p)
+		}
+	}
+	return eligible
+}
+
+// checkInExcludedNames returns the names of players that filterCheckedIn would
+// remove under opt-in semantics: the non-checked-in players when at least one
+// is checked in, else nil. Used to prune their seed assignments so ApplySeeds
+// doesn't fail on an absent player.
+//
+// The key is the raw, case-sensitive player Name — matching the roster identity
+// the draw uses (helper.CheckDuplicateEntries and ApplySeeds' playerMap both key
+// on the exact Name, so "Alice" and "alice" are distinct participants).
+// Normalizing case here would let an excluded "alice" drop the seed of a
+// checked-in "Alice" (PR #199 review round 3).
+func checkInExcludedNames(players []domain.Player) map[string]bool {
+	anyCheckedIn := false
+	for _, p := range players {
+		if p.CheckedIn {
+			anyCheckedIn = true
+			break
+		}
+	}
+	if !anyCheckedIn {
+		return nil
+	}
+	excluded := make(map[string]bool)
+	for _, p := range players {
+		if !p.CheckedIn {
+			excluded[p.Name] = true
+		}
+	}
+	return excluded
+}
+
+// dropSeedAssignments removes seed assignments whose participant name is in the
+// excluded set, matched case-sensitively on the exact Name (same key as
+// checkInExcludedNames / the roster identity). A nil/empty excluded set returns
+// the input unchanged, so a seed for a name that was never a participant still
+// flows through to ApplySeeds and surfaces the same error as before.
+func dropSeedAssignments(seeds []domain.SeedAssignment, excluded map[string]bool) []domain.SeedAssignment {
+	if len(excluded) == 0 {
+		return seeds
+	}
+	out := make([]domain.SeedAssignment, 0, len(seeds))
+	for _, a := range seeds {
+		if excluded[a.Name] {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // runDrawPipeline runs the full draw-generation pipeline for a Setup
 // competition and commits CompStatusDrawReady. It does NOT generate the
 // schedule; callers must call GenerateSchedule after transitioning to a
@@ -426,6 +500,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	loadedWithZekken := comp.WithZekkenName
 	loadedCourts := append([]string(nil), comp.Courts...)
 	loadedTeamSize := comp.TeamSize
+	loadedCheckInEnabled := comp.CheckInEnabled
 	// Note: PoolWinners is intentionally NOT snapshotted. The
 	// validation block below excludes it because it doesn't drive
 	// pool/bracket generation — admin's concurrent change is
@@ -465,6 +540,32 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if err != nil {
 		return err
 	}
+	// Exclude participants who have not checked in (mp-w7x) — but ONLY when the
+	// competition has check-in tracking enabled (comp.CheckInEnabled). The rest
+	// of the stack masks checkedIn behind this flag (the viewer derives
+	// checkedIn as `checkInEnabled && p.checkedIn`), so a stale/imported
+	// checked_in marker on a competition that doesn't use check-in must not
+	// silently shrink the field (PR #199 review). When enabled, opt-in
+	// semantics still apply (see filterCheckedIn): if nobody is checked in,
+	// everyone is included.
+	//
+	// Filter the DISK roster HERE — after load, BEFORE the playoffs
+	// source-resolution below. resolvePoolWinners builds promoted finalists
+	// with CheckedIn=false (ranking.go: only Name/DisplayName/Dojo are set),
+	// so filtering after resolution would wrongly drop the entire playoff
+	// bracket. Source-resolved finalists are intentionally exempt and bypass
+	// this filter by virtue of placement.
+	//
+	// excludedByCheckIn captures the names check-in removes so we can drop
+	// their seed assignments too: helper.ApplySeeds errors with "seeded
+	// participant not found in main list" for a seed whose player is absent,
+	// which would make a competition with a non-checked-in seeded player
+	// undrawable.
+	var excludedByCheckIn map[string]bool
+	if comp.CheckInEnabled {
+		excludedByCheckIn = checkInExcludedNames(players)
+		players = filterCheckedIn(players)
+	}
 	// Playoffs competitions created from a mixed source (POST /playoffs)
 	// start with an empty roster on disk. Resolve the source's final pool
 	// winners into the roster now, BEFORE the empty-roster check. The
@@ -496,6 +597,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if err != nil {
 		return err
 	}
+	// Drop seed assignments for participants removed by check-in (PR #199
+	// review) so ApplySeeds doesn't fail on an absent seeded player. Remaining
+	// seeds keep their ranks; sparse ranks are handled by the seeding pass.
+	seeds = dropSeedAssignments(seeds, excludedByCheckIn)
 
 	// League format: enforce the single-pool invariant so that
 	// generatePools always produces exactly one pool containing all
@@ -601,6 +706,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		//   - StartTime (initial ScheduledAt for generated matches)
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)
+		//   - CheckInEnabled (decides which participants are included)
 		// Other config fields (TeamSize, PoolWinners, Name, Date, Venue,
 		// Mirror) are NOT validated — they don't drive generation, so
 		// admin's concurrent change to them doesn't invalidate the
@@ -615,8 +721,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 			current.RoundRobin != loadedRoundRobin ||
 			current.Kind != loadedKind ||
 			current.WithZekkenName != loadedWithZekken ||
+			current.CheckInEnabled != loadedCheckInEnabled ||
 			!courtsEqual(current.Courts, loadedCourts) {
-			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/Courts); regenerate by retrying", id)
+			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/CheckInEnabled/Courts); regenerate by retrying", id)
 		}
 		// Participants / seeds drift: detected via file mtime captured
 		// at outer Load. A concurrent AdminParticipants PUT between our

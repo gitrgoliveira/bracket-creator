@@ -60,6 +60,28 @@ func parseSwissMatchRound(id string) (int, bool) {
 	return n, true
 }
 
+// swissFieldNamesFromMatches returns the set of competitor names that have
+// appeared in prior Swiss matches (players and bye recipients alike) — i.e.
+// the frozen round-1 field. Used by GenerateSwissRound for rounds > 1 to keep
+// the field stable across rounds regardless of later check-in toggles
+// (mp-w7x; PR #199 review). Names are unique per competition
+// (helper.CheckDuplicateEntries), so a name key is an unambiguous identity.
+func swissFieldNamesFromMatches(matches []state.MatchResult) map[string]bool {
+	field := make(map[string]bool)
+	for _, m := range matches {
+		if _, ok := parseSwissMatchRound(m.ID); !ok {
+			continue
+		}
+		if m.SideA != "" {
+			field[m.SideA] = true
+		}
+		if m.SideB != "" {
+			field[m.SideB] = true
+		}
+	}
+	return field
+}
+
 // GenerateSwissRound builds the matches for round `roundNumber` of the
 // Swiss-format competition identified by compID. Returns only the
 // new round's matches — the caller is responsible for merging them
@@ -125,9 +147,44 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	if err != nil {
 		return nil, err
 	}
-	// After T154, store.LoadParticipants returns []domain.Player
-	// directly, so the Swiss pipeline doesn't need a conversion at the
-	// boundary (NFR-007).
+	priorMatches, err := e.store.LoadPoolMatches(compID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine the Swiss field for this round (mp-w7x; PR #199 review).
+	//
+	// Round 1 (the initial draw): exclude participants who have not checked
+	// in, but ONLY when check-in tracking is enabled (comp.CheckInEnabled) —
+	// otherwise a stale/imported checked_in marker would shrink the field even
+	// though the competition doesn't use check-in (PR #199 review). When
+	// enabled, opt-in semantics still apply (see filterCheckedIn).
+	//
+	// Round N > 1: the field is FROZEN to whoever was part of the initial
+	// draw. We derive it from the names already present in prior Swiss matches
+	// rather than re-reading mutable check-in state, so toggling a
+	// participant's check-in after round 1 can neither inject a zero-history
+	// player into a later round nor silently drop one. Withdrawals are handled
+	// separately by the eligibility (kiken/fusenpai) filter below.
+	if roundNumber == 1 {
+		if comp.CheckInEnabled {
+			participants = filterCheckedIn(participants)
+		}
+	} else {
+		field := swissFieldNamesFromMatches(priorMatches)
+		frozen := make([]domain.Player, 0, len(participants))
+		for _, p := range participants {
+			if field[p.Name] {
+				frozen = append(frozen, p)
+			}
+		}
+		participants = frozen
+	}
+
+	// After T154, store.LoadParticipants returns []domain.Player directly, so
+	// the Swiss pipeline doesn't need a conversion at the boundary (NFR-007).
+	// Drop kiken/fusenpai players (FR-050f); LoadCompetitorStatus returns an
+	// empty map when the file is missing (== "all eligible").
 	active := make([]domain.Player, 0, len(participants))
 	for _, p := range participants {
 		if p.ID != "" {
@@ -139,11 +196,6 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	}
 	if len(active) < 2 {
 		return nil, validationErrorf("swiss round requires at least 2 eligible participants, got %d", len(active))
-	}
-
-	priorMatches, err := e.store.LoadPoolMatches(compID)
-	if err != nil {
-		return nil, err
 	}
 
 	// Build the prior-pairings set (for rematch avoidance) and the

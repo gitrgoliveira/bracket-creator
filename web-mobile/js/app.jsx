@@ -128,6 +128,62 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// mp-cw1: Fire browser Notification for each newly-added announcement.
+// Guards: Notification API available + permission granted + document hidden
+// + localStorage toggle on. Uses tag:id to coalesce duplicate fires.
+// NOT pure — reads Notification.permission, document.hidden and localStorage,
+// and constructs Notification instances. Exported for unit testing (tests stub
+// those globals). Callers must treat it as side-effecting.
+export function fireBrowserNotifications(additions) {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
+  if (!document.hidden) return;
+  let enabled = false;
+  try {
+    enabled = window.localStorage.getItem("viewer.notifications.enabled") === "true";
+  } catch (_e) { /* storage unavailable */ }
+  if (!enabled) return;
+  for (const a of additions) {
+    if (!a || !a.id) continue;
+    new Notification("Tournament Announcement", {
+      tag: a.id,
+      body: a.message || "",
+      icon: "/favicon.jpeg",
+    });
+  }
+}
+
+// mp-cw1: Given a ref holding the seen-ID Set (or null if not yet seeded) and
+// a new full-list announcement snapshot, returns the additions that should
+// fire a notification and updates the ref's Set in place.
+//
+// The FIRST call with an unseeded (null) ref is always treated as the SEED:
+// every ID is recorded and NO additions are returned. The intended caller flow:
+//   1. fetchAnnouncements() HTTP success → first call → seeds from HTTP response.
+//   2. SSE snapshots that arrive before the HTTP seed → buffered externally in
+//      pendingSseAnnouncements; replayed (second call) AFTER step 1 to detect
+//      announcements added in the race window.
+//   3. fetchAnnouncements() HTTP failure + buffered SSE → first call → seeds
+//      from SSE (no notifications for pre-fetch announcements).
+//   4. fetchAnnouncements() HTTP failure + nothing buffered → ref stays null;
+//      first subsequent SSE call seeds (original fallback).
+// Dismiss/clear snapshots (shrinking lists) never produce additions because
+// their remaining IDs are all already seen.
+export function diffAnnouncementSnapshot(seenRef, list) {
+  const arr = Array.isArray(list) ? list : [];
+  if (!seenRef.current) {
+    seenRef.current = new Set();
+    arr.forEach(a => { if (a && a.id) seenRef.current.add(a.id); });
+    return []; // first snapshot is the seed — fire nothing
+  }
+  const seen = seenRef.current;
+  const additions = arr.filter(a => a && a.id && !seen.has(a.id));
+  // Mark ALL current IDs as seen (additions + existing) so a later snapshot
+  // that still contains the same IDs won't re-fire.
+  arr.forEach(a => { if (a && a.id) seen.add(a.id); });
+  return additions;
+}
+
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
@@ -203,6 +259,24 @@ function App() {
       ? crypto.randomUUID()
       : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
+  // mp-cw1: Unix-ms timestamp of when this viewer session mounted. Used to
+  // distinguish pre-existing announcements (sentAt ≤ mount time) from
+  // announcements created after the viewer opened the tab (sentAt > mount
+  // time). Post-mount IDs are excluded from the HTTP seed so the buffered
+  // SSE replay still fires notifications for them. Stored as a number so
+  // the filter can use Date.parse() for correct cross-format comparison
+  // (Go RFC3339Nano may omit fractional seconds; lexicographic string
+  // comparison of "…Z" vs "….500Z" is incorrect — 'Z' > '.' in ASCII).
+  const mountTimeRef = useR(Date.now());
+  // Set of announcement IDs already seen by this session. Seeded by the
+  // initial HTTP fetchAnnouncements response (pre-mount IDs only) so a
+  // page-reload does NOT re-fire for already-active announcements, and an
+  // announcement created in the mount→fetch race window still fires.
+  const seenAnnouncementIds = useR(null); // lazily initialised to a Set below
+  // Holds the latest SSE announcement snapshot received before the HTTP seed
+  // has settled. Full snapshots are idempotent: only the latest matters.
+  const pendingSseAnnouncements = useR(null);
+
   // Auth-mode discovery (file vs. locked). Fetched once on App mount
   // from GET /api/auth-config. Starts as null ("loading") so that
   // CreateTournament can gate its submit until the mode is known —
@@ -321,10 +395,58 @@ function App() {
   useE(() => {
     window.API.fetchAnnouncements()
       .then(list => {
-        setAnnouncements(filterActiveAnnouncements(list || []));
+        const active = filterActiveAnnouncements(list || []);
+        setAnnouncements(active);
+        // mp-cw1: Consume any SSE snapshot buffered before the HTTP seed arrived.
+        const buffered = pendingSseAnnouncements.current;
+        pendingSseAnnouncements.current = null;
+
+        // Seed strategy depends on whether we have a buffered SSE to replay:
+        //
+        // • WITH buffered SSE: seed only pre-mount IDs (sentAt ≤ mountMs) so
+        //   the replay below can fire notifications for post-mount IDs even
+        //   when the HTTP GET happened to capture them. Date.parse() for numeric
+        //   comparison — Go's RFC3339Nano may omit fractional seconds, making
+        //   lexicographic comparison wrong ('Z' > '.' in ASCII).
+        //   Missing/unparseable sentAt → treated as pre-existing (no spam risk).
+        //
+        // • WITHOUT buffered SSE: seed the full HTTP list. Excluding post-mount
+        //   IDs with no SSE to replay would leave them unseeded, causing a later
+        //   unrelated SSE snapshot to treat them as new and fire stale
+        //   notifications for announcements the viewer already sees on screen.
+        let seedList;
+        if (buffered !== null) {
+          seedList = (list || []).filter(a => {
+            if (!a || !a.id) return false;
+            if (!a.sentAt) return true;
+            const ms = Date.parse(a.sentAt);
+            return isNaN(ms) || ms <= mountTimeRef.current;
+          });
+        } else {
+          seedList = list || [];
+        }
+        diffAnnouncementSnapshot(seenAnnouncementIds, seedList);
+
+        // Replay the buffered SSE (if any) to fire for announcements added in
+        // the mount→fetch race window.
+        if (buffered !== null) {
+          const additions = diffAnnouncementSnapshot(seenAnnouncementIds, buffered);
+          if (additions.length > 0) {
+            fireBrowserNotifications(additions);
+          }
+        }
       })
       .catch(err => {
         console.error("Failed to fetch initial announcements:", err);
+        // Fall back: if an SSE snapshot was buffered while the HTTP request
+        // was in flight, seed from it so the next SSE diff works correctly.
+        // If nothing was buffered, leave the ref null so the first subsequent
+        // SSE snapshot becomes the seed (original spam-prevention fallback).
+        const buffered = pendingSseAnnouncements.current;
+        pendingSseAnnouncements.current = null;
+        if (buffered !== null && seenAnnouncementIds.current === null) {
+          diffAnnouncementSnapshot(seenAnnouncementIds, buffered); // seed, no notifications
+        }
       });
   }, []);
 
@@ -483,6 +605,21 @@ function App() {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];
             setAnnouncements(filterActiveAnnouncements(list));
+
+            // mp-cw1: diff against seen IDs to fire browser notifications ONLY
+            // for genuinely new announcements.
+            // If the HTTP seed hasn't arrived yet, buffer this snapshot and let
+            // fetchAnnouncements replay it — so an announcement added in the
+            // mount→fetch race window still fires a notification (the HTTP seed
+            // records only pre-existing IDs; the replay surfaces the new one).
+            if (seenAnnouncementIds.current === null) {
+              pendingSseAnnouncements.current = list; // keep latest; seed pending
+            } else {
+              const additions = diffAnnouncementSnapshot(seenAnnouncementIds, list);
+              if (additions.length > 0) {
+                fireBrowserNotifications(additions);
+              }
+            }
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can

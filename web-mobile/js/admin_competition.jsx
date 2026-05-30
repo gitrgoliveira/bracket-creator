@@ -1152,7 +1152,32 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // with a date that can't be saved back.
   const isDateValid = isValidDate;
 
+  // mp-w7x: surface how many participants will be excluded from the draw
+  // because they have not checked in. Mirror the engine's rule
+  // (filterCheckedIn in internal/engine/competition.go): only applies when the
+  // competition has check-in tracking enabled (c.checkInEnabled) — consistent
+  // with the rest of the UI, which masks checkedIn behind that flag. Within an
+  // enabled competition, opt-in semantics apply: only exclude when at least one
+  // participant is checked in. Empty roster (e.g. a playoffs-from-source
+  // competition resolved server-side) yields 0.
+  const drawPlayers = c.players || [];
+  const anyCheckedIn = drawPlayers.some(p => p.checkedIn);
+  const excludedFromDraw = (c.checkInEnabled && anyCheckedIn) ? drawPlayers.filter(p => !p.checkedIn).length : 0;
+
+  // Confirm before a draw/start that would drop non-checked-in participants.
+  // Returns false when the operator cancels.
+  const confirmCheckInExclusion = () => {
+    if (excludedFromDraw === 0) return true;
+    const plural = excludedFromDraw === 1 ? "" : "s";
+    const verb = excludedFromDraw === 1 ? "is" : "are";
+    return confirm(
+      `${excludedFromDraw} participant${plural} ${verb} not checked in and will be excluded from the draw.\n\n` +
+      `Only checked-in participants will be drawn. Continue?`
+    );
+  };
+
   const generateDraw = async () => {
+    if (!confirmCheckInExclusion()) return;
     setGenerating(true);
     try {
       await window.API.generateDraw(c.id, password);
@@ -1190,6 +1215,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const regenerateDraw = async () => {
+    if (!confirmCheckInExclusion()) return;
     // Regenerate discards the existing draw first (DELETE /draw is gated),
     // so collect the elevated password up front before any work begins.
     const admin = window.promptAdminPassword();
@@ -1218,6 +1244,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const start = async () => {
+    // draw-ready → running does not regenerate the draw; skip the confirmation
+    // there to avoid showing stale exclusion counts against an already-fixed draw.
+    if (c.status !== "draw-ready" && !confirmCheckInExclusion()) return;
     showToast(`Starting ${c.name}…`);
 
     setStarting(true);
@@ -1321,6 +1350,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 {!isDateValid(c.date) && (
                   <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600 }}>
                     ⚠ Cannot start: invalid date in Settings tab (e.g. "{c.date}")
+                  </div>
+                )}
+                {excludedFromDraw > 0 && (
+                  <div style={{ color: "var(--ink-3)", fontSize: 11, fontWeight: 600 }}>
+                    {excludedFromDraw} not checked in — will be excluded from the draw
                   </div>
                 )}
               </>

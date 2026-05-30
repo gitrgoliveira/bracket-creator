@@ -364,6 +364,32 @@ func TestEstimateForCounts_PoolThenPlayoffSequential(t *testing.T) {
 		"with no opening/lunch blocks the buffer is linear, so combined == poolOnly + playoffOnly")
 }
 
+// TestEstimateForCounts_TeamComp exercises the comp.Kind == "team" branch of
+// perMatchElapsedMinutes through EstimateForCounts: a team match scales by bout
+// count (= TeamSize) plus inter-bout transitions. All other EstimateForCounts
+// tests use individual comps, so this guards the team code path.
+func TestEstimateForCounts_TeamComp(t *testing.T) {
+	team := &state.Competition{
+		Kind:                 "team",
+		TeamSize:             3,
+		Courts:               []string{"A"},
+		PoolMatchDuration:    2,
+		PlayoffMatchDuration: 2,
+		StartTime:            "09:00",
+	}
+	tourn := newTournament(1.5, 10, "", "", "")
+	// Per team match (3 bouts): 3*2*1.5 + (3-1)*1 = 11. 2 matches on 1 court = 22.
+	// 10% buffer (match time only): 22*1.1 = 24.2 → 24.
+	est := EstimateForCounts(2, 0, team, tourn)
+	assert.Equal(t, 24, est.TotalDurationMinutes)
+
+	// Sanity: the team comp must exceed the individual equivalent (bouts scaling).
+	indiv := EstimateForCounts(2, 0, newIndivComp([]string{"A"}, 2, 2, "09:00"), newTournament(1.5, 10, "", "", ""))
+	assert.Greater(t, est.TotalDurationMinutes, indiv.TotalDurationMinutes,
+		"team comp (%d) must scale by bouts above individual (%d)",
+		est.TotalDurationMinutes, indiv.TotalDurationMinutes)
+}
+
 // TestEstimateForCounts_EvenDistribution verifies even distribution across courts.
 // With SlowestCourtBufferPct=0 the default (10%) is applied: 2 matches *3min=6min
 // per court * 1.1 = 6.6 → 7.

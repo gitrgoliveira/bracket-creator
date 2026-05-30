@@ -96,6 +96,34 @@ func TestFilterCheckedIn(t *testing.T) {
 	})
 }
 
+// TestDropSeedAssignments_CaseSensitive is the regression guard for PR #199
+// review round 3: seed pruning must use the case-sensitive roster identity.
+// "Alice" (checked in) and "alice" (not) are distinct participants
+// (helper.CheckDuplicateEntries is case-sensitive), so the checked-in player's
+// seed must survive even though a case-variant peer is excluded.
+func TestDropSeedAssignments_CaseSensitive(t *testing.T) {
+	players := []domain.Player{
+		{Name: "Alice", CheckedIn: true},
+		{Name: "alice", CheckedIn: false},
+		{Name: "Bob", CheckedIn: true},
+	}
+	excluded := checkInExcludedNames(players)
+	require.Contains(t, excluded, "alice")
+	require.NotContains(t, excluded, "Alice", "checked-in Alice must not be in the excluded set")
+
+	seeds := []domain.SeedAssignment{
+		{Name: "Alice", SeedRank: 1},
+		{Name: "Bob", SeedRank: 2},
+	}
+	out := dropSeedAssignments(seeds, excluded)
+	require.Len(t, out, 2, "checked-in Alice's seed must survive an excluded case-variant 'alice'")
+	got := map[string]bool{}
+	for _, a := range out {
+		got[a.Name] = true
+	}
+	assert.True(t, got["Alice"] && got["Bob"])
+}
+
 // TestStartCompetition_MixedFormat_ExcludesNonCheckedIn verifies that when
 // check-in is in use, only checked-in participants reach the pool draw.
 func TestStartCompetition_MixedFormat_ExcludesNonCheckedIn(t *testing.T) {

@@ -243,3 +243,96 @@ func TestGenerateSwissRound_ExcludesNonCheckedIn(t *testing.T) {
 	assert.NotContains(t, seen, "Frank", "non-checked-in player must not be paired")
 	assert.Contains(t, seen, "Alice")
 }
+
+// TestStartCompetition_SeededNonCheckedIn_Drawable is the regression guard for
+// PR #199 review comment 1: a seeded participant who is not checked in must not
+// break the draw. Their seed assignment is dropped alongside the player so
+// ApplySeeds doesn't fail with "seeded participant not found in main list".
+func TestStartCompetition_SeededNonCheckedIn_Drawable(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "seeded-checkin"
+
+	createTestCompetition(t, store, compID, "mixed", 4)
+	saveParticipantsWithCheckIn(t, store, compID,
+		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve"},
+		map[string]bool{"Alice": true, "Bob": true, "Charlie": true, "Dave": true},
+	)
+	// Eve is seeded #1 but NOT checked in; Alice is seeded #2 and checked in.
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Eve", SeedRank: 1},
+		{Name: "Alice", SeedRank: 2},
+	}))
+
+	// Pre-fix this returned "applying seeds: seeded participant not found in
+	// main list: Eve" and the draw failed entirely.
+	require.NoError(t, eng.StartCompetition(compID), "draw must succeed despite a non-checked-in seeded player")
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	names := poolPlayerNames(pools)
+	assert.Len(t, names, 4, "only the 4 checked-in players should be drawn")
+	assert.NotContains(t, names, "Eve", "non-checked-in seeded player must be excluded")
+	assert.Contains(t, names, "Alice")
+}
+
+// TestGenerateSwissRound_FrozenFieldIgnoresLateCheckIn is the regression guard
+// for PR #199 review comment 2: once round 1 is drawn, the Swiss field is
+// frozen. A participant excluded from round 1 (not checked in) must not appear
+// in a later round just because they were checked in afterwards.
+func TestGenerateSwissRound_FrozenFieldIgnoresLateCheckIn(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-frozen"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Swiss Frozen Field",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      "setup",
+	}))
+	// Round 1: P1–P4 checked in, P5/P6 not.
+	saveParticipantsWithCheckIn(t, store, compID,
+		[]string{"P1", "P2", "P3", "P4", "P5", "P6"},
+		map[string]bool{"P1": true, "P2": true, "P3": true, "P4": true},
+	)
+
+	r1, err := eng.GenerateSwissRound(compID, 1)
+	require.NoError(t, err)
+	require.NoError(t, store.SavePoolMatches(compID, r1))
+
+	r1Field := map[string]bool{}
+	for _, m := range r1 {
+		r1Field[m.SideA] = true
+		if m.SideB != "" {
+			r1Field[m.SideB] = true
+		}
+	}
+	require.NotContains(t, r1Field, "P5")
+	require.NotContains(t, r1Field, "P6")
+
+	// Complete round 1 so a next round can be generated (SideA wins each).
+	for _, m := range r1 {
+		if m.SideB != "" {
+			completeSwissMatch(t, store, compID, m.ID, m.SideA)
+		}
+	}
+
+	// P5 is checked in AFTER round 1 — a late toggle of mutable state.
+	saveParticipantsWithCheckIn(t, store, compID,
+		[]string{"P1", "P2", "P3", "P4", "P5", "P6"},
+		map[string]bool{"P1": true, "P2": true, "P3": true, "P4": true, "P5": true},
+	)
+
+	r2, err := eng.GenerateSwissRound(compID, 2)
+	require.NoError(t, err)
+
+	for _, m := range r2 {
+		assert.NotEqual(t, "P5", m.SideA, "late check-in must not inject P5 into round 2")
+		assert.NotEqual(t, "P5", m.SideB, "late check-in must not inject P5 into round 2")
+		assert.NotEqual(t, "P6", m.SideA, "P6 was never in the field")
+		assert.NotEqual(t, "P6", m.SideB, "P6 was never in the field")
+	}
+}

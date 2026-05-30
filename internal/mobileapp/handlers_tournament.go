@@ -288,6 +288,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// immediately instead of waiting for their next write to 401.
 		passwordChanged := false
 		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
+			// Preserve the write-only elevated password (spec 004). It has
+			// json:"-", so the bound body always leaves desired.AdminPassword
+			// == "" — without copying it forward, a routine name/venue save
+			// would silently wipe the elevated credential. It is changed only
+			// via PUT /api/auth/admin-password, never here.
+			if current != nil {
+				desired.AdminPassword = current.AdminPassword
+			}
 			if locked {
 				// Reset passwordChanged to false defensively — the
 				// non-empty case is already rejected above, but keep
@@ -442,6 +450,15 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		} else if t.Password == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})
 			return
+		}
+
+		// Preserve the write-only elevated password (spec 004) across a
+		// re-bootstrap POST. It has json:"-" so the bound body never carries
+		// it; without this a re-POST over an existing record would wipe the
+		// elevated credential. On a true first bootstrap (existingForPost ==
+		// nil) it stays "" — the operator sets it later via Settings.
+		if existingForPost != nil {
+			t.AdminPassword = existingForPost.AdminPassword
 		}
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {

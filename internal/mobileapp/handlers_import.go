@@ -53,8 +53,8 @@ type ImportResult struct {
 	Error            string `json:"error,omitempty"`
 }
 
-func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
-	r.POST("/tournament/import", func(c *gin.Context) {
+func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, elevated ElevatedVerifier) {
+	r.POST("/tournament/import", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		if err := c.Request.ParseMultipartForm(64 << 20); err != nil { // 64 MB limit
 			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse multipart form: " + err.Error()})
 			return

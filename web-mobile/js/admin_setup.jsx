@@ -102,6 +102,35 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
 
+  // Elevated (destructive-ops) password — spec 004 / mp-e21. File mode only;
+  // in locked mode it's the TOURNAMENT_ADMIN_PASSWORD_HASH env var (read-only
+  // here). `elevatedConfigured` decides whether the current-password field is
+  // shown (rotation) vs. a first-time set (TOFU).
+  const elevatedConfigured = authConfig && authConfig.elevatedConfigured === true;
+  const [adminNew, setAdminNew] = useStateA("");
+  const [adminCurrent, setAdminCurrent] = useStateA("");
+  const [adminSaving, setAdminSaving] = useStateA(false);
+
+  const handleSetAdminPassword = async () => {
+    if (!adminNew) { if (showToast) showToast("Enter a new admin password", "error"); return; }
+    setAdminSaving(true);
+    try {
+      await window.API.setAdminPassword(adminNew, adminCurrent, password);
+      setAdminNew(""); setAdminCurrent("");
+      // Refresh auth-config so elevatedConfigured/elevatedRequired reflect the
+      // new state (the gate is now active) for subsequent destructive actions.
+      try {
+        const cfg = await window.API.fetchAuthConfig();
+        if (cfg && typeof cfg === "object") window.setCachedAuthConfig(cfg);
+      } catch (_e) { /* non-fatal */ }
+      if (showToast) showToast("Admin password updated", "success");
+    } catch (e) {
+      if (showToast) showToast(e.message, "error");
+    } finally {
+      setAdminSaving(false);
+    }
+  };
+
   const handleSave = () => {
     // Trim early and send the trimmed value. The empty-name check below
     // already used `name.trim()`, but the onSave payload was passing the
@@ -194,6 +223,31 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               <label className="field__label">Admin Password</label>
               <input className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
               <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
+            </div>
+          )}
+          {/* Elevated (destructive-ops) password — spec 004 / mp-e21. */}
+          {locked ? (
+            <div className="field">
+              <label className="field__label">Destructive-ops password</label>
+              <div className="field__hint" style={{ marginTop: 4 }}>
+                This server is in locked mode. The destructive-ops password comes from <code>TOURNAMENT_ADMIN_PASSWORD_HASH</code> and can only be changed by restarting the server with a new hash. If unset, destructive actions (delete competition, discard draw, roster changes, import) return 503.
+              </div>
+            </div>
+          ) : (
+            <div className="field">
+              <label className="field__label">Destructive-ops password {elevatedConfigured ? "(set)" : "(not set)"}</label>
+              {elevatedConfigured && (
+                <input className="input" type="password" value={adminCurrent} onChange={(e) => setAdminCurrent(e.target.value)} placeholder="Current destructive-ops password" autoComplete="off" style={{ marginBottom: 8 }} />
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <input className="input" type="password" value={adminNew} onChange={(e) => setAdminNew(e.target.value)} placeholder={elevatedConfigured ? "New destructive-ops password" : "Set destructive-ops password"} autoComplete="new-password" />
+                <button className="btn" disabled={adminSaving} onClick={handleSetAdminPassword}>
+                  {adminSaving ? "Saving…" : (elevatedConfigured ? "Update" : "Set")}
+                </button>
+              </div>
+              <div className="field__hint">
+                A separate password required for destructive actions (delete competition, discard draw, roster add/edit, import). Leave unset to gate those behind the main password only. {elevatedConfigured && "Changing it requires the current destructive-ops password."}
+              </div>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
@@ -634,6 +688,8 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const doImport = async () => {
     if (!files.length) return;
     if (!confirm("Are you sure you want to import these competitions? This will add new competitions to the tournament.")) return;
+    const admin = window.promptAdminPassword();
+    if (admin === null) return;
     setLoading(true);
     setError(null);
     try {
@@ -641,7 +697,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       files.forEach(f => fd.append("files", f, f.webkitRelativePath || f.name));
       // Use the centralized API wrapper (api.jsx) so auth + error handling
       // stay consistent with the rest of the admin UI.
-      const body = await window.API.importCompetitions(fd, password);
+      const body = await window.API.importCompetitions(fd, password, admin);
       // mountedRef gates the post-await setStates so a navigate-back
       // during the upload doesn't fire setResults / setTimeout on a
       // torn-down component. importedTimerRef has its own unmount

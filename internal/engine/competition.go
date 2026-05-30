@@ -500,6 +500,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	loadedWithZekken := comp.WithZekkenName
 	loadedCourts := append([]string(nil), comp.Courts...)
 	loadedTeamSize := comp.TeamSize
+	loadedCheckInEnabled := comp.CheckInEnabled
 	// Note: PoolWinners is intentionally NOT snapshotted. The
 	// validation block below excludes it because it doesn't drive
 	// pool/bracket generation — admin's concurrent change is
@@ -705,6 +706,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		//   - StartTime (initial ScheduledAt for generated matches)
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)
+		//   - CheckInEnabled (decides which participants are included)
 		// Other config fields (TeamSize, PoolWinners, Name, Date, Venue,
 		// Mirror) are NOT validated — they don't drive generation, so
 		// admin's concurrent change to them doesn't invalidate the
@@ -719,8 +721,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 			current.RoundRobin != loadedRoundRobin ||
 			current.Kind != loadedKind ||
 			current.WithZekkenName != loadedWithZekken ||
+			current.CheckInEnabled != loadedCheckInEnabled ||
 			!courtsEqual(current.Courts, loadedCourts) {
-			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/Courts); regenerate by retrying", id)
+			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/CheckInEnabled/Courts); regenerate by retrying", id)
 		}
 		// Participants / seeds drift: detected via file mtime captured
 		// at outer Load. A concurrent AdminParticipants PUT between our

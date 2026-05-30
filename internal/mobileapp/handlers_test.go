@@ -1563,59 +1563,6 @@ func TestPOSTCompetition_RollbackOnSaveParticipantsFailure(t *testing.T) {
 		"rollback must remove config.md so retry isn't blocked by 'ID already exists'")
 }
 
-// TestCreatePlayoff_RollbackOnReservedSlotFailure pins the K3 rollback
-// for POST /competitions/:id/playoffs. SaveCompetitionChanged commits the
-// playoff config inside WithCompetitionRenameLock, then the
-// AddReservedSlot loop runs OUTSIDE the lock. If any slot's I/O fails,
-// the orphaned playoff config would block the operator's retry with
-// "derived playoff ID already exists" — the same shape as the
-// POST /competitions rollback above and the import handler's rollback.
-//
-// Forces deterministic failure by planting a directory at the playoff's
-// future participants.csv path (AddReservedSlot writes a placeholder
-// participant via saveParticipantsLocked, which encounters EISDIR).
-func TestCreatePlayoff_RollbackOnReservedSlotFailure(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	// Source competition with 3 participants → numPools=1 with default
-	// poolSize=3 → totalWinners = 1*2 = 2 (two AddReservedSlot calls).
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     "rollback-src",
-		Name:   "Rollback Src",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusPools,
-	}))
-	require.NoError(t, store.SaveParticipants("rollback-src", []domain.Player{
-		{Name: "P1", Dojo: "D"},
-		{Name: "P2", Dojo: "D"},
-		{Name: "P3", Dojo: "D"},
-	}))
-
-	// Plant a directory where the playoff's participants.csv should be
-	// a file. Derived playoff ID = slugifyID("Rollback Src - Playoffs")
-	// = "rollback-src-playoffs". Created BEFORE the POST so when
-	// AddReservedSlot tries to saveParticipantsLocked the placeholder,
-	// the path is a directory → EISDIR.
-	playoffID := "rollback-src-playoffs"
-	participantsAsDir := filepath.Join(tempDir, "competitions", playoffID, "participants.csv")
-	require.NoError(t, os.MkdirAll(participantsAsDir, 0700))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/rollback-src/playoffs", nil)
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code,
-		"POST /playoffs must surface AddReservedSlot I/O failure as 500")
-	assert.Contains(t, w.Body.String(), "failed to add reserved slot",
-		"error message must identify the failing step")
-
-	// Rollback assertion: the orphaned playoff config must be gone so a
-	// retry isn't blocked by the ID-collision guard.
-	stored, _ := store.LoadCompetition(playoffID)
-	assert.Nil(t, stored,
-		"rollback must remove the playoff config.md so retry passes the ID-collision guard")
-}
-
 // TestPOSTTournament_ValidatesCourts pins Copilot #8: POST and PUT
 // /api/tournament now call validateCourts (1..26 single-char labels)
 // matching the spec. Direct API callers can no longer persist >26

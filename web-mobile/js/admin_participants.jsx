@@ -1,10 +1,9 @@
-// Participants section of a competition: paste/import roster, edit seeds,
-// manage reserved slots. See web-mobile/admin_split_plan.md.
+// Participants section of a competition: paste/import roster, edit seeds.
+// See web-mobile/admin_split_plan.md.
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
-const decideNumericUpdate = window.decideNumericUpdate;
 
 // EscapeListener: registers the global Escape→onClose handler only while
 // it's mounted. Used inside conditionally-rendered modals so the listener's
@@ -192,7 +191,7 @@ function CheckInBanner({ tournament, players }) {
   );
 }
 
-function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, showToast, onSection }) {
+function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSection }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);
@@ -587,52 +586,6 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
     }
   };
 
-  const [showSlotForm, setShowSlotForm] = useStateA(false);
-  const [slotSrcComp, setSlotSrcComp] = useStateA("");
-  const [slotRank, setSlotRank] = useStateA(1);
-  const [slotLoading, setSlotLoading] = useStateA(false);
-
-  const otherComps = (tournament?.competitions || []).filter(cc => cc.id !== c.id);
-
-  // Number.isInteger + >= 1 catches NaN (cleared input) AND fractional
-  // values that the browser number-input lets through despite step="1".
-  // The bare `slotRank < 1` guard the function used to have was vacuous
-  // for NaN (NaN < 1 is false), so Add stayed enabled and addReservedSlot
-  // was called with NaN — the backend rejected with an unhelpful 400.
-  const slotRankValid = Number.isInteger(slotRank) && slotRank >= 1;
-
-  const addSlot = async () => {
-    if (!slotSrcComp || !slotRankValid) return;
-    setSlotLoading(true);
-    try {
-      await window.API.addReservedSlot(c.id, slotSrcComp, slotRank, password);
-      // mountedRef declared above gates post-await own setStates so a
-      // navigate-away during the PUT can't setState on a torn-down
-      // component. showToast is safe (lifted to AdminApp). alert is a
-      // browser API, safe regardless.
-      if (!mountedRef.current) return;
-      setShowSlotForm(false);
-      setSlotSrcComp("");
-      setSlotRank(1);
-      showToast("Reserved slot added");
-    } catch (e) {
-      alert("Failed to add reserved slot: " + e.message);
-    } finally {
-      // Skip when unmounted — setSlotLoading on a dead component is a
-      // teardown signal even if React 18 silently no-ops.
-      if (mountedRef.current) setSlotLoading(false);
-    }
-  };
-
-  const removeSlot = async (slotID) => {
-    try {
-      await window.API.deleteReservedSlot(c.id, slotID, password);
-      showToast("Reserved slot removed");
-    } catch (e) {
-      alert("Failed to remove reserved slot: " + e.message);
-    }
-  };
-
   // Async so we can await onUpdate(): updateCompetition re-throws on
   // PUT failure now, so awaiting lets us gate the "Saved N participants"
   // toast on actual success. Pre-fix the rejection was swallowed and
@@ -737,7 +690,6 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
   const isSetup = !c.status || c.status === "setup";
   const isDrawReady = c.status === "draw-ready";
   const isStarted = !isSetup && !isDrawReady;
-  const hasReservedSlotsContext = otherComps.length > 0 || (reservedSlots != null && reservedSlots.length > 0);
 
   return (
     <>
@@ -752,79 +704,7 @@ function AdminParticipants({ c, tournament, reservedSlots, onUpdate, password, s
           <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
         </div>
       )}
-      <div className={hasReservedSlotsContext ? "row-3" : "row"} style={{ alignItems: "start" }}>
-        {hasReservedSlotsContext && (
-          <div className="card">
-            <div className="card__head">
-              <div className="card__title">Reserved slots ({reservedSlots?.length || 0})</div>
-              {otherComps.length > 0 && !showSlotForm && (
-                <button className="btn btn--sm" onClick={() => setShowSlotForm(true)}>+ Reserved slot</button>
-              )}
-            </div>
-            {otherComps.length > 0 && showSlotForm && (
-              <div style={{ padding: "0 16px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>Add reserved slot</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                  <div style={{ flex: 2 }}>
-                    <div className="field__label">Source competition</div>
-                    <select className="field__select" value={slotSrcComp} onChange={e => setSlotSrcComp(e.target.value)}>
-                      <option value="">Select…</option>
-                      {otherComps.map(cc => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div className="field__label">Rank</div>
-                    {/* Render NaN as "" so clearing the input stays empty */}
-                    {/* instead of triggering React's "Received NaN for the */}
-                    {/* value attribute" warning. decideNumericUpdate keeps */}
-                    {/* state at NaN when input is empty/non-integer, so the */}
-                    {/* slotRankValid guard above keeps Add disabled until the */}
-                    {/* user re-enters a positive integer. */}
-                    <input
-                      className="field__input"
-                      type="number"
-                      min={1}
-                      step="1"
-                      value={Number.isFinite(slotRank) ? slotRank : ""}
-                      onChange={e => setSlotRank(decideNumericUpdate(e.target.value, 1).value)}
-                    />
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn btn--sm btn--primary" onClick={addSlot} disabled={!slotSrcComp || !slotRankValid || slotLoading}>Add</button>
-                    <button className="btn btn--sm" onClick={() => setShowSlotForm(false)}>Cancel</button>
-                  </div>
-                </div>
-                <div className="field__hint">The placeholder participant will be replaced with the real player when the source competition reaches playoffs.</div>
-              </div>
-            )}
-            {reservedSlots && reservedSlots.length > 0 && (
-              <div className="card__body" style={{ padding: "0 0 8px" }}>
-                {reservedSlots.map(slot => {
-                  const srcComp = (tournament?.competitions || []).find(cc => cc.id === slot.sourceCompID);
-                  const ready = srcComp && (srcComp.status === "playoffs" || srcComp.status === "completed");
-                  return (
-                    <div key={slot.id} style={{ display: "flex", alignItems: "center", padding: "8px 16px", gap: 8, borderBottom: "1px solid var(--border)" }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 500, fontSize: 13 }}>
-                          {srcComp?.name || slot.sourceCompID} — rank {slot.sourceRank}
-                        </div>
-                        <span className={`tag-badge ${ready ? "" : "tag-badge--warn"}`}>
-                          {ready ? "✓ Source ready" : "⚠ Source not yet in playoffs"}
-                        </span>
-                      </div>
-                      <button className="btn btn--sm btn--danger" onClick={() => removeSlot(slot.id)} title="Remove reserved slot">✕</button>
-                    </div>
-                  );
-                })}
-                {reservedSlots.some(s => { const src = (tournament?.competitions || []).find(cc => cc.id === s.sourceCompID); return !src || (src.status !== "playoffs" && src.status !== "completed"); }) && (
-                  <div className="alert alert--warn" style={{ margin: "12px 16px 4px" }}>
-                    ⚠ Some reserved slots cannot be resolved yet. The competition cannot be started until all source competitions have reached playoffs.
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+      <div className="row" style={{ alignItems: "start" }}>
         <div className="card">
           <div className="card__head">
             <div>

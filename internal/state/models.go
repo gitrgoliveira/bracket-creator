@@ -59,26 +59,33 @@ func ApplyTournamentDefaults(t *Tournament) {
 }
 
 type Competition struct {
-	ID                   string            `yaml:"id" json:"id"`
-	Name                 string            `yaml:"name" json:"name"`
-	Kind                 string            `yaml:"kind" json:"kind"`
-	Format               string            `yaml:"format" json:"format"`
-	PoolFormat           string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
-	TeamSize             int               `yaml:"team_size" json:"teamSize"`
-	PoolSize             int               `yaml:"pool_size" json:"poolSize"`
-	PoolSizeMode         string            `yaml:"pool_size_mode" json:"poolSizeMode"`
-	PoolWinners          int               `yaml:"pool_winners" json:"poolWinners"`
-	RoundRobin           bool              `yaml:"round_robin" json:"roundRobin"`
-	Courts               []string          `yaml:"courts" json:"courts"`
-	StartTime            string            `yaml:"start_time" json:"startTime"`
-	Date                 string            `yaml:"date" json:"date"`
-	Status               CompetitionStatus `yaml:"status" json:"status"`
-	Mirror               bool              `yaml:"mirror" json:"mirror"`
-	WithZekkenName       bool              `yaml:"with_zekken_name" json:"withZekkenName"`
-	NumberPrefix         string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
-	HasParticipantIDs    bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
-	PoolMatchDuration    int               `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
-	PlayoffMatchDuration int               `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+	ID                string            `yaml:"id" json:"id"`
+	Name              string            `yaml:"name" json:"name"`
+	Kind              string            `yaml:"kind" json:"kind"`
+	Format            string            `yaml:"format" json:"format"`
+	PoolFormat        string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
+	TeamSize          int               `yaml:"team_size" json:"teamSize"`
+	PoolSize          int               `yaml:"pool_size" json:"poolSize"`
+	PoolSizeMode      string            `yaml:"pool_size_mode" json:"poolSizeMode"`
+	PoolWinners       int               `yaml:"pool_winners" json:"poolWinners"`
+	RoundRobin        bool              `yaml:"round_robin" json:"roundRobin"`
+	Courts            []string          `yaml:"courts" json:"courts"`
+	StartTime         string            `yaml:"start_time" json:"startTime"`
+	Date              string            `yaml:"date" json:"date"`
+	Status            CompetitionStatus `yaml:"status" json:"status"`
+	Mirror            bool              `yaml:"mirror" json:"mirror"`
+	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
+	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
+	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
+	// SourceCompID links a playoffs competition back to the mixed
+	// (Pools + Knockout) competition whose pool winners seed it. Set by
+	// POST /competitions/:id/playoffs. When non-empty, the playoffs comp
+	// starts with an empty roster on disk; StartCompetition resolves the
+	// source's final pool winners into the roster at draw time (see
+	// engine.resolvePoolWinners). Empty for all other competitions.
+	SourceCompID         string `yaml:"source_comp_id,omitempty" json:"sourceCompID,omitempty"`
+	PoolMatchDuration    int    `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
+	PlayoffMatchDuration int    `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
 	// MaxEnchoPeriods caps how many encho (overtime) periods one match
 	// may run before the operator must call daihyosen. Zero means
 	// unlimited (FIK general default). T104, CHK029.
@@ -402,15 +409,6 @@ type BracketMatch struct {
 
 type Bracket struct {
 	Rounds [][]BracketMatch `json:"rounds"`
-}
-
-// ReservedSlot represents a placeholder participant that will be resolved to
-// the actual player who achieves a given rank in another competition.
-type ReservedSlot struct {
-	ID            string `json:"id"`            // unique slot ID
-	ParticipantID string `json:"participantID"` // ID of the placeholder in participants.csv
-	SourceCompID  string `json:"sourceCompID"`
-	SourceRank    int    `json:"sourceRank"`
 }
 
 type Announcement struct {

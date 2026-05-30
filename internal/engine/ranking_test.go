@@ -1,8 +1,8 @@
 package engine
 
 import (
+	"errors"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -93,164 +93,75 @@ func TestGetBracketRanking_Errors(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestResolveReservedSlots(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-slots-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+// TestResolvePoolWinners verifies that a playoffs competition linked to a
+// finalized mixed source resolves its roster from the source's pool winners
+// (ranks 1..totalWinners) via GetPoolRanking. With 2 source participants the
+// default sizing (poolSize 3 → 1 pool, winners 2) yields totalWinners = 2.
+func TestResolvePoolWinners(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
 
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	eng := New(store)
-
-	// Source competition
-	srcID := "source-comp"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: srcID, Name: "Source", Status: "completed"}))
-	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{{Name: "Winner"}}))
-	require.NoError(t, store.SaveBracket(srcID, &state.Bracket{
-		Rounds: [][]state.BracketMatch{{{Winner: "Winner", Status: state.MatchStatusCompleted}}},
+	srcID := "src-mixed"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     srcID,
+		Name:   "Source Mixed",
+		Format: state.CompFormatMixed,
+		Status: state.CompStatusComplete,
+	}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 	}))
 
-	// Target competition
-	targetID := "target-comp"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: targetID, Name: "Target"}))
-	slots := []state.ReservedSlot{
-		{ParticipantID: "P1", SourceCompID: srcID, SourceRank: 1},
+	playoff := &state.Competition{
+		ID:           "src-mixed-playoffs",
+		Name:         "Source Mixed - Playoffs",
+		Format:       state.CompFormatPlayoffs,
+		SourceCompID: srcID,
 	}
-	require.NoError(t, store.SaveReservedSlots(targetID, slots))
+	require.NoError(t, store.SaveCompetition(playoff))
 
-	players := []domain.Player{
-		{ID: "P1", Name: "Placeholder", Tag: "reserved"},
-		{ID: "P2", Name: "Normal"},
-	}
-
-	resolved, mutated, err := eng.resolveReservedSlots(targetID, players)
+	roster, err := eng.resolvePoolWinners(playoff)
 	require.NoError(t, err)
-	assert.True(t, mutated, "placeholder was updated in place — mutated must be true")
-	assert.Len(t, resolved, 2)
-	assert.Equal(t, "Winner", resolved[0].Name)
-	assert.Equal(t, "", resolved[0].Tag)
-	assert.Equal(t, "Normal", resolved[1].Name)
+	require.Len(t, roster, 2, "1 pool × 2 winners = 2 qualifiers")
+	assert.Equal(t, "Alice", roster[0].Name, "rank 1 = pool winner")
+	assert.Equal(t, "Bob", roster[1].Name, "rank 2 = pool runner-up")
 }
 
-func TestResolveReservedSlots_Errors(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-slots-err-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+// TestResolvePoolWinners_SourceNotFinal verifies that resolving before the
+// source's pools are final returns a clear validation error rather than a
+// partial roster.
+func TestResolvePoolWinners_SourceNotFinal(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
 
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	eng := New(store)
+	srcID := "src-pending"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     srcID,
+		Name:   "Pending Source",
+		Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, // not final yet
+	}))
+	playoff := &state.Competition{ID: "p", Name: "P", Format: state.CompFormatPlayoffs, SourceCompID: srcID}
 
-	compID := "test"
-	players := []domain.Player{{ID: "P1", Tag: "reserved"}}
+	_, err := eng.resolvePoolWinners(playoff)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not final")
+}
 
-	// No slots file - should return players unchanged
-	res, mutated, err := eng.resolveReservedSlots(compID, players)
-	assert.NoError(t, err)
-	assert.False(t, mutated, "no slots file → no mutation possible")
-	assert.Equal(t, players, res)
-
-	// Slot with missing source competition
-	slots := []state.ReservedSlot{{ParticipantID: "P1", SourceCompID: "missing", SourceRank: 1}}
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Test"}))
-	require.NoError(t, store.SaveReservedSlots(compID, slots))
-	_, _, err = eng.resolveReservedSlots(compID, players)
-	assert.Error(t, err)
+// TestResolvePoolWinners_SourceNotFound verifies a missing SourceCompID
+// surfaces a not-found error.
+func TestResolvePoolWinners_SourceNotFound(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+	playoff := &state.Competition{ID: "p", Name: "P", Format: state.CompFormatPlayoffs, SourceCompID: "ghost"}
+	_, err := eng.resolvePoolWinners(playoff)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
-
-	// Source competition not ready
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "not-ready", Status: "setup"}))
-	slots[0].SourceCompID = "not-ready"
-	require.NoError(t, store.SaveReservedSlots(compID, slots))
-	_, _, err = eng.resolveReservedSlots(compID, players)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not reached playoffs yet")
-}
-
-// TestResolveReservedSlots_CorruptSlotsFile pins the invariant that a
-// genuine LoadReservedSlots I/O / parse failure surfaces as an error
-// from resolveReservedSlots rather than being swallowed into a
-// "(players, false, nil)" no-op. Pre-fix, a corrupt reserved-slots.json
-// caused StartCompetition to proceed past resolution with the
-// placeholder "Reserved: rank N" entries left in the players slice —
-// the bracket / pool files would be generated with those placeholders
-// as real participants. The fix in resolveReservedSlots propagates
-// the error; this test injects a corrupt JSON file directly and
-// asserts the resolution call surfaces it.
-func TestResolveReservedSlots_CorruptSlotsFile(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-slots-corrupt-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	eng := New(store)
-
-	compID := "corrupt-comp"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Corrupt"}))
-
-	// Write malformed JSON directly to reserved-slots.json. The file path
-	// matches state.Store.compPath(compID, "reserved-slots.json").
-	slotsPath := filepath.Join(store.GetFolder(), "competitions", compID, "reserved-slots.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(slotsPath), 0700))
-	require.NoError(t, os.WriteFile(slotsPath, []byte("{ not valid json"), 0600))
-
-	players := []domain.Player{{ID: "P1", Name: "Real", Tag: ""}}
-	res, mutated, err := eng.resolveReservedSlots(compID, players)
-	require.Error(t, err, "corrupt slots file must surface as error, not silent no-op")
-	assert.Contains(t, err.Error(), "cannot load reserved slots")
-	assert.Nil(t, res, "error path returns nil players")
-	assert.False(t, mutated)
-}
-
-func TestResolveReservedSlots_Duplicate(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-slots-dup-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	eng := New(store)
-
-	// Source competition with a winner
-	srcID := "source-comp"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: srcID, Name: "Source", Status: "completed"}))
-	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{{Name: "Robert Young", Dojo: "Team Alpha"}}))
-	require.NoError(t, store.SaveBracket(srcID, &state.Bracket{
-		Rounds: [][]state.BracketMatch{{{Winner: "Robert Young", Status: state.MatchStatusCompleted}}},
-	}))
-
-	// Target competition that ALREADY has "Robert Young"
-	targetID := "target-comp"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: targetID, Name: "Target"}))
-
-	// Two players: one real "Robert Young", one placeholder for Rank 1 of source
-	players := []domain.Player{
-		{ID: "Existing-ID", Name: "Robert Young", Dojo: "Team Alpha"},
-		{ID: "Placeholder-ID", Name: "Reserved: source-comp rank 1", Tag: "reserved"},
-	}
-	require.NoError(t, store.SaveParticipants(targetID, players))
-
-	slots := []state.ReservedSlot{
-		{ID: "Slot-ID", ParticipantID: "Placeholder-ID", SourceCompID: srcID, SourceRank: 1},
-	}
-	require.NoError(t, store.SaveReservedSlots(targetID, slots))
-
-	// Resolve slots
-	resolved, mutated, err := eng.resolveReservedSlots(targetID, players)
-	require.NoError(t, err)
-	assert.True(t, mutated, "placeholder was removed (duplicate-merge path) — mutated must be true")
-
-	// SHOULD now only have 1 player! (the existing one)
-	assert.Len(t, resolved, 1)
-	assert.Equal(t, "Robert Young", resolved[0].Name)
-	assert.Equal(t, "Existing-ID", resolved[0].ID)
-
-	// The reserved slot should have been UPDATED to point to the existing ID
-	updatedSlots, err := store.LoadReservedSlots(targetID)
-	require.NoError(t, err)
-	require.Len(t, updatedSlots, 1)
-	assert.Equal(t, "Existing-ID", updatedSlots[0].ParticipantID)
 }
 
 // TestGetPoolRanking_Basic verifies that rank 1 returns the winner of
@@ -348,77 +259,6 @@ func TestGetPoolRanking_OutOfRange(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestResolveReservedSlots_LeagueSource verifies that when the source
-// competition has format "league", resolveReservedSlots resolves the
-// placeholder via GetPoolRanking (pool standings) rather than
-// GetBracketRanking. A league source has no bracket.json, so calling
-// GetBracketRanking would return an error; the test confirms the happy
-// path succeeds and the placeholder is replaced with the pool winner.
-func TestResolveReservedSlots_LeagueSource(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-
-	// League source competition: complete, all players in one pool.
-	srcID := "league-source"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     srcID,
-		Name:   "League Source",
-		Format: state.CompFormatLeague,
-		Status: state.CompStatusComplete,
-	}))
-	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
-		{Name: "Alice", Dojo: "DojoA"},
-		{Name: "Bob", Dojo: "DojoB"},
-		{Name: "Charlie", Dojo: "DojoC"},
-	}))
-	require.NoError(t, store.SavePools(srcID, []helper.Pool{
-		{
-			PoolName: "Pool A",
-			Players: []helper.Player{
-				{Name: "Alice"},
-				{Name: "Bob"},
-				{Name: "Charlie"},
-			},
-		},
-	}))
-	// Alice beats Bob and Charlie — rank 1.
-	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
-		{
-			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
-			Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,
-		},
-		{
-			ID: "Pool A-1", SideA: "Alice", SideB: "Charlie",
-			Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,
-		},
-		{
-			ID: "Pool A-2", SideA: "Bob", SideB: "Charlie",
-			Winner: "Bob", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,
-		},
-	}))
-
-	// Target competition with one reserved slot pointing at rank 1 of the league source.
-	targetID := "league-target"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: targetID, Name: "Target"}))
-	players := []domain.Player{
-		{ID: "placeholder-1", Name: "Reserved: league-source rank 1", Tag: "reserved"},
-		{ID: "real-1", Name: "Dave", Dojo: "DojoD"},
-	}
-	require.NoError(t, store.SaveReservedSlots(targetID, []state.ReservedSlot{
-		{ParticipantID: "placeholder-1", SourceCompID: srcID, SourceRank: 1},
-	}))
-
-	resolved, mutated, err := eng.resolveReservedSlots(targetID, players)
-	require.NoError(t, err)
-	assert.True(t, mutated)
-	require.Len(t, resolved, 2)
-
-	// Placeholder should now hold Alice's name (pool ranking doesn't
-	// re-resolve full participant data, so Dojo is not checked here).
-	assert.Equal(t, "Alice", resolved[0].Name)
-	assert.Equal(t, "", resolved[0].Tag, "resolved placeholder must not retain 'reserved' tag")
-	assert.Equal(t, "Dave", resolved[1].Name)
-}
-
 // TestCalculatePoolStandings_TeamSubDraw covers the sub.Winner=="" branch in
 // computeStandings (lines 341-343). In a best-of-3 team kendo match each
 // position fights individually; a position where both fighters score 2 ippons
@@ -473,5 +313,289 @@ func TestCalculatePoolStandings_TeamSubDraw(t *testing.T) {
 	for _, s := range poolStandings {
 		assert.Equal(t, 1, s.Draws, "%s: team match must be a draw", s.Player.Name)
 		assert.Equal(t, 1, s.IndividualDraws, "%s: sub-bout draw must increment IndividualDraws", s.Player.Name)
+	}
+}
+
+// TestStartCompetition_PlayoffsFromSource exercises the end-to-end pools→playoffs
+// transition (mp-j39, replacing the reserved-slot flow): a playoffs competition
+// linked to a finalized mixed source via SourceCompID resolves its roster from
+// the source's pool winners at start, persists it, then generates the bracket.
+func TestStartCompetition_PlayoffsFromSource(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	// Finalized mixed source: one pool of two, Alice beats Bob.
+	srcID := "src-mixed"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Source Mixed", Format: state.CompFormatMixed,
+		Status: state.CompStatusComplete,
+	}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"}, {Name: "Bob", Dojo: "DojoB"},
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	// Playoffs comp linked to the source — empty roster on disk.
+	playoffID := "src-playoffs"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: playoffID, Name: "Source Mixed - Playoffs",
+		Format: state.CompFormatPlayoffs, SourceCompID: srcID,
+	}))
+
+	require.NoError(t, eng.StartCompetition(playoffID))
+
+	// Roster resolved from the source's pool winners and persisted.
+	roster, err := store.LoadParticipants(playoffID, false)
+	require.NoError(t, err)
+	require.Len(t, roster, 2, "1 pool × 2 winners")
+	assert.ElementsMatch(t, []string{"Alice", "Bob"},
+		[]string{roster[0].Name, roster[1].Name})
+
+	// Bracket generated from the resolved roster.
+	bracket, err := store.LoadBracket(playoffID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket)
+	assert.NotEmpty(t, bracket.Rounds, "bracket must be built from the resolved roster")
+
+	comp, err := store.LoadCompetition(playoffID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPlayoffs, comp.Status,
+		"StartCompetition runs the draw AND transitions a playoffs comp to playoffs")
+	assert.True(t, comp.HasParticipantIDs,
+		"resolved roster persisted with UUID ids → HasParticipantIDs flipped")
+}
+
+// TestStartCompetition_PlayoffsFromSource_NotFinal verifies that starting a
+// source-linked playoffs comp before the source's pools are final fails with a
+// clear error rather than generating a bracket from a partial roster.
+func TestStartCompetition_PlayoffsFromSource_NotFinal(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "src-pending"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Pending", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, // not final yet
+	}))
+	playoffID := "pending-playoffs"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: playoffID, Name: "Pending - Playoffs",
+		Format: state.CompFormatPlayoffs, SourceCompID: srcID,
+	}))
+
+	err := eng.StartCompetition(playoffID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not final")
+
+	// No bracket should have been generated.
+	bracket, _ := store.LoadBracket(playoffID)
+	if bracket != nil {
+		assert.Empty(t, bracket.Rounds, "no bracket on a failed start")
+	}
+}
+
+// TestResolvePoolWinners_NonMixedSource verifies the API-contract guard: a
+// source competition that is not mixed format is rejected even if it has
+// finalized pools (GetPoolRanking would otherwise mis-resolve a non-pool
+// source).
+func TestResolvePoolWinners_NonMixedSource(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "src-league"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "League Src", Format: state.CompFormatLeague,
+		Status: state.CompStatusComplete,
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+	}))
+	playoff := &state.Competition{ID: "p", Name: "P", Format: state.CompFormatPlayoffs, SourceCompID: srcID}
+
+	_, err := eng.resolvePoolWinners(playoff)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be a mixed")
+}
+
+// TestResolvePoolWinners_PoolCountFromPersistedPools pins the fix for the
+// over-promotion bug: totalWinners must come from the ACTUAL finalized pool
+// count, not a ceiling-division recomputation from participant count. Here 5
+// participants are split into 2 pools on disk; with PoolWinners=1 the result
+// must be exactly 2 winners (one per real pool), regardless of PoolSize/Mode.
+func TestResolvePoolWinners_PoolCountFromPersistedPools(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "src-2pools"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Two Pools", Format: state.CompFormatMixed,
+		Status:      state.CompStatusComplete,
+		PoolSize:    5, // ceiling math on 5 parts would give numPools=1 → wrong
+		PoolWinners: 1,
+	}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
+		{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"},
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A"}, {Name: "B"}, {Name: "C"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "D"}, {Name: "E"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A", SideB: "B", Winner: "A", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "A", SideB: "C", Winner: "A", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-2", SideA: "B", SideB: "C", Winner: "B", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "D", SideB: "E", Winner: "D", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	playoff := &state.Competition{ID: "p2", Name: "P2", Format: state.CompFormatPlayoffs, SourceCompID: srcID}
+	roster, err := eng.resolvePoolWinners(playoff)
+	require.NoError(t, err)
+	assert.Len(t, roster, 2, "2 real pools × 1 winner = 2 (NOT ceil(5/5)=1 pool)")
+}
+
+// TestStartCompetition_PlayoffsFromSource_ExistingRosterNotClobbered verifies
+// the anti-clobber guard: a playoffs comp that has a SourceCompID link BUT an
+// already-populated roster must keep that roster (no source resolution), so a
+// manual roster or an accidental SourceCompID can't silently wipe participants.
+func TestStartCompetition_PlayoffsFromSource_ExistingRosterNotClobbered(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	// Source is deliberately NOT final — if resolution ran it would error.
+	srcID := "src-unfinished"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Unfinished", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools,
+	}))
+
+	playoffID := "manual-roster-playoffs"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: playoffID, Name: "Manual - Playoffs",
+		Format: state.CompFormatPlayoffs, SourceCompID: srcID,
+	}))
+	require.NoError(t, store.SaveParticipants(playoffID, []domain.Player{
+		{Name: "Manual1", Dojo: "D1"}, {Name: "Manual2", Dojo: "D2"},
+		{Name: "Manual3", Dojo: "D3"}, {Name: "Manual4", Dojo: "D4"},
+	}))
+
+	require.NoError(t, eng.StartCompetition(playoffID),
+		"existing roster must be used directly — no source resolution, no error")
+
+	roster, err := store.LoadParticipants(playoffID, false)
+	require.NoError(t, err)
+	require.Len(t, roster, 4)
+	names := make([]string, len(roster))
+	for i, p := range roster {
+		names[i] = p.Name
+	}
+	assert.ElementsMatch(t, []string{"Manual1", "Manual2", "Manual3", "Manual4"}, names,
+		"manual roster preserved, not replaced by source pool winners")
+
+	bracket, err := store.LoadBracket(playoffID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket)
+	assert.NotEmpty(t, bracket.Rounds, "bracket built from the manual roster")
+}
+
+// TestStartCompetition_PlayoffsFromSource_SaveFailureRollsBackToSetup pins the
+// rollback guard: if the trailing roster save fails AFTER the atomic Status
+// commit, Status must revert to setup rather than getting stuck at draw-ready.
+// Otherwise a retry would take StartCompetition's draw-ready fast path
+// (transitionDrawToRunning) and start the playoffs with an empty
+// participants.csv. The failure is injected via the saveResolvedPlayoffRoster
+// seam so it triggers ONLY at the trailing save (the same participants.csv
+// path is read empty at the start of the pipeline, so a filesystem fault would
+// break the initial load instead).
+func TestStartCompetition_PlayoffsFromSource_SaveFailureRollsBackToSetup(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "src-rb"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Src RB", Format: state.CompFormatMixed, Status: state.CompStatusComplete,
+	}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{{Name: "Alice"}, {Name: "Bob"}}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	playoffID := "src-rb-playoffs"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: playoffID, Name: "Src RB - Playoffs",
+		Format: state.CompFormatPlayoffs, SourceCompID: srcID,
+	}))
+
+	// Inject a deterministic failure at the trailing roster save.
+	orig := saveResolvedPlayoffRoster
+	saveResolvedPlayoffRoster = func(*state.Store, string, []domain.Player) error {
+		return errors.New("injected disk failure")
+	}
+	defer func() { saveResolvedPlayoffRoster = orig }()
+
+	err := eng.StartCompetition(playoffID)
+	require.Error(t, err, "the injected roster-save failure must surface")
+	assert.Contains(t, err.Error(), "injected disk failure")
+
+	comp, lerr := store.LoadCompetition(playoffID)
+	require.NoError(t, lerr)
+	assert.Equal(t, state.CompStatusSetup, comp.Status,
+		"Status must roll back to setup after a roster-save failure, not get stuck at draw-ready")
+}
+
+// TestStartCompetition_PlayoffsFromSource_NonUUIDSourceIDsPersistUUIDs pins the
+// fix for the column-shift hazard: when the SOURCE competition carries
+// non-UUID (client-slug) participant IDs, the resolved playoffs roster must
+// still be persisted with UUID column-0 ids — so a later auto-detect load (the
+// path taken if the deferred HasParticipantIDs flip ever fails to land) parses
+// names/dojos correctly instead of column-shifting the slug into Name.
+func TestStartCompetition_PlayoffsFromSource_NonUUIDSourceIDsPersistUUIDs(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "slug-src"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Slug Src", Format: state.CompFormatMixed,
+		Status: state.CompStatusComplete, HasParticipantIDs: true,
+	}))
+	// Source participants carry non-UUID client-slug IDs (the mp-p7n shape).
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
+		{ID: "slug-src-p1", Name: "Alice", Dojo: "DojoA"},
+		{ID: "slug-src-p2", Name: "Bob", Dojo: "DojoB"},
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "slug-src-p1", Name: "Alice"}, {ID: "slug-src-p2", Name: "Bob"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	playoffID := "slug-playoffs"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: playoffID, Name: "Slug - Playoffs",
+		Format: state.CompFormatPlayoffs, SourceCompID: srcID,
+	}))
+
+	require.NoError(t, eng.StartCompetition(playoffID))
+
+	// Load WITHOUT the HasIDs hint (HasIDs: nil → auto-detect), simulating the
+	// path used if the HasParticipantIDs flip had failed. Column 0 must be a
+	// UUID for this to parse correctly.
+	roster, err := store.LoadParticipantsOpt(playoffID, false, state.LoadParticipantsOpts{})
+	require.NoError(t, err)
+	require.Len(t, roster, 2)
+	assert.ElementsMatch(t, []string{"Alice", "Bob"},
+		[]string{roster[0].Name, roster[1].Name},
+		"names must NOT be column-shifted on auto-detect load")
+	for _, p := range roster {
+		assert.NotEqual(t, "slug-src-p1", p.ID)
+		assert.NotEqual(t, "slug-src-p2", p.ID)
+		assert.True(t, helper.IsUUIDv4(p.ID),
+			"resolved roster id must be a freshly-minted UUID, got %q", p.ID)
 	}
 }

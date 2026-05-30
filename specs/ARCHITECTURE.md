@@ -105,7 +105,6 @@ main.go                          Entry point; embeds web/ and web-mobile/ via //
 │   │   ├── participants.go, seeds.go, pools.go, bracket.go, schedule.go
 │   │   ├── competitor_status.go Eligibility persistence
 │   │   ├── team_lineup.go       Team lineup persistence
-│   │   ├── reservedslots.go     Cross-competition reserved slot resolution
 │   │   ├── overrides.go         Manual ranking overrides
 │   │   ├── match.go             DeriveQueuePositions (pure helper)
 │   │   └── ids.go               ID generation utilities
@@ -274,7 +273,6 @@ tournament-data/
         ├── schedule.csv                Court/time assignments
         ├── competitor-status.yaml      Eligibility records (kiken/fusenpai losers)
         ├── lineups.yaml                Team lineups, keyed by round
-        ├── reserved-slots.json         Cross-competition reserved slot bindings
         └── overrides.json              Manual ranking overrides
 ```
 

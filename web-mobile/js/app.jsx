@@ -259,12 +259,15 @@ function App() {
       ? crypto.randomUUID()
       : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
-  // mp-cw1: ISO timestamp of when this viewer session mounted. Used to
+  // mp-cw1: Unix-ms timestamp of when this viewer session mounted. Used to
   // distinguish pre-existing announcements (sentAt ≤ mount time) from
   // announcements created after the viewer opened the tab (sentAt > mount
   // time). Post-mount IDs are excluded from the HTTP seed so the buffered
-  // SSE replay still fires notifications for them.
-  const mountTimeRef = useR(new Date().toISOString());
+  // SSE replay still fires notifications for them. Stored as a number so
+  // the filter can use Date.parse() for correct cross-format comparison
+  // (Go RFC3339Nano may omit fractional seconds; lexicographic string
+  // comparison of "…Z" vs "….500Z" is incorrect — 'Z' > '.' in ASCII).
+  const mountTimeRef = useR(Date.now());
   // Set of announcement IDs already seen by this session. Seeded by the
   // initial HTTP fetchAnnouncements response (pre-mount IDs only) so a
   // page-reload does NOT re-fire for already-active announcements, and an
@@ -399,11 +402,16 @@ function App() {
         // the viewer mounted (sentAt > mount time) are intentionally excluded
         // so the buffered SSE replay below still fires notifications for them
         // even when the HTTP GET response happened to capture them too.
-        // Announcements without a sentAt field are treated conservatively as
-        // pre-existing (no spam risk).
-        const preMountList = (list || []).filter(
-          a => !a || !a.id || !a.sentAt || a.sentAt <= mountTimeRef.current
-        );
+        // Date.parse() is used for numeric comparison because Go's RFC3339Nano
+        // serialisation may omit fractional seconds ("…Z" vs "….500Z") and
+        // lexicographic string comparison would give the wrong order in that
+        // case ('Z' > '.' in ASCII). Missing/unparseable sentAt → pre-existing.
+        const preMountList = (list || []).filter(a => {
+          if (!a || !a.id) return false;
+          if (!a.sentAt) return true;
+          const ms = Date.parse(a.sentAt);
+          return isNaN(ms) || ms <= mountTimeRef.current;
+        });
         diffAnnouncementSnapshot(seenAnnouncementIds, preMountList);
         // Replay any SSE snapshot that beat the HTTP seed. These arrived
         // after mount and may contain genuinely new announcements added in

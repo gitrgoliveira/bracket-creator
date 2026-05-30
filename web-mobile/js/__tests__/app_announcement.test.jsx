@@ -532,25 +532,34 @@ describe('diffAnnouncementSnapshot', () => {
     expect(ref.current).toBeInstanceOf(Set);
   });
 
-  // --- sentAt mount-time filter (Copilot comment 3328811690) ---
+  // --- sentAt mount-time filter (Copilot comments 3328811690, 3329327022) ---
   // The HTTP seed is pre-filtered to announcements with sentAt ≤ mountTime so
   // post-mount announcements in the HTTP response don't block the SSE replay
-  // from firing notifications for them.
+  // from firing notifications for them. Date.parse() is used for numeric
+  // comparison because Go's RFC3339Nano may omit fractional seconds, making
+  // lexicographic string comparison incorrect ('Z' > '.' in ASCII).
+
+  // Helper matching the app.jsx preMountList filter logic (numeric comparison).
+  function preMountFilter(list, mountMs) {
+    return list.filter(a => {
+      if (!a || !a.id) return false;
+      if (!a.sentAt) return true;
+      const ms = Date.parse(a.sentAt);
+      return isNaN(ms) || ms <= mountMs;
+    });
+  }
 
   it('sentAt filter: post-mount ID excluded from seed fires on SSE replay', () => {
     // Models the race: HTTP response includes NEW (sentAt after mount), but the
     // caller only seeds pre-mount IDs. Buffered SSE replay then fires for NEW.
-    const mountTime = '2026-05-30T13:00:00.000Z';
+    const mountMs = Date.parse('2026-05-30T13:00:00.000Z');
     const ref = { current: null };
 
     const httpList = [
       { id: 'ann-1', sentAt: '2026-05-30T12:00:00.000Z', message: 'Pre-existing' },
       { id: 'new-1', sentAt: '2026-05-30T13:00:01.000Z', message: 'Created after mount' },
     ];
-    const preMountList = httpList.filter(
-      a => !a || !a.id || !a.sentAt || a.sentAt <= mountTime
-    );
-    diffAnnouncementSnapshot(ref, preMountList); // seed pre-mount only
+    diffAnnouncementSnapshot(ref, preMountFilter(httpList, mountMs)); // seed pre-mount only
 
     // Replay buffered SSE (includes new-1)
     const additions = diffAnnouncementSnapshot(ref, httpList);
@@ -558,17 +567,30 @@ describe('diffAnnouncementSnapshot', () => {
     expect(additions[0].id).toBe('new-1');
   });
 
-  it('sentAt filter: missing sentAt treated as pre-existing (conservative — no spam)', () => {
-    const mountTime = '2026-05-30T13:00:00.000Z';
+  it('sentAt filter: Go RFC3339 without fractional seconds compares correctly', () => {
+    // "2026-05-30T13:00:00Z" (no fractional) vs mountMs from "2026-05-30T13:00:00.500Z".
+    // String comparison would wrongly say "Z" > "." → excluded. Numeric is correct.
+    const mountMs = Date.parse('2026-05-30T13:00:00.500Z'); // ~500ms after the hour
     const ref = { current: null };
 
+    // ann-1 sentAt is the same second but without fractional — pre-existing (sentAt < mountMs)
     const httpList = [
-      { id: 'ann-1', message: 'No sentAt' }, // treated as pre-existing
+      { id: 'ann-1', sentAt: '2026-05-30T13:00:00Z', message: 'Pre-existing, no frac seconds' },
     ];
-    const preMountList = httpList.filter(
-      a => !a || !a.id || !a.sentAt || a.sentAt <= mountTime
-    );
-    diffAnnouncementSnapshot(ref, preMountList); // seeds ann-1
+    diffAnnouncementSnapshot(ref, preMountFilter(httpList, mountMs)); // ann-1 IS pre-mount
+    expect(ref.current.has('ann-1')).toBe(true); // correctly seeded as pre-existing
+
+    // Replay with same list → ann-1 already seen → no notification ✓
+    const additions = diffAnnouncementSnapshot(ref, httpList);
+    expect(additions).toHaveLength(0);
+  });
+
+  it('sentAt filter: missing sentAt treated as pre-existing (conservative — no spam)', () => {
+    const mountMs = Date.parse('2026-05-30T13:00:00.000Z');
+    const ref = { current: null };
+
+    const httpList = [{ id: 'ann-1', message: 'No sentAt' }]; // treated as pre-existing
+    diffAnnouncementSnapshot(ref, preMountFilter(httpList, mountMs)); // seeds ann-1
     // Replay SSE with the same list → ann-1 already seen → no additions
     const additions = diffAnnouncementSnapshot(ref, httpList);
     expect(additions).toHaveLength(0);

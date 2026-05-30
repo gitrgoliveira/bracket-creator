@@ -78,6 +78,38 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 		}
 		c.JSON(http.StatusOK, lineup)
 	})
+
+	// Match-scoped read (mp-825). 404 lets the caller fall back to the
+	// round-scoped endpoint above.
+	r.GET("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
+		compID, teamID, matchID, ok := parseMatchLineupParams(c)
+		if !ok {
+			return
+		}
+		lineups, err := store.LoadTeamLineups(compID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		lineup, found := findMatchLineup(lineups, teamID, matchID)
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no lineup submitted for this team and match"})
+			return
+		}
+		c.JSON(http.StatusOK, lineup)
+	})
+}
+
+// findMatchLineup scans the loaded lineup map for the match-scoped entry
+// matching (teamID, matchID), avoiding any dependency on the store's
+// internal key format. Returns the lineup and whether it was found.
+func findMatchLineup(lineups map[string]domain.TeamLineup, teamID, matchID string) (domain.TeamLineup, bool) {
+	for _, l := range lineups {
+		if l.MatchID == matchID && l.TeamID == teamID {
+			return l, true
+		}
+	}
+	return domain.TeamLineup{}, false
 }
 
 // RegisterLineupHandlers wires the PUT/DELETE lineup endpoints under
@@ -223,6 +255,105 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		}
 		c.Status(http.StatusNoContent)
 	})
+
+	// Match-scoped PUT/DELETE (mp-825). Mirrors the round-scoped flow but
+	// keys the lineup by matchID so successive encounters lock and edit
+	// independently.
+	r.PUT("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
+		compID, teamID, matchID, ok := parseMatchLineupParams(c)
+		if !ok {
+			return
+		}
+		var req LineupRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		lineup := domain.TeamLineup{
+			TeamID:        teamID,
+			CompetitionID: compID,
+			MatchID:       matchID,
+			Positions:     req.Positions,
+		}
+
+		type httpErr struct {
+			status int
+			body   gin.H
+		}
+		var respErr *httpErr
+		var persistedLineup domain.TeamLineup
+		txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
+			comp, err := stx.LoadCompetition(compID)
+			if err != nil {
+				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": err.Error()}}
+				return nil
+			}
+			if comp == nil {
+				respErr = &httpErr{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
+				return nil
+			}
+			teamSize := comp.TeamSize
+			if teamSize <= 0 {
+				respErr = &httpErr{
+					status: http.StatusBadRequest,
+					body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
+				}
+				return nil
+			}
+			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
+				switch {
+				case errors.Is(err, state.ErrLineupLocked):
+					respErr = &httpErr{status: http.StatusConflict, body: gin.H{"error": err.Error()}}
+				default:
+					// All domain validation errors (missing senpo/taisho,
+					// too-many-missing, bad team size, dynamic position
+					// messages) map to 400 — same surface as the
+					// round-scoped PUT.
+					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
+				}
+				return nil
+			}
+			lineups, err := stx.LoadTeamLineups(compID)
+			if err != nil {
+				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": err.Error()}}
+				return nil
+			}
+			if persisted, found := findMatchLineup(lineups, teamID, matchID); found {
+				persistedLineup = persisted
+			} else {
+				// Defensive: Set just succeeded, so the entry must be
+				// present on reload; fall back to the request payload.
+				persistedLineup = lineup
+			}
+			return nil
+		})
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			return
+		}
+		if respErr != nil {
+			c.JSON(respErr.status, respErr.body)
+			return
+		}
+		c.JSON(http.StatusOK, persistedLineup)
+	})
+
+	r.DELETE("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
+		compID, teamID, matchID, ok := parseMatchLineupParams(c)
+		if !ok {
+			return
+		}
+		if err := store.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
+			if errors.Is(err, state.ErrLineupLocked) {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	})
 }
 
 // parseLineupParams extracts (compID, teamID, round) from the URL and
@@ -255,4 +386,27 @@ func parseLineupParams(c *gin.Context) (compID, teamID string, round int, ok boo
 		return "", "", 0, false
 	}
 	return compID, teamID, round, true
+}
+
+// parseMatchLineupParams extracts (compID, teamID, matchID) from the URL
+// for the match-scoped lineup endpoints (mp-825). matchID is opaque
+// (like teamID) — it's never used as a filesystem path, only as a map
+// key and a lookup against persisted match IDs — so no regex is imposed
+// beyond non-empty.
+func parseMatchLineupParams(c *gin.Context) (compID, teamID, matchID string, ok bool) {
+	compID, ok = requireValidCompID(c)
+	if !ok {
+		return "", "", "", false
+	}
+	teamID = c.Param("tid")
+	if teamID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "team ID is required"})
+		return "", "", "", false
+	}
+	matchID = c.Param("matchId")
+	if matchID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "match ID is required"})
+		return "", "", "", false
+	}
+	return compID, teamID, matchID, true
 }

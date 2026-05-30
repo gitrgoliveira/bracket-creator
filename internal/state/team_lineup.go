@@ -42,12 +42,32 @@ type teamLineupFile struct {
 
 const teamLineupFilename = "lineups.yaml"
 
-// teamLineupKey is the in-memory map key. Two lineups for the same
-// team in different rounds coexist (a 5-person team might rotate a
-// kiken'd jiho between round 1 and round 2), so the round is part of
-// the key — not just teamID.
+// teamLineupKey is the in-memory map key for a ROUND-scoped lineup. Two
+// lineups for the same team in different rounds coexist (a 5-person team
+// might rotate a kiken'd jiho between round 1 and round 2), so the round
+// is part of the key — not just teamID.
 func teamLineupKey(teamID string, round int) string {
 	return fmt.Sprintf("%s-%d", teamID, round)
+}
+
+// teamLineupMatchKey is the in-memory map key for a MATCH-scoped lineup
+// (mp-825). Prefixed with "m:" so it can never collide with a
+// round-scoped key (which is "<teamID>-<int>"); match IDs are opaque
+// strings and may themselves look like "team-0". Both scopes share one
+// persisted map; the prefix keeps them disjoint.
+func teamLineupMatchKey(teamID, matchID string) string {
+	return "m:" + teamID + "-" + matchID
+}
+
+// lineupStorageKey returns the map key a lineup is stored under:
+// match-scoped when MatchID is set, else round-scoped. This is the one
+// place the scope decision lives — every load/set/delete routes through
+// it so the two namespaces stay consistent.
+func lineupStorageKey(l domain.TeamLineup) string {
+	if l.MatchID != "" {
+		return teamLineupMatchKey(l.TeamID, l.MatchID)
+	}
+	return teamLineupKey(l.TeamID, l.Round)
 }
 
 // LoadTeamLineups returns every lineup persisted for compID, keyed by
@@ -91,7 +111,7 @@ func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
 	}
 	out := make(map[string]domain.TeamLineup, len(file.Lineups))
 	for _, l := range file.Lineups {
-		out[teamLineupKey(l.TeamID, l.Round)] = l
+		out[lineupStorageKey(l)] = l
 	}
 	return out, nil
 }
@@ -160,18 +180,28 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 	if err != nil {
 		return err
 	}
-	key := teamLineupKey(lineup.TeamID, lineup.Round)
+	key := lineupStorageKey(lineup)
 	if existing, ok := current[key]; ok && existing.LockedAt != nil {
 		return ErrLineupLocked
 	}
 	// T128a race-condition guard: a concurrent score-save could have
-	// transitioned a round's first match to running BETWEEN the
-	// caller's last GET and this PUT — without the lineup file yet
-	// recording LockedAt (the engine wires that as a follow-up).
-	// Re-check the round's match status inside this lock and refuse
-	// the write if the round is no longer mutable. Cheap pure-disk
-	// reads, both keyed to the same compPath we already cleaned.
-	if locked, err := s.roundHasLiveOrCompletedMatchLocked(compID, lineup.Round); err != nil {
+	// transitioned this lineup's match to running BETWEEN the caller's
+	// last GET and this PUT — without the lineup file yet recording
+	// LockedAt (the engine wires that as a follow-up). Re-check the
+	// relevant match status inside this lock and refuse the write if it
+	// is no longer mutable. Cheap pure-disk reads, both keyed to the
+	// same compPath we already cleaned.
+	//
+	// Match-scoped (mp-825): check only THIS match's status, so a live
+	// pool match 1 does not block editing the match-2 lineup.
+	// Round-scoped: keep the legacy round-wide check.
+	if lineup.MatchID != "" {
+		if locked, err := s.matchIsLiveOrCompletedLocked(compID, lineup.MatchID); err != nil {
+			return err
+		} else if locked {
+			return ErrLineupLocked
+		}
+	} else if locked, err := s.roundHasLiveOrCompletedMatchLocked(compID, lineup.Round); err != nil {
 		return err
 	} else if locked {
 		return ErrLineupLocked
@@ -231,6 +261,44 @@ func (s *Store) roundHasLiveOrCompletedMatchLocked(compID string, round int) (bo
 	return false, nil
 }
 
+// matchIsLiveOrCompletedLocked is the match-scoped twin of
+// roundHasLiveOrCompletedMatchLocked (mp-825): is the single match
+// `matchID` currently running or completed? Used by SetTeamLineup for
+// match-scoped lineups so the freeze check is keyed to the exact match,
+// not the whole round.
+//
+// Caller MUST already hold the per-competition lock. Reads pool-matches
+// and bracket directly from disk (bypassing the cache) for the same
+// stale-snapshot reason as the round variant. A match ID not found in
+// either file is treated as not-yet-live (false) — the lineup stays
+// editable until its match actually exists and starts.
+func (s *Store) matchIsLiveOrCompletedLocked(compID, matchID string) (bool, error) {
+	bracketParsed, err := parseBracketFile(s.compPath(compID, "bracket.json"))
+	if err != nil {
+		return false, err
+	}
+	if bracket, ok := bracketParsed.(*Bracket); ok && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, m := range round {
+				if m.ID == matchID {
+					return m.Status == MatchStatusRunning || m.Status == MatchStatusCompleted, nil
+				}
+			}
+		}
+	}
+	poolParsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
+	if err != nil {
+		return false, err
+	}
+	poolMatches, _ := poolParsed.([]MatchResult)
+	for _, m := range poolMatches {
+		if m.ID == matchID {
+			return m.Status == MatchStatusRunning || m.Status == MatchStatusCompleted, nil
+		}
+	}
+	return false, nil
+}
+
 // DeleteTeamLineup removes the lineup for (teamID, round) if present.
 // Same lock-protected refusal as SetTeamLineup when the entry is
 // already locked: deleting a frozen lineup would re-open the round to
@@ -259,6 +327,87 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 	}
 	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
+}
+
+// DeleteTeamLineupForMatch removes the match-scoped lineup for
+// (teamID, matchID) if present (mp-825). Same lock-protected refusal as
+// the round variant when the entry is already frozen.
+//
+// Returns nil when no entry exists (idempotent delete).
+func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	current, err := s.loadTeamLineupsLocked(compID)
+	if err != nil {
+		return err
+	}
+	key := teamLineupMatchKey(teamID, matchID)
+	existing, ok := current[key]
+	if !ok {
+		return nil
+	}
+	if existing.LockedAt != nil {
+		return ErrLineupLocked
+	}
+	delete(current, key)
+	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
+}
+
+// LockTeamLineupForMatch stamps LockedAt on every persisted match-scoped
+// lineup whose MatchID matches `matchID` — i.e. both teams' lineups for
+// that single encounter (mp-825). Round-scoped (legacy) lineups are
+// untouched; those are frozen by LockTeamLineupsForRound. Idempotent:
+// already-locked entries keep their original LockedAt.
+//
+// Called by the engine when a team match transitions to running, in
+// addition to LockTeamLineupsForRound (the two scopes are locked
+// independently during the transition window).
+func (s *Store) LockTeamLineupForMatch(compID, matchID string, lockedAt time.Time) error {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	return s.lockTeamLineupForMatchLocked(compID, matchID, lockedAt, s.directWrite)
+}
+
+// lockTeamLineupForMatchLocked is the lock-free body of
+// LockTeamLineupForMatch. Caller MUST already hold the per-comp write
+// lock (typically via WithTransaction). Mirrors
+// lockTeamLineupsForRoundLocked so the tx-aware score path can freeze
+// under the same lock acquire as the score write.
+func (s *Store) lockTeamLineupForMatchLocked(compID, matchID string, lockedAt time.Time, write writeFn) error {
+	if matchID == "" {
+		return nil
+	}
+	current, err := s.loadTeamLineupsLocked(compID)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for k, l := range current {
+		if l.MatchID != matchID {
+			continue
+		}
+		if l.LockedAt != nil {
+			continue
+		}
+		t := lockedAt
+		l.LockedAt = &t
+		current[k] = l
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveTeamLineupsLocked(compID, current, write)
 }
 
 // LockTeamLineupsForRound stamps LockedAt on every persisted lineup
@@ -296,6 +445,14 @@ func (s *Store) lockTeamLineupsForRoundLocked(compID string, round int, lockedAt
 	}
 	changed := false
 	for k, l := range current {
+		// Match-scoped lineups (mp-825) are frozen per-match by
+		// LockTeamLineupForMatch, never by the round sweep — otherwise a
+		// live round-0 pool match would freeze every match-scoped pool
+		// lineup (Round defaults to 0 when unset), re-introducing the
+		// exact bug this change fixes.
+		if l.MatchID != "" {
+			continue
+		}
 		if l.Round != round {
 			continue
 		}

@@ -134,6 +134,10 @@ type TeamLineupStore interface {
 	SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize int) error
 	DeleteTeamLineup(compID, teamID string, round int) error
 	LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error
+	// DeleteTeamLineupForMatch / LockTeamLineupForMatch are the
+	// match-scoped twins added for per-match lineups (mp-825).
+	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
+	LockTeamLineupForMatch(compID, matchID string, lockedAt time.Time) error
 }
 
 // Broadcaster is the consumer-boundary view of *Hub used by handlers

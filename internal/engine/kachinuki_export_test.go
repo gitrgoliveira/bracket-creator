@@ -294,3 +294,60 @@ func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
 	// BracketMatch has no sub-results → stub has zero bouts → skipped.
 	assert.Empty(t, out, "bracket stub with no bouts should be skipped by the renderer guard")
 }
+
+// TestResolveKachinukiPosition_PrefersMatchScoped verifies the mp-825
+// selection: a match-scoped lineup wins over the round-scoped fallback,
+// and the fallback applies when no match-scoped entry exists.
+func TestResolveKachinukiPosition_PrefersMatchScoped(t *testing.T) {
+	positions := map[string]string{
+		lineupKey("TeamA", "alice"):                 "Senpo",  // round-scoped fallback
+		matchLineupKey("PoolA-1", "TeamA", "alice"): "Taisho", // match-scoped override for PoolA-1
+	}
+
+	// Match PoolA-1 has a match-scoped override → Taisho.
+	assert.Equal(t, "Taisho", resolveKachinukiPosition(positions, "PoolA-1", "TeamA", "alice"))
+	// Match PoolA-2 has no match-scoped entry → round-scoped fallback.
+	assert.Equal(t, "Senpo", resolveKachinukiPosition(positions, "PoolA-2", "TeamA", "alice"))
+	// Empty matchID → fallback only.
+	assert.Equal(t, "Senpo", resolveKachinukiPosition(positions, "", "TeamA", "alice"))
+	// Unknown player → empty.
+	assert.Equal(t, "", resolveKachinukiPosition(positions, "PoolA-1", "TeamA", "bob"))
+}
+
+// TestBuildKachinukiPositionMap_MatchScoped verifies the loader splits
+// match-scoped and round-scoped lineups into their respective key
+// namespaces.
+func TestBuildKachinukiPositionMap_MatchScoped(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	const compID = "kx-match"
+	comp := &state.Competition{ID: compID, TeamSize: 5}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	// Round-scoped lineup.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "TeamA",
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "alice", domain.PosJiho: "b", domain.PosChuken: "c",
+			domain.PosFukusho: "d", domain.PosTaisho: "e",
+		},
+	}, 5))
+	// Match-scoped lineup for PoolA-1 puts alice at Taisho.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID:  "TeamA",
+		MatchID: "PoolA-1",
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "e", domain.PosJiho: "b", domain.PosChuken: "c",
+			domain.PosFukusho: "d", domain.PosTaisho: "alice",
+		},
+	}, 5))
+
+	e := New(store)
+	m := e.buildKachinukiPositionMap(compID, comp)
+
+	assert.Equal(t, "Senpo", resolveKachinukiPosition(m, "PoolA-2", "TeamA", "alice"),
+		"no match-scoped entry for PoolA-2 → round fallback Senpo")
+	assert.Equal(t, "Taisho", resolveKachinukiPosition(m, "PoolA-1", "TeamA", "alice"),
+		"match-scoped PoolA-1 overrides alice to Taisho")
+}

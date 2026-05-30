@@ -5236,6 +5236,17 @@ button.my-match__opp {
   gap: 8px;
   max-width: 360px;
   width: calc(100vw - 32px);
+  /* Cap to the viewport and scroll when the stack is tall. The store allows
+     up to maxActiveAnnouncements (10) active at once; without a height cap the
+     lower cards (and their dismiss buttons) would fall below a short/landscape
+     viewport and be unreachable. dvh tracks mobile browser chrome; vh is the
+     fallback. overscroll-behavior:contain stops the page behind from scrolling
+     when the overlay reaches its end. The container shrinks to content height
+     when the stack is short, so click-through below the last card is preserved. */
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   pointer-events: none;
   box-sizing: border-box;
 }
@@ -5331,5 +5342,7 @@ button.my-match__opp {
     right: 8px;
     width: calc(100vw - 16px);
     max-width: none;
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
   }
 }

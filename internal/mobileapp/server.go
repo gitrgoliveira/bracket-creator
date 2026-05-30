@@ -3,7 +3,9 @@ package mobileapp
 import (
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,6 +14,31 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/resources"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// AdminPasswordHashEnv is the env var holding the bcrypt hash of the
+// elevated (destructive-ops) password in locked mode (spec 004 / mp-e21).
+// It is the elevated-credential analogue of TOURNAMENT_PASSWORD_HASH.
+const AdminPasswordHashEnv = "TOURNAMENT_ADMIN_PASSWORD_HASH"
+
+// defaultElevatedVerifier derives the elevated-password verifier from the
+// main verifier's mode (spec 004). File mode reads the write-only
+// Tournament.AdminPassword from the store (no env var); locked mode reads
+// the bcrypt hash from TOURNAMENT_ADMIN_PASSWORD_HASH, falling back to the
+// fail-closed unconfigured verifier (503 on gated endpoints) when the env
+// var is absent or malformed. Reading the env here — rather than threading
+// an explicit param through NewRouter — keeps the router signature stable
+// for the many existing callers; file-mode tests never touch the env.
+func defaultElevatedVerifier(verifier PasswordVerifier, store *state.Store) ElevatedVerifier {
+	if verifier != nil && verifier.Mode() == "locked" {
+		if v, err := NewBcryptElevatedVerifier(os.Getenv(AdminPasswordHashEnv)); err == nil {
+			return v
+		}
+		slog.Warn("mobile-app: locked mode without a valid " + AdminPasswordHashEnv +
+			"; destructive operations will return 503 until it is set")
+		return NewLockedUnconfiguredElevatedVerifier()
+	}
+	return NewFileElevatedVerifier(store)
+}
 
 // NewRouter wires the mobile-app gin engine. The returned *gin.Engine
 // is the HTTP handler; the returned *Hub is exposed so the caller
@@ -34,11 +61,15 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		verifier = NewFileVerifier(store)
 	}
 
+	// Elevated (destructive-ops) password verifier — spec 004 / mp-e21.
+	// Derived from the main verifier's mode; see defaultElevatedVerifier.
+	elevated := defaultElevatedVerifier(verifier, store)
+
 	// Enable CORS
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Admin-Password")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -92,7 +123,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// inert payloads when locked mode is active — see handlers_reset.go
 	// and handlers_auth_config.go.
 	RegisterResetHandlers(api, store, verifier, hub)
-	RegisterAuthConfigHandlers(api, verifier)
+	RegisterAuthConfigHandlers(api, verifier, elevated)
 
 	// Admin API endpoints (protected). Split into three sub-groups by
 	// expected body size so the body cap fires BEFORE AuthMiddleware at
@@ -109,8 +140,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	adminSmallBody := adminGroup(r, DefaultMaxBodyBytes, verifier, store)
 	RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
-	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
-	RegisterParticipantHandlers(adminSmallBody, store, hub)
+	RegisterAdminPasswordHandler(adminSmallBody, store, elevated)
+	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub, elevated)
+	RegisterParticipantHandlers(adminSmallBody, store, hub, elevated)
 	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub)
 	RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
 	RegisterEligibilityHandlers(adminSmallBody, store, hub)
@@ -120,7 +152,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
 
 	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
-	RegisterImportHandlers(adminLargeBody, store, hub)
+	RegisterImportHandlers(adminLargeBody, store, hub, elevated)
 
 	// Static files & SPA Fallback
 	mobileFS := res.GetMobileWebFS()

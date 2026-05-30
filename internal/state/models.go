@@ -14,6 +14,23 @@ type Tournament struct {
 	Courts   []string `yaml:"courts" json:"courts"`
 	Password string   `yaml:"password" json:"password"`
 
+	// AdminPassword gates destructive operations (spec 004 / mp-e21):
+	// competition delete, draw/override/invalidate, and participant roster
+	// mutations. It is a SEPARATE, higher-privilege credential from
+	// Password (which gates the API as a whole).
+	//
+	// CRITICAL: it is WRITE-ONLY at the API boundary — `json:"-"` means it
+	// is never emitted in any response AND never populated by binding a
+	// request body into a Tournament. That is the opposite of Password
+	// (which is a peer of the credential gating /tournament, so returning
+	// it is harmless). AdminPassword is HIGHER privilege than that gate, so
+	// leaking it via GET — or letting a main-password holder overwrite it
+	// via the bulk PUT — would collapse the separation. It is set only via
+	// the dedicated, elevated-gated PUT /api/auth/admin-password handler.
+	// File mode only; in locked mode the env-var bcrypt hash is
+	// authoritative and any on-disk value here is inert.
+	AdminPassword string `yaml:"admin_password,omitempty" json:"-"`
+
 	// Ceremony blocks expressed as human duration strings (e.g. "30m",
 	// "1h"). When set, the auto-scheduler reserves a contiguous range
 	// at the appropriate point in the day and skips match slots that

@@ -6,7 +6,7 @@
 //     → the best source Match, or null if no candidate.
 //
 // Sorting rule:
-//   1. scheduledAt DESC (nulls last)
+//   1. scheduledAt DESC (nulls last — unscheduled treated as least-recent)
 //   2. court ASC
 //   3. index in allMatches ASC (queue/sequence order)
 //   4. matchId DESC
@@ -76,9 +76,9 @@ describe('pickCopySource', () => {
       const m1 = mkMatch('m1', { sideAId: TEAM, scheduledAt: '08:00' });
       const m2 = mkMatch('m2', { sideAId: TEAM, scheduledAt: null });
       const saved = { m1: { positions: {} }, m2: { positions: {} } };
-      // m1 has an earlier time (08:00) but m2 has null → "99:99" → sorts first by DESC
-      // So m2 (null=99:99) > m1 (08:00) → m2 wins
-      expect(pickCopySource([m1, m2], CURRENT, TEAM, saved)?.id).toBe('m2');
+      // null → "" which is lexicographically less than any time string, so in
+      // DESC order m1 (08:00) > m2 ("") → m1 wins (nulls sort last).
+      expect(pickCopySource([m1, m2], CURRENT, TEAM, saved)?.id).toBe('m1');
     });
 
     it('both nulls fall through to court tiebreak', () => {
@@ -110,31 +110,13 @@ describe('pickCopySource', () => {
     });
   });
 
-  describe('sort rule 4: matchId DESC (final tiebreak)', () => {
-    it('picks the lexicographically larger matchId when all else is equal', () => {
-      const m1 = mkMatch('match-001', { sideAId: TEAM, scheduledAt: '10:00', court: 'A' });
-      const m2 = mkMatch('match-002', { sideAId: TEAM, scheduledAt: '10:00', court: 'A' });
-      // Same index position — inject them as equal-position for stable sort test
-      // Actually index differs (0 vs 1) so we need both at same index.
-      // Use a third neutral match to give them the same apparent position
-      // by making the array [m1, m2] but splicing equal positions isn't
-      // possible via array order. For now test the matchId rule via equal
-      // index by using a single-element array trick — can't do that.
-      // Instead, test that the highest matchId wins when we put them in
-      // reverse order and expect rule 4 to flip the result vs rule 3.
-      // (This test is intentionally weaker — it verifies matchId DESC
-      // rather than the interaction with rule 3.)
-      const saved = { 'match-001': { positions: {} }, 'match-002': { positions: {} } };
-      // With both at the same scheduledAt and court, rule 3 (index ASC)
-      // takes precedence: m1 (idx 0) wins over m2 (idx 1).
-      // To isolate rule 4, make them equal on rules 1-3 by placing both
-      // in a separate array where their array indices are the same — we
-      // can do this by passing them individually:
-      const result = pickCopySource([m1, m2], CURRENT, TEAM, saved);
-      // Rule 3: m1 is at index 0, so m1 wins regardless of rule 4.
-      expect(result?.id).toBe('match-001');
-    });
-  });
+  // Note: sort rule 4 (matchId DESC) is a safety-net tiebreak for cases
+  // where two distinct JS objects have identical scheduledAt, court, AND the
+  // same indexOf position in allMatches. Because Array.indexOf returns the
+  // first occurrence of each reference and each match object is distinct,
+  // two different matches always have different indices — rule 3 always
+  // resolves before rule 4. Rule 4 is therefore effectively unreachable in
+  // practice and has no dedicated test.
 
   it('only considers matches with a non-empty savedLineups entry', () => {
     const m1 = mkMatch('m1', { sideAId: TEAM, scheduledAt: '11:00' }); // no saved lineup

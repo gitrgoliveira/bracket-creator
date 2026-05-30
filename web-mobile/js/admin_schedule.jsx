@@ -610,14 +610,12 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
 AdminTWMatch.displayName = "AdminTWMatch";
 
 // ---------- Per-match lineup panel (mp-bkg) ----------
-// Reuses admin_lineup.jsx's exported helpers (positionsForSize, rosterFor,
-// teamIdOf) so there is no duplication of position-label / roster logic.
-const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
 
 // pickCopySource — pure helper that selects the most recent saved lineup
 // among this team's other matches. Exported for unit testing.
-// Sort order: scheduledAt DESC (nulls last), then court ASC, then
-// queue-position (index in the allMatches array) ASC, then matchId DESC.
+// Sort order: scheduledAt DESC (nulls last — unscheduled matches treated as
+// least-recent), then court ASC, then queue-position (index in allMatches)
+// ASC, then matchId DESC.
 function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
   // savedLineups is a map of matchId → lineup (non-null only when a lineup
   // has been saved). Candidate = match for this team, not the current match,
@@ -631,9 +629,10 @@ function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
   });
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => {
-    // scheduledAt DESC (nulls sort last)
-    const aT = a.scheduledAt || "99:99";
-    const bT = b.scheduledAt || "99:99";
+    // scheduledAt DESC; null/missing treated as "" so they sort after any real
+    // time string in a DESC comparison (unscheduled = least recent).
+    const aT = a.scheduledAt || "";
+    const bT = b.scheduledAt || "";
     if (aT !== bT) return bT.localeCompare(aT);
     // court ASC
     const aC = a.court || "";
@@ -652,8 +651,13 @@ function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
 // MatchLineupSideEditor — inline lineup editor for one team side within
 // the per-match lineup panel. Handles load/save/copy-from-previous for a
 // single (compId, teamId, matchId) triple.
+// Reuses admin_lineup.jsx's exported helpers (positionsForSize, rosterFor,
+// teamIdOf) so there is no duplication of position-label / roster logic.
+// The helpers are read lazily on each render so module evaluation order
+// does not matter (safe in test/bundler contexts too).
 function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast }) {
   const teamSize = comp?.teamSize || 5;
+  const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
   const positions = (typeof lineupPositionsForSize === "function")
     ? lineupPositionsForSize(teamSize)
     : [];
@@ -676,10 +680,6 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   const [saving, setSaving] = useStateA(false);
   const [copying, setCopying] = useStateA(false);
   const [error, setError] = useStateA("");
-  // savedLineups for sibling matches — keyed matchId → TeamLineup.
-  // Populated lazily (best-effort) so Copy-from-previous button can be
-  // enabled/disabled without a separate batch fetch.
-  const [savedLineupsByMatch, setSavedLineupsByMatch] = useStateA({});
   // Track whether the current match's lineup was loaded from a per-match
   // entry (true) or is inheriting the round default (false).
   const [isMatchOverride, setIsMatchOverride] = useStateA(false);
@@ -735,26 +735,6 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     return () => { cancelled = true; };
   }, [compId, teamId, matchId]);
 
-  // Probe sibling matches to populate savedLineupsByMatch for the
-  // "Copy from previous" candidate check. We fire one fetch per
-  // candidate match (lazy, fire-and-forget on mount).
-  useEffectA(() => {
-    if (!compId || !teamId || !allMatches) return;
-    const siblings = allMatches.filter(m => {
-      if (m.id === matchId) return false;
-      const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
-      const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
-      return sideAId === teamId || sideBId === teamId;
-    });
-    siblings.forEach(sibling => {
-      window.API.fetchMatchLineup(compId, teamId, sibling.id)
-        .then(l => {
-          if (l) setSavedLineupsByMatch(prev => ({ ...prev, [sibling.id]: l }));
-        })
-        .catch(() => { /* ignore */ });
-    });
-  }, [compId, teamId, matchId]);
-
   const isLocked = !!lockedAt;
 
   const save = async () => {
@@ -781,16 +761,46 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     }
   };
 
-  // Copy from previous: find the most recent sibling match that has a
-  // saved lineup and clone its positions into the current form (then save).
-  const copySource = pickCopySource(allMatches, matchId, teamId, savedLineupsByMatch);
+  // Copy from previous: probe sibling lineups on demand (deferred until click
+  // to avoid N fire-and-forget GETs on every panel mount). Fetches all
+  // siblings in parallel, picks the best candidate via pickCopySource, and
+  // copies its positions into the current match.
+  const hasSiblings = !!(allMatches && allMatches.some(m => {
+    if (m.id === matchId) return false;
+    const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
+    const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
+    return sideAId === teamId || sideBId === teamId;
+  }));
   const copyFromPrevious = async () => {
-    if (!copySource) return;
-    const sourceLineup = savedLineupsByMatch[copySource.id];
-    if (!sourceLineup) return;
+    if (!compId || !teamId || !allMatches) return;
     setError("");
     setCopying(true);
     try {
+      // Fetch all sibling lineups in parallel to find the best candidate.
+      const siblings = allMatches.filter(m => {
+        if (m.id === matchId) return false;
+        const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
+        const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
+        return sideAId === teamId || sideBId === teamId;
+      });
+      const results = await Promise.all(
+        siblings.map(s =>
+          window.API.fetchMatchLineup(compId, teamId, s.id)
+            .then(l => ({ matchId: s.id, lineup: l }))
+            .catch(() => ({ matchId: s.id, lineup: null }))
+        )
+      );
+      const savedLineupsByMatch = {};
+      results.forEach(({ matchId: mid, lineup }) => {
+        if (lineup) savedLineupsByMatch[mid] = lineup;
+      });
+      const copySource = pickCopySource(allMatches, matchId, teamId, savedLineupsByMatch);
+      if (!copySource) {
+        setError("No previous match lineup found to copy.");
+        return;
+      }
+      const sourceLineup = savedLineupsByMatch[copySource.id];
+      if (!sourceLineup) return;
       const positionsOut = {};
       positions.forEach(p => {
         const v = (sourceLineup.positions || {})[p.key] || "";
@@ -884,10 +894,10 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         <button
           className="btn btn--sm"
           onClick={copyFromPrevious}
-          disabled={!copySource || copying || saving || isLocked}
-          title={copySource
-            ? `Copy from match at ${copySource.scheduledAt || "—"}`
-            : "No previous match with a saved lineup"}
+          disabled={!hasSiblings || copying || saving || isLocked}
+          title={hasSiblings
+            ? "Find and copy the lineup from the most recent previous match"
+            : "No other matches for this team"}
         >
           {copying ? "Copying…" : "Copy from previous match"}
         </button>

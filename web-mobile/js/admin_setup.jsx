@@ -104,6 +104,9 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [courts, setCourts] = useStateA(tournament.courts.length);
   const [checkInStart, setCheckInStart] = useStateA(tournament.checkInWindowStart || "");
   const [checkInEnd, setCheckInEnd] = useStateA(tournament.checkInWindowEnd || "");
+  // Tournament mode (mp-7h7): read-only after creation — shown for
+  // information only and NEVER included in the PUT payload.
+  const tournamentMode = tournament.mode || "officiated";
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
 
@@ -226,6 +229,20 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
             />
             <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
+          </div>
+          {/* Tournament type (mp-7h7): read-only after creation. Displayed
+              for information — it affects the auth boundary (officiated:
+              main password gates everything; self-run: only destructive
+              actions require a password). Never submitted on PUT. */}
+          <div className="field" style={{ marginTop: 16 }}>
+            <label className="field__label">Tournament type</label>
+            <div className="field__hint" style={{ marginTop: 4 }}>
+              <strong>{tournamentMode === "self-run" ? "Self-run" : "Officiated"}</strong>
+              {tournamentMode === "self-run"
+                ? " — Scoring, check-in and other constructive actions are public. Only destructive actions (delete, import, roster changes) require the destructive-ops password."
+                : " — All admin actions require the tournament password."}
+              {" "}This setting was fixed at creation and cannot be changed.
+            </div>
           </div>
           <div className="row" style={{ marginTop: 16 }}>
             <div className="field">

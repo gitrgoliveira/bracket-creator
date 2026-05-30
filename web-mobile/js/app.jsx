@@ -970,6 +970,15 @@ function CreateTournament({ onCreated, authConfig }) {
   const [venue, setVenue] = useS("");
   const [courts, setCourts] = useS(2);
   const [pass, setPass] = useS("");
+  // Tournament mode (mp-7h7): "officiated" (default) or "self-run".
+  // Chosen once at creation; read-only after that. Default officiated
+  // means existing deployments are unaffected.
+  const [mode, setMode] = useS("officiated");
+  // Destructive-ops (admin) password — required when creating a
+  // self-run tournament in file mode: the main auth gate is skipped in
+  // self-run, so destructive actions must fall back to this credential.
+  // Not shown in locked mode (the env-var hash is the credential).
+  const [adminPass, setAdminPass] = useS("");
   const [saving, setSaving] = useS(false);
   // submit's catch sets setSaving(false) post-await; on success the
   // parent calls onCreated which unmounts CreateTournament. The catch
@@ -978,6 +987,8 @@ function CreateTournament({ onCreated, authConfig }) {
   // fetch). Gate via mountedRef for symmetry with the admin sweep.
   const mountedRef = useR(true);
   useE(() => () => { mountedRef.current = false; }, []);
+
+  const isSelfRun = mode === "self-run";
 
   const submit = async (e) => {
     e.preventDefault();
@@ -990,6 +1001,14 @@ function CreateTournament({ onCreated, authConfig }) {
     const trimmedVenue = venue.trim();
     if (!trimmedName || !pass) {
       alert("Name and Password are required.");
+      return;
+    }
+    // Self-run in file mode requires a destructive-ops (admin) password
+    // so that destructive routes (delete, invalidate, etc.) are not
+    // left fully public. The backend enforces the same rule — this is
+    // client-side feedback only.
+    if (isSelfRun && !locked && !adminPass) {
+      alert("Self-run tournaments require a Destructive-ops password to protect delete and reset actions.");
       return;
     }
     // Match the admin-side handleSave guard from admin_setup.jsx.
@@ -1011,7 +1030,8 @@ function CreateTournament({ onCreated, authConfig }) {
       const config = {
         name: trimmedName, date, venue: trimmedVenue,
         password: pass,
-        courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
+        courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
+        mode,
       };
       // In locked mode, the typed password IS the env-var admin
       // credential — pass it as authPassword so api_client sends
@@ -1020,6 +1040,18 @@ function CreateTournament({ onCreated, authConfig }) {
       // lets it through unauthenticated).
       const t = await window.API.createTournament(config, locked ? pass : undefined);
       if (!mountedRef.current) return;
+      // For self-run in file mode, set the admin (destructive-ops) password
+      // immediately after creating the tournament, using the main password
+      // for authentication (the tournament was just created, so the main
+      // password is the one we just set).
+      if (isSelfRun && !locked && adminPass) {
+        try {
+          await window.API.setAdminPassword(adminPass, "", pass);
+        } catch (adminErr) {
+          // Non-fatal: tournament is created; operator can set admin pw in Settings.
+          console.warn("Created self-run tournament but failed to set admin password:", adminErr.message);
+        }
+      }
       // Wait for backend to broadcast or just pass it up
       onCreated(t, pass);
     } catch (err) {
@@ -1067,6 +1099,34 @@ function CreateTournament({ onCreated, authConfig }) {
             />
             <div className="field__hint">{`Enter a number (1-${window.MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
+          {/* Tournament mode selector (mp-7h7). Chosen once at creation;
+              immutable after that. Default is officiated (existing behaviour). */}
+          <div className="field">
+            <label className="field__label">Tournament type</label>
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button
+                type="button"
+                className={`btn${mode === "officiated" ? " btn--primary" : ""}`}
+                onClick={() => setMode("officiated")}
+                style={{ flex: 1 }}
+              >
+                Officiated
+              </button>
+              <button
+                type="button"
+                className={`btn${mode === "self-run" ? " btn--primary" : ""}`}
+                onClick={() => setMode("self-run")}
+                style={{ flex: 1 }}
+              >
+                Self-run
+              </button>
+            </div>
+            <div className="field__hint" style={{ marginTop: 6 }}>
+              {mode === "officiated"
+                ? "An operator manages scoring and bracket progression. All admin actions require the tournament password. This is the standard setup."
+                : "No dedicated operator. Participants self-report scores; all constructive actions (scoring, check-in, registration) are public. Destructive actions (delete, reset, import) still require a separate admin password. Cannot be changed after creation."}
+            </div>
+          </div>
           <div className="field">
             <label className="field__label">{locked ? "Admin Password (from TOURNAMENT_PASSWORD_HASH)" : "Admin Password"}</label>
             <input
@@ -1080,9 +1140,30 @@ function CreateTournament({ onCreated, authConfig }) {
             <div className="field__hint">
               {locked
                 ? "This server is running in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it's used both to authorize this bootstrap and as your admin credential afterwards."
-                : "This password will be required to manage the tournament."}
+                : isSelfRun
+                  ? "Used to authorise tournament setup. In self-run mode, scoring and check-in are public so participants don't need this."
+                  : "This password will be required to manage the tournament."}
             </div>
           </div>
+          {/* In self-run + file mode, require a destructive-ops password at
+              creation so delete/invalidate/import can't be called anonymously.
+              Locked mode uses TOURNAMENT_ADMIN_PASSWORD_HASH (no UI input). */}
+          {isSelfRun && !locked && (
+            <div className="field">
+              <label className="field__label">Destructive-ops password (required for self-run)</label>
+              <input
+                className="input"
+                type="password"
+                value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)}
+                placeholder="Password to protect delete / reset / import actions"
+                required
+              />
+              <div className="field__hint">
+                A separate password required for destructive actions (delete competition, discard draw, roster add/edit, import). Since this tournament is self-run, scoring is public — this password is the only thing protecting irreversible actions.
+              </div>
+            </div>
+          )}
           {/* Disable submit until authConfig is known (null = loading) so a
               locked-mode deployment doesn't submit without X-Tournament-Password.
               The null window lasts at most one HTTP round-trip on startup. */}

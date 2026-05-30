@@ -249,6 +249,29 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 			return
 		}
 
+		// Self-run mode (mp-7h7): skip the main-password gate entirely.
+		// Constructive admin routes (scoring, check-in, start, complete,
+		// generate draw, etc.) become public — there is no table operator.
+		// Destructive routes (delete competition, invalidate, draw, overrides,
+		// participant roster mutations, import) remain gated by the
+		// EXISTING RequireElevatedPassword / enforceElevated decorators that
+		// already fire downstream on those specific routes. No new allowlist
+		// is needed — the elevated-decorator set IS the allowlist (DRY).
+		//
+		// Officiated mode (the default) skips this block entirely → no regression.
+		//
+		// Note: LoadTournament returns tournament data with the Mode field. For
+		// older files where Mode is empty, ApplyTournamentDefaults normalises it
+		// to TournamentModeOfficiated before this comparison — but we don't call
+		// ApplyTournamentDefaults on the loaded record here to avoid unexpected
+		// mutations. Comparing explicitly against TournamentModeSelfRun is safe:
+		// the empty string (old files) and "officiated" both fall through to the
+		// standard auth path below.
+		if t.Mode == state.TournamentModeSelfRun {
+			c.Next()
+			return
+		}
+
 		// Defense-in-depth for the F4 sentinel-into-auth-field scenario
 		// (file mode only). The plaintext comparison done by the file
 		// verifier is satisfied vacuously when both sides are "" — an

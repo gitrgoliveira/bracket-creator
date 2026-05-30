@@ -137,6 +137,22 @@ func validateTournamentDurationDays(durationDays int) error {
 	return nil
 }
 
+// errModeImmutable is the sentinel the PUT /tournament transform returns
+// when the caller tries to change the tournament Mode field after creation
+// (mp-7h7). Mode is immutable — flipping it mid-event would either
+// suddenly expose the admin surface (officiated → self-run) or lock
+// participants out mid-scoring (self-run → officiated).
+var errModeImmutable = errors.New("tournament mode cannot be changed after creation")
+
+// errSelfRunRequiresAdminPassword is the sentinel returned when a caller
+// tries to create or save a self-run tournament in file mode without an
+// elevated (admin) password configured. In self-run mode the main-gate
+// is skipped, so if enforceElevated's GateActive()==false path (file mode,
+// no admin password) were reached the destructive routes would be fully
+// public — violating the self-run invariant that destructive calls still
+// require X-Admin-Password. (mp-7h7 fail-open fix)
+var errSelfRunRequiresAdminPassword = errors.New("self-run tournaments require an admin (destructive-ops) password to be set; configure it before switching to self-run mode or set it in the same request")
+
 // validateTournamentLengths enforces the persisted-string caps from
 // validation.go on every string field of t. Called after trim and
 // after the required-field checks so error messages report the
@@ -317,6 +333,25 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			if current != nil {
 				desired.AdminPassword = current.AdminPassword
 			}
+
+			// Immutability of Mode (mp-7h7): Mode is chosen once at creation
+			// and cannot be changed via PUT. Mirror the write-only AdminPassword
+			// preservation pattern: when the incoming body sends Mode == ""
+			// (omitempty), preserve the current stored value. When the body
+			// sends a non-empty Mode that differs from the stored Mode, reject.
+			if current != nil {
+				if desired.Mode == "" {
+					// Preserve on omit — backward-compat and "no change" intent.
+					desired.Mode = current.Mode
+				} else if desired.Mode != current.Mode {
+					return errModeImmutable
+				}
+			}
+			// Normalize empty Mode so new tournaments always have a canonical value.
+			if desired.Mode == "" {
+				desired.Mode = state.TournamentModeOfficiated
+			}
+
 			if locked {
 				// Reset passwordChanged to false defensively — the
 				// non-empty case is already rejected above, but keep
@@ -344,10 +379,37 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			if current == nil || current.Password != desired.Password {
 				passwordChanged = true
 			}
+
+			// Fail-open guard for self-run + file mode (mp-7h7): if the
+			// tournament is self-run, the main-gate is skipped, so
+			// destructive routes rely SOLELY on RequireElevatedPassword /
+			// enforceElevated. enforceElevated allows requests when
+			// GateActive()==false (file mode, no AdminPassword set). Without
+			// this guard, a self-run tournament with no admin password would
+			// leave destructive routes fully public. Locked mode always fails
+			// closed (GateActive always true → 503 when unconfigured) so we
+			// only need to guard file mode here.
+			//
+			// Note: we check desired.AdminPassword (the just-loaded value) not
+			// a freshly-loaded field since we are inside the locked transform.
+			// desired.AdminPassword was preserved from current above, so it
+			// reflects the current on-disk value.
+			if desired.Mode == state.TournamentModeSelfRun && desired.AdminPassword == "" {
+				return errSelfRunRequiresAdminPassword
+			}
+
 			return nil
 		})
 		if errors.Is(err, errPasswordRequired) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errPasswordRequired.Error()})
+			return
+		}
+		if errors.Is(err, errModeImmutable) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errModeImmutable.Error()})
+			return
+		}
+		if errors.Is(err, errSelfRunRequiresAdminPassword) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errSelfRunRequiresAdminPassword.Error()})
 			return
 		}
 		if err != nil {
@@ -433,6 +495,17 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
+		// Validate and normalize the Mode field (mp-7h7). POST is the creation
+		// endpoint — Mode is accepted here and becomes immutable thereafter.
+		// Empty maps to "officiated" (default, backward compat).
+		if err := state.ValidateTournamentMode(t.Mode); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if t.Mode == "" {
+			t.Mode = state.TournamentModeOfficiated
+		}
+
 		// Reject empty Password on POST (initial setup) in file mode.
 		// AuthMiddleware allows POST /api/tournament unauthenticated
 		// when the tournament is uninitialized — this is the bootstrap
@@ -489,6 +562,21 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// nil) it stays "" — the operator sets it later via Settings.
 		if existingForPost != nil {
 			t.AdminPassword = existingForPost.AdminPassword
+		}
+
+		// Fail-open guard for self-run + file mode (mp-7h7).
+		// In self-run mode the main-gate is skipped, so destructive routes
+		// rely SOLELY on RequireElevatedPassword / enforceElevated.
+		// enforceElevated GateActive()==false (file mode, no admin password)
+		// means destructive routes would be fully public — violating the
+		// invariant. Reject creation of a self-run tournament in file mode
+		// unless an AdminPassword is already set (or was set in existingForPost).
+		// Locked mode always fails closed (GateActive always true → 503) so no
+		// guard needed there.
+		fileMode := verifier == nil || !verifier.RedactStoredPassword()
+		if fileMode && t.Mode == state.TournamentModeSelfRun && t.AdminPassword == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errSelfRunRequiresAdminPassword.Error()})
+			return
 		}
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {

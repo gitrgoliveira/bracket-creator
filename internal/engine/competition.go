@@ -384,19 +384,6 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 	return err
 }
 
-// runDrawPipeline runs the full draw-generation pipeline for a Setup
-// competition and commits CompStatusDrawReady. It does NOT generate the
-// schedule; callers must call GenerateSchedule after transitioning to a
-// running status.
-//
-// Pipeline limitations (pre-existing):
-//   - Pool/bracket generation (writes pools.csv / bracket.json) runs
-//     OUTSIDE the comp-config lock. Two concurrent GenerateDraw calls
-//     could overwrite each other's pools.csv before the atomic Status
-//     commit serializes them. Left as a follow-up.
-//   - SaveParticipants (source-linked playoffs roster path) also has its own
-//     lock acquisition. A failure mid-pipeline leaves partial state on disk.
-//
 // filterCheckedIn applies the mp-w7x check-in filter with opt-in semantics:
 // if at least one player is checked in, return only the checked-in players;
 // if nobody is checked in, the operator never used check-in for this
@@ -471,6 +458,18 @@ func dropSeedAssignments(seeds []domain.SeedAssignment, excluded map[string]bool
 	return out
 }
 
+// runDrawPipeline runs the full draw-generation pipeline for a Setup
+// competition and commits CompStatusDrawReady. It does NOT generate the
+// schedule; callers must call GenerateSchedule after transitioning to a
+// running status.
+//
+// Pipeline limitations (pre-existing):
+//   - Pool/bracket generation (writes pools.csv / bracket.json) runs
+//     OUTSIDE the comp-config lock. Two concurrent GenerateDraw calls
+//     could overwrite each other's pools.csv before the atomic Status
+//     commit serializes them. Left as a follow-up.
+//   - SaveParticipants (source-linked playoffs roster path) also has its own
+//     lock acquisition. A failure mid-pipeline leaves partial state on disk.
 func (e *Engine) runDrawPipeline(id string) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {

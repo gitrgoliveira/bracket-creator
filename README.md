@@ -442,18 +442,12 @@ This project adheres to the Contributor Covenant [code of conduct](https://githu
 
 ## License
 
-Copyright © 2023–2026 Ricardo Oliveira &lt;oliveira.rg@gmail.com&gt;
+Copyright © 2023–2026 Ricardo Oliveira &lt;oliveira.rg [at] gmail.com&gt;
 
 This is an independent project created and maintained by Ricardo Oliveira in a
 personal capacity — in his own time and on his own equipment. It is not
 affiliated with, endorsed by, or owned by any employer, and Ricardo Oliveira is
 the sole copyright holder.
-
-> **Note on commit history:** some earlier commits were inadvertently authored
-> with a work email address because of a misconfigured local Git identity. A
-> [`.mailmap`](.mailmap) canonicalizes every contribution to the author's
-> personal identity. All contributions are the sole work and property of
-> Ricardo Oliveira.
 
 This Source Code Form is subject to the terms of the Mozilla Public License,
 v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain

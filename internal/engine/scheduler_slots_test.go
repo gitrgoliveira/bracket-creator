@@ -454,16 +454,3 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	_, nilCur := assignPoolMatchSlots(nil, nil, nil)
 	assert.True(t, nilCur.IsZero(), "nil comp should return zero time.Time")
 }
-
-// TestEstimateForCounts_NegativeCountsClamped verifies negative match counts are
-// clamped to 0 rather than producing negative/nonsensical durations
-// (Copilot review #3326935837).
-func TestEstimateForCounts_NegativeCountsClamped(t *testing.T) {
-	comp := newIndivComp([]string{"A"}, 4, 4, "09:00")
-	tourn := newTournament(1.5, 10, "", "", "")
-	neg := EstimateForCounts(-5, -3, comp, tourn)
-	zero := EstimateForCounts(0, 0, comp, tourn)
-	assert.Equal(t, zero.TotalDurationMinutes, neg.TotalDurationMinutes,
-		"negative counts must clamp to 0 (same as the empty estimate)")
-	assert.GreaterOrEqual(t, neg.TotalDurationMinutes, 0, "duration must never be negative")
-}

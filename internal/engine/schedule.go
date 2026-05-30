@@ -205,6 +205,13 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 		// relies on that 1-court default.
 		numCourts = 1
 	}
+	if numCourts > MaxCourts {
+		// Clamp to the A–Z (26) cap — the same defensive bound EstimateSchedule
+		// applies. A malformed/hostile Competition with an oversized Courts
+		// slice would otherwise drive large per-court allocations
+		// (courtCursor/matchMin/perCourtList) — CodeQL go/uncontrolled-allocation-size.
+		numCourts = MaxCourts
+	}
 
 	// Work on shallow copies so the caller's structs are not mutated by
 	// ApplyTournamentDefaults / ApplyCompetitionDefaults. The slot

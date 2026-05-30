@@ -915,12 +915,53 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
   // players (roster), etc.
   const comp = (tournament?.competitions || []).find(cc => cc.id === m.compId) || null;
   const isTeamComp = comp && (comp.kind === "team" || (comp.teamSize || 0) > 0);
+
+  // Hydrate the full participants list from the server. The competition list
+  // endpoint (/api/viewer/competitions) omits participant rosters to keep the
+  // payload small, so comp.players is always [] in the score-editor data path.
+  // We fetch /api/competitions/:id/participants on mount and merge the result
+  // so that each team object carries its metadata (member roster) for the
+  // position dropdowns in MatchLineupSideEditor.
+  const compId = comp?.id || "";
+  const [hydrated, setHydrated] = useStateA(null);   // null = loading, [] = fetched (empty), [...] = fetched
+  const [rosterError, setRosterError] = useStateA("");
+
+  useEffectA(() => {
+    if (!compId || !isTeamComp) {
+      setHydrated([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await window.API.listParticipants(compId, password);
+        if (cancelled) return;
+        // raw is PascalCase from the server; normalise to camelCase so
+        // rosterFor() can find team.metadata (lowercase).
+        const normalizeP = (typeof window.normalizePlayer === "function")
+          ? window.normalizePlayer
+          : (p) => p;
+        setHydrated(Array.isArray(raw) ? raw.map(normalizeP) : []);
+        setRosterError("");
+      } catch (e) {
+        if (!cancelled) {
+          setRosterError(e?.message || "Failed to load roster");
+          setHydrated([]);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [compId, isTeamComp]);
+
   if (!isTeamComp) return null;
 
-  // Resolve team objects from competition players list.
+  // Resolve team objects. Prefer the hydrated participants list (which carries
+  // Metadata/member roster) over the sparse comp.players from the competition
+  // list endpoint; fall back to m.sideA/sideB for the team name when the
+  // participant fetch is still in flight or found no match.
   const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
   const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
-  const players = comp.players || [];
+  const players = (hydrated !== null ? hydrated : comp.players) || [];
   const teamA = players.find(p => (p.id || p.ID || p.name || p.Name) === sideAId) || (m.sideA && typeof m.sideA === "object" ? m.sideA : null);
   const teamB = players.find(p => (p.id || p.ID || p.name || p.Name) === sideBId) || (m.sideB && typeof m.sideB === "object" ? m.sideB : null);
 
@@ -951,44 +992,53 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
           <button className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-          <div style={{ borderRight: "1px solid var(--line, #e5e7eb)", paddingRight: 20 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
-              SHIRO (white)
-            </div>
-            {teamB ? (
-              <MatchLineupSideEditor
-                key={`${m.id}-side-b`}
-                comp={comp}
-                team={teamB}
-                match={m}
-                allMatches={allMatches}
-                password={password}
-                showToast={showToast}
-              />
-            ) : (
-              <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
-            )}
+        {rosterError && (
+          <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 12, padding: 8, border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
+            Could not load roster: {rosterError}
           </div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
-              AKA (red)
+        )}
+        {hydrated === null ? (
+          <div style={{ padding: "16px 0", color: "var(--ink-3)", fontSize: 13 }}>Loading roster…</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            <div style={{ borderRight: "1px solid var(--line, #e5e7eb)", paddingRight: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
+                SHIRO (white)
+              </div>
+              {teamB ? (
+                <MatchLineupSideEditor
+                  key={`${m.id}-side-b`}
+                  comp={comp}
+                  team={teamB}
+                  match={m}
+                  allMatches={allMatches}
+                  password={password}
+                  showToast={showToast}
+                />
+              ) : (
+                <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
+              )}
             </div>
-            {teamA ? (
-              <MatchLineupSideEditor
-                key={`${m.id}-side-a`}
-                comp={comp}
-                team={teamA}
-                match={m}
-                allMatches={allMatches}
-                password={password}
-                showToast={showToast}
-              />
-            ) : (
-              <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
-            )}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
+                AKA (red)
+              </div>
+              {teamA ? (
+                <MatchLineupSideEditor
+                  key={`${m.id}-side-a`}
+                  comp={comp}
+                  team={teamA}
+                  match={m}
+                  allMatches={allMatches}
+                  password={password}
+                  showToast={showToast}
+                />
+              ) : (
+                <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -1515,5 +1565,5 @@ window.AdminExport = AdminExport;
 //
 // All other top-level components stay behind the window.* pattern to
 // match the rest of admin_*.jsx.
-// mp-bkg: export pickCopySource for the vitest suite.
-export { timeEdited, timeToMinutes, clampMatchDuration, suggestRebalances, allMatchesCompleted, pickCopySource };
+// mp-bkg: export pickCopySource and MatchLineupPanel for the vitest suite.
+export { timeEdited, timeToMinutes, clampMatchDuration, suggestRebalances, allMatchesCompleted, pickCopySource, MatchLineupPanel };

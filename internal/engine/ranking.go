@@ -131,10 +131,15 @@ func (e *Engine) GetPoolRanking(compID string, rank int) (*domain.Player, error)
 // non-qualifiers. The source is required to be final here, so pools.csv is
 // authoritative.
 //
-// The returned roster carries the source players' identities; the caller
-// persists it (participants.csv was empty on disk for a source-linked playoffs
-// comp) and flips HasParticipantIDs. Resolution is read-only against the
-// source competition, so it never contends with the playoffs comp's own lock.
+// The returned roster carries each winner's display fields (Name/DisplayName/
+// Dojo) but NOT the source-inherited ID: the playoffs comp is a brand-new set
+// of participants with no prior references, so we leave ID empty and let
+// SaveParticipants mint a fresh UUID. That keeps participants.csv column 0 a
+// UUID even when the source carried non-UUID (client-slug) IDs — so the
+// loader's auto-detect parses it correctly regardless of the HasParticipantIDs
+// flag (see the deferred-flip note in runDrawPipeline). Resolution is
+// read-only against the source competition, so it never contends with the
+// playoffs comp's own lock.
 func (e *Engine) resolvePoolWinners(playoffsComp *state.Competition) ([]domain.Player, error) {
 	srcID := playoffsComp.SourceCompID
 	srcComp, err := e.store.LoadCompetition(srcID)
@@ -172,7 +177,15 @@ func (e *Engine) resolvePoolWinners(playoffsComp *state.Competition) ([]domain.P
 		if err != nil {
 			return nil, fmt.Errorf("cannot resolve pool winner rank %d from %q: %w", rank, srcID, err)
 		}
-		players = append(players, *p)
+		// Fresh participant from display fields only — ID deliberately left
+		// empty so SaveParticipants mints a UUID (see the function comment).
+		// We also drop the source seed/number/metadata/tag: the playoffs
+		// bracket is seeded independently and these would be stale here.
+		players = append(players, domain.Player{
+			Name:        p.Name,
+			DisplayName: p.DisplayName,
+			Dojo:        p.Dojo,
+		})
 	}
 	return players, nil
 }

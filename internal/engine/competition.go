@@ -770,7 +770,11 @@ func (e *Engine) runDrawPipeline(id string) error {
 			// is safe because EVERY reader site uses the conditional
 			// hint pattern (only pass &true when comp.HasParticipantIDs;
 			// otherwise nil → LoadParticipantsOpt auto-detects from the
-			// first line's UUID prefix). Sites: handlers_viewer.go list
+			// first line's UUID prefix). Auto-detect is GUARANTEED to
+			// succeed here because resolvePoolWinners builds the roster
+			// with empty IDs, so marshalParticipantsCSV mints UUIDs into
+			// column 0 — even when the source competition carried non-UUID
+			// (client-slug) IDs. Sites: handlers_viewer.go list
 			// (line ~45) and detail (line ~101), and StartCompetition
 			// itself (line ~183). Aborting the start here after a
 			// successful save would commit Status (transform above

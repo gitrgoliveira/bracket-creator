@@ -47,9 +47,9 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Admin API
 	admin := r.Group("/api")
 	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
-	RegisterImportHandlers(admin, store, hub)
-	RegisterCompetitionHandlers(admin, store, eng, hub)
-	RegisterParticipantHandlers(admin, store, hub)
+	RegisterImportHandlers(admin, store, hub, NewFileElevatedVerifier(store))
+	RegisterCompetitionHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
+	RegisterParticipantHandlers(admin, store, hub, NewFileElevatedVerifier(store))
 	RegisterMatchHandlers(admin, eng, store, store, hub)
 	RegisterDecisionHandlers(admin, eng, store, store, hub)
 	RegisterEligibilityHandlers(admin, store, hub)

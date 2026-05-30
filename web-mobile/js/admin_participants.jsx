@@ -529,6 +529,8 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     const name = addName.trim(), dojo = addDojo.trim(), danGrade = addDanGrade.trim();
     const zekken = addZekken.trim();
     if (!name || !dojo) { showToast("Name and dojo are required", "error"); return; }
+    const admin = window.promptAdminPassword();
+    if (admin === null) return;
     setAddLoading(true);
     try {
       // displayName is only forwarded for zekken-enabled competitions; for
@@ -537,7 +539,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       // poison the slot with a stale value (see TestReplaceDoesNotInherit…).
       const payload = { name, dojo, danGrade: danGrade || undefined };
       if (c.withZekkenName && zekken) payload.displayName = zekken;
-      await window.API.addParticipant(c.id, payload, password);
+      await window.API.addParticipant(c.id, payload, password, admin);
       if (!mountedRef.current) return;
       setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); setShowAddForm(false);
       showToast(`${name} added`);
@@ -559,6 +561,8 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     const oldName = replaceTarget.name;
     const targetId = replaceTarget.id;
     const targetTag = replaceTarget.tag || "";
+    const admin = window.promptAdminPassword();
+    if (admin === null) return;
     setReplaceLoading(true);
     try {
       // Build metadata from danGrade so the edited grade actually persists —
@@ -574,7 +578,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
       const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", tag: targetTag };
       if (metadata !== undefined) payload.metadata = metadata;
-      const updated = await window.API.replaceParticipant(c.id, targetId, payload, password);
+      const updated = await window.API.replaceParticipant(c.id, targetId, payload, password, admin);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
       showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);

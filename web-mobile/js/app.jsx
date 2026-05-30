@@ -2,6 +2,7 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 import { applyPatch as patchCompetitionData } from './patch.jsx';
+import { setCachedAuthConfig } from './admin_helpers.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -342,6 +343,11 @@ function App() {
       setAuthConfig(fileDefault);
     });
   }, []);
+
+  // Mirror authConfig into the admin_helpers cache so promptAdminPassword()
+  // (spec 004) can read the elevated-password bits at destructive call sites
+  // without prop-drilling authConfig through every admin component.
+  useE(() => { setCachedAuthConfig(authConfig); }, [authConfig]);
 
   useE(() => {
     // Track every jittered timer so the cleanup can cancel them when

@@ -169,15 +169,18 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // (playoff seeding needs pool results). The post-draw slot assigners
 // (assignPoolMatchSlots / assignBracketMatchSlots) are invoked as two separate
 // calls that EACH re-anchor to dayStart+OpeningBlock, so they OVERLAP the two
-// phases in clock time. A post-draw estimate must therefore SEQUENCE (sum) the
-// two assigner cursors rather than max() them to match EstimateForCounts for a
-// mixed-format competition. See mp-zoh.
+// phases in clock time. A post-draw estimate must therefore SEQUENCE the two
+// phases rather than max() them — but it must add the OpeningBlock offset ONCE,
+// not once per phase. Summing the raw cursor durations would double-count
+// OpeningBlock (each cursor = dayStart + OpeningBlock + match-time); instead sum
+// the per-phase match durations and add OpeningBlock a single time. See mp-zoh.
 //
 // Negative counts are clamped to 0 — the helper is exported and likely fed
 // derived/user inputs (mp-zoh), and a negative count would otherwise make
 // matchMin negative and yield a nonsensical (even negative) duration.
 //
-// Returns a zero ScheduleEstimate when comp is nil or has no courts.
+// Returns a zero ScheduleEstimate only when comp is nil; an empty courts list
+// defaults to a single court (matching the assigners and EstimateSchedule).
 func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tournament *state.Tournament) ScheduleEstimate {
 	if comp == nil {
 		return ScheduleEstimate{}
@@ -192,7 +195,11 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	courts := comp.Courts
 	numCourts := len(courts)
 	if numCourts == 0 {
-		return ScheduleEstimate{}
+		// Empty courts list defaults to a single court — consistent with the
+		// assigners (pools.go / bracket.go) and EstimateSchedule's NumCourts
+		// clamp. Returning zero here would under-estimate a competition that
+		// relies on that 1-court default.
+		numCourts = 1
 	}
 
 	// Work on shallow copies so the caller's structs are not mutated by

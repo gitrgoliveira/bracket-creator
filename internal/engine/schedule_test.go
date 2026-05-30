@@ -495,11 +495,19 @@ func TestEstimateForCounts_NilComp(t *testing.T) {
 	assert.Equal(t, ScheduleEstimate{}, est)
 }
 
-// TestEstimateForCounts_NoCourts verifies that an empty courts slice returns a zero estimate.
+// TestEstimateForCounts_NoCourts verifies that an empty courts slice defaults to
+// a single court — matching the assigners (pools.go / bracket.go) and
+// EstimateSchedule's NumCourts clamp — rather than returning a zero estimate
+// (Copilot review #3328447507). The result must equal the explicit 1-court case.
 func TestEstimateForCounts_NoCourts(t *testing.T) {
-	comp := newIndivComp([]string{}, 3, 3, "09:00")
-	est := EstimateForCounts(10, 5, comp, nil)
-	assert.Equal(t, ScheduleEstimate{}, est)
+	empty := newIndivComp([]string{}, 3, 3, "09:00")
+	oneCourt := newIndivComp([]string{"A"}, 3, 3, "09:00")
+	estEmpty := EstimateForCounts(10, 5, empty, nil)
+	estOne := EstimateForCounts(10, 5, oneCourt, nil)
+
+	assert.Equal(t, estOne, estEmpty, "empty courts must behave as a single court")
+	assert.Greater(t, estEmpty.TotalDurationMinutes, 0, "empty-courts estimate must not be zero")
+	assert.Len(t, estEmpty.PerCourtMinutes, 1, "empty courts must yield exactly one per-court entry")
 }
 
 // ---------------------------------------------------------------------------

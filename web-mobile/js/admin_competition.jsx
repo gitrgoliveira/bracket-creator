@@ -760,9 +760,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div>
             <button className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
               if (confirm(`Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`)) {
+                const admin = window.promptAdminPassword();
+                if (admin === null) return;
                 setInvalidating(true);
                 try {
-                  const updated = await window.API.invalidateCompetition(local.id, password);
+                  const updated = await window.API.invalidateCompetition(local.id, password, admin);
                   if (mountedRef.current) {
                     // Use the server response (if any) so that server-side
                     // field updates are reflected immediately. Fall back to
@@ -795,9 +797,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
             : `Are you sure you want to delete "${local.name}"? This action cannot be undone.`;
           if (confirm(msg)) {
+            const admin = window.promptAdminPassword();
+            if (admin === null) return;
             setDeleting(true);
             try {
-              const ok = await window.API.deleteCompetition(local.id, password);
+              const ok = await window.API.deleteCompetition(local.id, password, admin);
               // onBack() unmounts AdminSettings via the parent's view
               // switch; setDeleting(false) in finally would then fire on
               // a torn-down component. Gate via mountedRef.
@@ -1138,9 +1142,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 
   const discardDraw = async () => {
     if (!confirm(`Discard the generated draw for "${c.name}"? The pools/bracket will be removed and you can regenerate.`)) return;
+    const admin = window.promptAdminPassword();
+    if (admin === null) return;
     setDiscarding(true);
     try {
-      await window.API.discardDraw(c.id, password);
+      await window.API.discardDraw(c.id, password, admin);
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`Draw discarded for ${c.name}`);
@@ -1154,9 +1160,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const regenerateDraw = async () => {
+    // Regenerate discards the existing draw first (DELETE /draw is gated),
+    // so collect the elevated password up front before any work begins.
+    const admin = window.promptAdminPassword();
+    if (admin === null) return;
     setGenerating(true);
     try {
-      await window.API.discardDraw(c.id, password);
+      await window.API.discardDraw(c.id, password, admin);
       if (!mountedRef.current) return;
       // Refresh after discard so the UI reflects setup status immediately;
       // if generateDraw then fails the UI is consistent with the server.

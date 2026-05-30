@@ -580,7 +580,7 @@ func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	admin := r.Group("/api")
-	RegisterParticipantHandlers(admin, store, spy)
+	RegisterParticipantHandlers(admin, store, spy, NewFileElevatedVerifier(store))
 
 	compID := "comp-broadcast-test"
 	require.NoError(t, store.SaveCompetition(&state.Competition{

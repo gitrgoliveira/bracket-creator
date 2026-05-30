@@ -70,8 +70,8 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 		}
 	} else if t.DurationDays == 0 {
 		// Migrate existing single-day tournament.md files that predate the
-		// DurationDays field: omitempty writes nothing for 1, so on load the
-		// zero value must be treated as 1.
+		// DurationDays field: with no duration_days key, the field
+		// deserializes to its zero value (0), which we treat as 1.
 		t.DurationDays = 1
 	}
 
@@ -193,8 +193,8 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 		var t Tournament
 		if perr := parseFrontMatter(data, &t); perr == nil {
 			if t.DurationDays == 0 {
-				// Migrate: omitempty means an existing file with no
-				// duration_days field deserialises to 0 — treat as 1.
+				// Migrate: a legacy file with no duration_days key
+				// deserialises to the zero value (0) — treat as 1.
 				t.DurationDays = 1
 			}
 			current = &t

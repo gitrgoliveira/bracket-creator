@@ -17,9 +17,13 @@ type Tournament struct {
 	// DurationDays is the number of consecutive calendar days this
 	// tournament spans, starting from Date (Day 1). Default 1 (single-day).
 	// Maximum 30. Use Days() to obtain the derived per-day DD-MM-YYYY list.
-	// Stored as omitempty so single-day tournaments (value 1) written by
-	// older code read back cleanly via the zero-→-default migration in
-	// ApplyTournamentDefaults.
+	//
+	// omitempty drops the field only when the value is 0 (Go's zero value),
+	// never when it is 1 — so tournaments saved by this code always persist
+	// an explicit duration_days. The omitempty matters in the reverse
+	// direction: legacy tournament.md files predating this field carry no
+	// duration_days key, so they deserialize to 0 and are migrated to 1 by
+	// the load path (and ApplyTournamentDefaults).
 	DurationDays int `yaml:"duration_days,omitempty" json:"durationDays,omitempty"`
 
 	// AdminPassword gates destructive operations (spec 004 / mp-e21):

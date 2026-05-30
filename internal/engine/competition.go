@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -423,10 +422,16 @@ func filterCheckedIn(players []domain.Player) []domain.Player {
 	return eligible
 }
 
-// checkInExcludedNames returns the normalized (lowercased, trimmed) names of
-// players that filterCheckedIn would remove under opt-in semantics: the
-// non-checked-in players when at least one is checked in, else nil. Used to
-// prune their seed assignments so ApplySeeds doesn't fail on an absent player.
+// checkInExcludedNames returns the names of players that filterCheckedIn would
+// remove under opt-in semantics: the non-checked-in players when at least one
+// is checked in, else nil. Used to prune their seed assignments so ApplySeeds
+// doesn't fail on an absent player.
+//
+// The key is the raw, case-sensitive player Name — matching the roster identity
+// the draw uses (helper.CheckDuplicateEntries and ApplySeeds' playerMap both key
+// on the exact Name, so "Alice" and "alice" are distinct participants).
+// Normalizing case here would let an excluded "alice" drop the seed of a
+// checked-in "Alice" (PR #199 review round 3).
 func checkInExcludedNames(players []domain.Player) map[string]bool {
 	anyCheckedIn := false
 	for _, p := range players {
@@ -441,23 +446,24 @@ func checkInExcludedNames(players []domain.Player) map[string]bool {
 	excluded := make(map[string]bool)
 	for _, p := range players {
 		if !p.CheckedIn {
-			excluded[strings.ToLower(strings.TrimSpace(p.Name))] = true
+			excluded[p.Name] = true
 		}
 	}
 	return excluded
 }
 
 // dropSeedAssignments removes seed assignments whose participant name is in the
-// excluded set (case-insensitive). A nil/empty excluded set returns the input
-// unchanged, so a seed for a name that was never a participant still flows
-// through to ApplySeeds and surfaces the same error as before.
+// excluded set, matched case-sensitively on the exact Name (same key as
+// checkInExcludedNames / the roster identity). A nil/empty excluded set returns
+// the input unchanged, so a seed for a name that was never a participant still
+// flows through to ApplySeeds and surfaces the same error as before.
 func dropSeedAssignments(seeds []domain.SeedAssignment, excluded map[string]bool) []domain.SeedAssignment {
 	if len(excluded) == 0 {
 		return seeds
 	}
 	out := make([]domain.SeedAssignment, 0, len(seeds))
 	for _, a := range seeds {
-		if excluded[strings.ToLower(strings.TrimSpace(a.Name))] {
+		if excluded[a.Name] {
 			continue
 		}
 		out = append(out, a)

@@ -135,9 +135,11 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // EstimateForCounts returns a ScheduleEstimate for a pre-draw competition
 // (no generated matches yet) given the expected number of pool matches and
 // playoff matches. It reuses the slot-model primitives (perMatchElapsedMinutes,
-// skipCeremonyBlocks) so per-match and break math match the post-draw path —
-// but the aggregate intentionally diverges in two documented ways (the buffer
-// and phase-sequencing notes below), so it is NOT a byte-for-byte equal.
+// skipCeremonyBlocks) so per-match and in-day break (OpeningBlock/LunchBlock)
+// math match the post-draw path — but the aggregate intentionally diverges in
+// two documented ways (the buffer and phase-sequencing notes below), so it is
+// NOT a byte-for-byte equal. (ClosingBlock is handled differently — surfaced as
+// CeremonyMinutes here, ignored by the assigners; see below.)
 //
 // Unit reconciliation: the slot model advances clock times (time.Time), while
 // ScheduleEstimate.TotalDurationMinutes is a duration in minutes. This function
@@ -154,8 +156,10 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // dead-time, which have no runtime variance to pad — matching EstimateSchedule's
 // semantics. The post-draw slot assigners (assignPoolMatchSlots /
 // assignBracketMatchSlots) do NOT apply the buffer at all because a real,
-// assigned schedule needs no extra padding. Do NOT assert cross-regime equality
-// for buffered inputs.
+// assigned schedule needs no extra padding. So do NOT assert RAW cross-regime
+// equality — but the buffered relationship (EstimateForCounts ≈ slot duration ×
+// (1 + buffer/100)) IS valid, and is exactly what
+// TestEstimateForCountsVsSlotAssigner_Balanced checks.
 //
 // CeremonyMinutes is populated from tournament.ClosingBlock. The OpeningBlock is
 // applied as a pre-loop per-court start offset (cursor initialised to

@@ -33,6 +33,13 @@ type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
 }
 
+// matchLineupLockedMsg is the 409 body for the match-scoped endpoints.
+// state.ErrLineupLocked's own text says "round has started", which is
+// misleading here since these endpoints lock by match — so we surface a
+// match-accurate message at the boundary while still keeping the shared
+// sentinel for control flow (errors.Is).
+const matchLineupLockedMsg = "team lineup locked: match has started"
+
 // RegisterLineupHandlers wires the GET/PUT/DELETE lineup endpoints
 // under the admin group. Slice 7.B / T127.
 //
@@ -304,7 +311,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
 				switch {
 				case errors.Is(err, state.ErrLineupLocked):
-					respErr = &httpErr{status: http.StatusConflict, body: gin.H{"error": err.Error()}}
+					respErr = &httpErr{status: http.StatusConflict, body: gin.H{"error": matchLineupLockedMsg}}
 				default:
 					// All domain validation errors (missing senpo/taisho,
 					// too-many-missing, bad team size, dynamic position
@@ -346,7 +353,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		}
 		if err := store.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
 			if errors.Is(err, state.ErrLineupLocked) {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				c.JSON(http.StatusConflict, gin.H{"error": matchLineupLockedMsg})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

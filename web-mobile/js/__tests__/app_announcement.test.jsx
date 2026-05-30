@@ -549,9 +549,10 @@ describe('diffAnnouncementSnapshot', () => {
     });
   }
 
-  it('sentAt filter: post-mount ID excluded from seed fires on SSE replay', () => {
-    // Models the race: HTTP response includes NEW (sentAt after mount), but the
-    // caller only seeds pre-mount IDs. Buffered SSE replay then fires for NEW.
+  it('sentAt filter WITH buffered SSE: post-mount ID excluded from seed fires on SSE replay', () => {
+    // Models the race WITH a buffered SSE snapshot: HTTP response includes NEW
+    // (sentAt after mount), but seed is pre-mount only. Buffered SSE replay fires
+    // for NEW.
     const mountMs = Date.parse('2026-05-30T13:00:00.000Z');
     const ref = { current: null };
 
@@ -559,12 +560,35 @@ describe('diffAnnouncementSnapshot', () => {
       { id: 'ann-1', sentAt: '2026-05-30T12:00:00.000Z', message: 'Pre-existing' },
       { id: 'new-1', sentAt: '2026-05-30T13:00:01.000Z', message: 'Created after mount' },
     ];
-    diffAnnouncementSnapshot(ref, preMountFilter(httpList, mountMs)); // seed pre-mount only
+    const sseList = httpList; // SSE was buffered; same snapshot (with NEW)
 
-    // Replay buffered SSE (includes new-1)
-    const additions = diffAnnouncementSnapshot(ref, httpList);
+    // WITH buffered SSE: seed pre-mount only
+    diffAnnouncementSnapshot(ref, preMountFilter(httpList, mountMs));
+    // Replay buffered SSE (includes new-1) → fires for NEW
+    const additions = diffAnnouncementSnapshot(ref, sseList);
     expect(additions).toHaveLength(1);
     expect(additions[0].id).toBe('new-1');
+  });
+
+  it('sentAt filter WITHOUT buffered SSE: post-mount ID seeded from full HTTP list (no stale notification)', () => {
+    // Models the case with NO buffered SSE: HTTP response includes NEW (post-mount)
+    // but since there is no SSE to replay, seed the full list to avoid leaving
+    // NEW unseeded and triggering stale notifications on a later unrelated SSE.
+    const mountMs = Date.parse('2026-05-30T13:00:00.000Z');
+    const ref = { current: null };
+
+    const httpList = [
+      { id: 'ann-1', sentAt: '2026-05-30T12:00:00.000Z', message: 'Pre-existing' },
+      { id: 'new-1', sentAt: '2026-05-30T13:00:01.000Z', message: 'Created after mount' },
+    ];
+
+    // WITHOUT buffered SSE: seed the full list (including new-1)
+    diffAnnouncementSnapshot(ref, httpList);
+    expect(ref.current.has('new-1')).toBe(true); // seeded → won't re-fire
+
+    // Later unrelated SSE arrives with the same list → no stale notification
+    const additions = diffAnnouncementSnapshot(ref, httpList);
+    expect(additions).toHaveLength(0);
   });
 
   it('sentAt filter: Go RFC3339 without fractional seconds compares correctly', () => {

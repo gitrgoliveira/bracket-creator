@@ -52,11 +52,18 @@ func teamLineupKey(teamID string, round int) string {
 
 // teamLineupMatchKey is the in-memory map key for a MATCH-scoped lineup
 // (mp-825). Prefixed with "m:" so it can never collide with a
-// round-scoped key (which is "<teamID>-<int>"); match IDs are opaque
-// strings and may themselves look like "team-0". Both scopes share one
-// persisted map; the prefix keeps them disjoint.
+// round-scoped key (which is "<teamID>-<int>"); both scopes share one
+// persisted map and the prefix keeps them disjoint.
+//
+// The two components are joined with a NUL byte rather than "-" because
+// both teamID and matchID are opaque and routinely contain hyphens (pool
+// match IDs are "PoolA-0"). A "-" delimiter would be ambiguous —
+// ("a-b","c") and ("a","b-c") would collide — so NUL, which cannot
+// appear in either, is used (same technique as lineupKey in
+// kachinuki_export.go). This key is only ever a map key; it is never
+// persisted or parsed back, so the delimiter choice is free.
 func teamLineupMatchKey(teamID, matchID string) string {
-	return "m:" + teamID + "-" + matchID
+	return "m:" + teamID + "\x00" + matchID
 }
 
 // lineupStorageKey returns the map key a lineup is stored under:

@@ -89,6 +89,10 @@ func TestMatchLineupPUT_409WhenMatchLive(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	// The 409 must use a match-accurate message, not the sentinel's
+	// "round has started" text.
+	assert.Contains(t, w.Body.String(), "match has started")
+	assert.NotContains(t, w.Body.String(), "round has started")
 }
 
 // TestMatchLineupDELETE: a match-scoped DELETE removes the entry and
@@ -128,6 +132,22 @@ func TestMatchLineupPUT_RequiresAuth(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(validPositionsBody()))
+	// No password header.
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestMatchLineupDELETE_RequiresAuth: the match-scoped DELETE is on the
+// admin group. A regression that registered it outside the admin group
+// would let a no-password DELETE through — this asserts it doesn't.
+func TestMatchLineupDELETE_RequiresAuth(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", nil)
 	// No password header.
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

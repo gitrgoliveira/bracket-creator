@@ -220,6 +220,58 @@ describe('Viewer Utils', () => {
       const c = mkComp({ status: 'setup', poolMatches: [{ id: 'Pool A-0', status: 'scheduled' }] });
       expect(compMatches(c)).toEqual([]);
     });
+
+    // mp-116: compKind/teamSize must be threaded onto every match so that
+    // MatchDetailCard.isTeam and MatchViewerModal.isTeam evaluate correctly.
+    it('threads compKind and teamSize onto pool matches for team comps', () => {
+      const c = mkComp({
+        kind: 'team',
+        teamSize: 3,
+        poolMatches: [{ id: 'Pool A-0', status: 'completed' }],
+      });
+      const ms = compMatches(c);
+      expect(ms[0].compKind).toBe('team');
+      expect(ms[0].teamSize).toBe(3);
+    });
+
+    it('zeroes out compKind/teamSize for pool-daihyosen matches (pool-DH guard)', () => {
+      const c = mkComp({
+        kind: 'team',
+        teamSize: 3,
+        poolMatches: [
+          { id: 'Pool A-0', status: 'completed' },
+          { id: 'Pool A-DH-0', status: 'completed' },
+        ],
+      });
+      const ms = compMatches(c);
+      const normal = ms.find(m => m.id === 'Pool A-0');
+      const dh = ms.find(m => m.id === 'Pool A-DH-0');
+      expect(normal.compKind).toBe('team');
+      expect(normal.teamSize).toBe(3);
+      expect(dh.compKind).toBe('');
+      expect(dh.teamSize).toBe(0);
+    });
+
+    it('threads compKind and teamSize onto bracket matches for team comps', () => {
+      global.window = global.window || {};
+      const savedRoundLabel = global.window.roundLabel;
+      global.window.roundLabel = (i, _total) => `Round ${i + 1}`;
+      try {
+        const c = mkComp({
+          kind: 'team',
+          teamSize: 5,
+          bracket: { rounds: [[{ id: 'QF-0', status: 'completed' }]] },
+        });
+        const ms = compMatches(c);
+        const bm = ms.find(m => m.phase === 'bracket');
+        expect(bm).toBeTruthy();
+        expect(bm.compKind).toBe('team');
+        expect(bm.teamSize).toBe(5);
+      } finally {
+        if (savedRoundLabel === undefined) delete global.window.roundLabel;
+        else global.window.roundLabel = savedRoundLabel;
+      }
+    });
   });
 
   describe('swissStandingsHeading', () => {
@@ -354,6 +406,55 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     const text = collectText(tree);
     expect(text).toContain('Daihyosen');
     expect(text).not.toContain('Hantei');
+  });
+
+  // mp-116: Overview "Recent results" bug — allMatches useMemo was not threading
+  // compKind/teamSize, so isTeam evaluated false and the individual ippons block
+  // rendered instead of the team sub-bout rows.
+  // Verify that a match carrying compKind="team" (as allMatches now produces)
+  // renders match-detail-card__team-subs, NOT match-detail-card__ippons.
+  it('renders team sub-bout block (not individual ippons) when compKind="team" from allMatches', () => {
+    const match = {
+      ...mkTeamMatch([
+        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
+        { position: 2, ipponsA: [], ipponsB: ['D'], decidedByHantei: false },
+      ]),
+      // These flags are what allMatches now correctly supplies for team comps.
+      compKind: 'team',
+      teamSize: 3,
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    // Team sub-rows container must be present.
+    const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
+    expect(teamSubs).toBeTruthy();
+    // Individual ippons block must NOT appear.
+    const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
+    expect(ipponsBlock).toBeNull();
+  });
+
+  // mp-116: Individual match must still render the ippons block (regression guard).
+  it('renders individual ippons block when compKind is absent (individual match)', () => {
+    // The individual path calls window.isHikiwake — stub it for this test.
+    global.window.isHikiwake = vi.fn(() => false);
+    const match = {
+      compKind: 'individual',
+      teamSize: 0,
+      status: 'completed',
+      court: 'A',
+      phase: 'bracket',
+      round: 'QF',
+      sideA: { id: 'pA', name: 'Alice' },
+      sideB: { id: 'pB', name: 'Bob' },
+      ipponsA: ['M'],
+      ipponsB: [],
+      winner: { id: 'pA' },
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    delete global.window.isHikiwake;
+    const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
+    expect(ipponsBlock).toBeTruthy();
+    const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
+    expect(teamSubs).toBeNull();
   });
 });
 

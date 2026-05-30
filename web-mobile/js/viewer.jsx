@@ -1174,16 +1174,19 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     if (pools) {
         pools.forEach((p) => {
             const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
-            matches.forEach((m) => out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName }));
+            matches.forEach((m) => {
+                const isDH = isPoolDaihyosenID(m.id || "");
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+            });
         });
     }
     if (bracket && bracket.rounds) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length) }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), compKind: c.kind, teamSize: c.teamSize }));
         });
     }
     return out;
-  }, [pools, poolMatches, bracket]);
+  }, [pools, poolMatches, bracket, c.kind, c.teamSize]);
 
   const liveMatches = allMatches.filter((m) => m.status === "running" && hasBothSides(m));
   const upcomingMatches = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m)).slice(0, 3);
@@ -1313,7 +1316,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     highlightedMatchId={currentMatch?.id}
                     autoScrollMatchId={bracketScrollTarget}
                     scrollContainerRef={bracketScrollRef}
-                    onMatchClick={(m) => setSelectedMatch(m)}
+                    onMatchClick={(m) => setSelectedMatch({ ...m, compKind: c.kind, teamSize: c.teamSize })}
                   />
                 </div>
               </div>

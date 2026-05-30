@@ -191,6 +191,15 @@ function normalizeCompetitionDetail(data) {
 
     const result = { ...data };
 
+    // Go ships nil slices as JSON null, so a competition created via the
+    // API/import flow (which don't force a courts list the way the admin
+    // form does) arrives with `courts: null`. Render sites across admin
+    // and viewer read `c.courts.join(...)` / `c.courts.length` directly,
+    // which crash on null. Normalize to [] at this single fetch boundary
+    // so no consumer has to guard individually. No code distinguishes
+    // null from empty courts, so this is behavior-preserving.
+    result.courts = result.courts || [];
+
     // Normalize config.players (Go uses PascalCase, JS expects camelCase)
     if (result.config && result.config.players) {
         result.config = { ...result.config, players: result.config.players.map(p => {

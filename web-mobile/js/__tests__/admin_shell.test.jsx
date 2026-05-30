@@ -27,6 +27,18 @@ beforeAll(async () => {
   CompCard = window.CompCard;
 });
 
+// Recursively gather string/number leaves from the React-stub vnode tree
+// ({type, props, children}) so we can assert on rendered text without a
+// real DOM.
+function collectText(node) {
+  if (node == null || node === false || node === true) return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(collectText).join('');
+  if (node.children !== undefined) return collectText(node.children);
+  return '';
+}
+
 describe('CompCard', () => {
   const noop = () => {};
 
@@ -49,5 +61,24 @@ describe('CompCard', () => {
       courts: ['A', 'B'], players: [{ id: 'p1' }, { id: 'p2' }],
     };
     expect(() => CompCard({ c, onOpen: noop, onStart: noop })).not.toThrow();
+  });
+
+  // Copilot review (PR #195): with no date/startTime and empty courts the
+  // meta line must not render a dangling " · " separator.
+  it('omits the meta separator entirely when courts and date/time are empty', () => {
+    const c = { id: 'x', name: 'X', format: 'playoffs', status: 'setup', courts: null };
+    expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).not.toContain('·');
+  });
+
+  it('does not lead the court list with a separator when nothing precedes it', () => {
+    const c = { id: 'x', name: 'X', format: 'playoffs', status: 'setup', courts: ['A', 'B'] };
+    const text = collectText(CompCard({ c, onOpen: noop, onStart: noop }));
+    expect(text).toContain('A, B');
+    expect(text).not.toContain('·');
+  });
+
+  it('separates date from the court list with " · " when both are present', () => {
+    const c = { id: 'x', name: 'X', format: 'playoffs', status: 'setup', date: '2026-06-01', courts: ['A'] };
+    expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).toContain('·');
   });
 });

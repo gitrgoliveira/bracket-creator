@@ -264,8 +264,10 @@ function CompCard({ c, onOpen, onStart }) {
             {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
             {c.date && c.startTime && " · "}
             {c.startTime && `Starts ${c.startTime}`}
-            {" · "}
-            {courts.join(", ")}
+            {/* Only emit the separator + court list when courts exist, and
+                only lead with " · " when something precedes it — otherwise
+                an empty/null-courts comp renders a dangling " · ". */}
+            {courts.length > 0 && `${(c.date || c.startTime) ? " · " : ""}${courts.join(", ")}`}
           </div>
         </div>
         <StatusBadge status={c.status} />

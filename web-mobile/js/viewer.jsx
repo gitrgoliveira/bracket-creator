@@ -64,8 +64,11 @@ const isPoolDaihyosenID = id => id.includes('-DH-');
 function compMatches(c) {
   const out = [];
 
-  // Setup/draw-ready/empty status: no public data yet — draw is admin-only preview
-  if (!c.status || c.status === "setup" || c.status === "draw-ready") return out;
+  // Setup status: no public data yet — draw is admin-only preview.
+  // draw-ready is allowed through: pool/bracket structure is already
+  // persisted and returned by handlers_viewer.go unconditionally, so
+  // spectators can see the pool draw before the first match is called.
+  if (!c.status || c.status === "setup") return out;
 
   const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
@@ -96,8 +99,13 @@ function compMatches(c) {
 }
 
 function tournamentMatches(t) {
+  // draw-ready comps contribute their (unscored) draw matches so the
+  // "Find my matches" / watchlist / full-schedule views can surface a
+  // spectator's upcoming bout once the draw is published. These never
+  // appear in the home LIVE/Up-next strips: those gate on liveCompIds,
+  // which excludes draw-ready (a draw-ready comp is not live).
   return (t.competitions || [])
-    .filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready")
+    .filter(c => c.status && c.status !== "setup")
     .flatMap(compMatches);
 }
 
@@ -334,6 +342,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
+  // Live-comp set: gates the home LIVE NOW / Up-next strips and the live dot.
+  // BOTH setup and draw-ready are excluded — a draw-ready comp has a published
+  // draw but no match has been called, so it is NOT live. (The competition
+  // detail view still shows its Pools/Bracket tabs; that is governed separately
+  // by isPreStart in ViewerCompetition.)
   const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
   // Apply hasBothSides here too — pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
@@ -468,6 +481,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                         </div>
                         <StatusBadge status={c.status} showLiveDot />
                       </div>
+                      {/* Progress bar: deliberately excludes draw-ready too.
+                          A draw-ready comp has 0 done / 0 live, so the bar
+                          would read "0 / N" at 0% — a misleading "in progress"
+                          signal. The StatusBadge already communicates the
+                          draw-ready state; the bar appears once play begins. */}
                       {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                         <div className="vlist-item__progress">
                           <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
@@ -1128,9 +1146,28 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   );
 }
 
-function ViewerCompetition({ _tournament, competition, pools, poolMatches, standings, bracket, onBack, _onAdminClick, tweaks }) {
+function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, _onAdminClick, tweaks }) {
   const [tab, setTab] = useState("overview");
   const c = competition;
+
+  // Phase 2 (mp-rrd) — link a pools/mixed comp to its separate playoffs comp
+  // and vice-versa. A mixed tournament is TWO competitions: the pools/mixed
+  // comp (holds the pools) and a playoffs comp created via POST /playoffs that
+  // carries a `sourceCompID` back-reference. Surface a one-tap affordance so a
+  // spectator landing on one can jump to the other under the same tournament.
+  const linkedComp = useMemo(() => {
+    const all = (tournament && tournament.competitions) || [];
+    // This comp IS a playoffs comp → link to its source pools/mixed comp.
+    if (c.sourceCompID) {
+      const src = all.find(x => x.id === c.sourceCompID);
+      if (src) return { comp: src, role: "pools" };
+    }
+    // This comp is a pools/mixed comp → link to the playoffs comp that
+    // references it (if one has been created yet).
+    const playoffs = all.find(x => x.sourceCompID === c.id);
+    if (playoffs) return { comp: playoffs, role: "playoffs" };
+    return null;
+  }, [tournament, c.id, c.sourceCompID]);
 
   const allMatches = useMemo(() => {
     const out = [];
@@ -1172,7 +1209,11 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
     return null;
   }, [bracket, c, pools]);
 
-  const isPreStart = !c.status || c.status === "setup" || c.status === "draw-ready";
+  // draw-ready is NOT pre-start for the purposes of showing pool/bracket
+  // structure — the draw has been generated and the payload already includes
+  // pools + bracket data returned unconditionally by handlers_viewer.go.
+  // Only setup (no draw yet) is treated as pre-start.
+  const isPreStart = !c.status || c.status === "setup";
   const hasPools = !isPreStart && !!pools && pools.length > 0;
   const hasBracket = !isPreStart && !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
   // T192 (FR-050e): Swiss competitions surface a dedicated standings
@@ -1230,6 +1271,25 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           ))}
         </div>
         <div className="viewer__body">
+          {linkedComp && onSelectCompetition && (
+            // Phase 2 (mp-rrd): pools <-> playoffs cross-link. A mixed
+            // tournament splits across two competitions; this lets a
+            // spectator hop between the pool draw and the knockout bracket.
+            <button
+              className="vlist-item vlist-item--row"
+              style={{ marginBottom: 12, width: "100%" }}
+              onClick={() => onSelectCompetition(linkedComp.comp.id)}
+            >
+              <span className="vlist-item__icon">{linkedComp.role === "playoffs" ? "🏆" : "👥"}</span>
+              <div className="vlist-item__rowbody">
+                <div className="vlist-item__rowtitle">
+                  {linkedComp.role === "playoffs" ? "View the playoffs bracket" : "View the pools"}
+                </div>
+                <div className="vlist-item__rowsub">{linkedComp.comp.name}</div>
+              </div>
+              <span className="vlist-item__rowchev">→</span>
+            </button>
+          )}
           {tab === "overview" && (
             <ViewerOverview
               c={c}
@@ -1370,12 +1430,26 @@ function MatchDetailCard({ match, onClose }) {
 function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
 
-  if (!c.status || c.status === "setup" || c.status === "draw-ready") {
+  // setup: no draw yet — plain "not started" message.
+  if (!c.status || c.status === "setup") {
     return (
       <div className="empty" style={{ padding: 32 }}>
         <div className="icon">⏳</div>
         <h3>Not started yet</h3>
         <div style={{ fontSize: 13 }}>Starts at {c.startTime}. Check back when the competition begins.</div>
+      </div>
+    );
+  }
+
+  // draw-ready: the draw is published but no match has been called yet.
+  // The comp is not live, so the Overview has no live/recent matches to
+  // show — point spectators to the now-available Pools/Bracket tabs.
+  if (c.status === "draw-ready") {
+    return (
+      <div className="empty" style={{ padding: 32 }}>
+        <div className="icon">📋</div>
+        <h3>Draw is ready</h3>
+        <div style={{ fontSize: 13 }}>Starts at {c.startTime}. Browse the Pools and Bracket tabs to see the draw.</div>
       </div>
     );
   }
@@ -1900,7 +1974,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, AnnouncementCard, AnnouncementBanner };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

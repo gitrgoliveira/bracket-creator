@@ -611,6 +611,7 @@ function App() {
           standings={selectedCompData.standings}
           bracket={selectedCompData.bracket}
           onBack={() => setViewerCompId(null)}
+          onSelectCompetition={setViewerCompId}
           onAdminClick={requestAdmin}
           tweaks={THEME}
         />

@@ -396,6 +396,32 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 //     commit serializes them. Left as a follow-up.
 //   - SaveParticipants (source-linked playoffs roster path) also has its own
 //     lock acquisition. A failure mid-pipeline leaves partial state on disk.
+//
+// filterCheckedIn applies the mp-w7x check-in filter with opt-in semantics:
+// if at least one player is checked in, return only the checked-in players;
+// if nobody is checked in, the operator never used check-in for this
+// competition, so return the roster unchanged. This guarantees the filter can
+// never silently empty the field. The input slice is not mutated.
+func filterCheckedIn(players []domain.Player) []domain.Player {
+	anyCheckedIn := false
+	for _, p := range players {
+		if p.CheckedIn {
+			anyCheckedIn = true
+			break
+		}
+	}
+	if !anyCheckedIn {
+		return players
+	}
+	eligible := make([]domain.Player, 0, len(players))
+	for _, p := range players {
+		if p.CheckedIn {
+			eligible = append(eligible, p)
+		}
+	}
+	return eligible
+}
+
 func (e *Engine) runDrawPipeline(id string) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -465,6 +491,19 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if err != nil {
 		return err
 	}
+	// Exclude participants who have not checked in (mp-w7x), but only when
+	// check-in is actually in use for this competition — i.e. at least one
+	// participant is checked in. If nobody is checked in, the operator never
+	// used the feature, so we include everyone (opt-in semantics: check-in
+	// can never silently empty the field).
+	//
+	// Filter the DISK roster HERE — after load, BEFORE the playoffs
+	// source-resolution below. resolvePoolWinners builds promoted finalists
+	// with CheckedIn=false (ranking.go: only Name/DisplayName/Dojo are set),
+	// so filtering after resolution would wrongly drop the entire playoff
+	// bracket. Source-resolved finalists are intentionally exempt and bypass
+	// this filter by virtue of placement.
+	players = filterCheckedIn(players)
 	// Playoffs competitions created from a mixed source (POST /playoffs)
 	// start with an empty roster on disk. Resolve the source's final pool
 	// winners into the roster now, BEFORE the empty-roster check. The

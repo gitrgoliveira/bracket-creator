@@ -128,6 +128,14 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// After T154, store.LoadParticipants returns []domain.Player
 	// directly, so the Swiss pipeline doesn't need a conversion at the
 	// boundary (NFR-007).
+	// Exclude participants who have not checked in (mp-w7x), opt-in semantics
+	// (see filterCheckedIn). Unlike the pools/playoffs draw (filtered once in
+	// runDrawPipeline), every Swiss round reloads the roster from disk here, so
+	// the filter lives at this shared point — it applies to round 1
+	// (StartCompetition) AND every AdvanceSwissRound, preventing a
+	// non-checked-in player from being paired mid-tournament.
+	participants = filterCheckedIn(participants)
+
 	active := make([]domain.Player, 0, len(participants))
 	for _, p := range participants {
 		if p.ID != "" {
@@ -138,7 +146,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		active = append(active, p)
 	}
 	if len(active) < 2 {
-		return nil, validationErrorf("swiss round requires at least 2 eligible participants, got %d", len(active))
+		return nil, validationErrorf("swiss round requires at least 2 eligible (checked-in) participants, got %d", len(active))
 	}
 
 	priorMatches, err := e.store.LoadPoolMatches(compID)

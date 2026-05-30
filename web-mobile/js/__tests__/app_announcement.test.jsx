@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotifications } from '../app.jsx';
+import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotifications, diffAnnouncementSnapshot } from '../app.jsx';
 import { AnnouncementBanner, AnnouncementCard, NotificationSettings, notificationSupported } from '../viewer.jsx';
 
 // Helper: recursively search a React element tree (mock objects) for all
@@ -408,61 +408,89 @@ describe('fireBrowserNotifications', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Snapshot-diff logic — verifies the seen-IDs pattern used in app.jsx's SSE
-// handler. We test the diff logic directly (as a pure function pattern) since
-// the full SSE integration requires mounting the App component, which is
-// heavier than needed for these invariants.
+// Snapshot-diff logic — exercises the REAL diffAnnouncementSnapshot helper
+// (the exact code app.jsx's SSE handler and initial-fetch effect call), rather
+// than a re-implementation. A ref is modelled as a plain { current } object,
+// matching the useRef shape the component passes in.
 // ---------------------------------------------------------------------------
 
-describe('announcement snapshot diff logic', () => {
-  it('identifies additions correctly — only ids not in seen set', () => {
-    const seen = new Set(['existing-1', 'existing-2']);
-    const snapshot = [
+describe('diffAnnouncementSnapshot', () => {
+  it('identifies additions correctly — only ids not in the already-seeded set', () => {
+    const ref = { current: new Set(['existing-1', 'existing-2']) };
+    const additions = diffAnnouncementSnapshot(ref, [
       { id: 'existing-1', message: 'Old' },
       { id: 'new-1', message: 'New announcement' },
-    ];
-    const additions = snapshot.filter(a => a && a.id && !seen.has(a.id));
+    ]);
     expect(additions).toHaveLength(1);
     expect(additions[0].id).toBe('new-1');
   });
 
   it('produces no additions when the snapshot only removed items (dismiss/clear)', () => {
-    const seen = new Set(['ann-1', 'ann-2', 'ann-3']);
-    // Snapshot shrunk — two were dismissed
-    const snapshot = [{ id: 'ann-1', message: 'Still here' }];
-    const additions = snapshot.filter(a => a && a.id && !seen.has(a.id));
+    const ref = { current: new Set(['ann-1', 'ann-2', 'ann-3']) };
+    const additions = diffAnnouncementSnapshot(ref, [{ id: 'ann-1', message: 'Still here' }]);
     expect(additions).toHaveLength(0);
   });
 
   it('produces no additions when snapshot is empty (clear-all)', () => {
-    const seen = new Set(['ann-1', 'ann-2']);
-    const snapshot = [];
-    const additions = snapshot.filter(a => a && a.id && !seen.has(a.id));
-    expect(additions).toHaveLength(0);
+    const ref = { current: new Set(['ann-1', 'ann-2']) };
+    expect(diffAnnouncementSnapshot(ref, [])).toHaveLength(0);
   });
 
   it('marks all current snapshot IDs as seen after processing', () => {
-    const seen = new Set(['old-1']);
-    const snapshot = [
+    const ref = { current: new Set(['old-1']) };
+    diffAnnouncementSnapshot(ref, [
       { id: 'old-1', message: 'Existing' },
       { id: 'new-1', message: 'New' },
-    ];
-    // Simulate what the SSE handler does
-    snapshot.forEach(a => { if (a && a.id) seen.add(a.id); });
-    expect(seen.has('old-1')).toBe(true);
-    expect(seen.has('new-1')).toBe(true);
+    ]);
+    expect(ref.current.has('old-1')).toBe(true);
+    expect(ref.current.has('new-1')).toBe(true);
   });
 
   it('a second identical snapshot produces no new additions (idempotent)', () => {
-    const seen = new Set();
-    const snapshot1 = [{ id: 'ann-1', message: 'Hello' }];
-    // First snapshot — seeds seen
-    let additions = snapshot1.filter(a => a && a.id && !seen.has(a.id));
-    snapshot1.forEach(a => { if (a && a.id) seen.add(a.id); });
-    expect(additions).toHaveLength(1);
-    // Second identical snapshot — no new additions
-    additions = snapshot1.filter(a => a && a.id && !seen.has(a.id));
+    const ref = { current: new Set() };
+    const snapshot = [{ id: 'ann-1', message: 'Hello' }];
+    expect(diffAnnouncementSnapshot(ref, snapshot)).toHaveLength(1); // new vs empty seeded set
+    expect(diffAnnouncementSnapshot(ref, snapshot)).toHaveLength(0); // already seen
+  });
+
+  // --- Seeding race (Copilot comment 3328483813) ---------------------------
+
+  it('treats the FIRST snapshot against an unseeded (null) ref as a seed — no additions', () => {
+    const ref = { current: null }; // initial fetch has not seeded yet
+    const additions = diffAnnouncementSnapshot(ref, [
+      { id: 'ann-1', message: 'Active at load' },
+      { id: 'ann-2', message: 'Also active at load' },
+    ]);
+    // No notifications on page load even though the SSE snapshot won the race.
     expect(additions).toHaveLength(0);
+    // ...but both IDs are now recorded, so they never re-fire later.
+    expect(ref.current.has('ann-1')).toBe(true);
+    expect(ref.current.has('ann-2')).toBe(true);
+  });
+
+  it('after the first snapshot seeds, a genuinely new announcement fires', () => {
+    const ref = { current: null };
+    diffAnnouncementSnapshot(ref, [{ id: 'ann-1', message: 'At load' }]); // seed
+    const additions = diffAnnouncementSnapshot(ref, [
+      { id: 'ann-1', message: 'At load' },
+      { id: 'ann-2', message: 'Arrived after load' },
+    ]);
+    expect(additions).toHaveLength(1);
+    expect(additions[0].id).toBe('ann-2');
+  });
+
+  it('seeds from an empty first snapshot, then fires for a later addition', () => {
+    const ref = { current: null };
+    expect(diffAnnouncementSnapshot(ref, [])).toHaveLength(0); // seed (nothing active)
+    expect(ref.current).toBeInstanceOf(Set); // now seeded, not null
+    const additions = diffAnnouncementSnapshot(ref, [{ id: 'ann-1', message: 'New' }]);
+    expect(additions).toHaveLength(1);
+  });
+
+  it('tolerates a non-array snapshot without throwing', () => {
+    const ref = { current: null };
+    expect(diffAnnouncementSnapshot(ref, null)).toEqual([]);
+    expect(ref.current).toBeInstanceOf(Set);
   });
 });
 
@@ -555,6 +583,42 @@ describe('NotificationSettings', () => {
     expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('true');
 
     window.localStorage.setItem('viewer.notifications.enabled', 'false');
+    expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('false');
+  });
+
+  // --- Two-click bug (Copilot comment 3328483825) -------------------------
+  // Stored opt-in is "true" but the browser permission has been reset to
+  // "default". The checkbox must render unchecked AND the first click must go
+  // down the "turning on" branch (request permission), not "turning off".
+  it('first click requests permission when opt-in was stored but permission is default', async () => {
+    window.localStorage.setItem('viewer.notifications.enabled', 'true');
+    const requestPermission = vi.fn().mockResolvedValue('granted');
+    global.Notification = { permission: 'default', requestPermission };
+
+    const tree = NotificationSettings({});
+    const toggle = findAll(tree, n => n.props && n.props['data-testid'] === 'notification-toggle')[0];
+    expect(toggle).toBeDefined();
+    // enabled is gated on permission===granted, so the box renders unchecked.
+    expect(toggle.props.checked).toBe(false);
+
+    // First click → must request permission (turning-on branch), not flip off.
+    await toggle.props.onChange();
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT re-request permission on the first click when already granted (turning off)', async () => {
+    window.localStorage.setItem('viewer.notifications.enabled', 'true');
+    const requestPermission = vi.fn().mockResolvedValue('granted');
+    global.Notification = { permission: 'granted', requestPermission };
+
+    const tree = NotificationSettings({});
+    const toggle = findAll(tree, n => n.props && n.props['data-testid'] === 'notification-toggle')[0];
+    // Stored true + granted → checkbox checked.
+    expect(toggle.props.checked).toBe(true);
+
+    // First click turns OFF — no permission prompt.
+    await toggle.props.onChange();
+    expect(requestPermission).not.toHaveBeenCalled();
     expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('false');
   });
 });

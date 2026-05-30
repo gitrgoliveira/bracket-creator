@@ -150,6 +150,32 @@ export function fireBrowserNotifications(additions) {
   }
 }
 
+// mp-cw1: Given a ref holding the seen-ID Set (or null if not yet seeded) and
+// a new full-list announcement snapshot, returns the additions that should
+// fire a notification and updates the ref's Set in place.
+//
+// The FIRST snapshot to encounter an unseeded (null) ref is treated as the
+// SEED: every ID is recorded and NO additions are returned. This closes the
+// race where an SSE `announcement` snapshot arrives before the initial
+// fetchAnnouncements() seed resolves (or after it fails) — without it, every
+// already-active announcement in that first snapshot would be misread as new
+// and spam the user on page load. Dismiss/clear snapshots (shrinking lists)
+// never produce additions because their remaining IDs are all already seen.
+export function diffAnnouncementSnapshot(seenRef, list) {
+  const arr = Array.isArray(list) ? list : [];
+  if (!seenRef.current) {
+    seenRef.current = new Set();
+    arr.forEach(a => { if (a && a.id) seenRef.current.add(a.id); });
+    return []; // first snapshot is the seed — fire nothing
+  }
+  const seen = seenRef.current;
+  const additions = arr.filter(a => a && a.id && !seen.has(a.id));
+  // Mark ALL current IDs as seen (additions + existing) so a later snapshot
+  // that still contains the same IDs won't re-fire.
+  arr.forEach(a => { if (a && a.id) seen.add(a.id); });
+  return additions;
+}
+
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
@@ -353,11 +379,10 @@ function App() {
         const active = filterActiveAnnouncements(list || []);
         setAnnouncements(active);
         // Seed the seen-IDs set so a page reload does NOT re-fire
-        // notifications for already-active announcements.
-        if (!seenAnnouncementIds.current) {
-          seenAnnouncementIds.current = new Set();
-        }
-        (list || []).forEach(a => { if (a && a.id) seenAnnouncementIds.current.add(a.id); });
+        // notifications for already-active announcements. Routed through the
+        // same helper as the SSE path: if this fetch wins the race it seeds;
+        // if an SSE snapshot already seeded, these IDs are simply re-marked.
+        diffAnnouncementSnapshot(seenAnnouncementIds, list || []);
       })
       .catch(err => {
         console.error("Failed to fetch initial announcements:", err);
@@ -515,18 +540,11 @@ function App() {
             const list = Array.isArray(event.data) ? event.data : [];
             setAnnouncements(filterActiveAnnouncements(list));
 
-            // mp-cw1: diff against seen IDs to fire browser notifications
-            // ONLY for genuinely new announcements. Dismiss/clear snapshots
-            // (where the list shrinks) must never re-fire for removed IDs.
-            if (!seenAnnouncementIds.current) {
-              seenAnnouncementIds.current = new Set();
-            }
-            const seen = seenAnnouncementIds.current;
-            const additions = list.filter(a => a && a.id && !seen.has(a.id));
-            // Mark ALL current IDs as seen (additions + existing), so a
-            // later snapshot that still contains the same IDs won't re-fire.
-            list.forEach(a => { if (a && a.id) seen.add(a.id); });
-
+            // mp-cw1: diff against seen IDs to fire browser notifications ONLY
+            // for genuinely new announcements. diffAnnouncementSnapshot handles
+            // the seeding race (first snapshot seeds + fires nothing) and the
+            // dismiss/clear case (shrinking lists produce no additions).
+            const additions = diffAnnouncementSnapshot(seenAnnouncementIds, list);
             if (additions.length > 0) {
               fireBrowserNotifications(additions);
             }

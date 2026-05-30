@@ -101,6 +101,34 @@ func TestMatchLineup_LockMatch1LeavesMatch2Editable(t *testing.T) {
 		"match 2 edit must have persisted")
 }
 
+// TestMatchLineup_KeyNoHyphenCollision guards the Copilot-found bug
+// (PR #197): joining teamID and matchID with "-" was ambiguous because
+// both routinely contain hyphens (pool match IDs are "PoolA-0"). The
+// pairs ("a-b","c") and ("a","b-c") both produced "m:a-b-c" and one
+// lineup silently overwrote the other. With the NUL-byte delimiter they
+// must remain distinct entries.
+func TestMatchLineup_KeyNoHyphenCollision(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-match-collision"
+	l1 := fiveStarterForMatch("a-b", "c")
+	l1.Positions[domain.PosSenpo] = "team-ab-senpo"
+	l2 := fiveStarterForMatch("a", "b-c")
+	l2.Positions[domain.PosSenpo] = "team-a-senpo"
+
+	require.NoError(t, store.SetTeamLineup(compID, l1, 5))
+	require.NoError(t, store.SetTeamLineup(compID, l2, 5))
+
+	got, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	require.Len(t, got, 2, "(a-b,c) and (a,b-c) must be distinct keys, not a collision")
+	assert.Equal(t, "team-ab-senpo",
+		got[teamLineupMatchKey("a-b", "c")].Positions[domain.PosSenpo])
+	assert.Equal(t, "team-a-senpo",
+		got[teamLineupMatchKey("a", "b-c")].Positions[domain.PosSenpo])
+}
+
 // TestMatchLineup_RoundLockSkipsMatchScoped: the legacy round-0 sweep
 // must NOT freeze match-scoped lineups (their Round defaults to 0).
 // Otherwise a live round-0 pool match would re-introduce the bug.

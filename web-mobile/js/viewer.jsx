@@ -1174,16 +1174,19 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     if (pools) {
         pools.forEach((p) => {
             const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
-            matches.forEach((m) => out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName }));
+            matches.forEach((m) => {
+                const isDH = isPoolDaihyosenID(m.id || "");
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+            });
         });
     }
     if (bracket && bracket.rounds) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length) }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), compKind: c.kind, teamSize: c.teamSize }));
         });
     }
     return out;
-  }, [pools, poolMatches, bracket]);
+  }, [pools, poolMatches, bracket, c.kind, c.teamSize]);
 
   const liveMatches = allMatches.filter((m) => m.status === "running" && hasBothSides(m));
   const upcomingMatches = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m)).slice(0, 3);
@@ -1313,7 +1316,10 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     highlightedMatchId={currentMatch?.id}
                     autoScrollMatchId={bracketScrollTarget}
                     scrollContainerRef={bracketScrollRef}
-                    onMatchClick={(m) => setSelectedMatch(m)}
+                    onMatchClick={(m, ri) => {
+                      const label = window.roundLabel(ri, derivedBracket.rounds.length);
+                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, compKind: c.kind, teamSize: c.teamSize });
+                    }}
                   />
                 </div>
               </div>
@@ -1842,7 +1848,16 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             {matches.length > 0 && isTeam && (
               <div style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {matches.map(m => <PoolMatchRow key={m.id} m={m} onClick={() => onMatchClick && onMatchClick(m)} />)}
+                  {matches.map(m => {
+                    // Thread the same metadata compMatches/allMatches supply so the
+                    // MatchViewerModal renders team sub-bouts (compKind/teamSize) and a
+                    // correct header (phase/poolName), not an empty round label. Pool
+                    // daihyosen bouts ("…-DH-…") are scored individually — null the team
+                    // flags so they route to the individual UI (mirrors compMatches).
+                    const isDH = isPoolDaihyosenID(m.id || "");
+                    const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
+                    return <PoolMatchRow key={m.id} m={m} onClick={() => onMatchClick && onMatchClick(enriched)} />;
+                  })}
                 </div>
               </div>
             )}
@@ -1981,7 +1996,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

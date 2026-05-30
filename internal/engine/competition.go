@@ -3,8 +3,18 @@ package engine
 import (
 	"fmt"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// saveResolvedPlayoffRoster persists the roster resolved for a source-linked
+// playoffs competition. It's a package var (not a direct
+// store.SaveParticipants call) so tests can inject a deterministic failure to
+// exercise the rollback-to-setup path in runDrawPipeline below. Mirrors the
+// flipHasParticipantIDs seam in handlers_competition.go.
+var saveResolvedPlayoffRoster = func(store *state.Store, id string, players []domain.Player) error {
+	return store.SaveParticipants(id, players)
+}
 
 // courtsEqual returns true when two court-label slices are
 // element-wise equal (used by StartCompetition's mid-pipeline
@@ -718,7 +728,31 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// empty/absent file before generation) does not flag our own write as a
 	// concurrent change.
 	if rosterPopulated {
-		if err := e.store.SaveParticipants(id, players); err != nil {
+		if err := saveResolvedPlayoffRoster(e.store, id, players); err != nil {
+			// The atomic transform above already committed Status=draw-ready,
+			// but the resolved roster did NOT land on disk. Without a rollback
+			// the comp is stuck in a broken draw-ready state: a retry would
+			// take StartCompetition's draw-ready fast path
+			// (transitionDrawToRunning) and start the playoffs with an empty
+			// participants.csv. Roll Status back to setup (best-effort) so the
+			// next GenerateDraw/StartCompetition re-runs the full pipeline —
+			// re-resolving the source winners and regenerating the bracket
+			// (which overwrites the orphaned bracket.json). Only source-linked
+			// playoffs comps reach this branch, and their participants.csv
+			// started empty, so reverting to setup loses no operator data.
+			if _, rbErr := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+				if current == nil {
+					return nil, nil
+				}
+				// Only revert if WE are the writer that committed draw-ready;
+				// if a concurrent actor already moved it on, leave it alone.
+				if current.Status == state.CompStatusDrawReady {
+					current.Status = state.CompStatusSetup
+				}
+				return current, nil
+			}); rbErr != nil {
+				fmt.Printf("Warning: failed to roll back Status to setup after SaveParticipants failure for %s: %v\n", id, rbErr)
+			}
 			return err
 		}
 		// Deferred HasParticipantIDs flip — runs ONLY after the

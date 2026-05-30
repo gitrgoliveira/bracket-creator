@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -495,4 +496,52 @@ func TestStartCompetition_PlayoffsFromSource_ExistingRosterNotClobbered(t *testi
 	require.NoError(t, err)
 	require.NotNil(t, bracket)
 	assert.NotEmpty(t, bracket.Rounds, "bracket built from the manual roster")
+}
+
+// TestStartCompetition_PlayoffsFromSource_SaveFailureRollsBackToSetup pins the
+// rollback guard: if the trailing roster save fails AFTER the atomic Status
+// commit, Status must revert to setup rather than getting stuck at draw-ready.
+// Otherwise a retry would take StartCompetition's draw-ready fast path
+// (transitionDrawToRunning) and start the playoffs with an empty
+// participants.csv. The failure is injected via the saveResolvedPlayoffRoster
+// seam so it triggers ONLY at the trailing save (the same participants.csv
+// path is read empty at the start of the pipeline, so a filesystem fault would
+// break the initial load instead).
+func TestStartCompetition_PlayoffsFromSource_SaveFailureRollsBackToSetup(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "src-rb"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Src RB", Format: state.CompFormatMixed, Status: state.CompStatusComplete,
+	}))
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{{Name: "Alice"}, {Name: "Bob"}}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	playoffID := "src-rb-playoffs"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: playoffID, Name: "Src RB - Playoffs",
+		Format: state.CompFormatPlayoffs, SourceCompID: srcID,
+	}))
+
+	// Inject a deterministic failure at the trailing roster save.
+	orig := saveResolvedPlayoffRoster
+	saveResolvedPlayoffRoster = func(*state.Store, string, []domain.Player) error {
+		return errors.New("injected disk failure")
+	}
+	defer func() { saveResolvedPlayoffRoster = orig }()
+
+	err := eng.StartCompetition(playoffID)
+	require.Error(t, err, "the injected roster-save failure must surface")
+	assert.Contains(t, err.Error(), "injected disk failure")
+
+	comp, lerr := store.LoadCompetition(playoffID)
+	require.NoError(t, lerr)
+	assert.Equal(t, state.CompStatusSetup, comp.Status,
+		"Status must roll back to setup after a roster-save failure, not get stuck at draw-ready")
 }

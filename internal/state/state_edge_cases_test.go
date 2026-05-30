@@ -229,39 +229,6 @@ func TestLoadPoolMatches_MalformedCSV(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestLoadReservedSlots_MalformedJSON covers the loadCached error path in
-// LoadReservedSlots by writing invalid JSON.
-func TestLoadReservedSlots_MalformedJSON(t *testing.T) {
-	dir := t.TempDir()
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-	compID := "slots-bad"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "competitions", compID, "reserved-slots.json"),
-		[]byte("{not valid json"), 0o600))
-
-	_, err = store.LoadReservedSlots(compID)
-	assert.Error(t, err)
-}
-
-// TestSaveReservedSlots_NilSlice verifies the nil-guard inside
-// saveReservedSlotsLocked: saving a nil slice persists "null" JSON but the
-// cache is populated with an empty (non-nil) slice.
-func TestSaveReservedSlots_NilSlice(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-	compID := "slots-nil"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	require.NoError(t, store.SaveReservedSlots(compID, nil))
-
-	loaded, err := store.LoadReservedSlots(compID)
-	require.NoError(t, err)
-	assert.NotNil(t, loaded)
-}
-
 // TestUpdateTournamentChanged_NoChange verifies the bytes.Equal no-change path:
 // calling UpdateTournamentChanged with data identical to what's on disk must
 // return (false, nil) without writing.
@@ -439,61 +406,4 @@ func TestDeleteTeamLineup_InvalidCompID(t *testing.T) {
 	require.NoError(t, err)
 	err = store.DeleteTeamLineup("", "team-x", 0)
 	assert.Error(t, err)
-}
-
-// TestAddReservedSlot_DuplicateSlot verifies the idempotent guard in
-// AddReservedSlot: adding the same (sourceCompID, sourceRank) pair twice must
-// return the existing slot rather than creating a duplicate.
-func TestAddReservedSlot_DuplicateSlot(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-
-	compID := "dup-slot-comp"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	first, err := store.AddReservedSlot(compID, "src-comp", 1, false)
-	require.NoError(t, err)
-	require.NotNil(t, first)
-
-	second, err := store.AddReservedSlot(compID, "src-comp", 1, false)
-	require.NoError(t, err)
-	require.NotNil(t, second)
-	assert.Equal(t, first.ID, second.ID, "duplicate AddReservedSlot must return the existing slot")
-
-	slots, err := store.LoadReservedSlots(compID)
-	require.NoError(t, err)
-	assert.Len(t, slots, 1, "exactly one slot must exist after two identical AddReservedSlot calls")
-}
-
-// TestRemoveReservedSlot_NotFound verifies that RemoveReservedSlot returns an
-// error when the slot ID does not exist.
-func TestRemoveReservedSlot_NotFound(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-
-	compID := "remove-notfound"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	err = store.RemoveReservedSlot(compID, "nonexistent-slot-id", false)
-	assert.Error(t, err)
-}
-
-// TestRemoveReservedSlot_HappyPath verifies that a slot added via
-// AddReservedSlot can be removed, and neither the slot nor the placeholder
-// participant remains afterward.
-func TestRemoveReservedSlot_HappyPath(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-
-	compID := "remove-ok"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	slot, err := store.AddReservedSlot(compID, "src", 2, false)
-	require.NoError(t, err)
-
-	require.NoError(t, store.RemoveReservedSlot(compID, slot.ID, false))
-
-	slots, err := store.LoadReservedSlots(compID)
-	require.NoError(t, err)
-	assert.Empty(t, slots, "slot must be gone after RemoveReservedSlot")
 }

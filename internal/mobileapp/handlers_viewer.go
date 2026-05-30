@@ -128,14 +128,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 		// Run all independent I/O concurrently.
 		var (
-			pools         any
-			poolMatches   []state.MatchResult
-			standings     any
-			bracket       *state.Bracket
-			schedule      any
-			reservedSlots []state.ReservedSlot
+			pools       any
+			poolMatches []state.MatchResult
+			standings   any
+			bracket     *state.Bracket
+			schedule    any
 
-			playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr, reservedSlotsErr error
+			playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr error
 		)
 
 		var wg sync.WaitGroup
@@ -170,9 +169,6 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		safeGo(&wg, &panicRef, func() {
 			schedule, scheduleErr = store.LoadSchedule(id)
 		})
-		safeGo(&wg, &panicRef, func() {
-			reservedSlots, reservedSlotsErr = store.LoadReservedSlots(id)
-		})
 		wg.Wait()
 
 		if p := panicRef.Load(); p != nil {
@@ -180,7 +176,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			return
 		}
 
-		for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr, reservedSlotsErr} {
+		for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr} {
 			if e != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": e.Error()})
 				return
@@ -193,13 +189,12 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		annotateBracketQueuePositions(bracket)
 
 		c.JSON(http.StatusOK, gin.H{
-			"config":        comp,
-			"pools":         pools,
-			"poolMatches":   poolMatches,
-			"standings":     standings,
-			"bracket":       bracket,
-			"schedule":      schedule,
-			"reservedSlots": reservedSlots,
+			"config":      comp,
+			"pools":       pools,
+			"poolMatches": poolMatches,
+			"standings":   standings,
+			"bracket":     bracket,
+			"schedule":    schedule,
 		})
 	})
 

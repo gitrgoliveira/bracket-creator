@@ -11,7 +11,7 @@ type Player struct {
 	DisplayName string   `json:"displayName"`
 	Dojo        string   `json:"dojo"`
 	Metadata    []string `json:"metadata,omitempty"`
-	Tag         string   `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer", "reserved"
+	Tag         string   `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer"
 	CheckedIn   bool     `json:"checkedIn"`
 
 	PoolPosition int64  `json:"-"`

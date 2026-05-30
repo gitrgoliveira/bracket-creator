@@ -3,8 +3,18 @@ package engine
 import (
 	"fmt"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// saveResolvedPlayoffRoster persists the roster resolved for a source-linked
+// playoffs competition. It's a package var (not a direct
+// store.SaveParticipants call) so tests can inject a deterministic failure to
+// exercise the rollback-to-setup path in runDrawPipeline below. Mirrors the
+// flipHasParticipantIDs seam in handlers_competition.go.
+var saveResolvedPlayoffRoster = func(store *state.Store, id string, players []domain.Player) error {
+	return store.SaveParticipants(id, players)
+}
 
 // courtsEqual returns true when two court-label slices are
 // element-wise equal (used by StartCompetition's mid-pipeline
@@ -384,8 +394,8 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 //     OUTSIDE the comp-config lock. Two concurrent GenerateDraw calls
 //     could overwrite each other's pools.csv before the atomic Status
 //     commit serializes them. Left as a follow-up.
-//   - SaveParticipants (reserved-slot path) also has its own lock
-//     acquisition. A failure mid-pipeline leaves partial state on disk.
+//   - SaveParticipants (source-linked playoffs roster path) also has its own
+//     lock acquisition. A failure mid-pipeline leaves partial state on disk.
 func (e *Engine) runDrawPipeline(id string) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -455,29 +465,34 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if err != nil {
 		return err
 	}
+	// Playoffs competitions created from a mixed source (POST /playoffs)
+	// start with an empty roster on disk. Resolve the source's final pool
+	// winners into the roster now, BEFORE the empty-roster check. The
+	// resolved roster is persisted by the trailing save below (after the
+	// atomic Status commit) — keeping the write out of this pre-generation
+	// phase so the transform's participants.csv mtime-drift check does not
+	// false-trip on our own write.
+	//
+	// Guard tightly: only a PLAYOFFS comp whose roster is still EMPTY should
+	// auto-resolve. A non-playoffs comp must never source-resolve, and an
+	// already-populated roster (operator manually added participants, or a
+	// SourceCompID set by accident) must NOT be clobbered — fall through to
+	// generation with the existing players instead.
+	rosterPopulated := false
+	if comp.Format == state.CompFormatPlayoffs && comp.SourceCompID != "" && len(players) == 0 {
+		resolved, rerr := e.resolvePoolWinners(comp)
+		if rerr != nil {
+			return rerr
+		}
+		players = resolved
+		rosterPopulated = true
+	}
+
 	if len(players) == 0 {
 		return validationErrorf("no participants found for competition %s", id)
 	}
 
 	seeds, err := e.store.LoadSeeds(id)
-	if err != nil {
-		return err
-	}
-
-	// Resolve any cross-competition reserved slots before generation.
-	// The returned `mutated` flag tells us whether the function actually
-	// changed the players slice (in-place field update OR placeholder
-	// removal). We gate the trailing SaveParticipants on this flag: if
-	// nothing was mutated, the players slice still matches disk
-	// byte-for-byte, so re-saving it is wasted I/O AND a participant-
-	// race risk (a concurrent admin participants upload between our
-	// outer Load and the trailing save would be clobbered by our stale
-	// snapshot). Deriving the flag from the function's actual mutation
-	// (rather than an outer LoadReservedSlots call) avoids a TOCTOU
-	// window where the outer check sees no slots but resolveReservedSlots
-	// then sees them under a race.
-	var resolvedSlots bool
-	players, resolvedSlots, err = e.resolveReservedSlots(id, players)
 	if err != nil {
 		return err
 	}
@@ -498,12 +513,6 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// per-comp lock acquisitions, so they run OUTSIDE the
 	// UpdateCompetitionChanged transform below (re-entering the lock would
 	// deadlock).
-	//
-	// earlyParticipantsSaved tracks whether we persisted the resolved roster
-	// before GenerateSwissRound (which reloads participants from disk). Set to
-	// true when a Swiss start saves early so the trailing resolvedSlots block
-	// skips the redundant write (the HasParticipantIDs flip still runs).
-	earlyParticipantsSaved := false
 	switch comp.Format {
 	case state.CompFormatMixed, state.CompFormatLeague:
 		if err := e.generatePools(comp, players, seeds); err != nil {
@@ -532,30 +541,6 @@ func (e *Engine) runDrawPipeline(id string) error {
 					return validationErrorf("competition %s already has scored Swiss matches on disk (match %s status=%s); cannot start again", id, m.ID, m.Status)
 				}
 			}
-		}
-		// GenerateSwissRound reloads participants from disk. If
-		// resolveReservedSlots mutated the in-memory roster (e.g. replaced
-		// placeholder reserved-slot entries), save it now so round-1 pairings
-		// use the resolved names rather than the placeholder originals.
-		if resolvedSlots {
-			// Pre-check: verify no concurrent admin write landed between our
-			// initial load and this early save. Without this guard, a write that
-			// arrives in that window would be silently overwritten, and the
-			// subsequent mtime re-snapshot would hide it from the later drift
-			// check inside UpdateCompetitionChanged. The mtime check is
-			// lock-free (same caveat as the transform's check at line ~505), so
-			// a very tight race can still slip through — but this closes the
-			// large window that was previously unguarded.
-			if e.store.FileMtime(id, "participants.csv") != loadedParticipantsMtime {
-				return validationErrorf("competition %s participants changed during start; retry", id)
-			}
-			if err := e.store.SaveParticipants(id, players); err != nil {
-				return err
-			}
-			earlyParticipantsSaved = true
-			// Re-snapshot after our own write so UpdateCompetitionChanged's
-			// drift check doesn't flag this deliberate save as concurrent.
-			loadedParticipantsMtime = e.store.FileMtime(id, "participants.csv")
 		}
 		r1, err := e.GenerateSwissRound(id, 1)
 		if err != nil {
@@ -654,7 +639,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// read). See seeds.go for the locking-strategy rationale.
 		//
 		// Remaining caveat: a write that lands AFTER this check but
-		// BEFORE the trailing SaveParticipants (resolvedSlots path)
+		// BEFORE the trailing SaveParticipants (rosterPopulated path)
 		// still races with our pipeline. That window remains because
 		// SaveParticipants takes the same per-comp lock that the
 		// transform holds, so it can't be folded inside. The mtime
@@ -707,7 +692,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// (current.HasParticipantIDs = comp.HasParticipantIDs), which
 		// reverted any concurrent PUT that flipped the flag to true
 		// (e.g. AdminParticipants persisting a UUID roster in parallel
-		// with this start). Combined with the no-reserved-slot branch
+		// with this start). Combined with the no-roster-rewrite path
 		// NOT rewriting participants.csv, the result was a UUID file
 		// on disk paired with a HasParticipantIDs=false metadata flag
 		// — and the list-view's HasIDs hint would then misparse the
@@ -718,10 +703,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// PUT is rejected before we reach this point. Defense in depth:
 		// preserve the fresh `current.HasParticipantIDs` (loaded inside
 		// the transform) by NOT overwriting it from the snapshot. The
-		// resolvedSlots branch below still upgrades to true when our
+		// rosterPopulated branch below still upgrades to true when our
 		// pipeline rewrites the roster with UUIDs — that path is the
 		// only legitimate reason to flip the flag here.
-		// HasParticipantIDs flip for the resolvedSlots path is DEFERRED
+		// HasParticipantIDs flip for the rosterPopulated path is DEFERRED
 		// to AFTER SaveParticipants below — pre-fix, this transform
 		// flipped the flag to true, but if the trailing SaveParticipants
 		// then failed (disk full, EISDIR, etc.), the config carried
@@ -735,17 +720,40 @@ func (e *Engine) runDrawPipeline(id string) error {
 		return err
 	}
 
-	// See `resolvedSlots` flag from resolveReservedSlots above. Skip the
-	// save when the pipeline didn't mutate the roster (no reserved-slot
-	// resolution happened); otherwise persist the resolved IDs/names.
-	// earlyParticipantsSaved is set by the Swiss case above when it already
-	// saved to disk — don't write twice, but still run the HasParticipantIDs
-	// flip below.
-	if resolvedSlots {
-		if !earlyParticipantsSaved {
-			if err := e.store.SaveParticipants(id, players); err != nil {
-				return err
+	// Persist the resolved roster for a source-linked playoffs competition.
+	// participants.csv was empty on disk for these comps (POST /playoffs
+	// stores only the SourceCompID link); resolvePoolWinners built the roster
+	// in-memory above. We save AFTER the atomic Status commit so the
+	// transform's participants.csv mtime-drift check (which snapshotted the
+	// empty/absent file before generation) does not flag our own write as a
+	// concurrent change.
+	if rosterPopulated {
+		if err := saveResolvedPlayoffRoster(e.store, id, players); err != nil {
+			// The atomic transform above already committed Status=draw-ready,
+			// but the resolved roster did NOT land on disk. Without a rollback
+			// the comp is stuck in a broken draw-ready state: a retry would
+			// take StartCompetition's draw-ready fast path
+			// (transitionDrawToRunning) and start the playoffs with an empty
+			// participants.csv. Roll Status back to setup (best-effort) so the
+			// next GenerateDraw/StartCompetition re-runs the full pipeline —
+			// re-resolving the source winners and regenerating the bracket
+			// (which overwrites the orphaned bracket.json). Only source-linked
+			// playoffs comps reach this branch, and their participants.csv
+			// started empty, so reverting to setup loses no operator data.
+			if _, rbErr := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+				if current == nil {
+					return nil, nil
+				}
+				// Only revert if WE are the writer that committed draw-ready;
+				// if a concurrent actor already moved it on, leave it alone.
+				if current.Status == state.CompStatusDrawReady {
+					current.Status = state.CompStatusSetup
+				}
+				return current, nil
+			}); rbErr != nil {
+				fmt.Printf("Warning: failed to roll back Status to setup after SaveParticipants failure for %s: %v\n", id, rbErr)
 			}
+			return err
 		}
 		// Deferred HasParticipantIDs flip — runs ONLY after the
 		// participants file lands successfully with UUID-prefixed rows.
@@ -762,7 +770,11 @@ func (e *Engine) runDrawPipeline(id string) error {
 			// is safe because EVERY reader site uses the conditional
 			// hint pattern (only pass &true when comp.HasParticipantIDs;
 			// otherwise nil → LoadParticipantsOpt auto-detects from the
-			// first line's UUID prefix). Sites: handlers_viewer.go list
+			// first line's UUID prefix). Auto-detect is GUARANTEED to
+			// succeed here because resolvePoolWinners builds the roster
+			// with empty IDs, so marshalParticipantsCSV mints UUIDs into
+			// column 0 — even when the source competition carried non-UUID
+			// (client-slug) IDs. Sites: handlers_viewer.go list
 			// (line ~45) and detail (line ~101), and StartCompetition
 			// itself (line ~183). Aborting the start here after a
 			// successful save would commit Status (transform above

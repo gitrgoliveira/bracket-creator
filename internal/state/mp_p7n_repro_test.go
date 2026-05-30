@@ -94,10 +94,9 @@ func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 	// 0 regardless of UUID shape. Together with the no-regeneration
 	// save path, that means a client-supplied non-UUID id round-trips
 	// intact — important for joining with other persisted state that
-	// references the player by id (CompetitorStatus.PlayerID,
-	// ReservedSlot.ParticipantID, team lineup PlayerIDs). Copilot
-	// PR #185 round-3 finding: regenerating ids would silently orphan
-	// those references.
+	// references the player by id (CompetitorStatus.PlayerID, team lineup
+	// PlayerIDs). Copilot PR #185 round-3 finding: regenerating ids would
+	// silently orphan those references.
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	require.NoError(t, err)
@@ -124,7 +123,7 @@ func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 	assert.Equal(t, "Team Alpha", loaded[0].Dojo)
 	assert.Empty(t, loaded[0].Metadata)
 	assert.Equal(t, "asddasd-p1", loaded[0].ID,
-		"original id must survive the round-trip — regenerating it would orphan competitor_status / reserved-slot references")
+		"original id must survive the round-trip — regenerating it would orphan competitor_status references")
 }
 
 // mp-p7n / Copilot PR #185 round-4 + round-9: closes the cache-

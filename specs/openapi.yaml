@@ -227,8 +227,8 @@ paths:
           (either via POST /complete or via the auto-complete check after the
           last pool match scored). `data: { competitionId }`.
         - `tournament_updated` — tournament-level config change (a competition
-          was created/updated/deleted, reserved slots changed, participants
-          updated, etc.). `data: null` — clients should refresh full state.
+          was created/updated/deleted, participants updated, etc.).
+          `data: null` — clients should refresh full state.
         - `schedule_updated` — a competition's schedule was saved.
         - `password_reset` — the admin password was changed. Emitted
           from three sources (file mode only; never emitted in locked mode):
@@ -889,14 +889,17 @@ paths:
       tags: [competitions]
       summary: Create linked playoff competition
       description: |
-        Creates a new `playoffs`-format competition linked to this pools competition.
-        The server automatically:
+        Creates a new `playoffs`-format competition linked to this mixed
+        (Pools + Knockout) competition. The server:
         - Derives a name (`<source name> - Playoffs`) and ID.
-        - Calculates the expected number of promoted players (`numPools × poolWinners`) and
-          creates the corresponding reserved slots, each backed by a placeholder participant.
+        - Records a `sourceCompID` link back to this competition.
 
-        Use this instead of manually creating a competition and wiring reserved slots.
-        Returns 400 if the source competition is not in `pools` format.
+        The playoff starts with an EMPTY roster. Its participants are resolved
+        from the source competition's pool winners when the playoff is started
+        (`POST /start`) — the source pools must be final by then. No placeholder
+        participants are created.
+
+        Returns 400 if the source competition is not in `mixed` format.
       security:
         - TournamentPassword: []
       parameters:
@@ -948,74 +951,6 @@ paths:
         '204':
           description: Overrides reset.
 
-  /api/competitions/{id}/reserved-slots:
-    parameters:
-      - $ref: '#/components/parameters/CompetitionId'
-    get:
-      tags: [competitions]
-      summary: Get reserved slots
-      security:
-        - TournamentPassword: []
-      responses:
-        '200':
-          description: List of reserved slots.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ReservedSlot'
-    post:
-      tags: [competitions]
-      summary: Add reserved slot
-      description: >
-        Creates a reserved slot and a matching placeholder participant. If a slot for the same
-        `sourceCompID`+`sourceRank` pair already exists it is returned as-is (idempotent).
-      security:
-        - TournamentPassword: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sourceCompID, sourceRank]
-              properties:
-                sourceCompID:
-                  type: string
-                  maxLength: 64
-                  description: ID of the competition to pull the player from.
-                sourceRank:
-                  type: integer
-                  description: Rank in the source competition (1-based).
-      responses:
-        '201':
-          description: Reserved slot created.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReservedSlot'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /api/competitions/{id}/reserved-slots/{slotID}:
-    parameters:
-      - $ref: '#/components/parameters/CompetitionId'
-      - in: path
-        name: slotID
-        required: true
-        schema:
-          type: string
-    delete:
-      tags: [competitions]
-      summary: Remove reserved slot
-      security:
-        - TournamentPassword: []
-      responses:
-        '204':
-          description: Reserved slot removed.
 
   /api/competitions/{id}/schedule:
     put:
@@ -2077,6 +2012,14 @@ components:
           type: string
         hasParticipantIDs:
           type: boolean
+        sourceCompID:
+          type: string
+          maxLength: 64
+          description: >
+            For a `playoffs` competition created via POST /playoffs, the ID of
+            the mixed source competition whose pool winners seed this playoff.
+            The roster is resolved from the source at start time. Empty for all
+            other competitions.
         teamMatchType:
           type: string
           description: Team-match scoring model — `fixed` (positions) or `kachinuki` (winner-stays).
@@ -2455,22 +2398,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ScheduleEntry'
-        reservedSlots:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReservedSlot'
-
-    ReservedSlot:
-      type: object
-      properties:
-        id:
-          type: string
-        participantID:
-          type: string
-        sourceCompID:
-          type: string
-        sourceRank:
-          type: integer
 
     EnchoMetadata:
       type: object

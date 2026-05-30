@@ -332,6 +332,14 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 	if existing.LockedAt != nil {
 		return ErrLineupLocked
 	}
+	// Same TOCTOU guard as SetTeamLineup: refuse the delete if the round
+	// has gone live before the lock stamp landed, so DELETE can't reopen
+	// a live/completed round's lineup.
+	if live, err := s.roundHasLiveOrCompletedMatchLocked(compID, round); err != nil {
+		return err
+	} else if live {
+		return ErrLineupLocked
+	}
 	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
@@ -359,6 +367,15 @@ func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
 		return nil
 	}
 	if existing.LockedAt != nil {
+		return ErrLineupLocked
+	}
+	// Same TOCTOU guard as SetTeamLineup: a concurrent score-save could
+	// have transitioned this match to running/completed before the
+	// follow-up lock stamp landed. Re-check the match status inside the
+	// lock so DELETE can't reopen a live/completed match's lineup.
+	if live, err := s.matchIsLiveOrCompletedLocked(compID, matchID); err != nil {
+		return err
+	} else if live {
 		return ErrLineupLocked
 	}
 	delete(current, key)

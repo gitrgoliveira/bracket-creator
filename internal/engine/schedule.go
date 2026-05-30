@@ -226,6 +226,14 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	tournament = &tournCopy
 	state.ApplyTournamentDefaults(tournament)
 	state.ApplyCompetitionDefaults(comp)
+	// Team-size default — same guard as competition.go (StartCompetition) and
+	// swiss.go: a team competition with an omitted TeamSize uses the FIK
+	// 5-person default. Without this, perMatchElapsedMinutes would see
+	// TeamSize==0 and fall through to the individual-match formula,
+	// under-estimating a team competition's duration.
+	if comp.Kind == "team" && comp.TeamSize == 0 {
+		comp.TeamSize = 5
+	}
 
 	// Common ceremony parameters (same as the slot assigners).
 	// tournament is always non-nil here (copies from caller or zero-value tournCopy).

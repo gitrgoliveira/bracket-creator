@@ -390,6 +390,34 @@ func TestEstimateForCounts_TeamComp(t *testing.T) {
 		est.TotalDurationMinutes, indiv.TotalDurationMinutes)
 }
 
+// TestEstimateForCounts_TeamDefaultsTeamSize verifies that a team competition
+// with an omitted TeamSize (0) is estimated using the FIK 5-person default —
+// matching competition.go (StartCompetition) and swiss.go — rather than falling
+// through to the individual-match formula (Copilot review #3328463582).
+func TestEstimateForCounts_TeamDefaultsTeamSize(t *testing.T) {
+	base := func(teamSize int) *state.Competition {
+		return &state.Competition{
+			Kind:                 "team",
+			TeamSize:             teamSize,
+			Courts:               []string{"A"},
+			PoolMatchDuration:    2,
+			PlayoffMatchDuration: 2,
+			StartTime:            "09:00",
+		}
+	}
+	tourn := func() *state.Tournament { return newTournament(1.5, 10, "", "", "") }
+
+	omitted := EstimateForCounts(2, 0, base(0), tourn())   // TeamSize unset → should default to 5
+	explicit5 := EstimateForCounts(2, 0, base(5), tourn()) // explicit 5
+	indiv := EstimateForCounts(2, 0, newIndivComp([]string{"A"}, 2, 2, "09:00"), tourn())
+
+	assert.Equal(t, explicit5.TotalDurationMinutes, omitted.TotalDurationMinutes,
+		"team comp with omitted TeamSize must estimate as the 5-person default")
+	assert.Greater(t, omitted.TotalDurationMinutes, indiv.TotalDurationMinutes,
+		"defaulted team comp (%d) must exceed the individual formula (%d)",
+		omitted.TotalDurationMinutes, indiv.TotalDurationMinutes)
+}
+
 // TestEstimateForCounts_EvenDistribution verifies even distribution across courts.
 // With SlowestCourtBufferPct=0 the default (10%) is applied: 2 matches *3min=6min
 // per court * 1.1 = 6.6 → 7.

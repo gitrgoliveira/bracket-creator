@@ -218,3 +218,28 @@ func TestDeleteTeamLineupForMatch(t *testing.T) {
 	require.ErrorIs(t, store.DeleteTeamLineupForMatch(compID, "team-alpha", "P2"), ErrLineupLocked,
 		"locked match lineup must refuse delete")
 }
+
+// TestDeleteTeamLineupForMatch_RefusesWhenMatchLive guards the
+// delete-side TOCTOU window (PR #197 review): even with no LockedAt
+// stamp yet, a running/completed match must block DELETE so it cannot
+// reopen a live encounter's lineup — mirroring SetTeamLineup's guard.
+func TestDeleteTeamLineupForMatch_RefusesWhenMatchLive(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-match-delete-live"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusScheduled},
+	}))
+	// Set the lineup while the match is still scheduled.
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5))
+
+	// The match goes live WITHOUT the lock stamp landing (the TOCTOU
+	// window). DELETE must still be refused.
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+	}))
+	require.ErrorIs(t, store.DeleteTeamLineupForMatch(compID, "team-alpha", "PoolA-0"), ErrLineupLocked,
+		"DELETE must be refused once the match is live, even before the lock stamp lands")
+}

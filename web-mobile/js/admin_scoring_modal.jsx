@@ -1161,6 +1161,26 @@ function renderPositionLabel(label) {
   return label;
 }
 
+// mp-bkg regression guard: exported so vitest can test the fallback
+// logic without mounting the component. Calls the two API functions
+// supplied as arguments (injected for testing), resolves to the
+// per-match lineup when it exists, falling back to the round lineup
+// when the match-specific GET returns null (404).
+// Both API calls are soft-fail: a network error on the per-match
+// endpoint falls through to the round endpoint; a network error on
+// the round endpoint is swallowed (same behaviour as the pre-mp-bkg
+// round-only path).
+async function resolveMatchLineup(compId, teamId, matchId, round, { fetchMatchLineup, fetchTeamLineup }) {
+  try {
+    const matchLineup = await fetchMatchLineup(compId, teamId, matchId);
+    if (matchLineup !== null) return matchLineup;
+  } catch (_e) { /* network: fall through */ }
+  try {
+    return await fetchTeamLineup(compId, teamId, round);
+  } catch (_e) { /* 404 / network: ignore */ }
+  return null;
+}
+
 function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
   const m = match;
   const isComplete = m.status === "completed";
@@ -1240,11 +1260,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         console.warn("Competition fetch for team modal failed:", e);
       }
     })();
-    // Lineups for both teams. compMatches injects m.round as a string
-    // label ("Round 2", "Quarterfinals", ...) — for bracket matches we
-    // extract the numeric index from "Round N" when possible. Pool
-    // matches don't have a per-round lineup in the current model, so
-    // we fall back to round 0 (matches the first set of bouts).
+    // Lineups for both teams. mp-bkg: prefer per-match lineup (GET
+    // match-lineups/:matchId); fall back to round lineup when no
+    // per-match entry exists (404 → null → round lookup). compMatches
+    // injects m.round as a string label ("Round 2", "Quarterfinals",
+    // ...) — for bracket matches we extract the numeric index from
+    // "Round N" when possible. Pool matches don't have a per-round
+    // lineup in the current model, so we fall back to round 0.
     // TODO(T131): plumb a numeric round through compMatches so this
     // lookup is exact for every phase / label.
     let round = 0;
@@ -1257,14 +1279,14 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
     const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
     if (sideAId) {
-      window.API.fetchTeamLineup(m.compId, sideAId, round).then(l => {
+      resolveMatchLineup(m.compId, sideAId, m.id, round, window.API).then(l => {
         if (!cancelled) setLineupA(l);
-      }).catch(() => { /* 404 / network: ignore */ });
+      });
     }
     if (sideBId) {
-      window.API.fetchTeamLineup(m.compId, sideBId, round).then(l => {
+      resolveMatchLineup(m.compId, sideBId, m.id, round, window.API).then(l => {
         if (!cancelled) setLineupB(l);
-      }).catch(() => { /* 404 / network: ignore */ });
+      });
     }
     return () => { cancelled = true; };
   }, [m.compId, m.id]);
@@ -2038,4 +2060,5 @@ export {
   applyFusenshoToggle,
   getIpponButtons,
   getValidPointKeys,
+  resolveMatchLineup,
 };

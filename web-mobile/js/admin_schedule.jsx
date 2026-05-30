@@ -609,6 +609,381 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
 });
 AdminTWMatch.displayName = "AdminTWMatch";
 
+// ---------- Per-match lineup panel (mp-bkg) ----------
+// Reuses admin_lineup.jsx's exported helpers (positionsForSize, rosterFor,
+// teamIdOf) so there is no duplication of position-label / roster logic.
+const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
+
+// pickCopySource — pure helper that selects the most recent saved lineup
+// among this team's other matches. Exported for unit testing.
+// Sort order: scheduledAt DESC (nulls last), then court ASC, then
+// queue-position (index in the allMatches array) ASC, then matchId DESC.
+function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
+  // savedLineups is a map of matchId → lineup (non-null only when a lineup
+  // has been saved). Candidate = match for this team, not the current match,
+  // with a saved lineup.
+  const candidates = allMatches.filter(m => {
+    if (m.id === currentMatchId) return false;
+    const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
+    const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
+    if (sideAId !== teamId && sideBId !== teamId) return false;
+    return !!savedLineups[m.id];
+  });
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => {
+    // scheduledAt DESC (nulls sort last)
+    const aT = a.scheduledAt || "99:99";
+    const bT = b.scheduledAt || "99:99";
+    if (aT !== bT) return bT.localeCompare(aT);
+    // court ASC
+    const aC = a.court || "";
+    const bC = b.court || "";
+    if (aC !== bC) return aC.localeCompare(bC);
+    // queue/sequence: original index in allMatches (lower = earlier)
+    const aIdx = allMatches.indexOf(a);
+    const bIdx = allMatches.indexOf(b);
+    if (aIdx !== bIdx) return aIdx - bIdx;
+    // matchId DESC as final tiebreak
+    return (b.id || "").localeCompare(a.id || "");
+  });
+  return candidates[0];
+}
+
+// MatchLineupSideEditor — inline lineup editor for one team side within
+// the per-match lineup panel. Handles load/save/copy-from-previous for a
+// single (compId, teamId, matchId) triple.
+function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast }) {
+  const teamSize = comp?.teamSize || 5;
+  const positions = (typeof lineupPositionsForSize === "function")
+    ? lineupPositionsForSize(teamSize)
+    : [];
+  const roster = (typeof lineupRosterFor === "function")
+    ? lineupRosterFor(team)
+    : [];
+  const teamId = (typeof lineupTeamIdOf === "function")
+    ? lineupTeamIdOf(team)
+    : (team?.id || team?.name || "");
+  const compId = comp?.id || "";
+  const matchId = match?.id || "";
+
+  const [values, setValues] = useStateA(() => {
+    const init = {};
+    positions.forEach(p => { init[p.key] = ""; });
+    return init;
+  });
+  const [lockedAt, setLockedAt] = useStateA(null);
+  const [loading, setLoading] = useStateA(true);
+  const [saving, setSaving] = useStateA(false);
+  const [copying, setCopying] = useStateA(false);
+  const [error, setError] = useStateA("");
+  // savedLineups for sibling matches — keyed matchId → TeamLineup.
+  // Populated lazily (best-effort) so Copy-from-previous button can be
+  // enabled/disabled without a separate batch fetch.
+  const [savedLineupsByMatch, setSavedLineupsByMatch] = useStateA({});
+  // Track whether the current match's lineup was loaded from a per-match
+  // entry (true) or is inheriting the round default (false).
+  const [isMatchOverride, setIsMatchOverride] = useStateA(false);
+
+  // Load per-match lineup on mount; record whether it was a real hit.
+  useEffectA(() => {
+    let cancelled = false;
+    if (!compId || !teamId || !matchId) {
+      setLoading(false);
+      return;
+    }
+    (async () => {
+      try {
+        const matchLineup = await window.API.fetchMatchLineup(compId, teamId, matchId);
+        if (cancelled) return;
+        if (matchLineup) {
+          const next = {};
+          positions.forEach(p => {
+            next[p.key] = (matchLineup.positions || {})[p.key] || "";
+          });
+          setValues(next);
+          setLockedAt(matchLineup.lockedAt || null);
+          setIsMatchOverride(true);
+        } else {
+          // No per-match entry — reflect the round default (fetch-and-show,
+          // but do NOT set isMatchOverride so the label says "inheriting").
+          let round = 0;
+          if (typeof match.round === "string") {
+            const mr = /^Round\s+(\d+)$/.exec(match.round);
+            if (mr) round = parseInt(mr[1], 10) - 1;
+          } else if (typeof match.round === "number") {
+            round = match.round;
+          }
+          try {
+            const roundLineup = await window.API.fetchTeamLineup(compId, teamId, round);
+            if (cancelled) return;
+            if (roundLineup) {
+              const next = {};
+              positions.forEach(p => {
+                next[p.key] = (roundLineup.positions || {})[p.key] || "";
+              });
+              setValues(next);
+            }
+          } catch (_e) { /* no round lineup — leave blank */ }
+          setIsMatchOverride(false);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e?.message || "Failed to load lineup");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [compId, teamId, matchId]);
+
+  // Probe sibling matches to populate savedLineupsByMatch for the
+  // "Copy from previous" candidate check. We fire one fetch per
+  // candidate match (lazy, fire-and-forget on mount).
+  useEffectA(() => {
+    if (!compId || !teamId || !allMatches) return;
+    const siblings = allMatches.filter(m => {
+      if (m.id === matchId) return false;
+      const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
+      const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
+      return sideAId === teamId || sideBId === teamId;
+    });
+    siblings.forEach(sibling => {
+      window.API.fetchMatchLineup(compId, teamId, sibling.id)
+        .then(l => {
+          if (l) setSavedLineupsByMatch(prev => ({ ...prev, [sibling.id]: l }));
+        })
+        .catch(() => { /* ignore */ });
+    });
+  }, [compId, teamId, matchId]);
+
+  const isLocked = !!lockedAt;
+
+  const save = async () => {
+    setError("");
+    setSaving(true);
+    try {
+      const positionsOut = {};
+      Object.entries(values).forEach(([k, v]) => {
+        if (v) positionsOut[k] = v;
+      });
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
+      setLockedAt(updated.lockedAt || null);
+      setIsMatchOverride(true);
+      if (typeof showToast === "function") showToast("Match lineup saved");
+    } catch (e) {
+      const msg = e?.message || "Failed to save match lineup";
+      if (/ErrLineupLocked|lineup.*locked|locked/i.test(msg)) {
+        setError("This match is live — lineup is locked and cannot be changed.");
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Copy from previous: find the most recent sibling match that has a
+  // saved lineup and clone its positions into the current form (then save).
+  const copySource = pickCopySource(allMatches, matchId, teamId, savedLineupsByMatch);
+  const copyFromPrevious = async () => {
+    if (!copySource) return;
+    const sourceLineup = savedLineupsByMatch[copySource.id];
+    if (!sourceLineup) return;
+    setError("");
+    setCopying(true);
+    try {
+      const positionsOut = {};
+      positions.forEach(p => {
+        const v = (sourceLineup.positions || {})[p.key] || "";
+        if (v) positionsOut[p.key] = v;
+      });
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
+      // Apply cloned values into local state
+      const next = {};
+      positions.forEach(p => {
+        next[p.key] = (updated.positions || {})[p.key] || "";
+      });
+      setValues(next);
+      setLockedAt(updated.lockedAt || null);
+      setIsMatchOverride(true);
+      if (typeof showToast === "function") showToast("Lineup copied from previous match");
+    } catch (e) {
+      const msg = e?.message || "Failed to copy lineup";
+      if (/ErrLineupLocked|lineup.*locked|locked/i.test(msg)) {
+        setError("This match is live — lineup is locked and cannot be changed.");
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  if (loading) {
+    return <div style={{ padding: "8px 0", color: "var(--ink-3)", fontSize: 12 }}>Loading lineup…</div>;
+  }
+
+  const teamName = team?.name || team?.Name || "Team";
+
+  return (
+    <div data-testid={`match-lineup-side-${teamId}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontWeight: 700, fontSize: 13 }}>{teamName}</span>
+        {isMatchOverride
+          ? <span style={{ fontSize: 11, color: "var(--accent, #1d73d5)", fontWeight: 600 }}>Override for this match</span>
+          : <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Inheriting round default</span>
+        }
+        {isLocked && (
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", background: "var(--bg-2, #fafafa)", border: "1px solid var(--line, #ddd)", padding: "1px 6px", borderRadius: 3 }}>
+            🔒 Locked
+          </span>
+        )}
+      </div>
+
+      {error && (
+        <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 8, padding: "6px 8px", border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+        {positions.map(p => (
+          <label key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12 }}>{p.label}</span>
+            <select
+              data-testid={`match-lineup-pos-${teamId}-${p.key}`}
+              className="input"
+              value={values[p.key] || ""}
+              disabled={isLocked || saving || copying}
+              onChange={(e) => setValues(v => ({ ...v, [p.key]: e.target.value }))}
+              style={{ flex: 1, padding: "4px 6px", fontSize: 13 }}
+            >
+              <option value="">— Select —</option>
+              {roster.map(member => (
+                <option key={member} value={member}>{member}</option>
+              ))}
+            </select>
+          </label>
+        ))}
+        {roster.length === 0 && (
+          <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
+            No roster found. Add member names as metadata in the participant CSV.
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {!isLocked && (
+          <button
+            className="btn btn--primary btn--sm"
+            onClick={save}
+            disabled={saving || copying || roster.length === 0}
+          >
+            {saving ? "Saving…" : "Save lineup"}
+          </button>
+        )}
+        <button
+          className="btn btn--sm"
+          onClick={copyFromPrevious}
+          disabled={!copySource || copying || saving || isLocked}
+          title={copySource
+            ? `Copy from match at ${copySource.scheduledAt || "—"}`
+            : "No previous match with a saved lineup"}
+        >
+          {copying ? "Copying…" : "Copy from previous match"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// MatchLineupPanel — modal overlay for per-match lineup editing. Renders
+// one MatchLineupSideEditor per team side (sideA / sideB). Only shown for
+// team competitions (compKind === "team" || teamSize > 0).
+function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
+  const m = match;
+  // Find the competition this match belongs to so we can access teamSize,
+  // players (roster), etc.
+  const comp = (tournament?.competitions || []).find(cc => cc.id === m.compId) || null;
+  const isTeamComp = comp && (comp.kind === "team" || (comp.teamSize || 0) > 0);
+  if (!isTeamComp) return null;
+
+  // Resolve team objects from competition players list.
+  const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
+  const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
+  const players = comp.players || [];
+  const teamA = players.find(p => (p.id || p.ID || p.name || p.Name) === sideAId) || (m.sideA && typeof m.sideA === "object" ? m.sideA : null);
+  const teamB = players.find(p => (p.id || p.ID || p.name || p.Name) === sideBId) || (m.sideB && typeof m.sideB === "object" ? m.sideB : null);
+
+  // All matches for this competition (needed for "Copy from previous" candidate search).
+  const allMatches = typeof window.compMatches === "function" ? window.compMatches(comp) : [];
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1000, padding: 16
+    }}>
+      <div style={{
+        background: "var(--bg, #fff)", borderRadius: 8,
+        boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: 24,
+        width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto"
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+              {comp?.name} · {m.scheduledAt || m.round || ""}
+            </div>
+            <h2 style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 700 }}>Lineup for this match</h2>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+              Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then.
+            </div>
+          </div>
+          <button className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+          <div style={{ borderRight: "1px solid var(--line, #e5e7eb)", paddingRight: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
+              SHIRO (white)
+            </div>
+            {teamB ? (
+              <MatchLineupSideEditor
+                key={`${m.id}-side-b`}
+                comp={comp}
+                team={teamB}
+                match={m}
+                allMatches={allMatches}
+                password={password}
+                showToast={showToast}
+              />
+            ) : (
+              <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
+            )}
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
+              AKA (red)
+            </div>
+            {teamA ? (
+              <MatchLineupSideEditor
+                key={`${m.id}-side-a`}
+                comp={comp}
+                team={teamA}
+                match={m}
+                allMatches={allMatches}
+                password={password}
+                showToast={showToast}
+              />
+            ) : (
+              <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Score editor ----------
 function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password }) {
   return (
@@ -645,11 +1020,14 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
   );
 }
 
-function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password }) {
+function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password, showToast }) {
   const [filter, setFilter] = useStateA("");
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
   const [statusFilter, setStatusFilter] = useStateA("all");
   const [openMatch, setOpenMatch] = useStateA(null);
+  // mp-bkg: per-match lineup panel state. lineupMatch holds the match
+  // currently open in the lineup panel (null = panel closed).
+  const [lineupMatch, setLineupMatch] = useStateA(null);
   // ScoreEditorModal's onSubmit / onSubmitAndNext callbacks await
   // onEditScore (which routes through AdminApp.editMatchScore — a
   // server PUT). If AdminScoreEditor unmounts during the in-flight
@@ -766,13 +1144,37 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
                 {m.status === "running" && <span className="bc-live">● LIVE</span>}
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
-              <button className={getScoreBtnClass(m.status)} onClick={() => setOpenMatch(m)}>
-                {m.status === "completed" ? "Correct" : "Score"}
-              </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <button className={getScoreBtnClass(m.status)} onClick={() => setOpenMatch(m)}>
+                  {m.status === "completed" ? "Correct" : "Score"}
+                </button>
+                {/* mp-bkg: show Lineup button only for team competitions */}
+                {(m.compKind === "team" || (m.teamSize || 0) > 0) && (
+                  <button
+                    className="btn btn--ghost btn--sm"
+                    style={{ fontSize: 11 }}
+                    onClick={() => setLineupMatch(m)}
+                  >
+                    Lineup
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
+
+      {/* mp-bkg: per-match lineup panel */}
+      {lineupMatch && (
+        <MatchLineupPanel
+          key={lineupMatch.compId + '-' + lineupMatch.id}
+          match={lineupMatch}
+          tournament={tournament}
+          password={password}
+          showToast={showToast}
+          onClose={() => setLineupMatch(null)}
+        />
+      )}
 
       {openMatch && (() => {
         // Chained nav (Prev/Next/Finish+Start Next/←/→) must stay on the same
@@ -1103,4 +1505,5 @@ window.AdminExport = AdminExport;
 //
 // All other top-level components stay behind the window.* pattern to
 // match the rest of admin_*.jsx.
-export { timeEdited, timeToMinutes, clampMatchDuration, suggestRebalances, allMatchesCompleted };
+// mp-bkg: export pickCopySource for the vitest suite.
+export { timeEdited, timeToMinutes, clampMatchDuration, suggestRebalances, allMatchesCompleted, pickCopySource };

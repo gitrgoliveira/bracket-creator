@@ -252,6 +252,40 @@ function getScoreBtnClass(status) {
   return `score-btn ${status === "completed" ? "score-btn--correct" : "score-btn--active"}`;
 }
 
+// MAX_TOURNAMENT_DURATION_DAYS mirrors MaxTournamentDurationDays in
+// internal/mobileapp/validation.go. Keep both in sync.
+const MAX_TOURNAMENT_DURATION_DAYS = 30;
+
+// deriveTournamentDays returns an ordered array of DD-MM-YYYY strings
+// covering the tournament, mirroring Tournament.Days() on the Go side.
+//
+//   deriveTournamentDays("05-06-2026", 3) → ["05-06-2026", "06-06-2026", "07-06-2026"]
+//
+// Returns [] (empty) when:
+//   - startDate is empty / unparseable
+//   - durationDays < 1
+//
+// Exported for JSX components and vitest.
+function deriveTournamentDays(startDate, durationDays) {
+  if (!startDate || !Number.isInteger(durationDays) || durationDays < 1) return [];
+  const norm = normalizeDate(startDate);
+  if (!norm) return [];
+  // Parse from DD-MM-YYYY
+  const [dd, mm, yyyy] = norm.split('-').map(Number);
+  const base = new Date(Date.UTC(yyyy, mm - 1, dd));
+  if (isNaN(base.getTime())) return [];
+  const days = [];
+  for (let i = 0; i < durationDays; i++) {
+    const d = new Date(base);
+    d.setUTCDate(base.getUTCDate() + i);
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const year = d.getUTCFullYear();
+    days.push(`${day}-${month}-${year}`);
+  }
+  return days;
+}
+
 // Guard window assignments so this file stays safely importable in
 // non-browser test environments (matches the pattern in data.jsx / ui.jsx).
 if (typeof window !== "undefined") {
@@ -273,6 +307,8 @@ if (typeof window !== "undefined") {
   window.MAX_TEAM_SIZE = MAX_TEAM_SIZE;
   window.MAX_COURTS = MAX_COURTS;
   window.MAX_RANK = MAX_RANK;
+  window.MAX_TOURNAMENT_DURATION_DAYS = MAX_TOURNAMENT_DURATION_DAYS;
+  window.deriveTournamentDays = deriveTournamentDays;
   window.setCachedAuthConfig = setCachedAuthConfig;
   window.getCachedAuthConfig = getCachedAuthConfig;
   window.promptAdminPassword = promptAdminPassword;
@@ -354,4 +390,6 @@ export {
   MAX_TEAM_SIZE,
   MAX_COURTS,
   MAX_RANK,
+  MAX_TOURNAMENT_DURATION_DAYS,
+  deriveTournamentDays,
 };

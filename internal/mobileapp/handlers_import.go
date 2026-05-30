@@ -200,6 +200,21 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 
+	// Cross-file guard symmetry with POST/PUT /competitions: reject a
+	// competition date that falls outside the tournament's day range.
+	// Load the tournament once per row; the cost is a file stat + cache
+	// hit after the first row. Failures are soft (res.Error, not HTTP
+	// abort) matching all other per-row validation patterns.
+	importTourn, importTournErr := store.LoadTournament()
+	if importTournErr != nil {
+		res.Error = "load tournament: " + importTournErr.Error()
+		return res
+	}
+	if err := validateCompetitionDateInTournament(comp, importTourn); err != nil {
+		res.Error = err.Error()
+		return res
+	}
+
 	// Cross-file guard symmetry with POST /competitions and PUT
 	// /competitions/:id (handlers_competition.go): reject unknown formats
 	// (400) so a manifest cannot persist a Competition whose format would

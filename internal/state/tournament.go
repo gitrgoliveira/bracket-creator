@@ -63,10 +63,16 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 	if err := parseFrontMatter(data, &t); err != nil {
 		// If it's not a front-matter file, return a default tournament
 		t = Tournament{
-			Name:  "New Tournament",
-			Date:  time.Now().Format("02-01-2006"),
-			Venue: "Venue TBA",
+			Name:         "New Tournament",
+			Date:         time.Now().Format("02-01-2006"),
+			Venue:        "Venue TBA",
+			DurationDays: 1,
 		}
+	} else if t.DurationDays == 0 {
+		// Migrate existing single-day tournament.md files that predate the
+		// DurationDays field: with no duration_days key, the field
+		// deserializes to its zero value (0), which we treat as 1.
+		t.DurationDays = 1
 	}
 
 	s.cachedTourn = &t
@@ -186,15 +192,21 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 	if data, rerr := os.ReadFile(path); rerr == nil { // #nosec G304
 		var t Tournament
 		if perr := parseFrontMatter(data, &t); perr == nil {
+			if t.DurationDays == 0 {
+				// Migrate: a legacy file with no duration_days key
+				// deserialises to the zero value (0) — treat as 1.
+				t.DurationDays = 1
+			}
 			current = &t
 		} else {
 			// Parse failure: fall back to the same default record
 			// LoadTournament constructs, so transform's view is
 			// consistent.
 			current = &Tournament{
-				Name:  "New Tournament",
-				Date:  time.Now().Format("02-01-2006"),
-				Venue: "Venue TBA",
+				Name:         "New Tournament",
+				Date:         time.Now().Format("02-01-2006"),
+				Venue:        "Venue TBA",
+				DurationDays: 1,
 			}
 		}
 	} else if !os.IsNotExist(rerr) {

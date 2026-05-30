@@ -17,7 +17,7 @@
 //
 // Empty-body methods (overridePoolRank, overrideBracketWinner,
 // resetOverrides, updateMatchTime, moveMatchCourt, updateSchedule,
-// deleteReservedSlot, deleteCompetition) deliberately return `true`
+// deleteCompetition) deliberately return `true`
 // rather than `res.json()` — calling res.json() on a 200/204 with no
 // body throws SyntaxError per the Fetch spec, which used to surface as
 // "alert: Unexpected end of JSON input" right after a successful save.
@@ -445,32 +445,6 @@ const API = {
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to update schedule");
-        }
-        return true;
-    },
-    async addReservedSlot(compID, sourceCompID, sourceRank, password) {
-        const res = await fetch(`/api/competitions/${compID}/reserved-slots`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ sourceCompID, sourceRank })
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to add reserved slot');
-        }
-        return res.json();
-    },
-    async deleteReservedSlot(compID, slotID, password) {
-        const res = await fetch(`/api/competitions/${compID}/reserved-slots/${slotID}`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to delete reserved slot");
         }
         return true;
     },

@@ -1123,14 +1123,16 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const isDateValid = isValidDate;
 
   // mp-w7x: surface how many participants will be excluded from the draw
-  // because they have not checked in. Mirror the engine's opt-in rule
-  // (filterCheckedIn in internal/engine/competition.go): only exclude when at
-  // least one participant is checked in; if nobody is, check-in is unused for
-  // this competition and everyone is included. Empty roster (e.g. a
-  // playoffs-from-source competition resolved server-side) yields 0.
+  // because they have not checked in. Mirror the engine's rule
+  // (filterCheckedIn in internal/engine/competition.go): only applies when the
+  // competition has check-in tracking enabled (c.checkInEnabled) — consistent
+  // with the rest of the UI, which masks checkedIn behind that flag. Within an
+  // enabled competition, opt-in semantics apply: only exclude when at least one
+  // participant is checked in. Empty roster (e.g. a playoffs-from-source
+  // competition resolved server-side) yields 0.
   const drawPlayers = c.players || [];
   const anyCheckedIn = drawPlayers.some(p => p.checkedIn);
-  const excludedFromDraw = anyCheckedIn ? drawPlayers.filter(p => !p.checkedIn).length : 0;
+  const excludedFromDraw = (c.checkInEnabled && anyCheckedIn) ? drawPlayers.filter(p => !p.checkedIn).length : 0;
 
   // Confirm before a draw/start that would drop non-checked-in participants.
   // Returns false when the operator cancels.

@@ -119,6 +119,10 @@ type StoreTx interface {
 	// (T128 / T156) so the lineup freeze happens under the same lock
 	// acquire as the score write.
 	LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error
+	// LockTeamLineupForMatch is the tx-aware twin of
+	// Store.LockTeamLineupForMatch (mp-825). Freezes the match-scoped
+	// lineups for a single encounter under the score-write lock.
+	LockTeamLineupForMatch(compID, matchID string, lockedAt time.Time) error
 	// UpdateParticipant is the tx-aware twin of
 	// Store.updateParticipantNoLock. Applies transform to the target
 	// participant while the transaction lock is held, so the caller
@@ -515,7 +519,7 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		if perr != nil {
 			return perr
 		}
-		key := teamLineupKey(l.TeamID, l.Round)
+		key := lineupStorageKey(l)
 		if existing, present := current[key]; present && existing.LockedAt != nil {
 			return ErrLineupLocked
 		}
@@ -624,6 +628,10 @@ func (t *storeTx) LockTeamLineupsForRound(compID string, round int, lockedAt tim
 		}
 		changed := false
 		for k, l := range current {
+			// Skip match-scoped entries — see lockTeamLineupsForRoundLocked.
+			if l.MatchID != "" {
+				continue
+			}
 			if l.Round != round {
 				continue
 			}
@@ -641,4 +649,44 @@ func (t *storeTx) LockTeamLineupsForRound(compID string, round int, lockedAt tim
 		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 	}
 	return t.store.lockTeamLineupsForRoundLocked(compID, round, lockedAt, t.txWriteFn())
+}
+
+// LockTeamLineupForMatch dispatches to the lock-free body of
+// Store.LockTeamLineupForMatch (mp-825). Caller (WithTransaction) holds
+// the per-comp lock. Read-your-own-writes: if lineups.yaml is staged in
+// this tx, this load + lock + save sees the staged version.
+func (t *storeTx) LockTeamLineupForMatch(compID, matchID string, lockedAt time.Time) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	if matchID == "" {
+		return nil
+	}
+	if pending, ok := t.pendingFor(teamLineupFilename); ok {
+		current, perr := parseTeamLineupsBytes(pending)
+		if perr != nil {
+			return perr
+		}
+		changed := false
+		for k, l := range current {
+			if l.MatchID != matchID {
+				continue
+			}
+			if l.LockedAt != nil {
+				continue
+			}
+			ts := lockedAt
+			l.LockedAt = &ts
+			current[k] = l
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
+	}
+	return t.store.lockTeamLineupForMatchLocked(compID, matchID, lockedAt, t.txWriteFn())
 }

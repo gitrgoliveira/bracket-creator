@@ -27,15 +27,26 @@ const (
 func PositionNumbered(n int) Position { return Position(strconv.Itoa(n)) }
 
 // TeamLineup pins which player occupies each Position for a team in a
-// given round. The lineup is replaceable up until the round's first
-// match goes live, at which point LockedAt is set and further
+// given round OR for a specific match. The lineup is replaceable up
+// until its match (match-scoped) or its round's first match
+// (round-scoped) goes live, at which point LockedAt is set and further
 // PUT/PATCH operations are rejected.
+//
+// Keying (mp-825): when MatchID is non-empty the lineup is
+// match-scoped — a team may field a different order/roster for each
+// encounter (e.g. successive pool matches), and each entry locks
+// independently when its own match starts. When MatchID is empty the
+// lineup is round-scoped (the legacy behavior, still used by bracket
+// rounds and pre-mp-825 data): one lineup per (team, round), frozen
+// when the round's first match goes live. The two scopes coexist; a
+// match-scoped entry shadows the round-scoped fallback for that match.
 //
 // FR-040, data-model §4.
 type TeamLineup struct {
 	TeamID        string              `json:"teamId" yaml:"teamId"`
 	CompetitionID string              `json:"competitionId" yaml:"competitionId"`
 	Round         int                 `json:"round" yaml:"round"`
+	MatchID       string              `json:"matchId,omitempty" yaml:"matchId,omitempty"`
 	Positions     map[Position]string `json:"positions" yaml:"positions"`
 	LockedAt      *time.Time          `json:"lockedAt,omitempty" yaml:"lockedAt,omitempty"`
 }

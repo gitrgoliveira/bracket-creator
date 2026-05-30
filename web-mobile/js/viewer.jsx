@@ -427,6 +427,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             onMatchClick={setSelectedMatch}
           />
 
+          {/* mp-cw1: Browser push notification opt-in toggle. */}
+          <NotificationSettings />
+
           {live.length > 0 && (
             <div className="hero-live">
               <div className="hero-live__lbl"><span className="dot dot--live"></span> LIVE NOW · {pluralize(live.length, "match", "matches")}</div>
@@ -2543,6 +2546,144 @@ function MatchViewerModal({ match, onClose }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// NotificationSettings — viewer settings panel for browser push notifications.
+// Exported for unit testing.
+// ---------------------------------------------------------------------------
+
+// LocalStorage key for the notification opt-in toggle.
+const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
+
+// Pure helper: detect Notification API support.
+// Exported for unit testing.
+export function notificationSupported() {
+  return typeof Notification !== "undefined";
+}
+
+// NotificationSettings — "Enable browser notifications" toggle for the
+// viewer home settings area. Phases:
+//   1) Secure-context warning (edge case, normally hidden in production).
+//   2) Notification API unavailable — hide the toggle.
+//   3) Permission "denied" — show blocked state.
+//   4) Permission "default" or "granted" — show the opt-in toggle.
+//
+// Requests permission ONLY on a user click (the gesture gate). Never
+// calls requestPermission() automatically. Exported for unit testing.
+export function NotificationSettings() {
+  // Compute the initial permission outside useState so tests using the
+  // static React mock (which passes the value through unmodified rather
+  // than calling function initialisers) see the correct starting value.
+  const initialPermission = (typeof Notification === "undefined")
+    ? "unavailable"
+    : Notification.permission;
+
+  // Read the current permission state reactively: re-query after the user
+  // interacts with the native permission prompt. We keep a local state so
+  // the UI stays responsive without relying on a global re-render.
+  const [permission, setPermission] = useState(initialPermission);
+
+  let storedOptIn = false;
+  try {
+    storedOptIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
+  } catch (_e) { /* storage unavailable */ }
+  // Only treat the opt-in as enabled when the browser permission is ALSO
+  // still granted. If the user reset the site permission back to "default"
+  // (or "denied") since they last opted in, starting `enabled` at true would
+  // render the checkbox unchecked (checked={enabled && permission==="granted"})
+  // yet send the first click down the "turning off" branch — the user would
+  // have to click twice and never see the prompt. Gating on granted keeps the
+  // handler branch aligned with the visible checkbox state.
+  const [enabled, setEnabled] = useState(storedOptIn && initialPermission === "granted");
+
+  // Phase 4: secure-context warning. In production the TLS proxy makes this
+  // false; it only matters for bare http:// (no proxy) access.
+  const insecure = typeof window !== "undefined" && window.isSecureContext === false;
+
+  // Phase 3 / Phase 4 ordering: when the API is unavailable we normally hide
+  // the panel entirely. BUT some browsers expose `Notification` only in a
+  // secure context, so a bare http:// page can have BOTH no API AND
+  // isSecureContext === false — which is the exact situation this panel is
+  // meant to explain. In that case render the warning (no toggle) instead of
+  // hiding. Only hide outright when the API is unavailable for some OTHER
+  // reason (secure context but an old/unsupported browser).
+  if (permission === "unavailable") {
+    if (!insecure) return null;
+    return (
+      <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
+        <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
+        <div style={{ fontSize: 12, color: "var(--amber, #b45309)" }} data-testid="notification-insecure-warning">
+          Browser notifications require a secure connection (https or localhost).
+        </div>
+      </div>
+    );
+  }
+
+  const handleToggle = async () => {
+    if (enabled) {
+      // Turning off: just persist the preference.
+      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) { /* storage unavailable */ }
+      setEnabled(false);
+      return;
+    }
+    // Turning on: request permission first (this is the user-gesture gate).
+    if (Notification.permission === "default") {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+      if (result !== "granted") return; // user denied — don't toggle on
+    } else {
+      setPermission(Notification.permission);
+    }
+    // Only mark the toggle ON if the preference actually persisted.
+    // fireBrowserNotifications() reads this localStorage flag at fire time, so
+    // an unpersisted "on" would render a checked box that never fires (storage
+    // throwing → flag missing → firing path reads opt-out). Keep the UI honest
+    // with the firing path: if persistence failed, leave the toggle off.
+    let persisted = false;
+    try {
+      window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true");
+      persisted = true;
+    } catch (_e) { /* storage unavailable — keep toggle off */ }
+    setEnabled(persisted);
+  };
+
+  const denied = permission === "denied";
+
+  return (
+    <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
+      <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
+      {insecure && (
+        <div style={{ fontSize: 12, color: "var(--amber, #b45309)", marginBottom: 8 }} data-testid="notification-insecure-warning">
+          Browser notifications require a secure connection (https or localhost).
+        </div>
+      )}
+      {denied ? (
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }} data-testid="notification-denied">
+          Browser notifications are blocked. Allow them in your browser settings, then reload.
+        </div>
+      ) : (
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={enabled && permission === "granted"}
+            onChange={handleToggle}
+            data-testid="notification-toggle"
+            disabled={insecure}
+          />
+          <span>
+            Enable browser notifications for announcements
+            {permission === "granted" && enabled && (
+              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-3)" }}>(granted)</span>
+            )}
+            {permission === "default" && (
+              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-3)" }}>(permission not yet requested)</span>
+            )}
+          </span>
+        </label>
+      )}
+    </div>
+  );
+}
+
 // Shared formatter so the synchronous initializer and the useEffect tick
 // produce identical strings — keeps the first paint stable.
 function formatAnnouncementTimeLeft(expiresAtIso) {
@@ -2632,4 +2773,6 @@ window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
+window.NotificationSettings = NotificationSettings;
+window.LS_NOTIFICATIONS_ENABLED = LS_NOTIFICATIONS_ENABLED;
 

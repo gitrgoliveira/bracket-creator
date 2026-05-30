@@ -534,11 +534,14 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if err != nil {
 		return err
 	}
-	// Exclude participants who have not checked in (mp-w7x), but only when
-	// check-in is actually in use for this competition — i.e. at least one
-	// participant is checked in. If nobody is checked in, the operator never
-	// used the feature, so we include everyone (opt-in semantics: check-in
-	// can never silently empty the field).
+	// Exclude participants who have not checked in (mp-w7x) — but ONLY when the
+	// competition has check-in tracking enabled (comp.CheckInEnabled). The rest
+	// of the stack masks checkedIn behind this flag (the viewer derives
+	// checkedIn as `checkInEnabled && p.checkedIn`), so a stale/imported
+	// checked_in marker on a competition that doesn't use check-in must not
+	// silently shrink the field (PR #199 review). When enabled, opt-in
+	// semantics still apply (see filterCheckedIn): if nobody is checked in,
+	// everyone is included.
 	//
 	// Filter the DISK roster HERE — after load, BEFORE the playoffs
 	// source-resolution below. resolvePoolWinners builds promoted finalists
@@ -547,13 +550,16 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// bracket. Source-resolved finalists are intentionally exempt and bypass
 	// this filter by virtue of placement.
 	//
-	// Capture the names check-in removes BEFORE filtering so we can drop their
-	// seed assignments too (PR #199 review): helper.ApplySeeds errors with
-	// "seeded participant not found in main list" for a seed whose player is
-	// absent, which would make a competition with a non-checked-in seeded
-	// player undrawable.
-	excludedByCheckIn := checkInExcludedNames(players)
-	players = filterCheckedIn(players)
+	// excludedByCheckIn captures the names check-in removes so we can drop
+	// their seed assignments too: helper.ApplySeeds errors with "seeded
+	// participant not found in main list" for a seed whose player is absent,
+	// which would make a competition with a non-checked-in seeded player
+	// undrawable.
+	var excludedByCheckIn map[string]bool
+	if comp.CheckInEnabled {
+		excludedByCheckIn = checkInExcludedNames(players)
+		players = filterCheckedIn(players)
+	}
 	// Playoffs competitions created from a mixed source (POST /playoffs)
 	// start with an empty roster on disk. Resolve the source's final pool
 	// winners into the roster now, BEFORE the empty-roster check. The

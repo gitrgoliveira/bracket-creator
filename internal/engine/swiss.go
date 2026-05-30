@@ -155,8 +155,10 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// Determine the Swiss field for this round (mp-w7x; PR #199 review).
 	//
 	// Round 1 (the initial draw): exclude participants who have not checked
-	// in, with opt-in semantics (see filterCheckedIn) — if nobody is checked
-	// in, check-in is unused and everyone is drawn.
+	// in, but ONLY when check-in tracking is enabled (comp.CheckInEnabled) —
+	// otherwise a stale/imported checked_in marker would shrink the field even
+	// though the competition doesn't use check-in (PR #199 review). When
+	// enabled, opt-in semantics still apply (see filterCheckedIn).
 	//
 	// Round N > 1: the field is FROZEN to whoever was part of the initial
 	// draw. We derive it from the names already present in prior Swiss matches
@@ -165,7 +167,9 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// player into a later round nor silently drop one. Withdrawals are handled
 	// separately by the eligibility (kiken/fusenpai) filter below.
 	if roundNumber == 1 {
-		participants = filterCheckedIn(participants)
+		if comp.CheckInEnabled {
+			participants = filterCheckedIn(participants)
+		}
 	} else {
 		field := swissFieldNamesFromMatches(priorMatches)
 		frozen := make([]domain.Player, 0, len(participants))

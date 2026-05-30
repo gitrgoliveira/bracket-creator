@@ -25,6 +25,16 @@ func saveParticipantsWithCheckIn(t *testing.T, store *state.Store, compID string
 	require.NoError(t, store.SaveParticipants(compID, players))
 }
 
+// enableCheckIn flips a competition's check-in tracking flag on. The draw
+// filter (mp-w7x) only excludes non-checked-in players when this is set.
+func enableCheckIn(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.CheckInEnabled = true
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
 // poolPlayerNames collects every player name across all generated pools.
 func poolPlayerNames(pools []helper.Pool) map[string]bool {
 	names := map[string]bool{}
@@ -93,6 +103,7 @@ func TestStartCompetition_MixedFormat_ExcludesNonCheckedIn(t *testing.T) {
 	compID := "checkin-pools"
 
 	createTestCompetition(t, store, compID, "mixed", 3)
+	enableCheckIn(t, store, compID)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
 		map[string]bool{"Alice": true, "Bob": true, "Charlie": true, "Dave": true},
@@ -120,6 +131,7 @@ func TestStartCompetition_NoneCheckedIn_IncludesAll(t *testing.T) {
 	compID := "no-checkin-pools"
 
 	createTestCompetition(t, store, compID, "mixed", 3)
+	enableCheckIn(t, store, compID)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
 		map[string]bool{}, // nobody checked in
@@ -132,6 +144,29 @@ func TestStartCompetition_NoneCheckedIn_IncludesAll(t *testing.T) {
 	assert.Len(t, poolPlayerNames(pools), 6, "with no check-in, all participants are drawn")
 }
 
+// TestStartCompetition_CheckInDisabled_IgnoresStaleMarkers is the regression
+// guard for PR #199 review round 2: when check-in tracking is DISABLED for the
+// competition, stale/imported checked_in markers must be ignored so they cannot
+// shrink the field. The rest of the stack masks checkedIn behind CheckInEnabled.
+func TestStartCompetition_CheckInDisabled_IgnoresStaleMarkers(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "checkin-disabled"
+
+	// NOTE: enableCheckIn is deliberately NOT called — CheckInEnabled stays false.
+	createTestCompetition(t, store, compID, "mixed", 3)
+	saveParticipantsWithCheckIn(t, store, compID,
+		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
+		map[string]bool{"Alice": true, "Bob": true}, // stale markers on 2 players
+	)
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	assert.Len(t, poolPlayerNames(pools), 6,
+		"check-in disabled: stale markers must be ignored and all participants drawn")
+}
+
 // TestStartCompetition_PlayoffsFormat_ExcludesNonCheckedIn verifies the filter
 // reaches the elimination-bracket path too.
 func TestStartCompetition_PlayoffsFormat_ExcludesNonCheckedIn(t *testing.T) {
@@ -139,6 +174,7 @@ func TestStartCompetition_PlayoffsFormat_ExcludesNonCheckedIn(t *testing.T) {
 	compID := "checkin-playoffs"
 
 	createTestCompetition(t, store, compID, "playoffs", 0)
+	enableCheckIn(t, store, compID)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve"},
 		map[string]bool{"Alice": true, "Bob": true, "Charlie": true, "Dave": true},
@@ -184,14 +220,15 @@ func TestStartCompetition_PlayoffsFromSource_FinalistsNotExcluded(t *testing.T) 
 
 	playoffID := "src-mixed-playoffs"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           playoffID,
-		Name:         "Source Mixed - Playoffs",
-		Kind:         "individual",
-		Format:       state.CompFormatPlayoffs,
-		SourceCompID: srcID,
-		Courts:       []string{"A"},
-		StartTime:    "09:00",
-		Status:       "setup",
+		ID:             playoffID,
+		Name:           "Source Mixed - Playoffs",
+		Kind:           "individual",
+		Format:         state.CompFormatPlayoffs,
+		SourceCompID:   srcID,
+		Courts:         []string{"A"},
+		StartTime:      "09:00",
+		Status:         "setup",
+		CheckInEnabled: true,
 	}))
 
 	require.NoError(t, eng.StartCompetition(playoffID))
@@ -213,14 +250,15 @@ func TestGenerateSwissRound_ExcludesNonCheckedIn(t *testing.T) {
 	compID := "checkin-swiss"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:          compID,
-		Name:        "Swiss Check-in",
-		Kind:        "individual",
-		Format:      state.CompFormatSwiss,
-		SwissRounds: 3,
-		Courts:      []string{"A"},
-		StartTime:   "09:00",
-		Status:      "setup",
+		ID:             compID,
+		Name:           "Swiss Check-in",
+		Kind:           "individual",
+		Format:         state.CompFormatSwiss,
+		SwissRounds:    3,
+		Courts:         []string{"A"},
+		StartTime:      "09:00",
+		Status:         "setup",
+		CheckInEnabled: true,
 	}))
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
@@ -244,6 +282,44 @@ func TestGenerateSwissRound_ExcludesNonCheckedIn(t *testing.T) {
 	assert.Contains(t, seen, "Alice")
 }
 
+// TestGenerateSwissRound_CheckInDisabled_IgnoresStaleMarkers mirrors the pools
+// guard for the Swiss path: with check-in tracking disabled, stale markers must
+// not shrink the round-1 field (PR #199 review round 2, swiss.go).
+func TestGenerateSwissRound_CheckInDisabled_IgnoresStaleMarkers(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-checkin-disabled"
+
+	// CheckInEnabled deliberately left false.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Swiss No Check-in",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      "setup",
+	}))
+	saveParticipantsWithCheckIn(t, store, compID,
+		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
+		map[string]bool{"Alice": true, "Bob": true}, // stale markers
+	)
+
+	matches, err := eng.GenerateSwissRound(compID, 1)
+	require.NoError(t, err)
+
+	seen := map[string]bool{}
+	for _, m := range matches {
+		if m.SideA != "" {
+			seen[m.SideA] = true
+		}
+		if m.SideB != "" {
+			seen[m.SideB] = true
+		}
+	}
+	assert.Len(t, seen, 6, "check-in disabled: all participants must be in the field")
+}
+
 // TestStartCompetition_SeededNonCheckedIn_Drawable is the regression guard for
 // PR #199 review comment 1: a seeded participant who is not checked in must not
 // break the draw. Their seed assignment is dropped alongside the player so
@@ -253,6 +329,7 @@ func TestStartCompetition_SeededNonCheckedIn_Drawable(t *testing.T) {
 	compID := "seeded-checkin"
 
 	createTestCompetition(t, store, compID, "mixed", 4)
+	enableCheckIn(t, store, compID)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve"},
 		map[string]bool{"Alice": true, "Bob": true, "Charlie": true, "Dave": true},
@@ -284,14 +361,15 @@ func TestGenerateSwissRound_FrozenFieldIgnoresLateCheckIn(t *testing.T) {
 	compID := "swiss-frozen"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:          compID,
-		Name:        "Swiss Frozen Field",
-		Kind:        "individual",
-		Format:      state.CompFormatSwiss,
-		SwissRounds: 3,
-		Courts:      []string{"A"},
-		StartTime:   "09:00",
-		Status:      "setup",
+		ID:             compID,
+		Name:           "Swiss Frozen Field",
+		Kind:           "individual",
+		Format:         state.CompFormatSwiss,
+		SwissRounds:    3,
+		Courts:         []string{"A"},
+		StartTime:      "09:00",
+		Status:         "setup",
+		CheckInEnabled: true,
 	}))
 	// Round 1: P1–P4 checked in, P5/P6 not.
 	saveParticipantsWithCheckIn(t, store, compID,

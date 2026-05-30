@@ -2582,11 +2582,18 @@ export function NotificationSettings() {
   // the UI stays responsive without relying on a global re-render.
   const [permission, setPermission] = useState(initialPermission);
 
-  let initialEnabled = false;
+  let storedOptIn = false;
   try {
-    initialEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
+    storedOptIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
   } catch (_e) { /* storage unavailable */ }
-  const [enabled, setEnabled] = useState(initialEnabled);
+  // Only treat the opt-in as enabled when the browser permission is ALSO
+  // still granted. If the user reset the site permission back to "default"
+  // (or "denied") since they last opted in, starting `enabled` at true would
+  // render the checkbox unchecked (checked={enabled && permission==="granted"})
+  // yet send the first click down the "turning off" branch — the user would
+  // have to click twice and never see the prompt. Gating on granted keeps the
+  // handler branch aligned with the visible checkbox state.
+  const [enabled, setEnabled] = useState(storedOptIn && initialPermission === "granted");
 
   // Phase 4: secure-context warning. Only show when the API would exist but
   // the context is insecure (plain http:// non-localhost). In production the

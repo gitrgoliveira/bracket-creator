@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 // Regression: CompCard crashed the entire admin console with
 //   TypeError: Cannot read properties of null (reading 'join')
@@ -15,16 +15,35 @@ import { describe, it, expect, beforeAll } from 'vitest';
 // which vitest.setup.js already loads for side effects.
 let CompCard;
 
-beforeAll(async () => {
-  window.pluralize = (n, s, p) => `${n} ${n === 1 ? s : (p || `${s}s`)}`;
-  window.formatLabelShort = (f) => f;
-  window.formatDate = (d) => d;
-  window.competitionKindLabel = () => 'Individual';
+// Globals this suite stubs so admin_shell.jsx (a window.* global-script
+// module) resolves its sibling helpers at import time. We snapshot the
+// originals and restore them in afterAll so these stubs can't leak into
+// other suites and cause order-dependent flakes.
+const STUBBED_GLOBALS = {
+  pluralize: (n, s, p) => `${n} ${n === 1 ? s : (p || `${s}s`)}`,
+  formatLabelShort: (f) => f,
+  formatDate: (d) => d,
+  competitionKindLabel: () => 'Individual',
   // Stub component: CompCard references <StatusBadge> via the global. The
   // React stub's createElement never invokes it, so a no-op suffices.
-  window.StatusBadge = function StatusBadge() { return null; };
+  StatusBadge: function StatusBadge() { return null; },
+};
+const originalGlobals = {};
+
+beforeAll(async () => {
+  for (const [key, stub] of Object.entries(STUBBED_GLOBALS)) {
+    originalGlobals[key] = { had: key in window, value: window[key] };
+    window[key] = stub;
+  }
   await import('../admin_shell.jsx');
   CompCard = window.CompCard;
+});
+
+afterAll(() => {
+  for (const [key, orig] of Object.entries(originalGlobals)) {
+    if (orig.had) window[key] = orig.value;
+    else delete window[key];
+  }
 });
 
 // Recursively gather string/number leaves from the React-stub vnode tree

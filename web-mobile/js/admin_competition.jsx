@@ -1214,7 +1214,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const start = async () => {
-    if (!confirmCheckInExclusion()) return;
+    // draw-ready → running does not regenerate the draw; skip the confirmation
+    // there to avoid showing stale exclusion counts against an already-fixed draw.
+    if (c.status !== "draw-ready" && !confirmCheckInExclusion()) return;
     showToast(`Starting ${c.name}…`);
 
     setStarting(true);

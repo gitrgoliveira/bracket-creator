@@ -388,13 +388,16 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// this guard, a self-run tournament with no admin password would
 			// leave destructive routes fully public. Locked mode always fails
 			// closed (GateActive always true → 503 when unconfigured) so we
-			// only need to guard file mode here.
+			// must NOT apply this guard in locked mode: there, the on-disk
+			// AdminPassword is always empty/inert (the env-var bcrypt hash is
+			// authoritative), so guarding on desired.AdminPassword == ""
+			// would wrongly reject every PUT to a locked-mode self-run
+			// tournament (e.g. a routine venue edit). The `locked` flag is
+			// captured from the enclosing handler scope.
 			//
-			// Note: we check desired.AdminPassword (the just-loaded value) not
-			// a freshly-loaded field since we are inside the locked transform.
 			// desired.AdminPassword was preserved from current above, so it
 			// reflects the current on-disk value.
-			if desired.Mode == state.TournamentModeSelfRun && desired.AdminPassword == "" {
+			if !locked && desired.Mode == state.TournamentModeSelfRun && desired.AdminPassword == "" {
 				return errSelfRunRequiresAdminPassword
 			}
 

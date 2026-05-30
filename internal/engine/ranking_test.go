@@ -545,3 +545,57 @@ func TestStartCompetition_PlayoffsFromSource_SaveFailureRollsBackToSetup(t *test
 	assert.Equal(t, state.CompStatusSetup, comp.Status,
 		"Status must roll back to setup after a roster-save failure, not get stuck at draw-ready")
 }
+
+// TestStartCompetition_PlayoffsFromSource_NonUUIDSourceIDsPersistUUIDs pins the
+// fix for the column-shift hazard: when the SOURCE competition carries
+// non-UUID (client-slug) participant IDs, the resolved playoffs roster must
+// still be persisted with UUID column-0 ids — so a later auto-detect load (the
+// path taken if the deferred HasParticipantIDs flip ever fails to land) parses
+// names/dojos correctly instead of column-shifting the slug into Name.
+func TestStartCompetition_PlayoffsFromSource_NonUUIDSourceIDsPersistUUIDs(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	srcID := "slug-src"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: srcID, Name: "Slug Src", Format: state.CompFormatMixed,
+		Status: state.CompStatusComplete, HasParticipantIDs: true,
+	}))
+	// Source participants carry non-UUID client-slug IDs (the mp-p7n shape).
+	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
+		{ID: "slug-src-p1", Name: "Alice", Dojo: "DojoA"},
+		{ID: "slug-src-p2", Name: "Bob", Dojo: "DojoB"},
+	}))
+	require.NoError(t, store.SavePools(srcID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "slug-src-p1", Name: "Alice"}, {ID: "slug-src-p2", Name: "Bob"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	playoffID := "slug-playoffs"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: playoffID, Name: "Slug - Playoffs",
+		Format: state.CompFormatPlayoffs, SourceCompID: srcID,
+	}))
+
+	require.NoError(t, eng.StartCompetition(playoffID))
+
+	// Load WITHOUT the HasIDs hint (HasIDs: nil → auto-detect), simulating the
+	// path used if the HasParticipantIDs flip had failed. Column 0 must be a
+	// UUID for this to parse correctly.
+	roster, err := store.LoadParticipantsOpt(playoffID, false, state.LoadParticipantsOpts{})
+	require.NoError(t, err)
+	require.Len(t, roster, 2)
+	assert.ElementsMatch(t, []string{"Alice", "Bob"},
+		[]string{roster[0].Name, roster[1].Name},
+		"names must NOT be column-shifted on auto-detect load")
+	for _, p := range roster {
+		assert.NotEqual(t, "slug-src-p1", p.ID)
+		assert.NotEqual(t, "slug-src-p2", p.ID)
+		assert.True(t, helper.IsUUIDv4(p.ID),
+			"resolved roster id must be a freshly-minted UUID, got %q", p.ID)
+	}
+}

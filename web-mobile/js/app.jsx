@@ -259,11 +259,16 @@ function App() {
       ? crypto.randomUUID()
       : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
-  // mp-cw1: Set of announcement IDs already seen by this session.
-  // Seeded by the initial HTTP fetchAnnouncements response (source of truth
-  // for pre-existing announcements). SSE snapshots that arrive before the HTTP
-  // seed are buffered in pendingSseAnnouncements and replayed after seeding to
-  // detect announcements added in the race window.
+  // mp-cw1: ISO timestamp of when this viewer session mounted. Used to
+  // distinguish pre-existing announcements (sentAt ≤ mount time) from
+  // announcements created after the viewer opened the tab (sentAt > mount
+  // time). Post-mount IDs are excluded from the HTTP seed so the buffered
+  // SSE replay still fires notifications for them.
+  const mountTimeRef = useR(new Date().toISOString());
+  // Set of announcement IDs already seen by this session. Seeded by the
+  // initial HTTP fetchAnnouncements response (pre-mount IDs only) so a
+  // page-reload does NOT re-fire for already-active announcements, and an
+  // announcement created in the mount→fetch race window still fires.
   const seenAnnouncementIds = useR(null); // lazily initialised to a Set below
   // Holds the latest SSE announcement snapshot received before the HTTP seed
   // has settled. Full snapshots are idempotent: only the latest matters.
@@ -389,9 +394,17 @@ function App() {
       .then(list => {
         const active = filterActiveAnnouncements(list || []);
         setAnnouncements(active);
-        // mp-cw1: Seed from the HTTP response — the canonical list of
-        // announcements that existed when the viewer mounted.
-        diffAnnouncementSnapshot(seenAnnouncementIds, list || []);
+        // mp-cw1: Seed from the HTTP response, but only for pre-mount
+        // announcements (sentAt ≤ mount time). Announcements created after
+        // the viewer mounted (sentAt > mount time) are intentionally excluded
+        // so the buffered SSE replay below still fires notifications for them
+        // even when the HTTP GET response happened to capture them too.
+        // Announcements without a sentAt field are treated conservatively as
+        // pre-existing (no spam risk).
+        const preMountList = (list || []).filter(
+          a => !a || !a.id || !a.sentAt || a.sentAt <= mountTimeRef.current
+        );
+        diffAnnouncementSnapshot(seenAnnouncementIds, preMountList);
         // Replay any SSE snapshot that beat the HTTP seed. These arrived
         // after mount and may contain genuinely new announcements added in
         // the race window; diff them to fire the appropriate notifications.

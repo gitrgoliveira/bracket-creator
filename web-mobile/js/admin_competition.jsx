@@ -618,15 +618,20 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {(() => {
             const days = deriveTournamentDays(tournament.date, tournament.durationDays || 1);
             if (days.length > 0) {
-              // A previously-saved competition date can fall outside the
-              // current day list (e.g. the tournament duration was shortened
-              // after this competition was created). A controlled <select>
-              // whose value matches no <option> would silently display the
-              // first option while React state keeps the stale date — the
-              // operator would then "save" an out-of-range date the backend
-              // now rejects. Surface the stray value as an explicit, flagged
-              // option so the displayed value matches state and the mismatch
-              // is visible. Picking any real day clears it on save.
+              // A controlled <select> whose value matches no <option> would
+              // silently display the first option while React state keeps the
+              // real (stale or empty) value — the operator would then "save"
+              // a value the UI never showed. Two cases need an explicit
+              // matching option so the displayed value always tracks state:
+              //   - empty date (legacy/imported competition with no day set):
+              //     render a disabled "— Select a day —" placeholder so the
+              //     select shows "unset" and forces a deliberate pick rather
+              //     than persisting "" while appearing to show Day 1.
+              //   - out-of-range date (e.g. the tournament duration was
+              //     shortened after this competition was created): surface the
+              //     stray value as a flagged option so the mismatch is visible.
+              // Picking any real day clears either state on save.
+              const isEmpty = !local.date;
               const outOfRange = local.date && !days.includes(local.date);
               return (
                 <select
@@ -634,6 +639,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                   value={local.date}
                   onChange={(e) => update("date", e.target.value)}
                 >
+                  {isEmpty && (
+                    <option value="" disabled>— Select a day —</option>
+                  )}
                   {outOfRange && (
                     <option key={local.date} value={local.date}>{local.date} (outside tournament days)</option>
                   )}

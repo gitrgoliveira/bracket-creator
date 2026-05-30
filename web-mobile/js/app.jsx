@@ -131,7 +131,9 @@ class ErrorBoundary extends React.Component {
 // mp-cw1: Fire browser Notification for each newly-added announcement.
 // Guards: Notification API available + permission granted + document hidden
 // + localStorage toggle on. Uses tag:id to coalesce duplicate fires.
-// Pure function; exported for unit testing.
+// NOT pure — reads Notification.permission, document.hidden and localStorage,
+// and constructs Notification instances. Exported for unit testing (tests stub
+// those globals). Callers must treat it as side-effecting.
 export function fireBrowserNotifications(additions) {
   if (typeof Notification === "undefined") return;
   if (Notification.permission !== "granted") return;

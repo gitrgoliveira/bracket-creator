@@ -307,23 +307,34 @@ describe('draw-ready is not live (mp-rrd)', () => {
   it('tournamentMatches excludes setup but includes draw-ready structure', async () => {
     vi.resetModules();
     global.window = global.window || {};
+    // Save/restore the globals we stub so we don't leak state into other
+    // suites if they were already present (delete-only would clobber them).
+    const stubbed = ['hasBothSides', 'roundLabel'];
+    const prior = stubbed.map(k => Object.prototype.hasOwnProperty.call(global.window, k)
+      ? { k, had: true, val: global.window[k] }
+      : { k, had: false });
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
     global.window.roundLabel = (i) => `Round ${i + 1}`;
-    const { tournamentMatches, compMatches } = await import('../viewer.jsx');
-    const drawReady = {
-      id: 'dr', status: 'draw-ready', kind: 'individual', teamSize: 0,
-      poolMatches: [{ id: 'Pool A-0', status: 'scheduled', sideA: { id: 'p1', name: 'A' }, sideB: { id: 'p2', name: 'B' } }],
-      bracket: { rounds: [] },
-    };
-    const setup = { id: 'st', status: 'setup', kind: 'individual', teamSize: 0, poolMatches: [{ id: 'Pool A-0', status: 'scheduled' }], bracket: { rounds: [] } };
-    // setup contributes nothing; draw-ready contributes its draw matches.
-    expect(compMatches(setup)).toEqual([]);
-    expect(compMatches(drawReady).length).toBe(1);
-    const all = tournamentMatches({ competitions: [drawReady, setup] });
-    expect(all.length).toBe(1);
-    expect(all[0].compId).toBe('dr');
-    delete global.window.hasBothSides;
-    delete global.window.roundLabel;
+    try {
+      const { tournamentMatches, compMatches } = await import('../viewer.jsx');
+      const drawReady = {
+        id: 'dr', status: 'draw-ready', kind: 'individual', teamSize: 0,
+        poolMatches: [{ id: 'Pool A-0', status: 'scheduled', sideA: { id: 'p1', name: 'A' }, sideB: { id: 'p2', name: 'B' } }],
+        bracket: { rounds: [] },
+      };
+      const setup = { id: 'st', status: 'setup', kind: 'individual', teamSize: 0, poolMatches: [{ id: 'Pool A-0', status: 'scheduled' }], bracket: { rounds: [] } };
+      // setup contributes nothing; draw-ready contributes its draw matches.
+      expect(compMatches(setup)).toEqual([]);
+      expect(compMatches(drawReady).length).toBe(1);
+      const all = tournamentMatches({ competitions: [drawReady, setup] });
+      expect(all.length).toBe(1);
+      expect(all[0].compId).toBe('dr');
+    } finally {
+      prior.forEach(({ k, had, val }) => {
+        if (had) global.window[k] = val;
+        else delete global.window[k];
+      });
+    }
   });
 
   it('the live-comp filter (status-based) excludes both setup and draw-ready', () => {

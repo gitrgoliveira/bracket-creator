@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -454,7 +455,31 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 	r.POST("/tournament", func(c *gin.Context) {
 		var t state.Tournament
-		if err := c.ShouldBindJSON(&t); err != nil {
+		// ShouldBindBodyWith caches the raw request body so we can bind it a
+		// SECOND time below into a separate struct. This lets us read a
+		// transient `adminPassword` field from the SAME POST body WITHOUT
+		// weakening the json:"-" invariant on Tournament.AdminPassword (which
+		// deliberately can never be populated by binding a request body).
+		// Creation is the one safe place to accept the elevated credential in
+		// the body: there is no existing credential to protect at bootstrap,
+		// and it lets self-run creation be atomic (the fail-open guard never
+		// sees a self-run tournament persisted without an admin password). PUT
+		// keeps the json:"-" preserve-only behaviour (rotation stays on
+		// PUT /api/auth/admin-password).
+		if err := c.ShouldBindBodyWith(&t, binding.JSON); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// Second bind into a local struct to capture the transient admin
+		// (destructive-ops) password. Tournament.AdminPassword has json:"-"
+		// so it is never populated by the bind above — this is the only way
+		// to read it from the body at creation time. A bind failure here is
+		// impossible (the first bind already validated the JSON), but handle
+		// it for safety.
+		var extra struct {
+			AdminPassword string `json:"adminPassword"`
+		}
+		if err := c.ShouldBindBodyWith(&extra, binding.JSON); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -567,16 +592,35 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			t.AdminPassword = existingForPost.AdminPassword
 		}
 
+		// Atomic admin-password set at creation (mp-7h7). In file mode the
+		// admin (destructive-ops) password is stored as PLAINTEXT in
+		// Tournament.AdminPassword (fileElevatedVerifier.Verify does an
+		// exact-string compare). When the body carried an `adminPassword`
+		// (read into `extra` above) and no admin password is already on disk,
+		// set it now — BEFORE the fail-open guard and before
+		// SaveTournamentChanged — so a self-run tournament is persisted WITH
+		// the credential in a single request. This is what makes self-run
+		// creation possible via the real API (the json:"-" invariant blocks
+		// the field from being bound directly into Tournament).
+		//
+		// Locked mode: the env-var bcrypt hash is the authoritative elevated
+		// credential; any body adminPassword is inert, so ignore it (do not
+		// write a plaintext value that would never be consulted).
+		fileMode := verifier == nil || !verifier.RedactStoredPassword()
+		if fileMode && t.AdminPassword == "" && extra.AdminPassword != "" {
+			t.AdminPassword = extra.AdminPassword
+		}
+
 		// Fail-open guard for self-run + file mode (mp-7h7).
 		// In self-run mode the main-gate is skipped, so destructive routes
 		// rely SOLELY on RequireElevatedPassword / enforceElevated.
 		// enforceElevated GateActive()==false (file mode, no admin password)
 		// means destructive routes would be fully public — violating the
 		// invariant. Reject creation of a self-run tournament in file mode
-		// unless an AdminPassword is already set (or was set in existingForPost).
-		// Locked mode always fails closed (GateActive always true → 503) so no
-		// guard needed there.
-		fileMode := verifier == nil || !verifier.RedactStoredPassword()
+		// unless an AdminPassword is set: either already on disk (preserved
+		// from existingForPost) or supplied in this request's body (set just
+		// above). Locked mode always fails closed (GateActive always true →
+		// 503) so no guard needed there.
 		if fileMode && t.Mode == state.TournamentModeSelfRun && t.AdminPassword == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errSelfRunRequiresAdminPassword.Error()})
 			return

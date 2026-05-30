@@ -433,28 +433,97 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   });
 
   // mp-116: Individual match must still render the ippons block (regression guard).
-  it('renders individual ippons block when compKind is absent (individual match)', () => {
-    // The individual path calls window.isHikiwake — stub it for this test.
+  it('renders individual ippons block (not team subs) for an individual match', () => {
+    // The individual path calls window.isHikiwake — stub it for this test,
+    // restoring any prior value in finally so a thrown assertion can't leak
+    // the stub into later tests (mirrors the roundLabel pattern above).
+    const savedIsHikiwake = global.window.isHikiwake;
     global.window.isHikiwake = vi.fn(() => false);
+    try {
+      const match = {
+        compKind: 'individual',
+        teamSize: 0,
+        status: 'completed',
+        court: 'A',
+        phase: 'bracket',
+        round: 'QF',
+        sideA: { id: 'pA', name: 'Alice' },
+        sideB: { id: 'pB', name: 'Bob' },
+        ipponsA: ['M'],
+        ipponsB: [],
+        winner: { id: 'pA' },
+      };
+      const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+      const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
+      expect(ipponsBlock).toBeTruthy();
+      const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
+      expect(teamSubs).toBeNull();
+    } finally {
+      if (savedIsHikiwake === undefined) delete global.window.isHikiwake;
+      else global.window.isHikiwake = savedIsHikiwake;
+    }
+  });
+});
+
+// mp-116 (Copilot review follow-up): the bracket-tab and pools-tab click sites
+// now enrich the match with phase/round (or poolName) before opening the modal,
+// because raw BracketMatch / pool match objects carry neither. MatchViewerModal's
+// header renders `phase === "pool" ? poolName : round`, so without that metadata
+// the header showed a dangling separator with an empty label. These tests lock
+// the modal-header contract the callers must satisfy.
+describe('MatchViewerModal header + team rendering (mp-116)', () => {
+  const realReact = global.React;
+  let runtime;
+  let MatchViewerModal;
+  const STUBBED = ['useEscapeToClose', 'ipponsFromScore'];
+  const savedGlobals = {};
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
+    global.window.useEscapeToClose = vi.fn();
+    global.window.ipponsFromScore = vi.fn(() => []);
+    vi.resetModules();
+    ({ MatchViewerModal } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('renders the round label in the header for a bracket match', () => {
     const match = {
-      compKind: 'individual',
-      teamSize: 0,
-      status: 'completed',
-      court: 'A',
-      phase: 'bracket',
-      round: 'QF',
-      sideA: { id: 'pA', name: 'Alice' },
-      sideB: { id: 'pB', name: 'Bob' },
-      ipponsA: ['M'],
-      ipponsB: [],
-      winner: { id: 'pA' },
+      phase: 'bracket', round: 'Final', compKind: 'team', teamSize: 5,
+      status: 'completed', court: 'A',
+      sideA: { id: 'tA', name: 'Team A' }, sideB: { id: 'tB', name: 'Team B' },
+      subResults: [{ position: 1, ipponsA: ['M'], ipponsB: [] }],
     };
-    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
-    delete global.window.isHikiwake;
-    const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
-    expect(ipponsBlock).toBeTruthy();
-    const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
-    expect(teamSubs).toBeNull();
+    const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
+    const text = collectText(tree);
+    // Header must show the round label, not an empty string after "Shiaijo A ·".
+    expect(text).toContain('Final');
+    // Team path renders the SHIRO/Position/AKA sub-bout table.
+    expect(text).toContain('Position');
+  });
+
+  it('renders the pool name in the header for a pool match', () => {
+    const match = {
+      phase: 'pool', poolName: 'Pool A', compKind: 'team', teamSize: 5,
+      status: 'completed', court: 'B',
+      sideA: { id: 'tA', name: 'Team A' }, sideB: { id: 'tB', name: 'Team B' },
+      subResults: [{ position: 1, ipponsA: ['M'], ipponsB: [] }],
+    };
+    const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
+    expect(collectText(tree)).toContain('Pool A');
   });
 });
 

@@ -195,7 +195,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		active = append(active, p)
 	}
 	if len(active) < 2 {
-		return nil, validationErrorf("swiss round requires at least 2 eligible (checked-in) participants, got %d", len(active))
+		return nil, validationErrorf("swiss round requires at least 2 eligible participants, got %d", len(active))
 	}
 
 	// Build the prior-pairings set (for rematch avoidance) and the

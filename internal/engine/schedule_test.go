@@ -510,6 +510,35 @@ func TestEstimateForCounts_NoCourts(t *testing.T) {
 	assert.Len(t, estEmpty.PerCourtMinutes, 1, "empty courts must yield exactly one per-court entry")
 }
 
+// TestEstimateForCounts_NegativeCountsClamped verifies negative match counts are
+// clamped to 0 rather than producing negative/nonsensical durations
+// (Copilot review #3326935837). Co-located with the other EstimateForCounts
+// tests (#3328458142).
+func TestEstimateForCounts_NegativeCountsClamped(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 4, 4, "09:00")
+	tourn := newTournament(1.5, 10, "", "", "")
+	neg := EstimateForCounts(-5, -3, comp, tourn)
+	zero := EstimateForCounts(0, 0, comp, tourn)
+	assert.Equal(t, zero.TotalDurationMinutes, neg.TotalDurationMinutes,
+		"negative counts must clamp to 0 (same as the empty estimate)")
+	assert.GreaterOrEqual(t, neg.TotalDurationMinutes, 0, "duration must never be negative")
+}
+
+// TestEstimateForCounts_CourtsClampedToMax verifies an oversized Courts slice is
+// clamped to MaxCourts (the A–Z cap), guarding the per-court allocations against
+// a malformed/hostile Competition — same defensive bound as EstimateSchedule
+// (Copilot review #3328458139).
+func TestEstimateForCounts_CourtsClampedToMax(t *testing.T) {
+	courts := make([]string, MaxCourts+50)
+	for i := range courts {
+		courts[i] = fmt.Sprintf("C%d", i)
+	}
+	comp := &state.Competition{Kind: "individual", Courts: courts, PoolMatchDuration: 3, StartTime: "09:00"}
+	est := EstimateForCounts(100, 0, comp, newTournament(1.5, 10, "", "", ""))
+	assert.Len(t, est.PerCourtMinutes, MaxCourts,
+		"oversized Courts slice must clamp per-court entries to MaxCourts")
+}
+
 // ---------------------------------------------------------------------------
 // Step 3: balanced fixture cross-path equality test
 // ---------------------------------------------------------------------------

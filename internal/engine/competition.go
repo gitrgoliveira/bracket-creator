@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -422,6 +423,48 @@ func filterCheckedIn(players []domain.Player) []domain.Player {
 	return eligible
 }
 
+// checkInExcludedNames returns the normalized (lowercased, trimmed) names of
+// players that filterCheckedIn would remove under opt-in semantics: the
+// non-checked-in players when at least one is checked in, else nil. Used to
+// prune their seed assignments so ApplySeeds doesn't fail on an absent player.
+func checkInExcludedNames(players []domain.Player) map[string]bool {
+	anyCheckedIn := false
+	for _, p := range players {
+		if p.CheckedIn {
+			anyCheckedIn = true
+			break
+		}
+	}
+	if !anyCheckedIn {
+		return nil
+	}
+	excluded := make(map[string]bool)
+	for _, p := range players {
+		if !p.CheckedIn {
+			excluded[strings.ToLower(strings.TrimSpace(p.Name))] = true
+		}
+	}
+	return excluded
+}
+
+// dropSeedAssignments removes seed assignments whose participant name is in the
+// excluded set (case-insensitive). A nil/empty excluded set returns the input
+// unchanged, so a seed for a name that was never a participant still flows
+// through to ApplySeeds and surfaces the same error as before.
+func dropSeedAssignments(seeds []domain.SeedAssignment, excluded map[string]bool) []domain.SeedAssignment {
+	if len(excluded) == 0 {
+		return seeds
+	}
+	out := make([]domain.SeedAssignment, 0, len(seeds))
+	for _, a := range seeds {
+		if excluded[strings.ToLower(strings.TrimSpace(a.Name))] {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 func (e *Engine) runDrawPipeline(id string) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -503,6 +546,13 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// so filtering after resolution would wrongly drop the entire playoff
 	// bracket. Source-resolved finalists are intentionally exempt and bypass
 	// this filter by virtue of placement.
+	//
+	// Capture the names check-in removes BEFORE filtering so we can drop their
+	// seed assignments too (PR #199 review): helper.ApplySeeds errors with
+	// "seeded participant not found in main list" for a seed whose player is
+	// absent, which would make a competition with a non-checked-in seeded
+	// player undrawable.
+	excludedByCheckIn := checkInExcludedNames(players)
 	players = filterCheckedIn(players)
 	// Playoffs competitions created from a mixed source (POST /playoffs)
 	// start with an empty roster on disk. Resolve the source's final pool
@@ -535,6 +585,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if err != nil {
 		return err
 	}
+	// Drop seed assignments for participants removed by check-in (PR #199
+	// review) so ApplySeeds doesn't fail on an absent seeded player. Remaining
+	// seeds keep their ranks; sparse ranks are handled by the seeding pass.
+	seeds = dropSeedAssignments(seeds, excludedByCheckIn)
 
 	// League format: enforce the single-pool invariant so that
 	// generatePools always produces exactly one pool containing all

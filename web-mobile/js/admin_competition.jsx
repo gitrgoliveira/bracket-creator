@@ -11,6 +11,7 @@ const isoToDmy = window.isoToDmy;
 const isValidDate = window.isValidDate;
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
+const deriveTournamentDays = window.deriveTournamentDays;
 // Canonical numeric bounds (admin_helpers.jsx) so the team-size input cap
 // stays in lockstep with TEAM_POSITIONS in the scoring modal.
 const MIN_YEAR = window.MIN_YEAR;
@@ -610,13 +611,42 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       <div className="row">
         <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
         <div className="field">
-          <label className="field__label">Date</label>
-          {/* HTML <input type="date"> uses ISO YYYY-MM-DD; convert at the */}
-          {/* boundary so local state (and the saved payload) stays in the */}
-          {/* canonical DD-MM-YYYY format. Picker bounds match MIN_YEAR/ */}
-          {/* MAX_YEAR (admin_helpers.jsx) so a typed date can't pass */}
-          {/* validation but be unreachable via the picker. */}
-          <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(local.date)} onChange={(e) => update("date", isoToDmy(e.target.value))} />
+          <label className="field__label">Day</label>
+          {/* When the tournament has a start date + durationDays, constrain */}
+          {/* the competition date to the tournament's day list via a select. */}
+          {/* Falls back to a free date picker when the tournament has no date. */}
+          {(() => {
+            const days = deriveTournamentDays(tournament.date, tournament.durationDays || 1);
+            if (days.length > 0) {
+              // A previously-saved competition date can fall outside the
+              // current day list (e.g. the tournament duration was shortened
+              // after this competition was created). A controlled <select>
+              // whose value matches no <option> would silently display the
+              // first option while React state keeps the stale date — the
+              // operator would then "save" an out-of-range date the backend
+              // now rejects. Surface the stray value as an explicit, flagged
+              // option so the displayed value matches state and the mismatch
+              // is visible. Picking any real day clears it on save.
+              const outOfRange = local.date && !days.includes(local.date);
+              return (
+                <select
+                  className="input"
+                  value={local.date}
+                  onChange={(e) => update("date", e.target.value)}
+                >
+                  {outOfRange && (
+                    <option key={local.date} value={local.date}>{local.date} (outside tournament days)</option>
+                  )}
+                  {days.map((d, i) => (
+                    <option key={d} value={d}>Day {i + 1} — {d}</option>
+                  ))}
+                </select>
+              );
+            }
+            return (
+              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(local.date)} onChange={(e) => update("date", isoToDmy(e.target.value))} />
+            );
+          })()}
           <div className="field__hint">Pick the competition day.</div>
         </div>
         <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>

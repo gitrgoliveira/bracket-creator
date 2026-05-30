@@ -91,6 +91,85 @@ func TestStore_TournamentYAML(t *testing.T) {
 	assert.Equal(t, tourney.Password, loaded.Password)
 }
 
+func TestStore_TournamentYAML_DurationDaysRoundTrip(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-test-durationdays-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		durationDays int
+		wantDuration int
+	}{
+		{"three days persisted and loaded", 3, 3},
+		{"max days", 30, 30},
+		{"one day", 1, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tourney := &Tournament{
+				Name:         "Round-trip Tournament",
+				Date:         "05-06-2026",
+				Venue:        "Test Venue",
+				Courts:       []string{"A"},
+				Password:     "pass",
+				DurationDays: tc.durationDays,
+			}
+			require.NoError(t, store.SaveTournament(tourney))
+
+			loaded, err := store.LoadTournament()
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantDuration, loaded.DurationDays)
+		})
+	}
+}
+
+func TestStore_TournamentYAML_DurationDays_MigratesFromZero(t *testing.T) {
+	// A tournament.md that predates the DurationDays field will not have
+	// duration_days in its YAML (omitempty). When loaded, the zero value
+	// must be promoted to 1 (single-day default).
+	dir, err := os.MkdirTemp("", "state-test-migrate-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// Write a tournament.md that looks like an old file (no duration_days).
+	path := filepath.Join(dir, "tournament.md")
+	data := "---\nname: Legacy Tournament\ndate: 01-05-2026\nvenue: Venue\npassword: pass\ncourts:\n  - A\n---\n"
+	require.NoError(t, os.WriteFile(path, []byte(data), 0600))
+
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, 1, loaded.DurationDays, "legacy tournament.md without duration_days must load as DurationDays=1")
+}
+
+func TestStore_TournamentYAML_CorruptParseFallback_DurationDays(t *testing.T) {
+	// When front matter fails to parse, the fallback record must also carry
+	// DurationDays=1 so Days() works correctly on the fallback.
+	dir, err := os.MkdirTemp("", "state-test-corrupt-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	path := filepath.Join(dir, "tournament.md")
+	require.NoError(t, os.WriteFile(path, []byte("invalid content"), 0600))
+
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, 1, loaded.DurationDays, "corrupt-parse fallback must have DurationDays=1")
+	// Days() must return a non-nil single-element slice for the fallback.
+	days := loaded.Days()
+	assert.Len(t, days, 1, "corrupt-parse fallback must produce 1 day via Days()")
+}
+
 func TestStore_TournamentYAML_ReturnsNilWhenMissing(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-test-*")
 	require.NoError(t, err)

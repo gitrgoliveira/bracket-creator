@@ -112,6 +112,31 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 	return out
 }
 
+// validateCompetitionDateInTournament checks that the competition's Date
+// falls within the tournament's day range [Day 1 .. Day N]. When:
+//   - comp.Date is empty (optional field) → skip, return nil.
+//   - tourn is nil or tourn.Date is empty → skip (can't derive day list yet).
+//   - comp.Date is in the derived day list → return nil.
+//   - comp.Date is NOT in the derived day list → return a descriptive error.
+//
+// errcheck: no bare ignored returns — always propagated by callers.
+func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.Tournament) error {
+	if comp.Date == "" || tourn == nil || tourn.Date == "" {
+		return nil
+	}
+	days := tourn.Days()
+	if len(days) == 0 {
+		// Tournament date unparseable or DurationDays < 1 — skip range check.
+		return nil
+	}
+	for _, d := range days {
+		if d == comp.Date {
+			return nil
+		}
+	}
+	return fmt.Errorf("date must be one of the tournament days (%s to %s)", days[0], days[len(days)-1])
+}
+
 // validateCompetitionFormat returns an HTTP status code + error
 // message for invalid Format / PoolFormat values. Empty values are
 // accepted (defaults applied on load). Unknown values return 400.
@@ -272,6 +297,31 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Load the tournament to (a) default the competition date to Day 1
+		// and (b) enforce the date-in-range constraint. Tournament load can
+		// return nil when no tournament.md exists yet (new setup); both steps
+		// skip gracefully in that case.
+		createTourn, err := store.LoadTournament()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Default the competition date to the tournament's Day 1 when the
+		// client sends an empty date. Pre-fix: the frontend seeded the date
+		// from tournament.date directly (JS), but the backend defaulted to
+		// today when it was empty — using Day 1 is the correct multi-day
+		// behaviour and also keeps server and client in sync.
+		if comp.Date == "" && createTourn != nil && createTourn.Date != "" {
+			comp.Date = createTourn.Date
+		}
+
+		// Reject a competition date that falls outside the tournament's day
+		// range. Skipped when tournament has no date configured.
+		if err := validateCompetitionDateInTournament(&comp, createTourn); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Cross-file guard symmetry with POST/PUT /tournament: same
 		// label + cap check via validateCompetitionCourts (looser than
 		// the tournament version — empty courts is allowed because the
@@ -348,7 +398,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// overwrote the existing competition. POST is documented as
 		// CREATE, so an existing ID is a 409 / 400 case.
 		var nameErr, idErr error
-		err := store.WithCompetitionRenameLock(func() error {
+		lockErr := store.WithCompetitionRenameLock(func() error {
 			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
@@ -359,6 +409,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
 			return saveErr
 		})
+		err = lockErr
 		if idErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
 			return
@@ -490,6 +541,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 			// Reject non-canonical Date format.
 			if err := validateDateDMY(comp.Date); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Enforce the competition-date-in-tournament-range constraint.
+			// Load tournament outside the rename lock to avoid holding the
+			// lock during I/O. Tournament load is read-only and idempotent,
+			// so the window between load and the lock acquisition is safe
+			// (the worst case is a missed tournament date update, which
+			// would just skip the range check — a harmless skip vs. a
+			// deadlock is the right trade-off).
+			putTourn, putTournErr := store.LoadTournament()
+			if putTournErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": putTournErr.Error()})
+				return
+			}
+			if err := validateCompetitionDateInTournament(&comp, putTourn); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}

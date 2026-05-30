@@ -204,6 +204,45 @@ func TestSelfRun_SelfRunMode_PUTTournament_RequiresMainPassword(t *testing.T) {
 	})
 }
 
+// Competition configuration mutations (create a competition, edit competition
+// config) are organiser setup, NOT operational play — like PUT /api/tournament
+// they stay main-gated in self-run mode (mp-7h7 / Copilot #203 sibling audit).
+// Without this an anonymous client could create or reconfigure competitions in
+// a self-run tournament. These routes are not elevated-gated, so the main gate
+// is the protection. The organiser's SPA always sends X-Tournament-Password.
+func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	configRoutes := []struct{ method, path string }{
+		{http.MethodPost, "/api/competitions"},
+		{http.MethodPut, "/api/competitions/some-id"},
+	}
+
+	for _, tc := range configRoutes {
+		t.Run("no_pw_401_"+tc.method+"_"+tc.path, func(t *testing.T) {
+			req := jsonReq(tc.method, tc.path, map[string]any{"name": "X"})
+			// No X-Tournament-Password: a config mutation must be rejected.
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusUnauthorized, w.Code,
+				"self-run config route %s %s must return 401 without main password", tc.method, tc.path)
+		})
+
+		t.Run("with_pw_not_401_"+tc.method+"_"+tc.path, func(t *testing.T) {
+			req := jsonReq(tc.method, tc.path, map[string]any{"name": "X"})
+			req.Header.Set("X-Tournament-Password", "main-pw")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			// Past the main gate — downstream may 400/404 on the body/id, but
+			// never 401 (the invariant under test).
+			assert.NotEqual(t, http.StatusUnauthorized, w.Code,
+				"correct main password must clear the gate on %s %s (got %d)", tc.method, tc.path, w.Code)
+		})
+	}
+}
+
 // Destructive routes still require X-Admin-Password in self-run mode.
 // The main gate is skipped but RequireElevatedPassword still fires.
 func TestSelfRun_SelfRunMode_DestructiveRoutes_Require_AdminPassword(t *testing.T) {

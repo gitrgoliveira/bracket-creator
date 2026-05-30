@@ -189,6 +189,32 @@ func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
 	return true
 }
 
+// isSelfRunMainGatedConfigRoute reports whether the given (method, route)
+// is an organiser-owned configuration/setup mutation that must remain behind
+// the main-password gate even in self-run mode (mp-7h7 / Copilot #203).
+//
+// Self-run makes the OPERATIONAL play surface public (scoring, check-in,
+// start/complete, draw generation) because there is no table operator. But
+// configuration mutations are NOT operational play and are NOT elevated-gated,
+// so the self-run pass-through would otherwise let an anonymous client tamper
+// with setup. The routes below mutate: tournament setup (name/password/courts/
+// check-in windows) and competition setup (creation + config). They are keyed
+// by the param-free FullPath so the match is stable across path parameters.
+//
+// IMPORTANT: any NEW admin route that mutates organiser-owned setup (rather
+// than operational play) and is not already elevated-gated MUST be added here,
+// otherwise it becomes anonymously writable in self-run mode.
+func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
+	switch method + " " + fullPath {
+	case http.MethodPut + " /api/tournament", // tournament name/password/courts/check-in windows
+		http.MethodPost + " /api/competitions",    // create a competition (category) — setup
+		http.MethodPut + " /api/competitions/:id": // edit competition config — setup
+		return true
+	default:
+		return false
+	}
+}
+
 // AuthMiddleware gates admin endpoints behind the X-Tournament-Password
 // header. The actual credential check is delegated to the PasswordVerifier
 // so file-based and locked (bcrypt-env-var) modes share a single middleware.
@@ -258,13 +284,16 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		// already fire downstream on those specific routes. No new allowlist
 		// needed — the elevated-decorator set IS the allowlist (DRY).
 		//
-		// Exception — tournament configuration routes (PUT /api/tournament):
-		// these mutate setup data including the main password, courts, and
-		// check-in windows. In self-run mode there is no separate main-password
-		// gate, so these routes fall through to the standard auth path below.
-		// The SPA always sends the main password as X-Tournament-Password on
-		// PUT /api/tournament even in self-run mode, so this is transparent to
-		// existing clients.
+		// Exception — configuration/setup mutations stay main-gated even in
+		// self-run mode (see isSelfRunMainGatedConfigRoute). These routes
+		// mutate organiser-owned setup (tournament name/password/courts/
+		// check-in windows; competition creation and competition config) as
+		// opposed to the operational play surface participants drive. They are
+		// NOT elevated-gated, so without this carve-out the pass-through would
+		// expose them to anonymous callers in self-run (Copilot #203). The SPA
+		// always sends the main password as X-Tournament-Password on admin
+		// mutations, so for the organiser who created the tournament this is
+		// transparent; only an anonymous client (no main password) is blocked.
 		//
 		// Officiated mode (the default) skips this block entirely → no regression.
 		//
@@ -275,8 +304,7 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		// mutations. Comparing explicitly against TournamentModeSelfRun is safe:
 		// the empty string (old files) and "officiated" both fall through to the
 		// standard auth path below.
-		isTournamentConfigMutation := c.Request.Method == http.MethodPut && c.FullPath() == "/api/tournament"
-		if t.Mode == state.TournamentModeSelfRun && !isTournamentConfigMutation {
+		if t.Mode == state.TournamentModeSelfRun && !isSelfRunMainGatedConfigRoute(c.Request.Method, c.FullPath()) {
 			c.Next()
 			return
 		}

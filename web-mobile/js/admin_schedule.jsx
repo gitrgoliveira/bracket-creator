@@ -620,12 +620,24 @@ function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
   // savedLineups is a map of matchId → lineup (non-null only when a lineup
   // has been saved). Candidate = match for this team, not the current match,
   // with a saved lineup.
+  //
+  // teamId may be a single key or an array of keys ([id, name]). A match
+  // side may be keyed by the team NAME (api_serializers name-as-id fallback)
+  // while the team's real id is a UUID, so we match a side against ANY of
+  // the provided keys by either its id OR its name — comparing only one key
+  // space would silently find zero candidates (the original copy-from-
+  // previous bug).
+  const keys = (Array.isArray(teamId) ? teamId : [teamId]).filter(Boolean);
+  const sideMatches = (side) => {
+    if (side == null) return false;
+    const sid = typeof side === "object" ? (side.id ?? side.ID) : side;
+    const sname = typeof side === "object" ? (side.name ?? side.Name) : side;
+    return keys.includes(sid) || keys.includes(sname);
+  };
   const candidates = allMatches.filter(m => {
     if (m.id === currentMatchId) return false;
-    const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
-    const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
-    if (sideAId !== teamId && sideBId !== teamId) return false;
-    return !!savedLineups[m.id];
+    if (!savedLineups[m.id]) return false;
+    return sideMatches(m.sideA) || sideMatches(m.sideB);
   });
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => {
@@ -669,6 +681,19 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     : (team?.id || team?.name || "");
   const compId = comp?.id || "";
   const matchId = match?.id || "";
+
+  // A match "involves" this team when either side resolves to it by id OR by
+  // name. Match sides may be keyed by team NAME (api_serializers name-as-id
+  // fallback) while teamId is the participant UUID, so we compare against
+  // both keys — the same id-vs-name pitfall the roster resolver hits.
+  const teamKeys = [team?.id, team?.ID, team?.name, team?.Name].filter(Boolean);
+  const sideMatchesTeam = (side) => {
+    if (side == null) return false;
+    const sid = typeof side === "object" ? (side.id ?? side.ID) : side;
+    const sname = typeof side === "object" ? (side.name ?? side.Name) : side;
+    return teamKeys.includes(sid) || teamKeys.includes(sname);
+  };
+  const matchInvolvesTeam = (mm) => sideMatchesTeam(mm.sideA) || sideMatchesTeam(mm.sideB);
 
   const [values, setValues] = useStateA(() => {
     const init = {};
@@ -765,24 +790,14 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   // to avoid N fire-and-forget GETs on every panel mount). Fetches all
   // siblings in parallel, picks the best candidate via pickCopySource, and
   // copies its positions into the current match.
-  const hasSiblings = !!(allMatches && allMatches.some(m => {
-    if (m.id === matchId) return false;
-    const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
-    const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
-    return sideAId === teamId || sideBId === teamId;
-  }));
+  const hasSiblings = !!(allMatches && allMatches.some(m => m.id !== matchId && matchInvolvesTeam(m)));
   const copyFromPrevious = async () => {
     if (!compId || !teamId || !allMatches) return;
     setError("");
     setCopying(true);
     try {
       // Fetch all sibling lineups in parallel to find the best candidate.
-      const siblings = allMatches.filter(m => {
-        if (m.id === matchId) return false;
-        const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
-        const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
-        return sideAId === teamId || sideBId === teamId;
-      });
+      const siblings = allMatches.filter(m => m.id !== matchId && matchInvolvesTeam(m));
       const results = await Promise.all(
         siblings.map(s =>
           window.API.fetchMatchLineup(compId, teamId, s.id)
@@ -794,7 +809,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
       results.forEach(({ matchId: mid, lineup }) => {
         if (lineup) savedLineupsByMatch[mid] = lineup;
       });
-      const copySource = pickCopySource(allMatches, matchId, teamId, savedLineupsByMatch);
+      const copySource = pickCopySource(allMatches, matchId, teamKeys, savedLineupsByMatch);
       if (!copySource) {
         setError("No previous match lineup found to copy.");
         return;
@@ -916,54 +931,30 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
   const comp = (tournament?.competitions || []).find(cc => cc.id === m.compId) || null;
   const isTeamComp = comp && (comp.kind === "team" || (comp.teamSize || 0) > 0);
 
-  // Hydrate the full participants list from the server. The competition list
-  // endpoint (/api/viewer/competitions) omits participant rosters to keep the
-  // payload small, so comp.players is always [] in the score-editor data path.
-  // We fetch /api/competitions/:id/participants on mount and merge the result
-  // so that each team object carries its metadata (member roster) for the
-  // position dropdowns in MatchLineupSideEditor.
-  const compId = comp?.id || "";
-  const [hydrated, setHydrated] = useStateA(null);   // null = loading, [] = fetched (empty), [...] = fetched
-  const [rosterError, setRosterError] = useStateA("");
-
-  useEffectA(() => {
-    if (!compId || !isTeamComp) {
-      setHydrated([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const raw = await window.API.listParticipants(compId, password);
-        if (cancelled) return;
-        // raw is PascalCase from the server; normalise to camelCase so
-        // rosterFor() can find team.metadata (lowercase).
-        const normalizeP = (typeof window.normalizePlayer === "function")
-          ? window.normalizePlayer
-          : (p) => p;
-        setHydrated(Array.isArray(raw) ? raw.map(normalizeP) : []);
-        setRosterError("");
-      } catch (e) {
-        if (!cancelled) {
-          setRosterError(e?.message || "Failed to load roster");
-          setHydrated([]);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [compId, isTeamComp]);
-
   if (!isTeamComp) return null;
 
-  // Resolve team objects. Prefer the hydrated participants list (which carries
-  // Metadata/member roster) over the sparse comp.players from the competition
-  // list endpoint; fall back to m.sideA/sideB for the team name when the
-  // participant fetch is still in flight or found no match.
-  const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
-  const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
-  const players = (hydrated !== null ? hydrated : comp.players) || [];
-  const teamA = players.find(p => (p.id || p.ID || p.name || p.Name) === sideAId) || (m.sideA && typeof m.sideA === "object" ? m.sideA : null);
-  const teamB = players.find(p => (p.id || p.ID || p.name || p.Name) === sideBId) || (m.sideB && typeof m.sideB === "object" ? m.sideB : null);
+  // Resolve team objects from the competition's player list. comp.players
+  // (loaded via /api/viewer/competitions) already carries each team's
+  // metadata (member roster) — no extra participants fetch is needed.
+  //
+  // The match's sideA/sideB are normalized to { id, name }, where `id`
+  // falls back to the team NAME when the backend has no UUID for that slot
+  // (see api_serializers.normalizeMatch). A real participant's id is a
+  // UUID, so the side key may be a name while the participant key is a
+  // UUID (or vice-versa). We must therefore match on EITHER id OR name:
+  // the previous `(p.id || p.name) === sideId` form compared only the
+  // first truthy key (the UUID), which never equals a name-keyed sideId,
+  // so the roster silently failed to resolve and every dropdown showed
+  // "No roster found".
+  const sideKey = (side) =>
+    (side && typeof side === "object" ? (side.id || side.name) : side) || "";
+  const sideAKey = sideKey(m.sideA);
+  const sideBKey = sideKey(m.sideB);
+  const players = comp.players || [];
+  const matchesKey = (p, key) =>
+    !!key && (p.id === key || p.ID === key || p.name === key || p.Name === key);
+  const teamA = players.find(p => matchesKey(p, sideAKey)) || (m.sideA && typeof m.sideA === "object" ? m.sideA : null);
+  const teamB = players.find(p => matchesKey(p, sideBKey)) || (m.sideB && typeof m.sideB === "object" ? m.sideB : null);
 
   // All matches for this competition (needed for "Copy from previous" candidate search).
   const allMatches = typeof window.compMatches === "function" ? window.compMatches(comp) : [];
@@ -992,53 +983,44 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
           <button className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
         </div>
 
-        {rosterError && (
-          <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 12, padding: 8, border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
-            Could not load roster: {rosterError}
-          </div>
-        )}
-        {hydrated === null ? (
-          <div style={{ padding: "16px 0", color: "var(--ink-3)", fontSize: 13 }}>Loading roster…</div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-            <div style={{ borderRight: "1px solid var(--line, #e5e7eb)", paddingRight: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
-                SHIRO (white)
-              </div>
-              {teamB ? (
-                <MatchLineupSideEditor
-                  key={`${m.id}-side-b`}
-                  comp={comp}
-                  team={teamB}
-                  match={m}
-                  allMatches={allMatches}
-                  password={password}
-                  showToast={showToast}
-                />
-              ) : (
-                <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
-              )}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+          <div style={{ borderRight: "1px solid var(--line, #e5e7eb)", paddingRight: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
+              SHIRO (white)
             </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
-                AKA (red)
-              </div>
-              {teamA ? (
-                <MatchLineupSideEditor
-                  key={`${m.id}-side-a`}
-                  comp={comp}
-                  team={teamA}
-                  match={m}
-                  allMatches={allMatches}
-                  password={password}
-                  showToast={showToast}
-                />
-              ) : (
-                <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
-              )}
-            </div>
+            {teamB ? (
+              <MatchLineupSideEditor
+                key={`${m.id}-side-b`}
+                comp={comp}
+                team={teamB}
+                match={m}
+                allMatches={allMatches}
+                password={password}
+                showToast={showToast}
+              />
+            ) : (
+              <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
+            )}
           </div>
-        )}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
+              AKA (red)
+            </div>
+            {teamA ? (
+              <MatchLineupSideEditor
+                key={`${m.id}-side-a`}
+                comp={comp}
+                team={teamA}
+                match={m}
+                allMatches={allMatches}
+                password={password}
+                showToast={showToast}
+              />
+            ) : (
+              <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

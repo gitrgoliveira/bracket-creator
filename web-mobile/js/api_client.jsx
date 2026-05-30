@@ -683,22 +683,6 @@ const API = {
         }
         return res.json();
     },
-    // Fetch the full participant/team list for a competition. Returns the
-    // raw array as serialised by the server (Player JSON with PascalCase
-    // fields). Callers that need camelCase should run each element through
-    // normalizePlayer. Used by MatchLineupPanel to hydrate team rosters
-    // when comp.players is empty (the competition list endpoint omits
-    // participants to keep the payload small).
-    async listParticipants(compID, password) {
-        const res = await fetch(`/api/competitions/${compID}/participants`, {
-            headers: { 'X-Tournament-Password': password }
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to load participants');
-        }
-        return res.json();
-    },
     async addParticipant(compID, payload, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/participants`, {
             method: 'POST',

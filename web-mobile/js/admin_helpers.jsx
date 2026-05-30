@@ -390,4 +390,6 @@ export {
   MAX_TEAM_SIZE,
   MAX_COURTS,
   MAX_RANK,
+  MAX_TOURNAMENT_DURATION_DAYS,
+  deriveTournamentDays,
 };

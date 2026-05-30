@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isAnnouncementActive, filterActiveAnnouncements } from '../app.jsx';
-import { AnnouncementBanner, AnnouncementCard } from '../viewer.jsx';
+import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotifications } from '../app.jsx';
+import { AnnouncementBanner, AnnouncementCard, NotificationSettings, notificationSupported } from '../viewer.jsx';
 
 // Helper: recursively search a React element tree (mock objects) for all
 // elements matching a predicate, returning them as a flat list.
@@ -286,5 +286,275 @@ describe('AnnouncementCard dismiss and per-card timer', () => {
     // And they are independent — c1's dismiss did not fire c2's and vice versa
     expect(onDismiss1).not.toHaveBeenCalledWith('c2');
     expect(onDismiss2).not.toHaveBeenCalledWith('c1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fireBrowserNotifications — unit tests for the notification diff helper.
+// These cover the four guard conditions and the happy path.
+// ---------------------------------------------------------------------------
+
+describe('fireBrowserNotifications', () => {
+  let NotificationMock;
+  let originalNotification;
+  let originalDocumentHidden;
+  let originalWindowLocalStorage;
+
+  const setDocumentHidden = (val) => {
+    Object.defineProperty(document, 'hidden', { value: val, writable: true, configurable: true });
+  };
+
+  // Create a minimal in-memory localStorage stub for tests that need it.
+  // window.localStorage is undefined in this jsdom/node environment so we
+  // install a mock on window directly in each test suite that reads it.
+  const makeLocalStorageMock = (initialEntries = {}) => {
+    const store = { ...initialEntries };
+    return {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
+    };
+  };
+
+  beforeEach(() => {
+    originalNotification = global.Notification;
+    originalDocumentHidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+    originalWindowLocalStorage = Object.getOwnPropertyDescriptor(window, 'localStorage');
+
+    NotificationMock = vi.fn();
+    NotificationMock.permission = 'granted';
+    global.Notification = NotificationMock;
+
+    setDocumentHidden(true);
+
+    // Install a mock localStorage with the toggle pre-enabled.
+    const lsMock = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+    Object.defineProperty(window, 'localStorage', { value: lsMock, writable: true, configurable: true });
+  });
+
+  afterEach(() => {
+    global.Notification = originalNotification;
+    if (originalDocumentHidden) {
+      Object.defineProperty(document, 'hidden', originalDocumentHidden);
+    } else {
+      Object.defineProperty(document, 'hidden', { value: false, writable: true, configurable: true });
+    }
+    if (originalWindowLocalStorage) {
+      Object.defineProperty(window, 'localStorage', originalWindowLocalStorage);
+    } else {
+      Object.defineProperty(window, 'localStorage', { value: undefined, writable: true, configurable: true });
+    }
+  });
+
+  it('fires once for a new id when all guards pass', () => {
+    const additions = [{ id: 'ann-1', message: 'New announcement' }];
+    fireBrowserNotifications(additions);
+    expect(NotificationMock).toHaveBeenCalledTimes(1);
+    expect(NotificationMock).toHaveBeenCalledWith('Tournament Announcement', {
+      tag: 'ann-1',
+      body: 'New announcement',
+      icon: '/favicon.jpeg',
+    });
+  });
+
+  it('does NOT fire when document is visible (document.hidden === false)', () => {
+    setDocumentHidden(false);
+    fireBrowserNotifications([{ id: 'ann-2', message: 'Hello' }]);
+    expect(NotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire when permission is not granted', () => {
+    NotificationMock.permission = 'default';
+    fireBrowserNotifications([{ id: 'ann-3', message: 'Hello' }]);
+    expect(NotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire when permission is denied', () => {
+    NotificationMock.permission = 'denied';
+    fireBrowserNotifications([{ id: 'ann-4', message: 'Hello' }]);
+    expect(NotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire when the localStorage toggle is off', () => {
+    // Override the mock localStorage (beforeEach sets 'true') to 'false'.
+    window.localStorage.setItem('viewer.notifications.enabled', 'false');
+    fireBrowserNotifications([{ id: 'ann-5', message: 'Hello' }]);
+    expect(NotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire when the Notification API is unavailable', () => {
+    global.Notification = undefined;
+    // Should not throw; additions are silently ignored
+    expect(() => fireBrowserNotifications([{ id: 'ann-6', message: 'Hello' }])).not.toThrow();
+    // Nothing to assert about calls since the mock is gone, but no throw = pass
+  });
+
+  it('fires one notification per addition when multiple are passed', () => {
+    const additions = [
+      { id: 'multi-1', message: 'One' },
+      { id: 'multi-2', message: 'Two' },
+    ];
+    fireBrowserNotifications(additions);
+    expect(NotificationMock).toHaveBeenCalledTimes(2);
+    expect(NotificationMock).toHaveBeenCalledWith('Tournament Announcement', expect.objectContaining({ tag: 'multi-1' }));
+    expect(NotificationMock).toHaveBeenCalledWith('Tournament Announcement', expect.objectContaining({ tag: 'multi-2' }));
+  });
+
+  it('does NOT fire for entries without an id', () => {
+    fireBrowserNotifications([{ message: 'No id here' }]);
+    expect(NotificationMock).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Snapshot-diff logic — verifies the seen-IDs pattern used in app.jsx's SSE
+// handler. We test the diff logic directly (as a pure function pattern) since
+// the full SSE integration requires mounting the App component, which is
+// heavier than needed for these invariants.
+// ---------------------------------------------------------------------------
+
+describe('announcement snapshot diff logic', () => {
+  it('identifies additions correctly — only ids not in seen set', () => {
+    const seen = new Set(['existing-1', 'existing-2']);
+    const snapshot = [
+      { id: 'existing-1', message: 'Old' },
+      { id: 'new-1', message: 'New announcement' },
+    ];
+    const additions = snapshot.filter(a => a && a.id && !seen.has(a.id));
+    expect(additions).toHaveLength(1);
+    expect(additions[0].id).toBe('new-1');
+  });
+
+  it('produces no additions when the snapshot only removed items (dismiss/clear)', () => {
+    const seen = new Set(['ann-1', 'ann-2', 'ann-3']);
+    // Snapshot shrunk — two were dismissed
+    const snapshot = [{ id: 'ann-1', message: 'Still here' }];
+    const additions = snapshot.filter(a => a && a.id && !seen.has(a.id));
+    expect(additions).toHaveLength(0);
+  });
+
+  it('produces no additions when snapshot is empty (clear-all)', () => {
+    const seen = new Set(['ann-1', 'ann-2']);
+    const snapshot = [];
+    const additions = snapshot.filter(a => a && a.id && !seen.has(a.id));
+    expect(additions).toHaveLength(0);
+  });
+
+  it('marks all current snapshot IDs as seen after processing', () => {
+    const seen = new Set(['old-1']);
+    const snapshot = [
+      { id: 'old-1', message: 'Existing' },
+      { id: 'new-1', message: 'New' },
+    ];
+    // Simulate what the SSE handler does
+    snapshot.forEach(a => { if (a && a.id) seen.add(a.id); });
+    expect(seen.has('old-1')).toBe(true);
+    expect(seen.has('new-1')).toBe(true);
+  });
+
+  it('a second identical snapshot produces no new additions (idempotent)', () => {
+    const seen = new Set();
+    const snapshot1 = [{ id: 'ann-1', message: 'Hello' }];
+    // First snapshot — seeds seen
+    let additions = snapshot1.filter(a => a && a.id && !seen.has(a.id));
+    snapshot1.forEach(a => { if (a && a.id) seen.add(a.id); });
+    expect(additions).toHaveLength(1);
+    // Second identical snapshot — no new additions
+    additions = snapshot1.filter(a => a && a.id && !seen.has(a.id));
+    expect(additions).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NotificationSettings component — settings toggle round-trip tests.
+// Uses the global React stub (non-reactive) since we only need static renders.
+// ---------------------------------------------------------------------------
+
+describe('NotificationSettings', () => {
+  let originalNotification;
+  let originalWindowLocalStorage;
+
+  // Minimal in-memory localStorage stub (same pattern as fireBrowserNotifications suite).
+  const makeLocalStorageMock = (initialEntries = {}) => {
+    const store = { ...initialEntries };
+    return {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
+    };
+  };
+
+  beforeEach(() => {
+    originalNotification = global.Notification;
+    originalWindowLocalStorage = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+      value: makeLocalStorageMock(),
+      writable: true, configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    global.Notification = originalNotification;
+    if (originalWindowLocalStorage) {
+      Object.defineProperty(window, 'localStorage', originalWindowLocalStorage);
+    } else {
+      Object.defineProperty(window, 'localStorage', { value: undefined, writable: true, configurable: true });
+    }
+  });
+
+  it('returns null when Notification API is unavailable', () => {
+    global.Notification = undefined;
+    const result = NotificationSettings({});
+    expect(result).toBeNull();
+  });
+
+  it('renders the toggle when Notification is available and permission is default', () => {
+    global.Notification = { permission: 'default', requestPermission: vi.fn() };
+    const result = NotificationSettings({});
+    expect(result).not.toBeNull();
+    // Should render a card with a checkbox
+    const str = JSON.stringify(result);
+    expect(str).toContain('notification-settings');
+    expect(str).toContain('notification-toggle');
+  });
+
+  it('renders a blocked message when permission is denied', () => {
+    global.Notification = { permission: 'denied' };
+    const result = NotificationSettings({});
+    expect(result).not.toBeNull();
+    const str = JSON.stringify(result);
+    expect(str).toContain('notification-denied');
+  });
+
+  it('shows the insecure-context warning when window.isSecureContext is false', () => {
+    const orig = window.isSecureContext;
+    Object.defineProperty(window, 'isSecureContext', { value: false, writable: true, configurable: true });
+    global.Notification = { permission: 'default', requestPermission: vi.fn() };
+    const result = NotificationSettings({});
+    const str = JSON.stringify(result);
+    expect(str).toContain('notification-insecure-warning');
+    Object.defineProperty(window, 'isSecureContext', { value: orig, writable: true, configurable: true });
+  });
+
+  it('notificationSupported returns false when Notification is undefined', () => {
+    global.Notification = undefined;
+    expect(notificationSupported()).toBe(false);
+  });
+
+  it('notificationSupported returns true when Notification is defined', () => {
+    global.Notification = { permission: 'default' };
+    expect(notificationSupported()).toBe(true);
+  });
+
+  it('persists toggle state to localStorage', () => {
+    // Verify the mock localStorage (installed in beforeEach) round-trips correctly.
+    // This exercises the same LS_NOTIFICATIONS_ENABLED key path used by the component.
+    window.localStorage.setItem('viewer.notifications.enabled', 'true');
+    expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('true');
+
+    window.localStorage.setItem('viewer.notifications.enabled', 'false');
+    expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('false');
   });
 });

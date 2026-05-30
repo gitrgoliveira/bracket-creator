@@ -88,7 +88,7 @@ func newTempStore(t *testing.T) *state.Store {
 }
 
 // jsonReq builds a JSON request.
-func jsonReq(method, path string, body interface{}) *http.Request {
+func jsonReq(method, path string, body any) *http.Request {
 	var buf *bytes.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -226,7 +226,7 @@ func TestSelfRun_SelfRunMode_ParticipantPOST_StillElevatedGated(t *testing.T) {
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
 	// No X-Admin-Password → 401 even in self-run.
-	req := jsonReq(http.MethodPost, "/api/competitions/any-id/participants", map[string]interface{}{})
+	req := jsonReq(http.MethodPost, "/api/competitions/any-id/participants", map[string]any{})
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code,
@@ -245,7 +245,7 @@ func TestSelfRun_FailOpenGuard_CreationWithoutAdminPw_Rejected(t *testing.T) {
 	// File mode verifier.
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"name":     "Self-Run Tournament",
 		"date":     "01-06-2026",
 		"venue":    "Dojo",
@@ -285,7 +285,7 @@ func TestSelfRun_FailOpenGuard_CreationWithExistingAdminPw_Allowed(t *testing.T)
 
 	// Re-POST (bootstrap) with self-run but no admin password in the body —
 	// the preserve step in the handler copies existingForPost.AdminPassword.
-	body := map[string]interface{}{
+	body := map[string]any{
 		"name":     "Self-Run Tournament",
 		"date":     "01-06-2026",
 		"venue":    "Dojo",
@@ -321,7 +321,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
 	// Step 1: fresh bootstrap as officiated (no auth header needed — bootstrap).
-	postBody := map[string]interface{}{
+	postBody := map[string]any{
 		"name":     "My Officiated",
 		"date":     "01-06-2026",
 		"venue":    "Dojo",
@@ -340,7 +340,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusOK, w2.Code)
-	var result map[string]interface{}
+	var result map[string]any
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &result))
 	assert.Equal(t, "officiated", result["mode"],
 		"GET must return mode=officiated after officiated POST")
@@ -361,7 +361,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 	}))
 	r2 := setupSelfRunRouter(t, store2, NewFileVerifier(store2))
 
-	postSelfRun := map[string]interface{}{
+	postSelfRun := map[string]any{
 		"name":     "My Self-Run",
 		"date":     "01-06-2026",
 		"venue":    "Dojo",
@@ -381,7 +381,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 	w4 := httptest.NewRecorder()
 	r2.ServeHTTP(w4, req4)
 	require.Equal(t, http.StatusOK, w4.Code)
-	var result2 map[string]interface{}
+	var result2 map[string]any
 	require.NoError(t, json.Unmarshal(w4.Body.Bytes(), &result2))
 	assert.Equal(t, "self-run", result2["mode"],
 		"GET /api/tournament must return mode=self-run after self-run POST")
@@ -395,7 +395,7 @@ func TestSelfRun_Immutability_PUT_SwitchModeRejected(t *testing.T) {
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
 	// Try to change mode from officiated to self-run via PUT.
-	putBody := map[string]interface{}{
+	putBody := map[string]any{
 		"name":   "Officiated Test",
 		"date":   "01-06-2026",
 		"venue":  "Dojo",
@@ -419,7 +419,7 @@ func TestSelfRun_Immutability_PUT_OmittingModePreservesIt(t *testing.T) {
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
 	// PUT without mode field — should preserve self-run.
-	putBody := map[string]interface{}{
+	putBody := map[string]any{
 		"name":   "SelfRun Test",
 		"date":   "01-06-2026",
 		"venue":  "Dojo Updated",
@@ -447,7 +447,7 @@ func TestSelfRun_Immutability_PUT_SameModeIsIdempotent(t *testing.T) {
 	seedSelfRunTournament(t, store, "admin-pw")
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
-	putBody := map[string]interface{}{
+	putBody := map[string]any{
 		"name":   "SelfRun Test",
 		"date":   "01-06-2026",
 		"venue":  "Dojo",
@@ -576,6 +576,60 @@ func TestSelfRun_LockedMode_DestructiveRoutes_StillRequireAdminPw(t *testing.T) 
 		"locked+self-run constructive route must be public (not 401)")
 }
 
+// Regression (mp-7h7): a locked-mode self-run tournament has an empty on-disk
+// AdminPassword (the env-var bcrypt hash is authoritative). The self-run
+// fail-open guard applies to FILE MODE ONLY — in locked mode the elevated
+// gate already fails closed via GateActive(). A routine PUT that edits
+// venue/name MUST therefore succeed. Before the fix the PUT transform guard
+// fired unconditionally on desired.AdminPassword == "", returning 400
+// errSelfRunRequiresAdminPassword and making locked self-run tournaments
+// permanently uneditable.
+func TestSelfRun_LockedMode_PUTEdit_NotRejectedByFailOpenGuard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newTempStore(t)
+
+	hashBytes, err := bcrypt.GenerateFromPassword([]byte("main-pw"), bcrypt.MinCost)
+	require.NoError(t, err)
+	lockedV, err := NewBcryptVerifier(string(hashBytes))
+	require.NoError(t, err)
+
+	// Locked-mode self-run tournament: empty on-disk Password AND empty
+	// on-disk AdminPassword (both inert; credentials come from env vars).
+	err = store.SaveTournament(&state.Tournament{
+		Name:     "LockedSelfRun",
+		Date:     "01-06-2026",
+		Venue:    "Old Dojo",
+		Courts:   []string{"A"},
+		Password: "",
+		Mode:     state.TournamentModeSelfRun,
+	})
+	require.NoError(t, err)
+
+	r := setupSelfRunRouter(t, store, lockedV)
+
+	// PUT editing the venue. Self-run skips the main gate, so no header is
+	// needed; password rotation is omitted (disabled in locked mode); mode is
+	// omitted (preserved). This must NOT be rejected by the file-mode-only
+	// fail-open guard.
+	putBody := map[string]any{
+		"name":   "LockedSelfRun",
+		"date":   "01-06-2026",
+		"venue":  "New Dojo",
+		"courts": []string{"A"},
+	}
+	req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code,
+		"locked self-run PUT venue edit must succeed, not be rejected by the file-mode fail-open guard: %s", w.Body.String())
+
+	t2, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, t2)
+	assert.Equal(t, "New Dojo", t2.Venue, "venue edit must persist")
+	assert.Equal(t, state.TournamentModeSelfRun, t2.Mode, "mode must remain self-run")
+}
+
 // ---------------------------------------------------------------------------
 // §6 POST mode validation
 // ---------------------------------------------------------------------------
@@ -586,7 +640,7 @@ func TestSelfRun_POST_InvalidMode_Rejected(t *testing.T) {
 	store := newTempStore(t)
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"name":     "T",
 		"date":     "01-06-2026",
 		"venue":    "V",
@@ -607,7 +661,7 @@ func TestSelfRun_POST_NoMode_DefaultsToOfficiated(t *testing.T) {
 	store := newTempStore(t)
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"name":     "T",
 		"date":     "01-06-2026",
 		"venue":    "V",

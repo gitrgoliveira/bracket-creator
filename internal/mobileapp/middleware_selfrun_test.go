@@ -262,6 +262,76 @@ func TestSelfRun_FailOpenGuard_CreationWithoutAdminPw_Rejected(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "admin")
 }
 
+// Creating a self-run tournament via the REAL API body path: the POST carries
+// a transient `adminPassword` field (the only way the credential can reach the
+// server, since Tournament.AdminPassword is json:"-"). The handler must set it
+// atomically with creation so the fail-open guard passes, the tournament is
+// persisted WITH the credential, and the destructive routes are gated by it.
+//
+// This exercises the path the browser/SPA actually uses — the prior
+// store-seeding test bypassed it, which is why the "creation impossible via
+// real API" bug slipped through.
+func TestSelfRun_FailOpenGuard_CreationWithBodyAdminPw_Atomic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newTempStore(t)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	// Fresh file-mode bootstrap POST: self-run + main password + a transient
+	// adminPassword in the SAME body. No header (file-mode bootstrap).
+	body := map[string]any{
+		"name":          "Self-Run Tournament",
+		"date":          "01-06-2026",
+		"venue":         "Dojo",
+		"courts":        []string{"A"},
+		"password":      "main-pw",
+		"mode":          "self-run",
+		"adminPassword": "destructive-pw",
+	}
+	req := jsonReq(http.MethodPost, "/api/tournament", body)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code,
+		"self-run creation with adminPassword in body must succeed: %s", w.Body.String())
+
+	// The persisted tournament must have mode=self-run AND a non-empty
+	// (correct) admin password on disk.
+	stored, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, state.TournamentModeSelfRun, stored.Mode,
+		"stored mode must be self-run")
+	assert.Equal(t, "destructive-pw", stored.AdminPassword,
+		"admin password must be persisted atomically with creation")
+
+	// Verify the destructive-route gate now uses the stored admin password:
+	// no X-Admin-Password → 401; correct X-Admin-Password → passes the gate.
+	t.Run("destructive route requires admin pw", func(t *testing.T) {
+		reqNoPw := httptest.NewRequest(http.MethodDelete, "/api/competitions/some-id", nil)
+		wNoPw := httptest.NewRecorder()
+		r.ServeHTTP(wNoPw, reqNoPw)
+		assert.Equal(t, http.StatusUnauthorized, wNoPw.Code,
+			"destructive route must 401 without X-Admin-Password")
+	})
+
+	t.Run("destructive route passes gate with correct admin pw", func(t *testing.T) {
+		reqWithPw := httptest.NewRequest(http.MethodDelete, "/api/competitions/some-id", nil)
+		reqWithPw.Header.Set("X-Admin-Password", "destructive-pw")
+		wWithPw := httptest.NewRecorder()
+		r.ServeHTTP(wWithPw, reqWithPw)
+		// Not 401: the elevated gate passed (downstream handler may 204/404).
+		assert.NotEqual(t, http.StatusUnauthorized, wWithPw.Code,
+			"destructive route must pass the elevated gate with correct X-Admin-Password (got %d)", wWithPw.Code)
+	})
+
+	t.Run("constructive route is public", func(t *testing.T) {
+		reqPub := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+		wPub := httptest.NewRecorder()
+		r.ServeHTTP(wPub, reqPub)
+		assert.NotEqual(t, http.StatusUnauthorized, wPub.Code,
+			"constructive route must be public in self-run (no main password)")
+	})
+}
+
 // Creating a self-run tournament IS allowed when the existing record already
 // has an AdminPassword on disk (from a prior setAdminPassword call or
 // direct store write). This exercises the preserveFromExisting path where

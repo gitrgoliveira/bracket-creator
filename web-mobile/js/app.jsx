@@ -1033,6 +1033,16 @@ function CreateTournament({ onCreated, authConfig }) {
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
         mode,
       };
+      // Self-run in file mode: send the destructive-ops password as a
+      // transient `adminPassword` field on the SAME POST. The server reads
+      // it via a second body bind (Tournament.AdminPassword is json:"-" so
+      // it can't be bound directly) and persists it atomically with the
+      // tournament — so the self-run fail-open guard never sees a self-run
+      // tournament without an admin credential. In locked mode the server
+      // ignores this field (the env-var bcrypt hash is authoritative).
+      if (isSelfRun && !locked && adminPass) {
+        config.adminPassword = adminPass;
+      }
       // In locked mode, the typed password IS the env-var admin
       // credential — pass it as authPassword so api_client sends
       // X-Tournament-Password. In file mode authPassword is undefined
@@ -1040,18 +1050,6 @@ function CreateTournament({ onCreated, authConfig }) {
       // lets it through unauthenticated).
       const t = await window.API.createTournament(config, locked ? pass : undefined);
       if (!mountedRef.current) return;
-      // For self-run in file mode, set the admin (destructive-ops) password
-      // immediately after creating the tournament, using the main password
-      // for authentication (the tournament was just created, so the main
-      // password is the one we just set).
-      if (isSelfRun && !locked && adminPass) {
-        try {
-          await window.API.setAdminPassword(adminPass, "", pass);
-        } catch (adminErr) {
-          // Non-fatal: tournament is created; operator can set admin pw in Settings.
-          console.warn("Created self-run tournament but failed to set admin password:", adminErr.message);
-        }
-      }
       // Wait for backend to broadcast or just pass it up
       onCreated(t, pass);
     } catch (err) {

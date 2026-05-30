@@ -296,8 +296,18 @@ func (e *Engine) maybeLockTeamLineupsForRound(compId string, result *state.Match
 	if err != nil || comp == nil || comp.TeamSize <= 0 {
 		return
 	}
+	now := time.Now().UTC()
+	// Match-scoped freeze (mp-825): lock only THIS encounter's lineups,
+	// so a live pool match 1 does not freeze the match-2 lineup.
+	if result.ID != "" {
+		if err := e.store.LockTeamLineupForMatch(compId, result.ID, now); err != nil {
+			log.Printf("engine: LockTeamLineupForMatch compId=%s matchId=%s: %v", compId, result.ID, err)
+		}
+	}
+	// Round-scoped freeze (legacy): still applies to round-keyed lineups
+	// (bracket rounds, pre-mp-825 data). Skips match-scoped entries.
 	const round = 0
-	if err := e.store.LockTeamLineupsForRound(compId, round, time.Now().UTC()); err != nil {
+	if err := e.store.LockTeamLineupsForRound(compId, round, now); err != nil {
 		log.Printf("engine: LockTeamLineupsForRound compId=%s round=%d: %v", compId, round, err)
 	}
 }

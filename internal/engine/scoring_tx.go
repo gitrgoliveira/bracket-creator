@@ -200,8 +200,16 @@ func (e *Engine) maybeLockTeamLineupsForRoundTx(tx state.StoreTx, compID string,
 	if err != nil || comp == nil || comp.TeamSize <= 0 {
 		return
 	}
+	now := time.Now().UTC()
+	// Match-scoped freeze (mp-825): lock only this encounter's lineups.
+	if result.ID != "" {
+		if err := tx.LockTeamLineupForMatch(compID, result.ID, now); err != nil {
+			log.Printf("engine: LockTeamLineupForMatch compId=%s matchId=%s: %v", compID, result.ID, err)
+		}
+	}
+	// Round-scoped freeze (legacy): round-keyed lineups only.
 	const round = 0
-	if err := tx.LockTeamLineupsForRound(compID, round, time.Now().UTC()); err != nil {
+	if err := tx.LockTeamLineupsForRound(compID, round, now); err != nil {
 		log.Printf("engine: LockTeamLineupsForRound compId=%s round=%d: %v", compID, round, err)
 	}
 }

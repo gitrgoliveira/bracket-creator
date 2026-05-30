@@ -128,6 +128,29 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// mp-cw1: Fire browser Notification for each newly-added announcement.
+// Guards: Notification API available + permission granted + document hidden
+// + localStorage toggle on. Uses tag:id to coalesce duplicate fires.
+// Pure function; exported for unit testing.
+export function fireBrowserNotifications(additions) {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
+  if (!document.hidden) return;
+  let enabled = false;
+  try {
+    enabled = window.localStorage.getItem("viewer.notifications.enabled") === "true";
+  } catch (_e) { /* storage unavailable */ }
+  if (!enabled) return;
+  for (const a of additions) {
+    if (!a || !a.id) continue;
+    new Notification("Tournament Announcement", {
+      tag: a.id,
+      body: a.message || "",
+      icon: "/favicon.jpeg",
+    });
+  }
+}
+
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
@@ -203,6 +226,13 @@ function App() {
       ? crypto.randomUUID()
       : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
+  // mp-cw1: Set of announcement IDs already seen by this session.
+  // Seeded from the initial fetchAnnouncements snapshot so page-reload
+  // does NOT re-fire notifications for already-active announcements.
+  // Updated on every SSE snapshot: all current IDs are added so that
+  // remove/clear snapshots (smaller lists) never re-fire.
+  const seenAnnouncementIds = useR(null); // lazily initialised to a Set below
+
   // Auth-mode discovery (file vs. locked). Fetched once on App mount
   // from GET /api/auth-config. Starts as null ("loading") so that
   // CreateTournament can gate its submit until the mode is known —
@@ -321,7 +351,14 @@ function App() {
   useE(() => {
     window.API.fetchAnnouncements()
       .then(list => {
-        setAnnouncements(filterActiveAnnouncements(list || []));
+        const active = filterActiveAnnouncements(list || []);
+        setAnnouncements(active);
+        // Seed the seen-IDs set so a page reload does NOT re-fire
+        // notifications for already-active announcements.
+        if (!seenAnnouncementIds.current) {
+          seenAnnouncementIds.current = new Set();
+        }
+        (list || []).forEach(a => { if (a && a.id) seenAnnouncementIds.current.add(a.id); });
       })
       .catch(err => {
         console.error("Failed to fetch initial announcements:", err);
@@ -483,6 +520,22 @@ function App() {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];
             setAnnouncements(filterActiveAnnouncements(list));
+
+            // mp-cw1: diff against seen IDs to fire browser notifications
+            // ONLY for genuinely new announcements. Dismiss/clear snapshots
+            // (where the list shrinks) must never re-fire for removed IDs.
+            if (!seenAnnouncementIds.current) {
+              seenAnnouncementIds.current = new Set();
+            }
+            const seen = seenAnnouncementIds.current;
+            const additions = list.filter(a => a && a.id && !seen.has(a.id));
+            // Mark ALL current IDs as seen (additions + existing), so a
+            // later snapshot that still contains the same IDs won't re-fire.
+            list.forEach(a => { if (a && a.id) seen.add(a.id); });
+
+            if (additions.length > 0) {
+              fireBrowserNotifications(additions);
+            }
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can

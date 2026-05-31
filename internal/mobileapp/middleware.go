@@ -207,13 +207,16 @@ func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
 func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	switch method + " " + fullPath {
 	case http.MethodGet + " /api/tournament", // Fix 3329406556: password field in full Tournament struct; viewer uses /api/viewer/tournament
-		http.MethodPost + " /api/tournament",          // Fix 3329416167: re-bootstrap overwrite when tournament already exists
-		http.MethodPut + " /api/tournament",           // tournament name/password/courts/check-in windows
-		http.MethodPost + " /api/competitions",        // create a competition (category) — setup
-		http.MethodPut + " /api/competitions/:id",     // edit competition config — setup
-		http.MethodPost + " /api/tournament/announce", // Fix 3329416176: organiser config, not operational play
-		http.MethodDelete + " /api/announcements/:id", // Fix 3329416176: organiser config, not operational play
-		http.MethodDelete + " /api/announcements":     // Fix 3329416176: organiser config, not operational play
+		http.MethodPost + " /api/tournament",                // Fix 3329416167: re-bootstrap overwrite when tournament already exists
+		http.MethodPut + " /api/tournament",                 // tournament name/password/courts/check-in windows
+		http.MethodPost + " /api/competitions",              // create a competition (category) — setup
+		http.MethodPut + " /api/competitions/:id",           // edit competition config — setup
+		http.MethodPost + " /api/tournament/announce",       // Fix 3329416176: organiser config, not operational play
+		http.MethodDelete + " /api/announcements/:id",       // Fix 3329416176: organiser config, not operational play
+		http.MethodDelete + " /api/announcements",           // Fix 3329416176: organiser config, not operational play
+		http.MethodPut + " /api/auth/admin-password",        // Fix 3330063192: relies on AuthMiddleware main-pw verification; not elevated-gated
+		http.MethodPut + " /api/competitions/:id/schedule",  // Fix 3330063192: organiser schedule setup, not operational play
+		http.MethodPost + " /api/competitions/:id/playoffs": // Fix 3330063192: organiser playoff seeding, not operational play
 		return true
 	default:
 		return false

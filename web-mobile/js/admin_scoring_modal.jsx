@@ -511,7 +511,12 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
 function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
   const m = match;
   const isComplete = m.status === "completed";
-  const isTeam = m.compKind === "team";
+  // Canonical team check (matches admin_pools.jsx and the lineup panel):
+  // compKind OR a positive teamSize. A team competition created with only
+  // teamSize set (compKind empty) must still route to TeamScoreEditorModal,
+  // and pool-daihyosen rows (compMatches forces compKind="" AND teamSize=0)
+  // correctly stay on the individual editor.
+  const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
   const teamSize = m.teamSize || 5;
   if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} />;
 

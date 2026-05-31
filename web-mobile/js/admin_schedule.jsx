@@ -773,7 +773,12 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     return () => { cancelled = true; };
   }, [compId, teamId, matchId]);
 
-  const isLocked = !!lockedAt;
+  // Locked when this side's lineup carries a lockedAt OR the match itself is
+  // already live/finished — the backend locks the whole match once it starts
+  // (LockTeamLineupForMatch), so a side with no saved lineup yet must also
+  // read as locked rather than show an editable form that 409s on save.
+  const matchStarted = match?.status === "running" || match?.status === "completed";
+  const isLocked = !!lockedAt || matchStarted;
 
   const save = async () => {
     setError("");

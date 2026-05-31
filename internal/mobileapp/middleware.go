@@ -206,9 +206,14 @@ func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
 // otherwise it becomes anonymously writable in self-run mode.
 func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	switch method + " " + fullPath {
-	case http.MethodPut + " /api/tournament", // tournament name/password/courts/check-in windows
+	case http.MethodGet + " /api/tournament", // Fix 3329406556: password field in full Tournament struct; viewer uses /api/viewer/tournament
+		http.MethodPost + " /api/tournament",      // Fix 3329416167: re-bootstrap overwrite when tournament already exists
+		http.MethodPut + " /api/tournament",       // tournament name/password/courts/check-in windows
 		http.MethodPost + " /api/competitions",    // create a competition (category) — setup
-		http.MethodPut + " /api/competitions/:id": // edit competition config — setup
+		http.MethodPut + " /api/competitions/:id", // edit competition config — setup
+		http.MethodPost + " /api/tournament/announce",    // Fix 3329416176: organiser config, not operational play
+		http.MethodDelete + " /api/announcements/:id",    // Fix 3329416176: organiser config, not operational play
+		http.MethodDelete + " /api/announcements":        // Fix 3329416176: organiser config, not operational play
 		return true
 	default:
 		return false

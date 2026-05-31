@@ -754,6 +754,60 @@ describe('API Utils', () => {
       });
     });
 
+    describe('estimateCompetitionSchedule', () => {
+      it('GETs /api/competitions/:id/schedule/estimate', async () => {
+        const payload = { totalDurationMinutes: 120, perCourtMinutes: [60, 60], ceremonyMinutes: 30 };
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
+        const result = await API.estimateCompetitionSchedule('comp-abc', 'pw');
+        expect(result).toEqual(payload);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp-abc/schedule/estimate',
+          expect.objectContaining({
+            headers: expect.objectContaining({ 'X-Tournament-Password': 'pw' }),
+          })
+        );
+      });
+
+      it('sends X-Tournament-Password header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 90, perCourtMinutes: [90], ceremonyMinutes: 0 }),
+        });
+        await API.estimateCompetitionSchedule('c1', 'secret-pw');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      });
+
+      it('forwards AbortSignal to fetch', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 45, perCourtMinutes: [45], ceremonyMinutes: 0 }),
+        });
+        const controller = new AbortController();
+        await API.estimateCompetitionSchedule('c1', 'pw', controller.signal);
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.signal).toBe(controller.signal);
+      });
+
+      it('throws with server error message on non-ok response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'competition not found' }),
+        });
+        await expect(API.estimateCompetitionSchedule('bad-id', 'pw'))
+          .rejects.toThrow('competition not found');
+      });
+
+      it('throws default message if json parse fails on error response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error('parse error'); },
+        });
+        await expect(API.estimateCompetitionSchedule('c1', 'pw'))
+          .rejects.toThrow('Failed to estimate schedule');
+      });
+    });
+
     describe('estimateSchedule', () => {
       it('GETs /api/schedule/estimate with required params in query string', async () => {
         global.fetch = vi.fn().mockResolvedValue({

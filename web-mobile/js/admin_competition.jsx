@@ -285,6 +285,15 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
   );
 }
 
+// Format a total-minutes integer as "Xh Ym". Exported for unit tests.
+export function formatCompMinutes(m) {
+  if (!Number.isFinite(m) || m <= 0) return null;
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  if (h === 0) return `${min}m`;
+  return `${h}h ${String(min).padStart(2, "0")}m`;
+}
+
 function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
   const [lastSaved, setLastSaved] = useStateA(null);
   const [saveErr, setSaveErr] = useStateA(null);
@@ -292,6 +301,36 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const [invalidating, setInvalidating] = useStateA(false);
   const [local, setLocal] = useStateA({ ...c });
   const debounceRef = useRefA(null);
+
+  // Schedule estimate (mp-zoh Phase 4): fetch per-competition estimate and
+  // display it inline near the duration inputs. Re-fetches whenever the
+  // saved competition changes (c.id, format, durations, courts, team size)
+  // so the estimate reflects the latest server-persisted config. Uses an
+  // AbortController so in-flight requests from a previous render are
+  // cancelled before the next fetch starts (same pattern as admin_schedule.jsx).
+  const [compEstimate, setCompEstimate] = useStateA(null);
+  const [compEstimateLoading, setCompEstimateLoading] = useStateA(false);
+  const [compEstimateErr, setCompEstimateErr] = useStateA(null);
+  useEffectA(() => {
+    if (!c.id) return;
+    const controller = new AbortController();
+    setCompEstimateLoading(true);
+    setCompEstimateErr(null);
+    window.API.estimateCompetitionSchedule(c.id, password, controller.signal).then(res => {
+      setCompEstimate(res);
+      setCompEstimateLoading(false);
+    }).catch(e => {
+      if (!controller.signal.aborted) {
+        setCompEstimateErr(e.message || "Failed to estimate");
+        setCompEstimateLoading(false);
+      }
+    });
+    return () => controller.abort();
+  // Re-fetch when the server-confirmed competition config changes. We depend
+  // on `c` fields (not `local`) so we re-fetch after a successful debounced
+  // save, not on every keystroke. This also fires on mount and on any
+  // SSE-driven competition_updated / schedule_updated refresh.
+  }, [c.id, c.format, c.poolMatchDuration, c.playoffMatchDuration, c.courts, c.teamSize, c.poolSize, c.poolWinners, c.swissRounds, password]);
   // AdminSettings unmounts when the user navigates to a different section
   // via onSection() (AdminCompetition rerenders with a different child).
   // saveNow's .then/.catch and the delete handler's finally fire on
@@ -771,6 +810,50 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             style={{ maxWidth: 120 }}
           />
           <div className="field__hint">Typical: 4 rounds for 16 players, 5 for 32, 6 for 64 (≈ log₂ of field size).</div>
+        </div>
+      )}
+      {/* mp-zoh Phase 4: inline schedule estimate. Shown below duration inputs */}
+      {/* so the operator can immediately see the impact of duration changes */}
+      {/* after the debounced save lands. Re-fetches from the server on every */}
+      {/* c-prop update (SSE schedule_updated / competition_updated). */}
+      {(compEstimate || compEstimateLoading || compEstimateErr) && (
+        <div style={{ padding: "10px 12px", borderRadius: 6, background: "var(--accent-soft, #f0f9ff)", border: "1px solid var(--accent, #3b82f6)", marginTop: 4 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2, #374151)", marginBottom: 4 }}>
+            Schedule estimate
+            {compEstimateLoading && <span className="spinner" style={{ marginLeft: 6, verticalAlign: "middle" }} />}
+          </div>
+          {compEstimateErr && (
+            <div style={{ fontSize: 12, color: "var(--red, #ef4444)" }}>{compEstimateErr}</div>
+          )}
+          {compEstimate && !compEstimateErr && (() => {
+            const total = formatCompMinutes(compEstimate.totalDurationMinutes);
+            const perCourt = (compEstimate.perCourtMinutes || []).map(formatCompMinutes).filter(Boolean);
+            const ceremony = formatCompMinutes(compEstimate.ceremonyMinutes);
+            if (!total) {
+              return <div style={{ fontSize: 12, color: "var(--ink-3, #6b7280)" }}>No estimate yet — add participants and configure duration to see a projection.</div>;
+            }
+            return (
+              <div style={{ fontSize: 12.5, color: "var(--ink-1, #111827)" }}>
+                <div><strong>Total:</strong> {total}</div>
+                {perCourt.length > 1 && (
+                  <div style={{ marginTop: 2 }}>
+                    <strong>Per court:</strong>{" "}
+                    {perCourt.map((t, i) => `Court ${String.fromCharCode(65 + i)}: ${t}`).join(" · ")}
+                  </div>
+                )}
+                {perCourt.length === 1 && (
+                  <div style={{ marginTop: 2 }}>
+                    <strong>Per court:</strong> {perCourt[0]}
+                  </div>
+                )}
+                {ceremony && (
+                  <div style={{ marginTop: 2 }}>
+                    <strong>Ceremony blocks:</strong> {ceremony}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
       <div className="field">

@@ -444,6 +444,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, comp)
 	})
 
+	// GET /competitions/:id/schedule/estimate — pre-draw schedule estimate
+	// for a specific competition. Public (read-only), no elevated auth.
+	// Returns a ScheduleEstimate JSON body; 404 for unknown competition.
+	// mp-zoh Phase 3.
+	r.GET("/competitions/:id/schedule/estimate", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		estimate, err := eng.EstimateScheduleForCompetition(id)
+		if err != nil {
+			var notFound *engine.NotFoundError
+			if errors.As(err, &notFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, estimate)
+	})
+
 	r.PUT("/competitions/:id", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

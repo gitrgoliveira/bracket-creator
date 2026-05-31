@@ -7,7 +7,7 @@
 // useEffect, but since vitest stubs hooks we test the pure helper directly.
 
 import { describe, it, expect, vi } from 'vitest';
-import { resolveMatchLineup } from '../admin_scoring_modal.jsx';
+import { resolveMatchLineup, resolveLineupTeamId } from '../admin_scoring_modal.jsx';
 
 describe('resolveMatchLineup (mp-bkg regression guard)', () => {
   const COMP_ID = 'comp1';
@@ -87,5 +87,39 @@ describe('resolveMatchLineup (mp-bkg regression guard)', () => {
     const result = await resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api);
     expect(result?.positions?.senpo).toBe('Match-specific player');
     expect(result).not.toEqual(roundDefault);
+  });
+});
+
+describe('resolveLineupTeamId (mp-bkg: name-keyed side → participant UUID)', () => {
+  // comp.players carry the real id (UUID) + name; a match side is keyed by
+  // NAME (api_serializers.buildPlayerMap sets id = name). Lineups are stored
+  // under the UUID, so the scoring modal must map name → UUID before fetching.
+  const PLAYERS = [
+    { id: 'uuid-red-111', name: 'Red Dojo', metadata: ['Aka Ichi'] },
+    { id: 'uuid-blue-222', name: 'Blue Dojo', metadata: ['Shiro Ichi'] },
+  ];
+
+  it('REGRESSION: maps a name-keyed side to the participant UUID', () => {
+    // This is the load-bearing mapping: the match side id is "Red Dojo"
+    // (the name), but the lineup is stored under "uuid-red-111".
+    expect(resolveLineupTeamId('Red Dojo', PLAYERS)).toBe('uuid-red-111');
+  });
+
+  it('matches when the side key is already the UUID', () => {
+    expect(resolveLineupTeamId('uuid-blue-222', PLAYERS)).toBe('uuid-blue-222');
+  });
+
+  it('tolerates PascalCase participant fields', () => {
+    const pascal = [{ ID: 'uuid-x', Name: 'Green Dojo' }];
+    expect(resolveLineupTeamId('Green Dojo', pascal)).toBe('uuid-x');
+  });
+
+  it('falls back to the side key when no participant matches', () => {
+    expect(resolveLineupTeamId('Ghost Dojo', PLAYERS)).toBe('Ghost Dojo');
+  });
+
+  it('returns "" for an empty side key and tolerates a missing player list', () => {
+    expect(resolveLineupTeamId('', PLAYERS)).toBe('');
+    expect(resolveLineupTeamId('Red Dojo', undefined)).toBe('Red Dojo');
   });
 });

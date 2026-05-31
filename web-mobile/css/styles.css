@@ -5416,3 +5416,13 @@ button.my-match__opp {
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
 }
+
+/* mp-4fd: shared "✕ Clear" button for the followed-player indicator. */
+.btn--clear-follow {
+  padding: 2px 6px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--ink-3);
+}

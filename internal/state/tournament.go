@@ -68,11 +68,13 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 			Venue:        "Venue TBA",
 			DurationDays: 1,
 		}
-	} else if t.DurationDays == 0 {
-		// Migrate existing single-day tournament.md files that predate the
-		// DurationDays field: with no duration_days key, the field
-		// deserializes to its zero value (0), which we treat as 1.
-		t.DurationDays = 1
+	} else {
+		// Apply canonical defaults so that tournament.md files predating
+		// any of these fields (DurationDays, ClockToElapsedMultiplier,
+		// SlowestCourtBufferPct, Mode) always return populated values.
+		// ApplyTournamentDefaults is idempotent so calling it here is safe
+		// even when the file already has explicit values for all fields.
+		ApplyTournamentDefaults(&t)
 	}
 
 	s.cachedTourn = &t

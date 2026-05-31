@@ -574,6 +574,47 @@ const API = {
         }
         return true;
     },
+    // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
+    // place of the round key — successive encounters between the same
+    // two teams each carry an independent, lockable lineup entry.
+    // 404 → null (no lineup saved yet; form treats as blank/editable).
+    // 409 ErrLineupLocked on PUT → the match is already live; surface
+    // as a clear error (same pattern as round-scoped PUT).
+    async fetchMatchLineup(compID, teamId, matchId) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`);
+        if (res.status === 404) return null;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load match lineup");
+        }
+        return res.json();
+    },
+    async putMatchLineup(compID, teamId, matchId, positions, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ teamId, competitionId: compID, matchId, positions })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to save match lineup");
+        }
+        return res.json();
+    },
+    async deleteMatchLineup(compID, teamId, matchId, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok && res.status !== 404) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to delete match lineup");
+        }
+        return true;
+    },
     // T141: daihyosen (representative bout) appended after a knockout team
     // match ties on IV and PW. Server validates the tie + eligibility and
     // returns the updated MatchResult with a new SubMatchResult whose

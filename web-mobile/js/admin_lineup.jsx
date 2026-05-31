@@ -352,6 +352,11 @@ function AdminTeamLineupsList({ comp, password, showToast }) {
 if (typeof window !== "undefined") {
   window.AdminLineup = AdminLineup;
   window.AdminTeamLineupsList = AdminTeamLineupsList;
+  // mp-bkg: expose pure helpers so admin_schedule.jsx can import them
+  // via window.AdminLineupHelpers without creating a cross-module import
+  // dependency (both files are type="module" but share the window object
+  // at runtime in the browser and in the esbuild bundle).
+  window.AdminLineupHelpers = { positionsForSize, rosterFor, teamIdOf, canRevise };
 }
 
 export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, teamIdOf, canRevise };

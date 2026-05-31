@@ -152,8 +152,13 @@ func TestSelfRun_SelfRunMode_ConstructiveRoutesArePublic(t *testing.T) {
 	// Routes that are main-gated-only today (no elevated decorator) become
 	// public in self-run. We test a subset because full competition state
 	// is complex to seed. The key invariant is: no 401 from the main gate.
+	//
+	// Note: GET /api/tournament is intentionally NOT in this list. In file
+	// mode it returns the Tournament struct including the Password field. If
+	// it were public in self-run, an anonymous caller could read the main
+	// password and use it to bypass the main gate on gated config routes
+	// (Copilot #203 finding 3329406556). It is kept in isSelfRunMainGatedConfigRoute.
 	constructiveRoutes := []struct{ method, path string }{
-		{http.MethodGet, "/api/tournament"},
 		{http.MethodGet, "/api/competitions"},
 	}
 
@@ -166,6 +171,34 @@ func TestSelfRun_SelfRunMode_ConstructiveRoutesArePublic(t *testing.T) {
 				"self-run constructive route %s %s must not return 401 (public)", tc.method, tc.path)
 		})
 	}
+}
+
+// GET /api/tournament is in the main-gated carve-out for self-run because in
+// file mode it returns the Tournament struct including the Password field
+// (Copilot #203 fix 3329406556). An anonymous read would leak the credential
+// and allow the caller to bypass the PUT /api/tournament gate.
+func TestSelfRun_SelfRunMode_GETTournament_RequiresMainPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	t.Run("no_pw_returns_401", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"GET /api/tournament must return 401 without main password in self-run mode (file-mode password leak prevention)")
+	})
+
+	t.Run("correct_pw_succeeds", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+		req.Header.Set("X-Tournament-Password", "main-pw")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code,
+			"GET /api/tournament must succeed with the main password in self-run mode")
+	})
 }
 
 // PUT /api/tournament is a tournament-configuration mutation (password, courts,
@@ -399,7 +432,9 @@ func TestSelfRun_FailOpenGuard_CreationWithBodyAdminPw_Atomic(t *testing.T) {
 	})
 
 	t.Run("constructive route is public", func(t *testing.T) {
-		reqPub := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+		// Use GET /api/competitions — GET /api/tournament is main-gated in
+		// self-run (file-mode password leak prevention, fix 3329406556).
+		reqPub := httptest.NewRequest(http.MethodGet, "/api/competitions", nil)
 		wPub := httptest.NewRecorder()
 		r.ServeHTTP(wPub, reqPub)
 		assert.NotEqual(t, http.StatusUnauthorized, wPub.Code,
@@ -490,39 +525,34 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 	assert.Equal(t, "officiated", result["mode"],
 		"GET must return mode=officiated after officiated POST")
 
-	// Step 2: verify self-run mode persists when created fresh.
-	// Use a separate store for a clean slate — the mode we just bootstrapped
-	// is officiated and immutable; a fresh store exercises the self-run path.
+	// Step 2: verify self-run mode persists when created as a FRESH tournament
+	// (no prior record — true first bootstrap). Use a clean store with no
+	// existing tournament so POST acts as first-create (not re-bootstrap).
+	// Fix 3329416172 makes re-bootstrap preserve the existing mode (immutability),
+	// so we must use a fresh store to actually create a self-run tournament via POST.
 	store2 := newTempStore(t)
-	// Pre-seed admin pw directly (simulates operator having set it
-	// before the self-run re-bootstrap, which is required by fail-open guard).
-	require.NoError(t, store2.SaveTournament(&state.Tournament{
-		Name:          "Prev",
-		Date:          "01-01-2026",
-		Venue:         "V",
-		Courts:        []string{"A"},
-		Password:      "pw",
-		AdminPassword: "admin-pw",
-	}))
 	r2 := setupSelfRunRouter(t, store2, NewFileVerifier(store2))
 
 	postSelfRun := map[string]any{
-		"name":     "My Self-Run",
-		"date":     "01-06-2026",
-		"venue":    "Dojo",
-		"courts":   []string{"A"},
-		"password": "main-pw",
-		"mode":     "self-run",
+		"name":          "My Self-Run",
+		"date":          "01-06-2026",
+		"venue":         "Dojo",
+		"courts":        []string{"A"},
+		"password":      "main-pw",
+		"mode":          "self-run",
+		"adminPassword": "admin-pw", // required for self-run in file mode
 	}
+	// Fresh bootstrap — no X-Tournament-Password needed (file mode, no record).
 	req3 := jsonReq(http.MethodPost, "/api/tournament", postSelfRun)
-	req3.Header.Set("X-Tournament-Password", "pw") // re-POST requires main auth
 	w3 := httptest.NewRecorder()
 	r2.ServeHTTP(w3, req3)
 	require.Equal(t, http.StatusCreated, w3.Code, "self-run POST must succeed: %s", w3.Body.String())
 
 	// GET the tournament and verify mode = self-run.
+	// GET /api/tournament is main-gated in self-run (file-mode password leak
+	// prevention — fix 3329406556), so send the main password.
 	req4 := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
-	// self-run: main gate skipped, GET is public
+	req4.Header.Set("X-Tournament-Password", "main-pw")
 	w4 := httptest.NewRecorder()
 	r2.ServeHTTP(w4, req4)
 	require.Equal(t, http.StatusOK, w4.Code)
@@ -713,8 +743,9 @@ func TestSelfRun_LockedMode_DestructiveRoutes_StillRequireAdminPw(t *testing.T) 
 		"locked+self-run destructive route must return 401 or 503, got %d: %s", w.Code, w.Body.String())
 
 	// Constructive route without any header must NOT be 401 in self-run
-	// (main gate is skipped).
-	req2 := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	// (main gate is skipped). Use GET /api/competitions — GET /api/tournament
+	// is main-gated in self-run to prevent file-mode password leaks (fix 3329406556).
+	req2 := httptest.NewRequest(http.MethodGet, "/api/competitions", nil)
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 	assert.NotEqual(t, http.StatusUnauthorized, w2.Code,

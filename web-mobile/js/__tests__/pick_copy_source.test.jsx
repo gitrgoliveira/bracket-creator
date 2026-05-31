@@ -142,4 +142,35 @@ describe('pickCopySource', () => {
     const saved = { m2: { positions: { senpo: 'Bob' } } };
     expect(pickCopySource([m1, m2], CURRENT, TEAM, saved)?.id).toBe('m2');
   });
+
+  describe('"previous match" filter: excludes siblings scheduled after the current match', () => {
+    // The button is "Copy from previous match": when the current match has a
+    // time, only siblings at or before that time are candidates.
+    const CUR_ID = 'cur';
+    const mkCur = (scheduledAt) => ({ id: CUR_ID, sideA: { id: TEAM }, sideB: { id: OTHER }, scheduledAt, court: 'A' });
+
+    it('excludes a later sibling and picks the earlier one', () => {
+      const cur = mkCur('10:00');
+      const earlier = mkMatch('earlier', { sideAId: TEAM, scheduledAt: '09:00' });
+      const later = mkMatch('later', { sideAId: TEAM, scheduledAt: '11:00' });
+      const saved = { earlier: { positions: { senpo: 'E' } }, later: { positions: { senpo: 'L' } } };
+      // Without the filter, DESC sort would pick the later match (11:00).
+      expect(pickCopySource([cur, earlier, later], CUR_ID, TEAM, saved)?.id).toBe('earlier');
+    });
+
+    it('returns null when the only saved sibling is later than the current match', () => {
+      const cur = mkCur('10:00');
+      const later = mkMatch('later', { sideAId: TEAM, scheduledAt: '11:00' });
+      const saved = { later: { positions: { senpo: 'L' } } };
+      expect(pickCopySource([cur, later], CUR_ID, TEAM, saved)).toBeNull();
+    });
+
+    it('does not restrict when the current match has no scheduled time', () => {
+      const cur = mkCur(null);
+      const later = mkMatch('later', { sideAId: TEAM, scheduledAt: '11:00' });
+      const saved = { later: { positions: { senpo: 'L' } } };
+      // No current time → any saved sibling is a valid source.
+      expect(pickCopySource([cur, later], CUR_ID, TEAM, saved)?.id).toBe('later');
+    });
+  });
 });

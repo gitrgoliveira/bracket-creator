@@ -612,7 +612,10 @@ AdminTWMatch.displayName = "AdminTWMatch";
 // ---------- Per-match lineup panel (mp-bkg) ----------
 
 // pickCopySource — pure helper that selects the most recent saved lineup
-// among this team's other matches. Exported for unit testing.
+// among this team's *earlier* matches ("Copy from previous match").
+// Exported for unit testing.
+// Candidate filter: this team's matches, not the current match, with a saved
+// lineup, scheduled at or before the current match's time (when it has one).
 // Sort order: scheduledAt DESC (nulls last — unscheduled matches treated as
 // least-recent), then court ASC, then queue-position (index in allMatches)
 // ASC, then matchId DESC.
@@ -634,10 +637,18 @@ function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
     const sname = typeof side === "object" ? (side.name ?? side.Name) : side;
     return keys.includes(sid) || keys.includes(sname);
   };
+  // "Previous match": only consider siblings scheduled at or before the
+  // current match. When the current match has no time, don't restrict (any
+  // saved sibling is a valid source). An unscheduled sibling (no time) is
+  // always allowed — it sorts last anyway.
+  const current = allMatches.find(m => m.id === currentMatchId);
+  const currentTime = current && current.scheduledAt ? current.scheduledAt : "";
   const candidates = allMatches.filter(m => {
     if (m.id === currentMatchId) return false;
     if (!savedLineups[m.id]) return false;
-    return sideMatches(m.sideA) || sideMatches(m.sideB);
+    if (!sideMatches(m.sideA) && !sideMatches(m.sideB)) return false;
+    if (currentTime && m.scheduledAt && m.scheduledAt > currentTime) return false;
+    return true;
   });
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => {
@@ -654,7 +665,9 @@ function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
     const aIdx = allMatches.indexOf(a);
     const bIdx = allMatches.indexOf(b);
     if (aIdx !== bIdx) return aIdx - bIdx;
-    // matchId DESC as final tiebreak
+    // matchId DESC: a defensive final tiebreak. In practice distinct match
+    // objects always have distinct indices above, so this is effectively
+    // unreachable — kept only so the comparator is total.
     return (b.id || "").localeCompare(a.id || "");
   });
   return candidates[0];

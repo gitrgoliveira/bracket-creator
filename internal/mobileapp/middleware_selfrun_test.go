@@ -463,8 +463,13 @@ func TestSelfRun_FailOpenGuard_CreationWithExistingAdminPw_Allowed(t *testing.T)
 
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
-	// Re-POST (bootstrap) with self-run but no admin password in the body —
-	// the preserve step in the handler copies existingForPost.AdminPassword.
+	// Re-POST (re-bootstrap) with mode:"self-run" in body, but no adminPassword
+	// in the body. The fail-open guard passes because the handler's preserve step
+	// copies existingForPost.AdminPassword from the prior record.
+	// NOTE: Mode is immutable — the preserve step also copies existingForPost.Mode
+	// (empty → "officiated"), so the stored record remains officiated regardless
+	// of what mode the body requests. This test exercises the fail-open path, not
+	// self-run creation; for first-create self-run see TestSelfRun_Immutability_POSTPreservesMode.
 	body := map[string]any{
 		"name":     "Self-Run Tournament",
 		"date":     "01-06-2026",
@@ -472,15 +477,23 @@ func TestSelfRun_FailOpenGuard_CreationWithExistingAdminPw_Allowed(t *testing.T)
 		"courts":   []string{"A"},
 		"password": "main-pw",
 		"mode":     "self-run",
-		// AdminPassword omitted from body (json:"-"); preserve step picks it up.
+		// adminPassword omitted from body (json:"-"); preserve step picks it up.
 	}
 	req := jsonReq(http.MethodPost, "/api/tournament", body)
-	req.Header.Set("X-Tournament-Password", "old-pw") // locked bootstrap test
+	req.Header.Set("X-Tournament-Password", "old-pw")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	// Should succeed (201) because the existing record has an admin password.
 	assert.Equal(t, http.StatusCreated, w.Code,
-		"self-run creation must succeed when admin pw exists in previous record")
+		"re-bootstrap must succeed when existing record has admin pw")
+
+	// The stored mode must be "officiated" — mode immutability preserves the
+	// existing record's mode (empty → officiated) and ignores the body's "self-run".
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, state.TournamentModeOfficiated, loaded.Mode,
+		"re-bootstrap must preserve existing mode (officiated), not adopt body mode")
 }
 
 // ---------------------------------------------------------------------------

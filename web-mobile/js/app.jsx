@@ -1008,7 +1008,7 @@ function CreateTournament({ onCreated, authConfig }) {
     // left fully public. The backend enforces the same rule — this is
     // client-side feedback only.
     if (isSelfRun && !locked && !adminPass) {
-      alert("Self-run tournaments require a Destructive-ops password to protect delete and reset actions.");
+      alert("Self-run tournaments require a Destructive-ops password to protect delete and import actions.");
       return;
     }
     // Match the admin-side handleSave guard from admin_setup.jsx.
@@ -1138,7 +1138,7 @@ function CreateTournament({ onCreated, authConfig }) {
             <div className="field__hint" style={{ marginTop: 6 }}>
               {mode === "officiated"
                 ? "An operator manages scoring and bracket progression. All admin actions require the tournament password. This is the standard setup."
-                : "No dedicated operator. Participants self-report scores; all constructive actions (scoring, check-in) are public. Destructive actions (delete, reset, import) still require a separate admin password. Cannot be changed after creation."}
+                : "No dedicated operator. Participants self-report scores; all constructive actions (scoring, check-in) are public. Destructive actions (delete competition, discard draw, import roster) still require a separate admin password. Cannot be changed after creation."}
             </div>
           </div>
           <div className="field">
@@ -1170,7 +1170,7 @@ function CreateTournament({ onCreated, authConfig }) {
                 type="password"
                 value={adminPass}
                 onChange={(e) => setAdminPass(e.target.value)}
-                placeholder="Password to protect delete / reset / import actions"
+                placeholder="Password to protect delete / import actions"
                 required
               />
               <div className="field__hint">

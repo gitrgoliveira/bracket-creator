@@ -423,7 +423,8 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       if (originalTitleRef.current === null) {
         originalTitleRef.current = document.title;
       }
-      document.title = "(1) Your match is next — " + (originalTitleRef.current || "Tournament");
+      const titlePrefix = m.status === "running" ? "🔴 LIVE NOW — " : "(1) Your match is next — ";
+      document.title = titlePrefix + (originalTitleRef.current || "Tournament");
     }
 
     // 2. Chime via WebAudio (two-tone, no asset needed).
@@ -458,7 +459,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       const sideA = matchSideName(m.sideA, m.sideAName);
       const sideB = matchSideName(m.sideB, m.sideBName);
       const courtStr = m.court ? ` — Shiaijo ${m.court}` : "";
-      const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(4) || "";
+      const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(3) || "";
       window.fireNotification("Your match is next", body, { tag: "match-" + m.id });
     }
 
@@ -2846,14 +2847,38 @@ export function NotificationSettings() {
   // meant to explain. In that case render the warning (no toggle) instead of
   // hiding. Only hide outright when the API is unavailable for some OTHER
   // reason (secure context but an old/unsupported browser).
+  // mp-4fd: the chime toggle uses WebAudio, not the Notification API, so it
+  // must remain visible even when browser notifications are unavailable.
+  const chimeToggle = (
+    <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, marginTop: 10 }}>
+      <input
+        type="checkbox"
+        checked={!chimeMuted}
+        onChange={toggleChimeMuted}
+        data-testid="chime-toggle"
+      />
+      <span>Play a sound when your match is up next</span>
+    </label>
+  );
+
   if (permission === "unavailable") {
-    if (!insecure) return null;
+    if (!insecure) {
+      // Notification API unavailable but context is secure — hide the
+      // notification toggle but still show the chime toggle.
+      return (
+        <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
+          <div className="section-title" style={{ marginTop: 0 }}>Match alerts</div>
+          {chimeToggle}
+        </div>
+      );
+    }
     return (
       <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
         <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
         <div style={{ fontSize: 12, color: "var(--amber, #b45309)" }} data-testid="notification-insecure-warning">
           Browser notifications require a secure connection (https or localhost).
         </div>
+        {chimeToggle}
       </div>
     );
   }
@@ -2920,16 +2945,8 @@ export function NotificationSettings() {
           </span>
         </label>
       )}
-      {/* mp-4fd: chime opt-out for the on-deck match alert. */}
-      <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, marginTop: 10 }}>
-        <input
-          type="checkbox"
-          checked={!chimeMuted}
-          onChange={toggleChimeMuted}
-          data-testid="chime-toggle"
-        />
-        <span>Play a sound when your match is up next</span>
-      </label>
+      {/* mp-4fd: chime opt-out for the on-deck match alert (shared variable). */}
+      {chimeToggle}
     </div>
   );
 }

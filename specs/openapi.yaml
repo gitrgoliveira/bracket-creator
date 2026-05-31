@@ -2083,6 +2083,41 @@ components:
         slowestCourtBufferPct:
           type: integer
           description: Buffer percentage applied to the slowest court when estimating overall duration.
+        mode:
+          type: string
+          enum: [officiated, self-run]
+          description: >
+            Tournament auth posture. Chosen once at creation and **immutable** thereafter
+            (mp-7h7) — PUT /tournament rejects a mode change with 400.
+
+            - **officiated** (default): the full admin surface requires `X-Tournament-Password`.
+              Constructive actions (scoring, check-in, start) and organiser-setup mutations
+              all require the main password.
+            - **self-run**: there is no dedicated table operator. Operational actions
+              (scoring, check-in, start, complete, swiss round generation) are public — no
+              password required. Organiser-setup mutations (tournament/competition config,
+              seeds, overrides, announcements, schedule, court assignment) remain behind the
+              main password. Destructive actions (delete competition, draw, overrides, import,
+              participant roster mutations) require the separate `X-Admin-Password` elevated
+              credential.
+
+            Omitted from the response in locked mode (same redaction rule as `password`).
+            Defaults to `officiated` when omitted on POST (backward-compatible with
+            pre-mp-7h7 tournaments whose `tournament.md` lacks the field).
+        adminPassword:
+          type: string
+          maxLength: 256
+          description: >
+            **Creation-only, file mode, self-run tournaments only.** Sets the elevated
+            (destructive-ops) credential atomically in the same POST that creates the
+            tournament. Required when `mode` is `"self-run"` in file mode — without it the
+            main gate is skipped and destructive routes would be unauthenticated.
+
+            This field is **write-only at the API boundary**: it is never returned in any
+            response (`json:"-"` on the server struct) and is ignored by PUT /tournament
+            (rotation is done via `PUT /api/auth/admin-password`). In locked mode this
+            field is accepted but silently ignored — the `TOURNAMENT_ADMIN_PASSWORD_HASH`
+            env var is the authoritative elevated credential.
 
     Competition:
       type: object

@@ -296,6 +296,11 @@ function buildRoster(competitions) {
 const LS_CHIME_MUTED = "viewer.matchAlert.chimeMuted";
 
 // Hook: chime-muted preference backed by localStorage.
+// Multiple instances (ViewerHome + NotificationSettings) stay in sync via
+// a custom DOM event dispatched on toggle — the native `storage` event only
+// fires across tabs, not within the same page.
+const CHIME_SYNC_EVENT = "chimeMutedSync";
+
 function useChimeMuted() {
   const [muted, setMuted] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -303,6 +308,13 @@ function useChimeMuted() {
       return window.localStorage.getItem(LS_CHIME_MUTED) === "true";
     } catch (_e) { return false; }
   });
+  // Sync across same-page instances via custom event.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onSync = (e) => setMuted(e.detail);
+    window.addEventListener(CHIME_SYNC_EVENT, onSync);
+    return () => window.removeEventListener(CHIME_SYNC_EVENT, onSync);
+  }, []);
   const toggle = () => {
     const next = !muted;
     setMuted(next);
@@ -310,6 +322,10 @@ function useChimeMuted() {
     try {
       window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false");
     } catch (_e) { /* storage unavailable — in-memory is fine */ }
+    // Notify other hook instances in the same page.
+    try {
+      window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next }));
+    } catch (_e) { /* CustomEvent unavailable */ }
   };
   return [muted, toggle];
 }
@@ -343,6 +359,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
   const originalTitleRef = useRefV(null);
 
   // Unlock AudioContext on first user interaction (gesture gate).
+  // Also cleans up AudioContext and restores document.title on unmount.
   useEffect(() => {
     const unlock = () => {
       if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
@@ -357,6 +374,16 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       if (typeof window !== "undefined") {
         window.removeEventListener("click", unlock);
         window.removeEventListener("touchstart", unlock);
+      }
+      // Restore document.title if it was flashed when unmounting.
+      if (originalTitleRef.current !== null && typeof document !== "undefined") {
+        document.title = originalTitleRef.current;
+        originalTitleRef.current = null;
+      }
+      // Close AudioContext to free the browser resource.
+      if (audioCtxRef.current) {
+        try { audioCtxRef.current.close(); } catch (_e) { /* already closed */ }
+        audioCtxRef.current = null;
       }
     };
   }, []);

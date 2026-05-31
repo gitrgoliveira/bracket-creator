@@ -903,9 +903,9 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
         className="btn btn--ghost btn--sm"
         onClick={() => setFollowedPlayer(null)}
         aria-label="Stop following"
-        style={{ marginLeft: 4 }}
+        style={{ marginLeft: 4, padding: "2px 6px", fontSize: 14, lineHeight: 1, borderRadius: 4, border: "1px solid var(--line)", color: "var(--ink-3)" }}
       >
-        ×
+        ✕ Clear
       </button>
     </div>
   );
@@ -2312,7 +2312,7 @@ function ScheduleViewer({ tournament, tweaks }) {
           <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
           <button
             className="btn btn--ghost btn--sm"
-            style={{ marginLeft: "auto" }}
+            style={{ marginLeft: "auto", padding: "2px 6px", fontSize: 14, lineHeight: 1, borderRadius: 4, border: "1px solid var(--line)", color: "var(--ink-3)" }}
             onClick={() => {
               // Clear both the persisted selection and the local schedule
               // chip so the highlight disappears without a reload.
@@ -2321,7 +2321,7 @@ function ScheduleViewer({ tournament, tweaks }) {
             }}
             aria-label="Stop following"
           >
-            ×
+            ✕ Clear
           </button>
         </div>
       ) : null}

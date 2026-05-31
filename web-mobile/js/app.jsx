@@ -128,6 +128,29 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// mp-4fd: Generic notification helper. Guards: Notification API available +
+// permission granted + localStorage opt-in on. The document.hidden check is
+// intentionally NOT here — callers gate on it when needed (announcements) but
+// the match-alert path fires even when the tab is focused (the banner + title
+// provide the in-tab surface; the Notification is for backgrounded tabs).
+// Exported for unit testing. NOT pure — side-effecting.
+export function fireNotification(title, body, { tag } = {}) {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
+  let enabled = false;
+  try {
+    enabled = window.localStorage.getItem("viewer.notifications.enabled") === "true";
+  } catch (_e) { /* storage unavailable */ }
+  if (!enabled) return;
+  try {
+    new Notification(title, {
+      tag: tag || "",
+      body: body || "",
+      icon: "/favicon.jpeg",
+    });
+  } catch (_e) { /* Notification constructor can throw in some envs */ }
+}
+
 // mp-cw1: Fire browser Notification for each newly-added announcement.
 // Guards: Notification API available + permission granted + document hidden
 // + localStorage toggle on. Uses tag:id to coalesce duplicate fires.
@@ -135,21 +158,10 @@ class ErrorBoundary extends React.Component {
 // and constructs Notification instances. Exported for unit testing (tests stub
 // those globals). Callers must treat it as side-effecting.
 export function fireBrowserNotifications(additions) {
-  if (typeof Notification === "undefined") return;
-  if (Notification.permission !== "granted") return;
   if (!document.hidden) return;
-  let enabled = false;
-  try {
-    enabled = window.localStorage.getItem("viewer.notifications.enabled") === "true";
-  } catch (_e) { /* storage unavailable */ }
-  if (!enabled) return;
   for (const a of additions) {
     if (!a || !a.id) continue;
-    new Notification("Tournament Announcement", {
-      tag: a.id,
-      body: a.message || "",
-      icon: "/favicon.jpeg",
-    });
+    fireNotification("Tournament Announcement", a.message || "", { tag: a.id });
   }
 }
 
@@ -1198,6 +1210,8 @@ window.App = App;
 window.ErrorBoundary = ErrorBoundary;
 window.parsePath = parsePath;
 window.pathFromState = pathFromState;
+// mp-4fd: expose generic notification helper for viewer.jsx (separate bundle).
+window.fireNotification = fireNotification;
 
 // Mount the App inside an ErrorBoundary so any uncaught render exception
 // renders a recoverable banner instead of a blank screen. Per NFR-008.

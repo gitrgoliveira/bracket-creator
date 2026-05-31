@@ -491,11 +491,11 @@ function MyMatchAlertBanner({ match, onView, onDismiss }) {
             View
           </button>
         )}
-        <button
+        {onDismiss && <button
           className="match-alert-banner__dismiss"
           onClick={onDismiss}
           aria-label="Dismiss match alert"
-        >✕</button>
+        >✕</button>}
       </div>
     </div>
   );

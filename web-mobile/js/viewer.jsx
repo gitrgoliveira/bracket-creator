@@ -311,7 +311,7 @@ function useChimeMuted() {
   // Sync across same-page instances via custom event.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const onSync = (e) => setMuted(e.detail);
+    const onSync = (e) => setMuted(!!e.detail);
     window.addEventListener(CHIME_SYNC_EVENT, onSync);
     return () => window.removeEventListener(CHIME_SYNC_EVENT, onSync);
   }, []);

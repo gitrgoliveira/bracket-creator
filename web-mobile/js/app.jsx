@@ -1152,11 +1152,13 @@ function CreateTournament({ onCreated, authConfig }) {
               required
             />
             <div className="field__hint">
-              {locked
-                ? "This server is running in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it's used both to authorize this bootstrap and as your admin credential afterwards."
-                : isSelfRun
-                  ? "Used to authorise tournament setup. In self-run mode, scoring and check-in are public so participants don't need this."
-                  : "This password will be required to manage the tournament."}
+              {locked && isSelfRun
+                ? "This server is in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it authorises this bootstrap and organiser-setup mutations. Destructive actions (delete competition, discard draw, import) require the separate TOURNAMENT_ADMIN_PASSWORD_HASH credential."
+                : locked
+                  ? "This server is running in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it's used both to authorize this bootstrap and as your admin credential afterwards."
+                  : isSelfRun
+                    ? "Used to authorise tournament setup. In self-run mode, scoring and check-in are public so participants don't need this."
+                    : "This password will be required to manage the tournament."}
             </div>
           </div>
           {/* In self-run + file mode, require a destructive-ops password at

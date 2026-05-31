@@ -623,6 +623,16 @@ func (e *Engine) runDrawPipeline(id string) error {
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
+		// mp-9dz: a mixed (Pools + Knockout) competition feeds a knockout
+		// bracket. Generate a PREVIEW bracket (pool-origin placeholder
+		// leaves) so the operator sees the elimination structure on the
+		// source competition at draw time — mirroring the Excel Tree sheet.
+		// League has no knockout stage, so skip it there.
+		if comp.Format == state.CompFormatMixed {
+			if err := e.generatePoolPreviewBracket(comp); err != nil {
+				return err
+			}
+		}
 		comp.Status = state.CompStatusDrawReady
 	case state.CompFormatSwiss:
 		// Guard 1: SwissCurrentRound already bumped — AdvanceSwissRound ran to

@@ -29,10 +29,63 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 		leaves[i] = p.Name
 	}
 
+	bracket, err := e.buildBracketFromLeaves(comp, leaves)
+	if err != nil {
+		return err
+	}
+
+	return e.store.SaveBracket(comp.ID, bracket)
+}
+
+// generatePoolPreviewBracket builds a PREVIEW elimination bracket for a mixed
+// (Pools + Knockout) competition at draw time. Its leaves are pool-origin
+// placeholders ("Pool A 1st", "Pool B 2nd", …) produced by
+// helper.GenerateFinals — the same labels the Excel Tree sheet uses — so the
+// operator can see, on the source competition, the knockout structure that the
+// pools feed (mp-9dz). The bracket is flagged Preview so the UI renders it
+// read-only: the live knockout is played in the separate playoffs competition
+// created via POST /competitions/:id/playoffs.
+//
+// No-ops (returns nil without writing bracket.json) when there are no pools or
+// PoolWinners resolves to zero — there is nothing to seed a tree from.
+func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
+	pools, err := e.store.LoadPools(comp.ID)
+	if err != nil {
+		return fmt.Errorf("loading pools for preview bracket: %w", err)
+	}
+	if len(pools) == 0 {
+		return nil
+	}
+
+	poolWinners := comp.PoolWinners
+	if poolWinners <= 0 {
+		poolWinners = 2 // mirror resolvePoolWinners' default
+	}
+
+	finals := helper.GenerateFinals(pools, poolWinners)
+	if len(finals) == 0 {
+		return nil
+	}
+
+	bracket, err := e.buildBracketFromLeaves(comp, finals)
+	if err != nil {
+		return err
+	}
+	bracket.Preview = true
+
+	return e.store.SaveBracket(comp.ID, bracket)
+}
+
+// buildBracketFromLeaves builds a balanced single-elimination bracket from an
+// ordered slice of leaf labels. Labels may be resolved player names (live
+// playoffs) or pool-origin placeholders (preview bracket) — the tree shape,
+// court assignment, bye resolution, and scheduling are identical either way.
+// The caller persists the result (and sets Preview when appropriate).
+func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string) (*state.Bracket, error) {
 	// NextPow2 ensures we have a balanced tree with enough slots
 	pow2 := helper.NextPow2(len(leaves))
 	leafValues := make([]string, pow2)
-	for i := 0; i < pow2; i++ {
+	for i := range pow2 {
 		if i < len(leaves) {
 			leafValues[i] = leaves[i]
 		} else {
@@ -136,11 +189,11 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 	// bracket.
 	tournament, err := e.store.LoadTournament()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	state.ApplyTournamentDefaults(tournament)
 	state.ApplyCompetitionDefaults(comp)
 	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
 
-	return e.store.SaveBracket(comp.ID, bracket)
+	return bracket, nil
 }

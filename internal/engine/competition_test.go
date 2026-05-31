@@ -365,6 +365,65 @@ func TestGenerateDraw_PlayoffsFormat(t *testing.T) {
 	assert.NotNil(t, bracket, "bracket must be written on GenerateDraw for playoffs")
 }
 
+// TestGenerateDraw_MixedFormat_WritesPreviewBracket verifies that GenerateDraw
+// on a mixed (Pools + Knockout) competition also writes a PREVIEW bracket whose
+// leaves are pool-origin placeholders (mp-9dz). The operator sees the knockout
+// structure that the pools feed, mirroring the Excel Tree sheet, before the
+// separate Playoffs competition is created.
+func TestGenerateDraw_MixedFormat_WritesPreviewBracket(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "generate-draw-mixed-preview"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket, "mixed GenerateDraw must write a preview bracket")
+	assert.True(t, bracket.Preview, "mixed bracket must be flagged as a preview")
+	require.NotEmpty(t, bracket.Rounds, "preview bracket must have rounds")
+
+	// Every first-round non-bye leaf must be a pool-origin placeholder
+	// ("Pool A 1st" / "Pool A-1st"), never a real participant name.
+	sawPoolLabel := false
+	for _, side := range []string{bracket.Rounds[0][0].SideA, bracket.Rounds[0][0].SideB} {
+		if side != "" {
+			assert.Contains(t, side, "Pool", "preview leaf must reference a pool, got %q", side)
+			sawPoolLabel = true
+		}
+	}
+	assert.True(t, sawPoolLabel, "expected at least one pool-origin leaf in round 1")
+
+	// Real participant names must NOT leak into the preview leaves.
+	for _, r := range bracket.Rounds {
+		for _, m := range r {
+			assert.NotContains(t, m.SideA, "Alice", "preview leaf must not contain a resolved player name")
+			assert.NotContains(t, m.SideB, "Alice", "preview leaf must not contain a resolved player name")
+		}
+	}
+}
+
+// TestGenerateDraw_LeagueFormat_NoPreviewBracket ensures league (no knockout
+// stage) does NOT get a preview bracket.
+func TestGenerateDraw_LeagueFormat_NoPreviewBracket(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "generate-draw-league-nobracket"
+
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 0)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	// LoadBracket returns nil or an empty bracket when no file exists.
+	if bracket != nil {
+		assert.Empty(t, bracket.Rounds, "league must not generate a preview bracket")
+	}
+}
+
 // TestGenerateDraw_RejectsDrawReady ensures GenerateDraw returns an error
 // when the competition is already in draw-ready state.
 func TestGenerateDraw_RejectsDrawReady(t *testing.T) {

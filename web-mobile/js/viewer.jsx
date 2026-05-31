@@ -314,6 +314,12 @@ function useChimeMuted() {
   return [muted, toggle];
 }
 
+// Extract a side's display name from the normalised match shape.
+// Handles both {sideA: {name}} (normalised) and flat sideAName (legacy).
+function matchSideName(side, fallbackName) {
+  return (side && side.name) || fallbackName || "";
+}
+
 // Predicate: is the followed player's match on-deck (up-next or running)?
 // Exported for unit testing and mp-5px (service worker path must reuse this).
 export function isFollowedMatchOnDeck(m) {
@@ -360,20 +366,13 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
     const onDeck = isFollowedMatchOnDeck(m);
 
     // Build the signature for this state.
-    let sig = null;
-    if (onDeck && m) {
-      const kind = m.status === "running" ? "running" : "upnext";
-      sig = m.id + ":" + kind;
-    }
+    const sig = onDeck && m
+      ? m.id + ":" + (m.status === "running" ? "running" : "upnext")
+      : null;
 
     // First call: prime without alerting (avoids false alert on reconnect).
     if (lastSigRef.current === null) {
       lastSigRef.current = sig || "";
-      if (!onDeck && originalTitleRef.current !== null) {
-        // Restore title if coming back to off-deck
-        if (typeof document !== "undefined") document.title = originalTitleRef.current;
-        originalTitleRef.current = null;
-      }
       return;
     }
 
@@ -429,8 +428,8 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
 
     // 3. Backgrounded browser Notification (reuses existing opt-in).
     if (typeof window !== "undefined" && typeof window.fireNotification === "function" && m) {
-      const sideA = (m.sideA && m.sideA.name) || m.sideAName || "";
-      const sideB = (m.sideB && m.sideB.name) || m.sideBName || "";
+      const sideA = matchSideName(m.sideA, m.sideAName);
+      const sideB = matchSideName(m.sideB, m.sideBName);
       const courtStr = m.court ? ` — Shiaijo ${m.court}` : "";
       const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(4) || "";
       window.fireNotification("Your match is next", body, { tag: "match-" + m.id });
@@ -445,8 +444,8 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
 function MyMatchAlertBanner({ match, onView, onDismiss }) {
   if (!match) return null;
   const kind = match.status === "running" ? "LIVE NOW" : "Next up";
-  const sideA = (match.sideA && match.sideA.name) || match.sideAName || "";
-  const sideB = (match.sideB && match.sideB.name) || match.sideBName || "";
+  const sideA = matchSideName(match.sideA, match.sideAName);
+  const sideB = matchSideName(match.sideB, match.sideBName);
   const vs = (sideA && sideB) ? `${sideA} vs ${sideB}` : "";
   const courtStr = match.court ? `Shiaijo ${match.court}` : "";
   return (
@@ -900,10 +899,10 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
       <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
       {pRecord && pRecord.checkedIn && <span className="tag-badge" style={{ fontSize: 9 }}>✓ Checked in</span>}
       <button
-        className="btn btn--ghost btn--sm"
+        className="btn btn--ghost btn--sm btn--clear-follow"
         onClick={() => setFollowedPlayer(null)}
         aria-label="Stop following"
-        style={{ marginLeft: 4, padding: "2px 6px", fontSize: 14, lineHeight: 1, borderRadius: 4, border: "1px solid var(--line)", color: "var(--ink-3)" }}
+        style={{ marginLeft: 4 }}
       >
         ✕ Clear
       </button>
@@ -2311,8 +2310,8 @@ function ScheduleViewer({ tournament, tweaks }) {
           <span style={{ color: "var(--ink-3)" }}>Following:</span>
           <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
           <button
-            className="btn btn--ghost btn--sm"
-            style={{ marginLeft: "auto", padding: "2px 6px", fontSize: 14, lineHeight: 1, borderRadius: 4, border: "1px solid var(--line)", color: "var(--ink-3)" }}
+            className="btn btn--ghost btn--sm btn--clear-follow"
+            style={{ marginLeft: "auto" }}
             onClick={() => {
               // Clear both the persisted selection and the local schedule
               // chip so the highlight disappears without a reload.

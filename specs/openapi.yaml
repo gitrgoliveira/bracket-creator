@@ -2101,11 +2101,13 @@ components:
               participant roster mutations) require the separate `X-Admin-Password` elevated
               credential.
 
-            Omitted from the response in locked mode (same redaction rule as `password`).
-            Defaults to `officiated` when omitted on POST (backward-compatible with
-            pre-mp-7h7 tournaments whose `tournament.md` lacks the field).
+            Always returned in GET/POST/PUT responses regardless of auth mode (unlike
+            `password`, which is redacted in locked mode). Defaults to `officiated` when
+            omitted on POST (backward-compatible with pre-mp-7h7 tournaments whose
+            `tournament.md` lacks the field).
         adminPassword:
           type: string
+          writeOnly: true
           maxLength: 256
           description: >
             **Creation-only, file mode, self-run tournaments only.** Sets the elevated

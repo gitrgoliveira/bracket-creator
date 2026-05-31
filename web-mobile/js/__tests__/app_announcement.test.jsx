@@ -574,7 +574,6 @@ describe('diffAnnouncementSnapshot', () => {
     // Models the case with NO buffered SSE: HTTP response includes NEW (post-mount)
     // but since there is no SSE to replay, seed the full list to avoid leaving
     // NEW unseeded and triggering stale notifications on a later unrelated SSE.
-    const _mountMs = Date.parse('2026-05-30T13:00:00.000Z');
     const ref = { current: null };
 
     const httpList = [

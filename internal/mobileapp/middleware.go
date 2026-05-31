@@ -207,16 +207,27 @@ func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
 func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	switch method + " " + fullPath {
 	case http.MethodGet + " /api/tournament", // Fix 3329406556: password field in full Tournament struct; viewer uses /api/viewer/tournament
-		http.MethodPost + " /api/tournament",                // Fix 3329416167: re-bootstrap overwrite when tournament already exists
-		http.MethodPut + " /api/tournament",                 // tournament name/password/courts/check-in windows
-		http.MethodPost + " /api/competitions",              // create a competition (category) — setup
-		http.MethodPut + " /api/competitions/:id",           // edit competition config — setup
-		http.MethodPost + " /api/tournament/announce",       // Fix 3329416176: organiser config, not operational play
-		http.MethodDelete + " /api/announcements/:id",       // Fix 3329416176: organiser config, not operational play
-		http.MethodDelete + " /api/announcements",           // Fix 3329416176: organiser config, not operational play
-		http.MethodPut + " /api/auth/admin-password",        // Fix 3330063192: relies on AuthMiddleware main-pw verification; not elevated-gated
-		http.MethodPut + " /api/competitions/:id/schedule",  // Fix 3330063192: organiser schedule setup, not operational play
-		http.MethodPost + " /api/competitions/:id/playoffs": // Fix 3330063192: organiser playoff seeding, not operational play
+		http.MethodPost + " /api/tournament",                                           // Fix 3329416167: re-bootstrap overwrite when tournament already exists
+		http.MethodPut + " /api/tournament",                                            // tournament name/password/courts/check-in windows
+		http.MethodPost + " /api/competitions",                                         // create a competition (category) — setup
+		http.MethodPut + " /api/competitions/:id",                                      // edit competition config — setup
+		http.MethodPost + " /api/tournament/announce",                                  // Fix 3329416176: organiser config, not operational play
+		http.MethodDelete + " /api/announcements/:id",                                  // Fix 3329416176: organiser config, not operational play
+		http.MethodDelete + " /api/announcements",                                      // Fix 3329416176: organiser config, not operational play
+		http.MethodPut + " /api/auth/admin-password",                                   // Fix 3330063192: relies on AuthMiddleware main-pw verification; not elevated-gated
+		http.MethodPut + " /api/competitions/:id/schedule",                             // Fix 3330063192: organiser schedule setup, not operational play
+		http.MethodPost + " /api/competitions/:id/playoffs",                            // Fix 3330063192: organiser playoff seeding, not operational play
+		http.MethodPut + " /api/competitions/:id/matches/:mid/override-winner",         // Fix 3330080949: result correction — organiser, not participant play
+		http.MethodPut + " /api/competitions/:id/pools/:poolId/override-rank",          // Fix 3330080949: standings correction — organiser, not participant play
+		http.MethodPut + " /api/competitions/:id/matches/:mid/court",                   // court assignment — organiser coordination
+		http.MethodPut + " /api/competitions/:id/matches/:mid/time",                    // match time — organiser coordination
+		http.MethodPut + " /api/competitions/:id/seeds",                                // seeding — organiser pre-draw setup
+		http.MethodPost + " /api/competitions/:id/competitors/:pid/reinstate",          // kiken-injury reinstatement — organiser decision
+		http.MethodDelete + " /api/competitions/:id/participants/:pid/checkin",         // check-in reversal — organiser correction
+		http.MethodPut + " /api/competitions/:id/teams/:tid/lineups/:round",            // team lineup management — organiser
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // team lineup management — organiser
+		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup — organiser
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId": // team match lineup — organiser
 		return true
 	default:
 		return false

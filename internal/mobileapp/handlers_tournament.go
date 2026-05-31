@@ -352,12 +352,24 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// preservation pattern: when the incoming body sends Mode == ""
 			// (omitempty), preserve the current stored value. When the body
 			// sends a non-empty Mode that differs from the stored Mode, reject.
+			//
+			// Fix 3329406568: normalize current.Mode="" to "officiated" before
+			// comparing so an idempotent PUT sending mode:"officiated" against a
+			// legacy tournament (empty Mode on disk) is accepted rather than
+			// rejected as a mutation ("" != "officiated").
 			if current != nil {
 				if desired.Mode == "" {
 					// Preserve on omit — backward-compat and "no change" intent.
 					desired.Mode = current.Mode
-				} else if desired.Mode != current.Mode {
-					return errModeImmutable
+				} else {
+					// Normalize legacy empty current mode before comparing.
+					currentMode := current.Mode
+					if currentMode == "" {
+						currentMode = state.TournamentModeOfficiated
+					}
+					if desired.Mode != currentMode {
+						return errModeImmutable
+					}
 				}
 			}
 			// Normalize empty Mode so new tournaments always have a canonical value.
@@ -604,6 +616,21 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			t.AdminPassword = existingForPost.AdminPassword
 		}
 
+		// Fix 3329416172: Mode is immutable after creation (mp-7h7). On a
+		// re-bootstrap POST (existingForPost != nil) preserve the stored Mode
+		// so a caller cannot flip an officiated tournament to self-run or vice
+		// versa via POST. Normalise legacy empty to "officiated" so the on-disk
+		// record gains the canonical value on the next write. On a true first
+		// bootstrap (existingForPost == nil), Mode was already validated and
+		// normalised above — no change needed.
+		if existingForPost != nil {
+			existingMode := existingForPost.Mode
+			if existingMode == "" {
+				existingMode = state.TournamentModeOfficiated
+			}
+			t.Mode = existingMode
+		}
+
 		// Atomic admin-password set at creation (mp-7h7). In file mode the
 		// admin (destructive-ops) password is stored as PLAINTEXT in
 		// Tournament.AdminPassword (fileElevatedVerifier.Verify does an
@@ -618,8 +645,16 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// Locked mode: the env-var bcrypt hash is the authoritative elevated
 		// credential; any body adminPassword is inert, so ignore it (do not
 		// write a plaintext value that would never be consulted).
+		//
+		// Fix 3329406566: validate adminPassword length before copy. The field
+		// is transient (not in Tournament) so validateTournamentLengths never
+		// sees it; enforce MaxLenTournamentPassword here.
 		fileMode := verifier == nil || !verifier.RedactStoredPassword()
 		if fileMode && t.AdminPassword == "" && extra.AdminPassword != "" {
+			if err := validateMaxLen("adminPassword", extra.AdminPassword, MaxLenTournamentPassword); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			t.AdminPassword = extra.AdminPassword
 		}
 

@@ -467,6 +467,13 @@ type BracketMatch struct {
 
 type Bracket struct {
 	Rounds [][]BracketMatch `json:"rounds"`
+	// Preview marks a bracket whose leaves are pool-origin PLACEHOLDERS
+	// (e.g. "Pool A 1st") rather than resolved players. It is generated on a
+	// mixed (Pools + Knockout) competition at draw time so the operator can
+	// see the elimination structure that the pools feed — mirroring the Excel
+	// Tree sheet. A preview bracket is read-only: the actual knockout is
+	// played in the separate playoffs competition created from this source.
+	Preview bool `json:"preview,omitempty"`
 }
 
 type Announcement struct {

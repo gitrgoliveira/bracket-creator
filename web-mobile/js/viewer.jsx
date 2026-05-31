@@ -1813,7 +1813,10 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                   <tr key={s.player.name}>
                     <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
                     <td>
-                      <div style={{ fontWeight: 500 }}>{s.player.name}</div>
+                      <div style={{ fontWeight: 500 }}>
+                        {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
+                        {s.player.name}
+                      </div>
                       {tweaks.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div> : null}
                     </td>
                     <td className="num">{s.wins}</td>
@@ -1830,7 +1833,10 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                     <tr key={p.name}>
                       <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
                       <td>
-                        <div style={{ fontWeight: 500 }}>{p.name}</div>
+                        <div style={{ fontWeight: 500 }}>
+                          {p.number ? <span className="num-prefix">{p.number}</span> : null}
+                          {p.name}
+                        </div>
                         {tweaks.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{p.dojo}</div> : null}
                       </td>
                       {Array.from({ length: cols }, (_, j) => <td key={j} className="num">—</td>)}

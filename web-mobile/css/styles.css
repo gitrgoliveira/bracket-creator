@@ -3650,6 +3650,26 @@ button.my-match__opp {
   border: 1px solid var(--line);
 }
 
+/* Competitor number prefix (e.g. "K1") shown before a player name. The value
+   in player.number already embeds the competition's configured numberPrefix;
+   this only styles it as a compact monospace badge (mp-3 / numberPrefix). */
+.num-prefix {
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  font-weight: 700;
+  color: var(--accent);
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+/* Provisional (pre-draw) competitor number — muted + dotted underline so it
+   reads as "not final yet" versus the solid accent of an assigned number. */
+.num-prefix--provisional {
+  color: var(--ink-3);
+  font-weight: 600;
+  border-bottom: 1px dotted var(--ink-4);
+}
+
 /* Schedule / TW-match compact badges (A/S) */
 .tw-match__badge {
   display: inline-flex;

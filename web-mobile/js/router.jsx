@@ -45,14 +45,27 @@ function Route(props) {
     return React.createElement(props.component || 'div', props);
 }
 
-// Imperative navigation. Equivalent to history.pushState + manual route
-// recompute — preact-router intercepts and dispatches to mounted Routers.
+// Imperative navigation.
+//
+// NOTE: we deliberately do NOT delegate to preact-router's route() here.
+// preact-router's route() only mutates history when canRoute(url) finds a
+// MOUNTED <Router> that matches the path. This app renders entirely from its
+// own state machine (app.jsx) and never mounts a <Router>, so canRoute() is
+// always false and preact-router's route() silently no-ops — leaving the
+// address bar stuck while the view changes. That broke back/forward and
+// shareable deep links (mp-dd3).
+//
+// Instead we drive the History API directly. app.jsx owns the routing
+// state-of-record: it calls route() from a state->URL sync effect (so the
+// view has already re-rendered from the state change — no popstate needed for
+// forward navigation) and it handles browser back/forward via its own
+// popstate listener. pushState intentionally does not fire popstate, which is
+// exactly what we want: forward nav must not re-trigger the popstate handler.
 function route(url, replace = false) {
-    if (_route) return _route(url, replace);
-    // Tests / pre-load fallback: use the History API directly.
     if (typeof window !== 'undefined' && window.history) {
         if (replace) window.history.replaceState(null, '', url);
         else window.history.pushState(null, '', url);
+        return true;
     }
     return false;
 }

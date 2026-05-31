@@ -341,7 +341,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                       />
                     </td>
                     <td>
-                      <div style={{ fontWeight: 600 }}>{s.player.name}</div>
+                      <div style={{ fontWeight: 600 }}>
+                        {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
+                        {s.player.name}
+                      </div>
                       {tweaks.showDojo && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
                     </td>
                     <td className="num">{s.wins}</td>
@@ -395,13 +398,19 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                 <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
                   <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id ? m.id.split('-').pop() : ""}</div>
                   <div className="sched-row__players">
-                    {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
+                    {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right (mp-41o). */}
                     <div className="sched-row__side" style={{ textAlign: "right" }}>
-                      <div className="name" style={{ fontSize: 13 }}>{m.sideB?.name || m.sideB}</div>
+                      <div className="name" style={{ fontSize: 13, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                        <span className="bc-color-badge bc-color-badge--shiro">SHIRO</span>
+                        {m.sideB?.name || m.sideB}
+                      </div>
                     </div>
                     <div className="sched-row__vs">vs</div>
                     <div className="sched-row__side">
-                      <div className="name" style={{ fontSize: 13 }}>{m.sideA?.name || m.sideA}</div>
+                      <div className="name" style={{ fontSize: 13, display: "flex", alignItems: "center" }}>
+                        <span className="bc-color-badge bc-color-badge--aka">AKA</span>
+                        {m.sideA?.name || m.sideA}
+                      </div>
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -490,7 +499,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                           />
                         </td>
                         <td>
-                          <div style={{ fontWeight: 500 }}>{s.player.name}</div>
+                          <div style={{ fontWeight: 500 }}>
+                            {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
+                            {s.player.name}
+                          </div>
                           {tweaks.showDojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
                         </td>
                         <td className="num">{s.wins}</td>
@@ -511,18 +523,26 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", marginBottom: 6 }}>Matches</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {pm.map(m => (
-                      <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center", padding: "2px 0" }}>
-                        <div style={{ width: 30, fontWeight: 600, color: "var(--accent)" }}>{m.id ? m.id.split('-').pop() : ""}</div>
-                        {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right. */}
-                        <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideB?.name || m.sideB}</span>
-                          <span style={{ color: "var(--ink-4)", fontSize: 10 }}>vs</span>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{m.sideA?.name || m.sideA}</span>
+                      // Fixed grid columns keep the names from reflowing when a
+                      // score replaces "—" or the button label flips
+                      // Score→Correct (mp-p8n). Column order encodes the global
+                      // UI contract: SHIRO (sideB) on the left, AKA (sideA) on
+                      // the right (mp-41o).
+                      <div key={m.id} style={{ display: "grid", gridTemplateColumns: "26px minmax(0,1fr) 18px minmax(0,1fr) 56px 62px", gap: 6, fontSize: 12, alignItems: "center", padding: "2px 0" }}>
+                        <div style={{ fontWeight: 600, color: "var(--accent)" }}>{m.id ? m.id.split('-').pop() : ""}</div>
+                        <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
+                          <span className="bc-color-badge bc-color-badge--shiro">SHIRO</span>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sideB?.name || m.sideB}</span>
                         </div>
-                        <div style={{ fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ color: "var(--ink-4)", fontSize: 10, textAlign: "center" }}>vs</span>
+                        <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
+                          <span className="bc-color-badge bc-color-badge--aka">AKA</span>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sideA?.name || m.sideA}</span>
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 600, textAlign: "right", whiteSpace: "nowrap" }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : m.status === "running" ? "● LIVE" : "—"}
-                          <button className={getScoreBtnClass(m.status)} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
                         </div>
+                        <button className={getScoreBtnClass(m.status)} style={{ minWidth: 0 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
                       </div>
                     ))}
                   </div>

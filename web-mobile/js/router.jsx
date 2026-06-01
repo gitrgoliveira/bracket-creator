@@ -20,7 +20,6 @@
 
 const PreactRouter = window.preactRouter;
 const _Router = PreactRouter ? PreactRouter.Router : null;
-const _route = PreactRouter ? PreactRouter.route : null;
 const _Link = PreactRouter ? PreactRouter.Link : null;
 const _getCurrentUrl = PreactRouter ? PreactRouter.getCurrentUrl : (() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
 

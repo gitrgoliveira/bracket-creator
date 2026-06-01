@@ -1614,7 +1614,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
           )}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={c.id} />}
     </div>
   );
 }
@@ -2727,7 +2727,7 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
   );
 }
 
-function MatchViewerModal({ match, onClose, tournament }) {
+function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId }) {
   window.useEscapeToClose(onClose);
   const [scoringMatch, setScoringMatch] = useState(null);
   if (!match) return null;
@@ -2751,7 +2751,7 @@ function MatchViewerModal({ match, onClose, tournament }) {
       onClose: () => setScoringMatch(null),
       onSubmit: async (patch) => {
         try {
-          await window.API.recordScore(scoringMatch.compId, scoringMatch.id, patch, "", scoringMatch);
+          await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
           setScoringMatch(null);
           onClose();
         } catch (_err) {

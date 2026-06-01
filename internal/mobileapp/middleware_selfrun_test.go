@@ -33,7 +33,7 @@ import (
 // ---------------------------------------------------------------------------
 
 // setupSelfRunRouter creates a full NewRouterWithHub with the given verifier
-// and a tournament pre-seeded in the store. Returns the router and store.
+// and a tournament pre-seeded in the store. Returns the router.
 func setupSelfRunRouter(t *testing.T, store *state.Store, verifier PasswordVerifier) *gin.Engine {
 	t.Helper()
 	eng := engine.New(store)

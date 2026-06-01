@@ -2096,10 +2096,10 @@ components:
             - **self-run**: there is no dedicated table operator. Operational actions
               (scoring, check-in, start, complete, swiss round generation) are public — no
               password required. Organiser-setup mutations (tournament/competition config,
-              seeds, overrides, announcements, schedule, court assignment) remain behind the
-              main password. Destructive actions (delete competition, draw, overrides, import,
-              participant roster mutations) require the separate `X-Admin-Password` elevated
-              credential.
+              seeds, override edits (set/change result), announcements, schedule, court
+              assignment, export) remain behind the main password. Destructive actions
+              (delete competition, discard draw, delete/discard overrides, import, participant
+              roster mutations) require the separate `X-Admin-Password` elevated credential.
 
             Always returned in GET/POST/PUT responses regardless of auth mode (unlike
             `password`, which is redacted in locked mode). Defaults to `officiated` when

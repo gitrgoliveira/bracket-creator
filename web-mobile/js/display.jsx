@@ -685,13 +685,18 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     // T065 auto-cycle. Only arm the timer when there is more than one
     // page. Reset to page 0 if the court count drops below the
     // threshold mid-cycle.
+    //
+    // All branches that change the page must also bump cycleKey so the
+    // progress bar animation restarts — including guard resets, not
+    // only the regular auto-cycle tick.
     useED(() => {
         if (totalPages <= 1) {
-            if (page !== 0) setPage(0);
+            if (page !== 0) { setPage(0); setCycleKey(k => k + 1); }
             return undefined;
         }
         if (page >= totalPages) {
             setPage(0);
+            setCycleKey(k => k + 1);
             return undefined;
         }
         const t = setTimeout(() => {

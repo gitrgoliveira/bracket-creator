@@ -69,12 +69,43 @@ type Tournament struct {
 	// after the window closes.
 	CheckInWindowStart string `yaml:"check_in_window_start,omitempty" json:"checkInWindowStart,omitempty"`
 	CheckInWindowEnd   string `yaml:"check_in_window_end,omitempty" json:"checkInWindowEnd,omitempty"`
+
+	// Mode selects the auth posture for the whole tournament, chosen at
+	// creation and IMMUTABLE thereafter (mp-7h7). "officiated" (default)
+	// gates the full admin surface behind X-Tournament-Password.
+	// "self-run" inverts the boundary: constructive actions (scoring,
+	// check-in, start/complete) are public; only destructive actions
+	// (those already gated by RequireElevatedPassword / enforceElevated)
+	// still require X-Admin-Password. omitempty means older tournament.md
+	// files (Mode == "") normalise to "officiated" via ApplyTournamentDefaults.
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+}
+
+// Tournament mode constants (mp-7h7).
+const (
+	TournamentModeOfficiated = "officiated" // default: main-gate on all admin routes
+	TournamentModeSelfRun    = "self-run"   // main-gate skipped; elevated gate stays
+)
+
+// ValidateTournamentMode reports whether the given mode value is acceptable.
+// Empty string is treated as "officiated" (backward compatibility). Only
+// the two defined constants are accepted; any other value returns an error.
+func ValidateTournamentMode(mode string) error {
+	switch mode {
+	case "", TournamentModeOfficiated, TournamentModeSelfRun:
+		return nil
+	default:
+		return fmt.Errorf("unknown tournament mode %q (expected %q or %q)",
+			mode, TournamentModeOfficiated, TournamentModeSelfRun)
+	}
 }
 
 // ApplyTournamentDefaults fills zero-valued schedule-estimator tuning
 // fields on t with their canonical defaults: ClockToElapsedMultiplier=1.5,
 // SlowestCourtBufferPct=10, and DurationDays=1. Idempotent; safe to call
 // repeatedly.
+// Also normalizes empty Mode to TournamentModeOfficiated so that
+// tournament.md files predating mp-7h7 behave as officiated tournaments.
 // FR-055, FR-057, R9.
 func ApplyTournamentDefaults(t *Tournament) {
 	if t == nil {
@@ -88,6 +119,9 @@ func ApplyTournamentDefaults(t *Tournament) {
 	}
 	if t.DurationDays == 0 {
 		t.DurationDays = 1
+	}
+	if t.Mode == "" {
+		t.Mode = TournamentModeOfficiated
 	}
 }
 

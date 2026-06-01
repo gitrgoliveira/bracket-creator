@@ -650,12 +650,23 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// is transient (not in Tournament) so validateTournamentLengths never
 		// sees it; enforce MaxLenTournamentPassword here.
 		fileMode := verifier == nil || !verifier.RedactStoredPassword()
-		if fileMode && t.AdminPassword == "" && extra.AdminPassword != "" {
+		// Fix 3331061367: validate adminPassword length whenever the field is
+		// present in the body, regardless of mode or whether an existing
+		// credential is already stored. This enforces the OpenAPI maxLength:256
+		// contract consistently: locked mode and re-bootstrap with an existing
+		// password would otherwise accept and silently discard an oversized
+		// value, giving callers no feedback that their request violates the
+		// contract. Only persist the value when in file mode with no existing
+		// elevated credential (locked mode uses TOURNAMENT_ADMIN_PASSWORD_HASH;
+		// re-bootstrap preserves the existing credential).
+		if extra.AdminPassword != "" {
 			if err := validateMaxLen("adminPassword", extra.AdminPassword, MaxLenTournamentPassword); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			t.AdminPassword = extra.AdminPassword
+			if fileMode && t.AdminPassword == "" {
+				t.AdminPassword = extra.AdminPassword
+			}
 		}
 
 		// Fail-open guard for self-run + file mode (mp-7h7).

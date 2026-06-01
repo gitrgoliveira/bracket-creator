@@ -4,7 +4,7 @@
    Anton + Archivo, both SIL Open Font License 1.1 (OFL.txt shipped alongside
    each .woff2 under /vendor/fonts/). Latin-subset woff2; Archivo keeps its
    weight axis (100–900). Used by the Aka/Shiro scoreboard + display surfaces
-   via --font-display-impact / --font-strong. Body text stays on system --font. */
+   via --font-impact / --font-strong. Body text stays on system --font. */
 @font-face {
   font-family: "Anton";
   font-style: normal;

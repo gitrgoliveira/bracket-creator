@@ -367,8 +367,8 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       }
     };
     if (typeof window !== "undefined") {
-      window.addEventListener("click", unlock, { once: true, passive: true });
-      window.addEventListener("touchstart", unlock, { once: true, passive: true });
+      window.addEventListener("click", unlock, { passive: true });
+      window.addEventListener("touchstart", unlock, { passive: true });
     }
     return () => {
       if (typeof window !== "undefined") {
@@ -460,7 +460,8 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       const sideB = matchSideName(m.sideB, m.sideBName);
       const courtStr = m.court ? ` — Shiaijo ${m.court}` : "";
       const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(3) || "";
-      window.fireNotification("Your match is next", body, { tag: "match-" + m.id });
+      const notifTitle = m.status === "running" ? "Your match is LIVE" : "Your match is next";
+      window.fireNotification(notifTitle, body, { tag: "match-" + m.id });
     }
 
     // 4. Notify consumer (e.g. to show/update the banner).

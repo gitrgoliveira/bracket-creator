@@ -5367,6 +5367,10 @@ button.my-match__opp {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .match-alert-banner { animation: none; }
+}
+
 .match-alert-banner__content {
   display: flex;
   align-items: center;

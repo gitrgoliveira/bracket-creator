@@ -5777,9 +5777,9 @@ button.my-match__opp {
   font-size: 6vh;
   line-height: 1.02;
   position: relative; z-index: 2;
-  overflow: hidden; text-overflow: ellipsis;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tvd-side__dojo { font-size: 2.4vh; opacity: 0.55; position: relative; z-index: 2; overflow: hidden; text-overflow: ellipsis; }
+.tvd-side__dojo { font-size: 2.4vh; opacity: 0.55; position: relative; z-index: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* SHIRO — left: framed white + 45° hatch over the dark board */
 .tvd-side--shiro { background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02)); }

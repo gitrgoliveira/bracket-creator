@@ -80,9 +80,12 @@ function route(url, replace = false) {
         try {
             window.dispatchEvent(new PopStateEvent('popstate'));
         } catch {
-            // Older / non-browser environments without PopStateEvent.
-            // useQuery() still works because its onChange just re-reads
-            // location.search; missing this signal is harmless there.
+            // PopStateEvent unavailable (very old / non-standard environments).
+            // Fall back to a plain Event so popstate listeners — useQuery(),
+            // app.jsx's back/forward handler — still receive the navigation
+            // signal. Any environment where window.history exists also has the
+            // base Event constructor, so this branch cannot throw.
+            window.dispatchEvent(new Event('popstate'));
         }
         return true;
     }

@@ -847,6 +847,38 @@ func TestSelfRun_POST_InvalidMode_Rejected(t *testing.T) {
 		"POST with invalid mode must return 400")
 }
 
+// POST with an oversized adminPassword returns 400 even in locked mode
+// (where the field is never persisted). Fix 3331061367: validate the
+// transient field whenever present, regardless of server mode.
+func TestSelfRun_POST_OversizedAdminPassword_Rejected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newTempStore(t)
+
+	// Build a bcrypt verifier (locked mode).
+	hashBytes, err := bcrypt.GenerateFromPassword([]byte("main-pw"), bcrypt.MinCost)
+	require.NoError(t, err)
+	lockedV, err := NewBcryptVerifier(string(hashBytes))
+	require.NoError(t, err)
+
+	r := setupSelfRunRouter(t, store, lockedV)
+
+	body := map[string]any{
+		"name":          "T",
+		"date":          "01-06-2026",
+		"venue":         "V",
+		"courts":        []string{"A"},
+		"password":      "main-pw",
+		"adminPassword": string(make([]byte, MaxLenTournamentPassword+1)), // 257 chars
+	}
+	req := jsonReq(http.MethodPost, "/api/tournament", body)
+	req.Header.Set("X-Tournament-Password", "main-pw")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"oversized adminPassword must return 400 even in locked mode")
+	assert.Contains(t, w.Body.String(), "adminPassword")
+}
+
 // POST with no mode → defaults to officiated.
 func TestSelfRun_POST_NoMode_DefaultsToOfficiated(t *testing.T) {
 	gin.SetMode(gin.TestMode)

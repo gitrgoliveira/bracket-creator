@@ -84,7 +84,15 @@ function compMatches(c) {
     out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
   });
 
-  const rounds = (c.bracket && c.bracket.rounds) ? c.bracket.rounds : (c.bracket || []);
+  // mp-9dz: a preview bracket on a mixed source carries pool-origin
+  // placeholders ("Pool A-1st") with assigned scheduled times. It must
+  // NOT contribute to the global match list that feeds Find-My-Matches /
+  // Watchlist / schedule / TV displays — those treat every bracket match
+  // as a real, scheduled bout. The viewer aggregate endpoint already
+  // strips it server-side; this is defense-in-depth for older caches and
+  // any code path that bypasses the aggregator.
+  const isPreviewBracket = !!(c.bracket && c.bracket.preview);
+  const rounds = (!isPreviewBracket && c.bracket && c.bracket.rounds) ? c.bracket.rounds : (!isPreviewBracket ? (c.bracket || []) : []);
   rounds.forEach((round, ri) => round.forEach((m) => out.push({
     ...m,
     phase: "bracket",

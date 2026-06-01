@@ -1117,10 +1117,11 @@ function CreateTournament({ onCreated, authConfig }) {
               immutable after that. Default is officiated (existing behaviour). */}
           <div className="field">
             <label className="field__label">Tournament type</label>
-            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <div role="group" aria-label="Tournament type" style={{ display: "flex", gap: 8, marginTop: 4 }}>
               <button
                 type="button"
                 className={`btn${mode === "officiated" ? " btn--primary" : ""}`}
+                aria-pressed={mode === "officiated"}
                 onClick={() => setMode("officiated")}
                 style={{ flex: 1 }}
               >
@@ -1129,6 +1130,7 @@ function CreateTournament({ onCreated, authConfig }) {
               <button
                 type="button"
                 className={`btn${mode === "self-run" ? " btn--primary" : ""}`}
+                aria-pressed={mode === "self-run"}
                 onClick={() => setMode("self-run")}
                 style={{ flex: 1 }}
               >

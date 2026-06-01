@@ -819,12 +819,14 @@ func TestRecordPoolMatchResult_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pool-not-found"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	// Use playoffs format: no preview bracket is generated, so an unknown
+	// match ID returns a clean "not found" error without the "read-only
+	// preview" guard that fires for mixed-format competitions (mp-9dz).
+	createTestCompetition(t, store, compID, "playoffs", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
-	// Pool match IDs contain "Pool" in them
-	err := eng.RecordMatchResult(compID, "Pool Z-99", &state.MatchResult{
+	err := eng.RecordMatchResult(compID, "no-such-match-id", &state.MatchResult{
 		Winner: "Alice",
 		Status: state.MatchStatusCompleted,
 	})

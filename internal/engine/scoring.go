@@ -57,6 +57,9 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 		if bracket == nil {
 			return errMatchNotFound
 		}
+		if bracket.Preview {
+			return validationErrorf("bracket for competition %s is a read-only preview; run the Playoffs competition to score elimination matches", compId)
+		}
 		for rIdx := range bracket.Rounds {
 			for mIdx := range bracket.Rounds[rIdx] {
 				if bracket.Rounds[rIdx][mIdx].ID == matchId {
@@ -589,6 +592,9 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compId)
 		}
+		if bracket.Preview {
+			return validationErrorf("bracket for competition %s is a read-only preview; run the Playoffs competition to score elimination matches", compId)
+		}
 
 		found := false
 		for rIdx, round := range bracket.Rounds {
@@ -817,6 +823,9 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 	err := e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compId)
+		}
+		if bracket.Preview {
+			return validationErrorf("bracket for competition %s is a read-only preview; run the Playoffs competition to score elimination matches", compId)
 		}
 		for rIdx := range bracket.Rounds {
 			for mIdx := range bracket.Rounds[rIdx] {

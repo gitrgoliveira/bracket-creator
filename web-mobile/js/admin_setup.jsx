@@ -107,6 +107,11 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // Tournament mode (mp-7h7): read-only after creation — shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
+  // mp-zoh Phase 5: ceremony block duration strings ("30m", "1h", "1h30m").
+  // Empty string means "no block configured".
+  const [openingBlock, setOpeningBlock] = useStateA(tournament.openingBlock || "");
+  const [lunchBlock, setLunchBlock] = useStateA(tournament.lunchBlock || "");
+  const [closingBlock, setClosingBlock] = useStateA(tournament.closingBlock || "");
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
 
@@ -165,7 +170,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       password: pass || undefined,
       courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
       checkInWindowStart: checkInStart || undefined,
-      checkInWindowEnd: checkInEnd || undefined
+      checkInWindowEnd: checkInEnd || undefined,
+      // mp-zoh Phase 5: ceremony blocks. Empty string → omit so the backend
+      // treats it as "not set" (matches backend's validateMaxLen behaviour —
+      // the field accepts "" but an explicit empty string round-trips fine).
+      openingBlock: openingBlock.trim() || undefined,
+      lunchBlock: lunchBlock.trim() || undefined,
+      closingBlock: closingBlock.trim() || undefined,
     });
   };
 
@@ -252,6 +263,26 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <div className="field">
               <label className="field__label">Check-in end (HH:MM)</label>
               <input className="input" type="time" value={checkInEnd} onChange={(e) => setCheckInEnd(e.target.value)} />
+            </div>
+          </div>
+          {/* mp-zoh Phase 5: ceremony block duration inputs. These feed the */}
+          {/* schedule estimator (backend Tournament.OpeningBlock etc.). */}
+          {/* Duration strings like "30m", "1h", "1h30m". Leave blank to omit. */}
+          <div className="row" style={{ marginTop: 16 }}>
+            <div className="field">
+              <label className="field__label">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
+              <div className="field__hint">Duration of the opening ceremony block (e.g. "30m", "1h"). Leave blank if none.</div>
+            </div>
+            <div className="field">
+              <label className="field__label">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
+              <div className="field__hint">Duration of the lunch break block (e.g. "1h", "45m"). Leave blank if none.</div>
+            </div>
+            <div className="field">
+              <label className="field__label">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
+              <div className="field__hint">Duration of the closing ceremony block. Leave blank if none.</div>
             </div>
           </div>
           {locked ? (

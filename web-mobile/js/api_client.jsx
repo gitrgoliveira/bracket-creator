@@ -455,6 +455,17 @@ const API = {
         }
         return res.json();
     },
+    async estimateCompetitionSchedule(compID, password, signal) {
+        const res = await fetch(`/api/competitions/${compID}/schedule/estimate`, {
+            headers: { 'X-Tournament-Password': password },
+            signal,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to estimate schedule");
+        }
+        return res.json();
+    },
     async moveMatchCourt(compID, matchID, court, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/court`, {
             method: 'PUT',

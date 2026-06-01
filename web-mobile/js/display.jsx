@@ -497,13 +497,6 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
 const LOBBY_PAGE_SIZE = 2;
 const LOBBY_CYCLE_MS = 10000;
 
-// LOBBY_QUEUE_LIMIT — 5 upcoming matches per court beyond the "Now"
-// slot, giving 6 rows total (Now + Next + #3–#6). When no live match
-// is present the first scheduled auto-promotes to "Now" and the
-// remaining 5 fill the queue rows, so we always request 5 upcoming
-// entries (the auto-promote logic below slices as needed).
-const LOBBY_QUEUE_LIMIT = 5;
-
 // Colour tokens for the cross-court table — defined once so the
 // per-cell renderers stay readable. These mirror the mockup's :root
 // vars but expressed as inline-style strings (display.jsx convention).

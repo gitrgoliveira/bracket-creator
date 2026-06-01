@@ -147,7 +147,7 @@ function levenshtein(a, b) {
   return prev[n];
 }
 
-function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSection }) {
+function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);

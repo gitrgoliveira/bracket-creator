@@ -751,6 +751,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     data-testid={`lobby-page-dot-${i}`}
                                     onClick={() => { setPage(i); setCycleKey(k => k + 1); }}
                                     aria-label={`Page ${i + 1}`}
+                                    aria-current={i === page ? 'page' : undefined}
                                     style={{
                                         width: 7, height: 7, borderRadius: '50%',
                                         background: i === page ? '#e8eaed' : LOBBY_COLORS.inkMuted,
@@ -834,7 +835,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                         })();
                                     return (
                                         <React.Fragment key={cc}>
-                                            <th style={{
+                                            <th scope="col" style={{
                                                 textAlign: 'center',
                                                 padding: '14px 12px 12px',
                                                 fontSize: 18, fontWeight: 700, letterSpacing: '0.1em',

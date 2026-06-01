@@ -1189,12 +1189,12 @@ paths:
 
         Allowed in `setup` state (no draw yet) and `draw-ready` state (draw generated
         but not started). In draw-ready state the change **cascades** through draw
-        artifacts: `pools.csv`, `bracket.json`, `pool-matches.csv`, and `seeds.csv`
-        are all updated in place — the draw structure (pool assignments, elimination
-        bracket) is preserved.
+        artifacts: `pools.csv`, `bracket.json`, and `pool-matches.csv` are updated
+        in place — the draw structure (pool assignments, elimination bracket) is
+        preserved. Seeds are renamed automatically by the participant update.
 
-        Returns the updated player. When the cascade produces dojo conflicts or seed
-        transfers, a `warnings` array is included alongside the player fields.
+        Returns the updated player. When the cascade detects dojo conflicts,
+        a `warnings` array is included alongside the player fields.
 
         Also requires `X-Admin-Password` when the destructive-ops gate is active.
       security:
@@ -1239,8 +1239,8 @@ paths:
         '200':
           description: |
             Participant updated. When the competition is in `draw-ready` state and
-            the cascade produces warnings (dojo conflicts, seed transfers), a `warnings`
-            array is included in the response alongside the standard player fields.
+            the cascade detects dojo conflicts, a `warnings` array is included in
+            the response alongside the standard player fields.
           content:
             application/json:
               schema:
@@ -1254,8 +1254,8 @@ paths:
                           type: string
                         description: |
                           Non-fatal advisory messages from the draw cascade (e.g. dojo
-                          conflict, seed rank transfer). Present only when at least one
-                          warning was generated; absent in setup state.
+                          conflict). Present only when at least one warning was
+                          generated; absent in setup state.
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':

@@ -7,18 +7,15 @@ import (
 )
 
 // ReplaceParticipantInDraw cascades a participant name/dojo/displayName change
-// through all draw artifacts (pools.csv, bracket.json, pool-matches.csv, seeds.csv)
-// for a draw-ready competition. It is called AFTER the participant record in
-// participants.csv has already been updated via UpdateParticipant.
+// through draw artifacts (pools.csv, bracket.json, pool-matches.csv) for a
+// draw-ready competition. Called AFTER UpdateParticipant has already updated
+// participants.csv and seeds.csv.
 //
-// Returns a list of human-readable warnings (dojo conflicts, seed transfers) and
-// an error on failure. A non-nil warnings slice with a nil error means the swap
-// succeeded but the operator should review the warnings.
+// Returns warnings (e.g. dojo conflicts) and an error on failure.
 //
 // Transaction safety: bracket.json and pool-matches.csv are updated atomically
-// under a single Store.WithTransaction lock (both are WAL-staged). pools.csv and
-// seeds.csv are not WAL-staged so they are written outside the transaction via
-// their own per-comp lock acquisitions — consistent with their existing save paths.
+// under a single Store.WithTransaction lock (WAL-staged). pools.csv is written
+// outside the transaction via its own per-comp lock.
 func (e *Engine) ReplaceParticipantInDraw(
 	compID string,
 	oldName, oldDojo, oldDisplayName string,

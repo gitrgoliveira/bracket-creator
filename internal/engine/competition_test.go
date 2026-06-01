@@ -715,35 +715,28 @@ func TestReplaceParticipantInDraw_DojoConflict(t *testing.T) {
 	assert.True(t, findPlayerInPools(poolsAfter, "Grace"), "new name must be present")
 }
 
-func TestReplaceParticipantInDraw_SeedCascade(t *testing.T) {
+func TestReplaceParticipantInDraw_SeedsUntouched(t *testing.T) {
 	eng, store, compID := setupDrawReadyMixed(t, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
 	})
 
-	// Seed Alice at rank 1 directly in seeds.csv (before draw, then re-generate
-	// so seeds are active in the draw-ready state).
+	// Seed Alice at rank 1. In the real flow, state.UpdateParticipant
+	// renames seeds.csv before ReplaceParticipantInDraw runs, so the
+	// engine function must NOT touch seeds — verify it leaves them as-is.
 	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
 		{Name: "Alice", SeedRank: 1},
 	}))
 
 	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
 	require.NoError(t, err)
+	assert.Empty(t, warnings, "no seed warnings — seed rename is handled by UpdateParticipant")
 
-	// Seed transfer warning should appear.
-	seedWarned := false
-	for _, w := range warnings {
-		if strings.Contains(w, "seed rank") && strings.Contains(w, "Alicia") {
-			seedWarned = true
-		}
-	}
-	assert.True(t, seedWarned, "should warn that seed rank was transferred to Alicia")
-
-	// seeds.csv must now reference the new name.
+	// seeds.csv must be unchanged (still "Alice") because the engine
+	// function does not touch seeds.
 	seeds, err := store.LoadSeeds(compID)
 	require.NoError(t, err)
 	require.Len(t, seeds, 1)
-	assert.Equal(t, "Alicia", seeds[0].Name)
-	assert.Equal(t, 1, seeds[0].SeedRank)
+	assert.Equal(t, "Alice", seeds[0].Name, "engine must not rename seeds — that's UpdateParticipant's job")
 }
 
 func TestReplaceParticipantInDraw_WrongState(t *testing.T) {

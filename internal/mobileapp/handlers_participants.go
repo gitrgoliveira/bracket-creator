@@ -370,11 +370,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// Cascade the name/dojo change through draw artifacts outside the
 			// transaction — WithTransaction's per-comp lock is released above
 			// (non-reentrant mutex), so the cascade function can acquire it.
-			displayName := req.DisplayName
-			if !comp.WithZekkenName {
-				displayName = ""
-			}
-			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, name, dojo, displayName)
+			// Use updatedPlayer.DisplayName (the canonical post-save value) so
+			// auto-derived display names propagate correctly into pools.csv.
+			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, name, dojo, updatedPlayer.DisplayName)
 			if cascadeErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
 				return

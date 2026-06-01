@@ -154,25 +154,8 @@ func (e *Engine) ReplaceParticipantInDraw(
 		return nil, notFoundErrorf("participant %q not found in draw artifacts for competition %s", oldName, compID)
 	}
 
-	// --- seeds.csv (SaveSeeds acquires its own per-comp lock) ---
-	seeds, err := e.store.LoadSeeds(compID)
-	if err != nil {
-		return warnings, fmt.Errorf("loading seeds: %w", err)
-	}
-	seedsChanged := false
-	for i, a := range seeds {
-		if a.Name == oldName && (a.Dojo == oldDojo || a.Dojo == "") {
-			seeds[i].Name = newName
-			seeds[i].Dojo = newDojo
-			seedsChanged = true
-			warnings = append(warnings, fmt.Sprintf("seed rank %d transferred to %q", a.SeedRank, newName))
-		}
-	}
-	if seedsChanged {
-		if err := e.store.SaveSeeds(compID, seeds); err != nil {
-			return warnings, fmt.Errorf("saving seeds: %w", err)
-		}
-	}
+	// seeds.csv is already renamed by state.UpdateParticipant (which runs
+	// before this function), so no seed cascade is needed here.
 
 	return warnings, nil
 }

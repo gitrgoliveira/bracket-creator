@@ -354,7 +354,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // clockToElapsedMultiplier, or slowestCourtBufferPct on the tournament
   // settings screen and then returns here — otherwise the display would be
   // stale until a competition field changed (Finding 5 fix).
-  }, [c.id, c.format, c.poolMatchDuration, c.playoffMatchDuration, c.courts, c.teamSize, c.poolSize, c.poolWinners, c.swissRounds, password,
+  }, [c.id, c.format, c.kind, c.poolMatchDuration, c.playoffMatchDuration, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
   // AdminSettings unmounts when the user navigates to a different section

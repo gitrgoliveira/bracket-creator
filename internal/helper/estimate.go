@@ -18,7 +18,8 @@ import "fmt"
 //	"swiss"      — PlayerCount, SwissRounds.
 type EstimateMatchCountsInput struct {
 	// Format is state.Competition.Format: "playoffs", "mixed", "league",
-	// "swiss". Any other value returns an error.
+	// "swiss". Empty string is treated as "playoffs" for backward
+	// compatibility with legacy configs. Any other value returns an error.
 	Format string
 
 	// PlayerCount is the number of participants that will take part in

@@ -169,8 +169,10 @@ func (e *Engine) estimateFinalistCount(srcCompID string) (int, error) {
 		return 0, err
 	}
 	if srcComp == nil {
-		// Source competition doesn't exist — can't estimate.
-		return 0, nil
+		// Source competition referenced by SourceCompID doesn't exist — this
+		// is a misconfiguration (deleted or never created), not a normal
+		// pre-draw state. Surface it as an error so the operator sees it.
+		return 0, notFoundErrorf("playoffs source competition %q not found", srcCompID)
 	}
 
 	pools, err := e.store.LoadPools(srcCompID)

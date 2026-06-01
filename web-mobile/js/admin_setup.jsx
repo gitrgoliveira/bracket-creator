@@ -298,11 +298,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <button className="btn btn--primary" onClick={handleSave}>Save changes</button>
           </div>
         </div>
-
-        <div className="page-head" style={{ marginTop: 32 }}><h1 className="page-head__title">Broadcast announcement</h1></div>
-        <div className="card card--pad-lg">
-          <window.AnnouncementComposer password={password} showToast={showToast} />
-        </div>
       </div>
     </div>
   );

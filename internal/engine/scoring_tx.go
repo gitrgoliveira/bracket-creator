@@ -57,6 +57,9 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compID)
 		}
+		if bracket.Preview {
+			return validationErrorf("bracket for competition %s is a read-only preview; run the Playoffs competition to score elimination matches", compID)
+		}
 
 		found := false
 		for rIdx, round := range bracket.Rounds {

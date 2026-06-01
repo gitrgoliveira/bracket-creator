@@ -1092,3 +1092,69 @@ func TestRecordBracketMatchResult_DaihyosenWinnerDerived(t *testing.T) {
 	assert.Equal(t, "TeamB", saved.Rounds[0][0].Winner, "r0m0 winner must be TeamB")
 	assert.Equal(t, "TeamB", saved.Rounds[1][0].SideA, "TeamB must propagate to next round")
 }
+
+// TestPreviewBracket_RejectsAllMutations verifies that all bracket mutation
+// paths (scoring, override, court/time reassignment) return an error when
+// bracket.Preview is true (mp-9dz). The UI disables scoring for preview
+// brackets, but server-side enforcement prevents direct API calls or stale
+// cached clients from persisting bogus winners/scores into bracket.json.
+func TestPreviewBracket_RejectsAllMutations(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-preview-readonly-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "preview-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Preview Test"}))
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
+
+	preview := &state.Bracket{
+		Preview: true,
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-2nd", Status: state.MatchStatusScheduled},
+		}},
+	}
+	require.NoError(t, store.SaveBracket(compID, preview))
+
+	result := &state.MatchResult{Winner: "Pool A-1st", Status: state.MatchStatusCompleted}
+
+	t.Run("RecordMatchResult rejected", func(t *testing.T) {
+		err := eng.RecordMatchResult(compID, "m-r1-0", result)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read-only preview")
+	})
+
+	t.Run("RecordMatchResultWithIneligibility rejected", func(t *testing.T) {
+		_, err := eng.RecordMatchResultWithIneligibility(compID, "m-r1-0", result)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read-only preview")
+	})
+
+	t.Run("OverrideBracketWinner rejected", func(t *testing.T) {
+		err := eng.OverrideBracketWinner(compID, "m-r1-0", "Pool A-1st")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read-only preview")
+	})
+
+	t.Run("UpdateMatchCourt rejected", func(t *testing.T) {
+		err := eng.UpdateMatchCourt(compID, "m-r1-0", "B")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read-only preview")
+	})
+
+	t.Run("UpdateMatchTime rejected", func(t *testing.T) {
+		err := eng.UpdateMatchTime(compID, "m-r1-0", "10:00")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read-only preview")
+	})
+
+	// Confirm the bracket was not mutated by any of the rejected calls.
+	loaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.True(t, loaded.Preview, "Preview flag must still be set")
+	assert.Equal(t, state.MatchStatusScheduled, loaded.Rounds[0][0].Status, "match status must not have changed")
+	assert.Empty(t, loaded.Rounds[0][0].Winner, "winner must not have been set")
+}

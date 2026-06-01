@@ -512,7 +512,7 @@ function MyMatchAlertBanner({ match, onView, onDismiss }) {
   );
 }
 
-function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule }) {
+function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister }) {
   const t = tournament;
   const comps = t.competitions || [];
   const compsByDate = useMemo(() => {
@@ -721,32 +721,46 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                   const done = matches.filter((m) => m.status === "completed").length;
                   const liveCount = matches.filter((m) => m.status === "running").length;
                   const pct = total ? Math.round((done / total) * 100) : 0;
+                  const showRegister = onRegister &&
+                    t.mode === "self-run" &&
+                    c.kind !== "team" &&
+                    (!c.status || c.status === "setup");
                   return (
-                    <button key={c.id} className="vlist-item vlist-item--comp" onClick={() => onSelectCompetition(c.id)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
-                          <div className="vlist-item__name">{c.name}</div>
-                          <div className="vlist-item__meta">
-                            {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
+                    <div key={c.id} style={{ position: "relative" }}>
+                      <button className="vlist-item vlist-item--comp" style={{ width: "100%" }} onClick={() => onSelectCompetition(c.id)}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
+                            <div className="vlist-item__name">{c.name}</div>
+                            <div className="vlist-item__meta">
+                              {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
+                            </div>
                           </div>
+                          <StatusBadge status={c.status} showLiveDot />
                         </div>
-                        <StatusBadge status={c.status} showLiveDot />
-                      </div>
-                      {/* Progress bar: deliberately excludes draw-ready too.
-                          A draw-ready comp has 0 done / 0 live, so the bar
-                          would read "0 / N" at 0% — a misleading "in progress"
-                          signal. The StatusBadge already communicates the
-                          draw-ready state; the bar appears once play begins. */}
-                      {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
-                        <div className="vlist-item__progress">
-                          <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
-                          <div className="vlist-item__pct">
-                            {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
+                        {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
+                          <div className="vlist-item__progress">
+                            <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
+                            <div className="vlist-item__pct">
+                              {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
+                            </div>
                           </div>
+                        )}
+                      </button>
+                      {showRegister && (
+                        <div style={{ padding: "0 12px 12px" }}>
+                          <button
+                            className="btn btn--primary btn--sm btn--full"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRegister(c.id);
+                            }}
+                          >
+                            Register for this competition
+                          </button>
                         </div>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>

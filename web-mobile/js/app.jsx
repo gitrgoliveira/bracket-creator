@@ -68,6 +68,10 @@ function parsePath(path) {
     if (path === "/reset") {
       return { mode: "viewer", viewerScreen: "reset" };
     }
+    if (path.startsWith("/register/")) {
+      const compId = path.split("/")[2] || "";
+      return { mode: "viewer", viewerScreen: "register", viewerCompId: compId };
+    }
     return { mode: "viewer", viewerScreen: "home" };
 }
 
@@ -91,6 +95,7 @@ function pathFromState(m, vs, vcid, av) {
     if (vs === "schedule") return "/schedule";
     if (vs === "glossary") return "/glossary";
     if (vs === "reset") return "/reset";
+    if (vs === "register" && vcid) return `/register/${vcid}`;
     return "/";
 }
 
@@ -811,12 +816,26 @@ function App() {
               }}
             />
           : <div className="loading">Loading…</div>
+      ) : viewerScreen === "register" ? (
+        window.RegistrationForm
+          ? <window.RegistrationForm
+              compId={viewerCompId}
+              onBack={() => {
+                setViewerScreen("home");
+                setViewerCompId(null);
+              }}
+            />
+          : <div className="loading">Loading…</div>
       ) : (
         <window.ViewerHome
           tournament={tournament}
           onSelectCompetition={setViewerCompId}
           onOpenSchedule={() => setViewerScreen("schedule")}
           onAdminClick={requestAdmin}
+          onRegister={(compId) => {
+            setViewerCompId(compId);
+            setViewerScreen("register");
+          }}
         />
       )}
       {authPrompt && (

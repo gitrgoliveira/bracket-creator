@@ -147,50 +147,6 @@ function levenshtein(a, b) {
   return prev[n];
 }
 
-function CheckInBanner({ tournament, players }) {
-  const [nowStr, setNowStr] = useStateA(() => {
-    const d = new Date();
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  });
-
-  useEffectA(() => {
-    const timer = setInterval(() => {
-      const d = new Date();
-      setNowStr(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
-    }, 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  if (!tournament?.checkInWindowStart || !tournament?.checkInWindowEnd) return null;
-  const start = tournament.checkInWindowStart;
-  const end = tournament.checkInWindowEnd;
-
-  const diffStart = window.diffMinutes(start, nowStr);
-  const diffEnd = window.diffMinutes(end, nowStr);
-
-  if (diffStart > 0) {
-    return (
-      <div className="alert alert--info" style={{ marginBottom: 12 }}>
-        🕒 Check-in window starts at {start} (in {diffStart}m)
-      </div>
-    );
-  }
-  if (diffEnd > 0) {
-    return (
-      <div className="alert alert--success" style={{ marginBottom: 12 }}>
-        ✅ Check-in window is OPEN: {start}–{end} (closes in {diffEnd}m)
-      </div>
-    );
-  }
-
-  const uncheckeds = (players || []).filter(p => !p.checkedIn).length;
-  return (
-    <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-      ⌛ Check-in CLOSED — {uncheckeds > 0 ? `${uncheckeds} participants did not check in` : "all participants checked in"}
-    </div>
-  );
-}
-
 function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSection }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
@@ -719,7 +675,6 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
 
   return (
     <>
-      {c.checkInEnabled && <CheckInBanner tournament={tournament} players={players} />}
       {isDrawReady && (
         <div className="notice notice--info" style={{ marginBottom: 12 }}>
           Draw pending — participant edits are locked. Discard the draw to make changes.

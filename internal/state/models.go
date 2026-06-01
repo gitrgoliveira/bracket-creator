@@ -64,12 +64,6 @@ type Tournament struct {
 	// when zero. FR-057, R9.
 	SlowestCourtBufferPct int `yaml:"slowest_court_buffer_pct,omitempty" json:"slowestCourtBufferPct,omitempty"`
 
-	// Check-in window configuration (HH:MM strings on the tournament day).
-	// Informational only; the head table can still manually toggle check-ins
-	// after the window closes.
-	CheckInWindowStart string `yaml:"check_in_window_start,omitempty" json:"checkInWindowStart,omitempty"`
-	CheckInWindowEnd   string `yaml:"check_in_window_end,omitempty" json:"checkInWindowEnd,omitempty"`
-
 	// Mode selects the auth posture for the whole tournament, chosen at
 	// creation and IMMUTABLE thereafter (mp-7h7). "officiated" (default)
 	// gates the full admin surface behind X-Tournament-Password.

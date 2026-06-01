@@ -102,8 +102,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // (tournament.durationDays is undefined / 0 for older records).
   const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
   const [courts, setCourts] = useStateA(tournament.courts.length);
-  const [checkInStart, setCheckInStart] = useStateA(tournament.checkInWindowStart || "");
-  const [checkInEnd, setCheckInEnd] = useStateA(tournament.checkInWindowEnd || "");
   // Tournament mode (mp-7h7): read-only after creation — shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
@@ -159,9 +157,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       return;
     }
     if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
-    if ((checkInStart && !checkInEnd) || (!checkInStart && checkInEnd)) { setError("Both check-in start and end must be set together, or both must be empty."); return; }
-    if (checkInStart && checkInEnd && checkInStart >= checkInEnd) { setError("Check-in start must be before check-in end."); return; }
-
     onSave({
       name: trimmedName,
       venue: venue.trim(),
@@ -169,11 +164,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       durationDays,
       password: pass || undefined,
       courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
-      checkInWindowStart: checkInStart || undefined,
-      checkInWindowEnd: checkInEnd || undefined,
-      // mp-zoh Phase 5: ceremony blocks. Empty string → omit so the backend
-      // treats it as "not set" (matches backend's validateMaxLen behaviour —
-      // the field accepts "" but an explicit empty string round-trips fine).
       openingBlock: openingBlock.trim() || undefined,
       lunchBlock: lunchBlock.trim() || undefined,
       closingBlock: closingBlock.trim() || undefined,
@@ -255,16 +245,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               {" "}This setting was fixed at creation and cannot be changed.
             </div>
           </div>
-          <div className="row" style={{ marginTop: 16 }}>
-            <div className="field">
-              <label className="field__label">Check-in start (HH:MM)</label>
-              <input className="input" type="time" value={checkInStart} onChange={(e) => setCheckInStart(e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="field__label">Check-in end (HH:MM)</label>
-              <input className="input" type="time" value={checkInEnd} onChange={(e) => setCheckInEnd(e.target.value)} />
-            </div>
-          </div>
           {/* mp-zoh Phase 5: ceremony block duration inputs. These feed the */}
           {/* schedule estimator (backend Tournament.OpeningBlock etc.). */}
           {/* Duration strings like "30m", "1h", "1h30m". Leave blank to omit. */}
@@ -328,11 +308,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <button className="btn" onClick={onCancel}>Cancel</button>
             <button className="btn btn--primary" onClick={handleSave}>Save changes</button>
           </div>
-        </div>
-
-        <div className="page-head" style={{ marginTop: 32 }}><h1 className="page-head__title">Broadcast announcement</h1></div>
-        <div className="card card--pad-lg">
-          <window.AnnouncementComposer password={password} showToast={showToast} />
         </div>
       </div>
     </div>

@@ -650,16 +650,20 @@ function App() {
 
   useE(() => {
     if (viewerCompId && viewerScreen !== "register") {
+      let cancelled = false;
       setLoading(true);
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
+          if (cancelled) return;
           setSelectedCompData(data);
           setLoading(false);
         })
         .catch(err => {
+          if (cancelled) return;
           console.error(err);
           setLoading(false);
         });
+      return () => { cancelled = true; };
     } else {
       setSelectedCompData(null);
       setLoading(false);

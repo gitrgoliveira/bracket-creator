@@ -39,7 +39,7 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 ## 2. Principles
 
 1. **Clarity over decoration.** Operators run tournaments under time pressure; a glanceable card beats a beautiful one. No gratuitous animation, no decorative shadows.
-2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; Excel puts White in the left column. See [§4 Match cards](#match-cards--bc-match) and [CLAUDE.md](CLAUDE.md) "Match Colors" for the full rule.
+2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; the horizontal scoreboard and list rows put Shiro left / Aka right; Excel puts White in the left column. The two sides must be **distinguishable at a glance on every surface** — and the distinction is carried by *treatment*, not hue alone (so it survives glare, projectors, and color-blindness): Aka = solid/red-tinted fill, Shiro = framed white (cool border + diagonal hatch) so "white" never dissolves into the page. **Color area must scale with the surface.** A full-screen scoreboard can flood half the screen; a dense schedule row cannot rely on a 5px spine — give each side a tinted cell, a colored header, or a filled badge so the signal stays legible as the component shrinks. See [§4 Match cards](#match-cards--bc-match), [§4 Aka/Shiro side treatment](#akashiro-side-treatment), and [CLAUDE.md](CLAUDE.md) "Match Colors" for the full rule.
 3. **Live state is loud.** Anything currently happening on a court gets the red treatment (`--red` border, soft red ring, pulsing dot). Anything else stays neutral. Don't dilute the signal.
 4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)` — see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
 5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → playoffs → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
@@ -195,6 +195,7 @@ Quick lookup — scan, then `Ctrl+F` the class name to jump to its subsection.
 | Tables | `.table`, `.pool__table` | Generic + pool tabular data |
 | Badges | `.badge--{status}` | Status pills (setup / pools / playoffs / completed / archive) |
 | Match cards | `.bc-match` | Bracket-tree card with two sides (Aka top / Shiro bottom) |
+| Aka/Shiro side treatment | (cross-cutting) | How Red vs White stays distinguishable on every matchup surface |
 | Pools | `.pool`, `.pools-grid` | Pool standings + matchups |
 | Modals | `.modal-backdrop`, `.modal` | Overlay dialogs (always wire `useEscapeToClose`) |
 | Toasts | `.toast` | Auto-dismissing notifications (single-slot, no stacking) |
@@ -270,6 +271,29 @@ Decision types ([CLAUDE.md](CLAUDE.md) "Match Decision Types") map to short tags
 | `kachinuki-exhaustion` | rendered via score-line suffix only | — | inherits |
 
 Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for liveness, not outcome.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
+
+### Aka/Shiro side treatment
+
+The one rule that spans **every** surface showing a matchup: scoreboard, score editor, bracket card, pool row, schedule row, match-detail panel. Aka (Red) and Shiro (White) must read as two visibly different sides at the size that surface actually renders.
+
+**The treatments (not just two hues):**
+
+| Side | Fill | Edge | Badge | Position |
+|---|---|---|---|---|
+| **Shiro** (White) | `--white-side` (`#f6f7fb`) or framed pure-white | dark cool border + 45° diagonal hatch | framed white square, letter `S` | **left** (horizontal) / **bottom** (bracket tree) |
+| **Aka** (Red) | `--red-soft` tint, or solid `--red` when emphasized | `--red` | solid red square, letter `A` | **right** (horizontal) / **top** (bracket tree) |
+
+The hatch on Shiro is load-bearing: pure white on a white card is invisible, and `--white-side` alone is too faint on dense rows. The diagonal hatch (`repeating-linear-gradient(-45deg, …)`) plus a dark leading edge is what makes "white" register as a deliberate side.
+
+**Color area scales with the component** (Principle 2):
+
+- **Full scoreboard** ([display.jsx](web-mobile/js/display.jsx)) — flood the whole half: tinted background, 6px top bar, large side label.
+- **Score editor / bracket card / pool row / schedule row** — these are dense and were the weak spot: a thin spine reads as decoration, not signal. Give each side **real area** — a tinted cell (`--red-soft` / hatched white), an always-on colored header (present *before* a winner is chosen), or a filled badge. Don't rely on a hairline.
+- **Smallest rows** — at minimum a filled `sq`-style square badge (red filled `A` / framed-white `S`) sitting inside a tinted segment.
+
+**Never** swap side order by seeding — geometry is the rule (see Match cards). And the label/position/badge are redundant with color on purpose: color is never the *only* signal, so the distinction holds for color-blind operators and washed-out projectors.
+
+> Reference mock for the full system across all six surfaces: [web-mobile/design/aka-shiro-system.html](web-mobile/design/aka-shiro-system.html) (standalone — not embedded; system-font + token-faithful integration lands in `styles.css`).
 
 ### Pools — `.pool`, `.pools-grid`
 

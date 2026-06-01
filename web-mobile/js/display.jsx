@@ -366,71 +366,58 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                             {' · '}
                             {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds)}
                         </div>
-                        {promotedKind === "live" && (
-                            <span style={{ color: '#ff3b30', fontWeight: 800, fontSize: '2.4vh', letterSpacing: '0.1em' }}>● LIVE</span>
-                        )}
+                        {/* LIVE is the default promoted state — no badge (the board IS
+                            the live match). UP NEXT is the exception, shown as a small
+                            muted note rather than a loud badge. */}
                         {promotedKind === "upnext" && (
-                            <span style={{ color: '#ffd166', fontWeight: 800, fontSize: '2.4vh', letterSpacing: '0.1em' }}>UP NEXT</span>
+                            <span className="tvd-upnext-note" data-testid="tvd-upnext">↑ up next</span>
                         )}
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '8vh', fontWeight: 700 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '2.5vh', opacity: 0.6 }}><TermD name="shiro">SHIRO</TermD></div>
-                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sideLabel(promoted.match.sideB, zekken)}</div>
+                    {/* Aka/Shiro colored half-panels (DESIGN.md §4). SHIRO (sideB)
+                        left, AKA (sideA) right; centre carries the real per-side
+                        waza score (white–red), decision suffix + fouls. */}
+                    <div className="tvd-board">
+                        <div className="tvd-side tvd-side--shiro">
+                            <div className="tvd-side__bar"></div>
+                            <div className="tvd-side__lab"><TermD name="shiro">SHIRO</TermD></div>
+                            <div className="tvd-side__name">{sideLabel(promoted.match.sideB, zekken)}</div>
                             {promoted.match.sideB?.dojo && (
-                                <div style={{ fontSize: '2.2vh', opacity: 0.55, fontWeight: 400, marginTop: '0.5vh' }}>
-                                    {promoted.match.sideB.dojo}
-                                </div>
+                                <div className="tvd-side__dojo">{promoted.match.sideB.dojo}</div>
                             )}
                         </div>
-                        <div style={{
-                            flexShrink: 0,
-                            padding: '0 4vw',
-                            fontFamily: 'var(--font-mono, monospace)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: '1vh',
-                        }}>
+                        <div className="tvd-centre">
                             {promotedKind === "live" ? (
                                 <>
-                                    <div>
-                                        <span>{(promoted.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0'}</span>
-                                        <span style={{ opacity: 0.4 }}> - </span>
-                                        <span style={{ color: '#ff5b54' }}>{(promoted.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0'}</span>
+                                    <div className="tvd-score">
+                                        <span className="tvd-score__s">{(promoted.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0'}</span>
+                                        <span className="tvd-score__d">–</span>
+                                        <span className="tvd-score__a">{(promoted.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0'}</span>
                                     </div>
-                                    {/* T097: decision suffix on the TV's live block. Hand-rolled
-                                        score above keeps the SHIRO/AKA colour split, so we add the
-                                        Kiken/Fus./DH/(E) label as its own line beneath the digits
-                                        rather than re-using formatIpponsScore (which collapses
-                                        both sides into one string). */}
+                                    {/* T097: Kiken/Fus./DH/(E) suffix. Kept separate from the
+                                        per-side digits (which carry the SHIRO/AKA colour split)
+                                        rather than re-using formatIpponsScore. */}
                                     {window.decisionSuffix && window.decisionSuffix(promoted.match) && (
-                                        <div style={{ fontSize: '2.2vh', opacity: 0.8, fontWeight: 700, letterSpacing: '0.05em' }}>
-                                            {window.decisionSuffix(promoted.match)}
-                                        </div>
+                                        <div className="tvd-centre__sfx">{window.decisionSuffix(promoted.match)}</div>
                                     )}
                                     {((promoted.match.hansokuA || 0) + (promoted.match.hansokuB || 0)) > 0 && (
-                                        <div style={{ fontSize: '2.2vh', opacity: 0.65, fontWeight: 500 }}>
+                                        <div className="tvd-centre__fouls">
                                             Fouls {promoted.match.hansokuB || 0} – {promoted.match.hansokuA || 0}
                                         </div>
                                     )}
                                 </>
                             ) : (
-                                <div style={{ fontSize: '6vh', opacity: 0.35 }}>vs</div>
+                                <div className="tvd-centre__vs">VS</div>
                             )}
                             {promoted.match.scheduledAt && (
-                                <div style={{ fontSize: '2vh', opacity: 0.6, fontWeight: 500 }}>
-                                    {promoted.match.scheduledAt}
-                                </div>
+                                <div className="tvd-side__dojo" style={{ opacity: 0.6 }}>{promoted.match.scheduledAt}</div>
                             )}
                         </div>
-                        <div style={{ flex: 1, textAlign: 'right', minWidth: 0 }}>
-                            <div style={{ fontSize: '2.5vh', opacity: 0.7, color: '#e63946' }}><TermD name="aka">AKA</TermD></div>
-                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sideLabel(promoted.match.sideA, zekken)}</div>
+                        <div className="tvd-side tvd-side--aka">
+                            <div className="tvd-side__bar"></div>
+                            <div className="tvd-side__lab"><TermD name="aka">AKA</TermD></div>
+                            <div className="tvd-side__name">{sideLabel(promoted.match.sideA, zekken)}</div>
                             {promoted.match.sideA?.dojo && (
-                                <div style={{ fontSize: '2.2vh', opacity: 0.55, fontWeight: 400, marginTop: '0.5vh' }}>
-                                    {promoted.match.sideA.dojo}
-                                </div>
+                                <div className="tvd-side__dojo">{promoted.match.sideA.dojo}</div>
                             )}
                         </div>
                     </div>
@@ -660,11 +647,11 @@ function LobbyCard({ court, tournament: _tournament, competitions }) {
         }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '0.06em' }}>SHIAIJO {court}</div>
-                {promotedKind === "live" && (
-                    <span style={{ color: '#ff3b30', fontWeight: 800, fontSize: 12 }}>● LIVE</span>
-                )}
+                {/* No red "LIVE" badge — the promoted match is live by default
+                    (red is reserved for Aka + danger). UP NEXT stays as a small
+                    muted note, consistent with TvDisplay. */}
                 {promotedKind === "upnext" && (
-                    <span style={{ color: '#ffd166', fontWeight: 700, fontSize: 12 }}>UP NEXT</span>
+                    <span style={{ color: 'rgba(255,209,102,0.85)', fontWeight: 700, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase' }}>↑ up next</span>
                 )}
             </div>
 
@@ -684,8 +671,9 @@ function LobbyCard({ court, tournament: _tournament, competitions }) {
                         fontSize: 22, fontWeight: 600,
                     }}>
                         <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            <div style={{ fontSize: 10, opacity: 0.55, letterSpacing: '0.2em' }}><TermD name="shiro">SHIRO</TermD></div>
-                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sideLabel(promoted.match.sideB, zekken)}</div>
+                            {/* Framed-white Shiro chip at lobby-card scale (DESIGN.md §4) */}
+                            <span style={{ display: 'inline-block', background: '#fff', color: 'var(--accent, #1d3557)', border: '1px solid var(--accent, #1d3557)', fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', padding: '1px 5px', borderRadius: 3 }}><TermD name="shiro">SHIRO</TermD></span>
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>{sideLabel(promoted.match.sideB, zekken)}</div>
                         </div>
                         <div style={{
                             fontFamily: 'var(--font-mono, monospace)', fontWeight: 700,
@@ -710,8 +698,9 @@ function LobbyCard({ court, tournament: _tournament, competitions }) {
                             )}
                         </div>
                         <div style={{ textAlign: 'right', color: '#ff8a86', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            <div style={{ fontSize: 10, opacity: 0.55, letterSpacing: '0.2em', color: '#e63946' }}><TermD name="aka">AKA</TermD></div>
-                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sideLabel(promoted.match.sideA, zekken)}</div>
+                            {/* Solid-red Aka chip at lobby-card scale (DESIGN.md §4) */}
+                            <span style={{ display: 'inline-block', background: 'var(--red, #c1121f)', color: '#fff', fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', padding: '1px 5px', borderRadius: 3 }}><TermD name="aka">AKA</TermD></span>
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>{sideLabel(promoted.match.sideA, zekken)}</div>
                         </div>
                     </div>
                 </>
@@ -822,10 +811,16 @@ function StreamingOverlay({ court, position, competitions }) {
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <span style={{
                     display: 'inline-block',
+                    // Framed-white Shiro chip (DESIGN.md §4): white fill + navy
+                    // frame + navy text, matching the framed-white badges across
+                    // the app. Kept as a chip (not a flood) so the transparent
+                    // lower-third still lets broadcast video show through.
                     background: '#fff',
-                    color: '#000',
+                    color: 'var(--accent, #1d3557)',
+                    border: '1px solid var(--accent, #1d3557)',
                     fontSize: '1.4vh',
-                    fontWeight: 700,
+                    fontWeight: 800,
+                    letterSpacing: '0.06em',
                     padding: '2px 6px',
                     borderRadius: 4,
                     marginRight: 8,
@@ -849,10 +844,13 @@ function StreamingOverlay({ court, position, competitions }) {
                 <span style={{ fontWeight: 600, verticalAlign: 'middle' }}>{aka}</span>
                 <span style={{
                     display: 'inline-block',
-                    background: '#e63946',
+                    // Solid-red Aka chip (DESIGN.md §4): --red fill, matching the
+                    // app's Aka badges. e63946 → --red for token consistency.
+                    background: 'var(--red, #c1121f)',
                     color: '#fff',
                     fontSize: '1.4vh',
-                    fontWeight: 700,
+                    fontWeight: 800,
+                    letterSpacing: '0.06em',
                     padding: '2px 6px',
                     borderRadius: 4,
                     marginLeft: 8,

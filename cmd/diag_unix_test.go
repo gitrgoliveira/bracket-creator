@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -45,8 +46,21 @@ func TestDiagnoseFolderError_OwnerInfo(t *testing.T) {
 	dir := t.TempDir()
 	result := diagnoseFolderError(dir)
 
-	// t.TempDir() is owned by the current user, so owner= must match Geteuid:Getegid
-	expected := fmt.Sprintf("owner=%d:%d", os.Geteuid(), os.Getegid())
+	// The diagnostic prints the directory's ACTUAL owner (stat.Uid:stat.Gid),
+	// not the process's uid/gid. Those usually match for t.TempDir(), but the
+	// group can differ: on macOS a temp dir created under a setgid parent
+	// inherits the parent's gid (often 0/wheel) rather than the process's
+	// effective gid (e.g. 20/staff). So derive the expected owner from the
+	// same stat the implementation reads, rather than assuming Getegid().
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat temp dir: %v", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Skipf("Sys() is not *syscall.Stat_t on this platform (%T)", info.Sys())
+	}
+	expected := fmt.Sprintf("owner=%d:%d", stat.Uid, stat.Gid)
 	if !strings.Contains(result, expected) {
 		t.Errorf("expected %q in output, got:\n%s", expected, result)
 	}

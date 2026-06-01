@@ -51,9 +51,23 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('△');
     });
 
-    it('falls back to numeric score when ippons arrays are empty but score object has pts', () => {
+    it('falls back to numeric score when ippons arrays are empty AND score has no ippon letters', () => {
       const score = formatIpponsScore([], [], { type: 'ippon', winnerPts: 2, loserPts: 1 }, null);
       expect(score).toBe('2–1');
+    });
+
+    it('prefers the winner waza LETTERS over a count when score.ippons is present', () => {
+      // Per-side arrays absent (server bracket score) but score.ippons carries
+      // the winner's techniques — show "MK–1", not "2–1". Loser is a count-only
+      // value in this degenerate path, so it stays numeric. Display-only: the
+      // numeric winnerPts/loserPts fields are untouched for logic that needs them.
+      const score = formatIpponsScore([], [], { type: 'ippon', winnerPts: 2, loserPts: 1, ippons: ['M', 'K'] }, null);
+      expect(score).toBe('MK–1');
+    });
+
+    it('ignores empty/dot placeholders in score.ippons and falls back to the count', () => {
+      const score = formatIpponsScore([], [], { type: 'ippon', winnerPts: 1, loserPts: 0, ippons: ['•'] }, null);
+      expect(score).toBe('1–0');
     });
   });
 

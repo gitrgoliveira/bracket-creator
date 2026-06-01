@@ -173,6 +173,34 @@ describe('API Utils', () => {
         loserPts: 1,
         ippons: ['M', 'K'],
       });
+      // Both sides' waza letters recovered into per-side arrays (loss-free),
+      // so the schedule/bracket render technique letters for BOTH competitors
+      // ("MK–M") rather than the numeric fallback. Hansoku suffix stripped.
+      expect(norm.ipponsA).toEqual(['M', 'K']);
+      expect(norm.ipponsB).toEqual(['M']);
+    });
+
+    it('recovers BOTH sides waza letters into ipponsA/ipponsB from bracket scoreA/scoreB', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A',
+        status: 'completed',
+        scoreA: 'MK', scoreB: 'D',
+      };
+      const norm = normalizeMatch(match, {});
+      expect(norm.ipponsA).toEqual(['M', 'K']);
+      expect(norm.ipponsB).toEqual(['D']);
+    });
+
+    it('does not overwrite server-provided ipponsA/ipponsB with scoreA/scoreB', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A',
+        status: 'completed',
+        scoreA: 'MK', scoreB: 'D',
+        ipponsA: ['K', 'M'], ipponsB: ['T'], // server arrays must win
+      };
+      const norm = normalizeMatch(match, {});
+      expect(norm.ipponsA).toEqual(['K', 'M']);
+      expect(norm.ipponsB).toEqual(['T']);
     });
 
     it('strips no-space "(HN)" suffix from bracket scoreA/scoreB too', () => {

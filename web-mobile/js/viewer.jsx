@@ -1241,6 +1241,26 @@ function DisplayModes({ tournament }) {
             <span className="vlist-item__rowchev">→</span>
           </a>
         ))}
+        {/* Per-court OBS/vMix overlay entry (previously URL-only). Links to the
+            transparent lower-third streaming overlay so operators can grab the
+            browser-source URL per shiaijo straight from the UI. */}
+        {courts.map((cc) => (
+          <a
+            key={`overlay-${cc}`}
+            className="vlist-item vlist-item--row"
+            href={`/display?court=${encodeURIComponent(cc)}&overlay=1`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "none" }}
+          >
+            <span className="vlist-item__icon">🎥</span>
+            <div className="vlist-item__rowbody">
+              <div className="vlist-item__rowtitle"><TermV name="shiaijo">Shiaijo</TermV> {cc} streaming overlay</div>
+              <div className="vlist-item__rowsub">Transparent lower-third for OBS / vMix · opens in a new tab</div>
+            </div>
+            <span className="vlist-item__rowchev">→</span>
+          </a>
+        ))}
         <a
           className="vlist-item vlist-item--row"
           href="/display?court=all"

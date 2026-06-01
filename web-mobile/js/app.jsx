@@ -91,11 +91,11 @@ function pathFromState(m, vs, vcid, av) {
       }
       return "/admin";
     }
+    if (vs === "register" && vcid) return `/register/${vcid}`;
     if (vcid) return `/competition/${vcid}`;
     if (vs === "schedule") return "/schedule";
     if (vs === "glossary") return "/glossary";
     if (vs === "reset") return "/reset";
-    if (vs === "register" && vcid) return `/register/${vcid}`;
     return "/";
 }
 
@@ -762,7 +762,7 @@ function App() {
           onDismiss={handleDismissAnnouncement}
         />
       )}
-      {selectedCompData ? (
+      {selectedCompData && viewerScreen !== "register" ? (
         <window.ViewerCompetition
           // key on the competition id so switching comps (notably the
           // mp-rrd pools<->playoffs cross-link, which calls

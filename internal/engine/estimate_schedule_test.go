@@ -65,7 +65,8 @@ func TestEstimateScheduleForCompetition_Mixed(t *testing.T) {
 	compID := "est-mixed"
 
 	// 9 players, poolSize 3 min-mode, RR, 2 winners → 3 pools of 3,
-	// pool matches = 3*C(3,2)=9, bracket = NextPow2(6)-1=7.
+	// pool matches = 3*C(3,2)=9, bracket = bracketMatchCount(6)=6
+	// (pow2=8, byes=2: 1 both-empty completed at gen time → real=6, not NextPow2(6)-1=7).
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:                   compID,
 		Format:               state.CompFormatMixed,

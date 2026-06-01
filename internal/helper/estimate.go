@@ -99,8 +99,13 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMa
 // estimateMixed handles the "mixed" (Pools + Knockout) format. Extracted for
 // readability.
 //
-// Finding 4 fix: pool sizes are derived by calling CreatePools with synthetic
-// players (all-unique names and dojos) rather than using an even base/rem split.
+// Finding 4 fix: when playerCount < poolSize in min mode, numPools is 0 and
+// an error is returned — mirroring CreatePools' error at tournament.go:222.
+// In max mode numPools is always ≥1 when playerCount ≥1, so the error only
+// fires for min mode.
+//
+// Pool sizes are derived by calling CreatePools with synthetic players
+// (all-unique names and dojos) rather than using an even base/rem split.
 // This mirrors the EXACT distribution produced by the real draw (tournament.go
 // CreatePools → forcePoolSize), including the "overflow > numPools" case where
 // forcePoolSize piles extra players into pool[0] rather than distributing evenly.
@@ -124,8 +129,9 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCou
 		numPools = in.PlayerCount / in.PoolSize
 	}
 	if numPools == 0 {
-		// Fewer players than pool size in min mode — no pools, no matches.
-		return 0, 0, nil
+		// Fewer players than pool size in min mode — mirrors CreatePools'
+		// error at tournament.go:222.
+		return 0, 0, fmt.Errorf("EstimateMatchCounts: player count (%d) is less than pool size (%d) in min mode", in.PlayerCount, in.PoolSize)
 	}
 
 	// --- Per-pool sizes via the REAL CreatePools (drift-proof) ---

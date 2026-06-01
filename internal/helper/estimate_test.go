@@ -421,6 +421,23 @@ func TestEstimateMatchCounts_PoolSizeZero_Mixed(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestEstimateMatchCounts_PlayerCountLessThanPoolSize_MinMode verifies that
+// a player count below the pool size in min mode returns an error (Finding 4).
+// This mirrors CreatePools' error at tournament.go:222: when floor(N/poolSize)
+// rounds to zero there can be no pools. Max mode always produces ≥1 pool (ceil
+// division), so it is unaffected.
+func TestEstimateMatchCounts_PlayerCountLessThanPoolSize_MinMode(t *testing.T) {
+	in := EstimateMatchCountsInput{
+		Format:       "mixed",
+		PlayerCount:  3, // fewer than poolSize
+		PoolSize:     5, // min mode → numPools = floor(3/5) = 0 → error
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+	}
+	_, _, err := EstimateMatchCounts(in)
+	require.Error(t, err, "player count < pool size in min mode must return an error")
+}
+
 // TestEstimateMatchCounts_CrossCheck_MatchesCreatePools confirms that the
 // pool-count math in EstimateMatchCounts agrees with CreatePools for a
 // concrete example. We call CreatePools directly and compare the pool count

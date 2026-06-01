@@ -330,7 +330,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // on `c` fields (not `local`) so we re-fetch after a successful debounced
   // save, not on every keystroke. This also fires on mount and on any
   // SSE-driven competition_updated / schedule_updated refresh.
-  }, [c.id, c.format, c.poolMatchDuration, c.playoffMatchDuration, c.courts, c.teamSize, c.poolSize, c.poolWinners, c.swissRounds, password]);
+  //
+  // Tournament ceremony/timing fields are included so the estimate refreshes
+  // when the operator changes openingBlock, lunchBlock, closingBlock,
+  // clockToElapsedMultiplier, or slowestCourtBufferPct on the tournament
+  // settings screen and then returns here — otherwise the display would be
+  // stale until a competition field changed (Finding 5 fix).
+  }, [c.id, c.format, c.poolMatchDuration, c.playoffMatchDuration, c.courts, c.teamSize, c.poolSize, c.poolWinners, c.swissRounds, password,
+    tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
+    tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
   // AdminSettings unmounts when the user navigates to a different section
   // via onSection() (AdminCompetition rerenders with a different child).
   // saveNow's .then/.catch and the delete handler's finally fire on

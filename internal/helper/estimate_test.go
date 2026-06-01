@@ -108,7 +108,7 @@ func TestEstimateMatchCounts_BracketMatchCount(t *testing.T) {
 		{32, 31}, // pow2=32, byes=0: real=31
 	}
 	for _, tc := range tests {
-		t.Run("", func(t *testing.T) {
+		t.Run(fmt.Sprintf("players=%d", tc.players), func(t *testing.T) {
 			got := bracketMatchCount(tc.players)
 			assert.Equal(t, tc.want, got, "bracketMatchCount(%d)", tc.players)
 		})
@@ -295,7 +295,7 @@ func TestEstimateMatchCounts_PlayoffsOnly(t *testing.T) {
 		{12, 12}, // pow2=16, byes=4: completed=3, real=12 (NOT 11=N-1!)
 	}
 	for _, tc := range tests {
-		t.Run("", func(t *testing.T) {
+		t.Run(fmt.Sprintf("players=%d", tc.playerCount), func(t *testing.T) {
 			in := EstimateMatchCountsInput{
 				Format:      "playoffs",
 				PlayerCount: tc.playerCount,
@@ -323,7 +323,7 @@ func TestEstimateMatchCounts_League(t *testing.T) {
 		{10, 45},
 	}
 	for _, tc := range tests {
-		t.Run("", func(t *testing.T) {
+		t.Run(fmt.Sprintf("players=%d", tc.playerCount), func(t *testing.T) {
 			in := EstimateMatchCountsInput{
 				Format:      "league",
 				PlayerCount: tc.playerCount,

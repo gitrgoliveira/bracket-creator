@@ -229,7 +229,8 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodPut + " /api/competitions/:id/teams/:tid/lineups/:round",            // team lineup management — organiser
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // team lineup management — organiser
 		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup — organiser
-		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId": // team match lineup — organiser
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup — organiser
+		http.MethodPost + " /api/competitions/:id/matches/:mid/decision":               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
 		return true
 	default:
 		return false

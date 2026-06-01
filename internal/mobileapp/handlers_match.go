@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -230,7 +231,7 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 // a time; the concrete `*engine.Engine` remains a drop-in
 // implementation of `ScoringEngine` so the `tryAutoCompletePools` and
 // score endpoint paths can already accept the interface today.
-func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, tx CompetitionTransactor, hub *Hub) {
+func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, tx CompetitionTransactor, hub *Hub, verifier PasswordVerifier, tl TournamentLoader) {
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -378,7 +379,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// behaviour as before. T156 added the CompetitionTransactor `tx`
 	// parameter so the match-write + ineligibility-write + lineup-freeze
 	// commit under one per-comp lock acquire.
-	registerScoreHandler(r, eng, store, tx, hub)
+	registerScoreHandler(r, eng, store, tx, hub, verifier, tl)
 
 	r.PUT("/competitions/:id/matches/:mid/court", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -486,6 +487,114 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	})
 }
 
+// enforceSelfRunPolicy applies the self-run decision allowlist when the
+// tournament is in self-run mode and the request carries no valid admin
+// password. Returns the resultSource string ("admin" or "self-reported")
+// and true on success; writes the HTTP error response and returns "",
+// false when the request should be rejected.
+//
+// The finalized-result guard is NOT checked here — it must run inside
+// WithTransaction to prevent TOCTOU races between concurrent anonymous
+// submissions. See checkFinalizedUnderTx.
+//
+// Called after ScoreRequest.Validate() so the request is structurally valid.
+//
+// In officiated mode this is a pass-through that returns "admin", true.
+// On LoadTournament error the function fails closed (500).
+func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest) (string, bool) {
+	t, err := tl.LoadTournament()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load tournament config"})
+		return "", false
+	}
+	if t == nil || t.Mode != "self-run" {
+		return "admin", true
+	}
+
+	// Self-run mode: check whether the caller has a valid admin password.
+	ok, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
+	if verr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
+		return "", false
+	}
+	if ok {
+		return "admin", true
+	}
+
+	// Anonymous caller in self-run mode: enforce decision allowlist on
+	// the top-level decision AND every sub-result decision.
+	if !IsSelfRunReportableDecision(req.Decision, req.DecidedByHantei) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "decision type not allowed in self-run mode without admin password"})
+		return "", false
+	}
+	for i := range req.SubResults {
+		sub := &req.SubResults[i]
+		if !IsSelfRunReportableSubDecision(sub.Decision, sub.DecidedByHantei, sub.Position) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("subResults[%d]: decision type not allowed in self-run mode without admin password", i)})
+			return "", false
+		}
+	}
+
+	return "self-reported", true
+}
+
+// errResultFinalized is a sentinel returned by checkFinalizedUnderTx to
+// signal that the match is already finalized and the anonymous overwrite
+// should be rejected with 409.
+var errResultFinalized = errors.New("result_finalized")
+
+// checkFinalizedUnderTx runs inside WithTransaction (under the per-comp
+// lock) so it's safe from TOCTOU races. Returns errResultFinalized when
+// an anonymous caller tries to write to a completed match. Fails closed:
+// a load error rejects the request rather than allowing an overwrite.
+func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
+	poolMatches, err := stx.LoadPoolMatches(compID)
+	if err != nil {
+		return fmt.Errorf("finalized guard: load pool matches: %w", err)
+	}
+	for i := range poolMatches {
+		if poolMatches[i].ID == matchID && isMatchFinalized(&poolMatches[i]) {
+			return errResultFinalized
+		}
+	}
+	bracket, err := stx.LoadBracket(compID)
+	if err != nil {
+		return fmt.Errorf("finalized guard: load bracket: %w", err)
+	}
+	if bracket != nil {
+		for _, round := range bracket.Rounds {
+			for i := range round {
+				if round[i].ID == matchID {
+					mr := bracketMatchToResult(&round[i])
+					if isMatchFinalized(mr) {
+						return errResultFinalized
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// bracketMatchToResult projects the fields of a BracketMatch that the
+// finalized guard cares about into a MatchResult so the guard can use a
+// uniform type.
+func bracketMatchToResult(bm *state.BracketMatch) *state.MatchResult {
+	return &state.MatchResult{
+		ID:       bm.ID,
+		Winner:   bm.Winner,
+		Decision: bm.Decision,
+		Status:   bm.Status,
+	}
+}
+
+// isMatchFinalized reports whether the given result represents a concluded
+// match. Any completed match is finalized — anonymous callers must not
+// overwrite it regardless of whether a winner was explicitly recorded.
+func isMatchFinalized(r *state.MatchResult) bool {
+	return r.Status == state.MatchStatusCompleted
+}
+
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`
 // endpoint via the consumer-boundary interfaces (T014/T017) instead of
 // the concrete `*engine.Engine` / `*Hub`. This is the Slice 0
@@ -511,7 +620,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 // NOT migrated: the partial-success error array semantics need a
 // per-result tx (or a different commit shape) and that's out of scope
 // for this slice.
-func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
+func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -546,7 +655,15 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 
+		// mp-ba3: self-run decision allowlist + result provenance. Runs
+		// after Validate() so the request is structurally valid.
+		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req)
+		if !ok {
+			return
+		}
+
 		result := req.AsMatchResult()
+		result.ResultSource = resultSource
 
 		// T156: run the score write + ineligibility update + lineup-freeze
 		// inside a single per-comp lock acquire via WithTransaction. The
@@ -569,6 +686,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			engErr    error
 		)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+			// mp-ba3: finalized guard runs under the per-comp lock to
+			// prevent TOCTOU races between concurrent anonymous submissions.
+			if resultSource == "self-reported" {
+				if err := checkFinalizedUnderTx(stx, id, mid); err != nil {
+					engErr = err
+					return nil
+				}
+			}
 			isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 			if !isWithdrawal {
 				if err := eng.StartMatchTx(stx, id, mid); err != nil {
@@ -590,6 +715,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		if engErr != nil {
+			if errors.Is(engErr, errResultFinalized) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "result_finalized",
+					"message": "This match result has already been reported. Contact the tournament organizer to correct it.",
+				})
+				return
+			}
 			var ineligErr *engine.IneligibleCompetitorError
 			if errors.As(engErr, &ineligErr) {
 				// U1: reasonHuman alongside the raw kendo-term reason

@@ -508,7 +508,7 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
   );
 }
 
-function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
+function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport }) {
   const m = match;
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
@@ -518,7 +518,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // correctly stay on the individual editor.
   const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
   const teamSize = m.teamSize || 5;
-  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} />;
+  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} />;
 
   const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const seedBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
@@ -1039,7 +1039,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               follow-up. Sits between the scoring board and the footer so the
               flow is: enter score OR record a decision → either way the modal
               closes (or surfaces the remaining-matches list for kiken). */}
-          {!withdrawnPlayer && !decisionPromptKind && (
+          {!withdrawnPlayer && !decisionPromptKind && !selfReport && (
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
               <div className="decision-btn-group">
@@ -1202,7 +1202,7 @@ function resolveLineupTeamId(sideKey, players) {
   return (p && (p.id || p.ID)) || sideKey;
 }
 
-function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
+function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport }) {
   const m = match;
   const isComplete = m.status === "completed";
   const numberedPositions = TEAM_POSITIONS.slice(0, teamSize);
@@ -1984,7 +1984,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           {/* T093–T098: decision (kiken/fusenpai) controls for the overall
               team match. Per-bout Fusensho lives on each sub-match row
               (see the row-level "Fusensho" button per side, T096). */}
-          {!withdrawnPlayer && !decisionPromptKind && (
+          {!withdrawnPlayer && !decisionPromptKind && !selfReport && (
             <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
               <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Team decision:</span>
               <div className="decision-btn-group">

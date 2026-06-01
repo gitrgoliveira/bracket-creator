@@ -23,6 +23,14 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// TournamentLoader is the consumer-boundary view of state.Store used by
+// handlers that need to inspect the tournament-level configuration (e.g.
+// Mode) without taking a dependency on the full store. *state.Store
+// satisfies this interface by structural match.
+type TournamentLoader interface {
+	LoadTournament() (*state.Tournament, error)
+}
+
 // CompetitionStore is the consumer-boundary view of state.Store used by
 // handler families that need to read/write competition-level data
 // (config.md, pools, brackets, schedule). Methods are added here only as
@@ -38,6 +46,10 @@ type CompetitionStore interface {
 	// LoadCompetition returns the competition record, or (nil, nil) when
 	// no record exists for this ID. Mirrors state.Store.LoadCompetition.
 	LoadCompetition(id string) (*state.Competition, error)
+	// LoadPoolMatches returns the pool-match results for compID.
+	LoadPoolMatches(id string) ([]state.MatchResult, error)
+	// LoadBracket returns the elimination bracket for compID.
+	LoadBracket(id string) (*state.Bracket, error)
 }
 
 // ScoringEngine is the consumer-boundary view of engine.Engine used by

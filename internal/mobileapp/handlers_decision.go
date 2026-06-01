@@ -133,10 +133,9 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
 			result, status, engErr = eng.RecordDecisionTx(stx, id, mid, req.Decision, req.DecisionBy, req.DecisionReason, req.Encho, req.Force)
-			// engine errors are normal failure modes (locked, ineligible,
-			// not-found, validation) — return nil here so the tx
-			// commits whatever partial writes K3-style rollback already
-			// landed; engErr is mapped to the right HTTP status below.
+			if result != nil && result.ResultSource == "" {
+				result.ResultSource = "admin"
+			}
 			return nil
 		})
 		if txErr != nil {

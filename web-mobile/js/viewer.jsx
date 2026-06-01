@@ -816,7 +816,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
           </div>
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={t} />}
     </div>
   );
 }
@@ -1634,7 +1634,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
           )}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={c.id} />}
     </div>
   );
 }
@@ -2742,13 +2742,14 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
           <ScheduleViewer tournament={tournament} tweaks={extendedTweaks} />
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} />}
     </div>
   );
 }
 
-function MatchViewerModal({ match, onClose }) {
+function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId }) {
   window.useEscapeToClose(onClose);
+  const [scoringMatch, setScoringMatch] = useState(null);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const aName = match.sideA?.name || "TBD";
@@ -2759,6 +2760,28 @@ function MatchViewerModal({ match, onClose }) {
   // same fallback used in MatchDetailCard and VSchedItem.
   const mvmIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
   const mvmIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
+
+  const isSelfRun = tournament && tournament.mode === "self-run";
+  const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
+  const isFinalized = match.status === "completed";
+
+  if (scoringMatch && window.ScoreEditorModal) {
+    return React.createElement(window.ScoreEditorModal, {
+      match: scoringMatch,
+      onClose: () => setScoringMatch(null),
+      onSubmit: async (patch) => {
+        try {
+          await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
+          setScoringMatch(null);
+          onClose();
+        } catch (_err) {
+          // leave modal open so the error is visible
+        }
+      },
+      password: "",
+      selfReport: true,
+    });
+  }
 
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2834,6 +2857,24 @@ function MatchViewerModal({ match, onClose }) {
             {match.decidedByHantei && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
             {match.score?.type === "hikiwake" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Draw (<TermV name="hikiwake">Hikiwake</TermV>)</div>}
             {match.score?.type === "bye" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>BYE</div>}
+          </div>
+        )}
+
+        {isSelfRun && bothSidesReady && (
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+            {isFinalized ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-3)" }}>
+                <span style={{ background: "var(--bg-2)", padding: "4px 10px", borderRadius: 4, fontSize: 12 }}>Result reported</span>
+                <span>Contact the organizer to correct this result.</span>
+              </div>
+            ) : (
+              <button
+                className="btn btn--primary btn--sm"
+                onClick={() => setScoringMatch({ ...match, id: match.id })}
+              >
+                Report result
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -104,6 +104,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 				if match.Winner == oldName {
 					bracket.Rounds[i][j].Winner = newName
 					bracketChanged = true
+					bracketFound = true
 				}
 			}
 		}
@@ -132,6 +133,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 			if m.Winner == oldName {
 				poolMatches[i].Winner = newName
 				matchesChanged = true
+				matchesFound = true
 			}
 		}
 		if matchesChanged {
@@ -159,7 +161,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 	}
 	seedsChanged := false
 	for i, a := range seeds {
-		if a.Name == oldName {
+		if a.Name == oldName && (a.Dojo == oldDojo || a.Dojo == "") {
 			seeds[i].Name = newName
 			seeds[i].Dojo = newDojo
 			seedsChanged = true

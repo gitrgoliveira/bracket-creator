@@ -984,38 +984,58 @@ func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
 		Kind:         "individual",
 	}))
 
-	// Alice and Bob share DojoX; Charlie uses DojoY.
-	// With pool size 3, we need more players. Use 6 players:
-	// DojoX: Alice, Bob; DojoY: Charlie; DojoZ: Dave, Eve, Frank.
-	// The generator will keep Alice & Bob apart (conflict avoidance).
-	// We then move Charlie into a pool with Alice, replacing Charlie's dojo with DojoX.
+	// 6 players, each from a unique dojo so the generator can place them freely.
 	names := []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}
-	dojos := []string{"DojoX", "DojoX", "DojoY", "DojoZ", "DojoZ", "DojoZ"}
 	players := make([]domain.Player, len(names))
 	for i, n := range names {
-		players[i] = domain.Player{Name: n, Dojo: dojos[i]}
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i))}
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
-
 	require.NoError(t, eng.GenerateDraw(compID))
 
-	saved, err := store.LoadParticipants(compID, false)
+	// After draw, find a pool-mate of Alice and change their dojo to Alice's
+	// dojo. This deterministically creates a conflict regardless of pool layout.
+	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
-	charlieID := ""
-	for _, p := range saved {
-		if p.Name == "Charlie" {
-			charlieID = p.ID
+	var aliceDojo, targetName, targetDojo string
+	for _, p := range pools {
+		aliceInPool := false
+		for _, pl := range p.Players {
+			if pl.Name == "Alice" {
+				aliceDojo = pl.Dojo
+				aliceInPool = true
+			}
+		}
+		if aliceInPool {
+			for _, pl := range p.Players {
+				if pl.Name != "Alice" {
+					targetName = pl.Name
+					targetDojo = pl.Dojo
+					break
+				}
+			}
 			break
 		}
 	}
-	require.NotEmpty(t, charlieID)
+	require.NotEmpty(t, targetName, "must find a pool-mate of Alice")
+	require.NotEqual(t, aliceDojo, targetDojo, "pool-mate must have a different dojo")
 
-	// Replace Charlie with Grace (DojoX) — may create a conflict if Alice or
-	// Bob is in the same pool as Charlie.
-	payload := map[string]any{"name": "Grace", "dojo": "DojoX"}
+	saved, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	targetID := ""
+	for _, p := range saved {
+		if p.Name == targetName {
+			targetID = p.ID
+			break
+		}
+	}
+	require.NotEmpty(t, targetID)
+
+	// Replace the pool-mate with a new participant from Alice's dojo.
+	payload := map[string]any{"name": "Grace", "dojo": aliceDojo}
 	body, _ := json.Marshal(payload)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+charlieID, bytes.NewBuffer(body))
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+targetID, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -1023,17 +1043,19 @@ func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	// If warnings were returned they must be a JSON array.
-	if ws, ok := resp["warnings"]; ok {
-		wsSlice, ok := ws.([]any)
-		require.True(t, ok, "warnings must be a JSON array")
-		assert.NotEmpty(t, wsSlice, "at least one dojo conflict warning expected when present")
-	}
+	// Dojo conflict warning MUST be present — we deterministically created one.
+	ws, ok := resp["warnings"]
+	require.True(t, ok, "warnings must be present when dojo conflict exists")
+	wsSlice, ok := ws.([]any)
+	require.True(t, ok, "warnings must be a JSON array")
+	require.NotEmpty(t, wsSlice, "at least one dojo conflict warning expected")
+	assert.Contains(t, wsSlice[0], "dojo conflict")
+
 	// Grace must be in pools.
-	pools, err := store.LoadPools(compID)
+	poolsAfter, err := store.LoadPools(compID)
 	require.NoError(t, err)
 	graceFound := false
-	for _, p := range pools {
+	for _, p := range poolsAfter {
 		for _, pl := range p.Players {
 			if pl.Name == "Grace" {
 				graceFound = true

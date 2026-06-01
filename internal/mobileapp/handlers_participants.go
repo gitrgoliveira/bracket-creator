@@ -384,16 +384,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 		if len(warnings) > 0 {
-			c.JSON(http.StatusOK, gin.H{
-				"id":          updatedPlayer.ID,
-				"name":        updatedPlayer.Name,
-				"displayName": updatedPlayer.DisplayName,
-				"dojo":        updatedPlayer.Dojo,
-				"metadata":    updatedPlayer.Metadata,
-				"tag":         updatedPlayer.Tag,
-				"seed":        updatedPlayer.Seed,
-				"checkedIn":   updatedPlayer.CheckedIn,
-				"warnings":    warnings,
+			type playerWithWarnings struct {
+				domain.Player
+				Warnings []string `json:"warnings"`
+			}
+			c.JSON(http.StatusOK, playerWithWarnings{
+				Player:   *updatedPlayer,
+				Warnings: warnings,
 			})
 			return
 		}

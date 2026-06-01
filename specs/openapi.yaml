@@ -1190,8 +1190,8 @@ paths:
         Allowed in `setup` state (no draw yet) and `draw-ready` state (draw generated
         but not started). In draw-ready state the change **cascades** through draw
         artifacts: `pools.csv`, `bracket.json`, `pool-matches.csv`, and `seeds.csv`
-        are all updated in place — the draw structure (pool assignments, bracket
-        brackets) is preserved.
+        are all updated in place — the draw structure (pool assignments, elimination
+        bracket) is preserved.
 
         Returns the updated player. When the cascade produces dojo conflicts or seed
         transfers, a `warnings` array is included alongside the player fields.

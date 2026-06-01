@@ -112,6 +112,15 @@ function normalizeMatch(m, playerMap) {
         const cleanA = stripHansoku(norm.scoreA);
         const cleanB = stripHansoku(norm.scoreB);
         const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
+        // Recover BOTH sides' waza letters into the per-side ippon arrays (when
+        // the server didn't send them for bracket matches). scoreA/scoreB are
+        // each formatScore(IpponsA/B) on the server — i.e. both sides' letters —
+        // so this is loss-free, unlike score.ippons which keeps only the
+        // winner's. Populating these means formatIpponsScore renders technique
+        // letters for BOTH competitors ("MK–D"), never the numeric fallback.
+        // Only fill when absent so server-provided arrays always win.
+        if (!norm.ipponsA?.length && cleanA) norm.ipponsA = cleanA.split("");
+        if (!norm.ipponsB?.length && cleanB) norm.ipponsB = cleanB.split("");
         norm.score = {
             type: "ippon",
             winnerPts: aWin ? cleanA.length : cleanB.length,

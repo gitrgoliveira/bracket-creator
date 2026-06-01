@@ -1,5 +1,25 @@
 /* Bracket Creator — clean utilitarian, polished */
 
+/* ---------- Self-hosted fonts (offline-safe, embedded via go:embed) ----------
+   Anton + Archivo, both SIL Open Font License 1.1 (OFL.txt shipped alongside
+   each .woff2 under /vendor/fonts/). Latin-subset woff2; Archivo keeps its
+   weight axis (100–900). Used by the Aka/Shiro scoreboard + display surfaces
+   via --font-impact / --font-strong. Body text stays on system --font. */
+@font-face {
+  font-family: "Anton";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/vendor/fonts/anton/anton-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/vendor/fonts/archivo/archivo-latin.woff2") format("woff2");
+}
+
 :root {
   --accent: #1d3557;
   --accent-soft: #e7eaf3;
@@ -30,6 +50,16 @@
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Aka/Shiro distinction system (DESIGN.md §4 "Aka/Shiro side treatment").
+     Opt-in: existing components keep --font / --font-display untouched. */
+  --font-impact: "Anton", "Archivo", var(--font-display); /* scoreboard numerals, big side labels */
+  --font-strong: "Archivo", var(--font);                  /* side names, chips */
+
+  /* Shiro (white) side framing — the only genuinely new colour tokens.
+     Aka reuses --red / --red-soft; danger also reuses --red (non-overlapping). */
+  --shiro-edge: #2a3346;              /* dark cool frame so white reads as a side */
+  --shiro-hatch: rgba(42, 51, 70, 0.07); /* 45° diagonal hatch tint */
+  --aka-bright: #ff3b3b;              /* luminous red for dark TV/overlay surfaces (Aka glow) */
 }
 
 * {
@@ -183,8 +213,12 @@ a:hover {
 /* ---------- Live status strip (under topbar) ---------- */
 /* Stickiness is provided by the parent .topbar-stack so the strip never
    needs to know the topbar's height — it sits naturally below in flow. */
+/* Live-strip: the admin "matches running now" bar. It is a NAVIGATION control
+   (each chip is a button → opens that match's score editor), so it stays — but
+   recoloured off red onto --accent navy, since red is now reserved for Aka +
+   danger. Liveness is still conveyed by the strip's presence + pulsing dot. */
 .live-strip {
-  background: var(--red-soft);
+  background: var(--accent-soft);
   border-bottom: 1px solid var(--line);
   padding: 6px 20px;
   display: flex;
@@ -195,7 +229,7 @@ a:hover {
 
 .live-strip__lbl {
   font-weight: 700;
-  color: var(--red);
+  color: var(--accent);
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
@@ -211,7 +245,7 @@ a:hover {
 
 .live-strip__chip {
   background: var(--surface);
-  border: 1px solid var(--red);
+  border: 1px solid var(--accent);
   border-radius: 999px;
   padding: 3px 10px;
   display: inline-flex;
@@ -223,7 +257,7 @@ a:hover {
 }
 
 .live-strip__chip:hover {
-  background: var(--red);
+  background: var(--accent);
   color: white;
 }
 
@@ -734,9 +768,12 @@ a:hover {
   display: inline-block;
 }
 
+/* Liveness cue: pulsing dot. Colour moved off red → --accent navy so red is
+   reserved for Aka (side) + danger (DESIGN.md §2/§4). The PULSE (motion) is the
+   liveness signal, not the hue. */
 .dot--live {
-  background: #ef4444;
-  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18);
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
   animation: pulse 1.6s infinite;
 }
 
@@ -914,6 +951,8 @@ a:hover {
   position: relative;
   z-index: 1;
   cursor: pointer;
+  /* clip the new side tints + leading colour bars to the rounded card corners */
+  overflow: hidden;
 }
 
 .bc-match:hover {
@@ -927,8 +966,8 @@ a:hover {
 }
 
 .bc-match--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 3px var(--red-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .bc-match--done {
@@ -959,7 +998,7 @@ a:hover {
 }
 
 .bc-live {
-  color: var(--red);
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -972,16 +1011,45 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 13px;
   font-size: 13.5px;
   min-height: 38px;
+  /* Aka/Shiro side treatment (DESIGN.md §4): a leading coloured bar + a faint
+     side tint so red vs white reads even in the dense bracket tree. The bar is
+     the side identity; subtle enough to stack many cards without noise. */
+  position: relative;
+}
+/* Leading colour bar — universal across all variants (the side identity).
+   The side-tinted backgrounds are scoped per-variant below, because v2 (full
+   flood) and v3 (compact) carry their own background treatments. */
+.bc-side::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+.bc-side--a::before { background: var(--red); }
+.bc-side--b::before { background: var(--accent); }
+.bc-side--winner::before { width: 5px; }
+
+/* v1 (classic line-bracket) side tints: red-soft for Aka, hatched white for
+   Shiro. Scoped to v1 so v2/v3 keep their own backgrounds. */
+.bc-match--v1 .bc-side--a {
+  background: var(--red-soft);
+}
+.bc-match--v1 .bc-side--b {
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
 }
 
+/* Winner: bolder name; the thicker bar (above) carries the win signal so we
+   don't flood accent-soft, which would fight the red side's tint. */
 .bc-side--winner {
-  background: linear-gradient(90deg, rgba(29, 53, 87, 0.04), transparent 80%);
   font-weight: 600;
 }
-
 .bc-side--winner .bc-name {
   color: var(--ink);
 }
@@ -1300,8 +1368,8 @@ a:hover {
 }
 
 .sched-row--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 3px var(--red-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .sched-row--done {
@@ -1520,22 +1588,63 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Aka/Shiro side treatment (DESIGN.md §4): a thick coloured top bar gives
+     each side real colour area so the two read apart at a glance, not just a
+     faint tint. The bar colour is the side identity. */
+  border-top: 5px solid var(--line);
+  /* Mirrored head-to-head: content is vertically centred and the two sides
+     face the central "vs" — Shiro (left) leans right-toward-centre, Aka
+     (right) leans left-toward-centre. Matches the live scoreboard. */
+  justify-content: center;
 }
 
 .score-side--white {
   background: var(--white-side);
+  /* framed white: dark cool bar + 45° hatch so "white" reads as a side */
+  border-top-color: var(--shiro-edge);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
+}
+
+/* Aka is on the right: align its content to the outer (right) edge so the
+   two sides mirror each other — Shiro left-aligned, Aka right-aligned.
+   Both sides are vertically centred by the justify-content:center above. */
+.score-side--red {
+  align-items: flex-end;
+  text-align: right;
+}
+.score-side--red .score-side__buttons,
+.score-side--red .score-side__points {
+  justify-content: flex-end;
 }
 
 .score-side--red {
-  background: #fdf2f2;
+  background: var(--red-soft);
+  border-top-color: var(--red);
 }
 
 .score-side__lbl {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: var(--font-strong);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--ink-3);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+/* filled identity chip — the obvious cue, present before any winner is chosen */
+.score-side--white .score-side__lbl {
+  background: #fff;
+  color: var(--shiro-edge);
+  border: 1.5px solid var(--shiro-edge);
+}
+.score-side--red .score-side__lbl {
+  background: var(--red);
+  color: #fff;
 }
 
 .score-side__name {
@@ -1616,6 +1725,134 @@ a:hover {
   font-weight: 700;
   color: var(--ink-3);
   font-family: var(--font-display);
+}
+
+/* ---------- Scoreboard editor (Proposal C) ----------
+   4 columns: [Shiro button rail | Shiro who | Aka who | Aka button rail].
+   The Aka/Shiro colour runs continuously edge-to-edge (no neutral gap); the
+   two competitors meet at the centre facing a floating "vs". Side name is
+   stated ONCE, in the centre identity chip (rails are unlabelled — their
+   colour + position already say which side). DESIGN.md §4 Aka/Shiro. */
+.sc-board {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr 1fr auto;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.sc-board__rail,
+.sc-board__who {
+  border-top: 5px solid var(--line);
+}
+/* side fills — shared by rail + who so colour is continuous */
+.sc-board__shiro {
+  background: var(--white-side);
+  border-top-color: var(--accent);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
+}
+.sc-board__aka {
+  background: var(--red-soft);
+  border-top-color: var(--red);
+}
+.sc-board__rail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+}
+.sc-board__btnrow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 156px;
+}
+.sc-board__who {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  padding: 18px;
+}
+.sc-board__who--shiro { align-items: flex-end; text-align: right; padding-right: 32px; }
+.sc-board__who--aka { align-items: flex-start; text-align: left; padding-left: 32px; }
+.sc-board__lbl {
+  display: inline-flex;
+  align-items: center;
+  font: 800 11px/1 var(--font-strong);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.sc-board__who--shiro .sc-board__lbl {
+  background: #fff;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+}
+.sc-board__who--aka .sc-board__lbl {
+  background: var(--red);
+  color: #fff;
+}
+.sc-board__nm {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.sc-board__tally { display: flex; gap: 6px; }
+/* the meeting line — a floating vs pill dead-centre */
+.sc-board__vs {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font: 800 12px/1 var(--font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 9px;
+  z-index: 2;
+}
+/* Portrait phones/tablets: the 4-column side-by-side doesn't fit, so each side
+   becomes its own horizontal band — name + tally on the inner side, the score
+   buttons on the same line to the outer side. Landscape (incl. landscape
+   phones) keeps the side-by-side Proposal C above. Orientation-based per the
+   operator's request. The two shiro/aka DOM nodes (rail + who) are re-placed
+   into a 2×2 grid: [who | rail] per row. */
+@media (max-width: 600px) {
+  /* Narrow screens (true phones, portrait or landscape): a side-by-side rail
+     competes with the name for horizontal space and overflows. So each side
+     becomes a single full-width block — identity chip + name + tally, then the
+     score buttons full-width beneath, wrapping as needed. One column = can't
+     overflow at any width, every button keeps its 44px touch target. Wider
+     tablets (incl. portrait ≥600px) keep the side-by-side Proposal C above. */
+  .sc-board {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    grid-auto-flow: row;
+  }
+  /* re-order so each side's buttons sit directly under that side's name:
+     shiro who → shiro rail → aka who → aka rail */
+  .sc-board__who--shiro { order: 1; }
+  .sc-board__rail.sc-board__shiro { order: 2; }
+  .sc-board__who--aka { order: 3; }
+  .sc-board__rail.sc-board__aka { order: 4; }
+  .sc-board__who--shiro,
+  .sc-board__who--aka {
+    align-items: flex-start; text-align: left; padding: 14px 16px 8px;
+  }
+  /* rail no longer its own column — full width under the name, buttons left-aligned.
+     Its top border would double the divider, so drop it here. */
+  .sc-board__rail { border-top: none; padding: 0 16px 14px; justify-content: flex-start; }
+  .sc-board__btnrow { max-width: none; justify-content: flex-start; }
+  /* the floating centre "vs" is meaningless once stacked */
+  .sc-board__vs { display: none; }
 }
 
 .live-panel__actions {
@@ -1903,8 +2140,8 @@ button.my-match__opp {
 }
 
 .vsched-item--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 3px var(--red-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .vsched-item__head {
@@ -1941,6 +2178,20 @@ button.my-match__opp {
   font-size: 14px;
   font-weight: 500;
   min-width: 0;
+  /* Aka/Shiro side treatment (DESIGN.md §4): tint each side so red vs white
+     reads in the viewer schedule list. Keep the original block flow (name over
+     dojo); just add padding + a tint. Tint is keyed off the badge each side
+     carries (:has) so side order can't desync the colour. */
+  padding: 5px 8px;
+  border-radius: 7px;
+}
+.vsched-item__side:has(.vsched-item__color-badge--shiro) {
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
+}
+.vsched-item__side:has(.vsched-item__color-badge--aka) {
+  background: var(--red-soft);
 }
 
 .vsched-item__side--w {
@@ -2475,6 +2726,13 @@ button.my-match__opp {
     min-height: 44px;
     padding: 8px 10px;
   }
+  /* Scoring buttons are the operator's most-tapped control — meet the 44px
+     touch target on tablets/phones (DESIGN.md §6). The portrait sc-board
+     button rail is sized (max-width ~100px) so two 44px buttons fit per row. */
+  .ipt-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 .seed-row__input:focus {
@@ -2771,8 +3029,8 @@ button.my-match__opp {
 }
 
 .tw-match--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 2px var(--red-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .tw-match--done {
@@ -2906,8 +3164,8 @@ button.my-match__opp {
 }
 
 .score-edit-row--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 2px var(--red-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .score-edit-row--complete {
@@ -3032,17 +3290,25 @@ button.my-match__opp {
   flex-direction: column;
   justify-content: center;
   transition: background 0.3s ease;
+  /* Aka/Shiro side treatment (DESIGN.md §4): solid side tint + a thick coloured
+     top bar so the colour reads as real area. Matches the inline editor's
+     Proposal C. */
+  border-top: 5px solid var(--line);
 }
 
+/* AKA = right side (sides array renders shiro first/left, aka second/right) */
 .sb-side--aka {
-  background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%);
-  border-right: 1px solid rgba(0,0,0,0.05);
+  background: var(--red-soft);
+  border-top-color: var(--red);
   text-align: left;
 }
 
+/* SHIRO = left side: framed white + 45° hatch so "white" reads as a side */
 .sb-side--shiro {
-  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%);
-  border-left: 1px solid rgba(0,0,0,0.05);
+  background: var(--white-side);
+  border-top-color: var(--accent);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
   text-align: right;
 }
 
@@ -3051,15 +3317,30 @@ button.my-match__opp {
   font-weight: 700;
   color: var(--ink);
   letter-spacing: -0.02em;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
+/* the side label (".sb-dojo" historically held it) becomes the identity chip —
+   one statement of the side, colour-coded, like the inline editor's chip */
 .sb-dojo {
-  font-size: 13px;
-  color: var(--ink-3);
-  font-weight: 500;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  font: 800 11px/1 var(--font-strong);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.sb-side--shiro .sb-dojo {
+  align-self: flex-end;
+  background: #fff;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+}
+.sb-side--aka .sb-dojo {
+  background: var(--red);
+  color: #fff;
 }
 
 .sb-center {
@@ -3645,9 +3926,10 @@ button.my-match__opp {
 }
 
 .bc-color-badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  /* framed white to match the system (was flat grey #e8eaf0) */
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 /* Competitor number prefix (e.g. "K1") shown before a player name. The value
@@ -3691,9 +3973,9 @@ button.my-match__opp {
 }
 
 .tw-match__badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 .tw-match__time--editable {
@@ -3733,9 +4015,9 @@ button.my-match__opp {
 }
 
 .vsched-item__color-badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
   margin-left: 4px;
 }
 
@@ -3765,6 +4047,22 @@ button.my-match__opp {
   justify-content: flex-end;
 }
 
+/* Aka/Shiro side treatment (DESIGN.md §4): tint each side cell so red vs white
+   reads as area, not just a 7px badge. SideA = Aka (left grid col), the
+   --right cell = Shiro. Padding + radius give the tint a contained shape. */
+.pool-match-row__side {
+  padding: 4px 8px;
+  border-radius: 7px;
+}
+.pool-match-row__side:not(.pool-match-row__side--right) {
+  background: var(--red-soft);
+}
+.pool-match-row__side--right {
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
+}
+
 .pool-match-row__name {
   white-space: nowrap;
   overflow: hidden;
@@ -3792,9 +4090,9 @@ button.my-match__opp {
 }
 
 .pool-match-row__badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 .pool-match-row__score {
@@ -3825,9 +4123,9 @@ button.my-match__opp {
 }
 
 .se-color-badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
   margin-left: 4px;
 }
 
@@ -3866,9 +4164,9 @@ button.my-match__opp {
 }
 
 .team-header__side--white .team-header__color {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 /* Draw/hantei tag in bracket */
@@ -4188,7 +4486,7 @@ button.my-match__opp {
   flex-shrink: 0;
 }
 .match-detail-card__color-badge--aka { background: var(--red); color: #fff; }
-.match-detail-card__color-badge--shiro { background: #f0f0f0; color: #333; border: 1px solid #ddd; }
+.match-detail-card__color-badge--shiro { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
 
 .match-detail-card__score {
   font-size: 18px;
@@ -4340,7 +4638,7 @@ button.my-match__opp {
 .pool-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
 .pool-matrix__cell--empty { background: var(--bg-2); }
 .pool-matrix__cell--pending { color: var(--ink-3); }
-.pool-matrix__cell--live { color: var(--red); }
+.pool-matrix__cell--live { color: var(--accent); }
 .pool-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
 .pool-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
 .pool-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
@@ -5450,3 +5748,68 @@ button.my-match__opp {
   border: 1px solid var(--line);
   color: var(--ink-3);
 }
+
+/* ============================================================
+   TV scoreboard — Aka/Shiro colored half-panels (display.jsx
+   TvDisplay). Fullscreen per-court board; vw/vh units so it
+   scales to any TV. DESIGN.md §4 Aka/Shiro side treatment.
+   ============================================================ */
+.tvd-board {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  border-radius: 1vh;
+  overflow: hidden;
+}
+.tvd-side {
+  position: relative;
+  padding: 4vh 4vw;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1vh;
+  min-width: 0;
+}
+.tvd-side__bar { position: absolute; top: 0; left: 0; right: 0; height: 0.9vh; z-index: 2; }
+.tvd-side__lab { font-family: var(--font-impact); font-size: 2.6vh; letter-spacing: 0.14em; position: relative; z-index: 2; }
+.tvd-side__name {
+  font-family: var(--font-strong);
+  font-weight: 800;
+  font-size: 6vh;
+  line-height: 1.02;
+  position: relative; z-index: 2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tvd-side__dojo { font-size: 2.4vh; opacity: 0.55; position: relative; z-index: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* SHIRO — left: framed white + 45° hatch over the dark board */
+.tvd-side--shiro { background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02)); }
+.tvd-side--shiro::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(-45deg, transparent 0 1.1vh, rgba(255,255,255,0.05) 1.1vh 1.3vh);
+}
+.tvd-side--shiro .tvd-side__bar { background: #fff; }
+.tvd-side--shiro .tvd-side__lab { color: rgba(255,255,255,0.8); }
+
+/* AKA — right: red flood + glow */
+.tvd-side--aka { text-align: right; align-items: flex-end; background: linear-gradient(180deg, rgba(204,17,34,0.55), rgba(204,17,34,0.28)), #0b0d12; }
+.tvd-side--aka::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(80% 60% at 80% 0%, rgba(255,59,59,0.35), transparent 60%);
+}
+.tvd-side--aka .tvd-side__bar { background: var(--aka-bright, #ff3b3b); }
+.tvd-side--aka .tvd-side__lab { color: #ffd9dc; }
+
+/* centre — real score MK – M (Shiro white, Aka red), + decision/fouls */
+.tvd-centre { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1vh; padding: 0 1.5vw; background: rgba(0,0,0,0.25); }
+.tvd-score { font-family: var(--font-impact); font-size: 9vh; line-height: 0.9; display: flex; align-items: center; gap: 0.18em; }
+.tvd-score__s { color: #fff; }
+.tvd-score__d { color: rgba(255,255,255,0.3); font-size: 0.55em; }
+.tvd-score__a { color: var(--aka-bright, #ff5b54); text-shadow: 0 0 4vh rgba(255,59,59,0.4); }
+.tvd-centre__sfx { font: 700 2.4vh/1 var(--font-strong); letter-spacing: 0.05em; color: rgba(255,255,255,0.75); }
+.tvd-centre__fouls { font-size: 2.2vh; opacity: 0.65; font-weight: 500; }
+.tvd-centre__vs { font-family: var(--font-impact); font-size: 5vh; color: rgba(255,255,255,0.4); writing-mode: vertical-rl; }
+
+/* up-next: tiny muted note in the header (NOT a big badge) */
+.tvd-upnext-note { font: 700 2.2vh/1 var(--font-strong); letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,209,102,0.85); }

@@ -56,15 +56,34 @@ function Route(props) {
 // shareable deep links (mp-dd3).
 //
 // Instead we drive the History API directly. app.jsx owns the routing
-// state-of-record: it calls route() from a state->URL sync effect (so the
-// view has already re-rendered from the state change — no popstate needed for
-// forward navigation) and it handles browser back/forward via its own
-// popstate listener. pushState intentionally does not fire popstate, which is
-// exactly what we want: forward nav must not re-trigger the popstate handler.
+// state-of-record: it calls route() from a state->URL sync effect, and it
+// handles browser back/forward via its own popstate listener.
+//
+// We dispatch a popstate event after mutating history so listeners that
+// rely on a history-change signal — notably useQuery() below — re-parse
+// and react to programmatic navigation. The native History API does NOT
+// fire popstate on pushState/replaceState, but preact-router's route()
+// does, and useQuery() / display surfaces were written against that
+// contract. Dispatching here restores it.
+//
+// Safety against loops: app.jsx's popstate handler calls parsePath on
+// location.pathname and setMode/setAdminView/setViewerCompId accordingly.
+// Because route() is only called from the state->URL sync effect AFTER
+// the state already matches the new URL, parsePath returns the same
+// state that's already set — React bails on identical setState values,
+// and the URL-sync effect's `location.pathname !== url` guard prevents
+// any re-entry on a possible re-render.
 function route(url, replace = false) {
     if (typeof window !== 'undefined' && window.history) {
         if (replace) window.history.replaceState(null, '', url);
         else window.history.pushState(null, '', url);
+        try {
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        } catch {
+            // Older / non-browser environments without PopStateEvent.
+            // useQuery() still works because its onChange just re-reads
+            // location.search; missing this signal is harmless there.
+        }
         return true;
     }
     return false;

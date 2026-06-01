@@ -296,6 +296,222 @@ function buildRoster(competitions) {
   return Array.from(map.values());
 }
 
+// ---------------------------------------------------------------------------
+// mp-4fd: On-deck match alert — predicate, hook, banner, chime
+// ---------------------------------------------------------------------------
+
+// LocalStorage key for the chime mute preference (viewer-level).
+const LS_CHIME_MUTED = "viewer.matchAlert.chimeMuted";
+
+// Hook: chime-muted preference backed by localStorage.
+// Multiple instances (ViewerHome + NotificationSettings) stay in sync via
+// a custom DOM event dispatched on toggle — the native `storage` event only
+// fires across tabs, not within the same page.
+const CHIME_SYNC_EVENT = "chimeMutedSync";
+
+function useChimeMuted() {
+  const [muted, setMuted] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(LS_CHIME_MUTED) === "true";
+    } catch (_e) { return false; }
+  });
+  // Sync across same-page instances via custom event.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onSync = (e) => setMuted(!!e.detail);
+    window.addEventListener(CHIME_SYNC_EVENT, onSync);
+    return () => window.removeEventListener(CHIME_SYNC_EVENT, onSync);
+  }, []);
+  const toggle = () => {
+    const next = !muted;
+    setMuted(next);
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false");
+    } catch (_e) { /* storage unavailable — in-memory is fine */ }
+    // Notify other hook instances in the same page.
+    try {
+      window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next }));
+    } catch (_e) { /* CustomEvent unavailable */ }
+  };
+  return [muted, toggle];
+}
+
+// Extract a side's display name from the normalised match shape.
+// Handles both {sideA: {name}} (normalised) and flat sideAName (legacy).
+function matchSideName(side, fallbackName) {
+  return (side && side.name) || fallbackName || "";
+}
+
+// Predicate: is the followed player's match on-deck (up-next or running)?
+// Exported for unit testing and mp-5px (service worker path must reuse this).
+export function isFollowedMatchOnDeck(m) {
+  if (!m) return false;
+  if (m.status === "running") return true;
+  if (m.status === "scheduled" && Number(m.queuePosition) === 1) return true;
+  return false;
+}
+
+// Hook: detect transitions into on-deck state for the followed match.
+// Fires the alert surfaces (document.title, chime, backgrounded Notification)
+// exactly once per genuine transition; ignores SSE re-renders that leave the
+// state unchanged. Accepts a callback `onAlert` for testability.
+//
+// Dedup is by "signature" (matchId + "running" or "upnext"), NOT a timer.
+// First render primes the ref without alerting (avoids false alert on mount
+// when loading a late-open tab).
+function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
+  const lastSigRef = useRefV(null); // null = not yet primed
+  const audioCtxRef = useRefV(null);
+  const originalTitleRef = useRefV(null);
+
+  // Unlock AudioContext on first user interaction (gesture gate).
+  // Also cleans up AudioContext and restores document.title on unmount.
+  useEffect(() => {
+    const unlock = () => {
+      if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("click", unlock, { passive: true });
+      window.addEventListener("touchstart", unlock, { passive: true });
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("click", unlock);
+        window.removeEventListener("touchstart", unlock);
+      }
+      // Restore document.title if it was flashed when unmounting.
+      if (originalTitleRef.current !== null && typeof document !== "undefined") {
+        document.title = originalTitleRef.current;
+        originalTitleRef.current = null;
+      }
+      // Close AudioContext to free the browser resource.
+      if (audioCtxRef.current) {
+        try { audioCtxRef.current.close(); } catch (_e) { /* already closed */ }
+        audioCtxRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const m = myNextMatch;
+    const onDeck = isFollowedMatchOnDeck(m);
+
+    // Build the signature for this state.  Always a string so the
+    // strict-equality fast-path (sig === lastSigRef.current) works when
+    // off-deck too — null !== "" would bypass the dedup on every render.
+    const sig = onDeck && m
+      ? m.id + ":" + (m.status === "running" ? "running" : "upnext")
+      : "";
+
+    // First call: prime without alerting (avoids false alert on reconnect).
+    if (lastSigRef.current === null) {
+      lastSigRef.current = sig || "";
+      return;
+    }
+
+    // No transition: same sig as before.
+    if (sig === lastSigRef.current) return;
+    lastSigRef.current = sig || "";
+
+    if (!onDeck) {
+      // Left on-deck: restore title.
+      if (originalTitleRef.current !== null && typeof document !== "undefined") {
+        document.title = originalTitleRef.current;
+        originalTitleRef.current = null;
+      }
+      return;
+    }
+
+    // Genuine transition INTO on-deck: fire all alert surfaces.
+
+    // 1. document.title flash.
+    if (typeof document !== "undefined") {
+      if (originalTitleRef.current === null) {
+        originalTitleRef.current = document.title;
+      }
+      const titlePrefix = m.status === "running" ? "🔴 LIVE NOW — " : "(1) Your match is next — ";
+      document.title = titlePrefix + (originalTitleRef.current || "Tournament");
+    }
+
+    // 2. Chime via WebAudio (two-tone, no asset needed).
+    if (!chimeMuted) {
+      try {
+        const AudioCtx = typeof AudioContext !== "undefined" ? AudioContext
+          : (typeof window !== "undefined" ? window.AudioContext || window.webkitAudioContext : null);
+        if (AudioCtx) {
+          if (!audioCtxRef.current) audioCtxRef.current = new AudioCtx();
+          const ctx = audioCtxRef.current;
+          const playTone = (freq, startTime, duration) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = "sine";
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.3, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+            osc.start(startTime);
+            osc.stop(startTime + duration);
+          };
+          const t0 = ctx.currentTime;
+          playTone(880, t0, 0.25);
+          playTone(1100, t0 + 0.3, 0.35);
+        }
+      } catch (_e) { /* autoplay restrictions or unavailable AudioContext — silent fail */ }
+    }
+
+    // 3. Backgrounded browser Notification (reuses existing opt-in).
+    if (typeof window !== "undefined" && typeof window.fireNotification === "function" && m) {
+      const sideA = matchSideName(m.sideA, m.sideAName);
+      const sideB = matchSideName(m.sideB, m.sideBName);
+      const courtStr = m.court ? ` — Shiaijo ${m.court}` : "";
+      const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(3) || "";
+      const notifTitle = m.status === "running" ? "Your match is LIVE" : "Your match is next";
+      window.fireNotification(notifTitle, body, { tag: "match-" + m.id });
+    }
+
+    // 4. Notify consumer (e.g. to show/update the banner).
+    if (typeof onAlert === "function") onAlert(m);
+  });
+}
+
+// Banner component: rendered when the followed match is on-deck.
+function MyMatchAlertBanner({ match, onView, onDismiss }) {
+  if (!match) return null;
+  const kind = match.status === "running" ? "LIVE NOW" : "Next up";
+  const sideA = matchSideName(match.sideA, match.sideAName);
+  const sideB = matchSideName(match.sideB, match.sideBName);
+  const vs = (sideA && sideB) ? `${sideA} vs ${sideB}` : "";
+  const courtStr = match.court ? `Shiaijo ${match.court}` : "";
+  return (
+    <div className="match-alert-banner" data-testid="match-alert-banner" role="alert">
+      <div className="match-alert-banner__content">
+        <span className="match-alert-banner__badge">{kind}</span>
+        <span className="match-alert-banner__text">
+          {vs && <strong>{vs}</strong>}
+          {courtStr && <span> · {courtStr}</span>}
+        </span>
+      </div>
+      <div className="match-alert-banner__actions">
+        {onView && (
+          <button className="btn btn--sm btn--primary" onClick={() => onView(match)}>
+            View
+          </button>
+        )}
+        {onDismiss && <button
+          className="match-alert-banner__dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss match alert"
+        >✕</button>}
+      </div>
+    </div>
+  );
+}
+
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -390,6 +606,20 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     [watchlist, allMatches]
   );
 
+  // mp-4fd: on-deck alert for the followed player's match.
+  const [chimeMuted] = useChimeMuted();
+  const [alertMatch, setAlertMatch] = useState(null);
+  const [alertDismissed, setAlertDismissed] = useState(false);
+  // Reset dismissal when the followed player or match changes.
+  useEffect(() => {
+    setAlertDismissed(false);
+  }, [followedPlayer, myNextMatch && myNextMatch.id]);
+  useFollowedMatchAlert(myNextMatch, {
+    chimeMuted,
+    onAlert: (m) => { setAlertMatch(m); setAlertDismissed(false); },
+  });
+  const showAlertBanner = alertMatch && !alertDismissed && isFollowedMatchOnDeck(myNextMatch);
+
   return (
     <div className="viewer">
       <div className="viewer__shell">
@@ -411,6 +641,17 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                {(t.courts || ["A"]).map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
              </select>
           </div>
+
+          {/* mp-4fd: on-deck alert banner — shown when the followed player's
+              match is up-next or running; dismissed by the viewer or auto-
+              cleared when the match is no longer on-deck. */}
+          {showAlertBanner && (
+            <MyMatchAlertBanner
+              match={alertMatch}
+              onView={(m) => { setSelectedMatch(m); setAlertDismissed(true); }}
+              onDismiss={() => setAlertDismissed(true)}
+            />
+          )}
 
           {/* T111 / T112 / FR-020 / FR-022: "Find my matches" + "Your next
               match" card. Rendered up top so a competitor or coach who
@@ -697,12 +938,12 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
       <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
       {pRecord && pRecord.checkedIn && <span className="tag-badge" style={{ fontSize: 9 }}>✓ Checked in</span>}
       <button
-        className="btn btn--ghost btn--sm"
+        className="btn btn--ghost btn--sm btn--clear-follow"
         onClick={() => setFollowedPlayer(null)}
         aria-label="Stop following"
         style={{ marginLeft: 4 }}
       >
-        ×
+        ✕ Clear
       </button>
     </div>
   );
@@ -2013,7 +2254,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2114,7 +2355,7 @@ function ScheduleViewer({ tournament, tweaks }) {
           <span style={{ color: "var(--ink-3)" }}>Following:</span>
           <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
           <button
-            className="btn btn--ghost btn--sm"
+            className="btn btn--ghost btn--sm btn--clear-follow"
             style={{ marginLeft: "auto" }}
             onClick={() => {
               // Clear both the persisted selection and the local schedule
@@ -2124,7 +2365,7 @@ function ScheduleViewer({ tournament, tweaks }) {
             }}
             aria-label="Stop following"
           >
-            ×
+            ✕ Clear
           </button>
         </div>
       ) : null}
@@ -2584,6 +2825,9 @@ export function notificationSupported() {
 // Requests permission ONLY on a user click (the gesture gate). Never
 // calls requestPermission() automatically. Exported for unit testing.
 export function NotificationSettings() {
+  // mp-4fd: chime preference for the on-deck match alert.
+  const [chimeMuted, toggleChimeMuted] = useChimeMuted();
+
   // Compute the initial permission outside useState so tests using the
   // static React mock (which passes the value through unmodified rather
   // than calling function initialisers) see the correct starting value.
@@ -2620,14 +2864,38 @@ export function NotificationSettings() {
   // meant to explain. In that case render the warning (no toggle) instead of
   // hiding. Only hide outright when the API is unavailable for some OTHER
   // reason (secure context but an old/unsupported browser).
+  // mp-4fd: the chime toggle uses WebAudio, not the Notification API, so it
+  // must remain visible even when browser notifications are unavailable.
+  const chimeToggle = (
+    <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, marginTop: 10 }}>
+      <input
+        type="checkbox"
+        checked={!chimeMuted}
+        onChange={toggleChimeMuted}
+        data-testid="chime-toggle"
+      />
+      <span>Play a sound when your match is up next</span>
+    </label>
+  );
+
   if (permission === "unavailable") {
-    if (!insecure) return null;
+    if (!insecure) {
+      // Notification API unavailable but context is secure — hide the
+      // notification toggle but still show the chime toggle.
+      return (
+        <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
+          <div className="section-title" style={{ marginTop: 0 }}>Match alerts</div>
+          {chimeToggle}
+        </div>
+      );
+    }
     return (
       <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
         <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
         <div style={{ fontSize: 12, color: "var(--amber, #b45309)" }} data-testid="notification-insecure-warning">
           Browser notifications require a secure connection (https or localhost).
         </div>
+        {chimeToggle}
       </div>
     );
   }
@@ -2694,6 +2962,8 @@ export function NotificationSettings() {
           </span>
         </label>
       )}
+      {/* mp-4fd: chime opt-out for the on-deck match alert (shared variable). */}
+      {chimeToggle}
     </div>
   );
 }

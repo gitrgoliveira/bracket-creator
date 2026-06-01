@@ -574,7 +574,6 @@ describe('diffAnnouncementSnapshot', () => {
     // Models the case with NO buffered SSE: HTTP response includes NEW (post-mount)
     // but since there is no SSE to replay, seed the full list to avoid leaving
     // NEW unseeded and triggering stale notifications on a later unrelated SSE.
-    const _mountMs = Date.parse('2026-05-30T13:00:00.000Z');
     const ref = { current: null };
 
     const httpList = [
@@ -659,10 +658,15 @@ describe('NotificationSettings', () => {
     }
   });
 
-  it('returns null when Notification API is unavailable', () => {
+  it('shows only the chime toggle when Notification API is unavailable', () => {
     global.Notification = undefined;
     const result = NotificationSettings({});
-    expect(result).toBeNull();
+    // mp-4fd: chime toggle uses WebAudio, not Notification API, so it renders
+    // even when browser notifications are unavailable.
+    expect(result).not.toBeNull();
+    const str = JSON.stringify(result);
+    expect(str).toContain('chime-toggle');
+    expect(str).not.toContain('notification-toggle');
   });
 
   it('renders the toggle when Notification is available and permission is default', () => {
@@ -792,11 +796,15 @@ describe('NotificationSettings (reactive)', () => {
     expect(findWarn().length).toBe(1);
   });
 
-  it('hides entirely when the API is unavailable AND the context is secure', () => {
+  it('shows only chime toggle when the API is unavailable AND the context is secure', () => {
     global.Notification = undefined;
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
     const tree = runtime.mount(RS, {});
-    expect(tree).toBeNull();
+    // mp-4fd: chime toggle (WebAudio) renders even when Notification API is absent.
+    expect(tree).not.toBeNull();
+    const str = JSON.stringify(tree);
+    expect(str).toContain('chime-toggle');
+    expect(str).not.toContain('notification-toggle');
   });
 
   it('leaves the toggle OFF when enabling succeeds at the prompt but localStorage.setItem throws', async () => {

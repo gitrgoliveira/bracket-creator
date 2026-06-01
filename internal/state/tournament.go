@@ -61,21 +61,24 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 
 	var t Tournament
 	if err := parseFrontMatter(data, &t); err != nil {
-		// If it's not a front-matter file, return a default tournament
+		// If it's not a front-matter file, return a default tournament with
+		// well-known field values. ApplyTournamentDefaults below will
+		// normalise any remaining zero-valued fields (Mode, schedule tuning).
 		t = Tournament{
-			Name:         "New Tournament",
-			Date:         time.Now().Format("02-01-2006"),
-			Venue:        "Venue TBA",
-			DurationDays: 1,
+			Name:  "New Tournament",
+			Date:  time.Now().Format("02-01-2006"),
+			Venue: "Venue TBA",
 		}
-	} else {
-		// Apply canonical defaults so that tournament.md files predating
-		// any of these fields (DurationDays, ClockToElapsedMultiplier,
-		// SlowestCourtBufferPct, Mode) always return populated values.
-		// ApplyTournamentDefaults is idempotent so calling it here is safe
-		// even when the file already has explicit values for all fields.
-		ApplyTournamentDefaults(&t)
 	}
+	// Apply canonical defaults for both the successful-parse and fallback
+	// branches so the returned tournament is always fully normalised:
+	// Mode="officiated", DurationDays=1, ClockToElapsedMultiplier=1.5,
+	// SlowestCourtBufferPct=10. ApplyTournamentDefaults is idempotent and
+	// safe to call even when the fields already carry explicit values.
+	// Fix 3332701952: previously only the successful-parse branch called
+	// this, leaving the fallback tournament with Mode=="" and zero schedule
+	// fields that would omit mode from JSON responses.
+	ApplyTournamentDefaults(&t)
 
 	s.cachedTourn = &t
 	s.tournMtime = mtime

@@ -84,6 +84,9 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					if result.ResultSource != "" {
+						bracket.Rounds[rIdx][mIdx].ResultSource = result.ResultSource
+					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults

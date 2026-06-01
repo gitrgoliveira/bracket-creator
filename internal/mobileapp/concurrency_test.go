@@ -78,7 +78,7 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	admin := r.Group("/api")
-	RegisterMatchHandlers(admin, eng, store, store, hub)
+	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 
 	// Goroutines all fire concurrently — each scores a different match
 	// so the per-comp lock is contended on every step (LoadCompetition

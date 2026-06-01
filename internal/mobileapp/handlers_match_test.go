@@ -630,6 +630,14 @@ func (f failingCompetitionStore) LoadCompetition(string) (*state.Competition, er
 	return nil, f.err
 }
 
+func (f failingCompetitionStore) LoadPoolMatches(string) ([]state.MatchResult, error) {
+	return nil, f.err
+}
+
+func (f failingCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
+	return nil, f.err
+}
+
 // TestEnchoExceedsCap covers the pure predicate. Force, missing comp,
 // 0 cap, and within-cap all return false; only an over-cap count with
 // !force returns true.
@@ -701,7 +709,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		// cap check exercises the new fail-closed branch. The engine
 		// keeps the real store but never gets called — enforceEnchoCap
 		// aborts the request first.
-		registerScoreHandler(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub)
+		registerScoreHandler(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub, NewFileVerifier(realStore), realStore)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(score(1)))
@@ -716,7 +724,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
 		admin := r.Group("/api")
-		registerScoreHandler(admin, eng, realStore, realStore, hub)
+		registerScoreHandler(admin, eng, realStore, realStore, hub, NewFileVerifier(realStore), realStore)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(score(3)))
@@ -737,7 +745,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
 		admin := r.Group("/api")
-		registerScoreHandler(admin, eng, realStore, realStore, hub)
+		registerScoreHandler(admin, eng, realStore, realStore, hub, NewFileVerifier(realStore), realStore)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score?force=true", bytes.NewBuffer(score(3)))
@@ -783,7 +791,7 @@ func TestEnforceEnchoCapWithSubs(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
 		admin := r.Group("/api")
-		registerScoreHandler(admin, eng, realStore, realStore, hub)
+		registerScoreHandler(admin, eng, realStore, realStore, hub, NewFileVerifier(realStore), realStore)
 
 		body, _ := json.Marshal(state.MatchResult{
 			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
@@ -809,7 +817,7 @@ func TestEnforceEnchoCapWithSubs(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
 		admin := r.Group("/api")
-		registerScoreHandler(admin, eng, realStore, realStore, hub)
+		registerScoreHandler(admin, eng, realStore, realStore, hub, NewFileVerifier(realStore), realStore)
 
 		body, _ := json.Marshal(state.MatchResult{
 			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
@@ -828,7 +836,7 @@ func TestEnforceEnchoCapWithSubs(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
 		admin := r.Group("/api")
-		RegisterMatchHandlers(admin, eng, realStore, realStore, hub)
+		RegisterMatchHandlers(admin, eng, realStore, realStore, hub, NewFileVerifier(realStore), realStore)
 
 		body, _ := json.Marshal([]state.MatchResult{
 			{
@@ -878,7 +886,7 @@ func TestBulkScore_FailsClosedOnLoadError(t *testing.T) {
 	// RegisterMatchHandlers takes the concrete *Hub; the cap check
 	// uses the CompetitionStore parameter (which we fault here) and
 	// returns 500 before any handler reaches the hub or engine.
-	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub)
+	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub, NewFileVerifier(realStore), realStore)
 
 	body, _ := json.Marshal([]state.MatchResult{
 		{ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P1", Status: state.MatchStatusCompleted},
@@ -1068,4 +1076,287 @@ func TestAnnotateBracketQueuePositions_EmptyScheduledAt(t *testing.T) {
 
 	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "has-time = 1st")
 	assert.Equal(t, 2, b.Rounds[0][0].QueuePosition, "no-time = 2nd (sinks to end)")
+}
+
+// setupSelfRunScoreRouter creates a minimal gin router with just the score
+// endpoint, wired to a fresh store that has a self-run tournament and one
+// pool match pre-seeded.
+func setupSelfRunScoreRouter(t *testing.T, mainPw string) (*gin.Engine, *state.Store, string) {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", "selfrun-score-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+	hub := NewHub()
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "SelfRun",
+		Password: mainPw,
+		Courts:   []string{"A"},
+		Mode:     state.TournamentModeSelfRun,
+	}))
+	compID := "c1"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Format: state.CompFormatMixed,
+		Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	verifier := NewFileVerifier(store)
+	RegisterMatchHandlers(admin, eng, store, store, hub, verifier, store)
+
+	return r, store, compID
+}
+
+// TestSelfRunScoreHandler verifies the decision allowlist, finalized guard,
+// and resultSource provenance for self-run tournaments.
+func TestSelfRunScoreHandler(t *testing.T) {
+	t.Run("anonymous PUT score with fought decision returns 200 and self-reported source", func(t *testing.T) {
+		r, store, compID := setupSelfRunScoreRouter(t, "secret")
+
+		body, _ := json.Marshal(state.MatchResult{
+			ID:      "PoolA-1",
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Alice",
+			IpponsA: []string{"M", "K"},
+			Status:  state.MatchStatusCompleted,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		var result state.MatchResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+		assert.Equal(t, "self-reported", result.ResultSource)
+
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.Equal(t, "self-reported", stored[0].ResultSource)
+	})
+
+	t.Run("anonymous PUT score with hikiwake returns 200 and self-reported source", func(t *testing.T) {
+		r, _, compID := setupSelfRunScoreRouter(t, "secret")
+
+		body, _ := json.Marshal(state.MatchResult{
+			ID:     "PoolA-1",
+			SideA:  "Alice",
+			SideB:  "Bob",
+			Status: state.MatchStatusCompleted,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		var result state.MatchResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+		assert.Equal(t, "self-reported", result.ResultSource)
+	})
+
+	t.Run("anonymous PUT score with kiken-voluntary returns 400", func(t *testing.T) {
+		r, _, compID := setupSelfRunScoreRouter(t, "secret")
+
+		body, _ := json.Marshal(state.MatchResult{
+			ID:         "PoolA-1",
+			SideA:      "Alice",
+			SideB:      "Bob",
+			Winner:     "Alice",
+			IpponsA:    []string{"M", "K"},
+			Status:     state.MatchStatusCompleted,
+			Decision:   "kiken-voluntary",
+			DecisionBy: "shiro",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "decision type not allowed")
+	})
+
+	t.Run("anonymous PUT score with fusenpai returns 400", func(t *testing.T) {
+		r, _, compID := setupSelfRunScoreRouter(t, "secret")
+
+		body, _ := json.Marshal(state.MatchResult{
+			ID:         "PoolA-1",
+			SideA:      "Alice",
+			SideB:      "Bob",
+			Winner:     "Alice",
+			IpponsA:    []string{"M", "K"},
+			Status:     state.MatchStatusCompleted,
+			Decision:   "fusenpai",
+			DecisionBy: "shiro",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "decision type not allowed")
+	})
+
+	t.Run("anonymous overwrite of finalized result returns 409", func(t *testing.T) {
+		r, store, compID := setupSelfRunScoreRouter(t, "secret")
+
+		// First, establish a finalized result.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{
+				ID:      "PoolA-1",
+				SideA:   "Alice",
+				SideB:   "Bob",
+				Winner:  "Alice",
+				Status:  state.MatchStatusCompleted,
+				IpponsA: []string{"M", "K"},
+			},
+		}))
+
+		// Anonymous attempt to overwrite.
+		body, _ := json.Marshal(state.MatchResult{
+			ID:      "PoolA-1",
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Bob",
+			IpponsB: []string{"M", "K"},
+			Status:  state.MatchStatusCompleted,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "result_finalized")
+	})
+
+	t.Run("admin PUT score with valid password returns 200 and admin source", func(t *testing.T) {
+		r, store, compID := setupSelfRunScoreRouter(t, "secret")
+
+		body, _ := json.Marshal(state.MatchResult{
+			ID:      "PoolA-1",
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Alice",
+			IpponsA: []string{"M", "K"},
+			Status:  state.MatchStatusCompleted,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		var result state.MatchResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+		assert.Equal(t, "admin", result.ResultSource)
+
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.Equal(t, "admin", stored[0].ResultSource)
+	})
+
+	t.Run("admin can overwrite finalized result with valid password", func(t *testing.T) {
+		r, store, compID := setupSelfRunScoreRouter(t, "secret")
+
+		// First, establish a finalized result.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{
+				ID:      "PoolA-1",
+				SideA:   "Alice",
+				SideB:   "Bob",
+				Winner:  "Alice",
+				Status:  state.MatchStatusCompleted,
+				IpponsA: []string{"M", "K"},
+			},
+		}))
+
+		// Admin overwrite with valid password succeeds.
+		body, _ := json.Marshal(state.MatchResult{
+			ID:      "PoolA-1",
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Bob",
+			IpponsB: []string{"M", "K"},
+			Status:  state.MatchStatusCompleted,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		var result state.MatchResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+		assert.Equal(t, "admin", result.ResultSource)
+	})
+
+	t.Run("officiated mode PUT score sets resultSource admin", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "officiated-*")
+		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(tempDir) })
+		store, err := state.NewStore(tempDir)
+		require.NoError(t, err)
+		eng := engine.New(store)
+		hub := NewHub()
+
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name:     "Officiated",
+			Password: "pw",
+			Courts:   []string{"A"},
+			Mode:     state.TournamentModeOfficiated,
+		}))
+		compID := "off1"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:     compID,
+			Format: state.CompFormatMixed,
+			Status: state.CompStatusPools,
+		}))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{Name: "Alice"}, {Name: "Bob"},
+		}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+		}))
+
+		gin.SetMode(gin.TestMode)
+		rr := gin.New()
+		admin := rr.Group("/api")
+		RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
+
+		body, _ := json.Marshal(state.MatchResult{
+			ID:      "PoolA-1",
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Alice",
+			IpponsA: []string{"M", "K"},
+			Status:  state.MatchStatusCompleted,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		var result state.MatchResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+		assert.Equal(t, "admin", result.ResultSource)
+	})
 }

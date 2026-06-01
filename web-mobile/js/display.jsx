@@ -805,12 +805,16 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                     <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
                         <thead>
                             <tr>
-                                {/* Row-label stub */}
-                                <th style={{
-                                    width: 72, minWidth: 72,
-                                    borderBottom: `2px solid ${LOBBY_COLORS.lineStrong}`,
-                                    background: LOBBY_COLORS.bg,
-                                }} />
+                                {/* Row-label stub — presentational spacer, not a data header */}
+                                <th
+                                    aria-label="Queue position"
+                                    scope="col"
+                                    style={{
+                                        width: 72, minWidth: 72,
+                                        borderBottom: `2px solid ${LOBBY_COLORS.lineStrong}`,
+                                        background: LOBBY_COLORS.bg,
+                                    }}
+                                />
                                 {visible.map((cc, ci) => {
                                     // Derive subtitle from existing helpers so the
                                     // predicate stays consistent with the slots.
@@ -840,9 +844,9 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                                     </div>
                                                 )}
                                             </th>
-                                            {/* Thin separator between courts, not after the last court */}
+                                            {/* Thin separator between courts — decorative, hidden from AT */}
                                             {ci < visible.length - 1 && (
-                                                <th style={{ width: 1, padding: 0, background: 'transparent', borderBottom: 'none' }} />
+                                                <th aria-hidden="true" style={{ width: 1, padding: 0, background: 'transparent', borderBottom: 'none' }} />
                                             )}
                                         </React.Fragment>
                                     );
@@ -854,8 +858,8 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                 const rowKind = row.slot === 0 ? 'now' : row.slot === 1 ? 'next' : 'queue';
                                 return (
                                     <tr key={row.label}>
-                                        {/* Row label */}
-                                        <td style={{
+                                        {/* Row label — <th scope="row"> so AT associates it with its cells */}
+                                        <th scope="row" style={{
                                             textAlign: 'right', paddingRight: 16,
                                             fontSize: 10, fontWeight: 700, letterSpacing: '0.14em',
                                             textTransform: 'uppercase', color: LOBBY_COLORS.inkMuted,
@@ -863,16 +867,16 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                             borderRight: `1px solid ${LOBBY_COLORS.line}`,
                                         }}>
                                             {row.label}
-                                        </td>
+                                        </th>
                                         {visible.map((cc, ci) => (
                                             <React.Fragment key={cc}>
                                                 <LobbyMatchCell
                                                     slot={courtSlots[ci][row.slot]}
                                                     rowKind={rowKind}
                                                 />
-                                                {/* Thin vertical separator between courts */}
+                                                {/* Thin vertical separator between courts — decorative, hidden from AT */}
                                                 {ci < visible.length - 1 && (
-                                                    <td style={{ width: 1, padding: 0, background: LOBBY_COLORS.line }} />
+                                                    <td aria-hidden="true" style={{ width: 1, padding: 0, background: LOBBY_COLORS.line }} />
                                                 )}
                                             </React.Fragment>
                                         ))}

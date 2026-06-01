@@ -30,6 +30,11 @@ function RegistrationForm({ compId, onBack }) {
   // Fetch competition metadata on mount to know the comp name,
   // withZekkenName flag, and whether registration is still open.
   useEffectReg(() => {
+    setMeta(null);
+    setMetaErr(null);
+    setLoading(true);
+    setSuccess(false);
+    setErr("");
     if (!compId) {
       setMetaErr("No competition specified.");
       setLoading(false);

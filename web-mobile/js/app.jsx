@@ -649,7 +649,7 @@ function App() {
   const [selectedCompData, setSelectedCompData] = useS(null);
 
   useE(() => {
-    if (viewerCompId) {
+    if (viewerCompId && viewerScreen !== "register") {
       setLoading(true);
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
@@ -662,8 +662,9 @@ function App() {
         });
     } else {
       setSelectedCompData(null);
+      setLoading(false);
     }
-  }, [viewerCompId]);
+  }, [viewerCompId, viewerScreen]);
 
   const requestAdmin = () => {
     if (authed) {

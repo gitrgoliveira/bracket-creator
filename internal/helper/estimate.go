@@ -49,10 +49,11 @@ type EstimateMatchCountsInput struct {
 //   - Bracket matches: bracketMatchCount(numFinalists), which returns the
 //     court-time-consuming match count (excludes auto-resolved byes).
 //
-// All three sub-helpers (poolMatchesPerPool, bracketMatchCount, and the
-// pool-count math) mirror the real draw code without duplicating its
-// formulas — making this the single source of truth for pre-draw estimates.
-// See the bead mp-zoh plan's "Central design risk" section.
+// Pool count and per-pool sizes are derived by calling the real CreatePools
+// (no duplication). Per-pool match counting (poolMatchesPerPool) and bracket
+// match counting (bracketMatchCount) mirror the draw's match-generation
+// logic; these are lightweight formulas cross-checked by integration tests
+// against the real generators. See mp-zoh plan's "Central design risk".
 //
 // Returned counts reflect court-time-consuming matches only. Auto-resolved
 // bracket byes (both-empty leaf pairs marked Completed at generation time)

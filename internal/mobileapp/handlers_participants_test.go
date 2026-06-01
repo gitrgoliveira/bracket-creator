@@ -819,3 +819,64 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Whitespace-only danGrade must not persist as a blank metadata entry
+// Tests both POST (add) and PUT (replace) paths — mirrors the registration
+// handler's analogous test (TestRegistration_POST_WhitespaceDanGrade_NotPersisted).
+// ---------------------------------------------------------------------------
+
+func TestParticipants_WhitespaceDanGrade_NotPersisted(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const compID = "comp-ws-dan-admin"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Whitespace Dan Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	t.Run("POST add — whitespace danGrade not persisted", func(t *testing.T) {
+		payload := map[string]interface{}{
+			"name":     "Alice Ws",
+			"dojo":     "Dojo",
+			"danGrade": "   ",
+		}
+		b, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		require.Len(t, players, 1)
+		assert.Empty(t, players[0].Metadata, "whitespace-only danGrade must not persist")
+	})
+
+	t.Run("PUT replace — whitespace danGrade not persisted", func(t *testing.T) {
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		require.Len(t, players, 1)
+		pid := players[0].ID
+
+		payload := map[string]interface{}{
+			"name":     "Alice Ws",
+			"dojo":     "Dojo",
+			"danGrade": "  ",
+		}
+		b, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+pid, bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		updated, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		require.Len(t, updated, 1)
+		assert.Empty(t, updated[0].Metadata, "whitespace-only danGrade must not persist on replace")
+	})
+}

@@ -7,7 +7,7 @@ const officiated = { mode: 'officiated' };
 const indivSetup    = { kind: 'individual', status: 'setup' };
 const indivNoStatus = { kind: 'individual', status: '' };
 const indivPools    = { kind: 'individual', status: 'pools' };
-const indivComplete = { kind: 'individual', status: 'complete' };
+const indivComplete = { kind: 'individual', status: 'completed' };
 const teamSetup     = { kind: 'team', status: 'setup' };
 
 describe('shouldShowRegister predicate (mp-e5j)', () => {

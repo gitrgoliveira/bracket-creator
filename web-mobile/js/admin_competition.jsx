@@ -846,7 +846,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 {perCourt.length > 1 && (
                   <div style={{ marginTop: 2 }}>
                     <strong>Per court:</strong>{" "}
-                    {perCourt.map((t, i) => `Court ${String.fromCharCode(65 + i)}: ${t}`).join(" · ")}
+                    {perCourt.map((t, i) => `Court ${c.courts?.[i] || String.fromCharCode(65 + i)}: ${t}`).join(" · ")}
                   </div>
                 )}
                 {perCourt.length === 1 && (

@@ -99,20 +99,26 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 			"expected non-zero total duration for competition with 8 participants")
 	})
 
-	t.Run("endpoint is public — no auth header required", func(t *testing.T) {
+	t.Run("no elevated auth required — main password sufficient", func(t *testing.T) {
+		// The endpoint is registered under adminGroup (main-password gated)
+		// but does NOT require elevated (admin) auth. This test confirms
+		// the handler itself does not check for elevated credentials;
+		// AuthMiddleware enforcement is tested via the real server wiring,
+		// not this unit-level router (setupTestRouter omits AuthMiddleware).
 		comp := state.Competition{
-			ID:     "public-estimate",
-			Name:   "Public Estimate",
+			ID:     "main-auth-estimate",
+			Name:   "Main Auth Estimate",
 			Format: state.CompFormatPlayoffs,
 			Status: state.CompStatusSetup,
 		}
 		require.NoError(t, store.SaveCompetition(&comp))
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/competitions/public-estimate/schedule/estimate", nil)
-		// Deliberately no X-Tournament-Password header.
+		req, _ := http.NewRequest("GET", "/api/competitions/main-auth-estimate/schedule/estimate", nil)
+		// No X-Admin-Password — only main-password auth is needed (enforced
+		// by AuthMiddleware in production, not by the handler itself).
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code,
-			"estimate endpoint must be public — no auth header should be required")
+			"estimate endpoint must not require elevated auth")
 	})
 }

@@ -46,19 +46,22 @@ type EstimateMatchCountsInput struct {
 //   - Pool count: helper.CreatePools (ceiling vs floor division by PoolSize,
 //     driven by PoolSizeMode == "max").
 //   - Pool matches: poolMatchesPerPool for each individual pool size.
-//   - Bracket size: helper.NextPow2(numFinalists) - 1, where numFinalists
-//     = numPools × PoolWinners.
+//   - Bracket matches: bracketMatchCount(numFinalists), which returns the
+//     court-time-consuming match count (excludes auto-resolved byes).
 //
 // All three sub-helpers (poolMatchesPerPool, bracketMatchCount, and the
 // pool-count math) mirror the real draw code without duplicating its
 // formulas — making this the single source of truth for pre-draw estimates.
 // See the bead mp-zoh plan's "Central design risk" section.
 //
-// Returned counts include all scheduled matches, including auto-resolved
-// byes (which the slot assigners still allocate a time slot for). Negative
-// PlayerCount or zero-round Swiss are clamped to zero matches rather than
-// erroring, because the estimator may be called speculatively before
-// validation is complete.
+// Returned counts reflect court-time-consuming matches only. Auto-resolved
+// bracket byes (both-empty leaf pairs marked Completed at generation time)
+// are excluded because assignBracketMatchSlots does not advance the court
+// cursor for them (scheduler_slots.go:286-291). Pool-side byes are not
+// applicable (pools have no bye mechanism). Negative PlayerCount or
+// zero-round Swiss are clamped to zero matches rather than erroring,
+// because the estimator may be called speculatively before validation is
+// complete.
 //
 // Returns an error for:
 //   - Unknown Format strings.

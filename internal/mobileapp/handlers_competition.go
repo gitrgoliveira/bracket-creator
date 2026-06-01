@@ -445,9 +445,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	// GET /competitions/:id/schedule/estimate — pre-draw schedule estimate
-	// for a specific competition. Public (read-only), no elevated auth.
-	// Returns a ScheduleEstimate JSON body; 404 for unknown competition.
-	// mp-zoh Phase 3.
+	// for a specific competition. Read-only; main-password gated (registered
+	// under adminGroup via RegisterCompetitionHandlers) but does NOT require
+	// elevated auth. Returns a ScheduleEstimate JSON body; 404 for unknown
+	// competition. mp-zoh Phase 3.
 	r.GET("/competitions/:id/schedule/estimate", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

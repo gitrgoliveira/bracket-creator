@@ -535,28 +535,29 @@ const LOBBY_ROWS = [
     { label: '#6',   slot: 5 },
 ];
 
-// Build the 6 display slots for a single court.
+// Build the display slots for a single court — one per LOBBY_ROWS entry.
 //
 // Auto-promote semantics (T062): when there is no live match the first
 // scheduled match is promoted to slot 0 ("Now") with a slight style
 // difference (no score shown in the vs column). The remaining
-// upcoming matches fill slots 1–5.
+// upcoming matches fill slots 1 – (LOBBY_ROWS.length - 1).
 //
-// Returns an array of exactly 6 elements; missing slots are null
-// (rendered as an empty "—" cell).
+// Returns an array of exactly LOBBY_ROWS.length elements; missing
+// slots are null (rendered as an empty "—" cell).
 function buildCourtSlots(competitions, court) {
+    const totalSlots = LOBBY_ROWS.length;
     const live = findLiveOnCourt(competitions, court);
-    // Request LOBBY_QUEUE_LIMIT upcoming matches. When there is no live
-    // match we need up to 6 (one will promote to slot 0).
-    const upcoming = findUpcomingOnCourt(competitions, court, live ? LOBBY_QUEUE_LIMIT : LOBBY_QUEUE_LIMIT + 1);
+    // Request enough upcoming matches to fill the queue rows. When there
+    // is no live match we need one extra (it will promote to slot 0).
+    const upcoming = findUpcomingOnCourt(competitions, court, live ? totalSlots - 1 : totalSlots);
 
-    const slots = new Array(6).fill(null);
+    const slots = new Array(totalSlots).fill(null);
 
     if (live) {
         slots[0] = { kind: 'live', match: live.match, competition: live.competition,
                      isBracket: live.isBracket, roundIndex: live.roundIndex,
                      totalRounds: live.totalRounds };
-        for (let i = 0; i < LOBBY_QUEUE_LIMIT && i < upcoming.length; i++) {
+        for (let i = 0; i < upcoming.length && i + 1 < totalSlots; i++) {
             const m = upcoming[i];
             slots[i + 1] = { kind: 'scheduled', match: m, competition: m._comp,
                              isBracket: m._isBracket, roundIndex: m._roundIndex,
@@ -568,7 +569,7 @@ function buildCourtSlots(competitions, court) {
         slots[0] = { kind: 'upnext', match: first, competition: first._comp,
                      isBracket: first._isBracket, roundIndex: first._roundIndex,
                      totalRounds: first._totalRounds };
-        for (let i = 1; i < upcoming.length && i < 6; i++) {
+        for (let i = 1; i < upcoming.length && i < totalSlots; i++) {
             const m = upcoming[i];
             slots[i] = { kind: 'scheduled', match: m, competition: m._comp,
                          isBracket: m._isBracket, roundIndex: m._roundIndex,
@@ -747,6 +748,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                         <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
                             {Array.from({ length: totalPages }, (_, i) => (
                                 <button
+                                    type="button"
                                     key={i}
                                     data-testid={`lobby-page-dot-${i}`}
                                     onClick={() => { setPage(i); setCycleKey(k => k + 1); }}
@@ -817,34 +819,17 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     background: LOBBY_COLORS.bg,
                                 }} />
                                 {visible.map((cc, ci) => {
-                                    // Count matches to show in the subtitle.
+                                    // Derive subtitle from existing helpers so the
+                                    // predicate stays consistent with the slots.
                                     const cts = countCourtMatches(competitions, cc);
                                     const remaining = cts.live + cts.scheduled;
-                                    // Find competition name for subtitle (first comp with a match on this court).
-                                    let compName = '';
-                                    if (competitions) {
-                                        for (const c of competitions) {
-                                            if (!c) continue;
-                                            for (const m of (c.poolMatches || [])) {
-                                                if ((m.court || '') === cc && (m.status === 'running' || m.status === 'scheduled')) {
-                                                    compName = c.name || '';
-                                                    break;
-                                                }
-                                            }
-                                            if (compName) break;
-                                            const rounds = (c.bracket && c.bracket.rounds) || [];
-                                            for (const round of rounds) {
-                                                for (const m of round) {
-                                                    if ((m.court || '') === cc && (m.status === 'running' || m.status === 'scheduled')) {
-                                                        compName = c.name || '';
-                                                        break;
-                                                    }
-                                                }
-                                                if (compName) break;
-                                            }
-                                            if (compName) break;
-                                        }
-                                    }
+                                    const liveHit = findLiveOnCourt(competitions, cc);
+                                    const compName = liveHit
+                                        ? (liveHit.competition?.name || '')
+                                        : (() => {
+                                            const first = findUpcomingOnCourt(competitions, cc, 1);
+                                            return first.length > 0 ? (first[0]._comp?.name || '') : '';
+                                        })();
                                     return (
                                         <React.Fragment key={cc}>
                                             <th style={{
@@ -916,15 +901,17 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
             }}>
                 {totalPages > 1
                     ? `Auto-cycling every ${LOBBY_CYCLE_MS / 1000} seconds`
-                    : courts.length === 1
-                        ? `Shiaijo ${courts[0]}`
-                        : `Shiaijo ${courts.join(' · ')}`
+                    : courts.length === 0
+                        ? ''
+                        : courts.length === 1
+                            ? `Shiaijo ${courts[0]}`
+                            : `Shiaijo ${courts.join(' · ')}`
                 }
             </div>
 
             {/* Keyframe for the cycle progress bar animation. Injected via a
-                <style> tag so it doesn't pollute styles.css (inline styles
-                cannot express @keyframes). Only rendered once. */}
+                <style> tag because inline styles cannot express @keyframes.
+                Re-rendered with the component but content is static/idempotent. */}
             <style>{`
                 @keyframes lobby-cycle-fill {
                     0%   { transform: scaleX(0); }
@@ -1127,6 +1114,8 @@ export {
     queueLabelCompact,
     LOBBY_PAGE_SIZE,
     LOBBY_CYCLE_MS,
+    LOBBY_ROWS,
+    buildCourtSlots,
 };
 
 if (typeof window !== 'undefined') {

@@ -8,10 +8,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster, elevated ElevatedVerifier) {
+func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub Broadcaster, elevated ElevatedVerifier) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -234,11 +235,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		if comp.Status == state.CompStatusDrawReady {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
-			return
-		}
-		if comp.Status != state.CompStatusSetup && comp.Status != "" {
+		if comp.Status != state.CompStatusDrawReady && comp.Status != state.CompStatusSetup && comp.Status != "" {
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
 			return
 		}
@@ -278,9 +275,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		// a concurrent start-competition cannot flip status between the check
 		// and the file write (TOCTOU, mp-0lc).
 		var (
-			updatedPlayer *domain.Player
-			httpStatus    = http.StatusInternalServerError
-			httpMsg       string
+			updatedPlayer  *domain.Player
+			oldName        string
+			oldDojo        string
+			oldDisplayName string
+			isDrawReady    bool
+			httpStatus     = http.StatusInternalServerError
+			httpMsg        string
 		)
 		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
 			comp, err := tx.LoadCompetition(id)
@@ -293,12 +294,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				httpMsg = "competition not found"
 				return fmt.Errorf("competition not found")
 			}
-			if comp.Status == state.CompStatusDrawReady {
-				httpStatus = http.StatusConflict
-				httpMsg = "cannot modify participants while a draw is pending; discard the draw first"
-				return state.ErrCompetitionNotInSetup
-			}
-			if comp.Status != state.CompStatusSetup && comp.Status != "" {
+			if comp.Status != state.CompStatusDrawReady && comp.Status != state.CompStatusSetup && comp.Status != "" {
 				httpStatus = http.StatusConflict
 				httpMsg = "cannot modify participants after competition has started"
 				return state.ErrCompetitionNotInSetup
@@ -318,6 +314,25 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				httpStatus = http.StatusBadRequest
 				httpMsg = err.Error()
 				return err
+			}
+
+			// Capture old values before mutation so we can cascade the change
+			// through draw artifacts when the competition is draw-ready.
+			if comp.Status == state.CompStatusDrawReady {
+				participants, lerr := tx.LoadParticipants(id, comp.WithZekkenName)
+				if lerr != nil {
+					httpMsg = lerr.Error()
+					return lerr
+				}
+				for _, p := range participants {
+					if p.ID == pid {
+						oldName = p.Name
+						oldDojo = p.Dojo
+						oldDisplayName = p.DisplayName
+						break
+					}
+				}
+				isDrawReady = true
 			}
 
 			p, err := tx.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
@@ -350,7 +365,38 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		var warnings []string
+		if isDrawReady && oldName != "" {
+			// Cascade the name/dojo change through draw artifacts outside the
+			// transaction — WithTransaction's per-comp lock is released above
+			// (non-reentrant mutex), so the cascade function can acquire it.
+			displayName := req.DisplayName
+			if !comp.WithZekkenName {
+				displayName = ""
+			}
+			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, name, dojo, displayName)
+			if cascadeErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
+				return
+			}
+			warnings = w
+		}
+
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		if len(warnings) > 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"id":          updatedPlayer.ID,
+				"name":        updatedPlayer.Name,
+				"displayName": updatedPlayer.DisplayName,
+				"dojo":        updatedPlayer.Dojo,
+				"metadata":    updatedPlayer.Metadata,
+				"tag":         updatedPlayer.Tag,
+				"seed":        updatedPlayer.Seed,
+				"checkedIn":   updatedPlayer.CheckedIn,
+				"warnings":    warnings,
+			})
+			return
+		}
 		c.JSON(http.StatusOK, updatedPlayer)
 	})
 

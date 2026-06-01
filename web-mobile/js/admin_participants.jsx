@@ -560,6 +560,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       if (!mountedRef.current) return;
       setReplaceTarget(null);
       showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);
+      if (updated.warnings && updated.warnings.length > 0) {
+        updated.warnings.forEach(w => showToast(`Warning: ${w}`, "error"));
+      }
     } catch (err) {
       if (!mountedRef.current) return;
       showToast(err.message, "error");
@@ -677,7 +680,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     <>
       {isDrawReady && (
         <div className="notice notice--info" style={{ marginBottom: 12 }}>
-          Draw pending — participant edits are locked. Discard the draw to make changes.
+          Draw pending — edits will update the draw in place.
         </div>
       )}
       {isStarted && (
@@ -922,7 +925,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                       <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
-                      {isSetup && (
+                      {(isSetup || isDrawReady) && (
                         <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>

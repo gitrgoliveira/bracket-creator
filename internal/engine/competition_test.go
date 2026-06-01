@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -538,4 +540,249 @@ func TestGenerateDraw_ThenDiscardThenRegenerateAndStart(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusPools, comp.Status)
+}
+
+// --- ReplaceParticipantInDraw tests ---
+
+// setupDrawReadyMixed creates a draw-ready mixed-format competition with the
+// given participants and returns the engine, store, and compID.
+func setupDrawReadyMixed(t *testing.T, names []string) (*Engine, *state.Store, string) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	compID := "replace-test"
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+
+	players := make([]domain.Player, len(names))
+	for i, n := range names {
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i%5))}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.GenerateDraw(compID))
+	return eng, store, compID
+}
+
+// setupDrawReadyPlayoffs creates a draw-ready playoffs competition.
+func setupDrawReadyPlayoffs(t *testing.T, names []string) (*Engine, *state.Store, string) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	compID := "replace-playoffs"
+	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 3)
+
+	players := make([]domain.Player, len(names))
+	for i, n := range names {
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i%5))}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.GenerateDraw(compID))
+	return eng, store, compID
+}
+
+// findPlayerInPools returns true when name appears in any pool.
+func findPlayerInPools(pools []helper.Pool, name string) bool {
+	for _, p := range pools {
+		for _, pl := range p.Players {
+			if pl.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// findNameInBracket returns true when name appears in any bracket side.
+func findNameInBracket(bracket *state.Bracket, name string) bool {
+	for _, round := range bracket.Rounds {
+		for _, m := range round {
+			if m.SideA == name || m.SideB == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestReplaceParticipantInDraw_PoolsHappyPath(t *testing.T) {
+	eng, store, compID := setupDrawReadyMixed(t, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	// Find Alice's pool entry before the swap.
+	poolsBefore, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.True(t, findPlayerInPools(poolsBefore, "Alice"), "Alice must be in pools before swap")
+
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
+	require.NoError(t, err)
+
+	// Dojo unchanged, no conflict expected.
+	assert.Empty(t, warnings)
+
+	poolsAfter, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	assert.False(t, findPlayerInPools(poolsAfter, "Alice"), "Alice must be removed from pools after swap")
+	assert.True(t, findPlayerInPools(poolsAfter, "Alicia"), "Alicia must appear in pools after swap")
+
+	// pool-matches.csv should be updated too.
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		assert.NotEqual(t, "Alice", m.SideA, "old name must not appear in pool matches")
+		assert.NotEqual(t, "Alice", m.SideB, "old name must not appear in pool matches")
+	}
+}
+
+func TestReplaceParticipantInDraw_PlayoffsBracket(t *testing.T) {
+	eng, store, compID := setupDrawReadyPlayoffs(t, []string{"Alice", "Bob", "Charlie", "Dave"})
+
+	bracketBefore, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.True(t, findNameInBracket(bracketBefore, "Alice"), "Alice must be in bracket before swap")
+
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
+	require.NoError(t, err)
+	assert.Empty(t, warnings)
+
+	bracketAfter, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.False(t, findNameInBracket(bracketAfter, "Alice"), "old name must not appear in bracket after swap")
+	assert.True(t, findNameInBracket(bracketAfter, "Alicia"), "new name must appear in bracket after swap")
+}
+
+func TestReplaceParticipantInDraw_DojoConflict(t *testing.T) {
+	// Create 6 players where pool-size=3 so we get 2 pools of 3.
+	// Alice and Bob both come from DojoX; the generator will try to keep them
+	// apart. We then replace Charlie (different dojo) with a DojoX player,
+	// which may create a conflict in one pool.
+	eng, store, _ := setupTestEngine(t)
+	compID := "replace-dojo-conflict"
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "DojoX"},
+		{Name: "Bob", Dojo: "DojoX"},
+		{Name: "Charlie", Dojo: "DojoY"},
+		{Name: "Dave", Dojo: "DojoZ"},
+		{Name: "Eve", Dojo: "DojoZ"},
+		{Name: "Frank", Dojo: "DojoW"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	// Find which pool Charlie is in; replace Charlie with a DojoX player.
+	poolsBefore, err := store.LoadPools(compID)
+	require.NoError(t, err)
+
+	charliesPool := ""
+	for _, p := range poolsBefore {
+		for _, pl := range p.Players {
+			if pl.Name == "Charlie" {
+				charliesPool = p.PoolName
+			}
+		}
+	}
+	require.NotEmpty(t, charliesPool)
+
+	// Check if Alice or Bob is in the same pool as Charlie.
+	// If so, swapping Charlie to DojoX will create a conflict.
+	aliceOrBobInSamePool := false
+	for _, p := range poolsBefore {
+		if p.PoolName != charliesPool {
+			continue
+		}
+		for _, pl := range p.Players {
+			if pl.Name == "Alice" || pl.Name == "Bob" {
+				aliceOrBobInSamePool = true
+			}
+		}
+	}
+
+	// Swap Charlie (DojoY) → Grace (DojoX).
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Charlie", "DojoY", "", "Grace", "DojoX", "")
+	require.NoError(t, err)
+
+	if aliceOrBobInSamePool {
+		// We expect a dojo conflict warning.
+		assert.NotEmpty(t, warnings, "dojo conflict warning expected when DojoX already appears in pool")
+		for _, w := range warnings {
+			assert.Contains(t, w, "dojo conflict")
+		}
+	}
+
+	// Regardless of conflict, the swap must succeed.
+	poolsAfter, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	assert.False(t, findPlayerInPools(poolsAfter, "Charlie"), "old name must be gone")
+	assert.True(t, findPlayerInPools(poolsAfter, "Grace"), "new name must be present")
+}
+
+func TestReplaceParticipantInDraw_SeedCascade(t *testing.T) {
+	eng, store, compID := setupDrawReadyMixed(t, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	// Seed Alice at rank 1 directly in seeds.csv (before draw, then re-generate
+	// so seeds are active in the draw-ready state).
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Alice", SeedRank: 1},
+	}))
+
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
+	require.NoError(t, err)
+
+	// Seed transfer warning should appear.
+	seedWarned := false
+	for _, w := range warnings {
+		if strings.Contains(w, "seed rank") && strings.Contains(w, "Alicia") {
+			seedWarned = true
+		}
+	}
+	assert.True(t, seedWarned, "should warn that seed rank was transferred to Alicia")
+
+	// seeds.csv must now reference the new name.
+	seeds, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1)
+	assert.Equal(t, "Alicia", seeds[0].Name)
+	assert.Equal(t, 1, seeds[0].SeedRank)
+}
+
+func TestReplaceParticipantInDraw_WrongState(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "replace-wrong-state"
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	// Competition is now in pools state, not draw-ready.
+	_, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not in draw-ready state")
+}
+
+func TestReplaceParticipantInDraw_ParticipantNotInDraw(t *testing.T) {
+	eng, _, compID := setupDrawReadyMixed(t, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	_, err := eng.ReplaceParticipantInDraw(compID, "Nonexistent", "DojoX", "", "Someone", "DojoX", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in draw artifacts")
+}
+
+func TestReplaceParticipantInDraw_NoopWhenUnchanged(t *testing.T) {
+	eng, store, compID := setupDrawReadyMixed(t, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	poolsBefore, err := store.LoadPools(compID)
+	require.NoError(t, err)
+
+	// Same name, same dojo, same displayName → no-op.
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alice", "DojoA", "")
+	require.NoError(t, err)
+	assert.Empty(t, warnings)
+
+	poolsAfter, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, poolsBefore, poolsAfter, "pools must be unchanged on no-op")
 }

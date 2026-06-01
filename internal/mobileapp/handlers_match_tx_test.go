@@ -67,7 +67,7 @@ func TestScoreHandler_NoDeadlockUnderConcurrentLoad(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	admin := r.Group("/api")
-	RegisterMatchHandlers(admin, eng, store, store, hub)
+	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 
 	var wg sync.WaitGroup
 	done := make(chan struct{})

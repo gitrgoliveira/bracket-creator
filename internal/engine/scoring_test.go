@@ -530,6 +530,37 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 	}
 }
 
+func TestRecordMatchResult_BracketResultSourcePropagated(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-bracket-resultsource-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "rs-bracket"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "RS Bracket"}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "SF1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled}},
+		},
+	}))
+
+	err = eng.RecordMatchResult(compID, "SF1", &state.MatchResult{
+		Winner:       "Alice",
+		IpponsA:      []string{"M", "K"},
+		Status:       state.MatchStatusCompleted,
+		ResultSource: "self-reported",
+	})
+	require.NoError(t, err)
+
+	stored, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, stored.Rounds[0], 1)
+	assert.Equal(t, "self-reported", stored.Rounds[0][0].ResultSource)
+}
+
 // TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost pins the
 // TOCTOU fix in engine.MaybeAutoCompletePools. Pre-atomic-primitive,
 // the LoadCompetition + status check + SaveCompetitionChanged

@@ -386,6 +386,10 @@ type MatchResult struct {
 	// allow it in pool play) that the gap is acceptable. The yaml tag
 	// is retained for future YAML-serialised contexts.
 	DecidedByHantei *bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+	// ResultSource records how the result was submitted: "admin" (operator with
+	// password), "self-reported" (participant in self-run mode), or "" (legacy/
+	// unset). Set by the score handler; omitted from wire when empty.
+	ResultSource string `json:"resultSource,omitempty" yaml:"result_source,omitempty"`
 }
 
 // HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths
@@ -491,6 +495,8 @@ type BracketMatch struct {
 	// SubResults persists per-bout results for team bracket matches so the
 	// score editor can restore hantei state and bout-level detail on re-open.
 	SubResults []SubMatchResult `json:"subResults,omitempty"`
+	// ResultSource mirrors MatchResult.ResultSource for bracket matches.
+	ResultSource string `json:"resultSource,omitempty"`
 }
 
 type Bracket struct {

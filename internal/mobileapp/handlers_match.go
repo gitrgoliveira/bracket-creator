@@ -545,18 +545,23 @@ var errResultFinalized = errors.New("result_finalized")
 
 // checkFinalizedUnderTx runs inside WithTransaction (under the per-comp
 // lock) so it's safe from TOCTOU races. Returns errResultFinalized when
-// an anonymous caller tries to write to a completed match.
+// an anonymous caller tries to write to a completed match. Fails closed:
+// a load error rejects the request rather than allowing an overwrite.
 func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
 	poolMatches, err := stx.LoadPoolMatches(compID)
-	if err == nil {
-		for i := range poolMatches {
-			if poolMatches[i].ID == matchID && isMatchFinalized(&poolMatches[i]) {
-				return errResultFinalized
-			}
+	if err != nil {
+		return fmt.Errorf("finalized guard: load pool matches: %w", err)
+	}
+	for i := range poolMatches {
+		if poolMatches[i].ID == matchID && isMatchFinalized(&poolMatches[i]) {
+			return errResultFinalized
 		}
 	}
 	bracket, err := stx.LoadBracket(compID)
-	if err == nil && bracket != nil {
+	if err != nil {
+		return fmt.Errorf("finalized guard: load bracket: %w", err)
+	}
+	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for i := range round {
 				if round[i].ID == matchID {

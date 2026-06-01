@@ -490,39 +490,209 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     );
 }
 
-// LobbyDisplay pagination tunables. PAGE_SIZE = 4 lines up with the
-// "≤ 4 courts fit on one screen" assumption from T065; CYCLE_MS = 10s
-// is the cadence the spec recommends for auto-cycle. Tweaking these
-// here flows to both the page-indicator and the timer below.
-const LOBBY_PAGE_SIZE = 4;
+// LobbyDisplay pagination tunables. PAGE_SIZE = 2 courts per page so
+// the table layout (2 court columns) fills a single screen; CYCLE_MS =
+// 10 s is the cadence the spec recommends for auto-cycle. Tweaking
+// these here flows to both the page-indicator and the timer below.
+const LOBBY_PAGE_SIZE = 2;
 const LOBBY_CYCLE_MS = 10000;
 
-// <LobbyDisplay> — multi-court grid for venue lobby screens.
+// LOBBY_QUEUE_LIMIT — 5 upcoming matches per court beyond the "Now"
+// slot, giving 6 rows total (Now + Next + #3–#6). When no live match
+// is present the first scheduled auto-promotes to "Now" and the
+// remaining 5 fill the queue rows, so we always request 5 upcoming
+// entries (the auto-promote logic below slices as needed).
+const LOBBY_QUEUE_LIMIT = 5;
+
+// Colour tokens for the cross-court table — defined once so the
+// per-cell renderers stay readable. These mirror the mockup's :root
+// vars but expressed as inline-style strings (display.jsx convention).
+const LOBBY_COLORS = {
+    bg:         '#080a0f',
+    surface:    'rgba(255,255,255,0.025)',
+    inkDim:     'rgba(255,255,255,0.45)',
+    inkMuted:   'rgba(255,255,255,0.25)',
+    line:       'rgba(255,255,255,0.06)',
+    lineStrong: 'rgba(255,255,255,0.12)',
+    nowBg:      'rgba(255,255,255,0.05)',
+    nowBorder:  'rgba(255,255,255,0.10)',
+    nextBg:     'rgba(255,209,102,0.06)',
+    nextBorder: 'rgba(255,209,102,0.14)',
+    nextAccent: '#ffd166',
+    schedBg:    'rgba(255,255,255,0.02)',
+    akaSoft:    '#ff9a95',
+    akaVivid:   '#ff5b54',
+};
+
+// Row descriptor array — drives both the row-label column and the
+// slot index pulled from the per-court slot arrays.
+const LOBBY_ROWS = [
+    { label: 'Now',  slot: 0 },
+    { label: 'Next', slot: 1 },
+    { label: '#3',   slot: 2 },
+    { label: '#4',   slot: 3 },
+    { label: '#5',   slot: 4 },
+    { label: '#6',   slot: 5 },
+];
+
+// Build the 6 display slots for a single court.
 //
-// T064: one card per *active* court (i.e. courts with at least one live
-// or scheduled match). Each card mirrors TvDisplay's structure at
-// reduced scale: court header, current/up-next match, and two queue
-// items beneath. CSS grid auto-fit makes the layout responsive to the
-// court count up to one screenful.
+// Auto-promote semantics (T062): when there is no live match the first
+// scheduled match is promoted to slot 0 ("Now") with a slight style
+// difference (no score shown in the vs column). The remaining
+// upcoming matches fill slots 1–5.
 //
-// T065: when there are more active courts than fit on one screen
-// (PAGE_SIZE = 4), cards auto-cycle every 10 seconds. The page counter
-// (1/3 etc.) is rendered in the header so spectators understand the
-// rotation. Below the threshold the timer is a no-op and all cards
-// render at once.
+// Returns an array of exactly 6 elements; missing slots are null
+// (rendered as an empty "—" cell).
+function buildCourtSlots(competitions, court) {
+    const live = findLiveOnCourt(competitions, court);
+    // Request LOBBY_QUEUE_LIMIT upcoming matches. When there is no live
+    // match we need up to 6 (one will promote to slot 0).
+    const upcoming = findUpcomingOnCourt(competitions, court, live ? LOBBY_QUEUE_LIMIT : LOBBY_QUEUE_LIMIT + 1);
+
+    const slots = new Array(6).fill(null);
+
+    if (live) {
+        slots[0] = { kind: 'live', match: live.match, competition: live.competition,
+                     isBracket: live.isBracket, roundIndex: live.roundIndex,
+                     totalRounds: live.totalRounds };
+        for (let i = 0; i < LOBBY_QUEUE_LIMIT && i < upcoming.length; i++) {
+            const m = upcoming[i];
+            slots[i + 1] = { kind: 'scheduled', match: m, competition: m._comp,
+                             isBracket: m._isBracket, roundIndex: m._roundIndex,
+                             totalRounds: m._totalRounds };
+        }
+    } else if (upcoming.length > 0) {
+        // Auto-promote first scheduled to "Now" slot.
+        const first = upcoming[0];
+        slots[0] = { kind: 'upnext', match: first, competition: first._comp,
+                     isBracket: first._isBracket, roundIndex: first._roundIndex,
+                     totalRounds: first._totalRounds };
+        for (let i = 1; i < upcoming.length && i < 6; i++) {
+            const m = upcoming[i];
+            slots[i] = { kind: 'scheduled', match: m, competition: m._comp,
+                         isBracket: m._isBracket, roundIndex: m._roundIndex,
+                         totalRounds: m._totalRounds };
+        }
+    }
+    // If no live and no upcoming, slots stay null → empty cells.
+    return slots;
+}
+
+// Render one match cell (td > .match-cell div) for the cross-court table.
+// rowKind: 'now' | 'next' | 'queue' — determines the background/border.
+// slot: the buildCourtSlots entry for this cell (null → empty cell).
+function LobbyMatchCell({ slot, rowKind }) {
+    if (!slot) {
+        return (
+            <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
+                <div style={{
+                    background: 'none',
+                    borderRadius: 8, padding: '10px 14px',
+                    minHeight: 54,
+                    border: '1px solid transparent',
+                    opacity: 0.12,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 18,
+                }}>—</div>
+            </td>
+        );
+    }
+
+    const { kind, match, competition, isBracket, roundIndex, totalRounds } = slot;
+    const zekken = !!(competition && competition.withZekkenName);
+
+    let cellBg = LOBBY_COLORS.schedBg;
+    let cellBorder = 'transparent';
+    if (rowKind === 'now') {
+        cellBg = LOBBY_COLORS.nowBg;
+        cellBorder = LOBBY_COLORS.nowBorder;
+    } else if (rowKind === 'next') {
+        cellBg = LOBBY_COLORS.nextBg;
+        cellBorder = LOBBY_COLORS.nextBorder;
+    }
+
+    const phase = phaseLabel(match, isBracket, roundIndex, totalRounds);
+    const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
+
+    // Score column: live → actual scores; upnext/scheduled → "vs"
+    let vsContent;
+    if (kind === 'live') {
+        const shiroScore = (match.ipponsB || []).filter(x => x && x !== '•').join('') || '0';
+        const akaScore   = (match.ipponsA || []).filter(x => x && x !== '•').join('') || '0';
+        const sfx = window.decisionSuffix ? window.decisionSuffix(match) : '';
+        vsContent = (
+            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: 14, color: '#e8eaed' }}>
+                {shiroScore}
+                <span style={{ opacity: 0.45 }}> - </span>
+                <span style={{ color: LOBBY_COLORS.akaVivid }}>{akaScore}</span>
+                {sfx ? <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.85 }}>{sfx}</span> : null}
+            </span>
+        );
+    } else {
+        vsContent = (
+            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 500, fontSize: 14, color: LOBBY_COLORS.inkMuted }}>vs</span>
+        );
+    }
+
+    return (
+        <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
+            <div style={{
+                background: cellBg,
+                borderRadius: 8, padding: '10px 14px',
+                minHeight: 54,
+                border: `1px solid ${cellBorder}`,
+            }}>
+                {compMeta && (
+                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em' }}>
+                        {compMeta}
+                    </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 600 }}>
+                    {/* Shiro — white text, left side */}
+                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {sideLabel(match.sideB, zekken)}
+                    </div>
+                    {/* Score / vs */}
+                    <div style={{ flexShrink: 0, minWidth: 64, textAlign: 'center' }}>
+                        {vsContent}
+                    </div>
+                    {/* Aka — pink/red text, right side */}
+                    <div style={{ flex: 1, minWidth: 0, textAlign: 'right', color: LOBBY_COLORS.akaSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {sideLabel(match.sideA, zekken)}
+                    </div>
+                </div>
+            </div>
+        </td>
+    );
+}
+
+// <LobbyDisplay> — multi-court cross-court table for venue lobby screens.
 //
-// Reconnect indicator (T063) is mirrored here so the lobby screen also
-// shows when SSE is in a reconnect window.
+// T064: shows all *active* courts (courts with at least one live or
+// scheduled match) in a 2-column table. Each column is one court;
+// rows are queue positions (Now, Next, #3–#6). Auto-promote semantics
+// from TvDisplay/LobbyCard (T062) are preserved: when no live match
+// exists the first scheduled promotes to "Now".
+//
+// T065: 2 courts per page; auto-cycles every 10 s when there are more
+// courts than fit. A progress bar at the top and clickable dot
+// pagination make the cycle visible to spectators.
+//
+// Reconnect indicator (T063) is preserved in the top bar.
 function LobbyDisplay({ tournament, competitions, connected = true }) {
     const courts = useMD(() => findActiveCourts(tournament, competitions), [tournament, competitions]);
     const totalPages = Math.max(1, Math.ceil(courts.length / LOBBY_PAGE_SIZE));
     const [page, setPage] = useSD(0);
+    // cycleKey increments on every page flip so the CSS animation on the
+    // progress bar restarts from zero each time.
+    const [cycleKey, setCycleKey] = useSD(0);
 
-    // T065 auto-cycle. Only arm the timer when there are more courts
-    // than fit. Reset to page 0 if the court count drops below the
-    // threshold mid-cycle (e.g. a court finishes and falls off).
+    // T065 auto-cycle. Only arm the timer when there is more than one
+    // page. Reset to page 0 if the court count drops below the
+    // threshold mid-cycle.
     useED(() => {
-        if (courts.length <= LOBBY_PAGE_SIZE) {
+        if (totalPages <= 1) {
             if (page !== 0) setPage(0);
             return undefined;
         }
@@ -530,54 +700,103 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
             setPage(0);
             return undefined;
         }
-        const t = setTimeout(() => setPage(p => (p + 1) % totalPages), LOBBY_CYCLE_MS);
+        const t = setTimeout(() => {
+            setPage(p => (p + 1) % totalPages);
+            setCycleKey(k => k + 1);
+        }, LOBBY_CYCLE_MS);
         return () => clearTimeout(t);
-    }, [courts.length, page, totalPages]);
+    }, [totalPages, page]);
 
     const start = page * LOBBY_PAGE_SIZE;
-    const visible = courts.length > LOBBY_PAGE_SIZE
-        ? courts.slice(start, start + LOBBY_PAGE_SIZE)
-        : courts;
+    const visible = courts.slice(start, start + LOBBY_PAGE_SIZE);
+
+    // Build per-court slot arrays for the visible courts. Computed
+    // outside JSX so each cell renderer receives a plain object.
+    const courtSlots = visible.map(cc => buildCourtSlots(competitions, cc));
+
+    // Page label: "Shiaijo A–B · 1 / 2" or just "Shiaijo A" for single.
+    const pageCourtLabel = visible.length === 2
+        ? `Shiaijo ${visible[0]}–${visible[1]}`
+        : visible.length === 1
+            ? `Shiaijo ${visible[0]}`
+            : '';
 
     return (
-        <div className="lobby" style={{
+        <div className="lobby" data-testid="lobby-root" style={{
             position: 'fixed', inset: 0,
-            background: '#0b0d12', color: '#fff',
+            background: LOBBY_COLORS.bg, color: '#e8eaed',
             display: 'flex', flexDirection: 'column',
-            padding: 24, gap: 16,
+            fontFamily: 'var(--font-body, system-ui, sans-serif)',
+            WebkitFontSmoothing: 'antialiased',
+            overflow: 'hidden',
         }}>
+            {/* ── Top bar ────────────────────────────────────── */}
             <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                fontSize: 14, opacity: 0.7, letterSpacing: '0.06em', textTransform: 'uppercase',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '20px 36px 16px',
+                fontSize: 13, color: LOBBY_COLORS.inkDim,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                borderBottom: `1px solid ${LOBBY_COLORS.line}`,
             }}>
-                <div>{tournament?.name || ''}</div>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                    <span>{courts.length} active court{courts.length === 1 ? '' : 's'}</span>
+                <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '0.1em' }}>
+                    {tournament?.name || ''}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    {/* Dot pagination — clickable to jump between pages */}
                     {totalPages > 1 && (
-                        <span data-testid="lobby-page-indicator">
-                            Page {page + 1} / {totalPages}
+                        <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+                            {Array.from({ length: totalPages }, (_, i) => (
+                                <button
+                                    key={i}
+                                    data-testid={`lobby-page-dot-${i}`}
+                                    onClick={() => { setPage(i); setCycleKey(k => k + 1); }}
+                                    aria-label={`Page ${i + 1}`}
+                                    style={{
+                                        width: 7, height: 7, borderRadius: '50%',
+                                        background: i === page ? '#e8eaed' : LOBBY_COLORS.inkMuted,
+                                        transform: i === page ? 'scale(1.4)' : 'scale(1)',
+                                        transition: 'background 0.4s, transform 0.4s',
+                                        border: 'none', cursor: 'pointer', padding: 0,
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    )}
+                    {totalPages > 1 && (
+                        <span data-testid="lobby-page-indicator" style={{ fontSize: 11, color: LOBBY_COLORS.inkMuted, letterSpacing: '0.06em', fontWeight: 400 }}>
+                            {pageCourtLabel} · {page + 1} / {totalPages}
                         </span>
                     )}
+                    {/* T063: SSE reconnect indicator */}
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting" style={{
-                            color: '#ffb400',
-                            fontWeight: 700,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
+                            color: '#ffb400', fontWeight: 700,
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
                         }}>
-                            <span style={{
-                                width: 8, height: 8, borderRadius: '50%',
-                                background: '#ffb400', display: 'inline-block',
-                            }} />
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ffb400', display: 'inline-block' }} />
                             RECONNECTING
                         </span>
                     )}
                 </div>
             </div>
 
+            {/* ── Cycle progress bar ─────────────────────────── */}
+            {totalPages > 1 && (
+                <div style={{ height: 2, background: 'rgba(255,255,255,0.03)', position: 'relative', overflow: 'hidden' }}>
+                    <div
+                        key={cycleKey}
+                        style={{
+                            position: 'absolute', top: 0, left: 0, height: '100%',
+                            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.18))',
+                            width: '100%',
+                            transformOrigin: 'left',
+                            animation: `lobby-cycle-fill ${LOBBY_CYCLE_MS}ms linear`,
+                        }}
+                    />
+                </div>
+            )}
+
+            {/* ── Main content area ──────────────────────────── */}
             {courts.length === 0 ? (
                 <div data-testid="lobby-empty" style={{
                     flex: 1,
@@ -587,157 +806,131 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                     No active courts
                 </div>
             ) : (
-                <div data-testid="lobby-display-grid" style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
-                    gap: 16,
-                    flex: 1,
-                    overflow: 'hidden',
-                }}>
-                    {visible.map(cc => <LobbyCard key={cc} court={cc} tournament={tournament} competitions={competitions} />)}
+                <div data-testid="lobby-display-grid" style={{ flex: 1, padding: '12px 36px 16px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
+                        <thead>
+                            <tr>
+                                {/* Row-label stub */}
+                                <th style={{
+                                    width: 72, minWidth: 72,
+                                    borderBottom: `2px solid ${LOBBY_COLORS.lineStrong}`,
+                                    background: LOBBY_COLORS.bg,
+                                }} />
+                                {visible.map((cc, ci) => {
+                                    // Count matches to show in the subtitle.
+                                    const cts = countCourtMatches(competitions, cc);
+                                    const remaining = cts.live + cts.scheduled;
+                                    // Find competition name for subtitle (first comp with a match on this court).
+                                    let compName = '';
+                                    if (competitions) {
+                                        for (const c of competitions) {
+                                            if (!c) continue;
+                                            for (const m of (c.poolMatches || [])) {
+                                                if ((m.court || '') === cc && (m.status === 'running' || m.status === 'scheduled')) {
+                                                    compName = c.name || '';
+                                                    break;
+                                                }
+                                            }
+                                            if (compName) break;
+                                            const rounds = (c.bracket && c.bracket.rounds) || [];
+                                            for (const round of rounds) {
+                                                for (const m of round) {
+                                                    if ((m.court || '') === cc && (m.status === 'running' || m.status === 'scheduled')) {
+                                                        compName = c.name || '';
+                                                        break;
+                                                    }
+                                                }
+                                                if (compName) break;
+                                            }
+                                            if (compName) break;
+                                        }
+                                    }
+                                    return (
+                                        <React.Fragment key={cc}>
+                                            <th style={{
+                                                textAlign: 'center',
+                                                padding: '14px 12px 12px',
+                                                fontSize: 18, fontWeight: 700, letterSpacing: '0.1em',
+                                                textTransform: 'uppercase',
+                                                borderBottom: `2px solid ${LOBBY_COLORS.lineStrong}`,
+                                                background: LOBBY_COLORS.bg,
+                                            }}>
+                                                Shiaijo {cc}
+                                                {compName && (
+                                                    <div style={{ fontSize: 11, fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
+                                                        {compName}{remaining > 0 ? ` · ${remaining} match${remaining === 1 ? '' : 'es'}` : ''}
+                                                    </div>
+                                                )}
+                                            </th>
+                                            {/* Thin separator between courts, not after the last court */}
+                                            {ci < visible.length - 1 && (
+                                                <th style={{ width: 1, padding: 0, background: 'transparent', borderBottom: 'none' }} />
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {LOBBY_ROWS.map((row) => {
+                                const rowKind = row.slot === 0 ? 'now' : row.slot === 1 ? 'next' : 'queue';
+                                return (
+                                    <tr key={row.label}>
+                                        {/* Row label */}
+                                        <td style={{
+                                            textAlign: 'right', paddingRight: 16,
+                                            fontSize: 10, fontWeight: 700, letterSpacing: '0.14em',
+                                            textTransform: 'uppercase', color: LOBBY_COLORS.inkMuted,
+                                            verticalAlign: 'top', paddingTop: 16,
+                                            borderRight: `1px solid ${LOBBY_COLORS.line}`,
+                                        }}>
+                                            {row.label}
+                                        </td>
+                                        {visible.map((cc, ci) => (
+                                            <React.Fragment key={cc}>
+                                                <LobbyMatchCell
+                                                    slot={courtSlots[ci][row.slot]}
+                                                    rowKind={rowKind}
+                                                />
+                                                {/* Thin vertical separator between courts */}
+                                                {ci < visible.length - 1 && (
+                                                    <td style={{ width: 1, padding: 0, background: LOBBY_COLORS.line }} />
+                                                )}
+                                            </React.Fragment>
+                                        ))}
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
                 </div>
             )}
-        </div>
-    );
-}
 
-// One court's card inside LobbyDisplay. Same auto-promote semantics as
-// TvDisplay but rendered at lobby-card scale (px-based instead of vw-
-// based so multiple cards on one screen stay legible regardless of
-// court count). Shows current match + up to 2 queue items.
-function LobbyCard({ court, tournament: _tournament, competitions }) {
-    const live = useMD(() => findLiveOnCourt(competitions, court), [competitions, court]);
-    const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, live ? 2 : 3), [competitions, court, live]);
-    const counts = useMD(() => countCourtMatches(competitions, court), [competitions, court]);
-
-    let promoted = null;
-    let queueMatches = upcoming;
-    let promotedKind = null;
-    if (live) {
-        promoted = { kind: "live", match: live.match, competition: live.competition, isBracket: live.isBracket, roundIndex: live.roundIndex, totalRounds: live.totalRounds };
-        promotedKind = "live";
-    } else if (upcoming.length > 0) {
-        const first = upcoming[0];
-        promoted = {
-            kind: "upnext",
-            match: first,
-            competition: first._comp,
-            isBracket: first._isBracket,
-            roundIndex: first._roundIndex,
-            totalRounds: first._totalRounds,
-        };
-        promotedKind = "upnext";
-        queueMatches = upcoming.slice(1, 3);
-    } else {
-        queueMatches = [];
-    }
-
-    const allCompleted = !promoted && counts.live === 0 && counts.scheduled === 0 && counts.completed > 0;
-    const zekken = !!(promoted && promoted.competition && promoted.competition.withZekkenName);
-
-    return (
-        <div className="lobby__card" style={{
-            background: 'rgba(255,255,255,0.04)',
-            borderRadius: 12, padding: 20,
-            display: 'flex', flexDirection: 'column',
-            gap: 12,
-            border: '1px solid rgba(255,255,255,0.06)',
-            minWidth: 0,
-            overflow: 'hidden',
-        }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '0.06em' }}>SHIAIJO {court}</div>
-                {/* No red "LIVE" badge — the promoted match is live by default
-                    (red is reserved for Aka + danger). UP NEXT stays as a small
-                    muted note, consistent with TvDisplay. */}
-                {promotedKind === "upnext" && (
-                    <span style={{ color: 'rgba(255,209,102,0.85)', fontWeight: 700, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase' }}>↑ up next</span>
-                )}
+            {/* ── Bottom bar ─────────────────────────────────── */}
+            <div style={{
+                padding: '10px 36px',
+                display: 'flex', justifyContent: 'center',
+                fontSize: 10, color: LOBBY_COLORS.inkMuted,
+                letterSpacing: '0.06em',
+                borderTop: `1px solid ${LOBBY_COLORS.line}`,
+            }}>
+                {totalPages > 1
+                    ? `Auto-cycling every ${LOBBY_CYCLE_MS / 1000} seconds`
+                    : courts.length === 1
+                        ? `Shiaijo ${courts[0]}`
+                        : `Shiaijo ${courts.join(' · ')}`
+                }
             </div>
 
-            {promoted ? (
-                <>
-                    <div style={{ fontSize: 13, opacity: 0.7 }}>
-                        {promoted.competition?.name}
-                        {' · '}
-                        {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds)}
-                        {promoted.match.scheduledAt ? ` · ${promoted.match.scheduledAt}` : ''}
-                    </div>
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr auto 1fr',
-                        gap: 12,
-                        alignItems: 'center',
-                        fontSize: 22, fontWeight: 600,
-                    }}>
-                        <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {/* Framed-white Shiro chip at lobby-card scale (DESIGN.md §4) */}
-                            <span style={{ display: 'inline-block', background: '#fff', color: 'var(--accent, #1d3557)', border: '1px solid var(--accent, #1d3557)', fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', padding: '1px 5px', borderRadius: 3 }}><TermD name="shiro">SHIRO</TermD></span>
-                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>{sideLabel(promoted.match.sideB, zekken)}</div>
-                        </div>
-                        <div style={{
-                            fontFamily: 'var(--font-mono, monospace)', fontWeight: 700,
-                            opacity: 0.85, fontSize: 22, minWidth: 80, textAlign: 'center',
-                        }}>
-                            {promotedKind === "live" ? (
-                                <>
-                                    <span>{(promoted.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0'}</span>
-                                    <span style={{ opacity: 0.4 }}> - </span>
-                                    <span style={{ color: '#ff5b54' }}>{(promoted.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0'}</span>
-                                    {/* T097: lobby grid is dense, so the suffix rides inline
-                                        on the same row as the digits rather than a separate
-                                        line. Empty string when no decision/encho applies. */}
-                                    {window.decisionSuffix && window.decisionSuffix(promoted.match) && (
-                                        <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.8, fontWeight: 600 }}>
-                                            {window.decisionSuffix(promoted.match)}
-                                        </span>
-                                    )}
-                                </>
-                            ) : (
-                                <span style={{ opacity: 0.4 }}>vs</span>
-                            )}
-                        </div>
-                        <div style={{ textAlign: 'right', color: '#ff8a86', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {/* Solid-red Aka chip at lobby-card scale (DESIGN.md §4) */}
-                            <span style={{ display: 'inline-block', background: 'var(--red, #c1121f)', color: '#fff', fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', padding: '1px 5px', borderRadius: 3 }}><TermD name="aka">AKA</TermD></span>
-                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>{sideLabel(promoted.match.sideA, zekken)}</div>
-                        </div>
-                    </div>
-                </>
-            ) : allCompleted ? (
-                <div style={{ opacity: 0.5, fontSize: 15, padding: '12px 0' }}>All matches completed</div>
-            ) : (
-                <div style={{ opacity: 0.5, fontSize: 15, padding: '12px 0' }}>No matches</div>
-            )}
-
-            {queueMatches.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                    <div style={{ fontSize: 10, opacity: 0.5, letterSpacing: '0.2em', textTransform: 'uppercase' }}>Queue</div>
-                    {queueMatches.map((m) => {
-                        const compZekken = m._comp?.withZekkenName;
-                        return (
-                            <div key={(m._comp?.id || '') + m.id} style={{
-                                display: 'grid',
-                                gridTemplateColumns: '1fr auto 1fr',
-                                alignItems: 'center',
-                                gap: 8,
-                                fontSize: 13,
-                                opacity: 0.85,
-                            }}>
-                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {sideLabel(m.sideB, compZekken)}
-                                </div>
-                                <div style={{ opacity: 0.5, fontSize: 11 }}>
-                                    {m.scheduledAt || 'vs'}
-                                </div>
-                                <div style={{ textAlign: 'right', color: '#ff8a86', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {sideLabel(m.sideA, compZekken)}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
+            {/* Keyframe for the cycle progress bar animation. Injected via a
+                <style> tag so it doesn't pollute styles.css (inline styles
+                cannot express @keyframes). Only rendered once. */}
+            <style>{`
+                @keyframes lobby-cycle-fill {
+                    0%   { transform: scaleX(0); }
+                    100% { transform: scaleX(1); }
+                }
+            `}</style>
         </div>
     );
 }

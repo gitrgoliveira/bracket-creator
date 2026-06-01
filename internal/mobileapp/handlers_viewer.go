@@ -75,6 +75,18 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				poolMatches, _ := store.LoadPoolMatches(compID)
 				bracket, _ := store.LoadBracket(compID)
 
+				// mp-9dz: a preview bracket on a mixed source carries pool-
+				// origin placeholders ("Pool A-1st") with scheduled times
+				// assigned by assignBracketMatchSlots. It MUST NOT leak into
+				// the aggregate viewer payload that feeds Find-My-Matches /
+				// Watchlist / global schedule / TV displays — those treat
+				// every bracket match as a real, scheduled bout. Strip it
+				// here so only the per-competition detail endpoint (which
+				// powers the Bracket — preview tab) sees it.
+				if bracket != nil && bracket.Preview {
+					bracket = nil
+				}
+
 				// FR-025, T036: derive per-court queue position at serve time
 				// so viewers see "Next up: 3" without persisting a value that
 				// would go stale the moment any match transitions.

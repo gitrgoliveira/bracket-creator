@@ -45,6 +45,7 @@ function RegistrationForm({ compId, onBack }) {
         }
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
+          if (!mountedRef.current) return;
           setMetaErr(body.error || "Failed to load competition details.");
           setLoading(false);
           return;

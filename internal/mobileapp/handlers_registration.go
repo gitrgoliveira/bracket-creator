@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -142,7 +143,8 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 				c.JSON(http.StatusConflict, gin.H{"error": "registration is closed for this competition"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register participant: " + err.Error()})
+			log.Printf("registration: failed to add participant to %s: %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register participant"})
 			return
 		}
 

@@ -501,11 +501,14 @@ func (e *Engine) runDrawPipeline(id string) error {
 	loadedCourts := append([]string(nil), comp.Courts...)
 	loadedTeamSize := comp.TeamSize
 	loadedCheckInEnabled := comp.CheckInEnabled
-	// Note: PoolWinners is intentionally NOT snapshotted. The
-	// validation block below excludes it because it doesn't drive
-	// pool/bracket generation — admin's concurrent change is
-	// preserved by leaving current.PoolWinners alone. Same applies
-	// to Mirror (export-only), Name, Date, Venue (all UI-only).
+	loadedPoolWinners := comp.PoolWinners
+	// Note: PoolWinners drives generatePoolPreviewBracket for mixed-format
+	// competitions (mp-9dz: the preview bracket leaf-count equals PoolWinners
+	// per pool). It is therefore snapshotted and validated in the atomic commit
+	// below, but ONLY for mixed format — for other formats it still doesn't
+	// drive generation, so admin's concurrent change is preserved by leaving
+	// current.PoolWinners alone. Mirror (export-only), Name, Date, Venue are
+	// still NOT snapshotted (UI-only, never read during generation).
 	//
 	// Roster/seed mtimes. Settings drift is detected via the field-by-
 	// field snapshot above; participants and seeds live in separate
@@ -717,12 +720,17 @@ func (e *Engine) runDrawPipeline(id string) error {
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)
 		//   - CheckInEnabled (decides which participants are included)
-		// Other config fields (TeamSize, PoolWinners, Name, Date, Venue,
-		// Mirror) are NOT validated — they don't drive generation, so
-		// admin's concurrent change to them doesn't invalidate the
-		// pools.csv / bracket.json we just wrote. Their values are
-		// preserved by leaving `current.X` alone in the transform
-		// (except TeamSize, see below).
+		// Other config fields (TeamSize, Name, Date, Venue, Mirror) are NOT
+		// validated — they don't drive generation, so admin's concurrent
+		// change to them doesn't invalidate the pools.csv / bracket.json we
+		// just wrote. Their values are preserved by leaving `current.X` alone
+		// in the transform (except TeamSize, see below).
+		//
+		// PoolWinners is validated below for mixed format only: it drives the
+		// preview bracket leaf-count (generatePoolPreviewBracket, mp-9dz), so
+		// a concurrent change would produce a bracket.json whose shape
+		// disagrees with the committed comp.PoolWinners. For other formats it
+		// remains non-generation-relevant and is left unvalidated.
 		if current.Format != loadedFormat ||
 			current.PoolSize != loadedPoolSize ||
 			current.PoolSizeMode != loadedPoolSizeMode ||
@@ -734,6 +742,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 			current.CheckInEnabled != loadedCheckInEnabled ||
 			!courtsEqual(current.Courts, loadedCourts) {
 			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/CheckInEnabled/Courts); regenerate by retrying", id)
+		}
+		if loadedFormat == state.CompFormatMixed && current.PoolWinners != loadedPoolWinners {
+			return nil, validationErrorf("competition %s PoolWinners changed during start; regenerate by retrying", id)
 		}
 		// Participants / seeds drift: detected via file mtime captured
 		// at outer Load. A concurrent AdminParticipants PUT between our

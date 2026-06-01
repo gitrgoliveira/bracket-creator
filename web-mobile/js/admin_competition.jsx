@@ -183,18 +183,36 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCo
         </div>
       )}
       {mode === "scoreboard" && (
-        <div className="score-card">
-          <div className="score-side score-side--white">
-            <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div></div>
-            <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--shiro ${bPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{bPoints[i] || "·"}</span>))}</div>
-            <div className="score-side__buttons">{(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setBPoints([])}>↺</button></div>
+        // Proposal C layout (DESIGN.md §4 Aka/Shiro): SHIRO (sideB) on the
+        // LEFT, AKA (sideA) on the RIGHT. Colour runs edge-to-edge; the two
+        // competitors meet at the centre. Side name appears once, in the
+        // centre identity chip — the button rails are unlabelled (their colour
+        // + position already say which side). Source order is rail→who→who→rail
+        // so the phone single-column stack reads top-to-bottom per side.
+        <div className="sc-board">
+          <div className="sc-board__rail sc-board__shiro">
+            <div className="sc-board__btnrow">
+              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
+              <button className="ipt-btn" onClick={() => setBPoints([])}>↺</button>
+            </div>
           </div>
-          <div className="score-vs">VS</div>
-          <div className="score-side score-side--red">
-            <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div></div>
-            <div className="score-side__points">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--aka ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</div>
-            <div className="score-side__buttons">{(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}<button className="ipt-btn" onClick={() => setAPoints([])}>↺</button></div>
+          <div className="sc-board__who sc-board__who--shiro sc-board__shiro">
+            <span className="sc-board__lbl">Shiro (White)</span>
+            <span className="sc-board__nm">{b.name}</span>
+            <span className="sc-board__tally">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--shiro ${bPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{bPoints[i] || "·"}</span>))}</span>
           </div>
+          <div className="sc-board__who sc-board__who--aka sc-board__aka">
+            <span className="sc-board__lbl">Aka (Red)</span>
+            <span className="sc-board__nm">{a.name}</span>
+            <span className="sc-board__tally">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--aka ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</span>
+          </div>
+          <div className="sc-board__rail sc-board__aka">
+            <div className="sc-board__btnrow">
+              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
+              <button className="ipt-btn" onClick={() => setAPoints([])}>↺</button>
+            </div>
+          </div>
+          <div className="sc-board__vs">vs</div>
         </div>
       )}
       {mode === "scoreboard" && (() => {
@@ -1200,7 +1218,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
                 <td>{m.sideB?.name || "—"}</td>
                 <td>{m.sideA?.name || "—"}</td>
                 <td style={{ fontFamily: "var(--font-mono)" }}>{m.court || "—"}</td>
-                <td style={{ fontSize: 12, color: m.status === "completed" ? "var(--accent)" : m.status === "running" ? "var(--red)" : "var(--ink-3)" }}>
+                <td style={{ fontSize: 12, color: m.status === "completed" ? "var(--accent)" : m.status === "running" ? "var(--accent)" : "var(--ink-3)" }}>
                   {m.status === "completed" ? "Done" : m.status === "running" ? "Live" : "Scheduled"}
                 </td>
               </tr>

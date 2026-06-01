@@ -108,9 +108,16 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
     return ((!aStr && !bStr) ? "X" : "△") + suffix;
   }
   if (!aStr && !bStr) {
-    // Fall back to numeric if ippons arrays are missing but score exists
+    // Fall back when the per-side ippon arrays are absent but a score object
+    // exists (e.g. server-provided bracket scores). Prefer the winner's waza
+    // LETTERS (score.ippons) over a bare count so the schedule always shows
+    // technique letters when the data carries them — only the loser, which is
+    // stored as a count not letters, falls back to a number. Winner-first
+    // order matches the historical numeric fallback (no orientation change).
     if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
-      return `${score.winnerPts}–${score.loserPts}` + suffix;
+      const winnerLetters = (score.ippons || []).filter(x => x && x !== "•").join("");
+      const winnerStr = winnerLetters || `${score.winnerPts}`;
+      return `${winnerStr}–${score.loserPts}` + suffix;
     }
     // No scores but a decision was recorded (e.g. kiken before any ippon
     // was struck) — still print the suffix so the operator sees "Kiken".

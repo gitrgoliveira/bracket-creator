@@ -39,8 +39,8 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 ## 2. Principles
 
 1. **Clarity over decoration.** Operators run tournaments under time pressure; a glanceable card beats a beautiful one. No gratuitous animation, no decorative shadows.
-2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; Excel puts White in the left column. See [§4 Match cards](#match-cards--bc-match) and [CLAUDE.md](CLAUDE.md) "Match Colors" for the full rule.
-3. **Live state is loud.** Anything currently happening on a court gets the red treatment (`--red` border, soft red ring, pulsing dot). Anything else stays neutral. Don't dilute the signal.
+2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; the horizontal scoreboard and list rows put Shiro left / Aka right; Excel puts White in the left column. The two sides must be **distinguishable at a glance on every surface** — and the distinction is carried by *treatment*, not hue alone (so it survives glare, projectors, and color-blindness): Aka = solid/red-tinted fill, Shiro = framed white (cool border + diagonal hatch) so "white" never dissolves into the page. **Color area must scale with the surface.** A full-screen scoreboard can flood half the screen; a dense schedule row cannot rely on a 5px spine — give each side a tinted cell, a colored header, or a filled badge so the signal stays legible as the component shrinks. See [§4 Match cards](#match-cards--bc-match), [§4 Aka/Shiro side treatment](#akashiro-side-treatment), and [CLAUDE.md](CLAUDE.md) "Match Colors" for the full rule.
+3. **Live state is loud — but not red.** Anything currently happening on a court gets the **`--accent` (navy) treatment**: navy border, soft-navy ring, and a pulsing dot whose *motion* is the primary signal. Anything else stays neutral. Don't dilute it. **Red is reserved for Aka (side) and danger only** — liveness must never use red, so the two never collide on the same card (a live match still shows its Aka side in red while the live ring stays navy).
 4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)` — see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
 5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → playoffs → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
 6. **Domain coupling is allowed.** Class names like `.bc-tree`, `.pool__table`, `.podium-step` exist because they map 1:1 to bracket concepts. Don't generalize a `.match-card` into a `.list-row` — readability wins.
@@ -53,11 +53,14 @@ All tokens are defined in [styles.css#L3-L33](web-mobile/css/styles.css#L3). Ref
 
 | Token | Value | Use |
 |---|---|---|
-| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), brand fills |
-| `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips |
+| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/badges, **liveness** (border/ring/dot/live-strip), brand fills |
+| `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **liveness rings/backgrounds** |
 | `--accent-fg` | `#ffffff` | Text on `--accent` |
-| `--red` | `#c1121f` | Aka (Red) winner fill, live indicators, danger buttons |
-| `--red-soft` | `#fde7e8` | Live-strip background, `bc-match--live` ring |
+| `--red` | `#c1121f` | Aka (Red) side fill/badge, danger buttons. **Aka + danger only — never liveness** (see Principle 3) |
+| `--red-soft` | `#fde7e8` | Aka (Red) side tint (score editor, bracket, pool/schedule rows) |
+| `--shiro-edge` | `#2a3346` | Shiro framing on dark surfaces (rare; most Shiro frames use `--accent`) |
+| `--shiro-hatch` | `rgba(42,51,70,0.07)` | 45° diagonal hatch on the Shiro side |
+| `--aka-bright` | `#ff3b3b` | Luminous Aka red for dark TV/overlay surfaces (scoreboard glow) |
 | `--white-side` | `#f6f7fb` | Shiro (White) side background — **not** pure white, to keep both sides visually weighted |
 | `--ink` | `#1a1d24` | Body text |
 | `--ink-1` | `#111827` | **AAA-grade text (~18:1 on white)** — tournament-critical numerals, glossary terms, score displays. Use when `--ink` isn't dark enough. |
@@ -195,6 +198,7 @@ Quick lookup — scan, then `Ctrl+F` the class name to jump to its subsection.
 | Tables | `.table`, `.pool__table` | Generic + pool tabular data |
 | Badges | `.badge--{status}` | Status pills (setup / pools / playoffs / completed / archive) |
 | Match cards | `.bc-match` | Bracket-tree card with two sides (Aka top / Shiro bottom) |
+| Aka/Shiro side treatment | (cross-cutting) | How Red vs White stays distinguishable on every matchup surface |
 | Pools | `.pool`, `.pools-grid` | Pool standings + matchups |
 | Modals | `.modal-backdrop`, `.modal` | Overlay dialogs (always wire `useEscapeToClose`) |
 | Toasts | `.toast` | Auto-dismissing notifications (single-slot, no stacking) |
@@ -249,11 +253,11 @@ Layout variants (composed by [bracket.jsx#L148](web-mobile/js/bracket.jsx#L148) 
 - `bc-match--v2` — filled sides, used in the viewer's "now playing" surface ([styles.css#L986](web-mobile/css/styles.css#L986))
 - `bc-match--v3` — compact, used in dense round columns ([styles.css#L1055](web-mobile/css/styles.css#L1055))
 
-State modifiers: `bc-match--live` (red ring), `bc-match--highlight` (accent ring), and `bc-match--done` (0.75 opacity — completed matches fade back so active ones stand out) all have CSS rules.
+State modifiers: `bc-match--live` (**navy `--accent` ring** — liveness is navy, not red), `bc-match--highlight` (accent ring), and `bc-match--done` (0.75 opacity — completed matches fade back so active ones stand out) all have CSS rules.
 
-Side composition (via `PlayerLine` in [bracket.jsx#L104](web-mobile/js/bracket.jsx#L104)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Winner side gets `bc-side--winner` plus a fill swap to `--red` (Aka) or `--accent` (Shiro). **Never swap side order based on seeding** — the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
+Side composition (via `PlayerLine` in [bracket.jsx#L104](web-mobile/js/bracket.jsx#L104)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Each side carries a leading colour bar (red for Aka / navy for Shiro) and, on v1, a faint side tint (`--red-soft` / hatched `--white-side`); the Shiro side adds the 45° hatch so white reads as a deliberate side. Winner side gets `bc-side--winner` (bolder name + thicker leading bar; v2 floods `--red`/`--accent`). **Never swap side order based on seeding** — the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
 
-Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-live` (red, 700-weight "● LIVE"), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, `--accent`, 10px 700), `.bc-encho` ((E), `--accent`, 10px 700).
+Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-live` (**`--accent` navy**, 700-weight "● LIVE" — liveness, not red), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, `--accent`, 10px 700), `.bc-encho` ((E), `--accent`, 10px 700).
 
 #### Match-decision visual suffixes
 
@@ -269,7 +273,30 @@ Decision types ([CLAUDE.md](CLAUDE.md) "Match Decision Types") map to short tags
 | Encho (overtime) | `(E)` | `.bc-encho` | `--accent` |
 | `kachinuki-exhaustion` | rendered via score-line suffix only | — | inherits |
 
-Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for liveness, not outcome.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
+Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for the Aka side and danger — never for outcome or liveness.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
+
+### Aka/Shiro side treatment
+
+The one rule that spans **every** surface showing a matchup: scoreboard, score editor, bracket card, pool row, schedule row, match-detail panel. Aka (Red) and Shiro (White) must read as two visibly different sides at the size that surface actually renders.
+
+**The treatments (not just two hues):**
+
+| Side | Fill | Edge / frame | Badge | Position |
+|---|---|---|---|---|
+| **Shiro** (White) | `--white-side` (`#f6f7fb`) or framed pure-white | `--accent` navy border + 45° `--shiro-hatch` diagonal (use `--shiro-edge` only on dark TV/overlay surfaces) | framed-white badge (`#fff` + `--accent` border), text "SHIRO" (or compact "S") | **left** (horizontal) / **bottom** (bracket tree) |
+| **Aka** (Red) | `--red-soft` tint, or solid `--red` when emphasized | `--red` | solid `--red` badge, text "AKA" (or compact "A") | **right** (horizontal) / **top** (bracket tree) |
+
+The hatch on Shiro is load-bearing: pure white on a white card is invisible, and `--white-side` alone is too faint on dense rows. The diagonal hatch (`repeating-linear-gradient(-45deg, …)`) plus the navy frame/leading-bar is what makes "white" register as a deliberate side. **All Shiro badges are framed white (`#fff` + `--accent` border) — never flat grey** (the old `#e8eaf0`/`#f0f0f0` greys were swept out).
+
+**Color area scales with the component** (Principle 2):
+
+- **Full scoreboard** ([display.jsx](web-mobile/js/display.jsx)) — flood the whole half: tinted background, 6px top bar, large side label.
+- **Score editor / bracket card / pool row / schedule row** — these are dense and were the weak spot: a thin spine reads as decoration, not signal. Give each side **real area** — a tinted cell (`--red-soft` / hatched white), an always-on colored header (present *before* a winner is chosen), or a filled badge. Don't rely on a hairline.
+- **Smallest rows** — at minimum a filled `sq`-style square badge (red filled `A` / framed-white `S`) sitting inside a tinted segment.
+
+**Never** swap side order by seeding — geometry is the rule (see Match cards). And the label/position/badge are redundant with color on purpose: color is never the *only* signal, so the distinction holds for color-blind operators and washed-out projectors.
+
+> Reference mock for the full system across all six surfaces: [web-mobile/design/aka-shiro-system.html](web-mobile/design/aka-shiro-system.html) (standalone — not embedded; system-font + token-faithful integration lands in `styles.css`).
 
 ### Pools — `.pool`, `.pools-grid`
 
@@ -297,7 +324,7 @@ Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. The host component (see
 
 ### Live strip chip — `.live-strip__chip`
 
-[styles.css#L216](web-mobile/css/styles.css#L216). Red-bordered pill rendered inside `.live-strip__chips`. Each chip represents one live court and is clickable to jump to the corresponding match. When adding a live-surface entry-point, surface it here rather than introducing a parallel chip strip.
+[styles.css#L216](web-mobile/css/styles.css#L216). **Navy (`--accent`)-bordered** pill rendered inside `.live-strip__chips` (recoloured off red — liveness is navy). Each chip represents one live court and is clickable to jump to the corresponding match. When adding a live-surface entry-point, surface it here rather than introducing a parallel chip strip.
 
 ### Tournament-card add — `.tcard--add`
 
@@ -305,7 +332,7 @@ Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. The host component (see
 
 ### Schedule rows — `.sched-row` (admin), `.vsched-item` (viewer)
 
-Grid: `60px (court) | 70px (time) | 1fr (matchup) | auto (actions)`. `--live` adds the red ring; `--done` drops opacity to 0.7. Court chips reuse `--accent-soft`.
+Grid: `60px (court) | 70px (time) | 1fr (matchup) | auto (actions)`. `--live` adds the **navy `--accent` ring** (liveness, not red); `--done` drops opacity to 0.7. Court chips reuse `--accent-soft`.
 
 ### Podium — `.podium-step--{1,2,3}`
 
@@ -323,7 +350,7 @@ Player-viewer-only. Solid `--accent` background, `--accent-fg` text. The only pl
 .app
   ├── .topbar-stack            (sticky z-30)
   │   ├── .topbar              (logo + nav + actions)
-  │   └── .live-strip          (red banner, only when any court is live)
+  │   └── .live-strip          (navy banner, only when any court is live)
   └── .page                    (max-width 1280, 24×32 padding)
       └── route content
 ```

@@ -132,6 +132,62 @@ func TestRegistration_GET_CompNotFound_Returns404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+func TestRegistration_GET_TeamComp_Returns404(t *testing.T) {
+	r, store, _, _ := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-team-get"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Team Comp",
+		Status: state.CompStatusSetup,
+		Kind:   "team",
+	}))
+
+	w := doGetMeta(r, compID)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "not available")
+}
+
+func TestRegistration_POST_TeamComp_Returns404(t *testing.T) {
+	r, store, spy, _ := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-team-post"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Team Comp",
+		Status: state.CompStatusSetup,
+		Kind:   "team",
+	}))
+
+	w := doRegister(r, compID, map[string]any{
+		"name": "Alice", "dojo": "Dojo",
+	})
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "not available")
+	assert.Equal(t, 0, spy.count())
+}
+
+func TestRegistration_POST_WhitespaceDanGrade_NotPersisted(t *testing.T) {
+	r, store, _, _ := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-ws-dan"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Whitespace Dan",
+		Status: state.CompStatusSetup,
+	}))
+
+	w := doRegister(r, compID, map[string]any{
+		"name": "Bob Smith", "dojo": "Dojo", "danGrade": "   ",
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, players, 1)
+	assert.Empty(t, players[0].Metadata, "whitespace-only danGrade should not persist")
+}
+
 // ---------------------------------------------------------------------------
 // POST /register/competitions/:id — happy path
 // ---------------------------------------------------------------------------

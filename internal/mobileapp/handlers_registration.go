@@ -16,8 +16,8 @@ import (
 //
 // Routes:
 //
-//	GET  /register/competitions/:id — competition metadata for the registration form
-//	POST /register/competitions/:id — register a new participant (tag="registered")
+//	GET  /api/register/competitions/:id — competition metadata for the registration form
+//	POST /api/register/competitions/:id — register a new participant (tag="registered")
 func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster) {
 	r.GET("/register/competitions/:id", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -38,6 +38,11 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		if comp.Kind == "team" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "registration is not available for this competition"})
 			return
 		}
 
@@ -68,6 +73,11 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 		comp, err := store.LoadCompetition(id)
 		if err != nil || comp == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		if comp.Kind == "team" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "registration is not available for this competition"})
 			return
 		}
 
@@ -105,8 +115,8 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 		}
 
 		var metadata []string
-		if req.DanGrade != "" {
-			metadata = []string{strings.TrimSpace(req.DanGrade)}
+		if dg := strings.TrimSpace(req.DanGrade); dg != "" {
+			metadata = []string{dg}
 		}
 
 		if err := validatePlayerLengths(name, displayName, dojo, "registered", metadata); err != nil {

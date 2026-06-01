@@ -392,10 +392,12 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
     const m = myNextMatch;
     const onDeck = isFollowedMatchOnDeck(m);
 
-    // Build the signature for this state.
+    // Build the signature for this state.  Always a string so the
+    // strict-equality fast-path (sig === lastSigRef.current) works when
+    // off-deck too — null !== "" would bypass the dedup on every render.
     const sig = onDeck && m
       ? m.id + ":" + (m.status === "running" ? "running" : "upnext")
-      : null;
+      : "";
 
     // First call: prime without alerting (avoids false alert on reconnect).
     if (lastSigRef.current === null) {

@@ -35,9 +35,10 @@ function RegistrationForm({ compId, onBack }) {
       setLoading(false);
       return;
     }
-    fetch(`/api/register/competitions/${encodeURIComponent(compId)}`)
+    const ac = new AbortController();
+    fetch(`/api/register/competitions/${encodeURIComponent(compId)}`, { signal: ac.signal })
       .then(async (res) => {
-        if (!mountedRef.current) return;
+        if (ac.signal.aborted) return;
         if (res.status === 404) {
           setMetaErr("Registration is not available for this competition.");
           setLoading(false);
@@ -45,13 +46,13 @@ function RegistrationForm({ compId, onBack }) {
         }
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          if (!mountedRef.current) return;
+          if (ac.signal.aborted) return;
           setMetaErr(body.error || "Failed to load competition details.");
           setLoading(false);
           return;
         }
         const data = await res.json();
-        if (!mountedRef.current) return;
+        if (ac.signal.aborted) return;
         if (data.status && data.status !== "setup" && data.status !== "") {
           setMetaErr("Registration is closed for this competition.");
           setLoading(false);
@@ -60,11 +61,13 @@ function RegistrationForm({ compId, onBack }) {
         setMeta(data);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((e) => {
+        if (e.name === "AbortError") return;
         if (!mountedRef.current) return;
         setMetaErr("Could not reach server. Please try again.");
         setLoading(false);
       });
+    return () => ac.abort();
   }, [compId]);
 
   const submit = async (e) => {

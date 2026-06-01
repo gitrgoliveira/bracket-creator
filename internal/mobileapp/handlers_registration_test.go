@@ -458,17 +458,22 @@ func TestRegistration_POST_FieldLengthValidation(t *testing.T) {
 func TestRegistration_POST_InvalidCompID_Returns400(t *testing.T) {
 	r, _, _, _ := setupRegistrationRouter(t, selfRunTournament())
 
-	for _, badID := range []string{
-		"../../../etc/passwd",
-		"",
+	for _, tc := range []struct {
+		id   string
+		desc string
+	}{
+		{".invalid", "dot-prefixed ID rejected by alphanumeric regex"},
+		{"has spaces", "spaces rejected by alphanumeric regex"},
+		{"a@b", "special char rejected by alphanumeric regex"},
 	} {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/register/competitions/"+badID, bytes.NewBufferString(`{"name":"A","dojo":"D"}`))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		// Either 400 (bad ID format) or 404 (empty path segment → matched another route)
-		assert.True(t, w.Code == http.StatusBadRequest || w.Code == http.StatusNotFound,
-			"invalid comp ID %q must return 400 or 404, got %d", badID, w.Code)
+		t.Run(tc.desc, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/register/competitions/"+tc.id, bytes.NewBufferString(`{"name":"A","dojo":"D"}`))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"invalid comp ID %q must return 400, got %d", tc.id, w.Code)
+		})
 	}
 }
 

@@ -7,6 +7,7 @@ import {
   isSwissRoundComplete,
   canGenerateNextSwissRound,
   isSwissCompetitionComplete,
+  formatCompMinutes,
 } from '../admin_competition.jsx';
 
 // Copilot finding on PR #103: LiveMatchPanel's scoreboard mode supports
@@ -786,5 +787,44 @@ describe('isSwissCompetitionComplete', () => {
 
   it('false when format !== swiss', () => {
     expect(isSwissCompetitionComplete(mkComp({ format: 'mixed' }), completedR4)).toBe(false);
+  });
+});
+
+// mp-zoh Phase 4: inline schedule estimate formatting helper.
+// formatCompMinutes converts a total-minutes integer to a human-readable
+// string like "2h 03m". It is extracted as a pure export so it can be
+// unit-tested without mounting the AdminSettings component.
+describe('formatCompMinutes (mp-zoh)', () => {
+  it('returns null for 0 (no estimate)', () => {
+    expect(formatCompMinutes(0)).toBeNull();
+  });
+
+  it('returns null for negative values', () => {
+    expect(formatCompMinutes(-1)).toBeNull();
+  });
+
+  it('returns null for non-finite values (NaN, Infinity)', () => {
+    expect(formatCompMinutes(NaN)).toBeNull();
+    expect(formatCompMinutes(Infinity)).toBeNull();
+  });
+
+  it('formats minutes-only (< 60 min)', () => {
+    expect(formatCompMinutes(30)).toBe('30m');
+    expect(formatCompMinutes(1)).toBe('1m');
+    expect(formatCompMinutes(59)).toBe('59m');
+  });
+
+  it('formats exactly 1 hour as "1h 00m"', () => {
+    expect(formatCompMinutes(60)).toBe('1h 00m');
+  });
+
+  it('pads single-digit minutes with leading zero', () => {
+    expect(formatCompMinutes(63)).toBe('1h 03m');
+    expect(formatCompMinutes(125)).toBe('2h 05m');
+  });
+
+  it('formats typical tournament durations', () => {
+    expect(formatCompMinutes(120)).toBe('2h 00m');
+    expect(formatCompMinutes(183)).toBe('3h 03m');
   });
 });

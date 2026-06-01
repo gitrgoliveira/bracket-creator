@@ -1161,3 +1161,37 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
 }
+
+// TestIsSelfRunReportableDecision covers the allowlist and rejection cases
+// for participant self-reporting in self-run tournaments.
+func TestIsSelfRunReportableDecision(t *testing.T) {
+	f := false
+	tr := true
+
+	tests := []struct {
+		name            string
+		decision        string
+		decidedByHantei *bool
+		want            bool
+	}{
+		{name: "empty decision allowed", decision: "", want: true},
+		{name: "fought allowed", decision: "fought", want: true},
+		{name: "hikiwake allowed", decision: "hikiwake", want: true},
+		{name: "fusensho allowed (team per-bout)", decision: "fusensho", want: true},
+		{name: "kiken-voluntary rejected", decision: "kiken-voluntary", want: false},
+		{name: "kiken-injury rejected", decision: "kiken-injury", want: false},
+		{name: "fusenpai rejected", decision: "fusenpai", want: false},
+		{name: "daihyosen rejected", decision: "daihyosen", want: false},
+		{name: "kachinuki-exhaustion rejected", decision: "kachinuki-exhaustion", want: false},
+		{name: "unknown decision rejected", decision: "magic", want: false},
+		{name: "decidedByHantei=true rejects even allowed decision", decision: "fought", decidedByHantei: &tr, want: false},
+		{name: "decidedByHantei=false is ok (nil-vs-false are the same signal)", decision: "fought", decidedByHantei: &f, want: true},
+		{name: "decidedByHantei nil is ok", decision: "fought", decidedByHantei: nil, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsSelfRunReportableDecision(tc.decision, tc.decidedByHantei)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

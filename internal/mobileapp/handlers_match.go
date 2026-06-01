@@ -230,7 +230,7 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 // a time; the concrete `*engine.Engine` remains a drop-in
 // implementation of `ScoringEngine` so the `tryAutoCompletePools` and
 // score endpoint paths can already accept the interface today.
-func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, tx CompetitionTransactor, hub *Hub) {
+func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, tx CompetitionTransactor, hub *Hub, verifier PasswordVerifier, tl TournamentLoader) {
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -378,7 +378,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// behaviour as before. T156 added the CompetitionTransactor `tx`
 	// parameter so the match-write + ineligibility-write + lineup-freeze
 	// commit under one per-comp lock acquire.
-	registerScoreHandler(r, eng, store, tx, hub)
+	registerScoreHandler(r, eng, store, tx, hub, verifier, tl)
 
 	r.PUT("/competitions/:id/matches/:mid/court", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -486,6 +486,122 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	})
 }
 
+// enforceSelfRunPolicy applies the self-run decision allowlist and
+// finalized-result guard when the tournament is in self-run mode and the
+// request carries no valid admin password. Returns the resultSource string
+// ("admin" or "self-reported") and true on success; writes the HTTP error
+// response and returns "", false when the request should be rejected.
+//
+// Called after ScoreRequest.Validate() so the request is structurally valid.
+//
+// In officiated mode (or when the tournament cannot be loaded), this is a
+// no-op that returns "admin", true — the auth middleware already gates those
+// endpoints, so setting the source is just provenance tracking.
+func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, store CompetitionStore, compID, matchID string, req *ScoreRequest) (string, bool) {
+	t, err := tl.LoadTournament()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load tournament config"})
+		return "", false
+	}
+	if t == nil || t.Mode != "self-run" {
+		return "admin", true
+	}
+
+	// Self-run mode: check whether the caller has a valid admin password.
+	ok, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
+	if verr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
+		return "", false
+	}
+	if ok {
+		return "admin", true
+	}
+
+	// Anonymous caller in self-run mode: enforce decision allowlist.
+	if !IsSelfRunReportableDecision(req.Decision, req.DecidedByHantei) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "decision type not allowed in self-run mode without admin password"})
+		return "", false
+	}
+
+	// Finalized guard: if a result already exists and is finalized, block overwrites.
+	existing := loadExistingMatchResult(store, compID, matchID)
+	if existing != nil && isMatchFinalized(existing) && isChangingResult(existing, req) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "result_finalized",
+			"message": "This match result has already been reported. Contact the tournament organizer to correct it.",
+		})
+		return "", false
+	}
+
+	return "self-reported", true
+}
+
+// loadExistingMatchResult looks up a match result by ID from pool matches or
+// the bracket. Returns nil when not found or on any load error (fail-open:
+// a load error should not block a legitimate score submission).
+func loadExistingMatchResult(store CompetitionStore, compID, matchID string) *state.MatchResult {
+	poolMatches, err := store.LoadPoolMatches(compID)
+	if err == nil {
+		for i := range poolMatches {
+			if poolMatches[i].ID == matchID {
+				m := poolMatches[i]
+				return &m
+			}
+		}
+	}
+	bracket, err := store.LoadBracket(compID)
+	if err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for i := range round {
+				if round[i].ID == matchID {
+					bm := round[i]
+					return bracketMatchToResult(&bm)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// bracketMatchToResult projects the fields of a BracketMatch that the
+// finalized guard cares about into a MatchResult so the guard can use a
+// uniform type.
+func bracketMatchToResult(bm *state.BracketMatch) *state.MatchResult {
+	return &state.MatchResult{
+		ID:       bm.ID,
+		Winner:   bm.Winner,
+		Decision: bm.Decision,
+		Status:   bm.Status,
+	}
+}
+
+// isMatchFinalized reports whether the given result represents a concluded
+// match. A result is finalized when its status is "completed" AND either a
+// winner has been recorded or the decision is hikiwake (a draw).
+func isMatchFinalized(r *state.MatchResult) bool {
+	return r.Status == state.MatchStatusCompleted && (r.Winner != "" || r.Decision == "hikiwake")
+}
+
+// isChangingResult reports whether the incoming score request would alter the
+// outcome of the existing finalized result. We check Winner, Decision,
+// IpponsA, IpponsB, and SubResults — the fields that constitute the match
+// outcome. Minor field changes (status update, scheduledAt) are allowed.
+func isChangingResult(existing *state.MatchResult, req *ScoreRequest) bool {
+	if req.Winner != "" && req.Winner != existing.Winner {
+		return true
+	}
+	if req.Decision != "" && req.Decision != existing.Decision {
+		return true
+	}
+	if len(req.IpponsA) > 0 || len(req.IpponsB) > 0 {
+		return true
+	}
+	if len(req.SubResults) > 0 {
+		return true
+	}
+	return false
+}
+
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`
 // endpoint via the consumer-boundary interfaces (T014/T017) instead of
 // the concrete `*engine.Engine` / `*Hub`. This is the Slice 0
@@ -511,7 +627,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 // NOT migrated: the partial-success error array semantics need a
 // per-result tx (or a different commit shape) and that's out of scope
 // for this slice.
-func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
+func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -546,7 +662,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 
+		// mp-ba3: self-run decision allowlist + finalized guard + result
+		// provenance. Runs after Validate() so the request is structurally
+		// valid before Mode and password are inspected.
+		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, store, id, mid, &req)
+		if !ok {
+			return
+		}
+
 		result := req.AsMatchResult()
+		result.ResultSource = resultSource
 
 		// T156: run the score write + ineligibility update + lineup-freeze
 		// inside a single per-comp lock acquire via WithTransaction. The

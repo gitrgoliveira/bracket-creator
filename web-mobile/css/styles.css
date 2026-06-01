@@ -1606,7 +1606,9 @@ a:hover {
     -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
 }
 
-/* Aka faces the centre: flip its content to the inner (left) edge. */
+/* Aka is on the right: align its content to the outer (right) edge so the
+   two sides mirror each other — Shiro left-aligned, Aka right-aligned.
+   Both sides are vertically centred by the justify-content:center above. */
 .score-side--red {
   align-items: flex-end;
   text-align: right;

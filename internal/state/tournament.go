@@ -80,6 +80,15 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 	// fields that would omit mode from JSON responses.
 	ApplyTournamentDefaults(&t)
 
+	// Normalize any unknown/invalid Mode value that may have been written to
+	// tournament.md outside the API (e.g. a manual edit). ApplyTournamentDefaults
+	// handles the empty-string case (→ "officiated"); this guard handles non-empty
+	// but unsupported values. Fix 3332772433: prevents unknown strings from leaking
+	// into JSON responses and violating the enum contract.
+	if t.Mode != TournamentModeOfficiated && t.Mode != TournamentModeSelfRun {
+		t.Mode = TournamentModeOfficiated
+	}
+
 	s.cachedTourn = &t
 	s.tournMtime = mtime
 

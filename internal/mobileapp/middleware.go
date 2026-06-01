@@ -318,13 +318,10 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		//
 		// Officiated mode (the default) skips this block entirely → no regression.
 		//
-		// Note: LoadTournament returns tournament data with the Mode field. For
-		// older files where Mode is empty, ApplyTournamentDefaults normalises it
-		// to TournamentModeOfficiated before this comparison — but we don't call
-		// ApplyTournamentDefaults on the loaded record here to avoid unexpected
-		// mutations. Comparing explicitly against TournamentModeSelfRun is safe:
-		// the empty string (old files) and "officiated" both fall through to the
-		// standard auth path below.
+		// Note: LoadTournament already calls ApplyTournamentDefaults and
+		// normalises unknown values, so t.Mode is always a canonical value
+		// ("officiated" or "self-run") at this point. Comparing explicitly
+		// against TournamentModeSelfRun is both necessary and sufficient.
 		if t.Mode == state.TournamentModeSelfRun && !isSelfRunMainGatedConfigRoute(c.Request.Method, c.FullPath()) {
 			c.Next()
 			return

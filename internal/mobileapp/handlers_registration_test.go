@@ -463,7 +463,7 @@ func TestRegistration_POST_InvalidCompID_Returns400(t *testing.T) {
 		desc string
 	}{
 		{".invalid", "dot-prefixed ID rejected by alphanumeric regex"},
-		{"has spaces", "spaces rejected by alphanumeric regex"},
+		{"has%20spaces", "URL-encoded spaces rejected by alphanumeric regex"},
 		{"a@b", "special char rejected by alphanumeric regex"},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {

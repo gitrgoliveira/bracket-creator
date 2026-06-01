@@ -70,7 +70,7 @@ function parsePath(path) {
     }
     if (path.startsWith("/register/")) {
       const compId = path.split("/")[2] || "";
-      return { mode: "viewer", viewerScreen: "register", viewerCompId: compId };
+      if (compId) return { mode: "viewer", viewerScreen: "register", viewerCompId: compId };
     }
     return { mode: "viewer", viewerScreen: "home" };
 }

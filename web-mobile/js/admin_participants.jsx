@@ -371,7 +371,12 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   // doesn't jump when the list is searched/sorted. Rendered as provisional
   // (muted, dotted) since the final numbers may differ after the draw.
   const provisionalNumberById = useMemoA(() => {
-    const map = {};
+    // Null-prototype object: keys are user-controlled (p.id ?? p.name), so a
+    // participant named "__proto__" or "constructor" against a plain `{}` map
+    // could pollute the prototype chain or return inherited values on lookup.
+    // `Object.create(null)` removes both risks and keeps the `map[key]` /
+    // `map[key] = …` ergonomics. (Copilot mp-1tk follow-up.)
+    const map = Object.create(null);
     if (c.numberPrefix) {
       (c.players || []).forEach((p, i) => {
         map[p.id ?? p.name] = `${c.numberPrefix}${i + 1}`;

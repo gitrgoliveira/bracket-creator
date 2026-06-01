@@ -1177,7 +1177,7 @@ func TestIsSelfRunReportableDecision(t *testing.T) {
 		{name: "empty decision allowed", decision: "", want: true},
 		{name: "fought allowed", decision: "fought", want: true},
 		{name: "hikiwake allowed", decision: "hikiwake", want: true},
-		{name: "fusensho allowed (team per-bout)", decision: "fusensho", want: true},
+		{name: "fusensho rejected at top level", decision: "fusensho", want: false},
 		{name: "kiken-voluntary rejected", decision: "kiken-voluntary", want: false},
 		{name: "kiken-injury rejected", decision: "kiken-injury", want: false},
 		{name: "fusenpai rejected", decision: "fusenpai", want: false},
@@ -1191,6 +1191,32 @@ func TestIsSelfRunReportableDecision(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := IsSelfRunReportableDecision(tc.decision, tc.decidedByHantei)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestIsSelfRunReportableSubDecision(t *testing.T) {
+	tests := []struct {
+		name            string
+		decision        string
+		decidedByHantei bool
+		position        int
+		want            bool
+	}{
+		{name: "empty sub-decision allowed", decision: "", position: 1, want: true},
+		{name: "fought sub-decision allowed", decision: "fought", position: 1, want: true},
+		{name: "hikiwake sub-decision allowed", decision: "hikiwake", position: 1, want: true},
+		{name: "fusensho sub-decision allowed", decision: "fusensho", position: 1, want: true},
+		{name: "kiken-voluntary sub rejected", decision: "kiken-voluntary", position: 1, want: false},
+		{name: "daihyosen sub rejected", decision: "daihyosen", position: 1, want: false},
+		{name: "position -1 (daihyosen slot) rejected", decision: "", position: -1, want: false},
+		{name: "decidedByHantei true sub rejected", decision: "fought", decidedByHantei: true, position: 1, want: false},
+		{name: "position 0 allowed", decision: "fought", position: 0, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsSelfRunReportableSubDecision(tc.decision, tc.decidedByHantei, tc.position)
 			assert.Equal(t, tc.want, got)
 		})
 	}

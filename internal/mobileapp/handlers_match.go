@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -494,9 +495,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 //
 // Called after ScoreRequest.Validate() so the request is structurally valid.
 //
-// In officiated mode (or when the tournament cannot be loaded), this is a
-// no-op that returns "admin", true — the auth middleware already gates those
-// endpoints, so setting the source is just provenance tracking.
+// In officiated mode this is a pass-through that returns "admin", true.
+// On LoadTournament error the function fails closed (500).
 func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, store CompetitionStore, compID, matchID string, req *ScoreRequest) (string, bool) {
 	t, err := tl.LoadTournament()
 	if err != nil {
@@ -517,15 +517,25 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 		return "admin", true
 	}
 
-	// Anonymous caller in self-run mode: enforce decision allowlist.
+	// Anonymous caller in self-run mode: enforce decision allowlist on
+	// the top-level decision AND every sub-result decision.
 	if !IsSelfRunReportableDecision(req.Decision, req.DecidedByHantei) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "decision type not allowed in self-run mode without admin password"})
 		return "", false
 	}
+	for i := range req.SubResults {
+		sub := &req.SubResults[i]
+		if !IsSelfRunReportableSubDecision(sub.Decision, sub.DecidedByHantei, sub.Position) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("subResults[%d]: decision type not allowed in self-run mode without admin password", i)})
+			return "", false
+		}
+	}
 
-	// Finalized guard: if a result already exists and is finalized, block overwrites.
+	// Finalized guard: anonymous callers cannot write to a finalized match
+	// at all — any field change could alter the outcome through the
+	// engine's preserve-on-empty merge, so we reject unconditionally.
 	existing := loadExistingMatchResult(store, compID, matchID)
-	if existing != nil && isMatchFinalized(existing) && isChangingResult(existing, req) {
+	if existing != nil && isMatchFinalized(existing) {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":   "result_finalized",
 			"message": "This match result has already been reported. Contact the tournament organizer to correct it.",
@@ -580,26 +590,6 @@ func bracketMatchToResult(bm *state.BracketMatch) *state.MatchResult {
 // winner has been recorded or the decision is hikiwake (a draw).
 func isMatchFinalized(r *state.MatchResult) bool {
 	return r.Status == state.MatchStatusCompleted && (r.Winner != "" || r.Decision == "hikiwake")
-}
-
-// isChangingResult reports whether the incoming score request would alter the
-// outcome of the existing finalized result. We check Winner, Decision,
-// IpponsA, IpponsB, and SubResults — the fields that constitute the match
-// outcome. Minor field changes (status update, scheduledAt) are allowed.
-func isChangingResult(existing *state.MatchResult, req *ScoreRequest) bool {
-	if req.Winner != "" && req.Winner != existing.Winner {
-		return true
-	}
-	if req.Decision != "" && req.Decision != existing.Decision {
-		return true
-	}
-	if len(req.IpponsA) > 0 || len(req.IpponsB) > 0 {
-		return true
-	}
-	if len(req.SubResults) > 0 {
-		return true
-	}
-	return false
 }
 
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`

@@ -528,16 +528,37 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 // permitted for participant self-reporting in self-run tournaments (i.e.
 // when no valid admin password is present on the request).
 //
-// Allowed: "" (none), "fought", "hikiwake", "fusensho" (per-bout default win
-// in team matches). These are factual observations a participant can make
-// without referee authority.
+// Allowed at the top level: "" (none), "fought", "hikiwake". These are
+// factual observations a participant can make without referee authority.
+// fusensho is only valid on sub-results (ScoreRequest.Validate rejects it
+// at the top level), so it's not listed here.
 //
 // Rejected: "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen",
-// "kachinuki-exhaustion" — referee/operator rulings with eligibility side-
-// effects or official designation requirements. Also rejected when
-// decidedByHantei is explicitly true (judges' panel decision).
+// "kachinuki-exhaustion", "fusensho" — referee/operator rulings with
+// eligibility side-effects or official designation requirements. Also
+// rejected when decidedByHantei is explicitly true (judges' panel decision).
 func IsSelfRunReportableDecision(decision string, decidedByHantei *bool) bool {
 	if decidedByHantei != nil && *decidedByHantei {
+		return false
+	}
+	switch decision {
+	case "", "fought", "hikiwake":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsSelfRunReportableSubDecision validates a sub-bout decision for self-run
+// anonymous callers. Allowed: "" (none), "fought", "hikiwake", "fusensho"
+// (per-bout forfeiture is a factual observation). Rejected: kiken variants,
+// fusenpai, daihyosen, kachinuki-exhaustion, decidedByHantei=true. Also
+// rejects position == -1 (daihyosen representative bout placeholder).
+func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, position int) bool {
+	if position == -1 {
+		return false
+	}
+	if decidedByHantei {
 		return false
 	}
 	switch decision {

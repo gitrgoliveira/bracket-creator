@@ -2742,8 +2742,7 @@ function MatchViewerModal({ match, onClose, tournament }) {
   const mvmIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
 
   const isSelfRun = tournament && tournament.mode === "self-run";
-  const hasBothSides = !!(match.sideA && match.sideA.name && match.sideB && match.sideB.name &&
-    match.sideA.name !== "TBD" && match.sideB.name !== "TBD");
+  const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
   const isFinalized = match.status === "completed" && (match.winner?.name || match.winner?.id || match.decision === "hikiwake");
 
   if (scoringMatch && window.ScoreEditorModal) {
@@ -2841,7 +2840,7 @@ function MatchViewerModal({ match, onClose, tournament }) {
           </div>
         )}
 
-        {isSelfRun && hasBothSides && (
+        {isSelfRun && bothSidesReady && (
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
             {isFinalized ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-3)" }}>

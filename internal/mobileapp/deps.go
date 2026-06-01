@@ -46,11 +46,9 @@ type CompetitionStore interface {
 	// LoadCompetition returns the competition record, or (nil, nil) when
 	// no record exists for this ID. Mirrors state.Store.LoadCompetition.
 	LoadCompetition(id string) (*state.Competition, error)
-	// LoadPoolMatches returns the pool-match results for compID. Used by
-	// the score handler's finalized-result guard (mp-ba3).
+	// LoadPoolMatches returns the pool-match results for compID.
 	LoadPoolMatches(id string) ([]state.MatchResult, error)
-	// LoadBracket returns the elimination bracket for compID. Used by the
-	// score handler's finalized-result guard (mp-ba3).
+	// LoadBracket returns the elimination bracket for compID.
 	LoadBracket(id string) (*state.Bracket, error)
 }
 

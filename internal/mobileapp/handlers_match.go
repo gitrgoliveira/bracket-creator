@@ -487,17 +487,21 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	})
 }
 
-// enforceSelfRunPolicy applies the self-run decision allowlist and
-// finalized-result guard when the tournament is in self-run mode and the
-// request carries no valid admin password. Returns the resultSource string
-// ("admin" or "self-reported") and true on success; writes the HTTP error
-// response and returns "", false when the request should be rejected.
+// enforceSelfRunPolicy applies the self-run decision allowlist when the
+// tournament is in self-run mode and the request carries no valid admin
+// password. Returns the resultSource string ("admin" or "self-reported")
+// and true on success; writes the HTTP error response and returns "",
+// false when the request should be rejected.
+//
+// The finalized-result guard is NOT checked here — it must run inside
+// WithTransaction to prevent TOCTOU races between concurrent anonymous
+// submissions. See checkFinalizedUnderTx.
 //
 // Called after ScoreRequest.Validate() so the request is structurally valid.
 //
 // In officiated mode this is a pass-through that returns "admin", true.
 // On LoadTournament error the function fails closed (500).
-func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, store CompetitionStore, compID, matchID string, req *ScoreRequest) (string, bool) {
+func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest) (string, bool) {
 	t, err := tl.LoadTournament()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load tournament config"})
@@ -531,41 +535,35 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 		}
 	}
 
-	// Finalized guard: anonymous callers cannot write to a finalized match
-	// at all — any field change could alter the outcome through the
-	// engine's preserve-on-empty merge, so we reject unconditionally.
-	existing := loadExistingMatchResult(store, compID, matchID)
-	if existing != nil && isMatchFinalized(existing) {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":   "result_finalized",
-			"message": "This match result has already been reported. Contact the tournament organizer to correct it.",
-		})
-		return "", false
-	}
-
 	return "self-reported", true
 }
 
-// loadExistingMatchResult looks up a match result by ID from pool matches or
-// the bracket. Returns nil when not found or on any load error (fail-open:
-// a load error should not block a legitimate score submission).
-func loadExistingMatchResult(store CompetitionStore, compID, matchID string) *state.MatchResult {
-	poolMatches, err := store.LoadPoolMatches(compID)
+// errResultFinalized is a sentinel returned by checkFinalizedUnderTx to
+// signal that the match is already finalized and the anonymous overwrite
+// should be rejected with 409.
+var errResultFinalized = errors.New("result_finalized")
+
+// checkFinalizedUnderTx runs inside WithTransaction (under the per-comp
+// lock) so it's safe from TOCTOU races. Returns errResultFinalized when
+// an anonymous caller tries to write to a completed match.
+func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
+	poolMatches, err := stx.LoadPoolMatches(compID)
 	if err == nil {
 		for i := range poolMatches {
-			if poolMatches[i].ID == matchID {
-				m := poolMatches[i]
-				return &m
+			if poolMatches[i].ID == matchID && isMatchFinalized(&poolMatches[i]) {
+				return errResultFinalized
 			}
 		}
 	}
-	bracket, err := store.LoadBracket(compID)
+	bracket, err := stx.LoadBracket(compID)
 	if err == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
 			for i := range round {
 				if round[i].ID == matchID {
-					bm := round[i]
-					return bracketMatchToResult(&bm)
+					mr := bracketMatchToResult(&round[i])
+					if isMatchFinalized(mr) {
+						return errResultFinalized
+					}
 				}
 			}
 		}
@@ -652,10 +650,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 
-		// mp-ba3: self-run decision allowlist + finalized guard + result
-		// provenance. Runs after Validate() so the request is structurally
-		// valid before Mode and password are inspected.
-		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, store, id, mid, &req)
+		// mp-ba3: self-run decision allowlist + result provenance. Runs
+		// after Validate() so the request is structurally valid.
+		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req)
 		if !ok {
 			return
 		}
@@ -684,6 +681,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			engErr    error
 		)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+			// mp-ba3: finalized guard runs under the per-comp lock to
+			// prevent TOCTOU races between concurrent anonymous submissions.
+			if resultSource == "self-reported" {
+				if err := checkFinalizedUnderTx(stx, id, mid); err != nil {
+					engErr = err
+					return nil
+				}
+			}
 			isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 			if !isWithdrawal {
 				if err := eng.StartMatchTx(stx, id, mid); err != nil {
@@ -705,6 +710,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		if engErr != nil {
+			if errors.Is(engErr, errResultFinalized) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "result_finalized",
+					"message": "This match result has already been reported. Contact the tournament organizer to correct it.",
+				})
+				return
+			}
 			var ineligErr *engine.IneligibleCompetitorError
 			if errors.As(engErr, &ineligErr) {
 				// U1: reasonHuman alongside the raw kendo-term reason

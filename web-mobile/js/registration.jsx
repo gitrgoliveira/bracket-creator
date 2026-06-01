@@ -35,6 +35,10 @@ function RegistrationForm({ compId, onBack }) {
     setLoading(true);
     setSuccess(false);
     setErr("");
+    setName("");
+    setDojo("");
+    setDanGrade("");
+    setDisplayName("");
     if (!compId) {
       setMetaErr("No competition specified.");
       setLoading(false);

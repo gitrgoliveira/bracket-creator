@@ -6,6 +6,15 @@ const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const formatLabel = window.formatLabel;
 
+// shouldShowRegister returns true when a "Register for this competition" button
+// should be shown on a competition card. Extracted for unit testability (mp-e5j).
+function shouldShowRegister(tournament, competition, hasHandler) {
+  return !!(hasHandler &&
+    tournament && tournament.mode === "self-run" &&
+    competition && competition.kind !== "team" &&
+    (!competition.status || competition.status === "setup"));
+}
+
 // TermV — kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.
 // U1 / glossary.md.
@@ -721,10 +730,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                   const done = matches.filter((m) => m.status === "completed").length;
                   const liveCount = matches.filter((m) => m.status === "running").length;
                   const pct = total ? Math.round((done / total) * 100) : 0;
-                  const showRegister = onRegister &&
-                    t.mode === "self-run" &&
-                    c.kind !== "team" &&
-                    (!c.status || c.status === "setup");
+                  const showRegister = shouldShowRegister(t, c, !!onRegister);
                   return (
                     <div key={c.id} style={{ position: "relative" }}>
                       <button className="vlist-item vlist-item--comp" style={{ width: "100%" }} onClick={() => onSelectCompetition(c.id)}>
@@ -3093,4 +3099,5 @@ window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
 window.NotificationSettings = NotificationSettings;
 window.LS_NOTIFICATIONS_ENABLED = LS_NOTIFICATIONS_ENABLED;
+export { shouldShowRegister };
 

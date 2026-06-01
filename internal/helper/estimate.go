@@ -75,8 +75,10 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMa
 	}
 
 	switch in.Format {
-	case "playoffs":
+	case "playoffs", "":
 		// No pool phase. Bracket over all players.
+		// Empty format is treated as playoffs for backward compatibility with
+		// legacy competition configs that predate the Format field.
 		return 0, bracketMatchCount(in.PlayerCount), nil
 
 	case "mixed":

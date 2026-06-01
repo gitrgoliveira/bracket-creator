@@ -2,6 +2,7 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 import { applyPatch as patchCompetitionData } from './patch.jsx';
+import { setCachedAuthConfig } from './admin_helpers.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -127,6 +128,62 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// mp-cw1: Fire browser Notification for each newly-added announcement.
+// Guards: Notification API available + permission granted + document hidden
+// + localStorage toggle on. Uses tag:id to coalesce duplicate fires.
+// NOT pure — reads Notification.permission, document.hidden and localStorage,
+// and constructs Notification instances. Exported for unit testing (tests stub
+// those globals). Callers must treat it as side-effecting.
+export function fireBrowserNotifications(additions) {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
+  if (!document.hidden) return;
+  let enabled = false;
+  try {
+    enabled = window.localStorage.getItem("viewer.notifications.enabled") === "true";
+  } catch (_e) { /* storage unavailable */ }
+  if (!enabled) return;
+  for (const a of additions) {
+    if (!a || !a.id) continue;
+    new Notification("Tournament Announcement", {
+      tag: a.id,
+      body: a.message || "",
+      icon: "/favicon.jpeg",
+    });
+  }
+}
+
+// mp-cw1: Given a ref holding the seen-ID Set (or null if not yet seeded) and
+// a new full-list announcement snapshot, returns the additions that should
+// fire a notification and updates the ref's Set in place.
+//
+// The FIRST call with an unseeded (null) ref is always treated as the SEED:
+// every ID is recorded and NO additions are returned. The intended caller flow:
+//   1. fetchAnnouncements() HTTP success → first call → seeds from HTTP response.
+//   2. SSE snapshots that arrive before the HTTP seed → buffered externally in
+//      pendingSseAnnouncements; replayed (second call) AFTER step 1 to detect
+//      announcements added in the race window.
+//   3. fetchAnnouncements() HTTP failure + buffered SSE → first call → seeds
+//      from SSE (no notifications for pre-fetch announcements).
+//   4. fetchAnnouncements() HTTP failure + nothing buffered → ref stays null;
+//      first subsequent SSE call seeds (original fallback).
+// Dismiss/clear snapshots (shrinking lists) never produce additions because
+// their remaining IDs are all already seen.
+export function diffAnnouncementSnapshot(seenRef, list) {
+  const arr = Array.isArray(list) ? list : [];
+  if (!seenRef.current) {
+    seenRef.current = new Set();
+    arr.forEach(a => { if (a && a.id) seenRef.current.add(a.id); });
+    return []; // first snapshot is the seed — fire nothing
+  }
+  const seen = seenRef.current;
+  const additions = arr.filter(a => a && a.id && !seen.has(a.id));
+  // Mark ALL current IDs as seen (additions + existing) so a later snapshot
+  // that still contains the same IDs won't re-fire.
+  arr.forEach(a => { if (a && a.id) seen.add(a.id); });
+  return additions;
+}
+
 function App() {
   const [tournament, setTournament] = useS(null);
   const [loading, setLoading] = useS(true);
@@ -202,6 +259,24 @@ function App() {
       ? crypto.randomUUID()
       : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
+  // mp-cw1: Unix-ms timestamp of when this viewer session mounted. Used to
+  // distinguish pre-existing announcements (sentAt ≤ mount time) from
+  // announcements created after the viewer opened the tab (sentAt > mount
+  // time). Post-mount IDs are excluded from the HTTP seed so the buffered
+  // SSE replay still fires notifications for them. Stored as a number so
+  // the filter can use Date.parse() for correct cross-format comparison
+  // (Go RFC3339Nano may omit fractional seconds; lexicographic string
+  // comparison of "…Z" vs "….500Z" is incorrect — 'Z' > '.' in ASCII).
+  const mountTimeRef = useR(Date.now());
+  // Set of announcement IDs already seen by this session. Seeded by the
+  // initial HTTP fetchAnnouncements response (pre-mount IDs only) so a
+  // page-reload does NOT re-fire for already-active announcements, and an
+  // announcement created in the mount→fetch race window still fires.
+  const seenAnnouncementIds = useR(null); // lazily initialised to a Set below
+  // Holds the latest SSE announcement snapshot received before the HTTP seed
+  // has settled. Full snapshots are idempotent: only the latest matters.
+  const pendingSseAnnouncements = useR(null);
+
   // Auth-mode discovery (file vs. locked). Fetched once on App mount
   // from GET /api/auth-config. Starts as null ("loading") so that
   // CreateTournament can gate its submit until the mode is known —
@@ -320,10 +395,58 @@ function App() {
   useE(() => {
     window.API.fetchAnnouncements()
       .then(list => {
-        setAnnouncements(filterActiveAnnouncements(list || []));
+        const active = filterActiveAnnouncements(list || []);
+        setAnnouncements(active);
+        // mp-cw1: Consume any SSE snapshot buffered before the HTTP seed arrived.
+        const buffered = pendingSseAnnouncements.current;
+        pendingSseAnnouncements.current = null;
+
+        // Seed strategy depends on whether we have a buffered SSE to replay:
+        //
+        // • WITH buffered SSE: seed only pre-mount IDs (sentAt ≤ mountMs) so
+        //   the replay below can fire notifications for post-mount IDs even
+        //   when the HTTP GET happened to capture them. Date.parse() for numeric
+        //   comparison — Go's RFC3339Nano may omit fractional seconds, making
+        //   lexicographic comparison wrong ('Z' > '.' in ASCII).
+        //   Missing/unparseable sentAt → treated as pre-existing (no spam risk).
+        //
+        // • WITHOUT buffered SSE: seed the full HTTP list. Excluding post-mount
+        //   IDs with no SSE to replay would leave them unseeded, causing a later
+        //   unrelated SSE snapshot to treat them as new and fire stale
+        //   notifications for announcements the viewer already sees on screen.
+        let seedList;
+        if (buffered !== null) {
+          seedList = (list || []).filter(a => {
+            if (!a || !a.id) return false;
+            if (!a.sentAt) return true;
+            const ms = Date.parse(a.sentAt);
+            return isNaN(ms) || ms <= mountTimeRef.current;
+          });
+        } else {
+          seedList = list || [];
+        }
+        diffAnnouncementSnapshot(seenAnnouncementIds, seedList);
+
+        // Replay the buffered SSE (if any) to fire for announcements added in
+        // the mount→fetch race window.
+        if (buffered !== null) {
+          const additions = diffAnnouncementSnapshot(seenAnnouncementIds, buffered);
+          if (additions.length > 0) {
+            fireBrowserNotifications(additions);
+          }
+        }
       })
       .catch(err => {
         console.error("Failed to fetch initial announcements:", err);
+        // Fall back: if an SSE snapshot was buffered while the HTTP request
+        // was in flight, seed from it so the next SSE diff works correctly.
+        // If nothing was buffered, leave the ref null so the first subsequent
+        // SSE snapshot becomes the seed (original spam-prevention fallback).
+        const buffered = pendingSseAnnouncements.current;
+        pendingSseAnnouncements.current = null;
+        if (buffered !== null && seenAnnouncementIds.current === null) {
+          diffAnnouncementSnapshot(seenAnnouncementIds, buffered); // seed, no notifications
+        }
       });
   }, []);
 
@@ -342,6 +465,11 @@ function App() {
       setAuthConfig(fileDefault);
     });
   }, []);
+
+  // Mirror authConfig into the admin_helpers cache so promptAdminPassword()
+  // (spec 004) can read the elevated-password bits at destructive call sites
+  // without prop-drilling authConfig through every admin component.
+  useE(() => { setCachedAuthConfig(authConfig); }, [authConfig]);
 
   useE(() => {
     // Track every jittered timer so the cleanup can cancel them when
@@ -477,6 +605,21 @@ function App() {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];
             setAnnouncements(filterActiveAnnouncements(list));
+
+            // mp-cw1: diff against seen IDs to fire browser notifications ONLY
+            // for genuinely new announcements.
+            // If the HTTP seed hasn't arrived yet, buffer this snapshot and let
+            // fetchAnnouncements replay it — so an announcement added in the
+            // mount→fetch race window still fires a notification (the HTTP seed
+            // records only pre-existing IDs; the replay surfaces the new one).
+            if (seenAnnouncementIds.current === null) {
+              pendingSseAnnouncements.current = list; // keep latest; seed pending
+            } else {
+              const additions = diffAnnouncementSnapshot(seenAnnouncementIds, list);
+              if (additions.length > 0) {
+                fireBrowserNotifications(additions);
+              }
+            }
         }
     }, (status) => {
         // T063: track SSE connection status so /display surfaces can
@@ -604,6 +747,15 @@ function App() {
       )}
       {selectedCompData ? (
         <window.ViewerCompetition
+          // key on the competition id so switching comps (notably the
+          // mp-rrd pools<->playoffs cross-link, which calls
+          // onSelectCompetition without unmounting) remounts the
+          // component and resets its per-comp UI state (active tab,
+          // open match modal, bracket scroll target). Otherwise a tab
+          // that doesn't exist in the destination comp (e.g. "pools"
+          // when navigating to a playoffs comp) would leave the body
+          // rendering empty.
+          key={selectedCompData.config.id}
           tournament={tournament}
           competition={selectedCompData.config}
           pools={selectedCompData.pools}
@@ -611,6 +763,7 @@ function App() {
           standings={selectedCompData.standings}
           bracket={selectedCompData.bracket}
           onBack={() => setViewerCompId(null)}
+          onSelectCompetition={setViewerCompId}
           onAdminClick={requestAdmin}
           tweaks={THEME}
         />
@@ -735,7 +888,11 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
     }
   };
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    // zIndex 1000 matches MatchViewerModal's modal layer (the shared
+    // .modal-backdrop default of 100 sits below viewer chrome at 200/500 and
+    // below the mp-udb announcement overlay at 900); without this the sign-in
+    // dialog could be obscured by chrome or by announcement cards.
+    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
         <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="auth__logo" decoding="async" />
         <div className="auth__title">Admin sign in</div>
@@ -813,6 +970,15 @@ function CreateTournament({ onCreated, authConfig }) {
   const [venue, setVenue] = useS("");
   const [courts, setCourts] = useS(2);
   const [pass, setPass] = useS("");
+  // Tournament mode (mp-7h7): "officiated" (default) or "self-run".
+  // Chosen once at creation; read-only after that. Default officiated
+  // means existing deployments are unaffected.
+  const [mode, setMode] = useS("officiated");
+  // Destructive-ops (admin) password — required when creating a
+  // self-run tournament in file mode: the main auth gate is skipped in
+  // self-run, so destructive actions must fall back to this credential.
+  // Not shown in locked mode (the env-var hash is the credential).
+  const [adminPass, setAdminPass] = useS("");
   const [saving, setSaving] = useS(false);
   // submit's catch sets setSaving(false) post-await; on success the
   // parent calls onCreated which unmounts CreateTournament. The catch
@@ -821,6 +987,8 @@ function CreateTournament({ onCreated, authConfig }) {
   // fetch). Gate via mountedRef for symmetry with the admin sweep.
   const mountedRef = useR(true);
   useE(() => () => { mountedRef.current = false; }, []);
+
+  const isSelfRun = mode === "self-run";
 
   const submit = async (e) => {
     e.preventDefault();
@@ -833,6 +1001,14 @@ function CreateTournament({ onCreated, authConfig }) {
     const trimmedVenue = venue.trim();
     if (!trimmedName || !pass) {
       alert("Name and Password are required.");
+      return;
+    }
+    // Self-run in file mode requires a destructive-ops (admin) password
+    // so that destructive routes (delete, invalidate, etc.) are not
+    // left fully public. The backend enforces the same rule — this is
+    // client-side feedback only.
+    if (isSelfRun && !locked && !adminPass) {
+      alert("Self-run tournaments require a Destructive-ops password to protect delete and import actions.");
       return;
     }
     // Match the admin-side handleSave guard from admin_setup.jsx.
@@ -854,8 +1030,19 @@ function CreateTournament({ onCreated, authConfig }) {
       const config = {
         name: trimmedName, date, venue: trimmedVenue,
         password: pass,
-        courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i))
+        courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
+        mode,
       };
+      // Self-run in file mode: send the destructive-ops password as a
+      // transient `adminPassword` field on the SAME POST. The server reads
+      // it via a second body bind (Tournament.AdminPassword is json:"-" so
+      // it can't be bound directly) and persists it atomically with the
+      // tournament — so the self-run fail-open guard never sees a self-run
+      // tournament without an admin credential. In locked mode the server
+      // ignores this field (the env-var bcrypt hash is authoritative).
+      if (isSelfRun && !locked && adminPass) {
+        config.adminPassword = adminPass;
+      }
       // In locked mode, the typed password IS the env-var admin
       // credential — pass it as authPassword so api_client sends
       // X-Tournament-Password. In file mode authPassword is undefined
@@ -863,7 +1050,23 @@ function CreateTournament({ onCreated, authConfig }) {
       // lets it through unauthenticated).
       const t = await window.API.createTournament(config, locked ? pass : undefined);
       if (!mountedRef.current) return;
-      // Wait for backend to broadcast or just pass it up
+      // Refresh the elevated-password auth config so promptAdminPassword()
+      // reads the correct gate state before the admin view mounts (mp-7h7).
+      // For a self-run tournament the admin password is set atomically in the
+      // same POST, so the /api/auth-config response changes: elevatedRequired
+      // flips from false to true. Without this refresh, the stale cached value
+      // would cause promptAdminPassword() to return "" and destructive actions
+      // would 401 without ever prompting the operator.
+      try {
+        const freshCfg = await window.API.fetchAuthConfig();
+        if (mountedRef.current && freshCfg && typeof freshCfg === "object") {
+          setCachedAuthConfig(freshCfg);
+        }
+      } catch (_) {
+        // Non-fatal: the cache update is best-effort; the operator can still
+        // retry destructive actions which will re-prompt after a 401.
+      }
+      if (!mountedRef.current) return;
       onCreated(t, pass);
     } catch (err) {
       alert(err.message);
@@ -910,6 +1113,36 @@ function CreateTournament({ onCreated, authConfig }) {
             />
             <div className="field__hint">{`Enter a number (1-${window.MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
+          {/* Tournament mode selector (mp-7h7). Chosen once at creation;
+              immutable after that. Default is officiated (existing behaviour). */}
+          <div className="field">
+            <label className="field__label">Tournament type</label>
+            <div role="group" aria-label="Tournament type" style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button
+                type="button"
+                className={`btn${mode === "officiated" ? " btn--primary" : ""}`}
+                aria-pressed={mode === "officiated"}
+                onClick={() => setMode("officiated")}
+                style={{ flex: 1 }}
+              >
+                Officiated
+              </button>
+              <button
+                type="button"
+                className={`btn${mode === "self-run" ? " btn--primary" : ""}`}
+                aria-pressed={mode === "self-run"}
+                onClick={() => setMode("self-run")}
+                style={{ flex: 1 }}
+              >
+                Self-run
+              </button>
+            </div>
+            <div className="field__hint" style={{ marginTop: 6 }}>
+              {mode === "officiated"
+                ? "An operator manages scoring and bracket progression. All admin actions require the tournament password. This is the standard setup."
+                : "No dedicated operator. Participants self-report scores; all constructive actions (scoring, check-in) are public. Destructive actions (delete competition, discard draw, import roster) still require a separate admin password. Cannot be changed after creation."}
+            </div>
+          </div>
           <div className="field">
             <label className="field__label">{locked ? "Admin Password (from TOURNAMENT_PASSWORD_HASH)" : "Admin Password"}</label>
             <input
@@ -921,11 +1154,34 @@ function CreateTournament({ onCreated, authConfig }) {
               required
             />
             <div className="field__hint">
-              {locked
-                ? "This server is running in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it's used both to authorize this bootstrap and as your admin credential afterwards."
-                : "This password will be required to manage the tournament."}
+              {locked && isSelfRun
+                ? "This server is in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it authorises this bootstrap and organiser-setup mutations. Destructive actions (delete competition, discard draw, import) require the separate TOURNAMENT_ADMIN_PASSWORD_HASH credential."
+                : locked
+                  ? "This server is running in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH — it's used both to authorize this bootstrap and as your admin credential afterwards."
+                  : isSelfRun
+                    ? "Used to authorise tournament setup. In self-run mode, scoring and check-in are public so participants don't need this."
+                    : "This password will be required to manage the tournament."}
             </div>
           </div>
+          {/* In self-run + file mode, require a destructive-ops password at
+              creation so delete/invalidate/import can't be called anonymously.
+              Locked mode uses TOURNAMENT_ADMIN_PASSWORD_HASH (no UI input). */}
+          {isSelfRun && !locked && (
+            <div className="field">
+              <label className="field__label">Destructive-ops password (required for self-run)</label>
+              <input
+                className="input"
+                type="password"
+                value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)}
+                placeholder="Password to protect delete / import actions"
+                required
+              />
+              <div className="field__hint">
+                A separate password required for destructive actions (delete competition, discard draw, roster add/edit, import). Since this tournament is self-run, scoring is public — this password is the only thing protecting irreversible actions.
+              </div>
+            </div>
+          )}
           {/* Disable submit until authConfig is known (null = loading) so a
               locked-mode deployment doesn't submit without X-Tournament-Password.
               The null window lasts at most one HTTP round-trip on startup. */}

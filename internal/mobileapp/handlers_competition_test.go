@@ -82,39 +82,6 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
-	t.Run("Reserved Slots", func(t *testing.T) {
-		comp := state.Competition{ID: "target-comp", Status: "setup"}
-		store.SaveCompetition(&comp)
-		store.SaveCompetition(&state.Competition{ID: "source-comp"})
-
-		// POST /api/competitions/:id/reserved-slots
-		reqBody, _ := json.Marshal(map[string]any{
-			"sourceCompID": "source-comp",
-			"sourceRank":   1,
-		})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/competitions/target-comp/reserved-slots", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusCreated, w.Code)
-
-		// GET /api/competitions/:id/reserved-slots
-		w = httptest.NewRecorder()
-		req, _ = http.NewRequest("GET", "/api/competitions/target-comp/reserved-slots", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var slots []state.ReservedSlot
-		json.Unmarshal(w.Body.Bytes(), &slots)
-		require.Len(t, slots, 1)
-
-		// DELETE /api/competitions/:id/reserved-slots/:slotID
-		w = httptest.NewRecorder()
-		req, _ = http.NewRequest("DELETE", "/api/competitions/target-comp/reserved-slots/"+slots[0].ID, nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNoContent, w.Code)
-	})
-
 	t.Run("Override Rank", func(t *testing.T) {
 		comp := state.Competition{ID: "rank-comp", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
@@ -702,7 +669,6 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}{
 			{"GET", "/api/competitions/%s"},
 			{"PUT", "/api/competitions/%s"},
-			{"GET", "/api/competitions/%s/reserved-slots"},
 			{"POST", "/api/competitions/%s/start"},
 			{"GET", "/api/competitions/%s/export"},
 			{"PUT", "/api/competitions/%s/pools/main/override-rank"},
@@ -1016,10 +982,10 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 }
 
 // mp-p7n: Copilot PR #185 round-3 finding — regenerating ids on save
-// would orphan CompetitorStatus.PlayerID / ReservedSlot.ParticipantID /
-// team-lineup PlayerIDs that reference the original ids. Fix: keep the
-// id verbatim on save; the loader (consulting Competition.HasParticipantIDs
-// for the strip decision) handles any shape.
+// would orphan CompetitorStatus.PlayerID / team-lineup PlayerIDs that
+// reference the original ids. Fix: keep the id verbatim on save; the loader
+// (consulting Competition.HasParticipantIDs for the strip decision) handles
+// any shape.
 //
 // This test pins the contract:
 //   - The PUT body's non-UUID ids round-trip to the response intact
@@ -1060,7 +1026,7 @@ func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 
 	// Ids preserved — regeneration would orphan dependent stores.
 	assert.Equal(t, "asddasd-p1", resp.Players[0].ID,
-		"non-UUID id must round-trip intact; regeneration orphans competitor_status/reserved_slot refs")
+		"non-UUID id must round-trip intact; regeneration orphans competitor_status refs")
 	assert.Equal(t, "asddasd-p2", resp.Players[1].ID)
 
 	// Name and Dojo correctly aligned — no column shift on load.
@@ -1255,18 +1221,18 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
 }
 
-// TestPlayoff_ResponseIncludesPlayers pins the Copilot round-12
-// finding (#6) server-side: POST /playoffs used to ship `players: null`
-// in the create response (Go nil slice → JSON null). admin.jsx's
-// refreshCompsAfterCreate fallback appends the response directly into
-// local state, and render paths that read `c.players.length` crash.
-// The handler now loads the placeholder roster for the response.
-func TestPlayoff_ResponseIncludesPlayers(t *testing.T) {
+// TestPlayoff_CreatesSourceLinkWithEmptyRoster verifies that POST /playoffs
+// stores a SourceCompID link to the mixed source and returns an EMPTY (but
+// non-nil) roster — the pool winners are resolved into the roster later, at
+// draw time (engine.resolvePoolWinners). The non-nil empty slice pins the
+// Copilot round-12 finding (#6): the response must not ship `players: null`
+// (Go nil slice → JSON null), because admin.jsx's refreshCompsAfterCreate
+// fallback appends the response into local state and render paths that read
+// `c.players.length` would crash.
+func TestPlayoff_CreatesSourceLinkWithEmptyRoster(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// Source pools competition with 2 participants → 1 pool → 2 winners
-	// → 2 reserved-slot placeholders on the playoff.
 	src := state.Competition{
 		ID:          "src",
 		Name:        "Source",
@@ -1288,13 +1254,19 @@ func TestPlayoff_ResponseIncludesPlayers(t *testing.T) {
 
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "src", resp.SourceCompID, "playoff must link back to the mixed source")
+	assert.Equal(t, state.CompFormatPlayoffs, resp.Format)
 	require.NotNil(t, resp.Players, "Players must NOT be null in POST /playoffs response")
 	assert.NotContains(t, w.Body.String(), `"players":null`,
 		"response must not ship `players: null` — client appends this into local state")
-	// The actual content is reserved-slot placeholders; we just care
-	// that the field isn't null.
-	assert.GreaterOrEqual(t, len(resp.Players), 1,
-		"placeholder participants must be present in the response")
+	assert.Empty(t, resp.Players,
+		"playoff roster starts empty; pool winners are resolved at draw time")
+
+	// The link is persisted on disk, not just echoed in the response.
+	stored, err := store.LoadCompetition(resp.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, "src", stored.SourceCompID)
 }
 
 // TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure pins the

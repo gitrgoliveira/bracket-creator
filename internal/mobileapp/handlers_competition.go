@@ -112,6 +112,31 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 	return out
 }
 
+// validateCompetitionDateInTournament checks that the competition's Date
+// falls within the tournament's day range [Day 1 .. Day N]. When:
+//   - comp.Date is empty (optional field) → skip, return nil.
+//   - tourn is nil or tourn.Date is empty → skip (can't derive day list yet).
+//   - comp.Date is in the derived day list → return nil.
+//   - comp.Date is NOT in the derived day list → return a descriptive error.
+//
+// errcheck: no bare ignored returns — always propagated by callers.
+func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.Tournament) error {
+	if comp.Date == "" || tourn == nil || tourn.Date == "" {
+		return nil
+	}
+	days := tourn.Days()
+	if len(days) == 0 {
+		// Tournament date unparseable or DurationDays < 1 — skip range check.
+		return nil
+	}
+	for _, d := range days {
+		if d == comp.Date {
+			return nil
+		}
+	}
+	return fmt.Errorf("date must be one of the tournament days (%s to %s)", days[0], days[len(days)-1])
+}
+
 // validateCompetitionFormat returns an HTTP status code + error
 // message for invalid Format / PoolFormat values. Empty values are
 // accepted (defaults applied on load). Unknown values return 400.
@@ -188,7 +213,7 @@ func checkUniqueCompName(store *state.Store, name, excludeID string) error {
 	return nil
 }
 
-func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
+func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
 		ids, err := store.ListCompetitions()
 		if err != nil {
@@ -272,6 +297,31 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Load the tournament to (a) default the competition date to Day 1
+		// and (b) enforce the date-in-range constraint. Tournament load can
+		// return nil when no tournament.md exists yet (new setup); both steps
+		// skip gracefully in that case.
+		createTourn, err := store.LoadTournament()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Default the competition date to the tournament's Day 1 when the
+		// client sends an empty date. Pre-fix: the frontend seeded the date
+		// from tournament.date directly (JS), but the backend defaulted to
+		// today when it was empty — using Day 1 is the correct multi-day
+		// behaviour and also keeps server and client in sync.
+		if comp.Date == "" && createTourn != nil && createTourn.Date != "" {
+			comp.Date = createTourn.Date
+		}
+
+		// Reject a competition date that falls outside the tournament's day
+		// range. Skipped when tournament has no date configured.
+		if err := validateCompetitionDateInTournament(&comp, createTourn); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Cross-file guard symmetry with POST/PUT /tournament: same
 		// label + cap check via validateCompetitionCourts (looser than
 		// the tournament version — empty courts is allowed because the
@@ -348,7 +398,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// overwrote the existing competition. POST is documented as
 		// CREATE, so an existing ID is a 409 / 400 case.
 		var nameErr, idErr error
-		err := store.WithCompetitionRenameLock(func() error {
+		lockErr := store.WithCompetitionRenameLock(func() error {
 			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
@@ -359,6 +409,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
 			return saveErr
 		})
+		err = lockErr
 		if idErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
 			return
@@ -414,6 +465,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		comp.ID = id // ensure ID matches URL (also for empty-body case)
+
+		// Elevated-password gate for the ROSTER-mutation path (spec 004 /
+		// mp-e21; Copilot PR #193). This handler doubles as a roster writer:
+		// a non-nil Players field below triggers SaveParticipants/SaveSeeds.
+		// That is the SPA's PRIMARY roster flow (paste/import, seed edits via
+		// API.updateCompetition), so gating only the dedicated
+		// POST/PUT /participants endpoints would leave the gate bypassable.
+		// Route-level middleware can't see Players (it runs before binding),
+		// so enforce inline now that the body is decoded. Settings-only PUTs
+		// (Players == nil) are unaffected and stay single-factor.
+		if comp.Players != nil && !enforceElevated(c, elevated) {
+			return
+		}
+
 		comp.Name = strings.TrimSpace(comp.Name)
 		// See POST handler comment — same trim is needed here so the
 		// SETTINGS edit path can't persist whitespace-padded prefixes.
@@ -476,6 +541,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 			// Reject non-canonical Date format.
 			if err := validateDateDMY(comp.Date); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Enforce the competition-date-in-tournament-range constraint.
+			// Load tournament outside the rename lock to avoid holding the
+			// lock during I/O. Tournament load is read-only and idempotent,
+			// so the window between load and the lock acquisition is safe
+			// (the worst case is a missed tournament date update, which
+			// would just skip the range check — a harmless skip vs. a
+			// deadlock is the right trade-off).
+			putTourn, putTournErr := store.LoadTournament()
+			if putTournErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": putTournErr.Error()})
+				return
+			}
+			if err := validateCompetitionDateInTournament(&comp, putTourn); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -827,7 +909,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, updated)
 	})
 
-	r.DELETE("/competitions/:id", func(c *gin.Context) {
+	r.DELETE("/competitions/:id", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -851,7 +933,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
-	r.POST("/competitions/:id/invalidate", func(c *gin.Context) {
+	r.POST("/competitions/:id/invalidate", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -896,77 +978,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
 		c.JSON(http.StatusOK, compOut)
-	})
-
-	r.GET("/competitions/:id/reserved-slots", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		slots, err := store.LoadReservedSlots(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, slots)
-	})
-
-	r.POST("/competitions/:id/reserved-slots", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		var req struct {
-			SourceCompID string `json:"sourceCompID"`
-			SourceRank   int    `json:"sourceRank"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if req.SourceCompID == "" || req.SourceRank < 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "sourceCompID and sourceRank (>= 1) are required"})
-			return
-		}
-		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		}
-		if comp.Status == state.CompStatusDrawReady {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
-			return
-		}
-		slot, err := store.AddReservedSlot(id, req.SourceCompID, req.SourceRank, comp.WithZekkenName)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.JSON(http.StatusCreated, slot)
-	})
-
-	r.DELETE("/competitions/:id/reserved-slots/:slotID", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		slotID := c.Param("slotID")
-		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		}
-		if comp.Status == state.CompStatusDrawReady {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
-			return
-		}
-		if err := store.RemoveReservedSlot(id, slotID, comp.WithZekkenName); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.Status(http.StatusNoContent)
 	})
 
 	r.POST("/competitions/:id/start", func(c *gin.Context) {
@@ -1045,7 +1056,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, comp)
 	})
 
-	r.DELETE("/competitions/:id/draw", func(c *gin.Context) {
+	r.DELETE("/competitions/:id/draw", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -1263,19 +1274,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Calculate number of pools to determine how many reserved slots we need.
-		parts, _ := store.LoadParticipants(id, src.WithZekkenName)
-		poolSize := src.PoolSize
-		if poolSize <= 0 {
-			poolSize = 3 // default
-		}
-		numPools := (len(parts) + poolSize - 1) / poolSize
-		winnersPerPool := src.PoolWinners
-		if winnersPerPool <= 0 {
-			winnersPerPool = 2 // default
-		}
-		totalWinners := numPools * winnersPerPool
-
+		// The playoffs competition is linked back to its source via
+		// SourceCompID and starts with an EMPTY roster. The source's pool
+		// winners are resolved into the roster at draw time by
+		// engine.resolvePoolWinners (see StartCompetition) — recomputed from
+		// the source's final pool configuration rather than snapshotted here,
+		// so the bracket always reflects the source as drawn.
 		playoff := state.Competition{
 			Name:           src.Name + " - Playoffs",
 			Format:         state.CompFormatPlayoffs,
@@ -1284,6 +1288,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			NumberPrefix:   src.NumberPrefix,
 			StartTime:      src.StartTime,
 			Status:         state.CompStatusSetup,
+			SourceCompID:   id,
 		}
 		playoff.ID = slugifyID(playoff.Name)
 
@@ -1319,40 +1324,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Link reserved slots (this will also add placeholder participants).
-		// Rollback on failure: SaveCompetitionChanged above already wrote
-		// config.md for the playoff. If any AddReservedSlot iteration
-		// fails (I/O error, EISDIR, etc.) the playoff is half-created —
-		// config on disk, slots/placeholders partial or absent — and the
-		// ID-collision guard inside WithCompetitionRenameLock above would
-		// block a retry with "derived playoff ID already exists". Mirror
-		// the import handler's rollback pattern (handlers_import.go).
-		for i := 1; i <= totalWinners; i++ {
-			if _, err := store.AddReservedSlot(playoff.ID, id, i, playoff.WithZekkenName); err != nil {
-				_ = store.DeleteCompetition(playoff.ID) // best-effort rollback
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to add reserved slot %d: %v", i, err)})
-				return
-			}
-		}
-
-		// Populate Players on the response from disk (the playoff has
-		// reserved-slot placeholders persisted by AddReservedSlot above,
-		// but `playoff` is the pre-save struct with Players: nil → JSON
-		// null. The frontend's refreshCompsAfterCreate fallback merges
-		// this record into local state, and a null Players field crashes
-		// render paths reading `c.players.length`. Mirror the PUT
-		// settings-PUT response fix.
-		if players, lerr := store.LoadParticipants(playoff.ID, playoff.WithZekkenName); lerr == nil {
-			playoff.Players = players
-		} else {
-			fmt.Printf("Warning: failed to load participants for POST /playoffs response: %v\n", lerr)
-			playoff.Players = []domain.Player{}
-		}
+		// The playoff starts with no participants (the roster is resolved
+		// from the source's pool winners at draw time). Return an empty but
+		// non-nil Players slice so the frontend's refreshCompsAfterCreate
+		// fallback can merge this record without a null-Players crash in
+		// render paths reading `c.players.length`.
+		playoff.Players = []domain.Player{}
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusCreated, playoff)
 	})
 
-	r.DELETE("/competitions/:id/overrides", func(c *gin.Context) {
+	r.DELETE("/competitions/:id/overrides", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return

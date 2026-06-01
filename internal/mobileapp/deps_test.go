@@ -105,6 +105,14 @@ func (stubTeamLineupStore) LockTeamLineupsForRound(string, int, time.Time) error
 	return nil
 }
 
+func (stubTeamLineupStore) DeleteTeamLineupForMatch(string, string, string) error {
+	return nil
+}
+
+func (stubTeamLineupStore) LockTeamLineupForMatch(string, string, time.Time) error {
+	return nil
+}
+
 // stubCompetitionTransactor is a no-op implementation of
 // CompetitionTransactor. fn runs immediately with a nil StoreTx; tests
 // that exercise the transactional path use the real *state.Store

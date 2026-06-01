@@ -227,8 +227,8 @@ paths:
           (either via POST /complete or via the auto-complete check after the
           last pool match scored). `data: { competitionId }`.
         - `tournament_updated` — tournament-level config change (a competition
-          was created/updated/deleted, reserved slots changed, participants
-          updated, etc.). `data: null` — clients should refresh full state.
+          was created/updated/deleted, participants updated, etc.).
+          `data: null` — clients should refresh full state.
         - `schedule_updated` — a competition's schedule was saved.
         - `password_reset` — the admin password was changed. Emitted
           from three sources (file mode only; never emitted in locked mode):
@@ -473,6 +473,84 @@ paths:
                   resetEnabled:
                     type: boolean
                     description: Whether POST /api/tournament/reset is honored.
+                  elevatedRequired:
+                    type: boolean
+                    description: |
+                      Whether the destructive-ops password gate is active. File mode:
+                      true once an admin password has been set. Locked mode: always true.
+                      When false, destructive endpoints require only the main password.
+                  elevatedConfigured:
+                    type: boolean
+                    description: |
+                      Whether a destructive-ops credential exists. File mode: an admin
+                      password is set. Locked mode: TOURNAMENT_ADMIN_PASSWORD_HASH is a
+                      valid bcrypt hash. When required but not configured, gated
+                      endpoints return 503.
+                  elevatedEditable:
+                    type: boolean
+                    description: |
+                      Whether the destructive-ops password can be set via
+                      PUT /api/auth/admin-password. True in file mode; false in locked
+                      mode (the credential is the TOURNAMENT_ADMIN_PASSWORD_HASH env var).
+
+  /api/auth/admin-password:
+    put:
+      tags: [tournament]
+      summary: Set or rotate the destructive-ops (elevated) password
+      description: |
+        Sets or rotates the file-mode destructive-ops password (spec 004 /
+        mp-e21). Gated by the MAIN password (`X-Tournament-Password`) via the
+        admin middleware.
+
+          * First-time set (no admin password yet) — trust-on-first-use: the
+            main password authorizes it; `currentPassword` is ignored.
+          * Rotation (admin password already set) — `currentPassword` must
+            equal the stored value, else 401. This prevents a main-password
+            holder from silently re-setting the elevated credential.
+
+        Locked mode returns 404 — the credential is the
+        `TOURNAMENT_ADMIN_PASSWORD_HASH` env var and is not settable via the
+        API. The response never echoes any password (write-only).
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              properties:
+                newPassword:
+                  type: string
+                  maxLength: 256
+                  description: The destructive-ops password to store (non-empty).
+                currentPassword:
+                  type: string
+                  maxLength: 256
+                  description: Required only when an admin password is already set (rotation).
+      responses:
+        '200':
+          description: Admin password set or rotated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  elevatedConfigured:
+                    type: boolean
+                    example: true
+        '400':
+          description: Empty newPassword or over-length field.
+        '401':
+          description: Wrong currentPassword on rotation (or missing/invalid main password).
+        '404':
+          description: Locked mode — not settable via the API.
+        '409':
+          description: No tournament configured yet.
 
   /api/tournament/import:
     post:
@@ -483,8 +561,13 @@ paths:
         via a multipart form upload. The server accepts files under any field name(s).
         One of the uploaded files must be named `manifest.yaml` (or `.yml`); it declares
         which competitions to create and which participant/seed CSV files to associate with each.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active
+        (see the AdminPassword security scheme); returns 503 when locked mode is
+        active but `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset.
       security:
         - TournamentPassword: []
+          AdminPassword: []
       requestBody:
         required: true
         content:
@@ -714,8 +797,19 @@ paths:
         Server-managed fields — `status`, `hasParticipantIDs` — are
         IGNORED in the body. Use the dedicated transition endpoints
         (`/start`, `/complete`, `/invalidate`) to change status.
+
+        **Elevated password (spec 004 / mp-e21):** the ROSTER-save path
+        (non-null `players`) additionally requires `X-Admin-Password`
+        when the destructive-ops gate is active — it rewrites
+        `participants.csv`, the same protected operation as the dedicated
+        participant endpoints. Returns 503 if locked mode is active without
+        `TOURNAMENT_ADMIN_PASSWORD_HASH`. The SETTINGS-only path
+        (`players` omitted) is NOT gated and needs only the main password.
+        The gate runs inside the handler (after body binding), so the
+        security requirement below is conditional on the body shape.
       security:
         - TournamentPassword: []
+          AdminPassword: []
       requestBody:
         required: true
         content:
@@ -743,8 +837,13 @@ paths:
         Allowed in any non-in-progress state (`setup`, `completed`,
         `invalid`, or unset). In-progress competitions (`pools`/`playoffs`)
         must first be invalidated via `POST /api/competitions/{id}/invalidate`.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active
+        (see the AdminPassword security scheme); 503 if locked mode is active
+        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
       security:
         - TournamentPassword: []
+          AdminPassword: []
       responses:
         '204':
           description: Competition deleted (or did not exist).
@@ -768,8 +867,13 @@ paths:
         which is the prerequisite for deletion of an already-started
         competition. Returns 400 if the competition is not in an in-progress
         state.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active
+        (see the AdminPassword security scheme); 503 if locked mode is active
+        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
       security:
         - TournamentPassword: []
+          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
@@ -822,8 +926,13 @@ paths:
         artifacts (pools.csv, pool-matches.csv, bracket.json), and resets the
         competition to `setup`. Returns 400 if the competition is not in `draw-ready`
         state.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active
+        (see the AdminPassword security scheme); 503 if locked mode is active
+        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
       security:
         - TournamentPassword: []
+          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
@@ -889,14 +998,17 @@ paths:
       tags: [competitions]
       summary: Create linked playoff competition
       description: |
-        Creates a new `playoffs`-format competition linked to this pools competition.
-        The server automatically:
+        Creates a new `playoffs`-format competition linked to this mixed
+        (Pools + Knockout) competition. The server:
         - Derives a name (`<source name> - Playoffs`) and ID.
-        - Calculates the expected number of promoted players (`numPools × poolWinners`) and
-          creates the corresponding reserved slots, each backed by a placeholder participant.
+        - Records a `sourceCompID` link back to this competition.
 
-        Use this instead of manually creating a competition and wiring reserved slots.
-        Returns 400 if the source competition is not in `pools` format.
+        The playoff starts with an EMPTY roster. Its participants are resolved
+        from the source competition's pool winners when the playoff is started
+        (`POST /start`) — the source pools must be final by then. No placeholder
+        participants are created.
+
+        Returns 400 if the source competition is not in `mixed` format.
       security:
         - TournamentPassword: []
       parameters:
@@ -939,83 +1051,21 @@ paths:
     delete:
       tags: [competitions]
       summary: Reset all overrides
-      description: Clears all manual rank and bracket-winner overrides for this competition.
+      description: |
+        Clears all manual rank and bracket-winner overrides for this competition.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active
+        (see the AdminPassword security scheme); 503 if locked mode is active
+        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
       security:
         - TournamentPassword: []
+          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
         '204':
           description: Overrides reset.
 
-  /api/competitions/{id}/reserved-slots:
-    parameters:
-      - $ref: '#/components/parameters/CompetitionId'
-    get:
-      tags: [competitions]
-      summary: Get reserved slots
-      security:
-        - TournamentPassword: []
-      responses:
-        '200':
-          description: List of reserved slots.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ReservedSlot'
-    post:
-      tags: [competitions]
-      summary: Add reserved slot
-      description: >
-        Creates a reserved slot and a matching placeholder participant. If a slot for the same
-        `sourceCompID`+`sourceRank` pair already exists it is returned as-is (idempotent).
-      security:
-        - TournamentPassword: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sourceCompID, sourceRank]
-              properties:
-                sourceCompID:
-                  type: string
-                  maxLength: 64
-                  description: ID of the competition to pull the player from.
-                sourceRank:
-                  type: integer
-                  description: Rank in the source competition (1-based).
-      responses:
-        '201':
-          description: Reserved slot created.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReservedSlot'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /api/competitions/{id}/reserved-slots/{slotID}:
-    parameters:
-      - $ref: '#/components/parameters/CompetitionId'
-      - in: path
-        name: slotID
-        required: true
-        schema:
-          type: string
-    delete:
-      tags: [competitions]
-      summary: Remove reserved slot
-      security:
-        - TournamentPassword: []
-      responses:
-        '204':
-          description: Reserved slot removed.
 
   /api/competitions/{id}/schedule:
     put:
@@ -1092,9 +1142,15 @@ paths:
     post:
       tags: [participants]
       summary: Set participants (JSON)
-      description: Replaces the current participants list for the competition with the provided JSON.
+      description: |
+        Replaces the current participants list for the competition with the provided JSON.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active
+        (see the AdminPassword security scheme); 503 if locked mode is active
+        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
       security:
         - TournamentPassword: []
+          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       requestBody:
@@ -2000,6 +2056,38 @@ components:
         `GET /api/auth-config` endpoint so clients can branch their
         UI without authenticating.
 
+    AdminPassword:
+      type: apiKey
+      in: header
+      name: X-Admin-Password
+      description: |
+        Elevated (destructive-ops) password — spec 004 / mp-e21. Required
+        IN ADDITION to `X-Tournament-Password` on destructive endpoints:
+        `DELETE /api/competitions/{id}`, `POST /api/competitions/{id}/invalidate`,
+        `DELETE /api/competitions/{id}/draw`, `DELETE /api/competitions/{id}/overrides`,
+        `POST /api/competitions/{id}/participants`,
+        `PUT /api/competitions/{id}/participants/{pid}`,
+        `POST /api/tournament/import`, and
+        `PUT /api/competitions/{id}` **when the body carries a non-null
+        `players` field** (the roster-save path — settings-only PUTs are not
+        gated).
+
+        Gate behavior:
+          * File mode — verified exact-string against the write-only
+            `admin_password` in `tournament.md`. While unset the gate is
+            INACTIVE (the header is not required; the main password alone
+            authorizes the action), so existing file deployments are
+            unaffected until an admin password is set.
+          * Locked mode — verified via bcrypt against
+            `TOURNAMENT_ADMIN_PASSWORD_HASH`. The gate is always active
+            (fail-closed): if the env var is unset/malformed the gated
+            endpoints return 503 "admin password not configured".
+
+        On a missing/incorrect header (when the gate is active and
+        configured) the endpoint returns 401. Set or rotate the file-mode
+        value via `PUT /api/auth/admin-password`. There is no session — the
+        header is required on each gated request.
+
   parameters:
     CompetitionId:
       in: path
@@ -2176,6 +2264,43 @@ components:
         slowestCourtBufferPct:
           type: integer
           description: Buffer percentage applied to the slowest court when estimating overall duration.
+        mode:
+          type: string
+          enum: [officiated, self-run]
+          description: >
+            Tournament auth posture. Chosen once at creation and **immutable** thereafter
+            (mp-7h7) — PUT /tournament rejects a mode change with 400.
+
+            - **officiated** (default): the full admin surface requires `X-Tournament-Password`.
+              Constructive actions (scoring, check-in, start) and organiser-setup mutations
+              all require the main password.
+            - **self-run**: there is no dedicated table operator. Operational actions
+              (scoring, check-in, start, complete, swiss round generation) are public — no
+              password required. Organiser-setup mutations (tournament/competition config,
+              seeds, override edits (set/change result), announcements, schedule, court
+              assignment, export) remain behind the main password. Destructive actions
+              (delete competition, discard draw, delete/discard overrides, import, participant
+              roster mutations) require the separate `X-Admin-Password` elevated credential.
+
+            Always returned in GET/POST/PUT responses regardless of auth mode (unlike
+            `password`, which is redacted in locked mode). Defaults to `officiated` when
+            omitted on POST (backward-compatible with pre-mp-7h7 tournaments whose
+            `tournament.md` lacks the field).
+        adminPassword:
+          type: string
+          writeOnly: true
+          maxLength: 256
+          description: >
+            **Creation-only, file mode, self-run tournaments only.** Sets the elevated
+            (destructive-ops) credential atomically in the same POST that creates the
+            tournament. Required when `mode` is `"self-run"` in file mode — without it the
+            main gate is skipped and destructive routes would be unauthenticated.
+
+            This field is **write-only at the API boundary**: it is never returned in any
+            response (`json:"-"` on the server struct) and is ignored by PUT /tournament
+            (rotation is done via `PUT /api/auth/admin-password`). In locked mode this
+            field is accepted but silently ignored — the `TOURNAMENT_ADMIN_PASSWORD_HASH`
+            env var is the authoritative elevated credential.
 
     Competition:
       type: object
@@ -2258,6 +2383,14 @@ components:
           type: string
         hasParticipantIDs:
           type: boolean
+        sourceCompID:
+          type: string
+          maxLength: 64
+          description: >
+            For a `playoffs` competition created via POST /playoffs, the ID of
+            the mixed source competition whose pool winners seed this playoff.
+            The roster is resolved from the source at start time. Empty for all
+            other competitions.
         teamMatchType:
           type: string
           description: Team-match scoring model — `fixed` (positions) or `kachinuki` (winner-stays).
@@ -2655,22 +2788,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ScheduleEntry'
-        reservedSlots:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReservedSlot'
-
-    ReservedSlot:
-      type: object
-      properties:
-        id:
-          type: string
-        participantID:
-          type: string
-        sourceCompID:
-          type: string
-        sourceRank:
-          type: integer
 
     EnchoMetadata:
       type: object

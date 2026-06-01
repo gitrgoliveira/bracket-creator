@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, buildPlayerMetadata } from '../api_serializers.jsx';
+import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, buildPlayerMetadata, normalizeCompetitionDetail } from '../api_serializers.jsx';
 import { API } from '../api_client.jsx';
 
 describe('API Utils', () => {
@@ -238,6 +238,34 @@ describe('API Utils', () => {
     it('returns empty danGrade when no metadata', () => {
       const p = { Name: 'Eve', Dojo: 'Mumeishi', Seed: 0 };
       expect(normalizePlayer(p).danGrade).toBe('');
+    });
+  });
+
+  // Regression (mp-bmw): Go ships nil slices as JSON null, so an
+  // API/import-created competition arrives with courts: null. Render
+  // sites across admin (CompCard, AdminCompetition) and viewer read
+  // c.courts.join(...) / c.courts.length directly and crash on null.
+  // normalizeCompetitionDetail is the single fetch boundary every comp
+  // passes through, so normalizing courts here protects all consumers.
+  describe('normalizeCompetitionDetail courts normalization', () => {
+    it('coerces null courts to []', () => {
+      const out = normalizeCompetitionDetail({ id: 'x', name: 'X', courts: null });
+      expect(out.courts).toEqual([]);
+    });
+
+    it('coerces missing courts to []', () => {
+      const out = normalizeCompetitionDetail({ id: 'x', name: 'X' });
+      expect(out.courts).toEqual([]);
+    });
+
+    it('preserves a populated courts list', () => {
+      const out = normalizeCompetitionDetail({ id: 'x', name: 'X', courts: ['A', 'B'] });
+      expect(out.courts).toEqual(['A', 'B']);
+    });
+
+    it('returns falsy input unchanged (no crash)', () => {
+      expect(normalizeCompetitionDetail(null)).toBeNull();
+      expect(normalizeCompetitionDetail(undefined)).toBeUndefined();
     });
   });
 

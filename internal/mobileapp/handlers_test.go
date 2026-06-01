@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,9 +48,9 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Admin API
 	admin := r.Group("/api")
 	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
-	RegisterImportHandlers(admin, store, hub)
-	RegisterCompetitionHandlers(admin, store, eng, hub)
-	RegisterParticipantHandlers(admin, store, hub)
+	RegisterImportHandlers(admin, store, hub, NewFileElevatedVerifier(store))
+	RegisterCompetitionHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
+	RegisterParticipantHandlers(admin, store, hub, NewFileElevatedVerifier(store))
 	RegisterMatchHandlers(admin, eng, store, store, hub)
 	RegisterDecisionHandlers(admin, eng, store, store, hub)
 	RegisterEligibilityHandlers(admin, store, hub)
@@ -1563,59 +1564,6 @@ func TestPOSTCompetition_RollbackOnSaveParticipantsFailure(t *testing.T) {
 		"rollback must remove config.md so retry isn't blocked by 'ID already exists'")
 }
 
-// TestCreatePlayoff_RollbackOnReservedSlotFailure pins the K3 rollback
-// for POST /competitions/:id/playoffs. SaveCompetitionChanged commits the
-// playoff config inside WithCompetitionRenameLock, then the
-// AddReservedSlot loop runs OUTSIDE the lock. If any slot's I/O fails,
-// the orphaned playoff config would block the operator's retry with
-// "derived playoff ID already exists" — the same shape as the
-// POST /competitions rollback above and the import handler's rollback.
-//
-// Forces deterministic failure by planting a directory at the playoff's
-// future participants.csv path (AddReservedSlot writes a placeholder
-// participant via saveParticipantsLocked, which encounters EISDIR).
-func TestCreatePlayoff_RollbackOnReservedSlotFailure(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	// Source competition with 3 participants → numPools=1 with default
-	// poolSize=3 → totalWinners = 1*2 = 2 (two AddReservedSlot calls).
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     "rollback-src",
-		Name:   "Rollback Src",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusPools,
-	}))
-	require.NoError(t, store.SaveParticipants("rollback-src", []domain.Player{
-		{Name: "P1", Dojo: "D"},
-		{Name: "P2", Dojo: "D"},
-		{Name: "P3", Dojo: "D"},
-	}))
-
-	// Plant a directory where the playoff's participants.csv should be
-	// a file. Derived playoff ID = slugifyID("Rollback Src - Playoffs")
-	// = "rollback-src-playoffs". Created BEFORE the POST so when
-	// AddReservedSlot tries to saveParticipantsLocked the placeholder,
-	// the path is a directory → EISDIR.
-	playoffID := "rollback-src-playoffs"
-	participantsAsDir := filepath.Join(tempDir, "competitions", playoffID, "participants.csv")
-	require.NoError(t, os.MkdirAll(participantsAsDir, 0700))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/rollback-src/playoffs", nil)
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code,
-		"POST /playoffs must surface AddReservedSlot I/O failure as 500")
-	assert.Contains(t, w.Body.String(), "failed to add reserved slot",
-		"error message must identify the failing step")
-
-	// Rollback assertion: the orphaned playoff config must be gone so a
-	// retry isn't blocked by the ID-collision guard.
-	stored, _ := store.LoadCompetition(playoffID)
-	assert.Nil(t, stored,
-		"rollback must remove the playoff config.md so retry passes the ID-collision guard")
-}
-
 // TestPOSTTournament_ValidatesCourts pins Copilot #8: POST and PUT
 // /api/tournament now call validateCourts (1..26 single-char labels)
 // matching the spec. Direct API callers can no longer persist >26
@@ -2302,4 +2250,210 @@ func TestStartCompetition_BroadcastContract(t *testing.T) {
 
 	_, extra := receiveEvent(10 * time.Millisecond)
 	assert.False(t, extra, "start must emit exactly 1 broadcast for the common case")
+}
+
+// --- Tournament DurationDays validation ---
+
+func TestTournamentHandlers_DurationDays_Validation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed a valid tournament so PUT has something to update.
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Base Tournament",
+		Password: "secret",
+		Courts:   []string{"A"},
+		Date:     "01-06-2026",
+	}))
+
+	tests := []struct {
+		name         string
+		method       string // "PUT" or "POST"
+		durationDays int
+		wantStatus   int
+		wantErrFrag  string
+	}{
+		{"PUT valid 1", "PUT", 1, http.StatusOK, ""},
+		{"PUT valid 30", "PUT", 30, http.StatusOK, ""},
+		{"PUT zero accepted defaults to 1", "PUT", 0, http.StatusOK, ""},
+		{"PUT negative rejected", "PUT", -1, http.StatusBadRequest, "durationDays must be between"},
+		{"PUT over 30 rejected", "PUT", 31, http.StatusBadRequest, "durationDays must be between"},
+		{"POST valid 1", "POST", 1, http.StatusCreated, ""},
+		{"POST zero accepted", "POST", 0, http.StatusCreated, ""},
+		{"POST negative rejected", "POST", -1, http.StatusBadRequest, "durationDays must be between"},
+		{"POST over 30 rejected", "POST", 31, http.StatusBadRequest, "durationDays must be between"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tour := state.Tournament{
+				Name:         "Duration Test",
+				Password:     "secret",
+				Courts:       []string{"A"},
+				Date:         "01-06-2026",
+				DurationDays: tc.durationDays,
+			}
+			body, _ := json.Marshal(tour)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(tc.method, "/api/tournament", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, tc.wantStatus, w.Code, "method=%s durationDays=%d", tc.method, tc.durationDays)
+			if tc.wantErrFrag != "" {
+				assert.Contains(t, w.Body.String(), tc.wantErrFrag)
+			}
+		})
+	}
+}
+
+func TestTournamentHandlers_DurationDays_PersistsAndLoads(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	tour := state.Tournament{
+		Name:         "Multi-day Tournament",
+		Password:     "secret",
+		Courts:       []string{"A"},
+		Date:         "05-06-2026",
+		DurationDays: 3,
+	}
+	body, _ := json.Marshal(tour)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, 3, loaded.DurationDays)
+	assert.Equal(t, []string{"05-06-2026", "06-06-2026", "07-06-2026"}, loaded.Days())
+}
+
+// --- Competition date range validation ---
+
+func TestCompetitionHandlers_DateRangeValidation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Three-day tournament starting June 5.
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:         "Multi-day",
+		Password:     "secret",
+		Courts:       []string{"A"},
+		Date:         "05-06-2026",
+		DurationDays: 3,
+	}))
+
+	tests := []struct {
+		name        string
+		compDate    string
+		wantStatus  int
+		wantErrFrag string
+	}{
+		{"Day 1 accepted", "05-06-2026", http.StatusCreated, ""},
+		{"Day 2 accepted", "06-06-2026", http.StatusCreated, ""},
+		{"Day 3 accepted", "07-06-2026", http.StatusCreated, ""},
+		{"before Day 1 rejected", "04-06-2026", http.StatusBadRequest, "date must be one of the tournament days"},
+		{"after Day 3 rejected", "08-06-2026", http.StatusBadRequest, "date must be one of the tournament days"},
+		{"empty date defaults to Day 1", "", http.StatusCreated, ""},
+	}
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := state.Competition{
+				ID:     fmt.Sprintf("c-range-%d", i),
+				Name:   fmt.Sprintf("Range Test %d", i),
+				Courts: []string{"A"},
+				Date:   tc.compDate,
+			}
+			body, _ := json.Marshal(comp)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, tc.wantStatus, w.Code, "case %q: comp date=%q", tc.name, tc.compDate)
+			if tc.wantErrFrag != "" {
+				assert.Contains(t, w.Body.String(), tc.wantErrFrag, "case %q", tc.name)
+			}
+		})
+	}
+}
+
+func TestCompetitionHandlers_DateRangeValidation_PUT(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:         "Multi-day",
+		Password:     "secret",
+		Courts:       []string{"A"},
+		Date:         "05-06-2026",
+		DurationDays: 2,
+	}))
+
+	// Create an initial competition on Day 1.
+	initComp := state.Competition{ID: "c-put-range", Name: "Range PUT Test", Courts: []string{"A"}, Date: "05-06-2026"}
+	require.NoError(t, store.SaveCompetition(&initComp))
+
+	tests := []struct {
+		name        string
+		newDate     string
+		wantStatus  int
+		wantErrFrag string
+	}{
+		{"Day 1 accepted", "05-06-2026", http.StatusOK, ""},
+		{"Day 2 accepted", "06-06-2026", http.StatusOK, ""},
+		{"outside range rejected", "07-06-2026", http.StatusBadRequest, "date must be one of the tournament days"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := state.Competition{
+				ID:     "c-put-range",
+				Name:   "Range PUT Test",
+				Courts: []string{"A"},
+				Date:   tc.newDate,
+			}
+			body, _ := json.Marshal(comp)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/c-put-range", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, tc.wantStatus, w.Code, "case %q: date=%q", tc.name, tc.newDate)
+			if tc.wantErrFrag != "" {
+				assert.Contains(t, w.Body.String(), tc.wantErrFrag)
+			}
+		})
+	}
+}
+
+func TestCompetitionHandlers_DefaultDate_IsDay1(t *testing.T) {
+	// When POST /competitions sends an empty date, the handler should
+	// default to the tournament's Day 1 (not today).
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:         "Multi-day",
+		Password:     "secret",
+		Courts:       []string{"A"},
+		Date:         "15-07-2026",
+		DurationDays: 3,
+	}))
+
+	comp := state.Competition{
+		ID:     "c-default-date",
+		Name:   "Default Date Test",
+		Courts: []string{"A"},
+		// Date intentionally empty — should default to tournament Day 1
+	}
+	body, _ := json.Marshal(comp)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	// Reload and check the date was set to Day 1.
+	loaded, err := store.LoadCompetition("c-default-date")
+	require.NoError(t, err)
+	assert.Equal(t, "15-07-2026", loaded.Date, "empty competition date should default to tournament Day 1")
 }

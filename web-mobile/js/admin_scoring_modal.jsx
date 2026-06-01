@@ -511,7 +511,12 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
 function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
   const m = match;
   const isComplete = m.status === "completed";
-  const isTeam = m.compKind === "team";
+  // Canonical team check (matches admin_pools.jsx and the lineup panel):
+  // compKind OR a positive teamSize. A team competition created with only
+  // teamSize set (compKind empty) must still route to TeamScoreEditorModal,
+  // and pool-daihyosen rows (compMatches forces compKind="" AND teamSize=0)
+  // correctly stay on the individual editor.
+  const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
   const teamSize = m.teamSize || 5;
   if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} />;
 
@@ -1161,6 +1166,42 @@ function renderPositionLabel(label) {
   return label;
 }
 
+// mp-bkg regression guard: exported so vitest can test the fallback
+// logic without mounting the component. Calls the two API functions
+// supplied as arguments (injected for testing), resolves to the
+// per-match lineup when it exists, falling back to the round lineup
+// when the match-specific GET returns null (404).
+// Both API calls are soft-fail: a network error on the per-match
+// endpoint falls through to the round endpoint; a network error on
+// the round endpoint is swallowed (same behaviour as the pre-mp-bkg
+// round-only path).
+async function resolveMatchLineup(compId, teamId, matchId, round, { fetchMatchLineup, fetchTeamLineup }) {
+  try {
+    const matchLineup = await fetchMatchLineup(compId, teamId, matchId);
+    if (matchLineup !== null) return matchLineup;
+  } catch (_e) { /* network: fall through */ }
+  try {
+    return await fetchTeamLineup(compId, teamId, round);
+  } catch (_e) { /* 404 / network: ignore */ }
+  return null;
+}
+
+// resolveLineupTeamId maps a match-side key to the participant id that
+// lineups are actually stored under. A match side's `id` is the team NAME
+// (api_serializers.buildPlayerMap sets id = name), but TeamLineups are
+// keyed server-side by the participant's real id (a UUID — the value
+// teamIdOf() returns from comp.players). Passing the name straight through
+// makes the lineup GET 404, so the per-match (and round) lineup never
+// reaches the scoring grid. We look the side up in the competition's
+// participant list by id OR name and return its real id. Exported for tests.
+function resolveLineupTeamId(sideKey, players) {
+  if (!sideKey) return "";
+  const list = Array.isArray(players) ? players : [];
+  const p = list.find(pl => pl
+    && (pl.id === sideKey || pl.ID === sideKey || pl.name === sideKey || pl.Name === sideKey));
+  return (p && (p.id || p.ID)) || sideKey;
+}
+
 function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password }) {
   const m = match;
   const isComplete = m.status === "completed";
@@ -1227,24 +1268,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   useEffectA(() => {
     let cancelled = false;
     if (!m.compId) return;
-    // Competition detail for teamMatchType + format. We don't need the
-    // full payload — just the config fields. fetchCompetitionDetails
-    // already exists and is cheap.
-    (async () => {
-      try {
-        const detail = await window.API.fetchCompetitionDetails(m.compId);
-        if (cancelled) return;
-        setCompMeta(detail || null);
-      } catch (e) {
-        // Soft-fail: kachinuki/daihyosen UI just won't render.
-        console.warn("Competition fetch for team modal failed:", e);
-      }
-    })();
-    // Lineups for both teams. compMatches injects m.round as a string
-    // label ("Round 2", "Quarterfinals", ...) — for bracket matches we
-    // extract the numeric index from "Round N" when possible. Pool
-    // matches don't have a per-round lineup in the current model, so
-    // we fall back to round 0 (matches the first set of bouts).
+    // compMatches injects m.round as a string label ("Round 2",
+    // "Quarterfinals", ...) — for bracket matches we extract the numeric
+    // index from "Round N" when possible. Pool matches don't have a
+    // per-round lineup in the current model, so we fall back to round 0.
     // TODO(T131): plumb a numeric round through compMatches so this
     // lookup is exact for every phase / label.
     let round = 0;
@@ -1254,18 +1281,45 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     } else if (typeof m.round === "number") {
       round = m.round;
     }
-    const sideAId = m.sideA?.id || (typeof m.sideA === "string" ? m.sideA : "");
-    const sideBId = m.sideB?.id || (typeof m.sideB === "string" ? m.sideB : "");
-    if (sideAId) {
-      window.API.fetchTeamLineup(m.compId, sideAId, round).then(l => {
+    // Side keys are NAME-keyed (api_serializers.buildPlayerMap sets id =
+    // name); lineups are stored under the participant's real id (UUID).
+    const sideAKey = m.sideA?.id || m.sideA?.name || (typeof m.sideA === "string" ? m.sideA : "");
+    const sideBKey = m.sideB?.id || m.sideB?.name || (typeof m.sideB === "string" ? m.sideB : "");
+    (async () => {
+      // Competition detail for teamMatchType + format AND the participant
+      // list used to map the name-keyed sides to their real lineup ids.
+      // fetchCompetitionDetails already exists and is cheap.
+      let detail = null;
+      try {
+        detail = await window.API.fetchCompetitionDetails(m.compId);
+        if (cancelled) return;
+        setCompMeta(detail || null);
+      } catch (e) {
+        // Soft-fail: kachinuki/daihyosen UI just won't render.
+        console.warn("Competition fetch for team modal failed:", e);
+      }
+      // mp-bkg: prefer per-match lineup (GET match-lineups/:matchId); fall
+      // back to round lineup when no per-match entry exists (404 → null →
+      // round lookup). Map the name-keyed side to the participant id the
+      // lineup is stored under first — otherwise every GET 404s.
+      // The detail payload carries participants under config.players; the
+      // top-level players array is often an empty (but truthy) [] in this
+      // shape, so prefer whichever list is non-empty.
+      const players =
+        (detail && detail.players && detail.players.length ? detail.players : null)
+        || (detail && detail.config && detail.config.players)
+        || [];
+      const teamAId = resolveLineupTeamId(sideAKey, players);
+      const teamBId = resolveLineupTeamId(sideBKey, players);
+      if (teamAId) {
+        const l = await resolveMatchLineup(m.compId, teamAId, m.id, round, window.API);
         if (!cancelled) setLineupA(l);
-      }).catch(() => { /* 404 / network: ignore */ });
-    }
-    if (sideBId) {
-      window.API.fetchTeamLineup(m.compId, sideBId, round).then(l => {
+      }
+      if (teamBId) {
+        const l = await resolveMatchLineup(m.compId, teamBId, m.id, round, window.API);
         if (!cancelled) setLineupB(l);
-      }).catch(() => { /* 404 / network: ignore */ });
-    }
+      }
+    })();
     return () => { cancelled = true; };
   }, [m.compId, m.id]);
 
@@ -2038,4 +2092,6 @@ export {
   applyFusenshoToggle,
   getIpponButtons,
   getValidPointKeys,
+  resolveMatchLineup,
+  resolveLineupTeamId,
 };

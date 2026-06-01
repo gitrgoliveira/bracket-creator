@@ -7,7 +7,9 @@ const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
+const deriveTournamentDays = window.deriveTournamentDays;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
+const MAX_TOURNAMENT_DURATION_DAYS = window.MAX_TOURNAMENT_DURATION_DAYS;
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
 // Canonical courts cap (admin_helpers.jsx) — mirrors helper.MaxCourts
@@ -96,11 +98,46 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [name, setName] = useStateA(tournament.name);
   const [venue, setVenue] = useStateA(tournament.venue);
   const [date, setDate] = useStateA(tournament.date);
+  // DurationDays: default 1 for tournaments that predate this field
+  // (tournament.durationDays is undefined / 0 for older records).
+  const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
   const [courts, setCourts] = useStateA(tournament.courts.length);
   const [checkInStart, setCheckInStart] = useStateA(tournament.checkInWindowStart || "");
   const [checkInEnd, setCheckInEnd] = useStateA(tournament.checkInWindowEnd || "");
+  // Tournament mode (mp-7h7): read-only after creation — shown for
+  // information only and NEVER included in the PUT payload.
+  const tournamentMode = tournament.mode || "officiated";
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
+
+  // Elevated (destructive-ops) password — spec 004 / mp-e21. File mode only;
+  // in locked mode it's the TOURNAMENT_ADMIN_PASSWORD_HASH env var (read-only
+  // here). `elevatedConfigured` decides whether the current-password field is
+  // shown (rotation) vs. a first-time set (TOFU).
+  const elevatedConfigured = authConfig && authConfig.elevatedConfigured === true;
+  const [adminNew, setAdminNew] = useStateA("");
+  const [adminCurrent, setAdminCurrent] = useStateA("");
+  const [adminSaving, setAdminSaving] = useStateA(false);
+
+  const handleSetAdminPassword = async () => {
+    if (!adminNew) { if (showToast) showToast("Enter a new admin password", "error"); return; }
+    setAdminSaving(true);
+    try {
+      await window.API.setAdminPassword(adminNew, adminCurrent, password);
+      setAdminNew(""); setAdminCurrent("");
+      // Refresh auth-config so elevatedConfigured/elevatedRequired reflect the
+      // new state (the gate is now active) for subsequent destructive actions.
+      try {
+        const cfg = await window.API.fetchAuthConfig();
+        if (cfg && typeof cfg === "object") window.setCachedAuthConfig(cfg);
+      } catch (_e) { /* non-fatal */ }
+      if (showToast) showToast("Admin password updated", "success");
+    } catch (e) {
+      if (showToast) showToast(e.message, "error");
+    } finally {
+      setAdminSaving(false);
+    }
+  };
 
   const handleSave = () => {
     // Trim early and send the trimmed value. The empty-name check below
@@ -112,6 +149,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     if (!trimmedName) { setError("Tournament name is required."); return; }
     const { norm, error: dateError } = validateAndNormalizeDate(date);
     if (dateError) { setError(dateError); return; }
+    if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > MAX_TOURNAMENT_DURATION_DAYS) {
+      setError(`Number of days must be a whole number between 1 and ${MAX_TOURNAMENT_DURATION_DAYS}.`);
+      return;
+    }
     if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
     if ((checkInStart && !checkInEnd) || (!checkInStart && checkInEnd)) { setError("Both check-in start and end must be set together, or both must be empty."); return; }
     if (checkInStart && checkInEnd && checkInStart >= checkInEnd) { setError("Check-in start must be before check-in end."); return; }
@@ -120,6 +161,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       name: trimmedName,
       venue: venue.trim(),
       date: norm,
+      durationDays,
       password: pass || undefined,
       courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
       checkInWindowStart: checkInStart || undefined,
@@ -141,14 +183,30 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           <div className="row">
             <div className="field"><label className="field__label">Name</label><input className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} /></div>
             <div className="field">
-              <label className="field__label">Date</label>
+              <label className="field__label">Start date (Day 1)</label>
               {/* Picker bounds mirror AdminSettings's date input in */}
               {/* admin_competition.jsx and the MIN_YEAR/MAX_YEAR range */}
               {/* that validateAndNormalizeDate enforces at handleSave — */}
               {/* keeps the picker from offering years the validator */}
               {/* will then reject on submit. */}
               <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
-              <div className="field__hint">Pick the tournament day.</div>
+              <div className="field__hint">Pick the first day of the tournament.</div>
+            </div>
+            <div className="field">
+              <label className="field__label">Number of days</label>
+              {/* decideNumericUpdate stores NaN for cleared input so render */}
+              {/* side can use Number.isFinite check (same pattern as courts). */}
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max={MAX_TOURNAMENT_DURATION_DAYS}
+                step="1"
+                value={Number.isFinite(durationDays) ? durationDays : ""}
+                onChange={(e) => { setDurationDays(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
+                style={{ maxWidth: 100 }}
+              />
+              <div className="field__hint">{`Duration in days (1–${MAX_TOURNAMENT_DURATION_DAYS}). Multi-day tournaments constrain competitions to their day.`}</div>
             </div>
           </div>
           <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
@@ -172,6 +230,20 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             />
             <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
           </div>
+          {/* Tournament type (mp-7h7): read-only after creation. Displayed
+              for information — it affects the auth boundary (officiated:
+              main password gates everything; self-run: only destructive
+              actions require a password). Never submitted on PUT. */}
+          <div className="field" style={{ marginTop: 16 }}>
+            <label className="field__label">Tournament type</label>
+            <div className="field__hint" style={{ marginTop: 4 }}>
+              <strong>{tournamentMode === "self-run" ? "Self-run" : "Officiated"}</strong>
+              {tournamentMode === "self-run"
+                ? " — Scoring, check-in and other constructive actions are public. Only destructive actions (delete, import, roster changes) require the destructive-ops password."
+                : " — All admin actions require the tournament password."}
+              {" "}This setting was fixed at creation and cannot be changed.
+            </div>
+          </div>
           <div className="row" style={{ marginTop: 16 }}>
             <div className="field">
               <label className="field__label">Check-in start (HH:MM)</label>
@@ -194,6 +266,31 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               <label className="field__label">Admin Password</label>
               <input className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
               <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
+            </div>
+          )}
+          {/* Elevated (destructive-ops) password — spec 004 / mp-e21. */}
+          {locked ? (
+            <div className="field">
+              <label className="field__label">Destructive-ops password</label>
+              <div className="field__hint" style={{ marginTop: 4 }}>
+                This server is in locked mode. The destructive-ops password comes from <code>TOURNAMENT_ADMIN_PASSWORD_HASH</code> and can only be changed by restarting the server with a new hash. If unset, destructive actions (delete competition, discard draw, roster changes, import) return 503.
+              </div>
+            </div>
+          ) : (
+            <div className="field">
+              <label className="field__label">Destructive-ops password {elevatedConfigured ? "(set)" : "(not set)"}</label>
+              {elevatedConfigured && (
+                <input className="input" type="password" value={adminCurrent} onChange={(e) => setAdminCurrent(e.target.value)} placeholder="Current destructive-ops password" autoComplete="off" style={{ marginBottom: 8 }} />
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <input className="input" type="password" value={adminNew} onChange={(e) => setAdminNew(e.target.value)} placeholder={elevatedConfigured ? "New destructive-ops password" : "Set destructive-ops password"} autoComplete="new-password" />
+                <button className="btn" disabled={adminSaving} onClick={handleSetAdminPassword}>
+                  {adminSaving ? "Saving…" : (elevatedConfigured ? "Update" : "Set")}
+                </button>
+              </div>
+              <div className="field__hint">
+                A separate password required for destructive actions (delete competition, discard draw, roster add/edit, import). Leave unset to gate those behind the main password only. {elevatedConfigured && "Changing it requires the current destructive-ops password."}
+              </div>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
@@ -405,12 +502,32 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           <div className="row">
             <div className="field">
-              <label className="field__label">Date</label>
-              {/* Picker bounds match validateAndNormalizeDate at create() — */}
-              {/* see the equivalent comment on AdminEditTournament's date */}
-              {/* field above and AdminSettings's date input in */}
-              {/* admin_competition.jsx. */}
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
+              <label className="field__label">Day</label>
+              {/* When the tournament has a start date and durationDays, offer */}
+              {/* a select over the derived day list so the competition date */}
+              {/* is always within the tournament's range. For a single-day */}
+              {/* tournament (or when the tournament has no date yet) a single- */}
+              {/* option select is shown so the label matches the day. */}
+              {(() => {
+                const days = deriveTournamentDays(tournament.date, tournament.durationDays || 1);
+                if (days.length > 0) {
+                  return (
+                    <select
+                      className="input"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                    >
+                      {days.map((d, i) => (
+                        <option key={d} value={d}>Day {i + 1} — {d}</option>
+                      ))}
+                    </select>
+                  );
+                }
+                // Fallback: tournament has no date yet — free date picker.
+                return (
+                  <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
+                );
+              })()}
               <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">
@@ -634,6 +751,8 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const doImport = async () => {
     if (!files.length) return;
     if (!confirm("Are you sure you want to import these competitions? This will add new competitions to the tournament.")) return;
+    const admin = window.promptAdminPassword();
+    if (admin === null) return;
     setLoading(true);
     setError(null);
     try {
@@ -641,7 +760,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       files.forEach(f => fd.append("files", f, f.webkitRelativePath || f.name));
       // Use the centralized API wrapper (api.jsx) so auth + error handling
       // stay consistent with the rest of the admin UI.
-      const body = await window.API.importCompetitions(fd, password);
+      const body = await window.API.importCompetitions(fd, password, admin);
       // mountedRef gates the post-await setStates so a navigate-back
       // during the upload doesn't fire setResults / setTimeout on a
       // torn-down component. importedTimerRef has its own unmount

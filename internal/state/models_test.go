@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestApplyTournamentDefaults_ZeroValues(t *testing.T) {
@@ -62,6 +63,126 @@ func TestMatchResult_HanteiOmitempty(t *testing.T) {
 		b, err := json.Marshal(mr)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"decidedByHantei":true`)
+	})
+}
+
+// TestSubMatchResult_HanteiRoundTrip pins the wire/storage contract for the
+// per-bout hantei flag the viewer reads (mp-8sw). Unlike MatchResult, the
+// SubMatchResult flag is a plain bool, so omitempty omits it when false and
+// emits it when true — across both the JSON HTTP path and the YAML config.md
+// persistence path.
+func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
+	t.Run("true survives JSON round-trip", func(t *testing.T) {
+		sub := SubMatchResult{Position: -1, DecidedByHantei: true}
+		b, err := json.Marshal(sub)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"decidedByHantei":true`)
+		var got SubMatchResult
+		require.NoError(t, json.Unmarshal(b, &got))
+		assert.True(t, got.DecidedByHantei)
+	})
+	t.Run("false is omitted from JSON", func(t *testing.T) {
+		b, err := json.Marshal(SubMatchResult{Position: 1})
+		require.NoError(t, err)
+		assert.NotContains(t, string(b), "decidedByHantei")
+	})
+	t.Run("true survives YAML round-trip", func(t *testing.T) {
+		sub := SubMatchResult{Position: -1, DecidedByHantei: true}
+		b, err := yaml.Marshal(sub)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), "decided_by_hantei: true")
+		var got SubMatchResult
+		require.NoError(t, yaml.Unmarshal(b, &got))
+		assert.True(t, got.DecidedByHantei)
+	})
+}
+
+// --- Tournament.Days() ---
+
+func TestTournament_Days(t *testing.T) {
+	tests := []struct {
+		name         string
+		date         string
+		durationDays int
+		want         []string
+	}{
+		{
+			name:         "single day",
+			date:         "05-06-2026",
+			durationDays: 1,
+			want:         []string{"05-06-2026"},
+		},
+		{
+			name:         "three days",
+			date:         "05-06-2026",
+			durationDays: 3,
+			want:         []string{"05-06-2026", "06-06-2026", "07-06-2026"},
+		},
+		{
+			name:         "month boundary",
+			date:         "30-06-2026",
+			durationDays: 3,
+			want:         []string{"30-06-2026", "01-07-2026", "02-07-2026"},
+		},
+		{
+			name:         "year boundary",
+			date:         "31-12-2025",
+			durationDays: 2,
+			want:         []string{"31-12-2025", "01-01-2026"},
+		},
+		{
+			name:         "empty date returns nil",
+			date:         "",
+			durationDays: 3,
+			want:         nil,
+		},
+		{
+			name:         "unparseable date returns nil",
+			date:         "not-a-date",
+			durationDays: 1,
+			want:         nil,
+		},
+		{
+			name:         "durationDays zero returns nil",
+			date:         "05-06-2026",
+			durationDays: 0,
+			want:         nil,
+		},
+		{
+			name:         "durationDays negative returns nil",
+			date:         "05-06-2026",
+			durationDays: -1,
+			want:         nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tour := &Tournament{Date: tc.date, DurationDays: tc.durationDays}
+			got := tour.Days()
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestTournament_Days_NilReceiver(t *testing.T) {
+	var tour *Tournament
+	// Must not panic
+	got := tour.Days()
+	assert.Nil(t, got)
+}
+
+// --- ApplyTournamentDefaults DurationDays ---
+
+func TestApplyTournamentDefaults_DurationDays(t *testing.T) {
+	t.Run("zero defaults to 1", func(t *testing.T) {
+		tour := &Tournament{}
+		ApplyTournamentDefaults(tour)
+		assert.Equal(t, 1, tour.DurationDays)
+	})
+	t.Run("non-zero preserved", func(t *testing.T) {
+		tour := &Tournament{DurationDays: 5}
+		ApplyTournamentDefaults(tour)
+		assert.Equal(t, 5, tour.DurationDays)
 	})
 }
 

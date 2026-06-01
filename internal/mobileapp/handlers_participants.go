@@ -11,7 +11,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster) {
+func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster, elevated ElevatedVerifier) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -31,7 +31,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		c.JSON(http.StatusOK, players)
 	})
 
-	r.POST("/competitions/:id/participants", func(c *gin.Context) {
+	r.POST("/competitions/:id/participants", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -219,7 +219,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		c.JSON(http.StatusOK, saved)
 	})
 
-	r.PUT("/competitions/:id/participants/:pid", func(c *gin.Context) {
+	r.PUT("/competitions/:id/participants/:pid", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return

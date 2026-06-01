@@ -99,10 +99,10 @@ func buildKachinukiDetail(m *state.MatchResult, label string, positions map[stri
 		bouts = append(bouts, helper.KachinukiBout{
 			Position:  sub.Position,
 			SideAName: sub.SideA,
-			SideAPos:  positions[lineupKey(m.SideA, sub.SideA)],
+			SideAPos:  resolveKachinukiPosition(positions, m.ID, m.SideA, sub.SideA),
 			ScoreA:    strings.Join(sub.IpponsA, ""),
 			SideBName: sub.SideB,
-			SideBPos:  positions[lineupKey(m.SideB, sub.SideB)],
+			SideBPos:  resolveKachinukiPosition(positions, m.ID, m.SideB, sub.SideB),
 			ScoreB:    strings.Join(sub.IpponsB, ""),
 			Winner:    sub.Winner,
 			Decision:  sub.Decision,
@@ -153,16 +153,27 @@ func tallyKachinukiEliminations(m *state.MatchResult) (a, b int) {
 }
 
 // lineupKey is the composite key used to look up a player's lineup
-// position. Both team name and player name are needed because two teams
-// may field players with the same name in different positions.
+// position from a ROUND-scoped lineup. Both team name and player name
+// are needed because two teams may field players with the same name in
+// different positions.
 func lineupKey(team, player string) string {
 	return team + "\x00" + player
 }
 
+// matchLineupKey is the composite key for a MATCH-scoped lineup
+// position (mp-825): the same player may occupy a different position in
+// successive encounters, so the match ID is part of the key.
+func matchLineupKey(matchID, team, player string) string {
+	return matchID + "\x00" + team + "\x00" + player
+}
+
 // buildKachinukiPositionMap loads team lineups for the competition and
-// flattens them into a (teamName,playerName) → position map. Missing
-// lineups (Slice 7 integration is partial) yield an empty map — positions
-// render as empty strings in that case, the renderer handles it.
+// flattens them into a position lookup. Two namespaces share one map:
+// match-scoped entries (mp-825) keyed by matchLineupKey, and
+// round-scoped (legacy) entries keyed by lineupKey as the fallback.
+// resolveKachinukiPosition consults match-scoped first. Missing lineups
+// yield an empty map — positions render as empty strings, the renderer
+// handles it.
 func (e *Engine) buildKachinukiPositionMap(compID string, comp *state.Competition) map[string]string {
 	out := map[string]string{}
 	if comp == nil {
@@ -178,10 +189,27 @@ func (e *Engine) buildKachinukiPositionMap(compID string, comp *state.Competitio
 			if playerName == "" {
 				continue
 			}
-			out[lineupKey(teamName, playerName)] = formatPositionLabel(pos)
+			label := formatPositionLabel(pos)
+			if lineup.MatchID != "" {
+				out[matchLineupKey(lineup.MatchID, teamName, playerName)] = label
+			} else {
+				out[lineupKey(teamName, playerName)] = label
+			}
 		}
 	}
 	return out
+}
+
+// resolveKachinukiPosition returns the position label for (team, player)
+// in the given match, preferring a match-scoped lineup and falling back
+// to the round-scoped entry.
+func resolveKachinukiPosition(positions map[string]string, matchID, team, player string) string {
+	if matchID != "" {
+		if label, ok := positions[matchLineupKey(matchID, team, player)]; ok {
+			return label
+		}
+	}
+	return positions[lineupKey(team, player)]
 }
 
 // formatPositionLabel turns a domain.Position wire value into a

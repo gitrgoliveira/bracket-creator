@@ -53,7 +53,6 @@ CATEGORIES = [
         "title": "Women 3D and up",
         "csv": "individual_women_3rd_and_above_2026.csv",
         "seeds": "individual_women_3rd_and_above_2026_seeds.csv",
-        "promote_from": "women-up-to-2d-playoffs",
         "zekken": True,
         "number_prefix": "D",
         "startTime": "12:30",
@@ -63,7 +62,6 @@ CATEGORIES = [
         "title": "Men 3D and up",
         "csv": "individual_men_3rd_and_above_2026.csv",
         "seeds": "individual_men_3rd_and_above_2026_seeds.csv",
-        "promote_from": "men-up-to-2d-playoffs",
         "zekken": True,
         "number_prefix": "E",
         "startTime": "13:30",
@@ -172,12 +170,11 @@ def run_competition_setup(cat):
         requests.post(f"{BASE_URL}/api/competitions/{comp_id}/participants",
                              json={"players": participants}, headers=HEADERS).raise_for_status()
 
-    # Link reserved slots — AddReservedSlot creates the placeholder participant automatically.
-    if cat.get('promote_from'):
-        for i in range(1, 3):
-            requests.post(f"{BASE_URL}/api/competitions/{comp_id}/reserved-slots",
-                                 json={"sourceCompID": cat['promote_from'], "sourceRank": i},
-                                 headers=HEADERS).raise_for_status()
+    # NOTE: cross-competition promotion (the old "reserved slots" feature) has
+    # been removed. The only automatic promotion is pools -> playoffs within a
+    # single mixed competition, created via POST /competitions/:id/playoffs.
+    # Promoting winners between separate competitions is now a manual step the
+    # operator performs by adding the resolved players to the target roster.
 
     seeds = parse_seeds(seeds_path)
     if seeds:

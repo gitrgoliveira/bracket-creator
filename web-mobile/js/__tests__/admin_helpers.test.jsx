@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -632,5 +632,61 @@ describe('getScoreBtnClass', () => {
 
   it('returns correct variant for completed matches', () => {
     expect(getScoreBtnClass('completed')).toBe('score-btn score-btn--correct');
+  });
+});
+
+describe('deriveTournamentDays', () => {
+  // This mirrors Tournament.Days() in internal/state/models.go. These cases
+  // guard against frontend/backend drift in day derivation (mp-ehf).
+  it('single day → one entry equal to the start date', () => {
+    expect(deriveTournamentDays('05-06-2026', 1)).toEqual(['05-06-2026']);
+  });
+
+  it('multi-day → contiguous DD-MM-YYYY list starting at Day 1', () => {
+    expect(deriveTournamentDays('05-06-2026', 3)).toEqual(['05-06-2026', '06-06-2026', '07-06-2026']);
+  });
+
+  it('rolls over month boundary', () => {
+    expect(deriveTournamentDays('30-06-2026', 3)).toEqual(['30-06-2026', '01-07-2026', '02-07-2026']);
+  });
+
+  it('rolls over year boundary', () => {
+    expect(deriveTournamentDays('31-12-2026', 2)).toEqual(['31-12-2026', '01-01-2027']);
+  });
+
+  it('handles leap-year February correctly', () => {
+    // 2028 is a leap year: 28 Feb → 29 Feb → 1 Mar.
+    expect(deriveTournamentDays('28-02-2028', 3)).toEqual(['28-02-2028', '29-02-2028', '01-03-2028']);
+  });
+
+  it('normalizes a non-canonical (ISO) start date before deriving', () => {
+    // normalizeDate accepts ISO and converts to DD-MM-YYYY.
+    expect(deriveTournamentDays('2026-06-05', 2)).toEqual(['05-06-2026', '06-06-2026']);
+  });
+
+  it('derives across the full supported duration cap', () => {
+    const days = deriveTournamentDays('01-01-2026', MAX_TOURNAMENT_DURATION_DAYS);
+    expect(days).toHaveLength(MAX_TOURNAMENT_DURATION_DAYS);
+    expect(days[0]).toBe('01-01-2026');
+    expect(days[MAX_TOURNAMENT_DURATION_DAYS - 1]).toBe('30-01-2026');
+  });
+
+  it('returns [] for empty / missing start date', () => {
+    expect(deriveTournamentDays('', 3)).toEqual([]);
+    expect(deriveTournamentDays(null, 3)).toEqual([]);
+    expect(deriveTournamentDays(undefined, 3)).toEqual([]);
+  });
+
+  it('returns [] for an unparseable start date', () => {
+    expect(deriveTournamentDays('not-a-date', 3)).toEqual([]);
+    expect(deriveTournamentDays('31-02-2026', 3)).toEqual([]); // Feb 31 invalid
+  });
+
+  it('returns [] for invalid durations', () => {
+    expect(deriveTournamentDays('05-06-2026', 0)).toEqual([]);
+    expect(deriveTournamentDays('05-06-2026', -1)).toEqual([]);
+    expect(deriveTournamentDays('05-06-2026', 1.5)).toEqual([]); // non-integer
+    expect(deriveTournamentDays('05-06-2026', NaN)).toEqual([]);
+    expect(deriveTournamentDays('05-06-2026', '3')).toEqual([]); // non-number
   });
 });

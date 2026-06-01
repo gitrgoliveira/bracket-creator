@@ -14,6 +14,35 @@ type Tournament struct {
 	Courts   []string `yaml:"courts" json:"courts"`
 	Password string   `yaml:"password" json:"password"`
 
+	// DurationDays is the number of consecutive calendar days this
+	// tournament spans, starting from Date (Day 1). Default 1 (single-day).
+	// Maximum 30. Use Days() to obtain the derived per-day DD-MM-YYYY list.
+	//
+	// omitempty drops the field only when the value is 0 (Go's zero value),
+	// never when it is 1 — so tournaments saved by this code always persist
+	// an explicit duration_days. The omitempty matters in the reverse
+	// direction: legacy tournament.md files predating this field carry no
+	// duration_days key, so they deserialize to 0 and are migrated to 1 by
+	// the load path (and ApplyTournamentDefaults).
+	DurationDays int `yaml:"duration_days,omitempty" json:"durationDays,omitempty"`
+
+	// AdminPassword gates destructive operations (spec 004 / mp-e21):
+	// competition delete, draw/override/invalidate, and participant roster
+	// mutations. It is a SEPARATE, higher-privilege credential from
+	// Password (which gates the API as a whole).
+	//
+	// CRITICAL: it is WRITE-ONLY at the API boundary — `json:"-"` means it
+	// is never emitted in any response AND never populated by binding a
+	// request body into a Tournament. That is the opposite of Password
+	// (which is a peer of the credential gating /tournament, so returning
+	// it is harmless). AdminPassword is HIGHER privilege than that gate, so
+	// leaking it via GET — or letting a main-password holder overwrite it
+	// via the bulk PUT — would collapse the separation. It is set only via
+	// the dedicated, elevated-gated PUT /api/auth/admin-password handler.
+	// File mode only; in locked mode the env-var bcrypt hash is
+	// authoritative and any on-disk value here is inert.
+	AdminPassword string `yaml:"admin_password,omitempty" json:"-"`
+
 	// Ceremony blocks expressed as human duration strings (e.g. "30m",
 	// "1h"). When set, the auto-scheduler reserves a contiguous range
 	// at the appropriate point in the day and skips match slots that
@@ -40,11 +69,43 @@ type Tournament struct {
 	// after the window closes.
 	CheckInWindowStart string `yaml:"check_in_window_start,omitempty" json:"checkInWindowStart,omitempty"`
 	CheckInWindowEnd   string `yaml:"check_in_window_end,omitempty" json:"checkInWindowEnd,omitempty"`
+
+	// Mode selects the auth posture for the whole tournament, chosen at
+	// creation and IMMUTABLE thereafter (mp-7h7). "officiated" (default)
+	// gates the full admin surface behind X-Tournament-Password.
+	// "self-run" inverts the boundary: constructive actions (scoring,
+	// check-in, start/complete) are public; only destructive actions
+	// (those already gated by RequireElevatedPassword / enforceElevated)
+	// still require X-Admin-Password. omitempty means older tournament.md
+	// files (Mode == "") normalise to "officiated" via ApplyTournamentDefaults.
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+}
+
+// Tournament mode constants (mp-7h7).
+const (
+	TournamentModeOfficiated = "officiated" // default: main-gate on all admin routes
+	TournamentModeSelfRun    = "self-run"   // main-gate skipped; elevated gate stays
+)
+
+// ValidateTournamentMode reports whether the given mode value is acceptable.
+// Empty string is treated as "officiated" (backward compatibility). Only
+// the two defined constants are accepted; any other value returns an error.
+func ValidateTournamentMode(mode string) error {
+	switch mode {
+	case "", TournamentModeOfficiated, TournamentModeSelfRun:
+		return nil
+	default:
+		return fmt.Errorf("unknown tournament mode %q (expected %q or %q)",
+			mode, TournamentModeOfficiated, TournamentModeSelfRun)
+	}
 }
 
 // ApplyTournamentDefaults fills zero-valued schedule-estimator tuning
-// fields on t with their canonical defaults: ClockToElapsedMultiplier=1.5
-// and SlowestCourtBufferPct=10. Idempotent; safe to call repeatedly.
+// fields on t with their canonical defaults: ClockToElapsedMultiplier=1.5,
+// SlowestCourtBufferPct=10, and DurationDays=1. Idempotent; safe to call
+// repeatedly.
+// Also normalizes empty Mode to TournamentModeOfficiated so that
+// tournament.md files predating mp-7h7 behave as officiated tournaments.
 // FR-055, FR-057, R9.
 func ApplyTournamentDefaults(t *Tournament) {
 	if t == nil {
@@ -56,29 +117,67 @@ func ApplyTournamentDefaults(t *Tournament) {
 	if t.SlowestCourtBufferPct == 0 {
 		t.SlowestCourtBufferPct = 10
 	}
+	if t.DurationDays == 0 {
+		t.DurationDays = 1
+	}
+	if t.Mode == "" {
+		t.Mode = TournamentModeOfficiated
+	}
+}
+
+// Days returns the ordered list of DD-MM-YYYY calendar day strings
+// covered by the tournament, derived from Date + DurationDays. The list
+// has exactly DurationDays entries (Day 1 = Date, Day 2 = Date+1, …).
+//
+// Edge cases — never panics:
+//   - If Date is empty or unparseable, returns nil (no day list available).
+//   - If DurationDays < 1, returns nil.
+//
+// Consumers should call ApplyTournamentDefaults before Days() to ensure
+// DurationDays has its correct minimum of 1.
+func (t *Tournament) Days() []string {
+	if t == nil || t.DurationDays < 1 || t.Date == "" {
+		return nil
+	}
+	base, err := time.Parse("02-01-2006", t.Date)
+	if err != nil {
+		return nil
+	}
+	days := make([]string, t.DurationDays)
+	for i := range days {
+		days[i] = base.AddDate(0, 0, i).Format("02-01-2006")
+	}
+	return days
 }
 
 type Competition struct {
-	ID                   string            `yaml:"id" json:"id"`
-	Name                 string            `yaml:"name" json:"name"`
-	Kind                 string            `yaml:"kind" json:"kind"`
-	Format               string            `yaml:"format" json:"format"`
-	PoolFormat           string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
-	TeamSize             int               `yaml:"team_size" json:"teamSize"`
-	PoolSize             int               `yaml:"pool_size" json:"poolSize"`
-	PoolSizeMode         string            `yaml:"pool_size_mode" json:"poolSizeMode"`
-	PoolWinners          int               `yaml:"pool_winners" json:"poolWinners"`
-	RoundRobin           bool              `yaml:"round_robin" json:"roundRobin"`
-	Courts               []string          `yaml:"courts" json:"courts"`
-	StartTime            string            `yaml:"start_time" json:"startTime"`
-	Date                 string            `yaml:"date" json:"date"`
-	Status               CompetitionStatus `yaml:"status" json:"status"`
-	Mirror               bool              `yaml:"mirror" json:"mirror"`
-	WithZekkenName       bool              `yaml:"with_zekken_name" json:"withZekkenName"`
-	NumberPrefix         string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
-	HasParticipantIDs    bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
-	PoolMatchDuration    int               `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
-	PlayoffMatchDuration int               `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+	ID                string            `yaml:"id" json:"id"`
+	Name              string            `yaml:"name" json:"name"`
+	Kind              string            `yaml:"kind" json:"kind"`
+	Format            string            `yaml:"format" json:"format"`
+	PoolFormat        string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
+	TeamSize          int               `yaml:"team_size" json:"teamSize"`
+	PoolSize          int               `yaml:"pool_size" json:"poolSize"`
+	PoolSizeMode      string            `yaml:"pool_size_mode" json:"poolSizeMode"`
+	PoolWinners       int               `yaml:"pool_winners" json:"poolWinners"`
+	RoundRobin        bool              `yaml:"round_robin" json:"roundRobin"`
+	Courts            []string          `yaml:"courts" json:"courts"`
+	StartTime         string            `yaml:"start_time" json:"startTime"`
+	Date              string            `yaml:"date" json:"date"`
+	Status            CompetitionStatus `yaml:"status" json:"status"`
+	Mirror            bool              `yaml:"mirror" json:"mirror"`
+	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
+	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
+	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
+	// SourceCompID links a playoffs competition back to the mixed
+	// (Pools + Knockout) competition whose pool winners seed it. Set by
+	// POST /competitions/:id/playoffs. When non-empty, the playoffs comp
+	// starts with an empty roster on disk; StartCompetition resolves the
+	// source's final pool winners into the roster at draw time (see
+	// engine.resolvePoolWinners). Empty for all other competitions.
+	SourceCompID         string `yaml:"source_comp_id,omitempty" json:"sourceCompID,omitempty"`
+	PoolMatchDuration    int    `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
+	PlayoffMatchDuration int    `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
 	// MaxEnchoPeriods caps how many encho (overtime) periods one match
 	// may run before the operator must call daihyosen. Zero means
 	// unlimited (FIK general default). T104, CHK029.
@@ -402,15 +501,6 @@ type BracketMatch struct {
 
 type Bracket struct {
 	Rounds [][]BracketMatch `json:"rounds"`
-}
-
-// ReservedSlot represents a placeholder participant that will be resolved to
-// the actual player who achieves a given rank in another competition.
-type ReservedSlot struct {
-	ID            string `json:"id"`            // unique slot ID
-	ParticipantID string `json:"participantID"` // ID of the placeholder in participants.csv
-	SourceCompID  string `json:"sourceCompID"`
-	SourceRank    int    `json:"sourceRank"`
 }
 
 type Announcement struct {

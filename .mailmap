@@ -1,0 +1,9 @@
+# Canonicalize author/committer identity to the sole copyright holder's
+# personal identity. Some earlier commits were inadvertently made with a work
+# email due to a misconfigured local Git identity; this project is independent,
+# personal-capacity work. See the License section in README.md.
+#
+# Format: Canonical Name <canonical-email> <commit-email>
+Ricardo Oliveira <oliveira.rg@gmail.com> <ricardo@hashicorp.com>
+Ricardo Oliveira <oliveira.rg@gmail.com> <17067463+gitrgoliveira@users.noreply.github.com>
+Ricardo Oliveira <oliveira.rg@gmail.com> <oliveira.rg@gmail.com>

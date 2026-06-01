@@ -61,12 +61,32 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 
 	var t Tournament
 	if err := parseFrontMatter(data, &t); err != nil {
-		// If it's not a front-matter file, return a default tournament
+		// If it's not a front-matter file, return a default tournament with
+		// well-known field values. ApplyTournamentDefaults below will
+		// normalise any remaining zero-valued fields (Mode, schedule tuning).
 		t = Tournament{
 			Name:  "New Tournament",
 			Date:  time.Now().Format("02-01-2006"),
 			Venue: "Venue TBA",
 		}
+	}
+	// Apply canonical defaults for both the successful-parse and fallback
+	// branches so the returned tournament is always fully normalised:
+	// Mode="officiated", DurationDays=1, ClockToElapsedMultiplier=1.5,
+	// SlowestCourtBufferPct=10. ApplyTournamentDefaults is idempotent and
+	// safe to call even when the fields already carry explicit values.
+	// Fix 3332701952: previously only the successful-parse branch called
+	// this, leaving the fallback tournament with Mode=="" and zero schedule
+	// fields that would omit mode from JSON responses.
+	ApplyTournamentDefaults(&t)
+
+	// Normalize any unknown/invalid Mode value that may have been written to
+	// tournament.md outside the API (e.g. a manual edit). ApplyTournamentDefaults
+	// handles the empty-string case (→ "officiated"); this guard handles non-empty
+	// but unsupported values. Fix 3332772433: prevents unknown strings from leaking
+	// into JSON responses and violating the enum contract.
+	if t.Mode != TournamentModeOfficiated && t.Mode != TournamentModeSelfRun {
+		t.Mode = TournamentModeOfficiated
 	}
 
 	s.cachedTourn = &t
@@ -186,15 +206,21 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 	if data, rerr := os.ReadFile(path); rerr == nil { // #nosec G304
 		var t Tournament
 		if perr := parseFrontMatter(data, &t); perr == nil {
+			if t.DurationDays == 0 {
+				// Migrate: a legacy file with no duration_days key
+				// deserialises to the zero value (0) — treat as 1.
+				t.DurationDays = 1
+			}
 			current = &t
 		} else {
 			// Parse failure: fall back to the same default record
 			// LoadTournament constructs, so transform's view is
 			// consistent.
 			current = &Tournament{
-				Name:  "New Tournament",
-				Date:  time.Now().Format("02-01-2006"),
-				Venue: "Venue TBA",
+				Name:         "New Tournament",
+				Date:         time.Now().Format("02-01-2006"),
+				Venue:        "Venue TBA",
+				DurationDays: 1,
 			}
 		}
 	} else if !os.IsNotExist(rerr) {

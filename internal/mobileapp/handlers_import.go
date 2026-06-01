@@ -53,8 +53,8 @@ type ImportResult struct {
 	Error            string `json:"error,omitempty"`
 }
 
-func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
-	r.POST("/tournament/import", func(c *gin.Context) {
+func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, elevated ElevatedVerifier) {
+	r.POST("/tournament/import", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		if err := c.Request.ParseMultipartForm(64 << 20); err != nil { // 64 MB limit
 			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse multipart form: " + err.Error()})
 			return
@@ -196,6 +196,21 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// missing-id / invalid-id / save-error patterns — doesn't HTTP-fail
 	// the batch.
 	if err := validateDateDMY(comp.Date); err != nil {
+		res.Error = err.Error()
+		return res
+	}
+
+	// Cross-file guard symmetry with POST/PUT /competitions: reject a
+	// competition date that falls outside the tournament's day range.
+	// Load the tournament once per row; the cost is a file stat + cache
+	// hit after the first row. Failures are soft (res.Error, not HTTP
+	// abort) matching all other per-row validation patterns.
+	importTourn, importTournErr := store.LoadTournament()
+	if importTournErr != nil {
+		res.Error = "load tournament: " + importTournErr.Error()
+		return res
+	}
+	if err := validateCompetitionDateInTournament(comp, importTourn); err != nil {
 		res.Error = err.Error()
 		return res
 	}

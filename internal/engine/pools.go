@@ -91,7 +91,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	}
 	state.ApplyTournamentDefaults(tournament)
 	state.ApplyCompetitionDefaults(comp)
-	results = assignPoolMatchSlots(results, comp, tournament)
+	results, _ = assignPoolMatchSlots(results, comp, tournament)
 
 	return e.store.SavePoolMatches(comp.ID, results)
 }

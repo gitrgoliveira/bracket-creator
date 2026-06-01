@@ -72,7 +72,56 @@ In locked mode:
 - Rotating the credential requires restarting the server with a new hash; the runtime never reads the env var twice.
 - If `--lock-password` is set but `TOURNAMENT_PASSWORD_HASH` is empty or malformed, the server **refuses to start** — fail-closed, so a misconfigured deployment can't silently fall through to file mode.
 
-The public `GET /api/auth-config` endpoint reports `{mode: "file"|"locked", resetEnabled: bool}` so SPAs and external monitoring can see the active mode without authenticating.
+The public `GET /api/auth-config` endpoint reports `{mode: "file"|"locked", resetEnabled: bool, elevatedRequired: bool, elevatedConfigured: bool, elevatedEditable: bool}` so SPAs and external monitoring can see the active mode (and whether the destructive-ops password gate is active) without authenticating.
+
+### Destructive-ops password (second password)
+
+You can require a **second, separately-held password** for destructive
+actions, so that table staff who hold the main password can run matches and
+check-in without being able to destroy data. The gate covers:
+
+- Delete a competition; mark a competition invalid.
+- Discard a generated draw; reset rank/winner overrides.
+- Add, edit, or replace participants; import competitions from a folder.
+
+It does **not** cover routine operations (scoring, decisions, check-in,
+starting/finishing competitions, lineups) or the `/reset` recovery path.
+When a gated action is triggered the admin UI prompts for the destructive-ops
+password each time (no session is cached); the value is sent in an
+`X-Admin-Password` header alongside the main `X-Tournament-Password`.
+
+**File mode.** Set or change it from **Admin → Edit details → Destructive-ops
+password**. The current value is never displayed (write-only) and is stored in
+`tournament-data/tournament.md` under `admin_password`. Changing it once set
+requires entering the current destructive-ops password. While unset, the
+feature is off and destructive actions are gated by the main password only —
+so existing file-mode deployments are unaffected until you opt in.
+
+**Locked mode.** The destructive-ops password is the bcrypt hash in the
+`TOURNAMENT_ADMIN_PASSWORD_HASH` env var (the elevated-credential analogue of
+`TOURNAMENT_PASSWORD_HASH`); it is **not** editable from the UI. Generate it
+the same way:
+
+```bash
+printf '%s' "$MY_DESTRUCTIVE_OPS_SECRET" | bracket-creator hash-password
+TOURNAMENT_PASSWORD_HASH='$2a$10$...main...' \
+  TOURNAMENT_ADMIN_PASSWORD_HASH='$2a$10$...destructive...' \
+  bracket-creator mobile-app --lock-password -f ./tournament-data
+```
+
+> **Locked-mode behavior change.** In locked mode the destructive-ops gate is
+> **always active and fail-closed**: if `TOURNAMENT_ADMIN_PASSWORD_HASH` is
+> unset (or malformed), the gated endpoints return **503 "admin password not
+> configured"** rather than allowing the action with the main password alone.
+> A malformed/empty hash does **not** prevent startup — the server boots and
+> only the destructive endpoints 503 — so set the env var if your operators
+> need to delete competitions or edit rosters on a locked deployment.
+
+**Scope of protection.** This is a privilege-separation speed bump for
+shared-credential operation, not a network-security control. Over plain HTTP
+(the common LAN default) both passwords travel in cleartext; anyone with
+filesystem access to `tournament.md` reads both in file mode. For a real
+network boundary, run behind TLS and/or `--lock-password`.
 
 ### Operational notes
 
@@ -154,7 +203,7 @@ State is stored as plain files in the data folder:
 
 ```
 tournament-data/
-  tournament.md                 ← YAML: name, date, venue, courts, password
+  tournament.md                 ← YAML: name, date, venue, courts, password, admin_password
   competitions/
     <id>/
       config.md                 ← YAML: kind, format, pool settings, courts, …

@@ -5199,7 +5199,8 @@ button.my-match__opp {
   .dot--live,
   .spinner,
   .toast,
-  .decision-prompt {
+  .decision-prompt,
+  .announcement-banner {
     animation: none;
   }
   .bc-match {
@@ -5207,10 +5208,51 @@ button.my-match__opp {
   }
 }
 
-/* Announcement Banner - Feature mp-h60 */
+/* Announcement overlay - Feature mp-udb */
+/* Fixed-position container stacks all active announcement cards in the top-right
+   corner. pointer-events:none on the container means empty space never blocks
+   bracket/score affordances behind it; each card re-enables pointer events.
+   z-index 900 sits ABOVE normal viewer chrome (max 500) but BELOW the modal
+   layer (.modal-backdrop dialogs at 1000) so open dialogs stay modal and are
+   never obscured by announcement cards. */
+@keyframes announcement-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.announcement-overlay {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 360px;
+  width: calc(100vw - 32px);
+  /* Cap to the viewport and scroll when the stack is tall. The store allows
+     up to maxActiveAnnouncements (10) active at once; without a height cap the
+     lower cards (and their dismiss buttons) would fall below a short/landscape
+     viewport and be unreachable. dvh tracks mobile browser chrome; vh is the
+     fallback. overscroll-behavior:contain stops the page behind from scrolling
+     when the overlay reaches its end. The container shrinks to content height
+     when the stack is short, so click-through below the last card is preserved. */
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* Announcement Banner card - Feature mp-h60 / mp-udb */
 .announcement-banner {
-  position: relative;
-  width: 100%;
   background: linear-gradient(135deg, #d97706, #b45309);
   color: #ffffff;
   padding: 10px 16px;
@@ -5218,10 +5260,12 @@ button.my-match__opp {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1001;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
   font-family: inherit;
   box-sizing: border-box;
+  pointer-events: auto;
+  animation: announcement-slide-in 0.22s ease-out;
 }
 
 .announcement-banner__content {
@@ -5290,4 +5334,15 @@ button.my-match__opp {
 .announcement-banner__dismiss:hover {
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
+}
+
+@media (max-width: 480px) {
+  .announcement-overlay {
+    top: 8px;
+    right: 8px;
+    width: calc(100vw - 16px);
+    max-width: none;
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
 }

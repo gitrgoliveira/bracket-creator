@@ -196,9 +196,21 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // succession (AdminParticipants.apply) or a "Last saved 13:45:22"
   // stamp on a failed save (AdminSettings.saveNow).
   const updateCompetition = async (cid, next) => {
+    // Elevated-password gate (spec 004 / mp-e21). This PUT doubles as the
+    // SPA's primary roster writer: a non-null `players` payload makes the
+    // server persist participants/seeds, which is a destructive op. Prompt
+    // for the admin password here (centrally) only when the payload carries
+    // a roster mutation — settings-only saves omit `players` and stay
+    // single-factor. promptAdminPassword returns "" when the gate is
+    // inactive (proceed) and null when cancelled/not-configured (abort).
+    let admin = "";
+    if (next && next.players != null) {
+      admin = window.promptAdminPassword();
+      if (admin === null) return;
+    }
     let updated;
     try {
-      updated = await window.API.updateCompetition(cid, next, password);
+      updated = await window.API.updateCompetition(cid, next, password, admin);
     } catch (e) {
       showToast(e.message, "error");
       throw e;
@@ -626,7 +638,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       poolMatches={detail?.poolMatches}
       standings={detail?.standings}
       bracket={detail?.bracket}
-      reservedSlots={detail?.reservedSlots || []}
       section={view.section}
       onSection={(section) => setView({ ...view, section })}
       onBack={() => setView({ kind: "dashboard" })}

@@ -64,8 +64,11 @@ const isPoolDaihyosenID = id => id.includes('-DH-');
 function compMatches(c) {
   const out = [];
 
-  // Setup/draw-ready/empty status: no public data yet — draw is admin-only preview
-  if (!c.status || c.status === "setup" || c.status === "draw-ready") return out;
+  // Setup status: no public data yet — draw is admin-only preview.
+  // draw-ready is allowed through: pool/bracket structure is already
+  // persisted and returned by handlers_viewer.go unconditionally, so
+  // spectators can see the pool draw before the first match is called.
+  if (!c.status || c.status === "setup") return out;
 
   const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
@@ -96,8 +99,13 @@ function compMatches(c) {
 }
 
 function tournamentMatches(t) {
+  // draw-ready comps contribute their (unscored) draw matches so the
+  // "Find my matches" / watchlist / full-schedule views can surface a
+  // spectator's upcoming bout once the draw is published. These never
+  // appear in the home LIVE/Up-next strips: those gate on liveCompIds,
+  // which excludes draw-ready (a draw-ready comp is not live).
   return (t.competitions || [])
-    .filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready")
+    .filter(c => c.status && c.status !== "setup")
     .flatMap(compMatches);
 }
 
@@ -334,6 +342,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
+  // Live-comp set: gates the home LIVE NOW / Up-next strips and the live dot.
+  // BOTH setup and draw-ready are excluded — a draw-ready comp has a published
+  // draw but no match has been called, so it is NOT live. (The competition
+  // detail view still shows its Pools/Bracket tabs; that is governed separately
+  // by isPreStart in ViewerCompetition.)
   const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
   // Apply hasBothSides here too — pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
@@ -414,6 +427,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             onMatchClick={setSelectedMatch}
           />
 
+          {/* mp-cw1: Browser push notification opt-in toggle. */}
+          <NotificationSettings />
+
           {live.length > 0 && (
             <div className="hero-live">
               <div className="hero-live__lbl"><span className="dot dot--live"></span> LIVE NOW · {pluralize(live.length, "match", "matches")}</div>
@@ -468,6 +484,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                         </div>
                         <StatusBadge status={c.status} showLiveDot />
                       </div>
+                      {/* Progress bar: deliberately excludes draw-ready too.
+                          A draw-ready comp has 0 done / 0 live, so the bar
+                          would read "0 / N" at 0% — a misleading "in progress"
+                          signal. The StatusBadge already communicates the
+                          draw-ready state; the bar appears once play begins. */}
                       {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                         <div className="vlist-item__progress">
                           <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
@@ -617,6 +638,18 @@ export function mymatchQueueLabel(m) {
   if (!Number.isFinite(qp) || qp <= 0) return null;
   if (qp === 1) return "Next up";
   return `${qp - 1} before yours`;
+}
+
+// subBoutLabel — center label for a team sub-bout row. The daihyosen
+// (representative bout) is stored with the sentinel position -1 (see
+// admin_scoring_modal.jsx buildPatch); render it as "Daihyosen" (matching
+// admin_pools.jsx wording) rather than the literal "Match -1" the
+// `position || index+1` fallback would otherwise produce. Shared by both
+// viewer sub-row sites (MatchDetailCard, MatchViewerModal). Exported for
+// unit-testing.
+export function subBoutLabel(sub, index) {
+  if (sub && sub.position === -1) return "Daihyosen";
+  return `Match ${(sub && sub.position) || index + 1}`;
 }
 
 // MyMatchPanel — "Find my matches" entry point + active "Your next match"
@@ -1116,25 +1149,47 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   );
 }
 
-function ViewerCompetition({ _tournament, competition, pools, poolMatches, standings, bracket, onBack, _onAdminClick, tweaks }) {
+function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, tweaks }) {
   const [tab, setTab] = useState("overview");
   const c = competition;
+
+  // Phase 2 (mp-rrd) — link a pools/mixed comp to its separate playoffs comp
+  // and vice-versa. A mixed tournament is TWO competitions: the pools/mixed
+  // comp (holds the pools) and a playoffs comp created via POST /playoffs that
+  // carries a `sourceCompID` back-reference. Surface a one-tap affordance so a
+  // spectator landing on one can jump to the other under the same tournament.
+  const linkedComp = useMemo(() => {
+    const all = (tournament && tournament.competitions) || [];
+    // This comp IS a playoffs comp → link to its source pools/mixed comp.
+    if (c.sourceCompID) {
+      const src = all.find(x => x.id === c.sourceCompID);
+      if (src) return { comp: src, role: "pools" };
+    }
+    // This comp is a pools/mixed comp → link to the playoffs comp that
+    // references it (if one has been created yet).
+    const playoffs = all.find(x => x.sourceCompID === c.id);
+    if (playoffs) return { comp: playoffs, role: "playoffs" };
+    return null;
+  }, [tournament, c.id, c.sourceCompID]);
 
   const allMatches = useMemo(() => {
     const out = [];
     if (pools) {
         pools.forEach((p) => {
             const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
-            matches.forEach((m) => out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName }));
+            matches.forEach((m) => {
+                const isDH = isPoolDaihyosenID(m.id || "");
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+            });
         });
     }
     if (bracket && bracket.rounds) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length) }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), compKind: c.kind, teamSize: c.teamSize }));
         });
     }
     return out;
-  }, [pools, poolMatches, bracket]);
+  }, [pools, poolMatches, bracket, c.kind, c.teamSize]);
 
   const liveMatches = allMatches.filter((m) => m.status === "running" && hasBothSides(m));
   const upcomingMatches = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m)).slice(0, 3);
@@ -1160,7 +1215,11 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
     return null;
   }, [bracket, c, pools]);
 
-  const isPreStart = !c.status || c.status === "setup" || c.status === "draw-ready";
+  // draw-ready is NOT pre-start for the purposes of showing pool/bracket
+  // structure — the draw has been generated and the payload already includes
+  // pools + bracket data returned unconditionally by handlers_viewer.go.
+  // Only setup (no draw yet) is treated as pre-start.
+  const isPreStart = !c.status || c.status === "setup";
   const hasPools = !isPreStart && !!pools && pools.length > 0;
   const hasBracket = !isPreStart && !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
   // T192 (FR-050e): Swiss competitions surface a dedicated standings
@@ -1218,6 +1277,25 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
           ))}
         </div>
         <div className="viewer__body">
+          {linkedComp && onSelectCompetition && (
+            // Phase 2 (mp-rrd): pools <-> playoffs cross-link. A mixed
+            // tournament splits across two competitions; this lets a
+            // spectator hop between the pool draw and the knockout bracket.
+            <button
+              className="vlist-item vlist-item--row"
+              style={{ marginBottom: 12, width: "100%" }}
+              onClick={() => onSelectCompetition(linkedComp.comp.id)}
+            >
+              <span className="vlist-item__icon">{linkedComp.role === "playoffs" ? "🏆" : "👥"}</span>
+              <div className="vlist-item__rowbody">
+                <div className="vlist-item__rowtitle">
+                  {linkedComp.role === "playoffs" ? "View the playoffs bracket" : "View the pools"}
+                </div>
+                <div className="vlist-item__rowsub">{linkedComp.comp.name}</div>
+              </div>
+              <span className="vlist-item__rowchev">→</span>
+            </button>
+          )}
           {tab === "overview" && (
             <ViewerOverview
               c={c}
@@ -1241,7 +1319,10 @@ function ViewerCompetition({ _tournament, competition, pools, poolMatches, stand
                     highlightedMatchId={currentMatch?.id}
                     autoScrollMatchId={bracketScrollTarget}
                     scrollContainerRef={bracketScrollRef}
-                    onMatchClick={(m) => setSelectedMatch(m)}
+                    onMatchClick={(m, ri) => {
+                      const label = window.roundLabel(ri, derivedBracket.rounds.length);
+                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, compKind: c.kind, teamSize: c.teamSize });
+                    }}
                   />
                 </div>
               </div>
@@ -1341,7 +1422,10 @@ function MatchDetailCard({ match, onClose }) {
             return (
               <div key={i} className="match-detail-card__sub-row">
                 <span className="match-detail-card__sub-score">{sB}</span>
-                <span className="match-detail-card__sub-pos">Match {sub.position || i + 1}</span>
+                <span className="match-detail-card__sub-pos">
+                  {subBoutLabel(sub, i)}
+                  {sub.decidedByHantei && <span className="match-detail-card__decision" data-testid="sub-row-hantei" style={{ marginLeft: 6 }}>Hantei</span>}
+                </span>
                 <span className="match-detail-card__sub-score match-detail-card__sub-score--right">{sA}</span>
               </div>
             );
@@ -1355,12 +1439,33 @@ function MatchDetailCard({ match, onClose }) {
 function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
 
-  if (!c.status || c.status === "setup" || c.status === "draw-ready") {
+  // setup: no draw yet — plain "not started" message.
+  if (!c.status || c.status === "setup") {
     return (
       <div className="empty" style={{ padding: 32 }}>
         <div className="icon">⏳</div>
         <h3>Not started yet</h3>
         <div style={{ fontSize: 13 }}>Starts at {c.startTime}. Check back when the competition begins.</div>
+      </div>
+    );
+  }
+
+  // draw-ready: the draw is published but no match has been called yet.
+  // The comp is not live, so the Overview has no live/recent matches to
+  // show — point spectators to the now-available tabs. Swiss comps render a
+  // Standings tab instead of Pools/Bracket (same isSwiss signal as the tab
+  // logic in ViewerCompetition), so the pointer text must match.
+  if (c.status === "draw-ready") {
+    const isSwiss = c.format === "swiss";
+    return (
+      <div className="empty" style={{ padding: 32 }}>
+        <div className="icon">📋</div>
+        <h3>Draw is ready</h3>
+        <div style={{ fontSize: 13 }}>
+          Starts at {c.startTime}. {isSwiss
+            ? "Check the Standings tab to follow the rounds."
+            : "Browse the Pools and Bracket tabs to see the draw."}
+        </div>
       </div>
     );
   }
@@ -1746,7 +1851,16 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             {matches.length > 0 && isTeam && (
               <div style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {matches.map(m => <PoolMatchRow key={m.id} m={m} onClick={() => onMatchClick && onMatchClick(m)} />)}
+                  {matches.map(m => {
+                    // Thread the same metadata compMatches/allMatches supply so the
+                    // MatchViewerModal renders team sub-bouts (compKind/teamSize) and a
+                    // correct header (phase/poolName), not an empty round label. Pool
+                    // daihyosen bouts ("…-DH-…") are scored individually — null the team
+                    // flags so they route to the individual UI (mirrors compMatches).
+                    const isDH = isPoolDaihyosenID(m.id || "");
+                    const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
+                    return <PoolMatchRow key={m.id} m={m} onClick={() => onMatchClick && onMatchClick(enriched)} />;
+                  })}
                 </div>
               </div>
             )}
@@ -1885,7 +1999,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2394,7 +2508,8 @@ function MatchViewerModal({ match, onClose }) {
                      {hansokuB > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuB}</span>}
                    </div>
                    <div style={{ flex: 1, textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>
-                     Match {sub.position || i+1}
+                     {subBoutLabel(sub, i)}
+                     {sub.decidedByHantei && <span data-testid="sub-pool-hantei" style={{ marginLeft: 6, fontWeight: 600 }}>Hantei</span>}
                    </div>
                    <div style={{ width: 80, textAlign: "right", display: "flex", flexDirection: "column" }}>
                      <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsA || "—"}</span>
@@ -2431,6 +2546,144 @@ function MatchViewerModal({ match, onClose }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// NotificationSettings — viewer settings panel for browser push notifications.
+// Exported for unit testing.
+// ---------------------------------------------------------------------------
+
+// LocalStorage key for the notification opt-in toggle.
+const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
+
+// Pure helper: detect Notification API support.
+// Exported for unit testing.
+export function notificationSupported() {
+  return typeof Notification !== "undefined";
+}
+
+// NotificationSettings — "Enable browser notifications" toggle for the
+// viewer home settings area. Phases:
+//   1) Secure-context warning (edge case, normally hidden in production).
+//   2) Notification API unavailable — hide the toggle.
+//   3) Permission "denied" — show blocked state.
+//   4) Permission "default" or "granted" — show the opt-in toggle.
+//
+// Requests permission ONLY on a user click (the gesture gate). Never
+// calls requestPermission() automatically. Exported for unit testing.
+export function NotificationSettings() {
+  // Compute the initial permission outside useState so tests using the
+  // static React mock (which passes the value through unmodified rather
+  // than calling function initialisers) see the correct starting value.
+  const initialPermission = (typeof Notification === "undefined")
+    ? "unavailable"
+    : Notification.permission;
+
+  // Read the current permission state reactively: re-query after the user
+  // interacts with the native permission prompt. We keep a local state so
+  // the UI stays responsive without relying on a global re-render.
+  const [permission, setPermission] = useState(initialPermission);
+
+  let storedOptIn = false;
+  try {
+    storedOptIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
+  } catch (_e) { /* storage unavailable */ }
+  // Only treat the opt-in as enabled when the browser permission is ALSO
+  // still granted. If the user reset the site permission back to "default"
+  // (or "denied") since they last opted in, starting `enabled` at true would
+  // render the checkbox unchecked (checked={enabled && permission==="granted"})
+  // yet send the first click down the "turning off" branch — the user would
+  // have to click twice and never see the prompt. Gating on granted keeps the
+  // handler branch aligned with the visible checkbox state.
+  const [enabled, setEnabled] = useState(storedOptIn && initialPermission === "granted");
+
+  // Phase 4: secure-context warning. In production the TLS proxy makes this
+  // false; it only matters for bare http:// (no proxy) access.
+  const insecure = typeof window !== "undefined" && window.isSecureContext === false;
+
+  // Phase 3 / Phase 4 ordering: when the API is unavailable we normally hide
+  // the panel entirely. BUT some browsers expose `Notification` only in a
+  // secure context, so a bare http:// page can have BOTH no API AND
+  // isSecureContext === false — which is the exact situation this panel is
+  // meant to explain. In that case render the warning (no toggle) instead of
+  // hiding. Only hide outright when the API is unavailable for some OTHER
+  // reason (secure context but an old/unsupported browser).
+  if (permission === "unavailable") {
+    if (!insecure) return null;
+    return (
+      <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
+        <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
+        <div style={{ fontSize: 12, color: "var(--amber, #b45309)" }} data-testid="notification-insecure-warning">
+          Browser notifications require a secure connection (https or localhost).
+        </div>
+      </div>
+    );
+  }
+
+  const handleToggle = async () => {
+    if (enabled) {
+      // Turning off: just persist the preference.
+      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) { /* storage unavailable */ }
+      setEnabled(false);
+      return;
+    }
+    // Turning on: request permission first (this is the user-gesture gate).
+    if (Notification.permission === "default") {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+      if (result !== "granted") return; // user denied — don't toggle on
+    } else {
+      setPermission(Notification.permission);
+    }
+    // Only mark the toggle ON if the preference actually persisted.
+    // fireBrowserNotifications() reads this localStorage flag at fire time, so
+    // an unpersisted "on" would render a checked box that never fires (storage
+    // throwing → flag missing → firing path reads opt-out). Keep the UI honest
+    // with the firing path: if persistence failed, leave the toggle off.
+    let persisted = false;
+    try {
+      window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true");
+      persisted = true;
+    } catch (_e) { /* storage unavailable — keep toggle off */ }
+    setEnabled(persisted);
+  };
+
+  const denied = permission === "denied";
+
+  return (
+    <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
+      <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
+      {insecure && (
+        <div style={{ fontSize: 12, color: "var(--amber, #b45309)", marginBottom: 8 }} data-testid="notification-insecure-warning">
+          Browser notifications require a secure connection (https or localhost).
+        </div>
+      )}
+      {denied ? (
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }} data-testid="notification-denied">
+          Browser notifications are blocked. Allow them in your browser settings, then reload.
+        </div>
+      ) : (
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={enabled && permission === "granted"}
+            onChange={handleToggle}
+            data-testid="notification-toggle"
+            disabled={insecure}
+          />
+          <span>
+            Enable browser notifications for announcements
+            {permission === "granted" && enabled && (
+              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-3)" }}>(granted)</span>
+            )}
+            {permission === "default" && (
+              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-3)" }}>(permission not yet requested)</span>
+            )}
+          </span>
+        </label>
+      )}
+    </div>
+  );
+}
+
 // Shared formatter so the synchronous initializer and the useEffect tick
 // produce identical strings — keeps the first paint stable.
 function formatAnnouncementTimeLeft(expiresAtIso) {
@@ -2443,41 +2696,13 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
-function AnnouncementBanner({ announcements, onDismiss }) {
-  const list = announcements || [];
-  const [idx, setIdx] = useState(0);
-
-  // Reset to 0 on any list-length change (add or dismiss) so the viewer
-  // always restarts from item 0 — deterministic and prevents out-of-bounds
-  // after a dismiss.
-  useEffect(() => {
-    setIdx(0);
-  }, [list.length]);
+// AnnouncementCard — renders a single announcement card with its own
+// independent per-card countdown and auto-dismiss timer.
+// Exported for unit testing; consumed only by AnnouncementBanner below.
+function AnnouncementCard({ ann, onDismiss }) {
+  const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(ann.expiresAt));
 
   useEffect(() => {
-    if (list.length <= 1) return;
-    const len = list.length;
-    const interval = setInterval(() => {
-      setIdx(i => (i + 1) % len);
-    }, 8000);
-    return () => clearInterval(interval);
-  }, [list.length]);
-
-  const safeIdx = list.length > 0 ? idx % list.length : 0;
-  const ann = list[safeIdx];
-
-  // Key timer state by ann.id so the displayed value is correct immediately
-  // on rotation, without waiting for the effect to fire after the first render.
-  const [timerState, setTimerState] = useState(() => ({
-    id: ann?.id ?? null,
-    value: ann ? formatAnnouncementTimeLeft(ann.expiresAt) : '',
-  }));
-  const timeLeft = timerState.id === ann?.id
-    ? timerState.value
-    : formatAnnouncementTimeLeft(ann?.expiresAt ?? '');
-
-  useEffect(() => {
-    if (!ann) return;
     // intervalId and dismissed are captured in the closure so updateTimer can
     // self-clear the interval on expiry and guard against repeated onDismiss
     // calls if React state updates are delayed before cleanup runs.
@@ -2493,14 +2718,12 @@ function AnnouncementBanner({ announcements, onDismiss }) {
         }
         return;
       }
-      setTimerState({ id: ann.id, value: formatAnnouncementTimeLeft(ann.expiresAt) });
+      setTimeLeft(formatAnnouncementTimeLeft(ann.expiresAt));
     };
     updateTimer();
     intervalId = setInterval(updateTimer, 1000);
     return () => clearInterval(intervalId);
-  }, [ann?.id, ann?.expiresAt, onDismiss]);
-
-  if (!ann) return null;
+  }, [ann.id, ann.expiresAt, onDismiss]);
 
   return (
     <div className="announcement-banner">
@@ -2509,9 +2732,6 @@ function AnnouncementBanner({ announcements, onDismiss }) {
         <p className="announcement-banner__message">{ann.message}</p>
       </div>
       <div className="announcement-banner__meta">
-        {list.length > 1 && (
-          <span className="announcement-banner__count">{safeIdx + 1}/{list.length}</span>
-        )}
         <span className="announcement-banner__badge">{timeLeft}</span>
         <button
           className="announcement-banner__dismiss"
@@ -2525,6 +2745,24 @@ function AnnouncementBanner({ announcements, onDismiss }) {
   );
 }
 
+// AnnouncementBanner — fixed-position overlay that stacks ALL active
+// announcements as independent cards. Does NOT rotate; each card owns
+// its own countdown and auto-dismiss timer. Public props unchanged so
+// app.jsx needs no edit.
+function AnnouncementBanner({ announcements, onDismiss }) {
+  const list = announcements || [];
+  if (list.length === 0) return null;
+
+  return (
+    <div className="announcement-overlay" role="region" aria-label="Announcements">
+      {list.map(ann => (
+        <AnnouncementCard key={ann.id} ann={ann} onDismiss={onDismiss} />
+      ))}
+    </div>
+  );
+}
+
+window.AnnouncementCard = AnnouncementCard;
 window.AnnouncementBanner = AnnouncementBanner;
 window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;
@@ -2535,4 +2773,6 @@ window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
+window.NotificationSettings = NotificationSettings;
+window.LS_NOTIFICATIONS_ENABLED = LS_NOTIFICATIONS_ENABLED;
 

@@ -16,8 +16,8 @@
     <img src="https://pkg.go.dev/badge/github.com/gitrgoliveira/bracket-creator.svg" alt="Go reference" style="max-width:100%;">
   </a>
 
-  <a href="https://github.com/gojp/goreportcard/blob/master/LICENSE" rel="nofollow">
-    <img src="https://img.shields.io/badge/license-Apache 2.0-blue.svg" alt="License Apache 2.0" style="max-width:100%;">
+  <a href="https://github.com/gitrgoliveira/bracket-creator/blob/main/LICENSE" rel="nofollow">
+    <img src="https://img.shields.io/badge/license-MPL 2.0-blue.svg" alt="License MPL 2.0" style="max-width:100%;">
   </a>
 
   <br/>
@@ -439,3 +439,17 @@ $ go install
 ## Contribute to this repository
 
 This project adheres to the Contributor Covenant [code of conduct](https://github.com/gitrgoliveira/bracket-creator/blob/main/.github/CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. We appreciate your contribution. Please refer to our [contributing](https://github.com/gitrgoliveira/bracket-creator/blob/main/.github/CONTRIBUTING.md) guidelines for further information.
+
+## License
+
+Copyright © 2023–2026 Ricardo Oliveira &lt;oliveira.rg [at] gmail.com&gt;
+
+This is an independent project created and maintained by Ricardo Oliveira in a
+personal capacity — in his own time and on his own equipment. It is not
+affiliated with, endorsed by, or owned by any employer, and Ricardo Oliveira is
+the sole copyright holder.
+
+This Source Code Form is subject to the terms of the Mozilla Public License,
+v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain
+one at <https://mozilla.org/MPL/2.0/>. The full license text is in
+[LICENSE](LICENSE).

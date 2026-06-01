@@ -11,6 +11,7 @@ const isoToDmy = window.isoToDmy;
 const isValidDate = window.isValidDate;
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
+const deriveTournamentDays = window.deriveTournamentDays;
 // Canonical numeric bounds (admin_helpers.jsx) so the team-size input cap
 // stays in lockstep with TEAM_POSITIONS in the scoring modal.
 const MIN_YEAR = window.MIN_YEAR;
@@ -610,13 +611,50 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       <div className="row">
         <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
         <div className="field">
-          <label className="field__label">Date</label>
-          {/* HTML <input type="date"> uses ISO YYYY-MM-DD; convert at the */}
-          {/* boundary so local state (and the saved payload) stays in the */}
-          {/* canonical DD-MM-YYYY format. Picker bounds match MIN_YEAR/ */}
-          {/* MAX_YEAR (admin_helpers.jsx) so a typed date can't pass */}
-          {/* validation but be unreachable via the picker. */}
-          <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(local.date)} onChange={(e) => update("date", isoToDmy(e.target.value))} />
+          <label className="field__label">Day</label>
+          {/* When the tournament has a start date + durationDays, constrain */}
+          {/* the competition date to the tournament's day list via a select. */}
+          {/* Falls back to a free date picker when the tournament has no date. */}
+          {(() => {
+            const days = deriveTournamentDays(tournament.date, tournament.durationDays || 1);
+            if (days.length > 0) {
+              // A controlled <select> whose value matches no <option> would
+              // silently display the first option while React state keeps the
+              // real (stale or empty) value — the operator would then "save"
+              // a value the UI never showed. Two cases need an explicit
+              // matching option so the displayed value always tracks state:
+              //   - empty date (legacy/imported competition with no day set):
+              //     render a disabled "— Select a day —" placeholder so the
+              //     select shows "unset" and forces a deliberate pick rather
+              //     than persisting "" while appearing to show Day 1.
+              //   - out-of-range date (e.g. the tournament duration was
+              //     shortened after this competition was created): surface the
+              //     stray value as a flagged option so the mismatch is visible.
+              // Picking any real day clears either state on save.
+              const isEmpty = !local.date;
+              const outOfRange = local.date && !days.includes(local.date);
+              return (
+                <select
+                  className="input"
+                  value={local.date}
+                  onChange={(e) => update("date", e.target.value)}
+                >
+                  {isEmpty && (
+                    <option value="" disabled>— Select a day —</option>
+                  )}
+                  {outOfRange && (
+                    <option key={local.date} value={local.date}>{local.date} (outside tournament days)</option>
+                  )}
+                  {days.map((d, i) => (
+                    <option key={d} value={d}>Day {i + 1} — {d}</option>
+                  ))}
+                </select>
+              );
+            }
+            return (
+              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(local.date)} onChange={(e) => update("date", isoToDmy(e.target.value))} />
+            );
+          })()}
           <div className="field__hint">Pick the competition day.</div>
         </div>
         <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>
@@ -760,9 +798,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div>
             <button className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
               if (confirm(`Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`)) {
+                const admin = window.promptAdminPassword();
+                if (admin === null) return;
                 setInvalidating(true);
                 try {
-                  const updated = await window.API.invalidateCompetition(local.id, password);
+                  const updated = await window.API.invalidateCompetition(local.id, password, admin);
                   if (mountedRef.current) {
                     // Use the server response (if any) so that server-side
                     // field updates are reflected immediately. Fall back to
@@ -795,9 +835,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
             : `Are you sure you want to delete "${local.name}"? This action cannot be undone.`;
           if (confirm(msg)) {
+            const admin = window.promptAdminPassword();
+            if (admin === null) return;
             setDeleting(true);
             try {
-              const ok = await window.API.deleteCompetition(local.id, password);
+              const ok = await window.API.deleteCompetition(local.id, password, admin);
               // onBack() unmounts AdminSettings via the parent's view
               // switch; setDeleting(false) in finally would then fire on
               // a torn-down component. Gate via mountedRef.
@@ -1093,7 +1135,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
   );
 }
 
-function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, reservedSlots, section, onSection, onBack, onOpenCompetition, onUpdate, onRefreshCompetition, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
+function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onUpdate, onRefreshCompetition, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
@@ -1118,7 +1160,32 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // with a date that can't be saved back.
   const isDateValid = isValidDate;
 
+  // mp-w7x: surface how many participants will be excluded from the draw
+  // because they have not checked in. Mirror the engine's rule
+  // (filterCheckedIn in internal/engine/competition.go): only applies when the
+  // competition has check-in tracking enabled (c.checkInEnabled) — consistent
+  // with the rest of the UI, which masks checkedIn behind that flag. Within an
+  // enabled competition, opt-in semantics apply: only exclude when at least one
+  // participant is checked in. Empty roster (e.g. a playoffs-from-source
+  // competition resolved server-side) yields 0.
+  const drawPlayers = c.players || [];
+  const anyCheckedIn = drawPlayers.some(p => p.checkedIn);
+  const excludedFromDraw = (c.checkInEnabled && anyCheckedIn) ? drawPlayers.filter(p => !p.checkedIn).length : 0;
+
+  // Confirm before a draw/start that would drop non-checked-in participants.
+  // Returns false when the operator cancels.
+  const confirmCheckInExclusion = () => {
+    if (excludedFromDraw === 0) return true;
+    const plural = excludedFromDraw === 1 ? "" : "s";
+    const verb = excludedFromDraw === 1 ? "is" : "are";
+    return confirm(
+      `${excludedFromDraw} participant${plural} ${verb} not checked in and will be excluded from the draw.\n\n` +
+      `Only checked-in participants will be drawn. Continue?`
+    );
+  };
+
   const generateDraw = async () => {
+    if (!confirmCheckInExclusion()) return;
     setGenerating(true);
     try {
       await window.API.generateDraw(c.id, password);
@@ -1138,9 +1205,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 
   const discardDraw = async () => {
     if (!confirm(`Discard the generated draw for "${c.name}"? The pools/bracket will be removed and you can regenerate.`)) return;
+    const admin = window.promptAdminPassword();
+    if (admin === null) return;
     setDiscarding(true);
     try {
-      await window.API.discardDraw(c.id, password);
+      await window.API.discardDraw(c.id, password, admin);
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`Draw discarded for ${c.name}`);
@@ -1154,9 +1223,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const regenerateDraw = async () => {
+    if (!confirmCheckInExclusion()) return;
+    // Regenerate discards the existing draw first (DELETE /draw is gated),
+    // so collect the elevated password up front before any work begins.
+    const admin = window.promptAdminPassword();
+    if (admin === null) return;
     setGenerating(true);
     try {
-      await window.API.discardDraw(c.id, password);
+      await window.API.discardDraw(c.id, password, admin);
       if (!mountedRef.current) return;
       // Refresh after discard so the UI reflects setup status immediately;
       // if generateDraw then fails the UI is consistent with the server.
@@ -1178,6 +1252,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const start = async () => {
+    // draw-ready → running does not regenerate the draw; skip the confirmation
+    // there to avoid showing stale exclusion counts against an already-fixed draw.
+    if (c.status !== "draw-ready" && !confirmCheckInExclusion()) return;
     showToast(`Starting ${c.name}…`);
 
     setStarting(true);
@@ -1283,6 +1360,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                     ⚠ Cannot start: invalid date in Settings tab (e.g. "{c.date}")
                   </div>
                 )}
+                {excludedFromDraw > 0 && (
+                  <div style={{ color: "var(--ink-3)", fontSize: 11, fontWeight: 600 }}>
+                    {excludedFromDraw} not checked in — will be excluded from the draw
+                  </div>
+                )}
               </>
             )}
             {isDrawReady && (
@@ -1336,7 +1418,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
           </div>
           <div>
             {section === "overview" && <AdminCompOverview c={c} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} />}
-            {section === "participants" && <AdminParticipants c={c} tournament={t} reservedSlots={reservedSlots || []} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
+            {section === "participants" && <AdminParticipants c={c} tournament={t} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
             {section === "lineups" && window.AdminTeamLineupsList && <window.AdminTeamLineupsList comp={c} password={password} showToast={showToast} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} onStatusChange={setLocalStatus} />}
             {/* T191/T193 (FR-050d/e): Swiss-round management. */}

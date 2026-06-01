@@ -247,48 +247,6 @@ func TestConcurrent_UpdatePoolMatchByID(t *testing.T) {
 	}
 }
 
-// TestConcurrent_SaveLoadReservedSlots validates that concurrent
-// LoadReservedSlots + SaveReservedSlots do not race.
-func TestConcurrent_SaveLoadReservedSlots(t *testing.T) {
-	store, cleanup := newTestStore(t)
-	defer cleanup()
-
-	compID := "concurrent-slots"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-	require.NoError(t, store.SaveReservedSlots(compID, []ReservedSlot{
-		{ID: "s1", ParticipantID: "p1", SourceCompID: "src", SourceRank: 1},
-	}))
-
-	const N = 20
-	var wg sync.WaitGroup
-	errs := make(chan error, N)
-
-	for i := range N {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			if i%2 == 0 {
-				if _, err := store.LoadReservedSlots(compID); err != nil {
-					errs <- err
-				}
-			} else {
-				slots := []ReservedSlot{
-					{ID: fmt.Sprintf("s%d", i), ParticipantID: fmt.Sprintf("p%d", i),
-						SourceCompID: "src", SourceRank: i},
-				}
-				if err := store.SaveReservedSlots(compID, slots); err != nil {
-					errs <- err
-				}
-			}
-		}(i)
-	}
-	wg.Wait()
-	close(errs)
-	for e := range errs {
-		require.NoError(t, e)
-	}
-}
-
 // TestConcurrent_UpdateCompetitionChanged verifies that concurrent
 // UpdateCompetitionChanged calls on the same competition serialize correctly:
 // no lost updates visible after all goroutines finish.

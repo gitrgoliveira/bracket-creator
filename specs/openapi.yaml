@@ -1180,6 +1180,147 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/participants/{pid}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: pid
+        required: true
+        schema:
+          type: string
+        description: Participant/Player ID.
+    put:
+      tags: [participants]
+      summary: Update single participant details
+      description: Updates the details (name, dojo, etc.) for a single participant.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, dojo]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                displayName:
+                  type: string
+                  maxLength: 50
+                dojo:
+                  type: string
+                  maxLength: 100
+                metadata:
+                  type: array
+                  items:
+                    type: string
+                danGrade:
+                  type: string
+                tag:
+                  type: string
+      responses:
+        '200':
+          description: Participant updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Name collision or competition in invalid state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/participants/{pid}/checkin:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: pid
+        required: true
+        schema:
+          type: string
+        description: Participant/Player ID.
+    put:
+      tags: [participants]
+      summary: Check in a single participant
+      description: Sets checked-in status to true for the participant.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Participant checked in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [participants]
+      summary: Undo check-in for a single participant
+      description: Resets checked-in status to false for the participant.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Participant check-in undone.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/participants/checkin-bulk:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    post:
+      tags: [participants]
+      summary: Bulk check-in participants
+      description: Atomically checks in multiple participants at once.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participantIds]
+              properties:
+                participantIds:
+                  type: array
+                  maxItems: 1000
+                  items:
+                    type: string
+                    maxLength: 64
+      responses:
+        '200':
+          description: Bulk check-in completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkCheckInResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/seeds:
     get:
       tags: [participants]
@@ -1634,6 +1775,46 @@ paths:
       responses:
         '204':
           description: Lineup deleted.
+
+  /api/competitions/{id}/swiss/generate-round:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    post:
+      tags: [competitions]
+      summary: Generate next Swiss round
+      description: |
+        Generates pairing and matches for the next Swiss round.
+        Returns 201 Created with the new round number and generated matches.
+      security:
+        - TournamentPassword: []
+      responses:
+        '201':
+          description: Swiss round generated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  round:
+                    type: integer
+                  swissCurrentRound:
+                    type: integer
+                  matches:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict (e.g. current Swiss round has incomplete matches).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/swiss/standings:
     parameters:
@@ -2148,8 +2329,8 @@ components:
           enum: [individual, team]
         format:
           type: string
-          description: "pools or playoffs"
-          enum: [pools, playoffs]
+          description: "playoffs, mixed, league, or swiss"
+          enum: [playoffs, mixed, league, swiss]
         teamSize:
           type: integer
           description: Number of members per team (0 for individual).
@@ -2256,6 +2437,9 @@ components:
         number:
           type: string
           description: Match number prefix + sequence (e.g. "K1"). Only present when number-prefix is set.
+        checkedIn:
+          type: boolean
+          description: True when the participant has checked in.
 
     Participant:
       type: object
@@ -2281,6 +2465,22 @@ components:
         tag:
           type: string
           maxLength: 200
+        checkedIn:
+          type: boolean
+          description: True when the participant has checked in.
+
+    BulkCheckInResult:
+      type: object
+      required: [checkedIn, alreadyCheckedIn, notFound]
+      properties:
+        checkedIn:
+          type: integer
+        alreadyCheckedIn:
+          type: integer
+        notFound:
+          type: array
+          items:
+            type: string
 
     SeedAssignment:
       type: object

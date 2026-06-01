@@ -457,8 +457,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		estimate, err := eng.EstimateScheduleForCompetition(id)
 		if err != nil {
 			var notFound *engine.NotFoundError
+			var validation *engine.ValidationError
 			if errors.As(err, &notFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			if errors.As(err, &validation) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

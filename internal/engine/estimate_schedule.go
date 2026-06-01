@@ -82,7 +82,10 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 	}
 	poolCount, playoffCount, err := helper.EstimateMatchCounts(in)
 	if err != nil {
-		return ScheduleEstimate{}, err
+		// EstimateMatchCounts errors are config-caused (unknown format, zero
+		// pool size, player count < pool size) — surface as ValidationError
+		// so the HTTP handler returns 400, not 500.
+		return ScheduleEstimate{}, validationErrorf("%s", err)
 	}
 
 	// Step 5: delegate to EstimateForCounts.

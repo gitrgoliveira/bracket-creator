@@ -1007,16 +1007,26 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
       .catch(err => showToast(err.message, "error"));
   };
   const selectedMatch = findSelectedMatch();
+  // mp-9dz: a preview bracket (mixed source) shows pool-origin placeholder
+  // leaves ("Pool A 1st") and is NOT scoreable here — the knockout is played
+  // in the separate Playoffs competition. Disable match selection/scoring and
+  // surface an explanatory note instead of the live scoring panel.
+  const isPreview = !!bracket.preview;
   return (
     <div className="row" style={{ gridTemplateColumns: "1fr 360px", alignItems: "start" }}>
       <div>
+        {isPreview && (
+          <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
+            <strong>Preview bracket</strong> — positions show where each pool's finishers feed the knockout (e.g. “Pool A 1st”). Create the <strong>Playoffs</strong> competition to play and score it.
+          </div>
+        )}
         <div className="bracket-canvas" ref={scrollRef}>
           <div className="bracket-canvas__inner">
             <window.BracketTree
               rounds={bracket.rounds}
               variant={tweaks.cardVariant}
               showDojo={tweaks.showDojo}
-              onMatchClick={select}
+              onMatchClick={isPreview ? undefined : select}
               highlightedMatchId={selected?.matchId}
               autoScrollMatchId={autoScrollId}
               scrollContainerRef={scrollRef}
@@ -1025,7 +1035,9 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
         </div>
       </div>
       <div>
-        {hasBothSides(selectedMatch) ? (
+        {isPreview ? (
+          <div className="empty"><div className="icon">🌳</div><h3>Preview only</h3><div style={{ fontSize: 13 }}>This bracket is seeded from pool finishing positions. The knockout is played in the Playoffs competition created from these pools.</div></div>
+        ) : hasBothSides(selectedMatch) ? (
           <LiveMatchPanel
             match={selectedMatch}
             compId={c.id}
@@ -1391,7 +1403,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
         c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
-        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — live" } : null,
+        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: (isDrawReady || bracket?.preview) ? "Bracket — preview" : "Bracket — live" } : null,
         !isDrawReady ? { id: "scores", label: "Scores — edit" } : null,
       ].filter(Boolean)
     },

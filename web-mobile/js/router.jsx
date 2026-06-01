@@ -20,7 +20,6 @@
 
 const PreactRouter = window.preactRouter;
 const _Router = PreactRouter ? PreactRouter.Router : null;
-const _route = PreactRouter ? PreactRouter.route : null;
 const _Link = PreactRouter ? PreactRouter.Link : null;
 const _getCurrentUrl = PreactRouter ? PreactRouter.getCurrentUrl : (() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
 
@@ -45,14 +44,49 @@ function Route(props) {
     return React.createElement(props.component || 'div', props);
 }
 
-// Imperative navigation. Equivalent to history.pushState + manual route
-// recompute — preact-router intercepts and dispatches to mounted Routers.
+// Imperative navigation.
+//
+// NOTE: we deliberately do NOT delegate to preact-router's route() here.
+// preact-router's route() only mutates history when canRoute(url) finds a
+// MOUNTED <Router> that matches the path. This app renders entirely from its
+// own state machine (app.jsx) and never mounts a <Router>, so canRoute() is
+// always false and preact-router's route() silently no-ops — leaving the
+// address bar stuck while the view changes. That broke back/forward and
+// shareable deep links (mp-dd3).
+//
+// Instead we drive the History API directly. app.jsx owns the routing
+// state-of-record: it calls route() from a state->URL sync effect, and it
+// handles browser back/forward via its own popstate listener.
+//
+// We dispatch a popstate event after mutating history so listeners that
+// rely on a history-change signal — notably useQuery() below — re-parse
+// and react to programmatic navigation. The native History API does NOT
+// fire popstate on pushState/replaceState, but preact-router's route()
+// does, and useQuery() / display surfaces were written against that
+// contract. Dispatching here restores it.
+//
+// Safety against loops: app.jsx's popstate handler calls parsePath on
+// location.pathname and setMode/setAdminView/setViewerCompId accordingly.
+// Because route() is only called from the state->URL sync effect AFTER
+// the state already matches the new URL, parsePath returns the same
+// state that's already set — React bails on identical setState values,
+// and the URL-sync effect's `location.pathname !== url` guard prevents
+// any re-entry on a possible re-render.
 function route(url, replace = false) {
-    if (_route) return _route(url, replace);
-    // Tests / pre-load fallback: use the History API directly.
     if (typeof window !== 'undefined' && window.history) {
         if (replace) window.history.replaceState(null, '', url);
         else window.history.pushState(null, '', url);
+        try {
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        } catch {
+            // PopStateEvent unavailable (very old / non-standard environments).
+            // Fall back to a plain Event so popstate listeners — useQuery(),
+            // app.jsx's back/forward handler — still receive the navigation
+            // signal. Any environment where window.history exists also has the
+            // base Event constructor, so this branch cannot throw.
+            window.dispatchEvent(new Event('popstate'));
+        }
+        return true;
     }
     return false;
 }

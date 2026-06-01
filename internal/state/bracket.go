@@ -52,7 +52,8 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		return nil
 	}
 	res := &Bracket{
-		Rounds: make([][]BracketMatch, len(b.Rounds)),
+		Rounds:  make([][]BracketMatch, len(b.Rounds)),
+		Preview: b.Preview,
 	}
 	for i, round := range b.Rounds {
 		res.Rounds[i] = make([]BracketMatch, len(round))

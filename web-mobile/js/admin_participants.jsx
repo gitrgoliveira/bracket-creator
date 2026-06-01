@@ -362,6 +362,28 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
   const players = useMemoA(() => c.players || [], [c.players]);
+
+  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
+  // The draw assigns the final, pool-interleaved numbers (player.number);
+  // before that there is none. We surface a stable registration-order number
+  // (numberPrefix + position in c.players) so operators can call competitors
+  // by number during check-in. Keyed off the unfiltered roster so the number
+  // doesn't jump when the list is searched/sorted. Rendered as provisional
+  // (muted, dotted) since the final numbers may differ after the draw.
+  const provisionalNumberById = useMemoA(() => {
+    // Null-prototype object: keys are user-controlled (p.id ?? p.name), so a
+    // participant named "__proto__" or "constructor" against a plain `{}` map
+    // could pollute the prototype chain or return inherited values on lookup.
+    // `Object.create(null)` removes both risks and keeps the `map[key]` /
+    // `map[key] = …` ergonomics. (Copilot mp-1tk follow-up.)
+    const map = Object.create(null);
+    if (c.numberPrefix) {
+      (c.players || []).forEach((p, i) => {
+        map[p.id ?? p.name] = `${c.numberPrefix}${i + 1}`;
+      });
+    }
+    return map;
+  }, [c.players, c.numberPrefix]);
   const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
@@ -919,7 +941,14 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-                        <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>{p.name}</div>
+                        <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
+                          {p.number ? (
+                            <span className="num-prefix">{p.number}</span>
+                          ) : provisionalNumberById[p.id ?? p.name] ? (
+                            <span className="num-prefix num-prefix--provisional" title="Provisional number — the final competitor number is assigned when the draw runs">{provisionalNumberById[p.id ?? p.name]}</span>
+                          ) : null}
+                          {p.name}
+                        </div>
                         {p.tag && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.tag}</span>}
                       </div>
                       <div className="seed-row__dojo">

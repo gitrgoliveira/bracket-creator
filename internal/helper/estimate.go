@@ -29,7 +29,7 @@ type EstimateMatchCountsInput struct {
 
 	// Pool-phase fields — relevant for "mixed" and "league" formats.
 	PoolSize     int    // state.Competition.PoolSize
-	PoolSizeMode string // state.Competition.PoolSizeMode: "max" | "" == "min"
+	PoolSizeMode string // state.Competition.PoolSizeMode: "max" or "min" (any other value including "" treated as "min")
 	PoolWinners  int    // state.Competition.PoolWinners (default 2 when 0)
 	RoundRobin   bool   // state.Competition.RoundRobin
 	PoolFormat   string // state.Competition.PoolFormat: "" | "full" | "partial"
@@ -64,7 +64,9 @@ type EstimateMatchCountsInput struct {
 // complete.
 //
 // Returns an error for:
-//   - Unknown Format strings.
+//   - Unknown Format strings (only when PlayerCount > 0; the zero-player
+//     early return takes precedence and returns nil — callers should not
+//     rely on a format error for zero-player inputs).
 //   - PoolSize == 0 for the mixed format (would divide by zero).
 func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCount int, err error) {
 	if in.PlayerCount <= 0 {

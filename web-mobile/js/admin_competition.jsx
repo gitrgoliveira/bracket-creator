@@ -835,7 +835,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           )}
           {compEstimate && !compEstimateErr && (() => {
             const total = formatCompMinutes(compEstimate.totalDurationMinutes);
-            const perCourt = (compEstimate.perCourtMinutes || []).map(formatCompMinutes).filter(Boolean);
+            const perCourt = (compEstimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m");
             const ceremony = formatCompMinutes(compEstimate.ceremonyMinutes);
             if (!total) {
               return <div style={{ fontSize: 12, color: "var(--ink-3, #6b7280)" }}>No estimate yet — add participants and configure duration to see a projection.</div>;

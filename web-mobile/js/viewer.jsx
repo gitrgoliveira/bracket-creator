@@ -2743,7 +2743,7 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
 
   const isSelfRun = tournament && tournament.mode === "self-run";
   const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
-  const isFinalized = match.status === "completed" && (match.winner?.name || match.winner?.id || match.decision === "hikiwake");
+  const isFinalized = match.status === "completed";
 
   if (scoringMatch && window.ScoreEditorModal) {
     return React.createElement(window.ScoreEditorModal, {

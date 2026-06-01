@@ -589,10 +589,10 @@ func bracketMatchToResult(bm *state.BracketMatch) *state.MatchResult {
 }
 
 // isMatchFinalized reports whether the given result represents a concluded
-// match. A result is finalized when its status is "completed" AND either a
-// winner has been recorded or the decision is hikiwake (a draw).
+// match. Any completed match is finalized — anonymous callers must not
+// overwrite it regardless of whether a winner was explicitly recorded.
 func isMatchFinalized(r *state.MatchResult) bool {
-	return r.Status == state.MatchStatusCompleted && (r.Winner != "" || r.Decision == "hikiwake")
+	return r.Status == state.MatchStatusCompleted
 }
 
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`

@@ -93,8 +93,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				return
 			}
 			metadata := req.Metadata
-			if len(metadata) == 0 && req.DanGrade != "" {
-				metadata = []string{req.DanGrade}
+			if len(metadata) == 0 {
+				if dg := strings.TrimSpace(req.DanGrade); dg != "" {
+					metadata = []string{dg}
+				}
 			}
 
 			// Default to "manual" so rows added via this UI carry the same
@@ -266,8 +268,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		}
 
 		metadata := req.Metadata
-		if len(metadata) == 0 && req.DanGrade != "" {
-			metadata = []string{req.DanGrade}
+		if len(metadata) == 0 {
+			if dg := strings.TrimSpace(req.DanGrade); dg != "" {
+				metadata = []string{dg}
+			}
 		}
 
 		// Run the status check and participant write under one lock acquire so

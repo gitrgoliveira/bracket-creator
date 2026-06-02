@@ -114,6 +114,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterPublicLineupHandlers(api, store)
 	RegisterPublicSwissHandlers(api, store, eng)
 	RegisterPublicAnnouncementHandlers(api, store)
+	RegisterPublicRegistrationHandlers(api, store, hub)
 
 	// Public password-reset + auth-config endpoints. Both must live
 	// outside the admin group: /reset is the recovery path for a

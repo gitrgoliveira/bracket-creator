@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,11 +33,12 @@ var validSponsorContentTypes = map[string]string{
 	"image/jpeg": ".jpg",
 }
 
-// maxSponsorNameLen and maxSponsorLinkLen bound the optional metadata
-// fields to keep YAML compact and prevent abuse.
-const (
-	maxSponsorNameLen = 80
-	maxSponsorLinkLen = 500
+// Sentinel errors surfaced by the POST/DELETE transforms so the handler
+// can map them to specific status codes without inspecting strings.
+var (
+	errSponsorTournamentNotInit = errors.New("tournament not initialized")
+	errSponsorCapReached        = errors.New("sponsor cap reached")
+	errSponsorNotFound          = errors.New("sponsor not found")
 )
 
 // RegisterPublicSponsorHandlers wires the unauthenticated GET route that
@@ -52,19 +52,25 @@ func RegisterPublicSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 		path := filepath.Join(store.GetFolder(), sponsorsDirName, name)
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
+		// Lstat (not Stat) so a symlink planted in the sponsors dir is
+		// rejected rather than followed. The filename regex prevents
+		// directory traversal, but a separate write path (operator,
+		// backup-restore, future feature) could drop a symlink into the
+		// dir; refusing to serve symlinks closes that gap regardless.
+		info, err := os.Lstat(path)
+		if err != nil || info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			c.JSON(http.StatusNotFound, gin.H{"error": "sponsor logo not found"})
 			return
 		}
-		// Content-hashed filenames are unique per upload, so the bytes a
-		// given URL refers to never change. immutable is correct here, not
-		// aspirational; see mp-c38 plan.
-		c.Header("Cache-Control", "public, max-age=31536000, immutable")
-		c.Header("ETag", `"`+strings.TrimSuffix(name, filepath.Ext(name))+`"`)
-		// Pick content-type from filename extension; we control the names
-		// so this is safe (no header-trust loop).
 		ext := strings.ToLower(filepath.Ext(name))
+		// Random-token filenames are unique per upload, so the bytes a
+		// given URL refers to never change. immutable is correct here,
+		// not aspirational; see mp-c38 plan.
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		c.Header("ETag", `"`+strings.TrimSuffix(name, ext)+`"`)
+		// Set Content-Type explicitly from extension; we control the
+		// names (regex-validated) so this is safe and avoids depending
+		// on the platform's MIME database via http.ServeFile.
 		switch ext {
 		case ".png":
 			c.Header("Content-Type", "image/png")
@@ -81,40 +87,19 @@ func RegisterPublicSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
 // SponsorMaxBodyBytes (2 MB) — the in-handler file size check at
 // SponsorMaxFileBytes still applies separately.
 func RegisterSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
-	r.POST("/sponsors", func(c *gin.Context) {
-		t, err := store.LoadTournament()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if t == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "tournament not initialized"})
-			return
-		}
-		if len(t.Sponsors) >= state.MaxSponsors {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "maximum " + strconv.Itoa(state.MaxSponsors) + " sponsors per tournament",
-			})
-			return
-		}
+	r.POST("/sponsors", handleSponsorUpload(store))
+	r.DELETE("/sponsors/:index", handleSponsorDelete(store))
+}
 
-		name := strings.TrimSpace(c.PostForm("name"))
-		if name == "" || len([]rune(name)) > maxSponsorNameLen {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required (1–80 chars)"})
-			return
+func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		candidate := state.Sponsor{
+			Name: strings.TrimSpace(c.PostForm("name")),
+			Link: strings.TrimSpace(c.PostForm("link")),
 		}
-
-		link := strings.TrimSpace(c.PostForm("link"))
-		if link != "" {
-			if len(link) > maxSponsorLinkLen {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "link must be ≤500 chars"})
-				return
-			}
-			u, perr := url.Parse(link)
-			if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "link must be a valid http(s) URL"})
-				return
-			}
+		if err := state.ValidateSponsor(candidate); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		fileHeader, err := c.FormFile("file")
@@ -134,30 +119,31 @@ func RegisterSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
 		}
 		defer func() { _ = src.Close() }()
 
-		// Sniff the first 512 bytes per http.DetectContentType contract.
-		// Don't trust the Content-Type header; clients lie.
+		// Sniff first 512 bytes per http.DetectContentType contract.
+		// Don't trust the Content-Type header. multipart.File is
+		// guaranteed by the net/textproto contract to be a ReadSeeker,
+		// so the Seek below cannot fail in practice.
 		sniffBuf := make([]byte, 512)
-		nRead, _ := io.ReadFull(src, sniffBuf)
+		nRead, rerr := io.ReadFull(src, sniffBuf)
+		// ErrUnexpectedEOF on a short part is fine: DetectContentType
+		// sniffs whatever bytes are present. Any other read error is a
+		// real I/O failure and we cannot recover.
+		if rerr != nil && !errors.Is(rerr, io.ErrUnexpectedEOF) && !errors.Is(rerr, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
+			return
+		}
 		sniffed := http.DetectContentType(sniffBuf[:nRead])
 		ext, ok := validSponsorContentTypes[sniffed]
 		if !ok {
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "only PNG or JPEG accepted"})
 			return
 		}
-		// Rewind so we can copy the full file. fileHeader.Open returns a
-		// multipart.File which is always io.Seeker — but defend against
-		// future refactors with an explicit assertion.
-		seeker, ok := src.(io.Seeker)
-		if !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal: file not seekable"})
-			return
-		}
-		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+		if _, err := src.(io.Seeker).Seek(0, io.SeekStart); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Server-generated random filename: 16 hex chars + sniffed-ext.
+		// Server-generated random filename: 16 hex chars + sniffed ext.
 		// Each upload gets a unique URL — see mp-c38 plan §2.
 		nameBytes := make([]byte, 8)
 		if _, err := rand.Read(nameBytes); err != nil {
@@ -171,69 +157,102 @@ func RegisterSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// fileName is server-generated (16 random hex chars + sniffed image
-		// extension); the path joins under sponsorsDir which is itself
-		// derived from store.GetFolder. No user-controlled input reaches
-		// the OS call.
+		fullPath := filepath.Join(sponsorsDir, fileName)
+		// fileName is server-generated (16 random hex chars + sniffed
+		// image extension); fullPath joins under sponsorsDir which is
+		// itself derived from store.GetFolder. No user-controlled input
+		// reaches the OS call.
 		// #nosec G304 -- filename is server-generated, not from user input
-		dst, err := os.OpenFile(filepath.Join(sponsorsDir, fileName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		dst, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// Cap the file-write side at SponsorMaxFileBytes+1 so an envelope
-		// that lied about size can still be caught mid-stream.
+		// LimitReader+1 catches an envelope that lied about its size.
 		written, copyErr := io.Copy(dst, io.LimitReader(src, SponsorMaxFileBytes+1))
 		cerr := dst.Close()
 		if copyErr != nil || cerr != nil {
-			_ = os.Remove(filepath.Join(sponsorsDir, fileName))
+			_ = os.Remove(fullPath)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": errors.Join(copyErr, cerr).Error()})
 			return
 		}
 		if written > SponsorMaxFileBytes {
-			_ = os.Remove(filepath.Join(sponsorsDir, fileName))
+			_ = os.Remove(fullPath)
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "logo must be ≤1 MB"})
 			return
 		}
 
-		// Persist the sponsor entry. Re-load under the store lock via
-		// SaveTournament — the brief window between LoadTournament above
-		// and Save below is bounded by the per-store mutex in Save.
-		sponsor := state.Sponsor{Name: name, File: fileName, Link: link}
-		t.Sponsors = append(t.Sponsors, sponsor)
-		if err := store.SaveTournament(t); err != nil {
-			_ = os.Remove(filepath.Join(sponsorsDir, fileName))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Append the sponsor entry atomically under the store lock.
+		// UpdateTournamentChanged serialises load+modify+save so two
+		// concurrent uploads can't exceed the cap or clobber each
+		// other's appended entry. The transform copies all fields from
+		// current; we replace Sponsors with a fresh slice to avoid
+		// aliasing current's backing array.
+		candidate.File = fileName
+		_, err = store.UpdateTournamentChanged(&state.Tournament{}, func(current, desired *state.Tournament) error {
+			if current == nil {
+				return errSponsorTournamentNotInit
+			}
+			*desired = *current
+			if len(current.Sponsors) >= state.MaxSponsors {
+				return errSponsorCapReached
+			}
+			sponsors := make([]state.Sponsor, len(current.Sponsors)+1)
+			copy(sponsors, current.Sponsors)
+			sponsors[len(current.Sponsors)] = candidate
+			desired.Sponsors = sponsors
+			return nil
+		})
+		if err != nil {
+			_ = os.Remove(fullPath)
+			switch {
+			case errors.Is(err, errSponsorTournamentNotInit):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.Is(err, errSponsorCapReached):
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "maximum " + strconv.Itoa(state.MaxSponsors) + " sponsors per tournament",
+				})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
 			return
 		}
-		c.JSON(http.StatusCreated, sponsor)
-	})
+		c.JSON(http.StatusCreated, candidate)
+	}
+}
 
-	r.DELETE("/sponsors/:index", func(c *gin.Context) {
+func handleSponsorDelete(store *state.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		idx, err := strconv.Atoi(c.Param("index"))
 		if err != nil || idx < 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid index"})
 			return
 		}
-		t, err := store.LoadTournament()
+		var removed state.Sponsor
+		_, err = store.UpdateTournamentChanged(&state.Tournament{}, func(current, desired *state.Tournament) error {
+			if current == nil || idx >= len(current.Sponsors) {
+				return errSponsorNotFound
+			}
+			*desired = *current
+			sponsors := make([]state.Sponsor, 0, len(current.Sponsors)-1)
+			sponsors = append(sponsors, current.Sponsors[:idx]...)
+			sponsors = append(sponsors, current.Sponsors[idx+1:]...)
+			removed = current.Sponsors[idx]
+			desired.Sponsors = sponsors
+			return nil
+		})
 		if err != nil {
+			if errors.Is(err, errSponsorNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "sponsor not found"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if t == nil || idx >= len(t.Sponsors) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "sponsor not found"})
-			return
-		}
-		removed := t.Sponsors[idx]
-		t.Sponsors = append(t.Sponsors[:idx], t.Sponsors[idx+1:]...)
-		if err := store.SaveTournament(t); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		// Unlink the file unconditionally — random filenames mean cross-
-		// references are effectively impossible at the 1–6 scale (mp-c38).
-		// Best-effort: log on failure but don't roll back the YAML write.
+		// Best-effort unlink. Random filenames make collisions effectively
+		// impossible at the 1–6 scale, so a missing file (ENOENT from a
+		// concurrent delete) is harmless and silently ignored.
 		_ = os.Remove(filepath.Join(store.GetFolder(), sponsorsDirName, removed.File))
 		c.JSON(http.StatusOK, gin.H{"removed": removed})
-	})
+	}
 }

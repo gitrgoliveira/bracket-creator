@@ -1,7 +1,9 @@
 package state
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -113,6 +115,44 @@ type Sponsor struct {
 // MaxSponsors is the per-tournament sponsor count cap (mp-c38). Realistic
 // count is 1–4; 6 leaves headroom without enabling abuse.
 const MaxSponsors = 6
+
+// MaxSponsorNameLen and MaxSponsorLinkLen bound the metadata fields.
+const (
+	MaxSponsorNameLen = 80
+	MaxSponsorLinkLen = 500
+)
+
+// Sentinel errors returned by ValidateSponsor so handlers can map them
+// to specific HTTP status codes without string-matching.
+var (
+	ErrSponsorNameRequired = errors.New("name is required (1–80 chars)")
+	ErrSponsorNameTooLong  = errors.New("name must be ≤80 chars")
+	ErrSponsorLinkTooLong  = errors.New("link must be ≤500 chars")
+	ErrSponsorLinkInvalid  = errors.New("link must be a valid http(s) URL")
+)
+
+// ValidateSponsor checks name length and link format. Centralises the
+// rules so handlers, tests, and future import paths agree. Name/link
+// must already be trimmed by the caller.
+func ValidateSponsor(s Sponsor) error {
+	if s.Name == "" {
+		return ErrSponsorNameRequired
+	}
+	if len([]rune(s.Name)) > MaxSponsorNameLen {
+		return ErrSponsorNameTooLong
+	}
+	if s.Link == "" {
+		return nil
+	}
+	if len(s.Link) > MaxSponsorLinkLen {
+		return ErrSponsorLinkTooLong
+	}
+	u, err := url.Parse(s.Link)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return ErrSponsorLinkInvalid
+	}
+	return nil
+}
 
 // Tournament mode constants (mp-7h7).
 const (

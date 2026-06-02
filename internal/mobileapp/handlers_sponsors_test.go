@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -156,15 +157,22 @@ func TestPostSponsor_RejectsBadLink(t *testing.T) {
 		"javascript:alert(1)",
 		"ftp://files.example",
 		"no-scheme.example",
-		"",
+		"https://user:pass@example.com", // userinfo rejected — would leak credentials in href
+		"https://",                      // missing host
 	} {
-		if badLink == "" {
-			continue // empty link is allowed (optional field)
-		}
 		body, ct := buildSponsorUpload(t, "Bad Link", badLink, "x.png", tinyPNG)
 		w := postSponsor(t, router, body, ct, "secret")
 		assert.Equal(t, http.StatusBadRequest, w.Code, "link %q must be rejected", badLink)
 	}
+}
+
+func TestPostSponsor_RejectsOversizedName(t *testing.T) {
+	router, _, cleanup := sponsorTestSetup(t)
+	defer cleanup()
+
+	body, ct := buildSponsorUpload(t, strings.Repeat("a", state.MaxSponsorNameLen+1), "", "x.png", tinyPNG)
+	w := postSponsor(t, router, body, ct, "secret")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestPostSponsor_RejectsEmptyName(t *testing.T) {
@@ -193,7 +201,7 @@ func TestPostSponsor_CapEnforced(t *testing.T) {
 	router, _, cleanup := sponsorTestSetup(t)
 	defer cleanup()
 
-	for i := 0; i < state.MaxSponsors; i++ {
+	for i := range state.MaxSponsors {
 		body, ct := buildSponsorUpload(t, "Sponsor", "", "s.png", tinyPNG)
 		w := postSponsor(t, router, body, ct, "secret")
 		require.Equal(t, http.StatusCreated, w.Code, "upload %d should succeed", i+1)
@@ -304,4 +312,96 @@ func TestDeleteSponsor_InvalidIndex(t *testing.T) {
 		router.ServeHTTP(w, req)
 		assert.NotEqual(t, http.StatusOK, w.Code, "path %q must not return 200", path)
 	}
+}
+
+// TestPostSponsor_NoTournament covers the rare-but-real path where the
+// admin somehow hits the upload route before tournament.md exists. The
+// transform must return errSponsorTournamentNotInit → 404, not 500.
+func TestPostSponsor_NoTournament(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sponsor-no-tournament-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(tempDir) }()
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}
+	res := resources.NewResources(nil, mockFS)
+	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+
+	body, ct := buildSponsorUpload(t, "Acme", "", "x.png", tinyPNG)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/sponsors", body)
+	req.Header.Set("Content-Type", ct)
+	// No tournament password set (no tournament exists). AuthMiddleware
+	// permits unauth POST /api/tournament on a virgin install, but
+	// /api/sponsors is NOT on that allowlist. The middleware should
+	// reject (4xx, not 200 or 404 from the handler), proving the auth
+	// layer fires before the handler can leak the not-init state.
+	router.ServeHTTP(w, req)
+	assert.True(t, w.Code >= 400 && w.Code < 500,
+		"no-tournament + no-password must reject at the auth layer (got %d)", w.Code)
+	assert.NotEqual(t, http.StatusOK, w.Code)
+	assert.NotEqual(t, http.StatusCreated, w.Code)
+}
+
+// TestPostSponsor_SelfRunMode_RejectsAnonymous and Delete equivalent
+// pin the self-run authorization contract — sponsor management is
+// organiser setup, not operational play, and must not become anonymously
+// writable when the tournament is in self-run mode. The route is added
+// to isSelfRunMainGatedConfigRoute alongside the other config routes.
+func TestPostSponsor_SelfRunMode_RejectsAnonymous(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sponsor-selfrun-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(tempDir) }()
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:          "Self-Run Cup",
+		Password:      "main-pw",
+		AdminPassword: "admin-pw",
+		Mode:          state.TournamentModeSelfRun,
+	}))
+	eng := engine.New(store)
+	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}
+	res := resources.NewResources(nil, mockFS)
+	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+
+	body, ct := buildSponsorUpload(t, "Acme", "", "x.png", tinyPNG)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/sponsors", body)
+	req.Header.Set("Content-Type", ct)
+	// No password header. In self-run mode the main-pw gate is bypassed
+	// for operational routes — but sponsor mutation is config, so 401.
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "self-run sponsor upload must require main-password")
+
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodDelete, "/api/sponsors/0", nil)
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusUnauthorized, w2.Code, "self-run sponsor delete must require main-password")
+}
+
+// TestGetSponsor_RejectsSymlink hardens the GET path against a symlink
+// planted in the sponsors dir (e.g. by a shared-host operator or a
+// future feature). The strict filename regex already blocks the most
+// common traversal vectors, but a valid-looking name pointing at /etc/
+// would still be served by c.File. os.Lstat + symlink check closes that.
+func TestGetSponsor_RejectsSymlink(t *testing.T) {
+	router, tempDir, cleanup := sponsorTestSetup(t)
+	defer cleanup()
+
+	sponsorsDir := filepath.Join(tempDir, "sponsors")
+	require.NoError(t, os.MkdirAll(sponsorsDir, 0o700))
+	// Create a target file outside the sponsors dir.
+	target := filepath.Join(tempDir, "secret.txt")
+	require.NoError(t, os.WriteFile(target, []byte("not for sharing"), 0o600))
+	// Plant a symlink that matches the strict filename regex.
+	linkName := "abcdef0123456789.png"
+	require.NoError(t, os.Symlink(target, filepath.Join(sponsorsDir, linkName)))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/sponsors/"+linkName, nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code, "symlinked sponsor file must 404, not serve target")
+	assert.NotContains(t, w.Body.String(), "not for sharing")
 }

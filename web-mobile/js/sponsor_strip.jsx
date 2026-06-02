@@ -17,40 +17,45 @@ function SponsorStrip({ sponsors, variant }) {
   const v = variant || "viewer";
   const interactive = v === "viewer";
 
-  return React.createElement(
-    "div",
-    { className: "sponsor-strip sponsor-strip--" + v, role: "complementary", "aria-label": "Sponsors" },
-    sponsors.map((s, i) => {
-      const img = React.createElement("img", {
-        key: "img-" + i,
-        src: "/api/sponsors/" + s.file,
-        alt: s.name || "Sponsor",
-        className: "sponsor-strip__logo",
+  return (
+    <div
+      className={"sponsor-strip sponsor-strip--" + v}
+      role="complementary"
+      aria-label="Sponsors"
+    >
+      {sponsors.map((s, i) => {
         // Defensive: hide a broken logo rather than letting one missing
         // file blow out the row layout. The handler returns 404 if the
         // file is gone; the rest of the strip stays intact.
-        onError: (e) => { e.currentTarget.style.display = "none"; },
-      });
-      if (interactive && s.link) {
-        return React.createElement(
-          "a",
-          {
-            key: "a-" + i,
-            href: s.link,
-            target: "_blank",
-            rel: "noopener noreferrer",
-            className: "sponsor-strip__link",
-            title: s.name,
-          },
-          img,
+        const img = (
+          <img
+            src={"/api/sponsors/" + s.file}
+            alt={s.name || "Sponsor"}
+            className="sponsor-strip__logo"
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
         );
-      }
-      return React.createElement(
-        "span",
-        { key: "span-" + i, className: "sponsor-strip__item", title: s.name },
-        img,
-      );
-    }),
+        if (interactive && s.link) {
+          return (
+            <a
+              key={i}
+              href={s.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="sponsor-strip__link"
+              title={s.name}
+            >
+              {img}
+            </a>
+          );
+        }
+        return (
+          <span key={i} className="sponsor-strip__item" title={s.name}>
+            {img}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

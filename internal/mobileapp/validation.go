@@ -96,12 +96,12 @@ func validateMaxLen(field, val string, max int) error {
 	return nil
 }
 
-// validateHTTPSURL returns a ValidationError when val is non-empty and does not
+// validateHTTPURL returns a ValidationError when val is non-empty and does not
 // start with "http://" or "https://". These URL fields are rendered as raw href
 // values in the viewer SPA; rejecting non-http(s) schemes at the write boundary
 // prevents javascript: or data: URIs from reaching the public viewer page.
 // Empty strings pass (the fields are optional).
-func validateHTTPSURL(field, val string) error {
+func validateHTTPURL(field, val string) error {
 	if val == "" {
 		return nil
 	}

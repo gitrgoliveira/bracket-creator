@@ -184,7 +184,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       rulesURL: rulesURL.trim() || undefined,
       awardsNote: awardsNote.trim() || undefined,
       infoNotes: infoNotes.trim() || undefined,
-      contacts: contacts.filter(c => (c.label || "").trim() || (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
+      contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
     });
   };
 

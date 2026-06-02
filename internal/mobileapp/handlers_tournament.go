@@ -172,7 +172,7 @@ func trimPublicInfoFields(t *state.Tournament) {
 		for _, ct := range t.Contacts {
 			ct.Label = strings.TrimSpace(ct.Label)
 			ct.Value = strings.TrimSpace(ct.Value)
-			if ct.Label != "" || ct.Value != "" {
+			if ct.Value != "" {
 				filtered = append(filtered, ct)
 			}
 		}
@@ -214,7 +214,7 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("venueMapURL", t.VenueMapURL, MaxLenVenueMapURL); err != nil {
 		return err
 	}
-	if err := validateHTTPSURL("venueMapURL", t.VenueMapURL); err != nil {
+	if err := validateHTTPURL("venueMapURL", t.VenueMapURL); err != nil {
 		return err
 	}
 	if err := validateMaxLen("openingTime", t.OpeningTime, MaxLenDisplayTime); err != nil {
@@ -226,7 +226,7 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("rulesURL", t.RulesURL, MaxLenRulesURL); err != nil {
 		return err
 	}
-	if err := validateHTTPSURL("rulesURL", t.RulesURL); err != nil {
+	if err := validateHTTPURL("rulesURL", t.RulesURL); err != nil {
 		return err
 	}
 	if err := validateMaxLen("awardsNote", t.AwardsNote, MaxLenAwardsNote); err != nil {

@@ -374,14 +374,17 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if cascadeErr != nil {
 				// participants.csv (and seeds.csv) were already updated — broadcast and
 				// return 200 with the updated player so the client keeps its local state.
-				// Surface the cascade error in a cascadeError field for operator visibility.
+				// Include any warnings collected before the failure (e.g. dojo conflicts
+				// from pools) and a cascadeError field for operator visibility.
 				hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 				type playerWithCascadeError struct {
 					domain.Player
-					CascadeError string `json:"cascadeError"`
+					Warnings     []string `json:"warnings,omitempty"`
+					CascadeError string   `json:"cascadeError"`
 				}
 				c.JSON(http.StatusOK, playerWithCascadeError{
 					Player:       *updatedPlayer,
+					Warnings:     w,
 					CascadeError: cascadeErr.Error(),
 				})
 				return

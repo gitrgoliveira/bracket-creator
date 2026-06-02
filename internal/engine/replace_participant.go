@@ -81,6 +81,21 @@ func (e *Engine) ReplaceParticipantInDraw(
 	// --- bracket.json + pool-matches.csv (WAL-staged, one transaction) ---
 	var bracketFound, matchesFound bool
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		// Re-verify draw-ready status under the transaction lock to guard against a
+		// concurrent StartCompetition that may have transitioned the competition
+		// between the initial status check and these writes.
+		current, err := tx.LoadCompetition(compID)
+		if err != nil {
+			return fmt.Errorf("re-checking competition status: %w", err)
+		}
+		if current == nil || current.Status != state.CompStatusDrawReady {
+			status := "unknown"
+			if current != nil {
+				status = string(current.Status)
+			}
+			return validationErrorf("competition %s is no longer in draw-ready state (status: %s)", compID, status)
+		}
+
 		bracket, err := tx.LoadBracket(compID)
 		if err != nil {
 			return fmt.Errorf("loading bracket: %w", err)

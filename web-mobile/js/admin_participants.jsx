@@ -563,6 +563,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       if (updated.warnings && updated.warnings.length > 0) {
         updated.warnings.forEach(w => showToast(`Warning: ${w}`, "error"));
       }
+      if (updated.cascadeError) {
+        showToast(`Draw update failed: ${updated.cascadeError}`, "error");
+      }
     } catch (err) {
       if (!mountedRef.current) return;
       showToast(err.message, "error");

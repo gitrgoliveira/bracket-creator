@@ -316,26 +316,16 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return err
 			}
 
-			// Capture old values before mutation so we can cascade the change
-			// through draw artifacts when the competition is draw-ready.
-			if comp.Status == state.CompStatusDrawReady {
-				participants, lerr := tx.LoadParticipants(id, comp.WithZekkenName)
-				if lerr != nil {
-					httpMsg = lerr.Error()
-					return lerr
-				}
-				for _, p := range participants {
-					if p.ID == pid {
-						oldName = p.Name
-						oldDojo = p.Dojo
-						oldDisplayName = p.DisplayName
-						break
-					}
-				}
-				isDrawReady = true
-			}
-
 			p, err := tx.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+				// Capture old values before mutation for draw cascade.
+				// The transform callback receives the pre-mutation player,
+				// so this avoids a separate LoadParticipants scan.
+				if comp.Status == state.CompStatusDrawReady {
+					oldName = p.Name
+					oldDojo = p.Dojo
+					oldDisplayName = p.DisplayName
+					isDrawReady = true
+				}
 				p.Name = name
 				p.DisplayName = displayName
 				p.Dojo = dojo
@@ -374,6 +364,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// auto-derived display names propagate correctly into pools.csv.
 			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, updatedPlayer.DisplayName)
 			if cascadeErr != nil {
+				// participants.csv (and seeds.csv) were already updated — broadcast
+				// so connected clients reflect the persisted state even on cascade failure.
+				hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 				var notFound *engine.NotFoundError
 				var validation *engine.ValidationError
 				switch {

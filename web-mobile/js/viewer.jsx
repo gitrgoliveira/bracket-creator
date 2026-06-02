@@ -526,14 +526,7 @@ function MyMatchAlertBanner({ match, onView, onDismiss }) {
 // are set so the card is invisible for tournaments that haven't filled them in.
 function TournamentInfo({ tournament }) {
   const t = tournament;
-  const hasAddress = !!(t.venueAddress);
-  const hasTimes = !!(t.openingTime || t.closingTime);
-  const hasAwards = !!(t.awardsNote);
-  const hasRules = !!(t.rulesURL);
-  const hasNotes = !!(t.infoNotes);
-  const hasContacts = !!(t.contacts && t.contacts.length > 0);
-
-  if (!hasAddress && !hasTimes && !hasAwards && !hasRules && !hasNotes && !hasContacts) return null;
+  if (!t.venueAddress && !t.openingTime && !t.closingTime && !t.awardsNote && !t.rulesURL && !t.infoNotes && !(t.contacts && t.contacts.length > 0)) return null;
 
   const contactLink = (value) => {
     if (!value) return value;
@@ -547,32 +540,32 @@ function TournamentInfo({ tournament }) {
     <div className="tournament-info">
       <div className="tournament-info__title">Tournament Info</div>
       <dl className="tournament-info__grid">
-        {hasAddress && <>
+        {t.venueAddress && <>
           <dt className="tournament-info__label">Venue</dt>
           <dd className="tournament-info__value">
             {t.venueAddress}
             {t.venueMapURL && <>{" "}<a href={t.venueMapURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">View map ↗</a></>}
           </dd>
         </>}
-        {hasTimes && <>
+        {(t.openingTime || t.closingTime) && <>
           <dt className="tournament-info__label">Times</dt>
           <dd className="tournament-info__value">
             {t.openingTime && t.closingTime ? `${t.openingTime} – ${t.closingTime}` : t.openingTime ? `Opens ${t.openingTime}` : `Closes ${t.closingTime}`}
           </dd>
         </>}
-        {hasAwards && <>
+        {t.awardsNote && <>
           <dt className="tournament-info__label">Awards</dt>
           <dd className="tournament-info__value">{t.awardsNote}</dd>
         </>}
-        {hasRules && <>
+        {t.rulesURL && <>
           <dt className="tournament-info__label">Rules</dt>
           <dd className="tournament-info__value"><a href={t.rulesURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.rulesURL.replace(/^https?:\/\//i, "")}</a></dd>
         </>}
-        {hasNotes && <>
+        {t.infoNotes && <>
           <dt className="tournament-info__label">Notes</dt>
           <dd className="tournament-info__value">{t.infoNotes}</dd>
         </>}
-        {hasContacts && <>
+        {t.contacts && t.contacts.length > 0 && <>
           <dt className="tournament-info__label">Contact</dt>
           <dd className="tournament-info__value">
             {t.contacts.map((ct, i) => (

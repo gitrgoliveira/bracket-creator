@@ -118,7 +118,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [rulesURL, setRulesURL] = useStateA(tournament.rulesURL || "");
   const [awardsNote, setAwardsNote] = useStateA(tournament.awardsNote || "");
   const [infoNotes, setInfoNotes] = useStateA(tournament.infoNotes || "");
-  const [contacts, setContacts] = useStateA(tournament.contacts && tournament.contacts.length > 0 ? tournament.contacts : []);
+  const [contacts, setContacts] = useStateA(tournament.contacts || []);
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
 

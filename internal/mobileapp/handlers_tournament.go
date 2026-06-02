@@ -154,6 +154,34 @@ var errModeImmutable = errors.New("tournament mode cannot be changed after creat
 // require X-Admin-Password. (mp-7h7 fail-open fix)
 var errSelfRunRequiresAdminPassword = errors.New("self-run tournaments require an admin (destructive-ops) password to be set; configure it before switching to self-run mode or set it in the same request")
 
+// trimPublicInfoFields trims all optional public tournament info string fields
+// and normalises the Contacts slice: each entry's Label/Value is trimmed,
+// all-empty entries are dropped, and the slice is capped at MaxTournamentContacts.
+// Called identically by the PUT and POST /tournament handlers.
+func trimPublicInfoFields(t *state.Tournament) {
+	t.VenueAddress = strings.TrimSpace(t.VenueAddress)
+	t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
+	t.OpeningTime = strings.TrimSpace(t.OpeningTime)
+	t.ClosingTime = strings.TrimSpace(t.ClosingTime)
+	t.RulesURL = strings.TrimSpace(t.RulesURL)
+	t.AwardsNote = strings.TrimSpace(t.AwardsNote)
+	t.InfoNotes = strings.TrimSpace(t.InfoNotes)
+	if len(t.Contacts) > 0 {
+		filtered := make([]state.TournamentContact, 0, len(t.Contacts))
+		for _, ct := range t.Contacts {
+			ct.Label = strings.TrimSpace(ct.Label)
+			ct.Value = strings.TrimSpace(ct.Value)
+			if ct.Label != "" || ct.Value != "" {
+				filtered = append(filtered, ct)
+			}
+		}
+		if len(filtered) > MaxTournamentContacts {
+			filtered = filtered[:MaxTournamentContacts]
+		}
+		t.Contacts = filtered
+	}
+}
+
 // validateTournamentLengths enforces the persisted-string caps from
 // validation.go on every string field of t. Called after trim and
 // after the required-field checks so error messages report the
@@ -258,29 +286,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
-		// mp-ef3: trim public info fields.
-		t.VenueAddress = strings.TrimSpace(t.VenueAddress)
-		t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
-		t.OpeningTime = strings.TrimSpace(t.OpeningTime)
-		t.ClosingTime = strings.TrimSpace(t.ClosingTime)
-		t.RulesURL = strings.TrimSpace(t.RulesURL)
-		t.AwardsNote = strings.TrimSpace(t.AwardsNote)
-		t.InfoNotes = strings.TrimSpace(t.InfoNotes)
-		// Trim and filter contacts: remove entries where both label and value are empty.
-		if len(t.Contacts) > 0 {
-			filtered := make([]state.TournamentContact, 0, len(t.Contacts))
-			for _, ct := range t.Contacts {
-				ct.Label = strings.TrimSpace(ct.Label)
-				ct.Value = strings.TrimSpace(ct.Value)
-				if ct.Label != "" || ct.Value != "" {
-					filtered = append(filtered, ct)
-				}
-			}
-			if len(filtered) > MaxTournamentContacts {
-				filtered = filtered[:MaxTournamentContacts]
-			}
-			t.Contacts = filtered
-		}
+		trimPublicInfoFields(&t)
 
 		// Reject non-empty Date that doesn't match the canonical DD-MM-YYYY
 		// shape (or semantically invalid days like Feb 31). The frontend
@@ -554,28 +560,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
-		// mp-ef3: trim public info fields (mirrors the PUT handler).
-		t.VenueAddress = strings.TrimSpace(t.VenueAddress)
-		t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
-		t.OpeningTime = strings.TrimSpace(t.OpeningTime)
-		t.ClosingTime = strings.TrimSpace(t.ClosingTime)
-		t.RulesURL = strings.TrimSpace(t.RulesURL)
-		t.AwardsNote = strings.TrimSpace(t.AwardsNote)
-		t.InfoNotes = strings.TrimSpace(t.InfoNotes)
-		if len(t.Contacts) > 0 {
-			filtered := make([]state.TournamentContact, 0, len(t.Contacts))
-			for _, ct := range t.Contacts {
-				ct.Label = strings.TrimSpace(ct.Label)
-				ct.Value = strings.TrimSpace(ct.Value)
-				if ct.Label != "" || ct.Value != "" {
-					filtered = append(filtered, ct)
-				}
-			}
-			if len(filtered) > MaxTournamentContacts {
-				filtered = filtered[:MaxTournamentContacts]
-			}
-			t.Contacts = filtered
-		}
+		trimPublicInfoFields(&t)
 
 		// Same empty-after-trim guard as the PUT handler.
 		if t.Name == "" {

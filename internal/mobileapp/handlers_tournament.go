@@ -181,6 +181,37 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
 		return err
 	}
+	// mp-ef3: public tournament info fields.
+	if err := validateMaxLen("venueAddress", t.VenueAddress, MaxLenVenueAddress); err != nil {
+		return err
+	}
+	if err := validateMaxLen("venueMapURL", t.VenueMapURL, MaxLenVenueMapURL); err != nil {
+		return err
+	}
+	if err := validateMaxLen("openingTime", t.OpeningTime, MaxLenDisplayTime); err != nil {
+		return err
+	}
+	if err := validateMaxLen("closingTime", t.ClosingTime, MaxLenDisplayTime); err != nil {
+		return err
+	}
+	if err := validateMaxLen("rulesURL", t.RulesURL, MaxLenRulesURL); err != nil {
+		return err
+	}
+	if err := validateMaxLen("awardsNote", t.AwardsNote, MaxLenAwardsNote); err != nil {
+		return err
+	}
+	if err := validateMaxLen("infoNotes", t.InfoNotes, MaxLenInfoNotes); err != nil {
+		return err
+	}
+	for i, ct := range t.Contacts {
+		prefix := fmt.Sprintf("contacts[%d]", i)
+		if err := validateMaxLen(prefix+".label", ct.Label, MaxLenContactLabel); err != nil {
+			return err
+		}
+		if err := validateMaxLen(prefix+".value", ct.Value, MaxLenContactValue); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -227,6 +258,29 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
+		// mp-ef3: trim public info fields.
+		t.VenueAddress = strings.TrimSpace(t.VenueAddress)
+		t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
+		t.OpeningTime = strings.TrimSpace(t.OpeningTime)
+		t.ClosingTime = strings.TrimSpace(t.ClosingTime)
+		t.RulesURL = strings.TrimSpace(t.RulesURL)
+		t.AwardsNote = strings.TrimSpace(t.AwardsNote)
+		t.InfoNotes = strings.TrimSpace(t.InfoNotes)
+		// Trim and filter contacts: remove entries where both label and value are empty.
+		if len(t.Contacts) > 0 {
+			filtered := make([]state.TournamentContact, 0, len(t.Contacts))
+			for _, ct := range t.Contacts {
+				ct.Label = strings.TrimSpace(ct.Label)
+				ct.Value = strings.TrimSpace(ct.Value)
+				if ct.Label != "" || ct.Value != "" {
+					filtered = append(filtered, ct)
+				}
+			}
+			if len(filtered) > MaxTournamentContacts {
+				filtered = filtered[:MaxTournamentContacts]
+			}
+			t.Contacts = filtered
+		}
 
 		// Reject non-empty Date that doesn't match the canonical DD-MM-YYYY
 		// shape (or semantically invalid days like Feb 31). The frontend
@@ -500,6 +554,28 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
+		// mp-ef3: trim public info fields (mirrors the PUT handler).
+		t.VenueAddress = strings.TrimSpace(t.VenueAddress)
+		t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
+		t.OpeningTime = strings.TrimSpace(t.OpeningTime)
+		t.ClosingTime = strings.TrimSpace(t.ClosingTime)
+		t.RulesURL = strings.TrimSpace(t.RulesURL)
+		t.AwardsNote = strings.TrimSpace(t.AwardsNote)
+		t.InfoNotes = strings.TrimSpace(t.InfoNotes)
+		if len(t.Contacts) > 0 {
+			filtered := make([]state.TournamentContact, 0, len(t.Contacts))
+			for _, ct := range t.Contacts {
+				ct.Label = strings.TrimSpace(ct.Label)
+				ct.Value = strings.TrimSpace(ct.Value)
+				if ct.Label != "" || ct.Value != "" {
+					filtered = append(filtered, ct)
+				}
+			}
+			if len(filtered) > MaxTournamentContacts {
+				filtered = filtered[:MaxTournamentContacts]
+			}
+			t.Contacts = filtered
+		}
 
 		// Same empty-after-trim guard as the PUT handler.
 		if t.Name == "" {

@@ -36,6 +36,17 @@ const (
 	MaxLenTournamentPassword = 256 // not trimmed; cap prevents megabyte payloads
 	MaxLenCeremonyBlock      = 16  // "1h30m" etc.
 
+	// mp-ef3: public tournament info field caps.
+	MaxLenVenueAddress    = 300
+	MaxLenVenueMapURL     = 500
+	MaxLenDisplayTime     = 5 // "HH:MM"
+	MaxLenRulesURL        = 500
+	MaxLenAwardsNote      = 500
+	MaxLenInfoNotes       = 2000
+	MaxLenContactLabel    = 50
+	MaxLenContactValue    = 200
+	MaxTournamentContacts = 10
+
 	// MaxTournamentDurationDays is the upper bound on Tournament.DurationDays.
 	// 30 days covers the longest conceivable multi-day open tournament.
 	MaxTournamentDurationDays = 30

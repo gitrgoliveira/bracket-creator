@@ -521,6 +521,73 @@ function MyMatchAlertBanner({ match, onView, onDismiss }) {
   );
 }
 
+// TournamentInfo renders optional public tournament info (mp-ef3) as a
+// read-only card on the viewer home page. Returns null when no info fields
+// are set so the card is invisible for tournaments that haven't filled them in.
+function TournamentInfo({ tournament }) {
+  const t = tournament;
+  const hasAddress = !!(t.venueAddress);
+  const hasTimes = !!(t.openingTime || t.closingTime);
+  const hasAwards = !!(t.awardsNote);
+  const hasRules = !!(t.rulesURL);
+  const hasNotes = !!(t.infoNotes);
+  const hasContacts = !!(t.contacts && t.contacts.length > 0);
+
+  if (!hasAddress && !hasTimes && !hasAwards && !hasRules && !hasNotes && !hasContacts) return null;
+
+  const contactLink = (value) => {
+    if (!value) return value;
+    if (value.match(/^https?:\/\//i)) return <a href={value} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{value.replace(/^https?:\/\//i, "")}</a>;
+    if (value.includes("@")) return <a href={"mailto:" + value} className="tournament-info__link">{value}</a>;
+    if (/^\+?[\d\s()-]+$/.test(value)) return <a href={"tel:" + value.replace(/[\s()-]/g, "")} className="tournament-info__link">{value}</a>;
+    return value;
+  };
+
+  return (
+    <div className="tournament-info">
+      <div className="tournament-info__title">Tournament Info</div>
+      <dl className="tournament-info__grid">
+        {hasAddress && <>
+          <dt className="tournament-info__label">Venue</dt>
+          <dd className="tournament-info__value">
+            {t.venueAddress}
+            {t.venueMapURL && <>{" "}<a href={t.venueMapURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">View map ↗</a></>}
+          </dd>
+        </>}
+        {hasTimes && <>
+          <dt className="tournament-info__label">Times</dt>
+          <dd className="tournament-info__value">
+            {t.openingTime && t.closingTime ? `${t.openingTime} – ${t.closingTime}` : t.openingTime ? `Opens ${t.openingTime}` : `Closes ${t.closingTime}`}
+          </dd>
+        </>}
+        {hasAwards && <>
+          <dt className="tournament-info__label">Awards</dt>
+          <dd className="tournament-info__value">{t.awardsNote}</dd>
+        </>}
+        {hasRules && <>
+          <dt className="tournament-info__label">Rules</dt>
+          <dd className="tournament-info__value"><a href={t.rulesURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.rulesURL.replace(/^https?:\/\//i, "")}</a></dd>
+        </>}
+        {hasNotes && <>
+          <dt className="tournament-info__label">Notes</dt>
+          <dd className="tournament-info__value">{t.infoNotes}</dd>
+        </>}
+        {hasContacts && <>
+          <dt className="tournament-info__label">Contact</dt>
+          <dd className="tournament-info__value">
+            {t.contacts.map((ct, i) => (
+              <div key={i} className="tournament-info__contact">
+                {ct.label && <span className="tournament-info__contact-label">{ct.label}:</span>}
+                {" "}{contactLink(ct.value)}
+              </div>
+            ))}
+          </dd>
+        </>}
+      </dl>
+    </div>
+  );
+}
+
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -644,6 +711,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         </div>
 
         <div className="viewer__body">
+          <TournamentInfo tournament={t} />
           <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
              <select className="input" style={{ width: "auto" }} value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
                <option value="all">All Shiaijo</option>

@@ -372,7 +372,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// (non-reentrant mutex), so the cascade function can acquire it.
 			// Use updatedPlayer.DisplayName (the canonical post-save value) so
 			// auto-derived display names propagate correctly into pools.csv.
-			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, name, dojo, updatedPlayer.DisplayName)
+			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, updatedPlayer.DisplayName)
 			if cascadeErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
 				return

@@ -118,7 +118,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [rulesURL, setRulesURL] = useStateA(tournament.rulesURL || "");
   const [awardsNote, setAwardsNote] = useStateA(tournament.awardsNote || "");
   const [infoNotes, setInfoNotes] = useStateA(tournament.infoNotes || "");
-  const [contacts, setContacts] = useStateA(tournament.contacts || []);
+  const [contacts, setContacts] = useStateA((tournament.contacts || []).map((ct, i) => ({ ...ct, _key: i })));
+  const nextKeyRef = useRefA((tournament.contacts || []).length);
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
 
@@ -323,14 +324,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               <label className="field__label">Contacts</label>
               <div className="field__hint" style={{ marginBottom: 8 }}>Add contact methods for attendees (max 10).</div>
               {contacts.map((ct, i) => (
-                <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                <div key={ct._key} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
                   <input className="input" style={{ flex: "0 0 120px" }} value={ct.label} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], label: e.target.value }; setContacts(next); }} placeholder="Label" />
                   <input className="input" style={{ flex: 1 }} value={ct.value} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], value: e.target.value }; setContacts(next); }} placeholder="Value (email, phone, URL, etc.)" />
                   <button className="btn" style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}>✕</button>
                 </div>
               ))}
               {contacts.length < 10 && (
-                <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => setContacts([...contacts, { label: "", value: "" }])}>+ Add contact</button>
+                <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => setContacts([...contacts, { label: "", value: "", _key: nextKeyRef.current++ }])}>+ Add contact</button>
               )}
             </div>
           </div>

@@ -335,6 +335,88 @@ func TestTournamentHandlers(t *testing.T) {
 			"PUT with empty Password against legacy empty-password tournament must reject")
 		assert.Contains(t, w.Body.String(), "tournament password is required")
 	}
+
+	// mp-ef3 Copilot round 2: public info field trimming, contacts-count
+	// validation, URL validation, and contacts field-length validation.
+
+	t.Run("PUT trims public info fields", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Trim Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{
+			Name:         "Trim Test",
+			Password:     "secret",
+			Courts:       []string{"A"},
+			VenueAddress: "  123 Main St  ",
+			OpeningTime:  "  09:00  ",
+			Contacts:     []state.TournamentContact{{Label: "  Email  ", Value: "  test@example.com  "}},
+		}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		saved, _ := store.LoadTournament()
+		assert.Equal(t, "123 Main St", saved.VenueAddress)
+		assert.Equal(t, "09:00", saved.OpeningTime)
+		require.Len(t, saved.Contacts, 1)
+		assert.Equal(t, "Email", saved.Contacts[0].Label)
+		assert.Equal(t, "test@example.com", saved.Contacts[0].Value)
+	})
+
+	t.Run("PUT rejects contacts over MaxTournamentContacts", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Max Contacts", Password: "secret", Courts: []string{"A"}}))
+		contacts := make([]state.TournamentContact, MaxTournamentContacts+1)
+		for i := range contacts {
+			contacts[i] = state.TournamentContact{Label: fmt.Sprintf("Label%d", i), Value: fmt.Sprintf("value%d@example.com", i)}
+		}
+		tour := state.Tournament{
+			Name:     "Max Contacts",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Contacts: contacts,
+		}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "contacts")
+	})
+
+	t.Run("PUT rejects javascript: URL in venueMapURL", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "URL Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{
+			Name:        "URL Test",
+			Password:    "secret",
+			Courts:      []string{"A"},
+			VenueMapURL: "javascript:alert(1)",
+		}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("PUT validates contacts field lengths", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Field Len", Password: "secret", Courts: []string{"A"}}))
+		longLabel := strings.Repeat("x", MaxLenContactLabel+1)
+		tour := state.Tournament{
+			Name:     "Field Len",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Contacts: []state.TournamentContact{{Label: longLabel, Value: "ok@example.com"}},
+		}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "contacts[0].label")
+	})
 }
 
 // TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange pins the
@@ -1904,7 +1986,7 @@ func TestCheckInPreservedOnRosterReplace(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "ci-pr"}))
 
 	// Seed an initial roster with Alice.
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"players": []map[string]string{{"name": "Alice", "dojo": "Dojo A"}},
 	})
 	w := httptest.NewRecorder()
@@ -1927,7 +2009,7 @@ func TestCheckInPreservedOnRosterReplace(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	// Replace the roster via POST (Alice still in the list, Bob added).
-	body, _ = json.Marshal(map[string]interface{}{
+	body, _ = json.Marshal(map[string]any{
 		"players": []map[string]string{
 			{"name": "Alice", "dojo": "Dojo A"},
 			{"name": "Bob", "dojo": "Dojo B"},

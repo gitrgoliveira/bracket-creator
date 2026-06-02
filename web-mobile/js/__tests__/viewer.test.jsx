@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel } from '../viewer.jsx';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 
@@ -524,6 +524,72 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     };
     const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
     expect(collectText(tree)).toContain('Pool A');
+  });
+});
+
+// mp-ef3 Copilot round 2: TournamentInfo component and isHttpURL helper tests.
+describe('TournamentInfo', () => {
+  let runtime;
+  const realReact = global.React;
+
+  beforeEach(() => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+  });
+
+  it('returns null when all fields are empty', () => {
+    const tree = runtime.mount(TournamentInfo, { tournament: {} });
+    expect(tree).toBeNull();
+  });
+
+  it('renders venue, times, awards, and notes when provided', () => {
+    const tree = runtime.mount(TournamentInfo, {
+      tournament: {
+        venueAddress: '1 Main St',
+        openingTime: '09:00',
+        closingTime: '18:00',
+        awardsNote: 'Gold, Silver',
+        infoNotes: 'Bring your shinai',
+      },
+    });
+    const text = collectText(tree);
+    expect(text).toContain('1 Main St');
+    expect(text).toContain('09:00');
+    expect(text).toContain('18:00');
+    expect(text).toContain('Gold, Silver');
+    expect(text).toContain('Bring your shinai');
+  });
+
+  it('creates an anchor for http(s) rulesURL but renders plain text for non-http', () => {
+    // http URL → anchor element
+    const treeHttp = runtime.mount(TournamentInfo, {
+      tournament: { rulesURL: 'https://example.com/rules.pdf' },
+    });
+    const anchor = findInTree(treeHttp, n => n.type === 'a');
+    expect(anchor).not.toBeNull();
+
+    // Non-http value → plain text, no anchor
+    const treePlain = runtime.mount(TournamentInfo, {
+      tournament: { rulesURL: 'See the notice board' },
+    });
+    const anchorPlain = findInTree(treePlain, n => n.type === 'a');
+    expect(anchorPlain).toBeNull();
+    expect(collectText(treePlain)).toContain('See the notice board');
+  });
+
+  it('isHttpURL accepts http and https but rejects other schemes', () => {
+    expect(isHttpURL('http://example.com')).toBe(true);
+    expect(isHttpURL('https://example.com')).toBe(true);
+    expect(isHttpURL('HTTP://EXAMPLE.COM')).toBe(true);
+    expect(isHttpURL('javascript:alert(1)')).toBe(false);
+    expect(isHttpURL('ftp://files.example.com')).toBe(false);
+    expect(isHttpURL('')).toBe(false);
+    expect(isHttpURL(undefined)).toBe(false);
   });
 });
 

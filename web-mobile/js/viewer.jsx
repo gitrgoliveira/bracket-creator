@@ -521,12 +521,15 @@ function MyMatchAlertBanner({ match, onView, onDismiss }) {
   );
 }
 
+// isHttpURL returns true when u starts with http:// or https://. Exported for
+// testing (mp-ef3 Copilot round 2).
+export const isHttpURL = (u) => /^https?:\/\//i.test(u);
+
 // TournamentInfo renders optional public tournament info (mp-ef3) as a
 // read-only card on the viewer home page. Returns null when no info fields
 // are set so the card is invisible for tournaments that haven't filled them in.
-function TournamentInfo({ tournament }) {
+export function TournamentInfo({ tournament }) {
   const t = tournament;
-  const isHttpURL = (u) => /^https?:\/\//i.test(u);
   if (!t.venueAddress && !t.venueMapURL && !t.openingTime && !t.closingTime && !t.awardsNote && !t.rulesURL && !t.infoNotes && !(t.contacts && t.contacts.length > 0)) return null;
 
   const contactLink = (value) => {

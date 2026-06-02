@@ -155,9 +155,10 @@ var errModeImmutable = errors.New("tournament mode cannot be changed after creat
 var errSelfRunRequiresAdminPassword = errors.New("self-run tournaments require an admin (destructive-ops) password to be set; configure it before switching to self-run mode or set it in the same request")
 
 // trimPublicInfoFields trims all optional public tournament info string fields
-// and normalises the Contacts slice: each entry's Label/Value is trimmed,
-// all-empty entries are dropped, and the slice is capped at MaxTournamentContacts.
-// Called identically by the PUT and POST /tournament handlers.
+// and normalises the Contacts slice: each entry's Label/Value is trimmed and
+// all-empty entries are dropped. Called identically by the PUT and POST
+// /tournament handlers. Count validation (>MaxTournamentContacts) is enforced
+// by validateTournamentLengths as a 400 error rather than silently truncating.
 func trimPublicInfoFields(t *state.Tournament) {
 	t.VenueAddress = strings.TrimSpace(t.VenueAddress)
 	t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
@@ -174,9 +175,6 @@ func trimPublicInfoFields(t *state.Tournament) {
 			if ct.Label != "" || ct.Value != "" {
 				filtered = append(filtered, ct)
 			}
-		}
-		if len(filtered) > MaxTournamentContacts {
-			filtered = filtered[:MaxTournamentContacts]
 		}
 		t.Contacts = filtered
 	}
@@ -236,6 +234,12 @@ func validateTournamentLengths(t *state.Tournament) error {
 	}
 	if err := validateMaxLen("infoNotes", t.InfoNotes, MaxLenInfoNotes); err != nil {
 		return err
+	}
+	if len(t.Contacts) > MaxTournamentContacts {
+		return &ValidationError{
+			Field:   "contacts",
+			Message: fmt.Sprintf("must contain <= %d entries", MaxTournamentContacts),
+		}
 	}
 	for i, ct := range t.Contacts {
 		prefix := fmt.Sprintf("contacts[%d]", i)

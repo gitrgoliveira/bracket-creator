@@ -216,6 +216,9 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("venueMapURL", t.VenueMapURL, MaxLenVenueMapURL); err != nil {
 		return err
 	}
+	if err := validateHTTPSURL("venueMapURL", t.VenueMapURL); err != nil {
+		return err
+	}
 	if err := validateMaxLen("openingTime", t.OpeningTime, MaxLenDisplayTime); err != nil {
 		return err
 	}
@@ -223,6 +226,9 @@ func validateTournamentLengths(t *state.Tournament) error {
 		return err
 	}
 	if err := validateMaxLen("rulesURL", t.RulesURL, MaxLenRulesURL); err != nil {
+		return err
+	}
+	if err := validateHTTPSURL("rulesURL", t.RulesURL); err != nil {
 		return err
 	}
 	if err := validateMaxLen("awardsNote", t.AwardsNote, MaxLenAwardsNote); err != nil {

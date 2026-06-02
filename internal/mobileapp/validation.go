@@ -19,6 +19,7 @@ package mobileapp
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -39,7 +40,7 @@ const (
 	// mp-ef3: public tournament info field caps.
 	MaxLenVenueAddress    = 300
 	MaxLenVenueMapURL     = 500
-	MaxLenDisplayTime     = 5 // "HH:MM"
+	MaxLenDisplayTime     = 8 // "HH:MM" or "HH:MM:SS"
 	MaxLenRulesURL        = 500
 	MaxLenAwardsNote      = 500
 	MaxLenInfoNotes       = 2000
@@ -90,6 +91,25 @@ func validateMaxLen(field, val string, max int) error {
 		return &ValidationError{
 			Field:   field,
 			Message: fmt.Sprintf("must be <= %d characters", max),
+		}
+	}
+	return nil
+}
+
+// validateHTTPSURL returns a ValidationError when val is non-empty and does not
+// start with "http://" or "https://". These URL fields are rendered as raw href
+// values in the viewer SPA; rejecting non-http(s) schemes at the write boundary
+// prevents javascript: or data: URIs from reaching the public viewer page.
+// Empty strings pass (the fields are optional).
+func validateHTTPSURL(field, val string) error {
+	if val == "" {
+		return nil
+	}
+	lower := strings.ToLower(val)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return &ValidationError{
+			Field:   field,
+			Message: "must start with http:// or https://",
 		}
 	}
 	return nil

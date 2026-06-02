@@ -197,7 +197,7 @@ function RegistrationForm({ compId, onBack }) {
               type="text"
               value={dojo}
               onChange={(e) => { setDojo(e.target.value); setErr(""); }}
-              placeholder="e.g. Mumeishi"
+              placeholder="e.g. Gyokusen"
               disabled={saving}
               required
             />

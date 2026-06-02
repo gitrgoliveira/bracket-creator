@@ -204,7 +204,7 @@ func TestRegistration_POST_SelfRun_Setup_CreatesParticipant(t *testing.T) {
 
 	w := doRegister(r, compID, map[string]any{
 		"name":     "Alice Tanaka",
-		"dojo":     "Senbukan",
+		"dojo":     "Raizan",
 		"danGrade": "3 Dan",
 	})
 
@@ -213,7 +213,7 @@ func TestRegistration_POST_SelfRun_Setup_CreatesParticipant(t *testing.T) {
 	var player domain.Player
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &player))
 	assert.Equal(t, "Alice Tanaka", player.Name)
-	assert.Equal(t, "Senbukan", player.Dojo)
+	assert.Equal(t, "Raizan", player.Dojo)
 	assert.Equal(t, "registered", player.Tag)
 	assert.NotEmpty(t, player.ID)
 
@@ -241,7 +241,7 @@ func TestRegistration_POST_SelfRun_ZekkenComp_PersistsDisplayName(t *testing.T) 
 
 	w := doRegister(r, compID, map[string]any{
 		"name":        "Yuki Sato",
-		"dojo":        "Mumeishi",
+		"dojo":        "Gyokusen",
 		"displayName": "SATO",
 	})
 
@@ -266,7 +266,7 @@ func TestRegistration_POST_NonZekkenComp_DisplayNameStripped(t *testing.T) {
 
 	w := doRegister(r, compID, map[string]any{
 		"name":        "Kenji Smith",
-		"dojo":        "Kenshikan",
+		"dojo":        "Suigetsu",
 		"displayName": "SMITH", // should be stripped
 	})
 
@@ -353,7 +353,7 @@ func TestRegistration_POST_DuplicateName_Returns409WithFriendlyMessage(t *testin
 
 	// Register Alice once.
 	w1 := doRegister(r, compID, map[string]any{
-		"name": "Alice Yamamoto", "dojo": "Senbukan",
+		"name": "Alice Yamamoto", "dojo": "Raizan",
 	})
 	require.Equal(t, http.StatusOK, w1.Code)
 

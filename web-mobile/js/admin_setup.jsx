@@ -380,18 +380,15 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           </div>
         </div>
         {/* mp-c38: sponsor management lives on the same edit page so admins
-            don't need to navigate elsewhere. SponsorsManager is loaded from
-            admin_sponsors.js (window.SponsorsManager). Refresh tournament
-            after each upload/delete by calling onSave-equivalent through a
-            lightweight refetch — we use window.location.reload() as the
-            simplest correct invalidation since this page already re-fetches
-            tournament on mount. */}
+            don't need to navigate elsewhere. SponsorsManager owns its own
+            sponsors list (seeded from the tournament prop, updated locally
+            from the API response on upload/delete) so unsaved edits in the
+            tournament form above survive a sponsor change — no page reload. */}
         {window.SponsorsManager && (
           <window.SponsorsManager
             tournament={tournament}
             password={password}
             showToast={showToast}
-            onChanged={async () => { window.location.reload(); }}
           />
         )}
       </div>

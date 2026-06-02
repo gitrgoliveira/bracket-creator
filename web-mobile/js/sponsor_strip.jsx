@@ -23,7 +23,7 @@ function SponsorStrip({ sponsors, variant }) {
       role="complementary"
       aria-label="Sponsors"
     >
-      {sponsors.map((s, i) => {
+      {sponsors.map((s) => {
         // Defensive: hide a broken logo rather than letting one missing
         // file blow out the row layout. The handler returns 404 if the
         // file is gone; the rest of the strip stays intact.
@@ -35,10 +35,14 @@ function SponsorStrip({ sponsors, variant }) {
             onError={(e) => { e.currentTarget.style.display = "none"; }}
           />
         );
+        // Key on s.file (server-generated, unique per upload) so React
+        // doesn't reuse the wrong DOM node when a sponsor is deleted —
+        // index keys would let sponsor N+1's image flash into sponsor
+        // N's slot before the next render flush.
         if (interactive && s.link) {
           return (
             <a
-              key={i}
+              key={s.file}
               href={s.link}
               target="_blank"
               rel="noopener noreferrer"
@@ -50,7 +54,7 @@ function SponsorStrip({ sponsors, variant }) {
           );
         }
         return (
-          <span key={i} className="sponsor-strip__item" title={s.name}>
+          <span key={s.file} className="sponsor-strip__item" title={s.name}>
             {img}
           </span>
         );

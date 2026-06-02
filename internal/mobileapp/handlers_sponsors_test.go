@@ -301,6 +301,50 @@ func TestDeleteSponsor_RemovesEntryAndFile(t *testing.T) {
 	assert.Empty(t, tour.Sponsors)
 }
 
+// TestDeleteSponsor_HandEditedTraversalFilenameRejected pins the
+// defense-in-depth check on DELETE: if tournament.md was hand-edited to
+// carry a traversal-shaped file value, the os.Remove must NOT fire and
+// the bystander file must survive. The YAML entry is still removed
+// (the index check stays intact).
+func TestDeleteSponsor_HandEditedTraversalFilenameRejected(t *testing.T) {
+	router, tempDir, cleanup := sponsorTestSetup(t)
+	defer cleanup()
+
+	// Plant a bystander file outside the sponsors dir that a traversal
+	// would target. If the unlink fires, we'll catch it.
+	bystander := filepath.Join(tempDir, "secret.txt")
+	require.NoError(t, os.WriteFile(bystander, []byte("must survive"), 0o600))
+
+	// Save a tournament with a Sponsors entry whose File is a traversal
+	// path. Simulates a hand-edit / corrupt YAML.
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Traversal Test",
+		Password: "secret",
+		Sponsors: []state.Sponsor{{Name: "Evil", File: "../secret.txt"}},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodDelete, "/api/sponsors/0", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "YAML entry still gets removed; only the file unlink is suppressed")
+
+	// Bystander file must still exist — the unlink was suppressed by
+	// the filename allowlist check.
+	_, err = os.Stat(bystander)
+	assert.NoError(t, err, "traversal-shaped sponsor filename must not trigger an arbitrary file delete")
+
+	// YAML entry is gone (the safe part of delete still ran).
+	store2, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	tour, err := store2.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tour)
+	assert.Empty(t, tour.Sponsors)
+}
+
 func TestDeleteSponsor_InvalidIndex(t *testing.T) {
 	router, _, cleanup := sponsorTestSetup(t)
 	defer cleanup()

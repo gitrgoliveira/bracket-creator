@@ -252,7 +252,17 @@ func handleSponsorDelete(store *state.Store) gin.HandlerFunc {
 		// Best-effort unlink. Random filenames make collisions effectively
 		// impossible at the 1–6 scale, so a missing file (ENOENT from a
 		// concurrent delete) is harmless and silently ignored.
-		_ = os.Remove(filepath.Join(store.GetFolder(), sponsorsDirName, removed.File))
+		//
+		// Defense-in-depth: the filename in tournament.md was server-
+		// generated, but a hand-edited or corrupt YAML could supply a
+		// traversal path like "../../etc/passwd". Re-apply the same
+		// allowlist regex used by the GET handler before unlinking so
+		// this endpoint can never delete arbitrary files under the
+		// store root. Invalid → skip the unlink; the YAML entry is
+		// already removed.
+		if sponsorFilePattern.MatchString(removed.File) {
+			_ = os.Remove(filepath.Join(store.GetFolder(), sponsorsDirName, removed.File))
+		}
 		c.JSON(http.StatusOK, gin.H{"removed": removed})
 	}
 }

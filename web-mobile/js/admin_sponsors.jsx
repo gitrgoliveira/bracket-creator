@@ -8,10 +8,18 @@
 
 const { useState: useStateSp, useRef: useRefSp } = React;
 
-function SponsorsManager({ tournament, password, onChanged, showToast, maxSponsors }) {
-  const sponsors = (tournament && tournament.sponsors) || [];
+function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
   const cap = maxSponsors || 6;
 
+  // Manage the sponsor list in local state so upload/delete don't
+  // force window.location.reload() — that would wipe any unsaved edits
+  // in the tournament form above. We seed from the tournament prop on
+  // first render and update locally from the API response shape:
+  //   POST /api/sponsors → returns the created Sponsor
+  //   DELETE /api/sponsors/:index → returns {removed}
+  const [sponsors, setSponsors] = useStateSp(
+    (tournament && tournament.sponsors) || [],
+  );
   const [name, setName] = useStateSp("");
   const [link, setLink] = useStateSp("");
   const [busy, setBusy] = useStateSp(false);
@@ -32,12 +40,12 @@ function SponsorsManager({ tournament, password, onChanged, showToast, maxSponso
     }
     setBusy(true);
     try {
-      await window.API.uploadSponsor({ file, name: name.trim(), link: link.trim(), password });
+      const created = await window.API.uploadSponsor({ file, name: name.trim(), link: link.trim(), password });
+      setSponsors((prev) => [...prev, created]);
       setName("");
       setLink("");
       if (fileRef.current) fileRef.current.value = "";
       if (showToast) showToast("Sponsor added", "success");
-      if (onChanged) await onChanged();
     } catch (err) {
       if (showToast) showToast(err && err.message ? err.message : "Upload failed", "error");
     } finally {
@@ -50,8 +58,8 @@ function SponsorsManager({ tournament, password, onChanged, showToast, maxSponso
     setBusy(true);
     try {
       await window.API.deleteSponsor(idx, password);
+      setSponsors((prev) => prev.filter((_, i) => i !== idx));
       if (showToast) showToast("Sponsor removed", "success");
-      if (onChanged) await onChanged();
     } catch (err) {
       if (showToast) showToast(err && err.message ? err.message : "Delete failed", "error");
     } finally {

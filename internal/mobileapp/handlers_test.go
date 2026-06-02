@@ -50,7 +50,7 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
 	RegisterImportHandlers(admin, store, hub, NewFileElevatedVerifier(store))
 	RegisterCompetitionHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
-	RegisterParticipantHandlers(admin, store, hub, NewFileElevatedVerifier(store))
+	RegisterParticipantHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
 	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 	RegisterDecisionHandlers(admin, eng, store, store, hub)
 	RegisterEligibilityHandlers(admin, store, hub)

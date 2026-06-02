@@ -120,9 +120,9 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 		defer func() { _ = src.Close() }()
 
 		// Sniff first 512 bytes per http.DetectContentType contract.
-		// Don't trust the Content-Type header. multipart.File is
-		// guaranteed by the net/textproto contract to be a ReadSeeker,
-		// so the Seek below cannot fail in practice.
+		// Don't trust the Content-Type header. fileHeader.Open() returns
+		// mime/multipart.File, which embeds io.ReadSeeker — so src.Seek
+		// below is part of the type and cannot fail at compile time.
 		sniffBuf := make([]byte, 512)
 		nRead, rerr := io.ReadFull(src, sniffBuf)
 		// ErrUnexpectedEOF on a short part is fine: DetectContentType
@@ -138,7 +138,7 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "only PNG or JPEG accepted"})
 			return
 		}
-		if _, err := src.(io.Seeker).Seek(0, io.SeekStart); err != nil {
+		if _, err := src.Seek(0, io.SeekStart); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

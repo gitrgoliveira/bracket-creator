@@ -612,7 +612,9 @@ func TestReplaceParticipantInDraw_PoolsHappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, findPlayerInPools(poolsBefore, "Alice"), "Alice must be in pools before swap")
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	// Use derived displayNames (SanitizeName) to match how the handler calls
+	// this in non-zekken competitions — exercises the displayName cascade branch.
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
 
 	// Dojo unchanged, no conflict expected.
@@ -622,6 +624,17 @@ func TestReplaceParticipantInDraw_PoolsHappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, findPlayerInPools(poolsAfter, "Alice"), "Alice must be removed from pools after swap")
 	assert.True(t, findPlayerInPools(poolsAfter, "Alicia"), "Alicia must appear in pools after swap")
+
+	// Verify displayName was updated in pools.csv.
+	aliciaDisplayName := ""
+	for _, p := range poolsAfter {
+		for _, pl := range p.Players {
+			if pl.Name == "Alicia" {
+				aliciaDisplayName = pl.DisplayName
+			}
+		}
+	}
+	assert.Equal(t, helper.SanitizeName("Alicia"), aliciaDisplayName, "pools.csv displayName must be updated after cascade")
 
 	// pool-matches.csv should be updated too.
 	matches, err := store.LoadPoolMatches(compID)
@@ -639,7 +652,7 @@ func TestReplaceParticipantInDraw_PlayoffsBracket(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, findNameInBracket(bracketBefore, "Alice"), "Alice must be in bracket before swap")
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
@@ -697,8 +710,9 @@ func TestReplaceParticipantInDraw_DojoConflict(t *testing.T) {
 		}
 	}
 
-	// Swap Charlie (DojoY) → Grace (DojoX).
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Charlie", "DojoY", "", "Grace", "DojoX", "")
+	// Swap Charlie (DojoY) → Grace (DojoX); use derived displayNames to exercise the
+	// displayName cascade branch as in production non-zekken calls.
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Charlie", "DojoY", helper.SanitizeName("Charlie"), "Grace", "DojoX", helper.SanitizeName("Grace"))
 	require.NoError(t, err)
 
 	if aliceOrBobInSamePool {
@@ -728,7 +742,7 @@ func TestReplaceParticipantInDraw_SeedsUntouched(t *testing.T) {
 		{Name: "Alice", SeedRank: 1},
 	}))
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
 	assert.Empty(t, warnings, "no seed warnings — seed rename is handled by UpdateParticipant")
 

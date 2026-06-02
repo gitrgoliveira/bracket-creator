@@ -811,7 +811,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                     <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
                         <thead>
                             <tr>
-                                {/* Row-label stub — presentational spacer, not a data header */}
+                                {/* Row-label column header — labels the queue-position column (Now/Next/#3…) */}
                                 <th
                                     aria-label="Queue position"
                                     scope="col"
@@ -822,17 +822,13 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     }}
                                 />
                                 {visible.map((cc, ci) => {
-                                    // Derive subtitle from existing helpers so the
-                                    // predicate stays consistent with the slots.
+                                    // Derive subtitle from the already-built courtSlots so
+                                    // the header and the table body always agree on which
+                                    // match is "current" (same auto-promote logic, no rescan).
                                     const cts = countCourtMatches(competitions, cc);
                                     const remaining = cts.live + cts.scheduled;
-                                    const liveHit = findLiveOnCourt(competitions, cc);
-                                    const compName = liveHit
-                                        ? (liveHit.competition?.name || '')
-                                        : (() => {
-                                            const first = findUpcomingOnCourt(competitions, cc, 1);
-                                            return first.length > 0 ? (first[0]._comp?.name || '') : '';
-                                        })();
+                                    const firstSlot = courtSlots[ci] && courtSlots[ci][0];
+                                    const compName = firstSlot ? (firstSlot.competition?.name || '') : '';
                                     return (
                                         <React.Fragment key={cc}>
                                             <th scope="col" style={{

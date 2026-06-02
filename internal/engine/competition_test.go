@@ -612,7 +612,7 @@ func TestReplaceParticipantInDraw_PoolsHappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, findPlayerInPools(poolsBefore, "Alice"), "Alice must be in pools before swap")
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
 	require.NoError(t, err)
 
 	// Dojo unchanged, no conflict expected.
@@ -639,7 +639,7 @@ func TestReplaceParticipantInDraw_PlayoffsBracket(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, findNameInBracket(bracketBefore, "Alice"), "Alice must be in bracket before swap")
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
@@ -728,7 +728,7 @@ func TestReplaceParticipantInDraw_SeedsUntouched(t *testing.T) {
 		{Name: "Alice", SeedRank: 1},
 	}))
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
 	require.NoError(t, err)
 	assert.Empty(t, warnings, "no seed warnings — seed rename is handled by UpdateParticipant")
 
@@ -772,7 +772,7 @@ func TestReplaceParticipantInDraw_NoopWhenUnchanged(t *testing.T) {
 	require.NoError(t, err)
 
 	// Same name, same dojo, same displayName → no-op.
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alice", "DojoA", "")
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", "", "Alice", "Dojo0", "")
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 

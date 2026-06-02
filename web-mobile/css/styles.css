@@ -5876,3 +5876,75 @@ button.my-match__opp {
 
 /* up-next: tiny muted note in the header (NOT a big badge) */
 .tvd-upnext-note { font: 700 2.2vh/1 var(--font-strong); letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,209,102,0.85); }
+
+/* ---------- Sponsor strip (mp-c38) ----------
+   Used on viewer home, LobbyDisplay, and TvDisplay. Three variants
+   share the base styles; per-variant overrides handle the different
+   backdrops and logo heights of each surface. */
+.sponsor-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 16px 12px;
+  margin-top: 16px;
+}
+.sponsor-strip__logo {
+  height: 40px;
+  width: auto;
+  max-width: 160px;
+  object-fit: contain;
+  display: block;
+}
+.sponsor-strip__link,
+.sponsor-strip__item {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.sponsor-strip__link:hover .sponsor-strip__logo {
+  filter: brightness(1.05);
+}
+
+/* Viewer variant — sits in the white viewer body, neutral framing. */
+.sponsor-strip--viewer {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+/* Lobby variant — dark lobby board; logos need a touch more breathing
+   room and a subtle backdrop so they remain legible against the dark
+   gradient behind them. */
+.sponsor-strip--lobby {
+  background: rgba(255, 255, 255, 0.04);
+  padding: 14px 24px;
+  margin-top: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sponsor-strip--lobby .sponsor-strip__logo {
+  height: 48px;
+  filter: brightness(1.1);
+}
+
+/* TV variant — fullscreen per-court board; smaller strip so it stays
+   subordinate to match info. */
+.sponsor-strip--tv {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 1vh 2vw;
+  margin-top: 0;
+  background: rgba(0, 0, 0, 0.35);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 2vw;
+}
+.sponsor-strip--tv .sponsor-strip__logo {
+  height: 5vh;
+  max-width: 12vw;
+  filter: brightness(1.05);
+}
+
+@media (max-width: 480px) {
+  .sponsor-strip__logo { height: 32px; max-width: 120px; }
+  .sponsor-strip { gap: 12px; padding: 12px 8px; }
+}

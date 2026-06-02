@@ -212,3 +212,56 @@ func TestValidateTeamMatchType(t *testing.T) {
 		})
 	}
 }
+
+// --- Sponsors (mp-c38) ---
+
+// TestTournament_SponsorsRoundTrip pins the YAML round-trip contract:
+// populated sponsors must survive marshal/unmarshal with name, file, and
+// link preserved. omitempty on Link must omit the key for sponsors with
+// no link set.
+func TestTournament_SponsorsRoundTrip(t *testing.T) {
+	original := Tournament{
+		Name: "Round-Trip Cup",
+		Sponsors: []Sponsor{
+			{Name: "Acme Corp", File: "8a3f9c12d7b6e041.png", Link: "https://acme.example"},
+			{Name: "BetaCo", File: "1f2e3d4c5b6a7080.jpg"}, // no link
+		},
+	}
+	b, err := yaml.Marshal(&original)
+	require.NoError(t, err)
+	// omitempty on Link → second sponsor must not emit a `link:` key.
+	assert.Contains(t, string(b), "name: Acme Corp")
+	assert.Contains(t, string(b), "link: https://acme.example")
+
+	var got Tournament
+	require.NoError(t, yaml.Unmarshal(b, &got))
+	require.Len(t, got.Sponsors, 2)
+	assert.Equal(t, "Acme Corp", got.Sponsors[0].Name)
+	assert.Equal(t, "8a3f9c12d7b6e041.png", got.Sponsors[0].File)
+	assert.Equal(t, "https://acme.example", got.Sponsors[0].Link)
+	assert.Equal(t, "BetaCo", got.Sponsors[1].Name)
+	assert.Empty(t, got.Sponsors[1].Link, "omitempty link must round-trip as empty")
+}
+
+// TestTournament_NoSponsorsKey_LegacyParse ensures legacy tournament.md
+// files (predating mp-c38) deserialize with an empty/nil Sponsors slice
+// rather than failing. Strict-mode unmarshal would break older configs.
+func TestTournament_NoSponsorsKey_LegacyParse(t *testing.T) {
+	legacy := []byte(`name: Legacy Cup
+date: "01-06-2026"
+courts: ["A", "B"]
+`)
+	var got Tournament
+	require.NoError(t, yaml.Unmarshal(legacy, &got))
+	assert.Empty(t, got.Sponsors, "missing sponsors key must deserialize as empty slice")
+}
+
+// TestTournament_EmptySponsors_OmitsKey pins the reverse direction: a
+// tournament with no sponsors must NOT emit `sponsors: []` so existing
+// files round-trip byte-for-equivalent when no sponsors are configured.
+func TestTournament_EmptySponsors_OmitsKey(t *testing.T) {
+	tour := Tournament{Name: "No-Sponsor Cup"}
+	b, err := yaml.Marshal(&tour)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "sponsors:", "empty Sponsors must be omitted from YAML")
+}

@@ -857,6 +857,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               match can drop into the display mode they need. */}
           <DisplayModes tournament={t} />
 
+          {/* mp-c38: sponsor logos. Hidden when none configured. */}
+          {window.SponsorStrip && <window.SponsorStrip sponsors={t && t.sponsors} variant="viewer" />}
+
           {/* U1: link to the kendo glossary so volunteers (and
               spectators new to kendo) can browse the term register
               that the inline tooltips draw from. */}

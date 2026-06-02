@@ -379,6 +379,21 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <button className="btn btn--primary" onClick={handleSave}>Save changes</button>
           </div>
         </div>
+        {/* mp-c38: sponsor management lives on the same edit page so admins
+            don't need to navigate elsewhere. SponsorsManager is loaded from
+            admin_sponsors.js (window.SponsorsManager). Refresh tournament
+            after each upload/delete by calling onSave-equivalent through a
+            lightweight refetch — we use window.location.reload() as the
+            simplest correct invalidation since this page already re-fetches
+            tournament on mount. */}
+        {window.SponsorsManager && (
+          <window.SponsorsManager
+            tournament={tournament}
+            password={password}
+            showToast={showToast}
+            onChanged={async () => { window.location.reload(); }}
+          />
+        )}
       </div>
     </div>
   );

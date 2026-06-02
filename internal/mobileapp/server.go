@@ -115,6 +115,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterPublicSwissHandlers(api, store, eng)
 	RegisterPublicAnnouncementHandlers(api, store)
 	RegisterPublicRegistrationHandlers(api, store, hub)
+	RegisterPublicSponsorHandlers(api, store)
 
 	// Public password-reset + auth-config endpoints. Both must live
 	// outside the admin group: /reset is the recovery path for a
@@ -154,6 +155,13 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
 	RegisterImportHandlers(adminLargeBody, store, hub, elevated)
+
+	// Sponsor uploads (mp-c38) — multipart logo upload needs envelope
+	// headroom for the file plus boundary/form-field overhead, so it gets
+	// its own 2 MB group separate from the 1 MB JSON tier. DELETE rides
+	// on the same group (DELETE skips the cap by method anyway).
+	adminSponsorBody := adminGroup(r, SponsorMaxBodyBytes, verifier, store)
+	RegisterSponsorHandlers(adminSponsorBody, store)
 
 	// Static files & SPA Fallback
 	mobileFS := res.GetMobileWebFS()

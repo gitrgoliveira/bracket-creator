@@ -374,7 +374,16 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// auto-derived display names propagate correctly into pools.csv.
 			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, updatedPlayer.DisplayName)
 			if cascadeErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
+				var notFound *engine.NotFoundError
+				var validation *engine.ValidationError
+				switch {
+				case errors.As(cascadeErr, &notFound):
+					c.JSON(http.StatusNotFound, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
+				case errors.As(cascadeErr, &validation):
+					c.JSON(http.StatusConflict, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
+				default:
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
+				}
 				return
 			}
 			warnings = w

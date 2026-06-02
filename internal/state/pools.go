@@ -131,6 +131,27 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	return s.savePoolsLocked(compID, pools)
+}
+
+// loadPoolsLocked reads pools.csv directly from disk without acquiring the
+// per-competition lock. Caller MUST already hold the per-comp write lock —
+// typically from inside a WithTransaction closure.
+func (s *Store) loadPoolsLocked(compID string) ([]helper.Pool, error) {
+	path := s.compPath(compID, "pools.csv")
+	parsed, err := parsePoolsFile(path)
+	if err != nil {
+		return nil, err
+	}
+	pools, _ := parsed.([]helper.Pool)
+	return s.copyPools(pools), nil
+}
+
+// savePoolsLocked writes pools.csv without acquiring the per-competition lock.
+// Caller MUST already hold the per-comp write lock — typically from inside a
+// WithTransaction closure. Writes directly to disk (not WAL-staged) but is
+// crash-safe via atomicWrite.
+func (s *Store) savePoolsLocked(compID string, pools []helper.Pool) error {
 	path := s.compPath(compID, "pools.csv")
 
 	// Build the CSV body in memory then write it atomically + durably

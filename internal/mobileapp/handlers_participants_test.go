@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -580,7 +581,7 @@ func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	admin := r.Group("/api")
-	RegisterParticipantHandlers(admin, store, spy, NewFileElevatedVerifier(store))
+	RegisterParticipantHandlers(admin, store, engine.New(store), spy, NewFileElevatedVerifier(store))
 
 	compID := "comp-broadcast-test"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -879,4 +880,187 @@ func TestParticipants_WhitespaceDanGrade_NotPersisted(t *testing.T) {
 		require.Len(t, updated, 1)
 		assert.Empty(t, updated[0].Metadata, "whitespace-only danGrade must not persist on replace")
 	})
+}
+
+// TestPutParticipant_DrawReady_Succeeds verifies that PUT /participants/:pid
+// returns 200 (not 409) when the competition is in draw-ready state, and that
+// the change cascades through pools.csv.
+func TestPutParticipant_DrawReady_Succeeds(t *testing.T) {
+	r, store, eng, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-draw-ready-put"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Draw-Ready PUT Test",
+		Status:       state.CompStatusSetup,
+		Format:       state.CompFormatMixed,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Kind:         "individual",
+	}))
+
+	// Add 6 participants so the pool generator has enough players (pool size ≥ 2).
+	names := []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}
+	players := make([]domain.Player, len(names))
+	for i, n := range names {
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i))}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// Find Alice's ID.
+	saved, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	aliceID := ""
+	for _, p := range saved {
+		if p.Name == "Alice" {
+			aliceID = p.ID
+			break
+		}
+	}
+	require.NotEmpty(t, aliceID, "Alice must have a UUID after save")
+
+	// Generate the draw so we reach draw-ready state.
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	// Verify draw-ready.
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusDrawReady, comp.Status)
+
+	// PUT Alice → Alicia while draw is pending.
+	payload := map[string]any{"name": "Alicia", "dojo": "DojoA"}
+	body, _ := json.Marshal(payload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "PUT in draw-ready state must return 200, not 409; body: %s", w.Body.String())
+
+	// Response must include the updated player.
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "Alicia", resp["name"])
+
+	// pools.csv must reflect the new name.
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	aliciaInPools := false
+	for _, p := range pools {
+		for _, pl := range p.Players {
+			if pl.Name == "Alicia" {
+				aliciaInPools = true
+			}
+			assert.NotEqual(t, "Alice", pl.Name, "old name must not remain in pools")
+		}
+	}
+	assert.True(t, aliciaInPools, "Alicia must appear in pools after cascade")
+}
+
+// TestPutParticipant_DrawReady_DojoConflictWarning verifies that when a PUT in
+// draw-ready state introduces a dojo conflict, the response includes a warnings
+// field alongside the player data.
+func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
+	r, store, eng, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-draw-dojo-warn"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Dojo Conflict Warning Test",
+		Status:       state.CompStatusSetup,
+		Format:       state.CompFormatMixed,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Kind:         "individual",
+	}))
+
+	// 6 players, each from a unique dojo so the generator can place them freely.
+	names := []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}
+	players := make([]domain.Player, len(names))
+	for i, n := range names {
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i))}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	// After draw, find a pool-mate of Alice and change their dojo to Alice's
+	// dojo. This deterministically creates a conflict regardless of pool layout.
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	var aliceDojo, targetName, targetDojo string
+	for _, p := range pools {
+		aliceInPool := false
+		for _, pl := range p.Players {
+			if pl.Name == "Alice" {
+				aliceDojo = pl.Dojo
+				aliceInPool = true
+			}
+		}
+		if aliceInPool {
+			for _, pl := range p.Players {
+				if pl.Name != "Alice" {
+					targetName = pl.Name
+					targetDojo = pl.Dojo
+					break
+				}
+			}
+			break
+		}
+	}
+	require.NotEmpty(t, targetName, "must find a pool-mate of Alice")
+	require.NotEqual(t, aliceDojo, targetDojo, "pool-mate must have a different dojo")
+
+	saved, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	targetID := ""
+	for _, p := range saved {
+		if p.Name == targetName {
+			targetID = p.ID
+			break
+		}
+	}
+	require.NotEmpty(t, targetID)
+
+	// Replace the pool-mate with a new participant from Alice's dojo.
+	payload := map[string]any{"name": "Grace", "dojo": aliceDojo}
+	body, _ := json.Marshal(payload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+targetID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "PUT must succeed even with dojo conflict; body: %s", w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	// Dojo conflict warning MUST be present — we deterministically created one.
+	ws, ok := resp["warnings"]
+	require.True(t, ok, "warnings must be present when dojo conflict exists")
+	wsSlice, ok := ws.([]any)
+	require.True(t, ok, "warnings must be a JSON array")
+	require.NotEmpty(t, wsSlice, "at least one dojo conflict warning expected")
+	assert.Contains(t, wsSlice[0], "dojo conflict")
+
+	// Grace must be in pools.
+	poolsAfter, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	graceFound := false
+	for _, p := range poolsAfter {
+		for _, pl := range p.Players {
+			if pl.Name == "Grace" {
+				graceFound = true
+			}
+		}
+	}
+	assert.True(t, graceFound, "Grace must appear in pools after cascade")
 }

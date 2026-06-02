@@ -8,10 +8,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster, elevated ElevatedVerifier) {
+func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub Broadcaster, elevated ElevatedVerifier) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -234,11 +236,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		if comp.Status == state.CompStatusDrawReady {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
-			return
-		}
-		if comp.Status != state.CompStatusSetup && comp.Status != "" {
+		if comp.Status != state.CompStatusDrawReady && comp.Status != state.CompStatusSetup && comp.Status != "" {
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
 			return
 		}
@@ -278,9 +276,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		// a concurrent start-competition cannot flip status between the check
 		// and the file write (TOCTOU, mp-0lc).
 		var (
-			updatedPlayer *domain.Player
-			httpStatus    = http.StatusInternalServerError
-			httpMsg       string
+			updatedPlayer  *domain.Player
+			oldName        string
+			oldDojo        string
+			oldDisplayName string
+			isDrawReady    bool
+			httpStatus     = http.StatusInternalServerError
+			httpMsg        string
 		)
 		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
 			comp, err := tx.LoadCompetition(id)
@@ -293,12 +295,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				httpMsg = "competition not found"
 				return fmt.Errorf("competition not found")
 			}
-			if comp.Status == state.CompStatusDrawReady {
-				httpStatus = http.StatusConflict
-				httpMsg = "cannot modify participants while a draw is pending; discard the draw first"
-				return state.ErrCompetitionNotInSetup
-			}
-			if comp.Status != state.CompStatusSetup && comp.Status != "" {
+			if comp.Status != state.CompStatusDrawReady && comp.Status != state.CompStatusSetup && comp.Status != "" {
 				httpStatus = http.StatusConflict
 				httpMsg = "cannot modify participants after competition has started"
 				return state.ErrCompetitionNotInSetup
@@ -321,6 +318,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			}
 
 			p, err := tx.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+				// Capture old values before mutation for draw cascade.
+				// The transform callback receives the pre-mutation player,
+				// so this avoids a separate LoadParticipants scan.
+				if comp.Status == state.CompStatusDrawReady {
+					oldName = p.Name
+					oldDojo = p.Dojo
+					oldDisplayName = p.DisplayName
+					isDrawReady = true
+				}
 				p.Name = name
 				p.DisplayName = displayName
 				p.Dojo = dojo
@@ -350,7 +356,54 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		var warnings []string
+		if isDrawReady && oldName != "" {
+			// Cascade the name/dojo change through draw artifacts outside the
+			// transaction — WithTransaction's per-comp lock is released above
+			// (non-reentrant mutex), so the cascade function can acquire it.
+			// Use updatedPlayer.DisplayName (the canonical post-save value) so
+			// auto-derived display names propagate correctly into pools.csv.
+			// For non-zekken competitions UpdateParticipant returns DisplayName=""
+			// (not persisted), but pools.csv carries the auto-derived SanitizeName form.
+			// Match what saveParticipantsNoLock writes so the cascade doesn't blank it.
+			cascadeDisplayName := updatedPlayer.DisplayName
+			if cascadeDisplayName == "" {
+				cascadeDisplayName = helper.SanitizeName(updatedPlayer.Name)
+			}
+			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
+			if cascadeErr != nil {
+				// participants.csv (and seeds.csv) were already updated — broadcast and
+				// return 200 with the updated player so the client keeps its local state.
+				// Include any warnings collected before the failure (e.g. dojo conflicts
+				// from pools) and a cascadeError field for operator visibility.
+				hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+				type playerWithCascadeError struct {
+					domain.Player
+					Warnings     []string `json:"warnings,omitempty"`
+					CascadeError string   `json:"cascadeError"`
+				}
+				c.JSON(http.StatusOK, playerWithCascadeError{
+					Player:       *updatedPlayer,
+					Warnings:     w,
+					CascadeError: cascadeErr.Error(),
+				})
+				return
+			}
+			warnings = w
+		}
+
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		if len(warnings) > 0 {
+			type playerWithWarnings struct {
+				domain.Player
+				Warnings []string `json:"warnings"`
+			}
+			c.JSON(http.StatusOK, playerWithWarnings{
+				Player:   *updatedPlayer,
+				Warnings: warnings,
+			})
+			return
+		}
 		c.JSON(http.StatusOK, updatedPlayer)
 	})
 

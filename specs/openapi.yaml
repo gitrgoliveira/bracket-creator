@@ -1180,6 +1180,101 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/participants/{pid}:
+    put:
+      tags: [participants]
+      summary: Update a participant
+      description: |
+        Updates an individual participant's name, dojo, displayName, danGrade, metadata, and tag.
+
+        Allowed in `setup` state (no draw yet) and `draw-ready` state (draw generated
+        but not started). In draw-ready state the change **cascades** through draw
+        artifacts: `pools.csv`, `bracket.json`, and `pool-matches.csv` are updated
+        in place — the draw structure (pool assignments, elimination bracket) is
+        preserved. Seeds are renamed automatically by the participant update.
+
+        Returns the updated player. When the cascade detects dojo conflicts,
+        a `warnings` array is included alongside the player fields.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active.
+      security:
+        - TournamentPassword: []
+          AdminPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - in: path
+          name: pid
+          required: true
+          schema:
+            type: string
+          description: Participant UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, dojo]
+              properties:
+                name:
+                  type: string
+                  description: Participant's full name (trimmed; must not be blank).
+                dojo:
+                  type: string
+                  description: Participant's dojo (trimmed; must not be blank).
+                displayName:
+                  type: string
+                  description: Bib/zekken display name (only persisted for zekken-enabled competitions).
+                danGrade:
+                  type: string
+                  description: Dan grade string (e.g. "3 Dan"). Stored in Metadata[0] when Metadata is absent.
+                metadata:
+                  type: array
+                  items:
+                    type: string
+                tag:
+                  type: string
+                  description: Provenance tag (e.g. "manual", "registered").
+      responses:
+        '200':
+          description: |
+            Participant updated. When the competition is in `draw-ready` state and
+            the cascade detects dojo conflicts, a `warnings` array is included in
+            the response alongside the standard player fields. If the draw cascade
+            itself fails (e.g. an I/O error after pools were already updated), the
+            participant update is still persisted and the response includes a
+            `cascadeError` string; any warnings collected before the failure are
+            also included.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Player'
+                  - type: object
+                    properties:
+                      warnings:
+                        type: array
+                        items:
+                          type: string
+                        description: |
+                          Non-fatal advisory messages from the draw cascade (e.g. dojo
+                          conflict). Present only when at least one warning was
+                          generated; absent in setup state.
+                      cascadeError:
+                        type: string
+                        description: |
+                          Present when the participant update succeeded but the draw
+                          cascade failed (e.g. I/O error updating bracket artifacts).
+                          The operator should review and may need to re-generate the draw.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/seeds:
     get:
       tags: [participants]

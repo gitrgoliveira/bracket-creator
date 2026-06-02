@@ -66,6 +66,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
 
@@ -92,6 +93,8 @@ var ErrMismatchedTxCompID = errors.New("compID does not match transaction's comp
 type StoreTx interface {
 	LoadCompetition(compID string) (*Competition, error)
 	SaveCompetition(c *Competition) error
+	LoadPools(compID string) ([]helper.Pool, error)
+	SavePools(compID string, pools []helper.Pool) error
 	LoadPoolMatches(compID string) ([]MatchResult, error)
 	SavePoolMatches(compID string, matches []MatchResult) error
 	LoadBracket(compID string) (*Bracket, error)
@@ -405,6 +408,20 @@ func (t *storeTx) SaveCompetition(c *Competition) error {
 		return err
 	}
 	return t.store.saveCompetitionLocked(c, t.txWriteFn())
+}
+
+func (t *storeTx) LoadPools(compID string) ([]helper.Pool, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
+	return t.store.loadPoolsLocked(compID)
+}
+
+func (t *storeTx) SavePools(compID string, pools []helper.Pool) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
+	return t.store.savePoolsLocked(compID, pools)
 }
 
 func (t *storeTx) LoadPoolMatches(compID string) ([]MatchResult, error) {

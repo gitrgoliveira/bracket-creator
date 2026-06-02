@@ -68,6 +68,10 @@ function parsePath(path) {
     if (path === "/reset") {
       return { mode: "viewer", viewerScreen: "reset" };
     }
+    if (path.startsWith("/register/")) {
+      const compId = path.split("/")[2] || "";
+      if (compId) return { mode: "viewer", viewerScreen: "register", viewerCompId: compId };
+    }
     return { mode: "viewer", viewerScreen: "home" };
 }
 
@@ -87,6 +91,7 @@ function pathFromState(m, vs, vcid, av) {
       }
       return "/admin";
     }
+    if (vs === "register" && vcid) return `/register/${vcid}`;
     if (vcid) return `/competition/${vcid}`;
     if (vs === "schedule") return "/schedule";
     if (vs === "glossary") return "/glossary";
@@ -644,21 +649,26 @@ function App() {
   const [selectedCompData, setSelectedCompData] = useS(null);
 
   useE(() => {
-    if (viewerCompId) {
+    if (viewerCompId && viewerScreen !== "register") {
+      let cancelled = false;
       setLoading(true);
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
+          if (cancelled) return;
           setSelectedCompData(data);
           setLoading(false);
         })
         .catch(err => {
+          if (cancelled) return;
           console.error(err);
           setLoading(false);
         });
+      return () => { cancelled = true; };
     } else {
       setSelectedCompData(null);
+      setLoading(false);
     }
-  }, [viewerCompId]);
+  }, [viewerCompId, viewerScreen]);
 
   const requestAdmin = () => {
     if (authed) {
@@ -757,7 +767,7 @@ function App() {
           onDismiss={handleDismissAnnouncement}
         />
       )}
-      {selectedCompData ? (
+      {selectedCompData && viewerScreen !== "register" ? (
         <window.ViewerCompetition
           // key on the competition id so switching comps (notably the
           // mp-rrd pools<->playoffs cross-link, which calls
@@ -811,12 +821,26 @@ function App() {
               }}
             />
           : <div className="loading">Loading…</div>
+      ) : viewerScreen === "register" ? (
+        window.RegistrationForm
+          ? <window.RegistrationForm
+              compId={viewerCompId}
+              onBack={() => {
+                setViewerScreen("home");
+                setViewerCompId(null);
+              }}
+            />
+          : <div className="loading">Loading…</div>
       ) : (
         <window.ViewerHome
           tournament={tournament}
           onSelectCompetition={setViewerCompId}
           onOpenSchedule={() => setViewerScreen("schedule")}
           onAdminClick={requestAdmin}
+          onRegister={(compId) => {
+            setViewerCompId(compId);
+            setViewerScreen("register");
+          }}
         />
       )}
       {authPrompt && (

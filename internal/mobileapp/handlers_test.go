@@ -1932,7 +1932,7 @@ func TestCheckInHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// Seed a participant.
-	require.NoError(t, store.SaveParticipants("ci-comp", []domain.Player{{Name: "Alice", Dojo: "Kenshikan"}}))
+	require.NoError(t, store.SaveParticipants("ci-comp", []domain.Player{{Name: "Alice", Dojo: "Shinsei"}}))
 	existing, err := store.LoadParticipants("ci-comp", false)
 	require.NoError(t, err)
 	aliceID := existing[0].ID

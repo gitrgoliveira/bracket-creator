@@ -205,7 +205,7 @@ func TestParticipantsNonZekkenImportRoundTrip(t *testing.T) {
 
 	// Simulate the import handler's pipeline: helper.CreatePlayers parses
 	// the uploaded CSV in non-zekken mode, which auto-derives DisplayName.
-	parsed, err := helper.CreatePlayers([]string{"Jane Doe, Mushin Dojo"}, false)
+	parsed, err := helper.CreatePlayers([]string{"Jane Doe, Enzan Dojo"}, false)
 	require.NoError(t, err)
 	require.Equal(t, "J. DOE", parsed[0].DisplayName, "guard: helper still auto-derives DisplayName")
 
@@ -221,7 +221,7 @@ func TestParticipantsNonZekkenImportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "Jane Doe", loaded[0].Name)
-	assert.Equal(t, "Mushin Dojo", loaded[0].Dojo, "Dojo must round-trip intact (regression)")
+	assert.Equal(t, "Enzan Dojo", loaded[0].Dojo, "Dojo must round-trip intact (regression)")
 	assert.Empty(t, loaded[0].Metadata, "real Dojo must not leak into Metadata (regression)")
 	assert.Equal(t, "J. DOE", loaded[0].DisplayName, "loader still re-derives DisplayName")
 }
@@ -327,14 +327,14 @@ func TestCheckedInColumnBasedDetection(t *testing.T) {
 
 	path := filepath.Join(dir, "competitions", compID, "participants.csv")
 	// Minimal "Name, Dojo, checked_in" (3-column) format.
-	content := "Alice, Kenshikan, checked_in\nBob, Mumeishi\n"
+	content := "Alice, Shinsei, checked_in\nBob, Hokuto\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
 
 	loaded, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, loaded, 2)
 	assert.True(t, loaded[0].CheckedIn, "Alice must be detected as checked-in from 3-column row")
-	assert.Equal(t, "Kenshikan", loaded[0].Dojo, "Dojo must not be consumed by checked_in detection")
+	assert.Equal(t, "Shinsei", loaded[0].Dojo, "Dojo must not be consumed by checked_in detection")
 	assert.False(t, loaded[1].CheckedIn, "Bob must not be checked-in")
 
 	// Negative: dojo literally named "checked_in" must NOT be consumed.
@@ -414,12 +414,12 @@ func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
 
 	// 4-col UUID row: uuid, Name, Dojo, checked_in — trailing checked_in IS a valid marker.
 	require.NoError(t, os.WriteFile(path,
-		[]byte("550e8400-e29b-41d4-a716-446655440001, Bob, Kenshikan, checked_in\n"), 0600))
+		[]byte("550e8400-e29b-41d4-a716-446655440001, Bob, Shinsei, checked_in\n"), 0600))
 	loaded2, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, loaded2, 1)
 	assert.True(t, loaded2[0].CheckedIn, "4-part UUID row must be detected as checked-in")
-	assert.Equal(t, "Kenshikan", loaded2[0].Dojo, "Dojo must survive after checked_in token is stripped")
+	assert.Equal(t, "Shinsei", loaded2[0].Dojo, "Dojo must survive after checked_in token is stripped")
 }
 
 func TestAddParticipant_WhitespaceDuplicateGuard(t *testing.T) {
@@ -496,14 +496,14 @@ func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
 	// DisplayName column for zekken comps so the row is round-trip safe.
 	// Tag="manual" mirrors what the single-add endpoint defaults to.
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Akira Tanaka", Dojo: "Mumeishi", Tag: "manual"},
+		{Name: "Akira Tanaka", Dojo: "Hokuto", Tag: "manual"},
 	}))
 
 	loaded, err := store.LoadParticipants(compID, true)
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "Akira Tanaka", loaded[0].Name, "Name must round-trip")
-	assert.Equal(t, "Mumeishi", loaded[0].Dojo, "Dojo must NOT shift into DisplayName (regression)")
+	assert.Equal(t, "Hokuto", loaded[0].Dojo, "Dojo must NOT shift into DisplayName (regression)")
 	assert.Equal(t, "manual", loaded[0].Tag, "Tag must NOT shift into Dojo (regression)")
 	assert.NotEmpty(t, loaded[0].DisplayName, "auto-derived DisplayName must be present after reload")
 }

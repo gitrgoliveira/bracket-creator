@@ -142,7 +142,7 @@ describe('RegistrationForm', () => {
       const findInputByPlaceholder = (ph) => findInTree(runtime.currentTree(),
         n => n.type === 'input' && n.props?.placeholder === ph);
       findInputByPlaceholder('e.g. Alice Tanaka').props.onChange({ target: { value: 'Alice' } });
-      findInputByPlaceholder('e.g. Mumeishi').props.onChange({ target: { value: 'Dojo' } });
+      findInputByPlaceholder('e.g. Hokuto').props.onChange({ target: { value: 'Dojo' } });
 
       const form = findInTree(runtime.currentTree(), n => n.type === 'form');
       expect(form).toBeTruthy();
@@ -181,7 +181,7 @@ describe('RegistrationForm', () => {
       const findInputByPlaceholder = (ph) => findInTree(runtime.currentTree(),
         n => n.type === 'input' && n.props?.placeholder === ph);
       findInputByPlaceholder('e.g. Alice Tanaka').props.onChange({ target: { value: 'Alice' } });
-      findInputByPlaceholder('e.g. Mumeishi').props.onChange({ target: { value: 'Dojo' } });
+      findInputByPlaceholder('e.g. Hokuto').props.onChange({ target: { value: 'Dojo' } });
 
       const form = findInTree(runtime.currentTree(), n => n.type === 'form');
       await form.props.onSubmit({ preventDefault: vi.fn() });

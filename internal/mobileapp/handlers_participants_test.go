@@ -346,8 +346,8 @@ func TestDuplicateNameRejection(t *testing.T) {
 // Regression guard for the bug where the frontend was sending
 // displayName: replaceTarget.displayName (the old player's auto-derived
 // "A. SMITH") as part of the replace payload, causing saveParticipantsNoLock
-// to emit "Alice Yamamoto, A. SMITH, Senbukan" instead of
-// "Alice Yamamoto, Senbukan".
+// to emit "Alice Yamamoto, A. SMITH, Raizan" instead of
+// "Alice Yamamoto, Raizan".
 func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -360,7 +360,7 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 	}))
 
 	// Add Alice Smith — Go will auto-derive displayName = "A. SMITH".
-	addBody, _ := json.Marshal(map[string]interface{}{"name": "Alice Smith", "dojo": "Senbukan"})
+	addBody, _ := json.Marshal(map[string]interface{}{"name": "Alice Smith", "dojo": "Raizan"})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(addBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -373,7 +373,7 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 	// to "" as the corrected frontend does.
 	replBody, _ := json.Marshal(map[string]interface{}{
 		"name":        "Alice Yamamoto",
-		"dojo":        "Senbukan",
+		"dojo":        "Raizan",
 		"displayName": "",
 	})
 	w = httptest.NewRecorder()
@@ -387,7 +387,7 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 	players := mustLoad(t, store, compID)
 	require.Len(t, players, 1)
 	assert.Equal(t, "Alice Yamamoto", players[0].Name)
-	assert.Equal(t, "Senbukan", players[0].Dojo)
+	assert.Equal(t, "Raizan", players[0].Dojo)
 	wantDisplay := helper.SanitizeName("Alice Yamamoto") // "A. YAMAMOTO"
 	assert.Equal(t, wantDisplay, players[0].DisplayName,
 		"displayName must be derived from the new name, not inherited from the old slot")
@@ -674,7 +674,7 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"name":        "Akira Tanaka",
 		"displayName": "TANAKA",
-		"dojo":        "Mumeishi",
+		"dojo":        "Hokuto",
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
@@ -690,13 +690,13 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "TANAKA", loaded[0].DisplayName, "zekken must round-trip through participants.csv")
-	assert.Equal(t, "Mumeishi", loaded[0].Dojo)
+	assert.Equal(t, "Hokuto", loaded[0].Dojo)
 
 	// Replace forwarding a new zekken.
 	replBody, _ := json.Marshal(map[string]interface{}{
 		"name":        "Akira Yamamoto",
 		"displayName": "YAMAMOTO",
-		"dojo":        "Senbukan",
+		"dojo":        "Raizan",
 	})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(replBody))
@@ -709,14 +709,14 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "YAMAMOTO", loaded[0].DisplayName, "operator-supplied zekken must persist through replace")
 	assert.Equal(t, "Akira Yamamoto", loaded[0].Name)
-	assert.Equal(t, "Senbukan", loaded[0].Dojo)
+	assert.Equal(t, "Raizan", loaded[0].Dojo)
 
 	// Replace with empty displayName — the backend must re-derive from the new
 	// name (NOT inherit the previous "YAMAMOTO"), matching non-zekken behavior.
 	replBody, _ = json.Marshal(map[string]interface{}{
 		"name":        "Kenji Sato",
 		"displayName": "",
-		"dojo":        "Senbukan",
+		"dojo":        "Raizan",
 	})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(replBody))

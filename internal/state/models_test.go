@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -229,9 +230,24 @@ func TestTournament_SponsorsRoundTrip(t *testing.T) {
 	}
 	b, err := yaml.Marshal(&original)
 	require.NoError(t, err)
-	// omitempty on Link → second sponsor must not emit a `link:` key.
-	assert.Contains(t, string(b), "name: Acme Corp")
-	assert.Contains(t, string(b), "link: https://acme.example")
+	yamlStr := string(b)
+	// Assert first sponsor fields are present.
+	assert.Contains(t, yamlStr, "name: Acme Corp")
+	assert.Contains(t, yamlStr, "link: https://acme.example")
+	// Structural omitempty check: the second sponsor has no link, so the
+	// `link:` key must be entirely absent from the YAML — not `link: ""`
+	// or `link: null`. This is what `yaml:"link,omitempty"` guarantees.
+	assert.Contains(t, yamlStr, "name: BetaCo")
+	assert.NotContains(t, yamlStr, "link: \"\"\nname: BetaCo",
+		"YAML must not emit link: \"\" for sponsors with no link")
+	// Parse the second sponsor block to confirm the key is truly absent,
+	// not just empty. We look for a "link:" line between the two name lines.
+	acmeIdx := strings.Index(yamlStr, "name: Acme Corp")
+	betaIdx := strings.Index(yamlStr, "name: BetaCo")
+	require.True(t, acmeIdx >= 0 && betaIdx > acmeIdx, "both sponsor entries must be present")
+	betaBlock := yamlStr[betaIdx:]
+	assert.NotContains(t, betaBlock[:strings.Index(betaBlock+"\n---", "\n---")], "link:",
+		"omitempty: link key must be absent from the no-link sponsor's YAML block")
 
 	var got Tournament
 	require.NoError(t, yaml.Unmarshal(b, &got))

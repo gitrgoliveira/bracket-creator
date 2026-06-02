@@ -4,7 +4,10 @@
 // Endpoints (via window.API.uploadSponsor / window.API.deleteSponsor):
 //   POST   /api/sponsors        multipart {name, link?, file}
 //   DELETE /api/sponsors/:index
-// Live list comes from the parent tournament prop (tournament.sponsors).
+// Live list is seeded from tournament.sponsors on first render and then
+// maintained in local state — updates come from API responses, not the
+// parent prop. This keeps unsaved tournament-form edits above intact
+// when a sponsor is added or deleted (no page reload needed).
 
 const { useState: useStateSp, useRef: useRefSp } = React;
 

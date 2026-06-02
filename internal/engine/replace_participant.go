@@ -13,9 +13,11 @@ import (
 //
 // Returns warnings (e.g. dojo conflicts) and an error on failure.
 //
-// Transaction safety: bracket.json and pool-matches.csv are updated atomically
-// under a single Store.WithTransaction lock (WAL-staged). pools.csv is written
-// outside the transaction via its own per-comp lock.
+// Transaction safety: all three files (pools.csv, bracket.json, pool-matches.csv)
+// are updated under a single Store.WithTransaction lock. bracket.json and
+// pool-matches.csv are WAL-staged. pools.csv is written directly (not WAL-staged)
+// but still under the same lock, so no concurrent StartCompetition can interleave
+// between any of the writes.
 func (e *Engine) ReplaceParticipantInDraw(
 	compID string,
 	oldName, oldDojo, oldDisplayName string,
@@ -37,49 +39,10 @@ func (e *Engine) ReplaceParticipantInDraw(
 		return nil, nil
 	}
 
-	// --- pools.csv ---
-	// SavePools acquires its own per-comp lock, so it runs outside the tx.
-	pools, err := e.store.LoadPools(compID)
-	if err != nil {
-		return nil, fmt.Errorf("loading pools: %w", err)
-	}
-	poolsChanged := false
-	affectedPools := map[string]bool{}
-	for i, pool := range pools {
-		for j, player := range pool.Players {
-			if player.Name == oldName {
-				pools[i].Players[j].Name = newName
-				pools[i].Players[j].Dojo = newDojo
-				if oldDisplayName != "" || newDisplayName != "" {
-					pools[i].Players[j].DisplayName = newDisplayName
-				}
-				affectedPools[pool.PoolName] = true
-				poolsChanged = true
-			}
-		}
-	}
-	if poolsChanged {
-		if err := e.store.SavePools(compID, pools); err != nil {
-			return nil, fmt.Errorf("saving pools: %w", err)
-		}
-		// Dojo-conflict detection on affected pools after the swap.
-		// Warn but do not block — the operator decides whether to proceed.
-		for _, pool := range pools {
-			if !affectedPools[pool.PoolName] {
-				continue
-			}
-			dojoCount := map[string]int{}
-			for _, p := range pool.Players {
-				dojoCount[p.Dojo]++
-			}
-			if count := dojoCount[newDojo]; count > 1 {
-				warnings = append(warnings, fmt.Sprintf("dojo conflict: %q appears %d times in %s", newDojo, count, pool.PoolName))
-			}
-		}
-	}
-
-	// --- bracket.json + pool-matches.csv (WAL-staged, one transaction) ---
-	var bracketFound, matchesFound bool
+	// All three files are updated under one transaction lock so a concurrent
+	// StartCompetition cannot interleave between the pools, bracket, and
+	// pool-matches writes.
+	var poolsChanged, bracketFound, matchesFound bool
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
 		// Re-verify draw-ready status under the transaction lock to guard against a
 		// concurrent StartCompetition that may have transitioned the competition
@@ -96,6 +59,46 @@ func (e *Engine) ReplaceParticipantInDraw(
 			return validationErrorf("competition %s is no longer in draw-ready state (status: %s)", compID, status)
 		}
 
+		// --- pools.csv ---
+		pools, err := tx.LoadPools(compID)
+		if err != nil {
+			return fmt.Errorf("loading pools: %w", err)
+		}
+		affectedPools := map[string]bool{}
+		for i, pool := range pools {
+			for j, player := range pool.Players {
+				if player.Name == oldName {
+					pools[i].Players[j].Name = newName
+					pools[i].Players[j].Dojo = newDojo
+					if oldDisplayName != "" || newDisplayName != "" {
+						pools[i].Players[j].DisplayName = newDisplayName
+					}
+					affectedPools[pool.PoolName] = true
+					poolsChanged = true
+				}
+			}
+		}
+		if poolsChanged {
+			if err := tx.SavePools(compID, pools); err != nil {
+				return fmt.Errorf("saving pools: %w", err)
+			}
+			// Dojo-conflict detection on affected pools after the swap.
+			// Warn but do not block — the operator decides whether to proceed.
+			for _, pool := range pools {
+				if !affectedPools[pool.PoolName] {
+					continue
+				}
+				dojoCount := map[string]int{}
+				for _, p := range pool.Players {
+					dojoCount[p.Dojo]++
+				}
+				if count := dojoCount[newDojo]; count > 1 {
+					warnings = append(warnings, fmt.Sprintf("dojo conflict: %q appears %d times in %s", newDojo, count, pool.PoolName))
+				}
+			}
+		}
+
+		// --- bracket.json + pool-matches.csv (WAL-staged) ---
 		bracket, err := tx.LoadBracket(compID)
 		if err != nil {
 			return fmt.Errorf("loading bracket: %w", err)

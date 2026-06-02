@@ -590,11 +590,11 @@ func findPlayerInPools(pools []helper.Pool, name string) bool {
 	return false
 }
 
-// findNameInBracket returns true when name appears in any bracket side.
+// findNameInBracket returns true when name appears in any bracket side or winner.
 func findNameInBracket(bracket *state.Bracket, name string) bool {
 	for _, round := range bracket.Rounds {
 		for _, m := range round {
-			if m.SideA == name || m.SideB == name {
+			if m.SideA == name || m.SideB == name || m.Winner == name {
 				return true
 			}
 		}
@@ -642,6 +642,7 @@ func TestReplaceParticipantInDraw_PoolsHappyPath(t *testing.T) {
 	for _, m := range matches {
 		assert.NotEqual(t, "Alice", m.SideA, "old name must not appear in pool matches")
 		assert.NotEqual(t, "Alice", m.SideB, "old name must not appear in pool matches")
+		assert.NotEqual(t, "Alice", m.Winner, "old name must not appear in pool matches winner")
 	}
 }
 

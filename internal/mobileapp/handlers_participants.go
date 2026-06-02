@@ -372,19 +372,18 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
 			if cascadeErr != nil {
-				// participants.csv (and seeds.csv) were already updated — broadcast
-				// so connected clients reflect the persisted state even on cascade failure.
+				// participants.csv (and seeds.csv) were already updated — broadcast and
+				// return 200 with the updated player so the client keeps its local state.
+				// Surface the cascade error in a cascadeError field for operator visibility.
 				hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
-				var notFound *engine.NotFoundError
-				var validation *engine.ValidationError
-				switch {
-				case errors.As(cascadeErr, &notFound):
-					c.JSON(http.StatusNotFound, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
-				case errors.As(cascadeErr, &validation):
-					c.JSON(http.StatusConflict, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
-				default:
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "participant updated but draw cascade failed: " + cascadeErr.Error()})
+				type playerWithCascadeError struct {
+					domain.Player
+					CascadeError string `json:"cascadeError"`
 				}
+				c.JSON(http.StatusOK, playerWithCascadeError{
+					Player:       *updatedPlayer,
+					CascadeError: cascadeErr.Error(),
+				})
 				return
 			}
 			warnings = w

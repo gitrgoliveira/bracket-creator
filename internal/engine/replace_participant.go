@@ -145,10 +145,12 @@ func (e *Engine) ReplaceParticipantInDraw(
 		return warnings, txErr
 	}
 
-	// If oldName appeared nowhere in the draw AND oldName != newName (a real name
-	// change was requested), the participant wasn't placed in the draw — report it.
+	// If oldName appeared nowhere in the draw AND oldName != newName, the participant
+	// was not placed in the draw. This is expected when check-in filtering excluded
+	// them — treat as a warning so the caller is not forced to roll back a successful
+	// participants.csv update.
 	if !poolsChanged && !bracketFound && !matchesFound && oldName != newName {
-		return nil, notFoundErrorf("participant %q not found in draw artifacts for competition %s", oldName, compID)
+		warnings = append(warnings, fmt.Sprintf("participant %q not found in draw artifacts (may be excluded by check-in filtering)", oldName))
 	}
 
 	// seeds.csv is already renamed by state.UpdateParticipant (which runs

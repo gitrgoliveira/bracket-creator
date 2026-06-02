@@ -772,9 +772,13 @@ func TestReplaceParticipantInDraw_ParticipantNotInDraw(t *testing.T) {
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
 	})
 
-	_, err := eng.ReplaceParticipantInDraw(compID, "Nonexistent", "DojoX", "", "Someone", "DojoX", "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found in draw artifacts")
+	// A participant not in the draw (e.g. excluded by check-in filtering) should
+	// return a warning, not an error, so the persisted participants.csv update is
+	// not treated as a failure.
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "Nonexistent", "DojoX", "", "Someone", "DojoX", "")
+	require.NoError(t, err)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "not found in draw artifacts")
 }
 
 func TestReplaceParticipantInDraw_NoopWhenUnchanged(t *testing.T) {

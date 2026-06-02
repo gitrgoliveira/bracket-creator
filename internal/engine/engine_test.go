@@ -160,9 +160,9 @@ func TestStartCompetition_MixedFormat_DojoConflictAvoidance(t *testing.T) {
 
 	// Create players with same-dojo groups
 	players := []domain.Player{
-		{Name: "A1", Dojo: "Hokuto"},
-		{Name: "A2", Dojo: "Hokuto"},
-		{Name: "A3", Dojo: "Hokuto"},
+		{Name: "A1", Dojo: "Gyokusen"},
+		{Name: "A2", Dojo: "Gyokusen"},
+		{Name: "A3", Dojo: "Gyokusen"},
 		{Name: "B1", Dojo: "Sanshukai"},
 		{Name: "B2", Dojo: "Sanshukai"},
 		{Name: "B3", Dojo: "Sanshukai"},

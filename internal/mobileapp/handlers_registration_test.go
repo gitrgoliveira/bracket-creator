@@ -241,7 +241,7 @@ func TestRegistration_POST_SelfRun_ZekkenComp_PersistsDisplayName(t *testing.T) 
 
 	w := doRegister(r, compID, map[string]any{
 		"name":        "Yuki Sato",
-		"dojo":        "Hokuto",
+		"dojo":        "Gyokusen",
 		"displayName": "SATO",
 	})
 
@@ -266,7 +266,7 @@ func TestRegistration_POST_NonZekkenComp_DisplayNameStripped(t *testing.T) {
 
 	w := doRegister(r, compID, map[string]any{
 		"name":        "Kenji Smith",
-		"dojo":        "Shinsei",
+		"dojo":        "Suigetsu",
 		"displayName": "SMITH", // should be stripped
 	})
 

@@ -247,7 +247,7 @@ describe('API Utils', () => {
     });
 
     it('maps Go Metadata[0] → danGrade on PascalCase input and preserves full metadata array', () => {
-      const p = { Name: 'Bob', Dojo: 'Shinsei', Seed: 0, Metadata: ['3d', 'registered'] };
+      const p = { Name: 'Bob', Dojo: 'Suigetsu', Seed: 0, Metadata: ['3d', 'registered'] };
       const norm = normalizePlayer(p);
       expect(norm.danGrade).toBe('3d');
       expect(norm.metadata).toEqual(['3d', 'registered']);
@@ -259,12 +259,12 @@ describe('API Utils', () => {
     });
 
     it('leaves danGrade unchanged when already set on camelCase input', () => {
-      const p = { name: 'Dave', dojo: 'Hokuto', seed: 0, danGrade: '4d' };
+      const p = { name: 'Dave', dojo: 'Gyokusen', seed: 0, danGrade: '4d' };
       expect(normalizePlayer(p).danGrade).toBe('4d');
     });
 
     it('returns empty danGrade when no metadata', () => {
-      const p = { Name: 'Eve', Dojo: 'Hokuto', Seed: 0 };
+      const p = { Name: 'Eve', Dojo: 'Gyokusen', Seed: 0 };
       expect(normalizePlayer(p).danGrade).toBe('');
     });
   });
@@ -948,14 +948,14 @@ describe('API Utils', () => {
           // grade + extra slot: preserve both
           { name: 'Alice', dojo: 'Raizan', danGrade: '3 Dan', metadata: ['3 Dan', 'registered'] },
           // grade, no extra slot
-          { name: 'Bob', dojo: 'Shinsei', danGrade: '2 Dan', metadata: ['2 Dan'] },
+          { name: 'Bob', dojo: 'Suigetsu', danGrade: '2 Dan', metadata: ['2 Dan'] },
           // no grade, no metadata: metadata field must be omitted entirely
           { name: 'Carol', dojo: 'Yoshinkan', danGrade: '', metadata: [] },
           // no grade but has extra slot: emit ["", ...rest] to preserve slot
           { name: 'Dave', dojo: 'Yoshinkan', danGrade: '', metadata: ['', 'registered'] },
           // Go-sourced player (no danGrade key at all): pass through unchanged
           // so metadata[0] (the grade) is NOT dropped
-          { name: 'Eve', dojo: 'Shinsei', metadata: ['1 Dan'] },
+          { name: 'Eve', dojo: 'Suigetsu', metadata: ['1 Dan'] },
         ];
         await API.updateCompetition('c1', { players }, 'pw');
         expect(capturedBody.players[0].metadata).toEqual(['3 Dan', 'registered']);

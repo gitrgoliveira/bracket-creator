@@ -674,7 +674,7 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"name":        "Akira Tanaka",
 		"displayName": "TANAKA",
-		"dojo":        "Hokuto",
+		"dojo":        "Gyokusen",
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
@@ -690,7 +690,7 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "TANAKA", loaded[0].DisplayName, "zekken must round-trip through participants.csv")
-	assert.Equal(t, "Hokuto", loaded[0].Dojo)
+	assert.Equal(t, "Gyokusen", loaded[0].Dojo)
 
 	// Replace forwarding a new zekken.
 	replBody, _ := json.Marshal(map[string]interface{}{

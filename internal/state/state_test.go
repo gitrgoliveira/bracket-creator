@@ -261,7 +261,7 @@ func TestStore_ParticipantsCSV(t *testing.T) {
 	require.NoError(t, err)
 
 	players := []domain.Player{
-		{Name: "Akira Tanaka", Dojo: "Hokuto"},
+		{Name: "Akira Tanaka", Dojo: "Gyokusen"},
 		{Name: "Hiroshi Sato", Dojo: "Sanshukai"},
 	}
 
@@ -272,13 +272,13 @@ func TestStore_ParticipantsCSV(t *testing.T) {
 	path := filepath.Join(dir, "competitions", compID, "participants.csv")
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "Akira Tanaka,Hokuto")
+	assert.Contains(t, string(data), "Akira Tanaka,Gyokusen")
 
 	loaded, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, loaded, 2)
 	assert.Equal(t, "Akira Tanaka", loaded[0].Name)
-	assert.Equal(t, "Hokuto", loaded[0].Dojo)
+	assert.Equal(t, "Gyokusen", loaded[0].Dojo)
 }
 
 func TestStore_ParticipantsCSV_MixedIDs(t *testing.T) {
@@ -321,7 +321,7 @@ func TestStore_ParticipantsCSV_WithZekkenName(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, WithZekkenName: true}))
 
 	players := []domain.Player{
-		{Name: "Akira Tanaka", DisplayName: "A. Tanaka", Dojo: "Hokuto"},
+		{Name: "Akira Tanaka", DisplayName: "A. Tanaka", Dojo: "Gyokusen"},
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
@@ -330,7 +330,7 @@ func TestStore_ParticipantsCSV_WithZekkenName(t *testing.T) {
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "Akira Tanaka", loaded[0].Name)
 	assert.Equal(t, "A. Tanaka", loaded[0].DisplayName)
-	assert.Equal(t, "Hokuto", loaded[0].Dojo)
+	assert.Equal(t, "Gyokusen", loaded[0].Dojo)
 }
 
 func TestStore_ParticipantsCSV_Empty(t *testing.T) {

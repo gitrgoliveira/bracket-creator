@@ -662,8 +662,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const content = c.kind === "team"
       ? "Team Name, Dojo\nTora A, Tora Dojo London\n"
       : c.withZekkenName
-        ? "Name, Zekken, Dojo, Dan\nAkira Tanaka, TANAKA, Hokuto, 3\n"
-        : "Name, Dojo, Dan\nAkira Tanaka, Hokuto, 3\n";
+        ? "Name, Zekken, Dojo, Dan\nAkira Tanaka, TANAKA, Gyokusen, 3\n"
+        : "Name, Dojo, Dan\nAkira Tanaka, Gyokusen, 3\n";
     const blob = new Blob([content], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -952,7 +952,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div>
               <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
               <div className="card__sub">
-                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Hokuto, 3</span>
+                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Gyokusen, 3</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: "{c.kind === "team" ? "Team name, Dojo" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
@@ -979,7 +979,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               <div>
                 <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
                 <div className="dropzone__sub">
-                  {c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Hokuto, 3)"}
+                  {c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Gyokusen, 3)"}
                 </div>
               </div>
               <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
@@ -999,7 +999,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             onFocus={() => { textFocusRef.current = true; }}
             onBlur={() => { textFocusRef.current = false; }}
             rows={14}
-            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Hokuto" : "Akira Tanaka, Hokuto"}
+            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
           />
           <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by name match (case-insensitive), so you can reorder rows freely.</div>
           {lines.length > 0 && (() => {

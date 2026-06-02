@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -554,7 +555,7 @@ func setupDrawReadyMixed(t *testing.T, names []string) (*Engine, *state.Store, s
 
 	players := make([]domain.Player, len(names))
 	for i, n := range names {
-		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i%5))}
+		players[i] = domain.Player{Name: n, Dojo: fmt.Sprintf("Dojo%d", i)}
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -566,11 +567,11 @@ func setupDrawReadyPlayoffs(t *testing.T, names []string) (*Engine, *state.Store
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 	compID := "replace-playoffs"
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 3)
+	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0)
 
 	players := make([]domain.Player, len(names))
 	for i, n := range names {
-		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i%5))}
+		players[i] = domain.Player{Name: n, Dojo: fmt.Sprintf("Dojo%d", i)}
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 	require.NoError(t, eng.GenerateDraw(compID))

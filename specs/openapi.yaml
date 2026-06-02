@@ -1185,7 +1185,7 @@ paths:
       tags: [participants]
       summary: Update a participant
       description: |
-        Updates an individual participant's name, dojo, displayName, metadata, and tag.
+        Updates an individual participant's name, dojo, displayName, danGrade, metadata, and tag.
 
         Allowed in `setup` state (no draw yet) and `draw-ready` state (draw generated
         but not started). In draw-ready state the change **cascades** through draw

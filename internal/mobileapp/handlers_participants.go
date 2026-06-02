@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -362,7 +363,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// (non-reentrant mutex), so the cascade function can acquire it.
 			// Use updatedPlayer.DisplayName (the canonical post-save value) so
 			// auto-derived display names propagate correctly into pools.csv.
-			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, updatedPlayer.DisplayName)
+			// For non-zekken competitions UpdateParticipant returns DisplayName=""
+			// (not persisted), but pools.csv carries the auto-derived SanitizeName form.
+			// Match what saveParticipantsNoLock writes so the cascade doesn't blank it.
+			cascadeDisplayName := updatedPlayer.DisplayName
+			if cascadeDisplayName == "" {
+				cascadeDisplayName = helper.SanitizeName(updatedPlayer.Name)
+			}
+			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
 			if cascadeErr != nil {
 				// participants.csv (and seeds.csv) were already updated — broadcast
 				// so connected clients reflect the persisted state even on cascade failure.

@@ -526,11 +526,12 @@ function MyMatchAlertBanner({ match, onView, onDismiss }) {
 // are set so the card is invisible for tournaments that haven't filled them in.
 function TournamentInfo({ tournament }) {
   const t = tournament;
-  if (!t.venueAddress && !t.openingTime && !t.closingTime && !t.awardsNote && !t.rulesURL && !t.infoNotes && !(t.contacts && t.contacts.length > 0)) return null;
+  const isHttpURL = (u) => /^https?:\/\//i.test(u);
+  if (!t.venueAddress && !t.venueMapURL && !t.openingTime && !t.closingTime && !t.awardsNote && !t.rulesURL && !t.infoNotes && !(t.contacts && t.contacts.length > 0)) return null;
 
   const contactLink = (value) => {
     if (!value) return value;
-    if (value.match(/^https?:\/\//i)) return <a href={value} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{value.replace(/^https?:\/\//i, "")}</a>;
+    if (isHttpURL(value)) return <a href={value} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{value.replace(/^https?:\/\//i, "")}</a>;
     if (value.includes("@")) return <a href={"mailto:" + value} className="tournament-info__link">{value}</a>;
     if (/^\+?[\d\s()-]+$/.test(value)) return <a href={"tel:" + value.replace(/[\s()-]/g, "")} className="tournament-info__link">{value}</a>;
     return value;
@@ -540,11 +541,11 @@ function TournamentInfo({ tournament }) {
     <div className="tournament-info">
       <div className="tournament-info__title">Tournament Info</div>
       <dl className="tournament-info__grid">
-        {t.venueAddress && <>
+        {(t.venueAddress || t.venueMapURL) && <>
           <dt className="tournament-info__label">Venue</dt>
           <dd className="tournament-info__value">
             {t.venueAddress}
-            {t.venueMapURL && <>{" "}<a href={t.venueMapURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">View map ↗</a></>}
+            {t.venueMapURL && isHttpURL(t.venueMapURL) && <>{t.venueAddress ? " " : ""}<a href={t.venueMapURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">View map ↗</a></>}
           </dd>
         </>}
         {(t.openingTime || t.closingTime) && <>
@@ -559,7 +560,7 @@ function TournamentInfo({ tournament }) {
         </>}
         {t.rulesURL && <>
           <dt className="tournament-info__label">Rules</dt>
-          <dd className="tournament-info__value"><a href={t.rulesURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.rulesURL.replace(/^https?:\/\//i, "")}</a></dd>
+          <dd className="tournament-info__value">{isHttpURL(t.rulesURL) ? <a href={t.rulesURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.rulesURL.replace(/^https?:\/\//i, "")}</a> : t.rulesURL}</dd>
         </>}
         {t.infoNotes && <>
           <dt className="tournament-info__label">Notes</dt>

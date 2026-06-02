@@ -19,6 +19,7 @@ package mobileapp
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -35,6 +36,17 @@ const (
 	MaxLenTournamentDate     = 10  // DD-MM-YYYY, also format-validated
 	MaxLenTournamentPassword = 256 // not trimmed; cap prevents megabyte payloads
 	MaxLenCeremonyBlock      = 16  // "1h30m" etc.
+
+	// mp-ef3: public tournament info field caps.
+	MaxLenVenueAddress    = 300
+	MaxLenVenueMapURL     = 500
+	MaxLenDisplayTime     = 8 // "HH:MM" or "HH:MM:SS"
+	MaxLenRulesURL        = 500
+	MaxLenAwardsNote      = 500
+	MaxLenInfoNotes       = 2000
+	MaxLenContactLabel    = 50
+	MaxLenContactValue    = 200
+	MaxTournamentContacts = 10
 
 	// MaxTournamentDurationDays is the upper bound on Tournament.DurationDays.
 	// 30 days covers the longest conceivable multi-day open tournament.
@@ -79,6 +91,25 @@ func validateMaxLen(field, val string, max int) error {
 		return &ValidationError{
 			Field:   field,
 			Message: fmt.Sprintf("must be <= %d characters", max),
+		}
+	}
+	return nil
+}
+
+// validateHTTPURL returns a ValidationError when val is non-empty and does not
+// start with "http://" or "https://". These URL fields are rendered as raw href
+// values in the viewer SPA; rejecting non-http(s) schemes at the write boundary
+// prevents javascript: or data: URIs from reaching the public viewer page.
+// Empty strings pass (the fields are optional).
+func validateHTTPURL(field, val string) error {
+	if val == "" {
+		return nil
+	}
+	lower := strings.ToLower(val)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return &ValidationError{
+			Field:   field,
+			Message: "must start with http:// or https://",
 		}
 	}
 	return nil

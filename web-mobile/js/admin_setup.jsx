@@ -110,6 +110,16 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [openingBlock, setOpeningBlock] = useStateA(tournament.openingBlock || "");
   const [lunchBlock, setLunchBlock] = useStateA(tournament.lunchBlock || "");
   const [closingBlock, setClosingBlock] = useStateA(tournament.closingBlock || "");
+  // mp-ef3: public tournament info fields.
+  const [venueAddress, setVenueAddress] = useStateA(tournament.venueAddress || "");
+  const [venueMapURL, setVenueMapURL] = useStateA(tournament.venueMapURL || "");
+  const [openingTime, setOpeningTime] = useStateA(tournament.openingTime || "");
+  const [closingTime, setClosingTime] = useStateA(tournament.closingTime || "");
+  const [rulesURL, setRulesURL] = useStateA(tournament.rulesURL || "");
+  const [awardsNote, setAwardsNote] = useStateA(tournament.awardsNote || "");
+  const [infoNotes, setInfoNotes] = useStateA(tournament.infoNotes || "");
+  const [contacts, setContacts] = useStateA((tournament.contacts || []).map((ct, i) => ({ ...ct, _key: i })));
+  const nextKeyRef = useRefA((tournament.contacts || []).length);
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
 
@@ -167,6 +177,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       openingBlock: openingBlock.trim() || undefined,
       lunchBlock: lunchBlock.trim() || undefined,
       closingBlock: closingBlock.trim() || undefined,
+      venueAddress: venueAddress.trim() || undefined,
+      venueMapURL: venueMapURL.trim() || undefined,
+      openingTime: openingTime.trim() || undefined,
+      closingTime: closingTime.trim() || undefined,
+      rulesURL: rulesURL.trim() || undefined,
+      awardsNote: awardsNote.trim() || undefined,
+      infoNotes: infoNotes.trim() || undefined,
+      contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
     });
   };
 
@@ -263,6 +281,58 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               <label className="field__label">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
               <input className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
               <div className="field__hint">Duration of the closing ceremony block. Leave blank if none.</div>
+            </div>
+          </div>
+          {/* mp-ef3: Tournament Information (Public) */}
+          <div style={{ borderTop: "1px solid var(--line)", marginTop: 20, paddingTop: 20 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--ink-3)", marginBottom: 12 }}>Tournament Information (Public)</div>
+            <div className="field">
+              <label className="field__label">Venue address</label>
+              <input className="input" value={venueAddress} onChange={(e) => setVenueAddress(e.target.value)} placeholder="123 Sport Centre Dr, City" />
+            </div>
+            <div className="field">
+              <label className="field__label">Map link</label>
+              <input className="input" value={venueMapURL} onChange={(e) => setVenueMapURL(e.target.value)} placeholder="https://maps.google.com/..." />
+              <div className="field__hint">Link to venue on Google Maps or similar.</div>
+            </div>
+            <div className="row">
+              <div className="field">
+                <label className="field__label">Opening time</label>
+                <input className="input" type="time" value={openingTime} onChange={(e) => setOpeningTime(e.target.value)} />
+                <div className="field__hint">Doors open / spectator arrival time.</div>
+              </div>
+              <div className="field">
+                <label className="field__label">Closing time</label>
+                <input className="input" type="time" value={closingTime} onChange={(e) => setClosingTime(e.target.value)} />
+                <div className="field__hint">Expected end time for the day.</div>
+              </div>
+            </div>
+            <div className="field">
+              <label className="field__label">Rules link</label>
+              <input className="input" value={rulesURL} onChange={(e) => setRulesURL(e.target.value)} placeholder="https://..." />
+              <div className="field__hint">Link to tournament rules document or PDF.</div>
+            </div>
+            <div className="field">
+              <label className="field__label">Awards</label>
+              <textarea className="input" rows={2} value={awardsNote} onChange={(e) => setAwardsNote(e.target.value)} placeholder="Gold, Silver, Bronze per competition" />
+            </div>
+            <div className="field">
+              <label className="field__label">Notes</label>
+              <textarea className="input" rows={3} value={infoNotes} onChange={(e) => setInfoNotes(e.target.value)} placeholder="General information for attendees" />
+            </div>
+            <div className="field">
+              <label className="field__label">Contacts</label>
+              <div className="field__hint" style={{ marginBottom: 8 }}>Add contact methods for attendees (max 10).</div>
+              {contacts.map((ct, i) => (
+                <div key={ct._key} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                  <input className="input" style={{ flex: "0 0 120px" }} value={ct.label} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], label: e.target.value }; setContacts(next); }} placeholder="Label" />
+                  <input className="input" style={{ flex: 1 }} value={ct.value} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], value: e.target.value }; setContacts(next); }} placeholder="Value (email, phone, URL, etc.)" />
+                  <button className="btn" style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}>✕</button>
+                </div>
+              ))}
+              {contacts.length < 10 && (
+                <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => setContacts([...contacts, { label: "", value: "", _key: nextKeyRef.current++ }])}>+ Add contact</button>
+              )}
             </div>
           </div>
           {locked ? (

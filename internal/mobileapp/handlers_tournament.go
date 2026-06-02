@@ -154,6 +154,32 @@ var errModeImmutable = errors.New("tournament mode cannot be changed after creat
 // require X-Admin-Password. (mp-7h7 fail-open fix)
 var errSelfRunRequiresAdminPassword = errors.New("self-run tournaments require an admin (destructive-ops) password to be set; configure it before switching to self-run mode or set it in the same request")
 
+// trimPublicInfoFields trims all optional public tournament info string fields
+// and normalises the Contacts slice: each entry's Label/Value is trimmed and
+// all-empty entries are dropped. Called identically by the PUT and POST
+// /tournament handlers. Count validation (>MaxTournamentContacts) is enforced
+// by validateTournamentLengths as a 400 error rather than silently truncating.
+func trimPublicInfoFields(t *state.Tournament) {
+	t.VenueAddress = strings.TrimSpace(t.VenueAddress)
+	t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
+	t.OpeningTime = strings.TrimSpace(t.OpeningTime)
+	t.ClosingTime = strings.TrimSpace(t.ClosingTime)
+	t.RulesURL = strings.TrimSpace(t.RulesURL)
+	t.AwardsNote = strings.TrimSpace(t.AwardsNote)
+	t.InfoNotes = strings.TrimSpace(t.InfoNotes)
+	if len(t.Contacts) > 0 {
+		filtered := make([]state.TournamentContact, 0, len(t.Contacts))
+		for _, ct := range t.Contacts {
+			ct.Label = strings.TrimSpace(ct.Label)
+			ct.Value = strings.TrimSpace(ct.Value)
+			if ct.Value != "" {
+				filtered = append(filtered, ct)
+			}
+		}
+		t.Contacts = filtered
+	}
+}
+
 // validateTournamentLengths enforces the persisted-string caps from
 // validation.go on every string field of t. Called after trim and
 // after the required-field checks so error messages report the
@@ -180,6 +206,49 @@ func validateTournamentLengths(t *state.Tournament) error {
 	}
 	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
 		return err
+	}
+	// mp-ef3: public tournament info fields.
+	if err := validateMaxLen("venueAddress", t.VenueAddress, MaxLenVenueAddress); err != nil {
+		return err
+	}
+	if err := validateMaxLen("venueMapURL", t.VenueMapURL, MaxLenVenueMapURL); err != nil {
+		return err
+	}
+	if err := validateHTTPURL("venueMapURL", t.VenueMapURL); err != nil {
+		return err
+	}
+	if err := validateMaxLen("openingTime", t.OpeningTime, MaxLenDisplayTime); err != nil {
+		return err
+	}
+	if err := validateMaxLen("closingTime", t.ClosingTime, MaxLenDisplayTime); err != nil {
+		return err
+	}
+	if err := validateMaxLen("rulesURL", t.RulesURL, MaxLenRulesURL); err != nil {
+		return err
+	}
+	if err := validateHTTPURL("rulesURL", t.RulesURL); err != nil {
+		return err
+	}
+	if err := validateMaxLen("awardsNote", t.AwardsNote, MaxLenAwardsNote); err != nil {
+		return err
+	}
+	if err := validateMaxLen("infoNotes", t.InfoNotes, MaxLenInfoNotes); err != nil {
+		return err
+	}
+	if len(t.Contacts) > MaxTournamentContacts {
+		return &ValidationError{
+			Field:   "contacts",
+			Message: fmt.Sprintf("must contain <= %d entries", MaxTournamentContacts),
+		}
+	}
+	for i, ct := range t.Contacts {
+		prefix := fmt.Sprintf("contacts[%d]", i)
+		if err := validateMaxLen(prefix+".label", ct.Label, MaxLenContactLabel); err != nil {
+			return err
+		}
+		if err := validateMaxLen(prefix+".value", ct.Value, MaxLenContactValue); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -227,6 +296,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
+		trimPublicInfoFields(&t)
 
 		// Reject non-empty Date that doesn't match the canonical DD-MM-YYYY
 		// shape (or semantically invalid days like Feb 31). The frontend
@@ -500,6 +570,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
+		trimPublicInfoFields(&t)
 
 		// Same empty-after-trim guard as the PUT handler.
 		if t.Name == "" {

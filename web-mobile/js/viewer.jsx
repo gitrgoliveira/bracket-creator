@@ -521,6 +521,70 @@ function MyMatchAlertBanner({ match, onView, onDismiss }) {
   );
 }
 
+// isHttpURL returns true when u starts with http:// or https://. Exported for
+// testing (mp-ef3 Copilot round 2).
+export const isHttpURL = (u) => /^https?:\/\//i.test(u);
+
+// TournamentInfo renders optional public tournament info (mp-ef3) as a
+// read-only card on the viewer home page. Returns null when no info fields
+// are set so the card is invisible for tournaments that haven't filled them in.
+export function TournamentInfo({ tournament }) {
+  const t = tournament;
+  if (!t.venueAddress && !t.venueMapURL && !t.openingTime && !t.closingTime && !t.awardsNote && !t.rulesURL && !t.infoNotes && !(t.contacts && t.contacts.length > 0)) return null;
+
+  const contactLink = (value) => {
+    if (!value) return value;
+    if (isHttpURL(value)) return <a href={value} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{value.replace(/^https?:\/\//i, "")}</a>;
+    if (value.includes("@")) return <a href={"mailto:" + value} className="tournament-info__link">{value}</a>;
+    if (/^\+?[\d\s()-]+$/.test(value)) return <a href={"tel:" + value.replace(/[\s()-]/g, "")} className="tournament-info__link">{value}</a>;
+    return value;
+  };
+
+  return (
+    <div className="tournament-info">
+      <div className="tournament-info__title">Tournament Info</div>
+      <dl className="tournament-info__grid">
+        {(t.venueAddress || t.venueMapURL) && <>
+          <dt className="tournament-info__label">Venue</dt>
+          <dd className="tournament-info__value">
+            {t.venueAddress}
+            {t.venueMapURL && isHttpURL(t.venueMapURL) && <>{t.venueAddress ? " " : ""}<a href={t.venueMapURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">View map ↗</a></>}
+          </dd>
+        </>}
+        {(t.openingTime || t.closingTime) && <>
+          <dt className="tournament-info__label">Times</dt>
+          <dd className="tournament-info__value">
+            {t.openingTime && t.closingTime ? `${t.openingTime} – ${t.closingTime}` : t.openingTime ? `Opens ${t.openingTime}` : `Closes ${t.closingTime}`}
+          </dd>
+        </>}
+        {t.awardsNote && <>
+          <dt className="tournament-info__label">Awards</dt>
+          <dd className="tournament-info__value">{t.awardsNote}</dd>
+        </>}
+        {t.rulesURL && <>
+          <dt className="tournament-info__label">Rules</dt>
+          <dd className="tournament-info__value">{isHttpURL(t.rulesURL) ? <a href={t.rulesURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.rulesURL.replace(/^https?:\/\//i, "")}</a> : t.rulesURL}</dd>
+        </>}
+        {t.infoNotes && <>
+          <dt className="tournament-info__label">Notes</dt>
+          <dd className="tournament-info__value">{t.infoNotes}</dd>
+        </>}
+        {t.contacts && t.contacts.length > 0 && <>
+          <dt className="tournament-info__label">Contact</dt>
+          <dd className="tournament-info__value">
+            {t.contacts.map((ct, i) => (
+              <div key={i} className="tournament-info__contact">
+                {ct.label && <span className="tournament-info__contact-label">{ct.label}:</span>}
+                {" "}{contactLink(ct.value)}
+              </div>
+            ))}
+          </dd>
+        </>}
+      </dl>
+    </div>
+  );
+}
+
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -644,6 +708,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         </div>
 
         <div className="viewer__body">
+          <TournamentInfo tournament={t} />
           <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
              <select className="input" style={{ width: "auto" }} value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
                <option value="all">All Shiaijo</option>

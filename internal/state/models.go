@@ -73,6 +73,25 @@ type Tournament struct {
 	// still require X-Admin-Password. omitempty means older tournament.md
 	// files (Mode == "") normalise to "officiated" via ApplyTournamentDefaults.
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+
+	// Public tournament info fields (mp-ef3). All optional (omitempty).
+	// Rendered read-only on the viewer home page; editable in the admin setup form.
+	VenueAddress string              `yaml:"venue_address,omitempty" json:"venueAddress,omitempty"`
+	VenueMapURL  string              `yaml:"venue_map_url,omitempty" json:"venueMapURL,omitempty"`
+	OpeningTime  string              `yaml:"opening_time,omitempty" json:"openingTime,omitempty"`
+	ClosingTime  string              `yaml:"closing_time,omitempty" json:"closingTime,omitempty"`
+	RulesURL     string              `yaml:"rules_url,omitempty" json:"rulesURL,omitempty"`
+	AwardsNote   string              `yaml:"awards_note,omitempty" json:"awardsNote,omitempty"`
+	InfoNotes    string              `yaml:"info_notes,omitempty" json:"infoNotes,omitempty"`
+	Contacts     []TournamentContact `yaml:"contacts,omitempty" json:"contacts,omitempty"`
+}
+
+// TournamentContact is a single contact entry for attendees (mp-ef3).
+// Label is a short description (e.g. "Email", "Phone") and Value is the
+// contact detail (email address, phone number, URL, etc.).
+type TournamentContact struct {
+	Label string `yaml:"label" json:"label"`
+	Value string `yaml:"value" json:"value"`
 }
 
 // Tournament mode constants (mp-7h7).

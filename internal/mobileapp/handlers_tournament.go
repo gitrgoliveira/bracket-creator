@@ -327,6 +327,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
+		// Trim windowTitle so whitespace-only input doesn't persist as an
+		// effectively-blank browser title instead of falling back to the default.
+		if t.Theme != nil {
+			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
+		}
+
 		// Validate hex color fields on the optional theme block (mp-scf).
 		if err := state.ValidateTheme(t.Theme); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -632,6 +638,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if t.Mode == "" {
 			t.Mode = state.TournamentModeOfficiated
+		}
+
+		// Trim windowTitle so whitespace-only input doesn't persist as an
+		// effectively-blank browser title instead of falling back to the default.
+		if t.Theme != nil {
+			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
 		}
 
 		if err := state.ValidateTheme(t.Theme); err != nil {

@@ -157,9 +157,15 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 
 		// Update state before removing the other extension so GET never
 		// fetches a file that has already been deleted.
+		//
+		// Use a sentinel so the error handler can distinguish "tournament
+		// was never initialized" (file is orphaned, safe to remove) from
+		// other transient failures (new bytes are in place; removing the
+		// file would leave Theme.LogoPath pointing at a missing file).
+		errNotInit := errors.New("tournament not initialized")
 		_, err = store.UpdateTournamentChanged(&state.Tournament{}, func(current, desired *state.Tournament) error {
 			if current == nil {
-				return errors.New("tournament not initialized")
+				return errNotInit
 			}
 			*desired = *current
 			if desired.Theme == nil {
@@ -169,7 +175,9 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			return nil
 		})
 		if err != nil {
-			_ = os.Remove(fullPath)
+			if errors.Is(err, errNotInit) {
+				_ = os.Remove(fullPath)
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

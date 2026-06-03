@@ -11,6 +11,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/resources"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -18,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func brandingTestSetup(t *testing.T) (*http.Handler, string, func()) {
+func brandingTestSetup(t *testing.T) (*gin.Engine, string, func()) {
 	t.Helper()
 	tempDir, err := os.MkdirTemp("", "branding-test-*")
 	require.NoError(t, err)
@@ -31,8 +32,7 @@ func brandingTestSetup(t *testing.T) (*http.Handler, string, func()) {
 	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}
 	res := resources.NewResources(nil, mockFS)
 	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
-	h := http.Handler(router)
-	return &h, tempDir, func() { _ = os.RemoveAll(tempDir) }
+	return router, tempDir, func() { _ = os.RemoveAll(tempDir) }
 }
 
 func buildBrandingUpload(t *testing.T, filename string, content []byte) (*bytes.Buffer, string) {
@@ -54,7 +54,7 @@ func TestGetBrandingLogo_NotFound(t *testing.T) {
 	defer cleanup()
 	req := httptest.NewRequest(http.MethodGet, "/api/branding/logo", nil)
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
@@ -66,7 +66,7 @@ func TestPostBrandingLogo_HappyPath_PNG(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.FileExists(t, filepath.Join(dir, brandingDirName, "logo.png"))
 }
@@ -79,7 +79,7 @@ func TestPostBrandingLogo_HappyPath_JPEG(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.FileExists(t, filepath.Join(dir, brandingDirName, "logo.jpg"))
 }
@@ -94,7 +94,7 @@ func TestPostBrandingLogo_ReplacesOtherExt(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	body, ct = buildBrandingUpload(t, "logo.jpg", tinyJPEG)
@@ -102,7 +102,7 @@ func TestPostBrandingLogo_ReplacesOtherExt(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.FileExists(t, filepath.Join(dir, brandingDirName, "logo.jpg"))
 	assert.NoFileExists(t, filepath.Join(dir, brandingDirName, "logo.png"))
@@ -117,7 +117,7 @@ func TestPostBrandingLogo_RejectsBadType(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnsupportedMediaType, w.Code)
 }
 
@@ -129,7 +129,7 @@ func TestPostBrandingLogo_AdminGated(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	// No password.
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
@@ -143,13 +143,13 @@ func TestGetBrandingLogo_ServesPNG(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	// Now GET it.
 	req = httptest.NewRequest(http.MethodGet, "/api/branding/logo", nil)
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
 }
@@ -164,21 +164,21 @@ func TestDeleteBrandingLogo_RemovesFile(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	// Delete.
 	req = httptest.NewRequest(http.MethodDelete, "/api/branding/logo", nil)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NoFileExists(t, filepath.Join(dir, brandingDirName, "logo.png"))
 
 	// GET should now return 404.
 	req = httptest.NewRequest(http.MethodGet, "/api/branding/logo", nil)
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
@@ -195,7 +195,7 @@ func TestDeleteBrandingLogo_PreservesWindowTitle(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	// Upload a logo.
@@ -204,21 +204,21 @@ func TestDeleteBrandingLogo_PreservesWindowTitle(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	// Delete the logo.
 	req = httptest.NewRequest(http.MethodDelete, "/api/branding/logo", nil)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	// Theme must survive with the windowTitle intact.
 	req = httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
@@ -233,7 +233,7 @@ func TestDeleteBrandingLogo_NoLogoReturns404(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/branding/logo", nil)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
@@ -247,7 +247,7 @@ func TestPutTournament_ThemeColorsAccepted(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
@@ -266,7 +266,7 @@ func TestPutTournament_ThemeBadColorRejected(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
@@ -282,7 +282,7 @@ func TestPutTournament_LogoPathPreserved(t *testing.T) {
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	// PUT tournament without a theme field.
@@ -291,7 +291,7 @@ func TestPutTournament_LogoPathPreserved(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	// Logo file should still exist.
@@ -300,6 +300,6 @@ func TestPutTournament_LogoPathPreserved(t *testing.T) {
 	// GET /api/branding/logo should still return 200.
 	req = httptest.NewRequest(http.MethodGet, "/api/branding/logo", nil)
 	w = httptest.NewRecorder()
-	(*h).ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }

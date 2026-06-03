@@ -191,7 +191,7 @@ func ValidateTheme(theme *Theme) error {
 	if theme.AccentSoftColor != "" && !hexColorRE.MatchString(theme.AccentSoftColor) {
 		return errors.New("accentSoftColor must be a 6-digit hex color (e.g. #e7eaf3)")
 	}
-	if len(theme.WindowTitle) > maxWindowTitleLen {
+	if len([]rune(theme.WindowTitle)) > maxWindowTitleLen {
 		return fmt.Errorf("windowTitle must be %d characters or fewer", maxWindowTitleLen)
 	}
 	return nil

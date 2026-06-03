@@ -952,7 +952,7 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
     // dialog could be obscured by chrome or by announcement cards.
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
-        <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Kendo Tournament Logo" className="auth__logo" decoding="async" />
+        <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="auth__logo" decoding="async" />
         <div className="auth__title">Admin sign in</div>
         <div className="auth__sub">Enter the tournament password to manage brackets, schedules and live results.</div>
         <form onSubmit={submit}>

@@ -150,7 +150,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder, highlightPlayerId, highlightPlayerName }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const live = match.status === "running";
@@ -165,12 +165,18 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const aTBD = isPlaceholder || (match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-"));
   const bTBD = isPlaceholder || (match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-"));
 
+  const playerHighlight = (highlightPlayerId || highlightPlayerName) && (
+    (highlightPlayerId && ((match.sideA?.id === highlightPlayerId) || (match.sideB?.id === highlightPlayerId))) ||
+    (highlightPlayerName && ((match.sideA?.name === highlightPlayerName) || (match.sideB?.name === highlightPlayerName) ||
+      (match.sideA?.id === highlightPlayerName) || (match.sideB?.id === highlightPlayerName)))
+  );
+
   return (
     <button
       ref={matchRef}
       type="button"
       data-match-id={match.id}
-      className={`bc-match bc-match--v${variant} ${live ? "bc-match--live" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""}`}
+      className={`bc-match bc-match--v${variant} ${live ? "bc-match--live" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}`}
       onClick={onClick}
       aria-label={`Match ${match.id}`}
     >
@@ -249,7 +255,7 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
   );
 }
 
-function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef }) {
+function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayerId, highlightPlayerName }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -291,6 +297,8 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
                   highlighted={m.id === highlightedMatchId}
                   matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
                   onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
+                  highlightPlayerId={highlightPlayerId}
+                  highlightPlayerName={highlightPlayerName}
                 />
               </div>
             ))}

@@ -1507,6 +1507,7 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
 function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, tweaks }) {
   const [tab, setTab] = useState("overview");
   const c = competition;
+  const [followedPlayer] = useFollowedPlayer();
 
   // Phase 2 (mp-rrd) — link a pools/mixed comp to its separate playoffs comp
   // and vice-versa. A mixed tournament is TWO competitions: the pools/mixed
@@ -1706,6 +1707,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
               onSwitchTab={setTab}
               hasActiveFilter={hasActiveFilter}
               filterLabel={filterLabel}
+              highlightPlayer={followedPlayer}
             />
           )}
           {tab === "bracket" && derivedBracket && (
@@ -1719,6 +1721,8 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     highlightedMatchId={currentMatch?.id}
                     autoScrollMatchId={bracketScrollTarget}
                     scrollContainerRef={bracketScrollRef}
+                    highlightPlayerId={followedPlayer?.id}
+                    highlightPlayerName={followedPlayer?.name}
                     onMatchClick={(m, ri) => {
                       const label = window.roundLabel(ri, derivedBracket.rounds.length);
                       setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, compKind: c.kind, teamSize: c.teamSize });
@@ -1729,7 +1733,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             </div>
           )}
           {tab === "pools" && hasPools && (
-            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} />
+            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} highlightPlayer={followedPlayer} />
           )}
           {tab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
@@ -1836,7 +1840,7 @@ function MatchDetailCard({ match, onClose }) {
   );
 }
 
-function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel }) {
+function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayer }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const isSelfRun = tournament && tournament.mode === "self-run";
@@ -2025,7 +2029,9 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="vsched">
             {liveMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
+                <div className={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer) ? "vsched-item--me" : ""}>
+                  <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
+                </div>
                 {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}
@@ -2040,7 +2046,9 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="vsched">
             {upcomingMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
+                <div className={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer) ? "vsched-item--me" : ""}>
+                  <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
+                </div>
                 {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}
@@ -2059,8 +2067,10 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="vsched">
             {recentMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
-                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+                <div className={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer) ? "vsched-item--me" : ""}>
+                  <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
+                </div>
+                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />
               </React.Fragment>
             ))}
           </div>
@@ -2172,10 +2182,14 @@ PoolMatchRow.displayName = "PoolMatchRow";
 
 // Round-robin matrix for a single pool. Each off-diagonal cell shows the row
 // player's result (W/L/X) against the column player; diagonal cells are self.
-function PoolMatrix({ pool, matches, tweaks, onMatchClick }) {
+function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
 
+  const isHighlighted = (p) => highlightPlayer && (
+    p.id === highlightPlayer.id ||
+    (p.name && highlightPlayer.name && p.name.trim().toLowerCase() === highlightPlayer.name.trim().toLowerCase())
+  );
   const matchMap = {};
   matches.forEach(m => {
     const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
@@ -2207,13 +2221,13 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick }) {
           <tr>
             <th className="pool-matrix__corner"></th>
             {players.map((p, i) => (
-              <th key={p.name} className="pool-matrix__col-head" title={p.name}>{i + 1}</th>
+              <th key={p.name} className={`pool-matrix__col-head${isHighlighted(p) ? " pool-matrix__col--me" : ""}`} title={p.name}>{i + 1}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {players.map((rowPlayer, ri) => (
-            <tr key={rowPlayer.name}>
+            <tr key={rowPlayer.name} className={isHighlighted(rowPlayer) ? "pool-matrix__row--me" : ""}>
               <td className="pool-matrix__row-head" title={rowPlayer.name}>
                 <span className="pool-matrix__num">{ri + 1}</span>
                 <span className="pool-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
@@ -2279,7 +2293,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick }) {
   );
 }
 
-function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick }) {
+function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayer }) {
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3></div>;
   }
@@ -2328,7 +2342,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
               </thead>
               <tbody>
                 {poolStandings && poolStandings.length > 0 ? poolStandings.map((s, i) => (
-                  <tr key={s.player.name}>
+                  <tr key={s.player.name} className={highlightPlayer && (s.player.id === highlightPlayer.id || (s.player.name && highlightPlayer.name && s.player.name.trim().toLowerCase() === highlightPlayer.name.trim().toLowerCase())) ? "pool__row--me" : ""}>
                     <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
                     <td>
                       <div style={{ fontWeight: 500 }}>
@@ -2348,7 +2362,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                 )) : pool.players.map((p, i) => {
                   const cols = isTeam ? 7 : 5;
                   return (
-                    <tr key={p.name}>
+                    <tr key={p.name} className={highlightPlayer && (p.id === highlightPlayer.id || (p.name && highlightPlayer.name && p.name.trim().toLowerCase() === highlightPlayer.name.trim().toLowerCase())) ? "pool__row--me" : ""}>
                       <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>
@@ -2367,7 +2381,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             {/* Round-robin matrix — always visible */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 12 }}>
-                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} />
+                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
               </div>
             )}
 

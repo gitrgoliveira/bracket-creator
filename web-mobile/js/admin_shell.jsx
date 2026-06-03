@@ -67,7 +67,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
     <div className="topbar-stack">
       <div className="topbar">
         <div className="topbar__brand">
-          <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="topbar__logo" decoding="async" />
+          <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="topbar__logo" decoding="async" />
           <div>
             <div className="topbar__title">{tournament?.name || "Bracket Creator"}</div>
             <div className="topbar__sub">Admin console</div>

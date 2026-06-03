@@ -152,6 +152,15 @@ function RegistrationForm({ compId, onBack }) {
     );
   }
 
+  const registerAnother = () => {
+    setSuccess(false);
+    setName("");
+    setDojo("");
+    setDanGrade("");
+    setDisplayName("");
+    setErr("");
+  };
+
   if (success) {
     return (
       <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
@@ -161,9 +170,14 @@ function RegistrationForm({ compId, onBack }) {
             You have been registered for{meta ? ` ${meta.name}` : " this competition"}.
             Results and match schedules will be available on the day of the tournament.
           </p>
-          {onBack && (
-            <button className="btn btn--ghost" onClick={onBack}>← Back to home</button>
-          )}
+          <div style={{ display: "flex", gap: 12 }}>
+            {onBack && (
+              <button className="btn btn--ghost" onClick={onBack}>← Back to home</button>
+            )}
+            <button className="btn btn--primary" onClick={registerAnother} style={{ flex: 1 }}>
+              Register another participant
+            </button>
+          </div>
         </div>
       </div>
     );

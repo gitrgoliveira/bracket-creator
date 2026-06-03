@@ -122,6 +122,33 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 - **CI/CD:** GitHub Actions are used for validation (`.github/workflows/validate.yaml`), including security scans (`gosec`), linting, and coverage reporting via Codecov.
 - **Git:** Never commit changes directly to `main` without a PR. Ensure the build and tests pass before requesting a review.
 
+## PR Workflow
+
+- **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional — execute them, then check them.
+- **Keep the issue (bead) `in_progress` until the PR actually merges.** A green review is not a merge. Only close the issue after the merge lands, with a reason referencing the merge commit/PR.
+- **After a merge, run full cleanup**: close the issue → fast-forward `main` → remove the worktree → delete the local and remote branch → prune.
+
+## Code Review
+
+- **Never report an automated-review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix, or dismissal with a reason), then re-verify the count is zero.
+- When re-requesting a GitHub Copilot review, use the REST endpoint (the `gh pr edit --add-reviewer` form lowercases the login and fails):
+  `gh api repos/<owner>/<repo>/pulls/<pr>/requested_reviewers -X POST -f "reviewers[]=Copilot"`
+- Run `make go/test` after fixes and before pushing — a red gate means fix-or-revert, never push.
+
+## Testing & Verification
+
+- **Verify in the browser, never substitute API/curl calls.** Manual test-plan items and UAT must be executed through the actual UI.
+- **Test self-run / public features from the PUBLIC page, not the admin UI** — the public flow is what users hit; admin-side scoring proves nothing about it.
+- **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.
+- Frontend changes under `web-mobile/` require a rebuild to take effect (`//go:embed`); use `make run-mobile` or rebuild + restart.
+
+## Merge & Rebase
+
+When rebasing or resolving conflicts, watch for these recurring breakages:
+- Duplicate declarations introduced by the rebase (same symbol defined twice after a merge).
+- UUID-vs-name-string mismatches in player/entity maps — match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
+- Re-run `make go/test` after every rebase; a clean rebase that compiles can still be semantically broken.
+
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker

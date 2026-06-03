@@ -808,7 +808,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                               {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
                             </div>
                           </div>
-                          <StatusBadge status={c.status} showLiveDot />
+                          <StatusBadge status={c.status} showLiveDot format={c.format} />
                         </div>
                         {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                           <div className="vlist-item__progress">
@@ -1625,10 +1625,11 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   // data via /swiss/standings (it's not part of the competition-detail
   // payload — see api_client.jsx).
   const isSwiss = c.format === "swiss";
+  const isLeague = c.format === "league";
   const tabs = [
     { id: "overview", label: "Overview" },
     isSwiss ? { id: "swiss", label: "Standings" } : null,
-    hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
+    hasPools && !isSwiss ? { id: "pools", label: isLeague ? "League" : "Pools" } : null,
     hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
     c.status === "completed" ? { id: "results", label: "Awards" } : null,
   ].filter(Boolean);
@@ -1662,7 +1663,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             <div className="viewer__title">{c.name}</div>
             <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
-          <StatusBadge status={c.status} showLiveDot />
+          <StatusBadge status={c.status} showLiveDot format={c.format} />
         </div>
         <div className="viewer__tabs">
           {tabs.map((tb) => (
@@ -1881,6 +1882,8 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
         <div style={{ fontSize: 13 }}>
           Starts at {c.startTime}. {isSwiss
             ? "Check the Standings tab to follow the rounds."
+            : isLeague
+            ? "Browse the League tab to see the draw."
             : "Browse the Pools and Bracket tabs to see the draw."}
         </div>
       </div>
@@ -2318,7 +2321,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
         return (
           <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
             <div className="pool__head">
-              <div className="pool__name">{isLeague ? "Final standings" : pool.poolName}</div>
+              <div className="pool__name">{isLeague ? (allMatchesComplete ? "Final standings" : "Standings") : pool.poolName}</div>
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
                 {matches.filter(m => m.status === "completed").length}/{matches.length} matches
               </div>
@@ -2532,7 +2535,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

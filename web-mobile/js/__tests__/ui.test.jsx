@@ -14,6 +14,16 @@ describe('UI Components', () => {
       const dot = badge.children.find(c => c && c.props && c.props.className === 'dot dot--live');
       expect(dot).toBeDefined();
     });
+
+    it('should show "League" label for pools status when format is league', () => {
+      const badge = StatusBadge({ status: 'pools', format: 'league' });
+      expect(badge.children).toContain('League');
+    });
+
+    it('should still show "Pools" label for pools status when format is mixed', () => {
+      const badge = StatusBadge({ status: 'pools', format: 'mixed' });
+      expect(badge.children).toContain('Pools');
+    });
   });
 
   describe('formatDate', () => {

@@ -193,6 +193,71 @@ describe('RegistrationForm', () => {
     });
   });
 
+  describe('register another', () => {
+    it('resets form when "Register another" is clicked after success', async () => {
+      global.fetch = vi.fn((url, opts) => {
+        if (!opts || opts.method !== 'POST') {
+          return Promise.resolve({
+            status: 200,
+            ok: true,
+            json: () => Promise.resolve({ id: 'c1', name: 'Open', status: 'setup', withZekkenName: true }),
+          });
+        }
+        return Promise.resolve({
+          status: 200,
+          ok: true,
+          json: () => Promise.resolve({ id: 'p1', name: 'Alice', dojo: 'Dojo', tag: 'registered' }),
+        });
+      });
+
+      runtime.mount(RegistrationForm, { compId: 'c1' });
+      await vi.waitFor(() => {
+        expect(collectText(runtime.currentTree())).toContain('Full name');
+      });
+
+      const findInputByPlaceholder = (ph) => findInTree(runtime.currentTree(),
+        n => n.type === 'input' && n.props?.placeholder === ph);
+      findInputByPlaceholder('e.g. Alice Tanaka').props.onChange({ target: { value: 'Alice' } });
+      findInputByPlaceholder('e.g. Gyokusen').props.onChange({ target: { value: 'Dojo' } });
+      findInputByPlaceholder('e.g. 3 Dan').props.onChange({ target: { value: '3 Dan' } });
+      findInputByPlaceholder('e.g. TANAKA').props.onChange({ target: { value: 'ALICE' } });
+
+      const form = findInTree(runtime.currentTree(), n => n.type === 'form');
+      await form.props.onSubmit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(collectText(runtime.currentTree())).toContain("You're registered");
+      });
+
+      const registerAnotherBtn = findInTree(runtime.currentTree(), n =>
+        n.type === 'button' && collectText(n).includes('Register another')
+      );
+      expect(registerAnotherBtn).toBeTruthy();
+      registerAnotherBtn.props.onClick();
+
+      await vi.waitFor(() => {
+        const text = collectText(runtime.currentTree());
+        expect(text).toContain('Full name');
+        expect(text).toContain('Dojo');
+        expect(text).not.toContain("You're registered");
+      });
+
+      const nameInput = findInputByPlaceholder('e.g. Alice Tanaka');
+      expect(nameInput.props.value).toBe('');
+      const dojoInput = findInputByPlaceholder('e.g. Gyokusen');
+      expect(dojoInput.props.value).toBe('');
+      const danGradeInput = findInputByPlaceholder('e.g. 3 Dan');
+      expect(danGradeInput.props.value).toBe('');
+      const displayNameInput = findInputByPlaceholder('e.g. TANAKA');
+      expect(displayNameInput.props.value).toBe('');
+
+      // Competition metadata preserved — comp name still visible, no re-fetch
+      const text = collectText(runtime.currentTree());
+      expect(text).toContain('Open');
+      expect(global.fetch).toHaveBeenCalledTimes(2); // 1 GET meta + 1 POST register — no extra fetch
+    });
+  });
+
   describe('back button', () => {
     it('calls onBack when back button is clicked', async () => {
       global.fetch = vi.fn(() =>

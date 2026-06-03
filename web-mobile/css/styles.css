@@ -1323,6 +1323,10 @@ a:hover {
   font-size: 10px;
 }
 
+.pool__table tr.advancing-cut td {
+  border-bottom: 2px solid #bbf7d0;
+}
+
 /* ---------- Pool match results ---------- */
 .pool-match-row {
   display: flex;

@@ -2312,6 +2312,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
   const leagueWinner = (isLeague && allMatchesComplete && pools[0] && standings)
     ? (standings[pools[0].poolName] || [])[0]
     : null;
+  const poolWinners = competition ? (competition.poolWinners || 2) : 2;
 
   return (
     <div className="pools-grid">
@@ -2335,14 +2336,20 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             <table className="pool__table">
               <thead>
                 {isTeam ? (
-                  <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">PW</th><th className="num">PL</th></tr>
+                  <tr><th>#</th><th>Team</th><th className="num" title="Team matches won">W</th><th className="num" title="Team matches lost">L</th><th className="num" title="Team matches tied">T</th><th className="num" title="Individual victories">IV</th><th className="num" title="Individual losses">IL</th><th className="num" title="Individual ties (draws)">IT</th><th className="num" title="Points won">PW</th><th className="num" title="Points lost">PL</th></tr>
                 ) : (
-                  <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
+                  <tr><th>#</th><th>Player</th><th className="num" title="Fights won">W</th><th className="num" title="Fights lost">L</th><th className="num" title="Draws (hikiwake)">D</th><th className="num" title="Points won (ippon)">PW</th><th className="num" title="Points lost">PL</th></tr>
                 )}
               </thead>
               <tbody>
-                {poolStandings && poolStandings.length > 0 ? poolStandings.map((s, i) => (
-                  <tr key={s.player.name} className={isFollowedPlayer(s.player, highlightPlayer) ? "pool__row--me" : ""}>
+                {poolStandings && poolStandings.length > 0 ? poolStandings.map((s, i) => {
+                  const rowClasses = [
+                    isFollowedPlayer(s.player, highlightPlayer) ? "pool__row--me" : "",
+                    !isLeague && i < poolWinners ? "advancing" : "",
+                    !isLeague && i === poolWinners - 1 ? "advancing-cut" : "",
+                  ].filter(Boolean).join(" ");
+                  return (
+                  <tr key={s.player.name} className={rowClasses || undefined}>
                     <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
                     <td>
                       <div style={{ fontWeight: 500 }}>
@@ -2356,11 +2363,13 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                     <td className="num">{s.draws}</td>
                     {isTeam && <td className="num">{s.individualWins || 0}</td>}
                     {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                    {isTeam && <td className="num">{s.individualDraws || 0}</td>}
                     <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
                     <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
                   </tr>
-                )) : pool.players.map((p, i) => {
-                  const cols = isTeam ? 7 : 5;
+                  );
+                }) : pool.players.map((p, i) => {
+                  const cols = isTeam ? 8 : 5;
                   return (
                     <tr key={p.name} className={isFollowedPlayer(p, highlightPlayer) ? "pool__row--me" : ""}>
                       <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>

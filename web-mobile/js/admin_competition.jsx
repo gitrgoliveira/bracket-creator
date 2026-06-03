@@ -1425,7 +1425,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // Show pools/bracket in nav when draw is ready (preview) or running.
         // Use .length checks: the state store returns [] / {rounds:[]} (never null)
         // when files are absent, so plain truthiness would always show the items.
-        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: isDrawReady ? "Pools — preview" : "Pools — live" } : null,
+        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + " — " + (isDrawReady ? "preview" : "live") } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
         c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
@@ -1456,7 +1456,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             <div className="page-head__eyebrow">{t.name} ›</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{c.name}</h1>
-              <StatusBadge status={localStatus ?? c.status} />
+              <StatusBadge status={localStatus ?? c.status} format={c.format} />
             </div>
             <div className="page-head__sub">
               {window.competitionKindLabel(c)} · {c.players.length} {c.kind === "team" ? "teams" : "players"} ·

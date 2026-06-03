@@ -2201,7 +2201,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick }) {
         <span className="pool-matrix__legend-item pool-matrix__legend-item--win">W = win</span>
         <span className="pool-matrix__legend-item pool-matrix__legend-item--loss">L = loss</span>
         <span className="pool-matrix__legend-item pool-matrix__legend-item--draw">X = draw</span>
-        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>Tap a cell to view match details</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row plays AKA vs col SHIRO"}</span>
       </div>
     </div>
   );

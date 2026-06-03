@@ -13,6 +13,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
 
   const [primaryColor, setPrimaryColor] = useStateBr(theme.primaryColor || "#1d3557");
   const [accentSoftColor, setAccentSoftColor] = useStateBr(theme.accentSoftColor || "#e7eaf3");
+  const [windowTitle, setWindowTitle] = useStateBr(theme.windowTitle || "");
   const [hasLogo, setHasLogo] = useStateBr(false);
   const [logoKey, setLogoKey] = useStateBr(0); // bump to force img reload
   const [busy, setBusy] = useStateBr(false);
@@ -26,29 +27,38 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   }, [logoKey]);
 
   // Sync incoming theme changes (e.g. after a tournament SSE reload).
-  // Always update — falsy values reset the pickers to their defaults.
+  // Always update — falsy values reset the pickers/inputs to their defaults.
   useEffectBr(() => {
     const t = (tournament && tournament.theme) || {};
     setPrimaryColor(t.primaryColor || "#1d3557");
     setAccentSoftColor(t.accentSoftColor || "#e7eaf3");
+    setWindowTitle(t.windowTitle || "");
   }, [tournament]);
 
   const handleColorChange = (field, value) => {
+    const next = {
+      primaryColor: field === "primaryColor" ? value : primaryColor,
+      accentSoftColor: field === "accentSoftColor" ? value : accentSoftColor,
+      windowTitle,
+    };
     if (field === "primaryColor") setPrimaryColor(value);
     else setAccentSoftColor(value);
-    // Propagate to parent so the PUT /tournament body includes updated colors.
-    if (onThemeChange) onThemeChange({ primaryColor: field === "primaryColor" ? value : primaryColor, accentSoftColor: field === "accentSoftColor" ? value : accentSoftColor });
+    // Propagate to parent so the PUT /tournament body includes all branding.
+    if (onThemeChange) onThemeChange(next);
     // Live-preview the color change in CSS without waiting for save.
     if (typeof window.applyTheme === "function") {
-      window.applyTheme({
-        primaryColor: field === "primaryColor" ? value : primaryColor,
-        accentSoftColor: field === "accentSoftColor" ? value : accentSoftColor,
-      });
+      window.applyTheme(next);
     } else {
       const root = document.documentElement;
       if (field === "primaryColor") root.style.setProperty("--accent", value);
       else root.style.setProperty("--accent-soft", value);
     }
+  };
+
+  const handleWindowTitleChange = (value) => {
+    setWindowTitle(value);
+    if (onThemeChange) onThemeChange({ primaryColor, accentSoftColor, windowTitle: value });
+    document.title = value || "Bracket Creator Mobile";
   };
 
   const handleLogoUpload = async (e) => {
@@ -91,9 +101,25 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
     <div className="card card--pad-lg" style={{ marginTop: 16 }}>
       <div className="card__title">Branding</div>
       <div className="field__hint" style={{ marginBottom: 16 }}>
-        Customize accent colors and the tournament logo shown on the viewer,
-        lobby, and admin screens. Changes refresh on next page load;
-        colors preview instantly below.
+        Customize the browser tab title, accent colors, and the tournament logo
+        shown on the viewer, lobby, and admin screens. Colors and title preview
+        instantly; the logo takes effect on next page load.
+      </div>
+
+      <div className="field" style={{ marginBottom: 16 }}>
+        <label className="field__label">Browser tab / window title</label>
+        <input
+          type="text"
+          value={windowTitle}
+          maxLength={100}
+          placeholder="Bracket Creator Mobile"
+          onChange={(e) => handleWindowTitleChange(e.target.value)}
+          style={{ width: "100%", boxSizing: "border-box" }}
+        />
+        <div className="field__hint">
+          Shown in the browser tab and title bar on all pages. Defaults to
+          "Bracket Creator Mobile" when blank.
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>

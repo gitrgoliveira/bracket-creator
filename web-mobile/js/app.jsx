@@ -35,6 +35,7 @@ function applyTheme(theme) {
   } else {
     root.style.removeProperty("--accent-soft");
   }
+  document.title = (theme && theme.windowTitle) || "Bracket Creator Mobile";
 }
 
 // Pure helper: parse the current pathname into the App's view state.

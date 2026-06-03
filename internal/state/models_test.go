@@ -107,6 +107,7 @@ func TestTournamentTheme_RoundTrip(t *testing.T) {
 			Theme: &Theme{
 				PrimaryColor:    "#ff0000",
 				AccentSoftColor: "#ffe0e0",
+				WindowTitle:     "My Cup 2026",
 				LogoPath:        "logo.png",
 			},
 		}
@@ -117,6 +118,7 @@ func TestTournamentTheme_RoundTrip(t *testing.T) {
 		require.NotNil(t, got.Theme)
 		assert.Equal(t, "#ff0000", got.Theme.PrimaryColor)
 		assert.Equal(t, "#ffe0e0", got.Theme.AccentSoftColor)
+		assert.Equal(t, "My Cup 2026", got.Theme.WindowTitle)
 		assert.Equal(t, "logo.png", got.Theme.LogoPath)
 	})
 	t.Run("logo_path is omitted from JSON", func(t *testing.T) {
@@ -159,6 +161,9 @@ func TestValidateTheme(t *testing.T) {
 		{"bad accent", &Theme{AccentSoftColor: "notacolor"}, true},
 		{"empty primary ok", &Theme{AccentSoftColor: "#e7eaf3"}, false},
 		{"empty accent ok", &Theme{PrimaryColor: "#1d3557"}, false},
+		{"window title ok", &Theme{WindowTitle: "My Tournament 2026"}, false},
+		{"window title at max length ok", &Theme{WindowTitle: string(make([]byte, 100))}, false},
+		{"window title too long", &Theme{WindowTitle: string(make([]byte, 101))}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

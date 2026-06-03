@@ -58,10 +58,15 @@ const (
 	BrandingMaxBodyBytes int64 = 2 << 20 // 2 MB
 )
 
-// SponsorMaxFileBytes is the in-handler cap on the logo file itself
+// SponsorMaxFileBytes is the in-handler cap on the sponsor logo file itself
 // (the multipart `file` field), distinct from the envelope cap above.
 // See mp-c38 plan.
 const SponsorMaxFileBytes int64 = 1 << 20 // 1 MB
+
+// BrandingMaxFileBytes is the in-handler cap on the tournament branding
+// logo file itself. Kept separate from SponsorMaxFileBytes so the two
+// limits can evolve independently.
+const BrandingMaxFileBytes int64 = 1 << 20 // 1 MB
 
 // MaxBodyBytes returns a Gin middleware that rejects requests whose
 // body exceeds n bytes. Two checks, in order of cost:

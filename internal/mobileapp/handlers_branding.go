@@ -84,7 +84,7 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 			return
 		}
-		if fh.Size > SponsorMaxFileBytes {
+		if fh.Size > BrandingMaxFileBytes {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "logo must be ≤1 MB"})
 			return
 		}
@@ -129,14 +129,14 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			return
 		}
 		tmpPath := dst.Name()
-		written, copyErr := io.Copy(dst, io.LimitReader(src, SponsorMaxFileBytes+1))
+		written, copyErr := io.Copy(dst, io.LimitReader(src, BrandingMaxFileBytes+1))
 		cerr := dst.Close()
 		if copyErr != nil || cerr != nil {
 			_ = os.Remove(tmpPath)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": errors.Join(copyErr, cerr).Error()})
 			return
 		}
-		if written > SponsorMaxFileBytes {
+		if written > BrandingMaxFileBytes {
 			_ = os.Remove(tmpPath)
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "logo must be ≤1 MB"})
 			return

@@ -1698,6 +1698,8 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
               upcomingMatches={upcomingMatches}
               recentMatches={recentMatches}
               tweaks={tweaks}
+              tournament={tournament}
+              compId={c.id}
               standings={standings}
               pools={pools}
               poolMatches={poolMatches}
@@ -1834,8 +1836,10 @@ function MatchDetailCard({ match, onClose }) {
   );
 }
 
-function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel }) {
+function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
+  const [selectedMatch, setSelectedMatch] = useState(null);
+  const isSelfRun = tournament && tournament.mode === "self-run";
 
   const isLeague = c.format === "league";
   const isTeam = c.kind === "team" || c.teamSize > 0;
@@ -1879,7 +1883,11 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
   }
 
   const handleMatchClick = (m) => {
-    setExpandedMatchId(prev => prev === m.id ? null : m.id);
+    if (isSelfRun) {
+      setSelectedMatch(m);
+    } else {
+      setExpandedMatchId(prev => prev === m.id ? null : m.id);
+    }
   };
 
   return (
@@ -1988,7 +1996,19 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 
       {/* Current match — shown inline, before Up Next */}
       {currentMatch && currentMatch.status === "running" && (
-        <div style={{ marginBottom: 12 }}>
+        <div
+          style={{ marginBottom: 12, cursor: isSelfRun ? "pointer" : undefined }}
+          role={isSelfRun ? "button" : undefined}
+          aria-label={isSelfRun ? "View current match details" : undefined}
+          tabIndex={isSelfRun ? 0 : undefined}
+          onClick={isSelfRun ? () => handleMatchClick(currentMatch) : undefined}
+          onKeyDown={isSelfRun ? (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handleMatchClick(currentMatch);
+            }
+          } : undefined}
+        >
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span className="dot dot--live"></span> ON NOW
           </div>
@@ -2006,7 +2026,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             {liveMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
               <React.Fragment key={m.id}>
                 <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
-                {expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}
           </div>
@@ -2021,7 +2041,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             {upcomingMatches.map((m) => (
               <React.Fragment key={m.id}>
                 <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
-                {expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}
           </div>
@@ -2039,13 +2059,14 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="vsched">
             {recentMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => setExpandedMatchId(prev => prev === m.id ? null : m.id)} />
-                {expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
+                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}
           </div>
         </>
       )}
+      {isSelfRun && selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={compId} />}
     </div>
   );
 }

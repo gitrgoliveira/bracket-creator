@@ -2315,7 +2315,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
         return (
           <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
             <div className="pool__head">
-              <div className="pool__name">{isLeague ? "Final standings" : pool.poolName}</div>
+              <div className="pool__name">{isLeague ? (allMatchesComplete ? "Final standings" : "Standings") : pool.poolName}</div>
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
                 {matches.filter(m => m.status === "completed").length}/{matches.length} matches
               </div>
@@ -2529,7 +2529,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

@@ -1,7 +1,7 @@
 // Pure-logic tests for buildPlayerMatchHighlight (FR-020, FR-022).
 // Slice 4 / T108–T109: drives "Find my matches" filtering on the viewer home.
 import { describe, it, expect } from 'vitest';
-import { buildPlayerMatchHighlight, isFollowedPlayer, mymatchQueueLabel } from '../viewer.jsx';
+import { buildPlayerMatchHighlight, buildFollowedNextMatch, isFollowedPlayer, mymatchQueueLabel } from '../viewer.jsx';
 
 describe('buildPlayerMatchHighlight', () => {
   it('returns matches where playerId is on SideA', () => {
@@ -163,5 +163,74 @@ describe('mymatchQueueLabel', () => {
   it('handles null / undefined match gracefully', () => {
     expect(mymatchQueueLabel(null)).toBeNull();
     expect(mymatchQueueLabel(undefined)).toBeNull();
+  });
+});
+
+// mp-wvkh: Tests for buildFollowedNextMatch — the extracted helper used by
+// ViewerCompetition to derive the followed player's next match. Covers:
+// running-match precedence, scheduledAt ordering, name-fallback (no UUID).
+describe('buildFollowedNextMatch (mp-wvkh)', () => {
+  const mkMatch = (id, sideA, sideB, status, scheduledAt) => ({
+    id, sideA, sideB, status, scheduledAt,
+  });
+  const player = { id: 'p1', name: 'Alice' };
+
+  it('returns null when followedPlayer is null or has no id/name', () => {
+    expect(buildFollowedNextMatch(null, [])).toBeNull();
+    expect(buildFollowedNextMatch({}, [])).toBeNull();
+    expect(buildFollowedNextMatch({ id: '', name: '' }, [])).toBeNull();
+  });
+
+  it('returns the running match over a scheduled match', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'scheduled', '09:00'),
+      mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'running', '09:30'),
+    ];
+    const result = buildFollowedNextMatch(player, matches);
+    expect(result.id).toBe('m2');
+  });
+
+  it('sorts scheduled matches by scheduledAt ascending', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'scheduled', '10:00'),
+      mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '09:00'),
+    ];
+    const result = buildFollowedNextMatch(player, matches);
+    expect(result.id).toBe('m2');
+  });
+
+  it('excludes completed matches', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'completed', '08:00'),
+      mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '10:00'),
+    ];
+    const result = buildFollowedNextMatch(player, matches);
+    expect(result.id).toBe('m2');
+  });
+
+  it('falls back to name match when followed player has no UUID', () => {
+    const nameOnly = { id: '', name: 'Alice' };
+    const matches = [
+      mkMatch('m1', { id: 'x1', name: 'Alice' }, { id: 'x2', name: 'Bob' }, 'scheduled', '09:00'),
+    ];
+    const result = buildFollowedNextMatch(nameOnly, matches);
+    expect(result).not.toBeNull();
+    expect(result.id).toBe('m1');
+  });
+
+  it('returns null when no matches involve the followed player', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p5', name: 'Eve' }, { id: 'p6', name: 'Frank' }, 'scheduled', '09:00'),
+    ];
+    expect(buildFollowedNextMatch(player, matches)).toBeNull();
+  });
+
+  it('skips matches missing a side (hasBothSides guard)', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p1', name: 'Alice' }, null, 'scheduled', '09:00'),
+      mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '10:00'),
+    ];
+    const result = buildFollowedNextMatch(player, matches);
+    expect(result.id).toBe('m2');
   });
 });

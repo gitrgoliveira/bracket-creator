@@ -339,7 +339,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               {courts.length > 0 && `${(c.date || c.startTime) ? " · " : ""}${courts.join(", ")}`}
             </div>
           </div>
-          <StatusBadge status={c.status} />
+          <StatusBadge status={c.status} format={c.format} />
         </div>
         <div className="tcard__stats">
           <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>

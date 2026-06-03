@@ -805,7 +805,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                               {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
                             </div>
                           </div>
-                          <StatusBadge status={c.status} showLiveDot />
+                          <StatusBadge status={c.status} showLiveDot format={c.format} />
                         </div>
                         {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                           <div className="vlist-item__progress">
@@ -1622,10 +1622,11 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   // data via /swiss/standings (it's not part of the competition-detail
   // payload — see api_client.jsx).
   const isSwiss = c.format === "swiss";
+  const isLeague = c.format === "league";
   const tabs = [
     { id: "overview", label: "Overview" },
     isSwiss ? { id: "swiss", label: "Standings" } : null,
-    hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
+    hasPools && !isSwiss ? { id: "pools", label: isLeague ? "League" : "Pools" } : null,
     hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
     c.status === "completed" ? { id: "results", label: "Awards" } : null,
   ].filter(Boolean);
@@ -1659,7 +1660,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             <div className="viewer__title">{c.name}</div>
             <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
-          <StatusBadge status={c.status} showLiveDot />
+          <StatusBadge status={c.status} showLiveDot format={c.format} />
         </div>
         <div className="viewer__tabs">
           {tabs.map((tb) => (
@@ -1878,6 +1879,8 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
         <div style={{ fontSize: 13 }}>
           Starts at {c.startTime}. {isSwiss
             ? "Check the Standings tab to follow the rounds."
+            : isLeague
+            ? "Browse the League tab to see the draw."
             : "Browse the Pools and Bracket tabs to see the draw."}
         </div>
       </div>

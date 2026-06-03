@@ -1053,6 +1053,13 @@ a:hover {
 .bc-side--winner .bc-name {
   color: var(--ink);
 }
+/* Explicit winner marker — weight/colour alone are weak signals (a11y +
+   colour-blind). A green check makes the advancing side unambiguous. */
+.bc-winner-tick {
+  color: #16a34a;
+  font-weight: 800;
+  margin-right: 4px;
+}
 
 .bc-side--empty .bc-name--tbd {
   color: var(--ink-4);

@@ -799,7 +799,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                       <button className="vlist-item vlist-item--comp" style={{ width: "100%" }} onClick={() => onSelectCompetition(c.id)}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                           <div style={{ minWidth: 0 }}>
-                            <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
+                            <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize > 1 ? ` · ${c.teamSize}-person` : ""}</div>
                             <div className="vlist-item__name">{c.name}</div>
                             <div className="vlist-item__meta">
                               {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
@@ -1579,7 +1579,14 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && matchInvolvesWatched(m))
       .sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))
       .slice(0, hasActiveFilter ? 20 : 3);
-    const recent = allMatches.filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m)).slice(hasActiveFilter ? -20 : -5).reverse();
+    // Reverse-chronological by scheduled time. allMatches arrives in
+    // pool-then-bracket order (not time order), so a bare slice(-N).reverse()
+    // produced a jumbled "Recent results" list — sort by scheduledAt desc,
+    // then take the most recent N. Missing times sort last (oldest).
+    const recent = allMatches
+      .filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m))
+      .sort((a, b) => (b.scheduledAt || "00:00").localeCompare(a.scheduledAt || "00:00"))
+      .slice(0, hasActiveFilter ? 20 : 5);
     return { liveMatches: live, upcomingMatches: upcoming, recentMatches: recent };
   }, [allMatches, watchedIds, hasActiveFilter, followedName]);
 

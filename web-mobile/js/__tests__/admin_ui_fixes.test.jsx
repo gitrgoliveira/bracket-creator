@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { arraysEqual } from '../data.jsx';
-import { pluralize } from '../ui.jsx';
+import { pluralize, formatAdminHeaderSub, formatViewerHeaderEyebrow } from '../ui.jsx';
 
 describe('WebUI Fixes - pluralize', () => {
   it('should pluralize correctly', () => {
@@ -269,5 +269,48 @@ describe('AdminScoreEditor status sort', () => {
     // Real `running` must come before the unrecognised `in_progress` even
     // though `in_progress` has an earlier scheduledAt.
     expect(sortScoreEdit(input).map(m => m.id)).toEqual(['real', 'legacy']);
+  });
+});
+
+// --- Tournament Header Empty Venue Logic ---
+describe('Tournament Header Empty Venue Logic', () => {
+  it('should format admin subheader correctly when venue is present', () => {
+    const formatted = formatAdminHeaderSub(
+      '3 Jun 2026',
+      'Crystal Palace',
+      2,
+      1,
+      5
+    );
+    expect(formatted).toBe('3 Jun 2026 · Crystal Palace · 2 shiaijo (courts) · 1 competition · 5 participants');
+  });
+
+  it('should format admin subheader with no double dot separator when venue is empty', () => {
+    const formatted = formatAdminHeaderSub(
+      '3 Jun 2026',
+      '',
+      2,
+      1,
+      5
+    );
+    expect(formatted).toBe('3 Jun 2026 · 2 shiaijo (courts) · 1 competition · 5 participants');
+    expect(formatted).not.toContain('·  ·');
+  });
+
+  it('should format viewer eyebrow correctly when venue is present', () => {
+    const formatted = formatViewerHeaderEyebrow(
+      '3 Jun 2026',
+      'Crystal Palace'
+    );
+    expect(formatted).toBe('3 Jun 2026 · Crystal Palace');
+  });
+
+  it('should format viewer eyebrow with no trailing separator when venue is empty', () => {
+    const formatted = formatViewerHeaderEyebrow(
+      '3 Jun 2026',
+      ''
+    );
+    expect(formatted).toBe('3 Jun 2026');
+    expect(formatted.endsWith(' · ')).toBe(false);
   });
 });

@@ -545,6 +545,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         onLogout={onLogout}
         onViewerMode={onViewerMode}
         onUpdate={onUpdate}
+        showToast={showToast}
       />
       {announceOpen && <window.AnnouncementModal
         password={password}

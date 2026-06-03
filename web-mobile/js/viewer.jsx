@@ -2098,8 +2098,8 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
 });
 PoolMatchRow.displayName = "PoolMatchRow";
 
-// Round-robin matrix for a single pool. Rows = players (AKA), cols = players (SHIRO).
-// Diagonal and upper triangle are empty; lower triangle shows result from match AKA vs SHIRO.
+// Round-robin matrix for a single pool. Each off-diagonal cell shows the row
+// player's result (W/L/X) against the column player; diagonal cells are self.
 function PoolMatrix({ pool, matches, tweaks, onMatchClick }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
@@ -2201,7 +2201,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick }) {
         <span className="pool-matrix__legend-item pool-matrix__legend-item--win">W = win</span>
         <span className="pool-matrix__legend-item pool-matrix__legend-item--loss">L = loss</span>
         <span className="pool-matrix__legend-item pool-matrix__legend-item--draw">X = draw</span>
-        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row plays AKA vs col SHIRO"}</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row player's result vs column player"}</span>
       </div>
     </div>
   );

@@ -809,6 +809,8 @@ function App() {
           onBack={() => setViewerCompId(null)}
           onSelectCompetition={setViewerCompId}
           onAdminClick={requestAdmin}
+          authed={authed}
+          onEditCompetition={(id) => { setMode("admin"); setAdminView({ kind: "competition", id, section: "settings" }); }}
           tweaks={THEME}
         />
       ) : viewerScreen === "schedule" ? (

@@ -28,11 +28,17 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
 
   // Sync incoming theme changes (e.g. after a tournament SSE reload).
   // Always update — falsy values reset the pickers/inputs to their defaults.
+  // Also propagate to the parent so the PUT payload stays consistent
+  // if Save is clicked after an SSE-driven refresh.
   useEffectBr(() => {
     const t = (tournament && tournament.theme) || {};
-    setPrimaryColor(t.primaryColor || "#1d3557");
-    setAccentSoftColor(t.accentSoftColor || "#e7eaf3");
-    setWindowTitle(t.windowTitle || "");
+    const pc = t.primaryColor || "#1d3557";
+    const asc = t.accentSoftColor || "#e7eaf3";
+    const wt = t.windowTitle || "";
+    setPrimaryColor(pc);
+    setAccentSoftColor(asc);
+    setWindowTitle(wt);
+    if (onThemeChange) onThemeChange({ primaryColor: pc, accentSoftColor: asc, windowTitle: wt });
   }, [tournament]);
 
   const handleColorChange = (field, value) => {

@@ -119,16 +119,16 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			return
 		}
 		fullPath := filepath.Join(brandingDir, fileName)
-		// Write to a temp file then rename atomically so concurrent GET
-		// requests never see a partial write. fileName is always "logo.png"
-		// or "logo.jpg" — server-derived; no user-controlled input reaches
-		// the OS call.
-		tmpPath := fullPath + ".tmp"
-		dst, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304
+		// Use os.CreateTemp for a unique temp file so concurrent uploads
+		// don't share the same ".tmp" path and corrupt each other's write.
+		// Temp file is in brandingDir so the final Rename stays on the
+		// same filesystem and remains atomic. // #nosec G304
+		dst, err := os.CreateTemp(brandingDir, "logo-*.tmp")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		tmpPath := dst.Name()
 		written, copyErr := io.Copy(dst, io.LimitReader(src, SponsorMaxFileBytes+1))
 		cerr := dst.Close()
 		if copyErr != nil || cerr != nil {

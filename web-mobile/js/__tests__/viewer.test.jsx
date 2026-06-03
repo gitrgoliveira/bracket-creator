@@ -798,3 +798,118 @@ describe('PoolMatrix (mp-f4xo)', () => {
   });
 });
 
+// mp-7x4n: ViewerOverview opens MatchViewerModal in self-run mode,
+// MatchDetailCard in officiated mode.
+describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
+  const realReact = global.React;
+  let runtime;
+  let ViewerOverview;
+  const STUBBED = ['ipponsFromScore', 'formatIpponsScore', 'queueLabel', 'isHikiwake', 'useEscapeToClose', 'hasBothSides', 'StatusBadge', 'formatLabel', 'roundLabel', 'queueLabelCompact', 'pluralize'];
+  const savedGlobals = {};
+
+  const mkMatch = (id) => ({
+    id,
+    status: 'scheduled',
+    phase: 'pool',
+    poolName: 'Pool A',
+    court: 'A',
+    sideA: { id: 'a1', name: 'Alice' },
+    sideB: { id: 'b1', name: 'Bob' },
+    ipponsA: [],
+    ipponsB: [],
+  });
+
+  const mkComp = () => ({
+    id: 'c1',
+    name: 'Test',
+    format: 'mixed',
+    status: 'pools',
+    courts: ['A'],
+  });
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
+    global.window.ipponsFromScore = vi.fn(() => []);
+    global.window.formatIpponsScore = vi.fn(() => '');
+    global.window.queueLabel = vi.fn(() => '');
+    global.window.queueLabelCompact = vi.fn(() => '');
+    global.window.isHikiwake = vi.fn(() => false);
+    global.window.useEscapeToClose = vi.fn();
+    global.window.hasBothSides = vi.fn(() => true);
+    global.window.StatusBadge = vi.fn(() => null);
+    global.window.formatLabel = vi.fn((x) => x || '');
+    global.window.roundLabel = vi.fn((x) => x || '');
+    global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);
+    vi.resetModules();
+    ({ ViewerOverview } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('self-run: clicking an upcoming match opens MatchViewerModal', () => {
+    const m = mkMatch('m1');
+    const tree = runtime.mount(ViewerOverview, {
+      c: mkComp(),
+      myPlayer: null,
+      myUpcoming: null,
+      currentMatch: null,
+      liveMatches: [],
+      upcomingMatches: [m],
+      recentMatches: [],
+      tweaks: {},
+      tournament: { mode: 'self-run' },
+      compId: 'c1',
+    });
+    // VSchedItem is a child component — the reactive shim stores it as a
+    // vnode {type: Function, props: {onClick, ...}} without executing it.
+    // Find it by its type being a function with an onClick prop.
+    const vsched = findInTree(tree, n => typeof n?.type === 'function' && n?.props?.onClick && n?.props?.m);
+    expect(vsched).toBeTruthy();
+    vsched.props.onClick();
+    const updated = runtime.currentTree();
+    // MatchViewerModal is a function component with tournament + compId props
+    const modal = findInTree(updated, n => typeof n?.type === 'function' && n?.props?.tournament && n?.props?.compId);
+    expect(modal).toBeTruthy();
+    expect(modal.props.match).toBeTruthy();
+    expect(modal.props.match.id).toBe('m1');
+  });
+
+  it('officiated: clicking an upcoming match expands inline MatchDetailCard', () => {
+    const m = mkMatch('m1');
+    const tree = runtime.mount(ViewerOverview, {
+      c: mkComp(),
+      myPlayer: null,
+      myUpcoming: null,
+      currentMatch: null,
+      liveMatches: [],
+      upcomingMatches: [m],
+      recentMatches: [],
+      tweaks: {},
+      tournament: { mode: 'officiated' },
+      compId: 'c1',
+    });
+    const vsched = findInTree(tree, n => typeof n?.type === 'function' && n?.props?.onClick && n?.props?.m);
+    expect(vsched).toBeTruthy();
+    vsched.props.onClick();
+    const updated = runtime.currentTree();
+    // MatchDetailCard should be rendered (function component with match + onClose props)
+    const detailCard = findInTree(updated, n => typeof n?.type === 'function' && n?.props?.match && n?.props?.onClose !== undefined && !n?.props?.tournament);
+    expect(detailCard).toBeTruthy();
+    // No modal-backdrop (no MatchViewerModal)
+    const modal = findInTree(updated, n => n?.props?.className === 'modal-backdrop');
+    expect(modal).toBeNull();
+  });
+});
+

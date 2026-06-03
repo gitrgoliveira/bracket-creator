@@ -23,10 +23,12 @@ var validBrandingContentTypes = map[string]string{
 	"image/jpeg": "logo.jpg",
 }
 
-// RegisterPublicBrandingHandlers wires the unauthenticated GET route that
-// serves the tournament logo bytes. Returns 404 when no logo is configured.
+// RegisterPublicBrandingHandlers wires the unauthenticated GET and HEAD routes
+// that serve the tournament logo bytes. Returns 404 when no logo is configured.
+// HEAD is registered explicitly because Gin does not auto-route HEAD to GET.
+// The BrandingManager component uses HEAD to probe logo existence on mount.
 func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
-	r.GET("/branding/logo", func(c *gin.Context) {
+	brandingLogoHandler := func(c *gin.Context) {
 		// Prevent browsers/proxies from caching 404s — a newly uploaded logo
 		// would otherwise stay "missing" until a hard refresh.
 		c.Header("Cache-Control", "no-cache")
@@ -59,7 +61,13 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 		// admin upload flow is infrequent, so this is acceptable.
 		c.Header("Cache-Control", "no-cache")
 		c.File(path)
-	})
+	}
+	r.GET("/branding/logo", brandingLogoHandler)
+	// HEAD is used by BrandingManager to probe logo existence without
+	// fetching the full image payload. Gin does not auto-route HEAD to GET,
+	// so we register it explicitly with the same handler (c.File/ServeContent
+	// strips the body for HEAD requests automatically).
+	r.HEAD("/branding/logo", brandingLogoHandler)
 }
 
 // RegisterBrandingHandlers wires admin-gated mutation endpoints. The caller

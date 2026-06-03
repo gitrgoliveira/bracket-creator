@@ -58,7 +58,12 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   const handleWindowTitleChange = (value) => {
     setWindowTitle(value);
     if (onThemeChange) onThemeChange({ primaryColor, accentSoftColor, windowTitle: value });
-    document.title = value || "Bracket Creator Mobile";
+    // Route through the shared helper so the default string stays in one place.
+    if (typeof window.applyTheme === "function") {
+      window.applyTheme({ primaryColor, accentSoftColor, windowTitle: value });
+    } else {
+      document.title = value || "Bracket Creator Mobile";
+    }
   };
 
   const handleLogoUpload = async (e) => {

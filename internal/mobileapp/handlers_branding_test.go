@@ -303,3 +303,31 @@ func TestPutTournament_LogoPathPreserved(t *testing.T) {
 	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
+
+// TestHeadBrandingLogo covers the HEAD probe used by BrandingManager on mount
+// to detect whether a logo exists without fetching the full image payload.
+func TestHeadBrandingLogo(t *testing.T) {
+	h, _, cleanup := brandingTestSetup(t)
+	defer cleanup()
+
+	// HEAD before any upload → 404 (logo not configured).
+	req := httptest.NewRequest(http.MethodHead, "/api/branding/logo", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	// Upload a PNG.
+	body, ct := buildBrandingUpload(t, "logo.png", tinyPNG)
+	req = httptest.NewRequest(http.MethodPost, "/api/branding/logo", body)
+	req.Header.Set("Content-Type", ct)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// HEAD after upload → 200 (logo present).
+	req = httptest.NewRequest(http.MethodHead, "/api/branding/logo", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}

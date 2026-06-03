@@ -624,7 +624,10 @@ paths:
       description: |
         Public (no auth). Returns the raw PNG or JPEG bytes for a previously
         uploaded sponsor logo. The filename is server-generated (16 random hex
-        chars + `.png`, `.jpg`, or `.jpeg`); any other shape returns `400`.
+        chars + `.png`, `.jpg`, or `.jpeg`). Requests whose `file` parameter
+        reaches the handler but does not match the expected pattern return `400`;
+        multi-segment paths (e.g. containing `/`) do not match the route at all
+        and receive a router-level `404`.
 
         Response carries `Cache-Control: public, max-age=31536000, immutable`
         because the filename is unique per upload — the bytes at a given URL
@@ -650,9 +653,9 @@ paths:
                 type: string
                 format: binary
         '400':
-          description: Invalid filename (pattern mismatch or traversal attempt).
+          description: Filename reached the handler but does not match the expected pattern (not 16 hex chars + .png/.jpg/.jpeg).
         '404':
-          description: File not found.
+          description: File not found, or path did not match the route.
 
   /api/sponsors:
     post:

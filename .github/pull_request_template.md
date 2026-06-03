@@ -34,6 +34,14 @@ Motivation / root cause. For fixes, state the root cause explicitly.
 REQUIRED for any change that affects the UI (web-mobile/ or web/) — including
 visual, layout, copy, or behavior changes. Attach before/after images.
 Delete this section only if the change has no UI impact whatsoever.
+
+Agents: `gh gist create` rejects binaries. Push the PNG to the `pr-assets`
+branch (never merged to main) and embed the raw URL:
+  gh api --method PUT .../contents/pr-assets/<pr>/shot.png \
+    -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"
+  ![desc](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)
+If no browser/MCP captured a shot, state what wasn't captured + a textual
+geometry/DOM attestation. Never silently skip. Full recipe: `bd memories screenshot`.
 -->
 
 ## Test plan

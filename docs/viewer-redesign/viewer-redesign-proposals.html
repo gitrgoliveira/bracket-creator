@@ -86,6 +86,23 @@ table.std td:nth-child(-n+2){text-align:left}
 .help{border-bottom:1px dotted var(--ink-4);cursor:help}
 .tiebreak{font-size:11px;color:var(--good);font-weight:600}
 .cut{font-size:10.5px;color:var(--good);font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:4px 4px 0}
+/* compact realistic pool tile */
+.ptile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px;box-shadow:var(--shadow-sm)}
+.ptile__h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.ptile__h b{font-size:14px}
+.ptile__h span{font-size:11px;color:var(--ink-3)}
+table.mini{width:100%;border-collapse:collapse;font-size:12px}
+table.mini th{font-size:9px;color:var(--ink-3);text-transform:uppercase;text-align:right;padding:3px 3px;border-bottom:1px solid var(--line)}
+table.mini th:nth-child(-n+2){text-align:left}
+table.mini td{padding:4px 3px;text-align:right;border-bottom:1px solid var(--line-2);font-variant-numeric:tabular-nums}
+table.mini td:nth-child(-n+2){text-align:left}
+table.mini td.nm{font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+table.mini tr.adv{background:#ecfdf5}
+table.mini tr.adv td:first-child::before{content:"▲";color:#16a34a;font-size:8px;margin-right:3px}
+.pm{display:flex;align-items:center;gap:6px;font-size:11px;padding:4px 0;border-bottom:1px solid var(--line-2)}
+.pm .s{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pm .s.r{text-align:right}
+.pm .sc{font-weight:700;color:var(--ink-1)}
 
 /* match row */
 .mrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line-2);font-size:13px}
@@ -304,41 +321,77 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
   <h2><span class="gtag">Group 3</span><br>Use tablet / laptop width — reflow collections to a grid</h2>
   <div class="finding">Pools, competition cards and watched matches stay a single column at every width. On tablet/laptop each pool card is ~half empty. (The bracket already scales — leave it.) Primary targets are tablet + phone; laptop secondary.</div>
 
-  <h3>Pools on a tablet (768px)</h3>
+  <div class="finding" style="border-left-color:var(--good)"><b>Tested on the real app with real tiles</b> (seeded Teams pool — the densest 8-column case). Verdict: <b>2-up is clean, not cluttered</b> — full names, 4 pools per screen. <b>3-up (and wider) starts wrapping</b> the 8-column team table and truncating match names → busy. Good news: the codebase <b>already has</b> a <code>.pools-grid</code> rule and a <code>tr.advancing</code> green/▲ highlight — the pools tab just doesn't use them yet (it renders a single-column flex). So this is mostly "apply the grid that already exists, capped at 2 columns."</div>
+
+  <h3>Real tiles — current 1-up vs proposed 2-up (team pool, the dense case)</h3>
   <div class="cols">
-    <div class="col" style="min-width:340px;flex:0 0 340px">
-      <div class="lbl lbl--cur"><span class="dot dot--cur"></span>Current — 1 column</div>
-      <div class="frame frame--bad">
-        <div class="card"><div style="font-weight:600">Pool A</div><div class="meta">3/3 matches · half the card is empty →</div></div>
-        <div class="card"><div style="font-weight:600">Pool B</div><div class="meta">3/3 matches</div></div>
-        <div class="card"><div style="font-weight:600">Pool C</div><div class="meta">3/3 matches</div></div>
-      </div>
-    </div>
     <div class="col">
-      <div class="lbl lbl--new"><span class="dot dot--new"></span>Proposed — 2-up grid (tablet) / 2–3-up (laptop)</div>
-      <div class="frame frame--good frame--tab">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div class="card" style="margin:0"><div style="font-weight:600">Pool A</div><div class="meta">3/3 matches</div></div>
-          <div class="card" style="margin:0"><div style="font-weight:600">Pool B</div><div class="meta">3/3 matches</div></div>
-          <div class="card" style="margin:0"><div style="font-weight:600">Pool C</div><div class="meta">3/3 matches</div></div>
-          <div class="card" style="margin:0"><div style="font-weight:600">Pool D</div><div class="meta">3/3 matches</div></div>
+      <div class="lbl lbl--cur"><span class="dot dot--cur"></span>Current — 1 column (½ the card empty →)</div>
+      <div class="frame frame--bad">
+        <div class="ptile" style="margin-bottom:10px">
+          <div class="ptile__h"><b>Pool A</b><span>3/3 matches</span></div>
+          <table class="mini">
+            <tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>IV</th><th>IL</th><th>IT</th><th>PW</th><th>PL</th></tr>
+            <tr><td>1</td><td class="nm">Legolas Greenleaf</td><td>1</td><td>0</td><td>1</td><td>5</td><td>3</td><td>1</td><td>11</td><td>9</td></tr>
+            <tr><td>2</td><td class="nm">Philip K Dick</td><td>1</td><td>1</td><td>0</td><td>3</td><td>4</td><td>0</td><td>9</td><td>10</td></tr>
+            <tr><td>3</td><td class="nm">Quirinus Quirrell</td><td>0</td><td>1</td><td>1</td><td>3</td><td>4</td><td>1</td><td>8</td><td>9</td></tr>
+          </table>
+          <div style="margin-top:6px">
+            <div class="pm"><span class="s">Legolas Greenleaf</span><span class="cbadge cb-shiro">S</span><span class="sc">1–1</span><span class="cbadge cb-aka">A</span><span class="s r">Philip K Dick</span></div>
+            <div class="pm"><span class="s">Quirinus Quirrell</span><span class="cbadge cb-shiro">S</span><span class="sc">1–1</span><span class="cbadge cb-aka">A</span><span class="s r">Philip K Dick</span></div>
+          </div>
         </div>
       </div>
-      <p class="note">Half the scrolling on the larger screens. Same component, responsive grid.</p>
+      <p class="note">One pool fills 768px; IV/IL/PW/PL float in empty space; ~1.5 pools per screen.</p>
+    </div>
+    <div class="col">
+      <div class="lbl lbl--new"><span class="dot dot--new"></span>Proposed — 2-up grid + qualifier highlight</div>
+      <div class="frame frame--good frame--tab">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="ptile">
+            <div class="ptile__h"><b>Pool A</b><span>3/3</span></div>
+            <table class="mini">
+              <tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>IV</th><th>IL</th><th>IT</th><th>PW</th><th>PL</th></tr>
+              <tr class="adv"><td>1</td><td class="nm">Legolas Greenleaf</td><td>1</td><td>0</td><td>1</td><td>5</td><td>3</td><td>1</td><td>11</td><td>9</td></tr>
+              <tr class="adv"><td>2</td><td class="nm">Philip K Dick</td><td>1</td><td>1</td><td>0</td><td>3</td><td>4</td><td>0</td><td>9</td><td>10</td></tr>
+              <tr><td>3</td><td class="nm">Quirinus Quirrell</td><td>0</td><td>1</td><td>1</td><td>3</td><td>4</td><td>1</td><td>8</td><td>9</td></tr>
+            </table>
+            <div style="margin-top:6px">
+              <div class="pm"><span class="s">Legolas G…</span><span class="cbadge cb-shiro">S</span><span class="sc">1–1</span><span class="cbadge cb-aka">A</span><span class="s r">Philip K…</span></div>
+              <div class="pm"><span class="s">Quirinus…</span><span class="cbadge cb-shiro">S</span><span class="sc">1–1</span><span class="cbadge cb-aka">A</span><span class="s r">Philip K…</span></div>
+            </div>
+          </div>
+          <div class="ptile">
+            <div class="ptile__h"><b>Pool B</b><span>3/3</span></div>
+            <table class="mini">
+              <tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>IV</th><th>IL</th><th>IT</th><th>PW</th><th>PL</th></tr>
+              <tr class="adv"><td>1</td><td class="nm">Paul Hall</td><td>2</td><td>0</td><td>0</td><td>6</td><td>1</td><td>0</td><td>13</td><td>5</td></tr>
+              <tr class="adv"><td>2</td><td class="nm">Quentin Blake</td><td>1</td><td>1</td><td>0</td><td>4</td><td>4</td><td>0</td><td>9</td><td>9</td></tr>
+              <tr><td>3</td><td class="nm">Luke Rodriguez</td><td>0</td><td>2</td><td>0</td><td>2</td><td>7</td><td>0</td><td>6</td><td>14</td></tr>
+            </table>
+            <div style="margin-top:6px">
+              <div class="pm"><span class="s">Paul Hall</span><span class="cbadge cb-shiro">S</span><span class="sc">1–1</span><span class="cbadge cb-aka">A</span><span class="s r">Quentin…</span></div>
+              <div class="pm"><span class="s">Luke Rod…</span><span class="cbadge cb-shiro">S</span><span class="sc">1–1</span><span class="cbadge cb-aka">A</span><span class="s r">Quentin…</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note">4 pools per screen; qualifiers shaded green with ▲. Names truncate to fit — the cost of the 8-column team table. (Individual pools are W/L/T/PW/PL → 5 columns → far roomier here.)</p>
     </div>
   </div>
 
-  <h3>Decide: how far to take the grid</h3>
+  <h3>Decide: column cap (the clutter control)</h3>
   <div class="opts">
     <label class="opt sel" data-group="g3">
-      <div class="opt__hd"><input type="radio" name="g3" value="A · pools only" checked><span class="opt__t">A — Pools grid only</span><span class="pill">smallest change</span></div>
-      <p class="opt__d">Reflow just the pool cards (biggest, emptiest). Lowest risk.</p>
+      <div class="opt__hd"><input type="radio" name="g3" value="A · cap at 2 columns" checked><span class="opt__t">A — Cap at 2 columns</span><span class="pill">recommended</span></div>
+      <p class="opt__d">2-up at tablet & laptop. Clean even for the dense 8-column team table; full names on laptop. This is what the existing <code>.pools-grid</code> already resolves to — smallest, safest change.</p>
     </label>
     <label class="opt" data-group="g3">
-      <div class="opt__hd"><input type="radio" name="g3" value="B · pools + comps + watched"><span class="opt__t">B — Pools + competition list + watched matches</span><span class="pill">recommended</span></div>
-      <p class="opt__d">All collections reflow at ≥tablet. Most consistent; a bit more layout work.</p>
+      <div class="opt__hd"><input type="radio" name="g3" value="B · up to 3 columns"><span class="opt__t">B — Allow up to 3 columns on wide screens</span></div>
+      <p class="opt__d">More pools per screen, but the team table wraps names at 3-up. Acceptable for individual pools (5 cols); busier for team pools. Could be conditional: 3-up only when <code>teamSize ≤ 1</code>.</p>
     </label>
   </div>
+  <p class="note" style="margin-top:6px"><b>Scope (separate, low-stakes):</b> apply the same grid to just <b>pools</b>, or also the <b>competition list</b> and <b>watched matches</b>. Recommend all three for consistency — tell me in your notes if you'd rather start with pools only.</p>
 
   <h3>Awards / podium</h3>
   <div class="cols">

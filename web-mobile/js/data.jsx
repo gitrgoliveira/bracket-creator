@@ -209,7 +209,6 @@ function poolWinners(pools) {
 function buildEmptyCompetition(args) {
   if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
   const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled } = args;
-  console.log("buildCompetition: args", args);
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount, gender) : [];
   return {
@@ -233,7 +232,6 @@ function buildEmptyCompetition(args) {
 
 function applyFormat(c) {
   if (c.status === "setup") return c;
-  console.log("buildCompetition: c before pools/bracket", c);
   if (c.format === "mixed") {
     c.pools = buildPools(c.players, { poolMode: c.poolSizeMode, poolSize: c.poolSize, winnersPerPool: c.poolWinners, courts: c.courts });
     if (c.status === "pools") {

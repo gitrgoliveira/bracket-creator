@@ -165,7 +165,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const aTBD = isPlaceholder || (match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-"));
   const bTBD = isPlaceholder || (match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-"));
 
-  const _isFollowed = window.isFollowedPlayer || (() => false);
+  const _isFollowed = (typeof window !== "undefined" && window.isFollowedPlayer) || (() => false);
   const playerHighlight = highlightPlayer && (_isFollowed(match.sideA, highlightPlayer) || _isFollowed(match.sideB, highlightPlayer));
 
   return (

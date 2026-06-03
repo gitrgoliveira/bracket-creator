@@ -165,3 +165,88 @@ describe('mymatchQueueLabel', () => {
     expect(mymatchQueueLabel(undefined)).toBeNull();
   });
 });
+
+// mp-wvkh: myUpcoming derivation logic — tested as a pure function that
+// mirrors the inline useMemo in ViewerCompetition. Exercises the three
+// behaviours Copilot flagged: running-match precedence, scheduledAt
+// ordering, and name-fallback when followed player has no UUID.
+function deriveMyUpcoming(followedPlayer, allMatches) {
+  if (!followedPlayer || (!followedPlayer.id && !followedPlayer.name)) return null;
+  const hasBothSides = (m) => m.sideA && m.sideB;
+  const mine = buildPlayerMatchHighlight(followedPlayer.id || "", allMatches, followedPlayer.name)
+    .filter(hasBothSides)
+    .filter((m) => m.status !== "completed");
+  mine.sort((a, b) => {
+    const ao = a.status === "running" ? 0 : 1;
+    const bo = b.status === "running" ? 0 : 1;
+    if (ao !== bo) return ao - bo;
+    return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
+  });
+  return mine[0] || null;
+}
+
+describe('deriveMyUpcoming (mp-wvkh)', () => {
+  const mkMatch = (id, sideA, sideB, status, scheduledAt) => ({
+    id, sideA, sideB, status, scheduledAt,
+  });
+  const player = { id: 'p1', name: 'Alice' };
+
+  it('returns null when followedPlayer is null or has no id/name', () => {
+    expect(deriveMyUpcoming(null, [])).toBeNull();
+    expect(deriveMyUpcoming({}, [])).toBeNull();
+    expect(deriveMyUpcoming({ id: '', name: '' }, [])).toBeNull();
+  });
+
+  it('returns the running match over a scheduled match', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'scheduled', '09:00'),
+      mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'running', '09:30'),
+    ];
+    const result = deriveMyUpcoming(player, matches);
+    expect(result.id).toBe('m2');
+  });
+
+  it('sorts scheduled matches by scheduledAt ascending', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'scheduled', '10:00'),
+      mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '09:00'),
+    ];
+    const result = deriveMyUpcoming(player, matches);
+    expect(result.id).toBe('m2');
+  });
+
+  it('excludes completed matches', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'completed', '08:00'),
+      mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '10:00'),
+    ];
+    const result = deriveMyUpcoming(player, matches);
+    expect(result.id).toBe('m2');
+  });
+
+  it('falls back to name match when followed player has no UUID', () => {
+    const nameOnly = { id: '', name: 'Alice' };
+    const matches = [
+      mkMatch('m1', { id: 'x1', name: 'Alice' }, { id: 'x2', name: 'Bob' }, 'scheduled', '09:00'),
+    ];
+    const result = deriveMyUpcoming(nameOnly, matches);
+    expect(result).not.toBeNull();
+    expect(result.id).toBe('m1');
+  });
+
+  it('returns null when no matches involve the followed player', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p5', name: 'Eve' }, { id: 'p6', name: 'Frank' }, 'scheduled', '09:00'),
+    ];
+    expect(deriveMyUpcoming(player, matches)).toBeNull();
+  });
+
+  it('skips matches missing a side (hasBothSides guard)', () => {
+    const matches = [
+      mkMatch('m1', { id: 'p1', name: 'Alice' }, null, 'scheduled', '09:00'),
+      mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '10:00'),
+    ];
+    const result = deriveMyUpcoming(player, matches);
+    expect(result.id).toBe('m2');
+  });
+});

@@ -271,3 +271,60 @@ describe('AdminScoreEditor status sort', () => {
     expect(sortScoreEdit(input).map(m => m.id)).toEqual(['real', 'legacy']);
   });
 });
+
+// --- Tournament Header Empty Venue Logic ---
+function formatAdminHeaderSub({ date, venue, courtsCount, compsCount, participantsCount }) {
+  return [
+    date,
+    venue,
+    pluralize(courtsCount, "shiaijo (court)", "shiaijo (courts)"),
+    pluralize(compsCount, "competition"),
+    pluralize(participantsCount, "participant")
+  ].filter(Boolean).join(" · ");
+}
+
+function formatViewerHeaderEyebrow({ date, venue }) {
+  return [date, venue].filter(Boolean).join(" · ");
+}
+
+describe('Tournament Header Empty Venue Logic', () => {
+  it('should format admin subheader correctly when venue is present', () => {
+    const formatted = formatAdminHeaderSub({
+      date: '3 Jun 2026',
+      venue: 'Crystal Palace',
+      courtsCount: 2,
+      compsCount: 1,
+      participantsCount: 5
+    });
+    expect(formatted).toBe('3 Jun 2026 · Crystal Palace · 2 shiaijo (courts) · 1 competition · 5 participants');
+  });
+
+  it('should format admin subheader with no double dot separator when venue is empty', () => {
+    const formatted = formatAdminHeaderSub({
+      date: '3 Jun 2026',
+      venue: '',
+      courtsCount: 2,
+      compsCount: 1,
+      participantsCount: 5
+    });
+    expect(formatted).toBe('3 Jun 2026 · 2 shiaijo (courts) · 1 competition · 5 participants');
+    expect(formatted).not.toContain('·  ·');
+  });
+
+  it('should format viewer eyebrow correctly when venue is present', () => {
+    const formatted = formatViewerHeaderEyebrow({
+      date: '3 Jun 2026',
+      venue: 'Crystal Palace'
+    });
+    expect(formatted).toBe('3 Jun 2026 · Crystal Palace');
+  });
+
+  it('should format viewer eyebrow with no trailing separator when venue is empty', () => {
+    const formatted = formatViewerHeaderEyebrow({
+      date: '3 Jun 2026',
+      venue: ''
+    });
+    expect(formatted).toBe('3 Jun 2026');
+    expect(formatted.endsWith(' · ')).toBe(false);
+  });
+});

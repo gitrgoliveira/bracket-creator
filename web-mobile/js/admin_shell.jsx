@@ -181,7 +181,13 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
               <StatusBadge status={t.status} />
             </div>
             <div className="page-head__sub">
-              {formatDate(t.date)} · {t.venue} · {pluralize(t.courts.length, "shiaijo (court)", "shiaijo (courts)")} · {pluralize(comps.length, "competition")} · {pluralize(totalParticipants, "participant")}
+              {[
+                formatDate(t.date),
+                t.venue,
+                pluralize(t.courts.length, "shiaijo (court)", "shiaijo (courts)"),
+                pluralize(comps.length, "competition"),
+                pluralize(totalParticipants, "participant")
+              ].filter(Boolean).join(" · ")}
             </div>
           </div>
           <div className="page-head__actions">

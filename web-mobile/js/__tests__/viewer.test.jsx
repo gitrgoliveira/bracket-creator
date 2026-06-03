@@ -841,19 +841,19 @@ describe('PoolMatrix (mp-f4xo)', () => {
     expect(rowNums).toEqual(['A1', 'A2', 'A3']);
   });
 
-  it('falls back to positional index when player.number is not set', () => {
+  it('omits numbers entirely when player.number is not set', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
     const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
-    expect(colHeaders.map(h => textContent(h))).toEqual(['1', '2', '3']);
+    expect(colHeaders.map(h => textContent(h))).toEqual(['', '', '']);
 
     const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
       const spans = [].concat(td.children || td.props?.children || []);
       const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
-      return textContent(numSpan);
+      return numSpan;
     });
-    expect(rowNums).toEqual(['1', '2', '3']);
+    expect(rowNums).toEqual([undefined, undefined, undefined]);
   });
 });
 

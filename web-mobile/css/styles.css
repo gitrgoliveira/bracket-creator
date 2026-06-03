@@ -5930,10 +5930,13 @@ button.my-match__opp {
 /* TV variant — fullscreen per-court board; smaller strip so it stays
    subordinate to match info. */
 .sponsor-strip--tv {
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
+  /* Normal flow — not absolute. position: absolute would take the strip
+     out of flow and overlay the upcoming-matches list below it (the tvd
+     container only has 4vh bottom padding, but the strip is ~6vh tall).
+     Keeping it in flow lets the flex column stack sponsor strip under the
+     queue cards without overlap. */
   padding: 1vh 2vw;
-  margin-top: 0;
+  margin-top: auto; /* push to bottom of the flex column when there's space */
   background: rgba(0, 0, 0, 0.35);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   gap: 2vw;

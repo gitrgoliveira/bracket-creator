@@ -91,17 +91,23 @@ describe('SponsorStrip', () => {
     expect(findAll(tree, (n) => n.type === 'a')).toHaveLength(1);
   });
 
-  it('every <img> has an onError handler to hide broken logos', () => {
-    // When a logo file is gone (e.g. YAML stale after manual delete),
-    // the handler must suppress the broken image rather than leaving a
-    // broken-image icon in the strip. Verify the onError prop is present
-    // on every rendered img regardless of variant.
+  it('every <img> onError hides the wrapper element, not just the img', () => {
+    // A broken logo that only hides the <img> still leaves its <a> or <span>
+    // wrapper as an empty flex item, which shows as a visible blank gap.
+    // The onError handler must climb to parentElement and hide the wrapper.
+    // We verify this by simulating the DOM event: stub parentElement with a
+    // spy, call the handler, and confirm style.display was set on the parent.
     for (const variant of ['viewer', 'lobby', 'tv']) {
       const tree = SponsorStrip({ sponsors: sponsorsWithLink, variant });
       const imgs = findAll(tree, (n) => n.type === 'img');
       expect(imgs.length).toBeGreaterThan(0);
       imgs.forEach((img) => {
         expect(typeof img.props.onError).toBe('function');
+        // Simulate the browser onError event with a fake currentTarget.
+        const parentStyle = {};
+        const fakeEvent = { currentTarget: { parentElement: { style: parentStyle } } };
+        img.props.onError(fakeEvent);
+        expect(parentStyle.display).toBe('none');
       });
     }
   });

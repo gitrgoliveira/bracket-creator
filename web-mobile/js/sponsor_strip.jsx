@@ -24,21 +24,27 @@ function SponsorStrip({ sponsors, variant }) {
       aria-label="Sponsors"
     >
       {sponsors.map((s) => {
-        // Defensive: hide a broken logo rather than letting one missing
-        // file blow out the row layout. The handler returns 404 if the
-        // file is gone; the rest of the strip stays intact.
+        // Key on s.file (server-generated, unique per upload) so React
+        // doesn't reuse the wrong DOM node when a sponsor is deleted —
+        // index keys would let sponsor N+1's image flash into sponsor
+        // N's slot before the next render flush.
+        //
+        // onError hides the *wrapper* element (a or span), not just the
+        // img. Hiding only the img leaves the wrapper as an empty flex
+        // item that still occupies a gap in the row layout. Climbing to
+        // the parentElement removes both the gap and the broken image.
+        const handleError = (e) => {
+          const wrapper = e.currentTarget.parentElement;
+          if (wrapper) wrapper.style.display = "none";
+        };
         const img = (
           <img
             src={"/api/sponsors/" + s.file}
             alt={s.name || "Sponsor"}
             className="sponsor-strip__logo"
-            onError={(e) => { e.currentTarget.style.display = "none"; }}
+            onError={handleError}
           />
         );
-        // Key on s.file (server-generated, unique per upload) so React
-        // doesn't reuse the wrong DOM node when a sponsor is deleted —
-        // index keys would let sponsor N+1's image flash into sponsor
-        // N's slot before the next render flush.
         if (interactive && s.link) {
           return (
             <a

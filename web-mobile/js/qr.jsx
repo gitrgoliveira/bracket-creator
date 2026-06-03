@@ -430,17 +430,19 @@ function buildQR(text) {
 
   placeData(mat, size, allCW);
 
-  let bestMask = 0, bestScore = Infinity, bestMat = null;
+  let bestScore = Infinity, bestMat = null;
   for (let m = 0; m < 8; m++) {
     const candidate = applyMask(mat, size, m, funcMask);
+    // Place format info and re-assert the always-dark module BEFORE scoring so
+    // penaltyScore sees a fully binary matrix (ISO 18004:2015 §7.8.3). Format
+    // info cells are reserved as value 2 in buildMatrix; leaving them at 2 would
+    // give Rule 4 an inaccurate dark-module proportion and break Rules 1–3 runs.
+    placeFormatInfo(candidate, size, m);
+    candidate[(4 * version + 9) * size + 8] = 1;
     const s = penaltyScore(candidate, size);
-    if (s < bestScore) { bestScore = s; bestMask = m; bestMat = candidate; }
+    if (s < bestScore) { bestScore = s; bestMat = candidate; }
   }
-
-  placeFormatInfo(bestMat, size, bestMask);
-  // Re-set the always-dark module — placeFormatInfo's bottom-left second copy
-  // writes bit 7 to position (size-8, 8) = (4v+9, 8), which overlaps it.
-  bestMat[(4 * version + 9) * size + 8] = 1;
+  // Format info and dark module are already written on bestMat from the loop above.
   return { mat: bestMat, size };
 }
 

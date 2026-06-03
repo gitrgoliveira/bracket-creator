@@ -3,6 +3,8 @@
 // lives here so it loads before any section-specific file. See
 // web-mobile/admin_split_plan.md.
 
+import { renderQR } from './qr.js';
+
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Producers (loaded earlier).
@@ -109,7 +111,7 @@ function initialSectionFor(status) {
   return "overview";
 }
 
-function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate }) {
+function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast }) {
   const t = tournament;
   const comps = t.competitions || [];
 
@@ -217,13 +219,13 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
             <span className="dot dot--live"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>
-            {running.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, "scores")} onStart={() => onStartCompetition(c.id)} />)}
+            {running.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, "scores")} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
           </div>
         </>)}
 
         <div className="section-title">All competitions</div>
         <div className="tlist">
-          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} />)}
+          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
           <button className="tcard tcard--add" onClick={onCreateCompetition}>
             <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>
@@ -240,56 +242,136 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
   );
 }
 
-function CompCard({ c, onOpen, onStart }) {
+async function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  // Fallback for non-secure context (LAN without TLS)
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    const ok = document.execCommand('copy');
+    if (!ok) throw new Error('execCommand copy failed');
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+function ShareRegistrationModal({ url, onClose, showToast }) {
+  const canvasRef = useRefA(null);
+
+  useEffectA(() => {
+    if (canvasRef.current) {
+      try {
+        renderQR(canvasRef.current, url, { moduleSize: 6, quietZone: 4 });
+      } catch (e) {
+        console.error("QR render failed", e);
+      }
+    }
+  }, [url]);
+
+  window.useEscapeToClose(onClose);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Share registration link">
+        <div className="modal__head">
+          <div className="modal__title">Share registration link</div>
+          <button className="modal__close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="modal__body" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+          <canvas ref={canvasRef} style={{ display: "block", imageRendering: "pixelated" }} />
+          <div style={{ width: "100%", background: "var(--surface-2, #f5f5f5)", borderRadius: 6, padding: "8px 12px", fontFamily: "monospace", fontSize: 13, wordBreak: "break-all", userSelect: "all" }}>
+            {url}
+          </div>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>
+            Participants can scan this QR code or open the link to register.
+          </p>
+        </div>
+        <div className="modal__foot">
+          <button className="btn btn--primary" onClick={() => {
+            copyToClipboard(url).then(() => showToast && showToast("Registration link copied!")).catch(() => showToast && showToast("Copy failed — select the link above manually", "error"));
+          }}>Copy link</button>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompCard({ c, onOpen, onStart, tournament, showToast }) {
   const { live: liveCount } = compMatchStats(c);
   const playerCount = (c.players || []).length;
   const courts = c.courts || [];
+  const [shareOpen, setShareOpen] = useStateA(false);
+
+  const canShare = tournament && tournament.mode === "self-run"
+    && c.kind !== "team"
+    && (!c.status || c.status === "setup");
 
   return (
-    <div
-      className="tcard"
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      // Only fire when focus is on the card itself, not on a nested
-      // <button> inside .tcard__actions — otherwise Enter on
-      // "Start Competition" would also trigger onOpen.
-      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(); } }}
-    >
-      <div className="tcard__head">
-        <div>
-          <div className="tcard__eyebrow">{window.competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
-          <div className="tcard__name">{c.name}</div>
-          <div className="tcard__meta">
-            {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
-            {c.date && c.startTime && " · "}
-            {c.startTime && `Starts ${c.startTime}`}
-            {/* Only emit the separator + court list when courts exist, and
-                only lead with " · " when something precedes it — otherwise
-                an empty/null-courts comp renders a dangling " · ". */}
-            {courts.length > 0 && `${(c.date || c.startTime) ? " · " : ""}${courts.join(", ")}`}
+    <>
+      <div
+        className="tcard"
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        // Only fire when focus is on the card itself, not on a nested
+        // <button> inside .tcard__actions — otherwise Enter on
+        // "Start Competition" would also trigger onOpen.
+        onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(); } }}
+      >
+        <div className="tcard__head">
+          <div>
+            <div className="tcard__eyebrow">{window.competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
+            <div className="tcard__name">{c.name}</div>
+            <div className="tcard__meta">
+              {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
+              {c.date && c.startTime && " · "}
+              {c.startTime && `Starts ${c.startTime}`}
+              {/* Only emit the separator + court list when courts exist, and
+                  only lead with " · " when something precedes it — otherwise
+                  an empty/null-courts comp renders a dangling " · ". */}
+              {courts.length > 0 && `${(c.date || c.startTime) ? " · " : ""}${courts.join(", ")}`}
+            </div>
           </div>
+          <StatusBadge status={c.status} />
         </div>
-        <StatusBadge status={c.status} />
+        <div className="tcard__stats">
+          <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
+          <div className="tcard__stat"><div className="v">{courts.length}</div><div className="l">{pluralize(courts.length, "Shiaijo", "Shiaijo")}</div></div>
+          <div className="tcard__stat"><div className="v">{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
+          {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Live</div></div>}
+        </div>
+        <div className="tcard__actions">
+          {c.status === "setup" && playerCount >= 2 && (
+            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
+          )}
+          {(c.status === "pools" || c.status === "playoffs") && (
+            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Live Scoring →</button>
+          )}
+          {c.status === "completed" && (
+            <button className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View Results</button>
+          )}
+          {canShare && (
+            <button className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}>
+              Share registration link
+            </button>
+          )}
+        </div>
       </div>
-      <div className="tcard__stats">
-        <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
-        <div className="tcard__stat"><div className="v">{courts.length}</div><div className="l">{pluralize(courts.length, "Shiaijo", "Shiaijo")}</div></div>
-        <div className="tcard__stat"><div className="v">{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
-        {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Live</div></div>}
-      </div>
-      <div className="tcard__actions">
-        {c.status === "setup" && playerCount >= 2 && (
-          <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
-        )}
-        {(c.status === "pools" || c.status === "playoffs") && (
-          <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Live Scoring →</button>
-        )}
-        {c.status === "completed" && (
-          <button className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View Results</button>
-        )}
-      </div>
-    </div>
+      {shareOpen && (
+        <ShareRegistrationModal
+          url={`${window.location.origin}/register/${c.id}`}
+          onClose={() => setShareOpen(false)}
+          showToast={showToast}
+        />
+      )}
+    </>
   );
 }
 

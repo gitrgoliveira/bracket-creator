@@ -1,5 +1,9 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // JSX transformation: @vitejs/plugin-react handles `.jsx` files with the
 // classic React.createElement runtime so the global `React` stub in
@@ -12,6 +16,15 @@ export default defineConfig({
     include: /\.(js|jsx)$/,
     jsxRuntime: 'classic',
   })],
+  resolve: {
+    alias: {
+      // qr.jsx is imported as ./qr.js in admin_shell.jsx because esbuild's
+      // non-bundling transform preserves import specifiers verbatim and the
+      // compiled output in dist/ is qr.js. Vitest needs to resolve the .js
+      // specifier back to the .jsx source.
+      './qr.js': path.resolve(__dirname, 'js/qr.jsx'),
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

@@ -2101,13 +2101,12 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
 });
 PoolMatchRow.displayName = "PoolMatchRow";
 
-// Round-robin matrix for a single pool. Rows = players (AKA), cols = players (SHIRO).
-// Diagonal and upper triangle are empty; lower triangle shows result from match AKA vs SHIRO.
-function PoolMatrix({ pool, matches, tweaks }) {
+// Round-robin matrix for a single pool. Each off-diagonal cell shows the row
+// player's result (W/L/X) against the column player; diagonal cells are self.
+function PoolMatrix({ pool, matches, tweaks, onMatchClick }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
 
-  // Build a lookup: (aName, bName) → match
   const matchMap = {};
   matches.forEach(m => {
     const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
@@ -2123,6 +2122,14 @@ function PoolMatrix({ pool, matches, tweaks }) {
     const parts = n.split(" ");
     return parts.length > 1 ? parts[0][0] + ". " + parts.slice(1).join(" ") : n;
   };
+
+  const enrichMatch = (m) => ({ ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: "", teamSize: 0 });
+
+  const handleCellClick = (m) => { if (onMatchClick) onMatchClick(enrichMatch(m)); };
+
+  const handleCellKeyDown = (e, m) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleCellClick(m); } };
+
+  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${rowPlayer.name} vs ${colPlayer.name} — ${result}`;
 
   return (
     <div className="pool-matrix-wrap">
@@ -2143,7 +2150,7 @@ function PoolMatrix({ pool, matches, tweaks }) {
                 <span className="pool-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {
-                if (ri === ci) return <td key={colPlayer.name} className="pool-matrix__cell pool-matrix__cell--self">—</td>;
+                if (ri === ci) return <td key={colPlayer.name} className="pool-matrix__cell pool-matrix__cell--self">&mdash;</td>;
                 const m = matchMap[`${rowPlayer.name}||${colPlayer.name}`];
                 if (!m) return <td key={colPlayer.name} className="pool-matrix__cell pool-matrix__cell--empty"></td>;
 
@@ -2151,8 +2158,15 @@ function PoolMatrix({ pool, matches, tweaks }) {
                 const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
                 const rowIsAka = aName === rowPlayer.name;
 
+                const interactiveProps = onMatchClick ? {
+                  role: "button",
+                  tabIndex: 0,
+                  onClick: () => handleCellClick(m),
+                  onKeyDown: (e) => handleCellKeyDown(e, m),
+                } : {};
+
                 if (m.status !== "completed") {
-                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}`}>
+                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2164,16 +2178,20 @@ function PoolMatrix({ pool, matches, tweaks }) {
                 const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
 
                 let cellContent;
+                let resultLabel;
                 if (isDraw) {
                   cellContent = <span className="pool-matrix__draw">X</span>;
+                  resultLabel = "Draw";
                 } else if (rowWon) {
                   cellContent = <span className="pool-matrix__win">{rowIppons.join("") || "W"}</span>;
+                  resultLabel = "Win";
                 } else {
                   cellContent = <span className="pool-matrix__loss">{rowIppons.join("") || "L"}</span>;
+                  resultLabel = "Loss";
                 }
 
                 return (
-                  <td key={colPlayer.name} className={`pool-matrix__cell ${rowWon ? "pool-matrix__cell--win" : isDraw ? "pool-matrix__cell--draw" : "pool-matrix__cell--loss"}`}>
+                  <td key={colPlayer.name} className={`pool-matrix__cell ${rowWon ? "pool-matrix__cell--win" : isDraw ? "pool-matrix__cell--draw" : "pool-matrix__cell--loss"}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );
@@ -2186,7 +2204,7 @@ function PoolMatrix({ pool, matches, tweaks }) {
         <span className="pool-matrix__legend-item pool-matrix__legend-item--win">W = win</span>
         <span className="pool-matrix__legend-item pool-matrix__legend-item--loss">L = loss</span>
         <span className="pool-matrix__legend-item pool-matrix__legend-item--draw">X = draw</span>
-        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>Row plays AKA vs col SHIRO</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row player's result vs column player"}</span>
       </div>
     </div>
   );
@@ -2280,7 +2298,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             {/* Round-robin matrix — always visible */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 12 }}>
-                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} />
+                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} />
               </div>
             )}
 
@@ -2438,7 +2456,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

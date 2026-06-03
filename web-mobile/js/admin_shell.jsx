@@ -14,6 +14,7 @@ const pluralize = window.pluralize;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const formatLabelShort = window.formatLabelShort;
+const formatAdminHeaderSub = window.formatAdminHeaderSub;
 
 // Maximum live-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
@@ -183,7 +184,13 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
               <StatusBadge status={t.status} />
             </div>
             <div className="page-head__sub">
-              {formatDate(t.date)} · {t.venue} · {pluralize(t.courts.length, "shiaijo (court)", "shiaijo (courts)")} · {pluralize(comps.length, "competition")} · {pluralize(totalParticipants, "participant")}
+              {formatAdminHeaderSub(
+                formatDate(t.date),
+                t.venue,
+                t.courts.length,
+                comps.length,
+                totalParticipants
+              )}
             </div>
           </div>
           <div className="page-head__actions">

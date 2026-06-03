@@ -32,13 +32,19 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   // the parent PUT payload clean (theme block omitted unless configured).
   useEffectBr(() => {
     const rawTheme = tournament && tournament.theme;
+    // Treat a theme object that carries no meaningful fields as "absent":
+    // when only a logo is configured, the server returns theme:{} because
+    // LogoPath has json:"-". Propagating defaults in that case would persist
+    // unwanted color values on the next Save.
+    const hasThemeConfig = rawTheme &&
+      (rawTheme.primaryColor || rawTheme.accentSoftColor || rawTheme.windowTitle);
     const pc = (rawTheme && rawTheme.primaryColor) || "#1d3557";
     const asc = (rawTheme && rawTheme.accentSoftColor) || "#e7eaf3";
     const wt = (rawTheme && rawTheme.windowTitle) || "";
     setPrimaryColor(pc);
     setAccentSoftColor(asc);
     setWindowTitle(wt);
-    if (onThemeChange) onThemeChange(rawTheme ? { primaryColor: pc, accentSoftColor: asc, windowTitle: wt } : null);
+    if (onThemeChange) onThemeChange(hasThemeConfig ? { primaryColor: pc, accentSoftColor: asc, windowTitle: wt } : null);
   }, [tournament]);
 
   const handleColorChange = (field, value) => {

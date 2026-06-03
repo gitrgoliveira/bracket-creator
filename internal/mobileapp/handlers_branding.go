@@ -33,7 +33,11 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 		// would otherwise stay "missing" until a hard refresh.
 		c.Header("Cache-Control", "no-cache")
 		t, err := store.LoadTournament()
-		if err != nil || t == nil || t.Theme == nil || t.Theme.LogoPath == "" {
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if t == nil || t.Theme == nil || t.Theme.LogoPath == "" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no logo configured"})
 			return
 		}

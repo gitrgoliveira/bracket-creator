@@ -788,7 +788,7 @@ const API = {
             throw new Error(err.error || `Failed to delete sponsor (Status ${res.status})`);
         }
     },
-    // mp-scf: tournament branding — logo upload/delete and theme color update.
+    // mp-scf: tournament branding — logo upload/delete.
     async uploadBrandingLogo({ file, password }) {
         const fd = new FormData();
         fd.append('file', file);

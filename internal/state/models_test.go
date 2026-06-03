@@ -162,8 +162,8 @@ func TestValidateTheme(t *testing.T) {
 		{"empty primary ok", &Theme{AccentSoftColor: "#e7eaf3"}, false},
 		{"empty accent ok", &Theme{PrimaryColor: "#1d3557"}, false},
 		{"window title ok", &Theme{WindowTitle: "My Tournament 2026"}, false},
-		{"window title at max length ok", &Theme{WindowTitle: string(make([]byte, 100))}, false},
-		{"window title too long", &Theme{WindowTitle: string(make([]byte, 101))}, true},
+		{"window title at max length ok", &Theme{WindowTitle: strings.Repeat("a", 100)}, false},
+		{"window title too long", &Theme{WindowTitle: strings.Repeat("a", 101)}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

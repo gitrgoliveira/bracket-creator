@@ -246,14 +246,16 @@ async function copyToClipboard(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     return navigator.clipboard.writeText(text);
   }
+  // Fallback for non-secure context (LAN without TLS)
   const ta = document.createElement('textarea');
   ta.value = text;
   ta.style.position = 'fixed';
   ta.style.opacity = '0';
   document.body.appendChild(ta);
   ta.select();
-  document.execCommand('copy');
+  const ok = document.execCommand('copy');
   document.body.removeChild(ta);
+  if (!ok) throw new Error('execCommand copy failed');
 }
 
 function ShareRegistrationModal({ url, onClose, showToast }) {
@@ -269,11 +271,7 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
     }
   }, [url]);
 
-  useEffectA(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  window.useEscapeToClose(onClose);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

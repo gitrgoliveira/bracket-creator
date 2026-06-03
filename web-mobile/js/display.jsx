@@ -486,6 +486,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     })}
                 </div>
             )}
+            {/* mp-c38: sponsor strip — non-interactive on TV display. */}
+            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
         </div>
     );
 }
@@ -907,6 +909,10 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                             : `Shiaijo ${courts.join(' · ')}`
                 }
             </div>
+
+            {/* mp-c38: sponsor strip — non-interactive on lobby (no input
+                hardware to click; touchscreen lobbies should not focus-trap). */}
+            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="lobby" />}
 
             {/* Keyframe for the cycle progress bar animation. Injected via a
                 <style> tag because inline styles cannot express @keyframes.

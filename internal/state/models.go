@@ -1,7 +1,9 @@
 package state
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -84,6 +86,12 @@ type Tournament struct {
 	AwardsNote   string              `yaml:"awards_note,omitempty" json:"awardsNote,omitempty"`
 	InfoNotes    string              `yaml:"info_notes,omitempty" json:"infoNotes,omitempty"`
 	Contacts     []TournamentContact `yaml:"contacts,omitempty" json:"contacts,omitempty"`
+
+	// Sponsors is the ordered list of sponsor logos to display on the
+	// public viewer home and the /display TV/lobby surfaces (mp-c38).
+	// Stored as omitempty so legacy tournament.md files without sponsors
+	// round-trip cleanly (no `sponsors: []` key emitted).
+	Sponsors []Sponsor `yaml:"sponsors,omitempty" json:"sponsors,omitempty"`
 }
 
 // TournamentContact is a single contact entry for attendees (mp-ef3).
@@ -92,6 +100,58 @@ type Tournament struct {
 type TournamentContact struct {
 	Label string `yaml:"label" json:"label"`
 	Value string `yaml:"value" json:"value"`
+}
+
+// Sponsor is a single sponsor logo entry. File is the server-generated
+// random filename under tournament-data/sponsors/; Name is the alt text;
+// Link is optional and, when set, makes the logo clickable on the viewer
+// surface only (display surfaces never render anchors). See mp-c38.
+type Sponsor struct {
+	Name string `yaml:"name" json:"name"`
+	File string `yaml:"file" json:"file"`
+	Link string `yaml:"link,omitempty" json:"link,omitempty"`
+}
+
+// MaxSponsors is the per-tournament sponsor count cap (mp-c38). Realistic
+// count is 1–4; 6 leaves headroom without enabling abuse.
+const MaxSponsors = 6
+
+// MaxSponsorNameLen and MaxSponsorLinkLen bound the metadata fields.
+const (
+	MaxSponsorNameLen = 80
+	MaxSponsorLinkLen = 500
+)
+
+// Sentinel errors returned by ValidateSponsor so handlers can map them
+// to specific HTTP status codes without string-matching.
+var (
+	ErrSponsorNameRequired = errors.New("name is required (1–80 chars)")
+	ErrSponsorNameTooLong  = errors.New("name must be ≤80 chars")
+	ErrSponsorLinkTooLong  = errors.New("link must be ≤500 chars")
+	ErrSponsorLinkInvalid  = errors.New("link must be a valid http(s) URL")
+)
+
+// ValidateSponsor checks name length and link format. Centralises the
+// rules so handlers, tests, and future import paths agree. Name/link
+// must already be trimmed by the caller.
+func ValidateSponsor(s Sponsor) error {
+	if s.Name == "" {
+		return ErrSponsorNameRequired
+	}
+	if len([]rune(s.Name)) > MaxSponsorNameLen {
+		return ErrSponsorNameTooLong
+	}
+	if s.Link == "" {
+		return nil
+	}
+	if len(s.Link) > MaxSponsorLinkLen {
+		return ErrSponsorLinkTooLong
+	}
+	u, err := url.Parse(s.Link)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return ErrSponsorLinkInvalid
+	}
+	return nil
 }
 
 // Tournament mode constants (mp-7h7).

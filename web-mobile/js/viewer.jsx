@@ -1573,7 +1573,9 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
       return false;
     };
     const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && matchInvolvesWatched(m));
-    const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && matchInvolvesWatched(m)).slice(0, hasActiveFilter ? 20 : 3);
+    const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && matchInvolvesWatched(m))
+      .sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))
+      .slice(0, hasActiveFilter ? 20 : 3);
     const recent = allMatches.filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m)).slice(hasActiveFilter ? -20 : -5).reverse();
     return { liveMatches: live, upcomingMatches: upcoming, recentMatches: recent };
   }, [allMatches, watchedIds, hasActiveFilter, followedName]);
@@ -1626,9 +1628,8 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
-      if (liveMatches.length > 0) return liveMatches[0];
-      const sched = [...upcomingMatches].sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"));
-      return sched[0] || null;
+    if (liveMatches.length > 0) return liveMatches[0];
+    return upcomingMatches[0] || null;
   }, [liveMatches, upcomingMatches]);
 
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);

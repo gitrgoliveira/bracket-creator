@@ -1581,12 +1581,13 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   const filterLabel = useMemo(() => {
     if (!hasActiveFilter) return null;
     const name = (followedPlayer && followedPlayer.name && followedPlayer.name.trim()) || null;
-    const wl = (watchlist || []).length;
-    if (name && wl === 0) return name;
+    const followedId = followedPlayer && followedPlayer.id;
+    const wl = followedId ? watchedIds.size - 1 : watchedIds.size;
+    if (name && wl <= 0) return name;
     if (!name && wl > 0) return `${wl} watched`;
     if (name && wl > 0) return `${name} + ${wl} watched`;
     return "filtered";
-  }, [followedPlayer, watchlist, hasActiveFilter]);
+  }, [followedPlayer, watchedIds, hasActiveFilter]);
 
   const derivedBracket = useMemo(() => {
     if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;

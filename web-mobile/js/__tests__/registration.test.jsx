@@ -200,7 +200,7 @@ describe('RegistrationForm', () => {
           return Promise.resolve({
             status: 200,
             ok: true,
-            json: () => Promise.resolve({ id: 'c1', name: 'Open', status: 'setup', withZekkenName: false }),
+            json: () => Promise.resolve({ id: 'c1', name: 'Open', status: 'setup', withZekkenName: true }),
           });
         }
         return Promise.resolve({
@@ -220,6 +220,7 @@ describe('RegistrationForm', () => {
       findInputByPlaceholder('e.g. Alice Tanaka').props.onChange({ target: { value: 'Alice' } });
       findInputByPlaceholder('e.g. Gyokusen').props.onChange({ target: { value: 'Dojo' } });
       findInputByPlaceholder('e.g. 3 Dan').props.onChange({ target: { value: '3 Dan' } });
+      findInputByPlaceholder('e.g. TANAKA').props.onChange({ target: { value: 'ALICE' } });
 
       const form = findInTree(runtime.currentTree(), n => n.type === 'form');
       await form.props.onSubmit({ preventDefault: vi.fn() });
@@ -247,6 +248,8 @@ describe('RegistrationForm', () => {
       expect(dojoInput.props.value).toBe('');
       const danGradeInput = findInputByPlaceholder('e.g. 3 Dan');
       expect(danGradeInput.props.value).toBe('');
+      const displayNameInput = findInputByPlaceholder('e.g. TANAKA');
+      expect(displayNameInput.props.value).toBe('');
 
       // Competition metadata preserved — comp name still visible, no re-fetch
       const text = collectText(runtime.currentTree());

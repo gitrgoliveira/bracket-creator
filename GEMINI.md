@@ -125,6 +125,7 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 ## PR Workflow
 
 - **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section — `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
+- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binary files). Push the PNG to the `pr-assets` branch (which never merges to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. If no browser captured a shot, state what wasn't captured plus a textual geometry/DOM attestation — never silently skip the section.
 - **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional — execute them, then check them.
 - **Keep the issue (bead) `in_progress` until the PR actually merges.** A green review is not a merge. Only close the issue after the merge lands, with a reason referencing the merge commit/PR.
 - **After a merge, run full cleanup**: close the issue → fast-forward `main` → remove the worktree → delete the local and remote branch → prune.

@@ -34,9 +34,10 @@ h3{font-size:14px;margin:18px 0 8px;color:var(--ink-2);text-transform:uppercase;
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
 .dot--cur{background:var(--ink-4)} .dot--new{background:var(--good)}
 
-/* phone / tablet frame */
-.frame{background:var(--bg);border:1px solid var(--line);border-radius:18px;padding:12px;box-shadow:var(--shadow);width:375px;max-width:100%}
-.frame--tab{width:100%}
+/* phone / tablet frame — fill the column up to a consistent phone width so
+   Current and Proposed line up edge-to-edge */
+.frame{background:var(--bg);border:1px solid var(--line);border-radius:18px;padding:12px;box-shadow:var(--shadow);width:100%;max-width:380px}
+.frame--tab{max-width:none}
 .frame--bad{outline:2px solid #f0b4b4}
 .frame--good{outline:2px solid #b6e0c7}
 
@@ -107,7 +108,9 @@ table.std td:nth-child(-n+2){text-align:left}
 
 /* awards */
 .podium{display:flex;gap:12px;align-items:flex-end;justify-content:center;padding:14px 0}
+.podium--row{align-items:stretch;padding:10px 0}
 .place{border-radius:12px;padding:14px 12px;text-align:center;width:120px}
+.place--eq{flex:1;width:auto;height:auto;display:flex;flex-direction:column;justify-content:center}
 .p1{background:linear-gradient(#fef0b8,#f5d96b);height:150px}
 .p2{background:linear-gradient(#eef0f5,#d6dbe6);height:124px}
 .p3{background:linear-gradient(#f6dcc2,#e9b487);height:108px}
@@ -183,7 +186,7 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
       <div class="opts" style="flex-direction:column">
         <label class="opt sel" data-group="g1">
           <div class="opt__hd"><input type="radio" name="g1" value="A · phase strip" checked><span class="opt__t">Option A — phase strip on one card</span><span class="pill">recommended</span></div>
-          <div class="frame frame--good" style="width:auto">
+          <div class="frame frame--good">
             <div class="card">
               <div class="row"><div><div class="eyebrow">Teams · 5-person</div><div class="cname">Teams</div><div class="meta">12 teams · Pools → Knockout · 09:30</div></div><span class="sbadge sb-play">Knockout live</span></div>
               <div class="phasestrip">
@@ -196,7 +199,7 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
         </label>
         <label class="opt" data-group="g1">
           <div class="opt__hd"><input type="radio" name="g1" value="B · nested sub-row"><span class="opt__t">Option B — parent card with nested knockout row</span></div>
-          <div class="frame frame--good" style="width:auto">
+          <div class="frame frame--good">
             <div class="card">
               <div class="row"><div><div class="eyebrow">Teams · 5-person</div><div class="cname">Teams</div><div class="meta">12 teams · 09:30</div></div><span class="sbadge sb-done">Pools done</span></div>
               <div style="margin-top:8px;border-top:1px solid var(--line-2);padding-top:8px;display:flex;justify-content:space-between;align-items:center">
@@ -271,7 +274,7 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
   <div class="cols">
     <div class="col" style="min-width:340px;flex:0 0 340px">
       <div class="lbl lbl--cur"><span class="dot dot--cur"></span>Current — 1 column</div>
-      <div class="frame frame--bad" style="width:320px">
+      <div class="frame frame--bad">
         <div class="card"><div style="font-weight:600">Pool A</div><div class="meta">3/3 matches · half the card is empty →</div></div>
         <div class="card"><div style="font-weight:600">Pool B</div><div class="meta">3/3 matches</div></div>
         <div class="card"><div style="font-weight:600">Pool C</div><div class="meta">3/3 matches</div></div>
@@ -326,14 +329,11 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
       <div class="frame frame--good">
         <div class="card">
           <div class="hero"><div class="crown">🏆</div><div class="pl" style="color:var(--ink-2)">Champion</div><div class="hn">Isaac Asimov</div><div class="ht">Team Psi</div></div>
-          <div style="text-align:center;font-size:11px;color:var(--ink-3);margin:2px 0 4px">Runner-up</div>
-          <div class="podium" style="align-items:stretch">
-            <div class="place p2" style="height:auto"><div class="pl">2nd</div><div class="pn">Oscar Wilde</div><div class="pt">Team Rho</div></div>
-          </div>
-          <div style="text-align:center;font-size:11px;color:var(--ink-3);margin:8px 0 4px">Joint 3rd <span style="opacity:.7">· both beaten semifinalists</span></div>
-          <div class="podium" style="align-items:stretch">
-            <div class="place p3" style="height:auto"><div class="pl">3rd</div><div class="pn">Vincent King</div><div class="pt">Team Theta</div></div>
-            <div class="place p3" style="height:auto"><div class="pl">3rd</div><div class="pn">Edgar Allan Poe</div><div class="pt">Team Xi</div></div>
+          <div style="text-align:center;font-size:11px;color:var(--ink-3);margin:2px 0 2px">Runner-up · joint 3rd <span style="opacity:.7">(both beaten semifinalists)</span></div>
+          <div class="podium podium--row">
+            <div class="place place--eq p2"><div class="pl">2nd</div><div class="pn">Oscar Wilde</div><div class="pt">Team Rho</div></div>
+            <div class="place place--eq p3"><div class="pl">3rd</div><div class="pn">Vincent King</div><div class="pt">Team Theta</div></div>
+            <div class="place place--eq p3"><div class="pl">3rd</div><div class="pn">Edgar Allan Poe</div><div class="pt">Team Xi</div></div>
           </div>
         </div>
       </div>
@@ -359,7 +359,7 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
         <tr><td><input type="checkbox" class="chk" data-qw="dark-mode"></td><td>Theme</td><td><span class="bad">light only</span></td><td><span class="fix">add dark mode</span> (dim halls)</td></tr>
       </table>
       <p class="note">Winner-tick example (proposed):</p>
-      <div class="frame frame--good" style="width:260px">
+      <div class="frame frame--good">
         <div class="bcell">
           <div class="bcell__hd">Shiaijo A · 09:30</div>
           <div class="bside bside--aka"><span class="cbadge cb-aka">AKA</span><span class="nm win">Legolas Greenleaf</span><span class="wtick">✓</span><span class="ip">DM</span></div>

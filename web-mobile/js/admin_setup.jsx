@@ -379,6 +379,18 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <button className="btn btn--primary" onClick={handleSave}>Save changes</button>
           </div>
         </div>
+        {/* mp-c38: sponsor management lives on the same edit page so admins
+            don't need to navigate elsewhere. SponsorsManager owns its own
+            sponsors list (seeded from the tournament prop, updated locally
+            from the API response on upload/delete) so unsaved edits in the
+            tournament form above survive a sponsor change — no page reload. */}
+        {window.SponsorsManager && (
+          <window.SponsorsManager
+            tournament={tournament}
+            password={password}
+            showToast={showToast}
+          />
+        )}
       </div>
     </div>
   );

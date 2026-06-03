@@ -760,6 +760,33 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to clear announcements (Status ${res.status})`);
         }
+    },
+    // mp-c38: sponsor logo upload (multipart) and delete.
+    async uploadSponsor({ file, name, link, password }) {
+        const fd = new FormData();
+        fd.append('name', name);
+        if (link) fd.append('link', link);
+        fd.append('file', file);
+        const res = await fetch('/api/sponsors', {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password },
+            body: fd,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to upload sponsor (Status ${res.status})`);
+        }
+        return res.json();
+    },
+    async deleteSponsor(index, password) {
+        const res = await fetch(`/api/sponsors/${index}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password },
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to delete sponsor (Status ${res.status})`);
+        }
     }
 };
 

@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -211,4 +212,72 @@ func TestValidateTeamMatchType(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Sponsors (mp-c38) ---
+
+// TestTournament_SponsorsRoundTrip pins the YAML round-trip contract:
+// populated sponsors must survive marshal/unmarshal with name, file, and
+// link preserved. omitempty on Link must omit the key for sponsors with
+// no link set.
+func TestTournament_SponsorsRoundTrip(t *testing.T) {
+	original := Tournament{
+		Name: "Round-Trip Cup",
+		Sponsors: []Sponsor{
+			{Name: "Acme Corp", File: "8a3f9c12d7b6e041.png", Link: "https://acme.example"},
+			{Name: "BetaCo", File: "1f2e3d4c5b6a7080.jpg"}, // no link
+		},
+	}
+	b, err := yaml.Marshal(&original)
+	require.NoError(t, err)
+	yamlStr := string(b)
+	// Assert first sponsor fields are present.
+	assert.Contains(t, yamlStr, "name: Acme Corp")
+	assert.Contains(t, yamlStr, "link: https://acme.example")
+	// Structural omitempty check: the second sponsor has no link, so the
+	// `link:` key must be entirely absent from the YAML — not `link: ""`
+	// or `link: null`. This is what `yaml:"link,omitempty"` guarantees.
+	assert.Contains(t, yamlStr, "name: BetaCo")
+	assert.NotContains(t, yamlStr, "link: \"\"\nname: BetaCo",
+		"YAML must not emit link: \"\" for sponsors with no link")
+	// Parse the second sponsor block to confirm the key is truly absent,
+	// not just empty. We look for a "link:" line between the two name lines.
+	acmeIdx := strings.Index(yamlStr, "name: Acme Corp")
+	betaIdx := strings.Index(yamlStr, "name: BetaCo")
+	require.True(t, acmeIdx >= 0 && betaIdx > acmeIdx, "both sponsor entries must be present")
+	betaBlock := yamlStr[betaIdx:]
+	assert.NotContains(t, betaBlock[:strings.Index(betaBlock+"\n---", "\n---")], "link:",
+		"omitempty: link key must be absent from the no-link sponsor's YAML block")
+
+	var got Tournament
+	require.NoError(t, yaml.Unmarshal(b, &got))
+	require.Len(t, got.Sponsors, 2)
+	assert.Equal(t, "Acme Corp", got.Sponsors[0].Name)
+	assert.Equal(t, "8a3f9c12d7b6e041.png", got.Sponsors[0].File)
+	assert.Equal(t, "https://acme.example", got.Sponsors[0].Link)
+	assert.Equal(t, "BetaCo", got.Sponsors[1].Name)
+	assert.Empty(t, got.Sponsors[1].Link, "omitempty link must round-trip as empty")
+}
+
+// TestTournament_NoSponsorsKey_LegacyParse ensures legacy tournament.md
+// files (predating mp-c38) deserialize with an empty/nil Sponsors slice
+// rather than failing. Strict-mode unmarshal would break older configs.
+func TestTournament_NoSponsorsKey_LegacyParse(t *testing.T) {
+	legacy := []byte(`name: Legacy Cup
+date: "01-06-2026"
+courts: ["A", "B"]
+`)
+	var got Tournament
+	require.NoError(t, yaml.Unmarshal(legacy, &got))
+	assert.Empty(t, got.Sponsors, "missing sponsors key must deserialize as empty slice")
+}
+
+// TestTournament_EmptySponsors_OmitsKey pins the reverse direction: a
+// tournament with no sponsors must NOT emit `sponsors: []` so existing
+// files round-trip byte-for-equivalent when no sponsors are configured.
+func TestTournament_EmptySponsors_OmitsKey(t *testing.T) {
+	tour := Tournament{Name: "No-Sponsor Cup"}
+	b, err := yaml.Marshal(&tour)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "sponsors:", "empty Sponsors must be omitted from YAML")
 }

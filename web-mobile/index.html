@@ -54,6 +54,9 @@
     <script type="module" src="/dist/glossary.js?v=5"></script>
     <script type="module" src="/dist/reset.js?v=5"></script>
     <script type="module" src="/dist/registration.js?v=5"></script>
+    <!-- sponsor_strip.js exports SponsorStrip to window. Must load before
+         display.js and viewer.js — both consume window.SponsorStrip (mp-c38). -->
+    <script type="module" src="/dist/sponsor_strip.js?v=5"></script>
     <!-- display.js exports queueLabel / queueLabelCompact to window for the
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->
@@ -68,6 +71,9 @@
     <script type="module" src="/dist/admin_schedule.js?v=5"></script>
     <script type="module" src="/dist/admin_competition.js?v=5"></script>
     <script type="module" src="/dist/admin_announcement.js?v=5"></script>
+    <!-- admin_sponsors.js exports SponsorsManager. Loaded before admin_setup.js
+         (which embeds it inside the Edit Tournament page) — mp-c38. -->
+    <script type="module" src="/dist/admin_sponsors.js?v=5"></script>
     <script type="module" src="/dist/admin_setup.js?v=5"></script>
     <script type="module" src="/dist/admin.js?v=5"></script>
     <script type="module" src="/dist/app.js?v=5"></script>

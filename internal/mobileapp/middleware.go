@@ -45,7 +45,19 @@ const (
 	// to disk. 64 MB is sized for a worst-case full-roster CSV plus
 	// metadata; raise here if real tournaments outgrow it.
 	MaxImportBodyBytes int64 = 64 << 20 // 64 MB
+
+	// SponsorMaxBodyBytes caps POST /api/sponsors (multipart logo upload).
+	// The sponsor logo file itself is capped at 1 MB by in-handler check;
+	// this envelope cap (2 MB) gives generous headroom for the multipart
+	// boundary, form-field overhead, and the optional link/name fields
+	// without letting a client stream gigabytes through the parser.
+	SponsorMaxBodyBytes int64 = 2 << 20 // 2 MB
 )
+
+// SponsorMaxFileBytes is the in-handler cap on the logo file itself
+// (the multipart `file` field), distinct from the envelope cap above.
+// See mp-c38 plan.
+const SponsorMaxFileBytes int64 = 1 << 20 // 1 MB
 
 // MaxBodyBytes returns a Gin middleware that rejects requests whose
 // body exceeds n bytes. Two checks, in order of cost:
@@ -230,7 +242,9 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // team lineup management — organiser
 		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup — organiser
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup — organiser
-		http.MethodPost + " /api/competitions/:id/matches/:mid/decision":               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
+		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
+		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload — organiser setup, not operational play
+		http.MethodDelete + " /api/sponsors/:index":                                    // mp-c38: sponsor deletion — organiser setup, not operational play
 		return true
 	default:
 		return false

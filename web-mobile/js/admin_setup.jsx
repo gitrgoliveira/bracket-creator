@@ -122,6 +122,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const nextKeyRef = useRefA((tournament.contacts || []).length);
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
+  // mp-scf: theme colors (updated live by BrandingManager via onThemeChange).
+  const [theme, setTheme] = useStateA(tournament.theme || null);
 
   // Elevated (destructive-ops) password — spec 004 / mp-e21. File mode only;
   // in locked mode it's the TOURNAMENT_ADMIN_PASSWORD_HASH env var (read-only
@@ -185,6 +187,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       awardsNote: awardsNote.trim() || undefined,
       infoNotes: infoNotes.trim() || undefined,
       contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
+      theme: theme || undefined,
     });
   };
 
@@ -389,6 +392,17 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             tournament={tournament}
             password={password}
             showToast={showToast}
+          />
+        )}
+        {/* mp-scf: branding (colors + logo). onThemeChange propagates color
+            changes back to this component's theme state so they are included
+            in the tournament PUT payload when Save is clicked. */}
+        {window.BrandingManager && (
+          <window.BrandingManager
+            tournament={tournament}
+            password={password}
+            showToast={showToast}
+            onThemeChange={setTheme}
           />
         )}
       </div>

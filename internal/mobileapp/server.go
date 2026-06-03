@@ -116,6 +116,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterPublicAnnouncementHandlers(api, store)
 	RegisterPublicRegistrationHandlers(api, store, hub)
 	RegisterPublicSponsorHandlers(api, store)
+	RegisterPublicBrandingHandlers(api, store)
 
 	// Public password-reset + auth-config endpoints. Both must live
 	// outside the admin group: /reset is the recovery path for a
@@ -162,6 +163,10 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// on the same group (DELETE skips the cap by method anyway).
 	adminSponsorBody := adminGroup(r, SponsorMaxBodyBytes, verifier, store)
 	RegisterSponsorHandlers(adminSponsorBody, store)
+
+	// Tournament branding logo (mp-scf) — same 2 MB envelope as sponsors.
+	adminBrandingBody := adminGroup(r, BrandingMaxBodyBytes, verifier, store)
+	RegisterBrandingHandlers(adminBrandingBody, store)
 
 	// Static files & SPA Fallback
 	mobileFS := res.GetMobileWebFS()

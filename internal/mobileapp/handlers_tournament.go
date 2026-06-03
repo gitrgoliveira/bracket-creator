@@ -329,8 +329,15 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 		// Trim windowTitle so whitespace-only input doesn't persist as an
 		// effectively-blank browser title instead of falling back to the default.
+		// Also nil-out a fully-empty Theme (no colors, no title set by the
+		// client) so tournament.md stays clean and the UI doesn't treat an
+		// unintentional "theme: {}" as "branding is configured".
+		// LogoPath is excluded: it has json:"-" and is never set via this path.
 		if t.Theme != nil {
 			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
+			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" {
+				t.Theme = nil
+			}
 		}
 
 		// Validate hex color fields on the optional theme block (mp-scf).
@@ -642,8 +649,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 		// Trim windowTitle so whitespace-only input doesn't persist as an
 		// effectively-blank browser title instead of falling back to the default.
+		// Also nil-out a fully-empty Theme so tournament.md stays clean.
 		if t.Theme != nil {
 			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
+			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" {
+				t.Theme = nil
+			}
 		}
 
 		if err := state.ValidateTheme(t.Theme); err != nil {

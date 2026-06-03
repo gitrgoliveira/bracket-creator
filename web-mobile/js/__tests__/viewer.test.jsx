@@ -689,6 +689,27 @@ describe('PoolMatrix (mp-f4xo)', () => {
     return cells;
   }
 
+  function allHeaders(tree) {
+    const ths = [];
+    (function walk(n) {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (n.type === 'th') ths.push(n);
+      const kids = n.children || n.props?.children || [];
+      [].concat(kids).forEach(walk);
+    })(tree);
+    return ths;
+  }
+
+  function textContent(node) {
+    if (node == null) return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(textContent).join('');
+    const kids = node.children || node.props?.children;
+    if (kids) return textContent(kids);
+    return '';
+  }
+
   it('renders W/L cells for a completed match', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const cells = allCells(tree);
@@ -795,6 +816,44 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('returns null for fewer than 2 players', () => {
     const tree = runtime.mount(PM, { pool: { poolName: 'Pool X', players: [{ name: 'Solo' }] }, matches: [], tweaks: {} });
     expect(tree).toBeNull();
+  });
+
+  it('shows player.number in column headers and row labels when set', () => {
+    const numberedPool = {
+      poolName: 'Pool A',
+      players: [
+        { name: 'Alice', number: 'A1' },
+        { name: 'Bob', number: 'A2' },
+        { name: 'Charlie', number: 'A3' },
+      ],
+    };
+    const tree = runtime.mount(PM, { pool: numberedPool, matches: [completedMatch], tweaks: {} });
+    const ths = allHeaders(tree);
+    const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
+    expect(colHeaders.map(h => textContent(h))).toEqual(['A1', 'A2', 'A3']);
+
+    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
+    const rowNums = rowHeads.map(td => {
+      const spans = [].concat(td.children || td.props?.children || []);
+      const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
+      return textContent(numSpan);
+    });
+    expect(rowNums).toEqual(['A1', 'A2', 'A3']);
+  });
+
+  it('omits numbers entirely when player.number is not set', () => {
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
+    const ths = allHeaders(tree);
+    const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
+    expect(colHeaders.map(h => textContent(h))).toEqual(['', '', '']);
+
+    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
+    const rowNums = rowHeads.map(td => {
+      const spans = [].concat(td.children || td.props?.children || []);
+      const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
+      return numSpan;
+    });
+    expect(rowNums).toEqual([undefined, undefined, undefined]);
   });
 });
 

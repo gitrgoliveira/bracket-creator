@@ -2209,8 +2209,8 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
         <thead>
           <tr>
             <th className="pool-matrix__corner"></th>
-            {players.map((p, i) => (
-              <th key={p.name} className={`pool-matrix__col-head${isHighlighted(p) ? " pool-matrix__col--me" : ""}`} title={p.name}>{i + 1}</th>
+            {players.map((p) => (
+              <th key={p.name} scope="col" aria-label={p.name} className={`pool-matrix__col-head${isHighlighted(p) ? " pool-matrix__col--me" : ""}`} title={p.name}>{p.number || ""}</th>
             ))}
           </tr>
         </thead>
@@ -2218,7 +2218,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
           {players.map((rowPlayer, ri) => (
             <tr key={rowPlayer.name} className={isHighlighted(rowPlayer) ? "pool-matrix__row--me" : ""}>
               <td className="pool-matrix__row-head" title={rowPlayer.name}>
-                <span className="pool-matrix__num">{ri + 1}</span>
+                {rowPlayer.number ? <span className="pool-matrix__num">{rowPlayer.number}</span> : null}
                 <span className="pool-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {

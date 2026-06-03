@@ -2314,8 +2314,8 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
     : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {isLeague && leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} />}
+    <div className="pools-grid">
+      {isLeague && leagueWinner && <div style={{ gridColumn: "1 / -1" }}><WinnerBadge name={leagueWinner.player?.name || ""} /></div>}
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
         const matches = poolMatches ? poolMatches.filter(m => {

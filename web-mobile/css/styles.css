@@ -1236,8 +1236,14 @@ a:hover {
 /* ---------- Pools ---------- */
 .pools-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
+}
+
+@media (orientation: landscape) and (min-width: 580px) {
+  .pools-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .pool {

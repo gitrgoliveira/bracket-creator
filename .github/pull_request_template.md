@@ -1,24 +1,52 @@
-<!--- Provide a general summary of your changes in the Title above -->
-
-# Description
-
 <!--
-Please include a summary of the changes and the related issue. Please also include relevant motivation and context. List any dependencies that are required for this change.
+Title: conventional-commit style, e.g.
+  feat(mp-xxxx): short imperative summary
+  fix(mp-xxxx): ...
+  chore: ...
 -->
 
-Fixes #
+## Summary
 
-## Type of change
+<!-- Bullet points: what changed and why it matters. Lead with user-visible behavior. -->
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] This change requires a documentation update
+-
+-
 
-# Checklist:
+<!-- Optional, include when relevant:
 
-- [ ] I have read the [CONTRIBUTING](https://github.com/gitrgoliveira/bracket-creator/blob/main/.github/CONTRIBUTING.md) document.
-- [ ] I have performed a self-review of my code
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
+## Why
+Motivation / root cause. For fixes, state the root cause explicitly.
+
+## Files changed
+| File | What |
+|---|---|
+| `path/to/file` | one-line description |
+
+-->
+
+## Screenshots
+
+<!--
+REQUIRED for any change that affects the UI (web-mobile/ or web/) — including
+visual, layout, copy, or behavior changes. Attach before/after images.
+Delete this section only if the change has no UI impact whatsoever.
+-->
+
+## Test plan
+
+<!--
+Every box must be checked before the PR is ready. Manual browser steps are NOT
+optional for web-mobile / web changes — run them in a real browser, don't just
+read the diff. See CONTRIBUTING and CLAUDE.md.
+-->
+
+- [ ] `make go/test` passes (lint + security scan + tests)
+- [ ] New/updated unit tests cover the change
+- [ ] Manual browser verification (for `web-mobile/` or `web/` changes) — describe what you exercised
+- [ ] Screenshots added above (REQUIRED for any UI-affecting change)
+- [ ] No new console errors or warnings
+
+<!-- Bead reference: -->
+Closes mp-xxxx
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)

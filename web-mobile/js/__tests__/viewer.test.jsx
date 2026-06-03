@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL } from '../viewer.jsx';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL, PoolMatrix } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 
@@ -590,6 +590,179 @@ describe('TournamentInfo', () => {
     expect(isHttpURL('ftp://files.example.com')).toBe(false);
     expect(isHttpURL('')).toBe(false);
     expect(isHttpURL(undefined)).toBe(false);
+  });
+});
+
+// mp-f4xo: PoolMatrix — clickable cross-table cells
+describe('PoolMatrix (mp-f4xo)', () => {
+  const realReact = global.React;
+  let runtime;
+  let PM;
+  let savedIsHikiwake;
+
+  const pool = {
+    poolName: 'Pool A',
+    players: [
+      { name: 'Alice' },
+      { name: 'Bob' },
+      { name: 'Charlie' },
+    ],
+  };
+
+  const completedMatch = {
+    id: 'Pool A-1',
+    sideA: { id: 'pA', name: 'Alice' },
+    sideB: { id: 'pB', name: 'Bob' },
+    status: 'completed',
+    winner: { id: 'pA', name: 'Alice' },
+    ipponsA: ['M'],
+    ipponsB: [],
+    decision: 'fought',
+  };
+
+  const pendingMatch = {
+    id: 'Pool A-2',
+    sideA: { id: 'pA', name: 'Alice' },
+    sideB: { id: 'pC', name: 'Charlie' },
+    status: 'scheduled',
+    winner: null,
+    ipponsA: [],
+    ipponsB: [],
+  };
+
+  const runningMatch = {
+    id: 'Pool A-3',
+    sideA: { id: 'pB', name: 'Bob' },
+    sideB: { id: 'pC', name: 'Charlie' },
+    status: 'running',
+    winner: null,
+    ipponsA: [],
+    ipponsB: [],
+  };
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    savedIsHikiwake = global.window.isHikiwake;
+    global.window.isHikiwake = vi.fn(() => false);
+    vi.resetModules();
+    ({ PoolMatrix: PM } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    if (savedIsHikiwake === undefined) delete global.window.isHikiwake;
+    else global.window.isHikiwake = savedIsHikiwake;
+  });
+
+  function allCells(tree) {
+    const cells = [];
+    (function walk(n) {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (n.type === 'td') cells.push(n);
+      const kids = n.children || n.props?.children || [];
+      [].concat(kids).forEach(walk);
+    })(tree);
+    return cells;
+  }
+
+  it('renders W/L cells for a completed match', () => {
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const lossCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--loss'));
+    expect(winCell).toBeTruthy();
+    expect(lossCell).toBeTruthy();
+  });
+
+  it('clicking a completed-match cell fires onMatchClick with enriched match', () => {
+    const spy = vi.fn();
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    expect(winCell.props.onClick).toBeTypeOf('function');
+    winCell.props.onClick();
+    expect(spy).toHaveBeenCalledTimes(1);
+    const enriched = spy.mock.calls[0][0];
+    expect(enriched.phase).toBe('pool');
+    expect(enriched.poolName).toBe('Pool A');
+    expect(enriched.phaseName).toBe('Pool A');
+    expect(enriched.compKind).toBe('');
+    expect(enriched.teamSize).toBe(0);
+    expect(enriched.id).toBe(completedMatch.id);
+  });
+
+  it('clicking a pending-match cell fires onMatchClick', () => {
+    const spy = vi.fn();
+    const tree = runtime.mount(PM, { pool, matches: [pendingMatch], tweaks: {}, onMatchClick: spy });
+    const cells = allCells(tree);
+    const pendingCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--pending'));
+    expect(pendingCell).toBeTruthy();
+    pendingCell.props.onClick();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking a live-match cell fires onMatchClick', () => {
+    const spy = vi.fn();
+    const tree = runtime.mount(PM, { pool, matches: [runningMatch], tweaks: {}, onMatchClick: spy });
+    const cells = allCells(tree);
+    const liveCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--live'));
+    expect(liveCell).toBeTruthy();
+    liveCell.props.onClick();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('self-diagonal and empty cells have no onClick', () => {
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
+    const cells = allCells(tree);
+    const selfCells = cells.filter(c => c.props?.className?.includes('pool-matrix__cell--self'));
+    const emptyCells = cells.filter(c => c.props?.className?.includes('pool-matrix__cell--empty'));
+    expect(selfCells.length).toBeGreaterThan(0);
+    selfCells.forEach(c => expect(c.props.onClick).toBeUndefined());
+    emptyCells.forEach(c => expect(c.props.onClick).toBeUndefined());
+  });
+
+  it('interactive cells have role=button and tabIndex=0 for a11y', () => {
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    expect(winCell.props.role).toBe('button');
+    expect(winCell.props.tabIndex).toBe(0);
+  });
+
+  it('interactive cells have aria-label describing the matchup', () => {
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    expect(winCell.props['aria-label']).toContain('Alice');
+    expect(winCell.props['aria-label']).toContain('Bob');
+    expect(winCell.props['aria-label']).toContain('Win');
+  });
+
+  it('Enter key on interactive cell fires onMatchClick', () => {
+    const spy = vi.fn();
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const preventDefaultSpy = vi.fn();
+    winCell.props.onKeyDown({ key: 'Enter', preventDefault: preventDefaultSpy });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(preventDefaultSpy).toHaveBeenCalled();
+  });
+
+  it('cells are not interactive when onMatchClick is not provided', () => {
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    expect(winCell.props.onClick).toBeUndefined();
+    expect(winCell.props.role).toBeUndefined();
+  });
+
+  it('returns null for fewer than 2 players', () => {
+    const tree = runtime.mount(PM, { pool: { poolName: 'Pool X', players: [{ name: 'Solo' }] }, matches: [], tweaks: {} });
+    expect(tree).toBeNull();
   });
 });
 

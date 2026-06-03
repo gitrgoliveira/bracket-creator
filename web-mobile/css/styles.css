@@ -1304,6 +1304,7 @@ a:hover {
   letter-spacing: 0.04em;
 }
 
+.pool__table th.num,
 .pool__table td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;

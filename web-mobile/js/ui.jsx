@@ -1,6 +1,6 @@
 // Shared UI primitives used by both admin and viewer modules.
 
-function StatusBadge({ status, showLiveDot }) {
+function StatusBadge({ status, showLiveDot, format }) {
   const map = {
     setup: ["badge--setup", "Pending"],
     "draw-ready": ["badge--draw-ready", "Draw ready"],
@@ -8,7 +8,8 @@ function StatusBadge({ status, showLiveDot }) {
     playoffs: ["badge--playoffs", "Playoffs"],
     completed: ["badge--completed", "Completed"],
   };
-  const [cls, label] = map[status || "setup"] || ["badge--setup", status];
+  const [cls, rawLabel] = map[status || "setup"] || ["badge--setup", status];
+  const label = (status === "pools" && format === "league") ? "League" : rawLabel;
   const showLive = showLiveDot && (status === "pools" || status === "playoffs");
   return (
     <span className={`badge ${cls}`}>

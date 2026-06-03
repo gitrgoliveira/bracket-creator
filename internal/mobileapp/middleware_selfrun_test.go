@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -903,4 +904,61 @@ func TestSelfRun_POST_NoMode_DefaultsToOfficiated(t *testing.T) {
 	require.NotNil(t, t2)
 	assert.Equal(t, state.TournamentModeOfficiated, t2.Mode,
 		"missing mode must default to officiated")
+}
+
+// ---------------------------------------------------------------------------
+// §sponsors: Self-run auth gate for sponsor management (mp-c38)
+// ---------------------------------------------------------------------------
+//
+// Sponsor POST/DELETE are organiser-owned setup routes (like PUT /api/tournament)
+// and must NOT become anonymously writable in self-run mode. Both are added to
+// isSelfRunMainGatedConfigRoute. This test pins that contract in the centralised
+// self-run auth matrix (the dedicated handler tests in handlers_sponsors_test.go
+// cover the full authentication story; these tests ensure the middleware-level
+// carve-out wiring is correct for self-run mode specifically).
+
+func TestSelfRun_Sponsors_RequireMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	buildMultipart := func() (*bytes.Buffer, string) {
+		buf := &bytes.Buffer{}
+		mw := multipart.NewWriter(buf)
+		_ = mw.WriteField("name", "Acme Corp")
+		fw, _ := mw.CreateFormFile("file", "logo.png")
+		_, _ = fw.Write(tinyPNG) // reuse tinyPNG defined in handlers_sponsors_test.go
+		_ = mw.Close()
+		return buf, mw.FormDataContentType()
+	}
+
+	t.Run("POST_without_password_returns_401", func(t *testing.T) {
+		body, ct := buildMultipart()
+		req := httptest.NewRequest(http.MethodPost, "/api/sponsors", body)
+		req.Header.Set("Content-Type", ct)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"POST /api/sponsors must be main-gated in self-run mode")
+	})
+
+	t.Run("DELETE_without_password_returns_401", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/api/sponsors/0", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"DELETE /api/sponsors/:index must be main-gated in self-run mode")
+	})
+
+	t.Run("GET_sponsor_logo_is_public", func(t *testing.T) {
+		// GET /api/sponsors/:file is a public asset endpoint (serves logo to
+		// viewer/TV/lobby). It must NOT require authentication in self-run mode.
+		// A 400 (invalid filename) is fine — the route is reachable without a
+		// password.
+		req := httptest.NewRequest(http.MethodGet, "/api/sponsors/abcdef0123456789.png", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.NotEqual(t, http.StatusUnauthorized, w.Code,
+			"GET /api/sponsors/:file must be public — logo is served to unauthenticated viewer/TV surfaces")
+	})
 }

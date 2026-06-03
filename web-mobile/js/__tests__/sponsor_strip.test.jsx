@@ -90,4 +90,25 @@ describe('SponsorStrip', () => {
     expect(tree.props.className).toContain('sponsor-strip--viewer');
     expect(findAll(tree, (n) => n.type === 'a')).toHaveLength(1);
   });
+
+  it('every <img> has an onError handler to hide broken logos', () => {
+    // When a logo file is gone (e.g. YAML stale after manual delete),
+    // the handler must suppress the broken image rather than leaving a
+    // broken-image icon in the strip. Verify the onError prop is present
+    // on every rendered img regardless of variant.
+    for (const variant of ['viewer', 'lobby', 'tv']) {
+      const tree = SponsorStrip({ sponsors: sponsorsWithLink, variant });
+      const imgs = findAll(tree, (n) => n.type === 'img');
+      expect(imgs.length).toBeGreaterThan(0);
+      imgs.forEach((img) => {
+        expect(typeof img.props.onError).toBe('function');
+      });
+    }
+  });
+
+  it('root div has role=complementary and aria-label=Sponsors', () => {
+    const tree = SponsorStrip({ sponsors: sponsorsWithLink, variant: 'viewer' });
+    expect(tree.props.role).toBe('complementary');
+    expect(tree.props['aria-label']).toBe('Sponsors');
+  });
 });

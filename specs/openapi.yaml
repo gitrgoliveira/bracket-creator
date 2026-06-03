@@ -615,6 +615,132 @@ paths:
                             `parse participants: ...`. Empty when the row
                             imported successfully.
 
+  # ── Sponsors ───────────────────────────────────────────────────────────────
+
+  /api/sponsors/{file}:
+    get:
+      tags: [tournament]
+      summary: Serve a sponsor logo file
+      description: |
+        Public (no auth). Returns the raw PNG or JPEG bytes for a previously
+        uploaded sponsor logo. The filename is server-generated (16 random hex
+        chars + `.png` or `.jpg`); any other shape returns `400`.
+
+        Response carries `Cache-Control: public, max-age=31536000, immutable`
+        because the filename is unique per upload — the bytes at a given URL
+        never change.
+      parameters:
+        - in: path
+          name: file
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{16}\.(png|jpe?g)$'
+          description: Server-generated sponsor logo filename (16 hex chars + .png/.jpg).
+      responses:
+        '200':
+          description: Sponsor logo image bytes.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid filename (pattern mismatch or traversal attempt).
+        '404':
+          description: File not found.
+
+  /api/sponsors:
+    post:
+      tags: [tournament]
+      summary: Upload a sponsor logo
+      description: |
+        Admin-gated (`X-Tournament-Password`). Accepts `multipart/form-data`
+        with fields `name` (required, ≤80 chars), `link` (optional, must be
+        an `http(s)://` URL with no user-info), and `file` (required PNG or
+        JPEG, ≤1 MB detected by content sniff — not the `Content-Type` header).
+
+        Up to **6** sponsors per tournament. The server generates the on-disk
+        filename from `crypto/rand` hex; the client-supplied filename is ignored.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, file]
+              properties:
+                name:
+                  type: string
+                  maxLength: 80
+                  description: Sponsor name (used as alt text on logo images).
+                link:
+                  type: string
+                  format: uri
+                  maxLength: 500
+                  description: Optional clickable URL (must be http or https, no user-info).
+                file:
+                  type: string
+                  format: binary
+                  description: PNG or JPEG logo, ≤1 MB.
+      responses:
+        '201':
+          description: Sponsor created. Returns the Sponsor object including the server-generated filename.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sponsor'
+        '400':
+          description: Validation error (name missing/too long, link invalid, cap reached).
+        '401':
+          description: Missing or incorrect tournament password.
+        '413':
+          description: Logo file exceeds 1 MB.
+        '415':
+          description: Unsupported media type (only PNG and JPEG accepted).
+
+  /api/sponsors/{index}:
+    delete:
+      tags: [tournament]
+      summary: Delete a sponsor logo
+      description: |
+        Admin-gated (`X-Tournament-Password`). Removes the sponsor at the given
+        zero-based index from `tournament.sponsors` and unlinks the on-disk file
+        (file unlink is skipped if the stored filename does not match the
+        server-generated pattern, guarding against corrupt YAML).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - in: path
+          name: index
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Zero-based index into the tournament's sponsors array.
+      responses:
+        '200':
+          description: Sponsor removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed:
+                    $ref: '#/components/schemas/Sponsor'
+        '400':
+          description: Invalid index (negative or non-integer).
+        '401':
+          description: Missing or incorrect tournament password.
+        '404':
+          description: Index out of range or tournament not initialized.
+
   # ── Announcements ──────────────────────────────────────────────────────────
 
   /api/tournament/announcement:
@@ -2062,6 +2188,26 @@ components:
       properties:
         error:
           type: string
+
+    Sponsor:
+      type: object
+      description: A single sponsor logo entry in the tournament's sponsor list (mp-c38).
+      required: [name, file]
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          description: Sponsor name used as alt text on logo images.
+          example: "Acme Corp"
+        file:
+          type: string
+          description: Server-generated filename (16 random hex chars + .png or .jpg). Serves as the path component in GET /api/sponsors/{file}.
+          example: "69a33e3dd2ebe03b.jpg"
+        link:
+          type: string
+          format: uri
+          description: Optional clickable URL shown on the viewer surface. Absent when not set (omitempty). Must be http(s) with no user-info.
+          example: "https://acme.example"
 
     Announcement:
       type: object

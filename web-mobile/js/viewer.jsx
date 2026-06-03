@@ -287,6 +287,20 @@ function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX)
   return upcoming.slice(0, max);
 }
 
+function buildFollowedNextMatch(followedPlayer, allMatches) {
+  if (!followedPlayer || (!followedPlayer.id && !followedPlayer.name)) return null;
+  const mine = buildPlayerMatchHighlight(followedPlayer.id, allMatches, followedPlayer.name)
+    .filter(hasBothSides)
+    .filter((m) => m.status !== "completed");
+  mine.sort((a, b) => {
+    const ao = a.status === "running" ? 0 : 1;
+    const bo = b.status === "running" ? 0 : 1;
+    if (ao !== bo) return ao - bo;
+    return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
+  });
+  return mine[0] || null;
+}
+
 // checkedIn=true wins if any check-in-enabled competition has the player checked in.
 function buildRoster(competitions) {
   const map = new Map();
@@ -654,23 +668,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   let upNext = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
   if (courtFilter === "all") upNext = upNext.slice(0, 3);
 
-  // FR-020 / FR-022: derive my-player's next match across all competitions
-  // for the activated "Your next match" card (T112).
-  const myNextMatch = useMemo(() => {
-    if (!followedPlayer || !followedPlayer.id) return null;
-    const mine = buildPlayerMatchHighlight(followedPlayer.id, allMatches, followedPlayer.name)
-      .filter(hasBothSides)
-      .filter((m) => m.status !== "completed");
-    mine.sort((a, b) => {
-      // Live ahead of scheduled — a followed player mid-match should be
-      // the top thing the viewer sees, not their *next* scheduled fight.
-      const ao = a.status === "running" ? 0 : 1;
-      const bo = b.status === "running" ? 0 : 1;
-      if (ao !== bo) return ao - bo;
-      return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
-    });
-    return mine[0] || null;
-  }, [followedPlayer, allMatches]);
+  const myNextMatch = useMemo(() => buildFollowedNextMatch(followedPlayer, allMatches), [followedPlayer, allMatches]);
 
   // FR-024: up to 6 upcoming matches across the watchlist for the home
   // "Watched matches" section (T116).
@@ -1548,13 +1546,53 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     return out;
   }, [pools, poolMatches, bracket, c.kind, c.teamSize]);
 
-  const liveMatches = allMatches.filter((m) => m.status === "running" && hasBothSides(m));
-  const upcomingMatches = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m)).slice(0, 3);
-  const recentMatches = allMatches.filter((m) => m.status === "completed" && m.winner).slice(-5).reverse();
+  const [followedPlayer] = useFollowedPlayer();
+  const [watchlist] = useWatchlist();
 
-  // pick a "my match" — placeholder for now
-  const myPlayer = null;
-  const myUpcoming = null;
+  const watchedIds = useMemo(() => {
+    const ids = new Set();
+    if (followedPlayer && followedPlayer.id) ids.add(String(followedPlayer.id));
+    (watchlist || []).forEach(w => { if (w.id) ids.add(String(w.id)); });
+    return ids;
+  }, [followedPlayer, watchlist]);
+
+  const followedName = followedPlayer && followedPlayer.name ? followedPlayer.name.trim().toLowerCase() : "";
+  const hasActiveFilter = watchedIds.size > 0 || !!followedName;
+
+  const myPlayer = followedPlayer;
+  const myUpcoming = useMemo(() => buildFollowedNextMatch(followedPlayer, allMatches), [followedPlayer, allMatches]);
+
+  const { liveMatches, upcomingMatches, recentMatches } = useMemo(() => {
+    const matchInvolvesWatched = (m) => {
+      if (!hasActiveFilter) return true;
+      const [aId, bId] = matchParticipantIds(m);
+      if ((aId && watchedIds.has(aId)) || (bId && watchedIds.has(bId))) return true;
+      if (followedName) {
+        const [aName, bName] = matchParticipantNames(m);
+        const aN = aName ? aName.trim().toLowerCase() : "";
+        const bN = bName ? bName.trim().toLowerCase() : "";
+        if (aN === followedName || bN === followedName) return true;
+      }
+      return false;
+    };
+    const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && matchInvolvesWatched(m));
+    const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && matchInvolvesWatched(m))
+      .sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))
+      .slice(0, hasActiveFilter ? 20 : 3);
+    const recent = allMatches.filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m)).slice(hasActiveFilter ? -20 : -5).reverse();
+    return { liveMatches: live, upcomingMatches: upcoming, recentMatches: recent };
+  }, [allMatches, watchedIds, hasActiveFilter, followedName]);
+
+  const filterLabel = useMemo(() => {
+    if (!hasActiveFilter) return null;
+    const name = (followedPlayer && followedPlayer.name && followedPlayer.name.trim()) || null;
+    const followedId = followedPlayer && followedPlayer.id;
+    const wl = followedId ? watchedIds.size - 1 : watchedIds.size;
+    if (name && wl <= 0) return name;
+    if (!name && wl > 0) return `${wl} watched`;
+    if (name && wl > 0) return `${name} + ${wl} watched`;
+    return "filtered";
+  }, [followedPlayer, watchedIds, hasActiveFilter]);
 
   const derivedBracket = useMemo(() => {
     if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;
@@ -1593,12 +1631,9 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
-      const live = allMatches.find((m) => m.status === "running" && hasBothSides(m));
-      if (live) return live;
-      const sched = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m));
-      sched.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"));
-      return sched[0] || null;
-  }, [allMatches]);
+    if (liveMatches.length > 0) return liveMatches[0];
+    return upcomingMatches[0] || null;
+  }, [liveMatches, upcomingMatches]);
 
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);
   const bracketScrollRef = useRefV(null);
@@ -1667,6 +1702,8 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
               pools={pools}
               poolMatches={poolMatches}
               onSwitchTab={setTab}
+              hasActiveFilter={hasActiveFilter}
+              filterLabel={filterLabel}
             />
           )}
           {tab === "bracket" && derivedBracket && (
@@ -1797,7 +1834,7 @@ function MatchDetailCard({ match, onClose }) {
   );
 }
 
-function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, standings, pools, poolMatches, onSwitchTab }) {
+function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
 
   const isLeague = c.format === "league";
@@ -1847,6 +1884,17 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 
   return (
     <div>
+      {hasActiveFilter && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 12px", marginBottom: 12,
+          background: "var(--accent-soft, #eef)",
+          borderRadius: 8, fontSize: 13
+        }}>
+          <span aria-hidden="true" style={{ color: "var(--accent, #36c)" }}>👤</span>
+          <span>Showing matches for <strong>{filterLabel}</strong></span>
+        </div>
+      )}
       {myUpcoming && myPlayer ? (
         <div className="my-match">
           <div className="my-match__lbl">Your next match</div>
@@ -2456,7 +2504,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

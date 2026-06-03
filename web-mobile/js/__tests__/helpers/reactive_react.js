@@ -84,6 +84,7 @@ export function makeReactive() {
       }
       return hookSlots[i];
     },
+    useCallback: (fn) => { hookIndex++; return fn; },
     useLayoutEffect: () => {},
     memo: (c) => c,
   };

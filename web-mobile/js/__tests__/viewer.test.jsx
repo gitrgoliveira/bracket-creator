@@ -88,6 +88,21 @@ describe('Viewer Utils', () => {
       const filtered = applyFilters(matches, [], 'Dojo A', 'all');
       expect(filtered.length).toBe(2);
     });
+
+    it('matches by name when picked id differs from match side id (UUID vs name)', () => {
+      const uuidMatches = [
+        { id: 'm1', compId: 'c1', sideA: { id: 'Alice', name: 'Alice' }, sideB: { id: 'Bob', name: 'Bob' } },
+      ];
+      const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
+      const filtered = applyFilters(uuidMatches, picked, '', 'all');
+      expect(filtered.length).toBe(1);
+    });
+
+    it('matches by name on sideB', () => {
+      const m = [{ id: 'm1', compId: 'c1', sideA: { id: 'x', name: 'X' }, sideB: { id: 'Bob', name: 'Bob' } }];
+      const filtered = applyFilters(m, [{ id: 'uuid-bbb', name: 'Bob' }], '', 'all');
+      expect(filtered.length).toBe(1);
+    });
   });
 
   describe('matchHighlightedBy', () => {
@@ -101,6 +116,11 @@ describe('Viewer Utils', () => {
     it('should return true if dojo matches', () => {
       expect(matchHighlightedBy(match, [], 'Dojo B')).toBe(true);
       expect(matchHighlightedBy(match, [], 'Dojo C')).toBe(false);
+    });
+
+    it('highlights by name when picked id differs from match side id', () => {
+      expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(true);
+      expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Nobody' }], '')).toBe(false);
     });
   });
 

@@ -52,6 +52,10 @@ const (
 	// boundary, form-field overhead, and the optional link/name fields
 	// without letting a client stream gigabytes through the parser.
 	SponsorMaxBodyBytes int64 = 2 << 20 // 2 MB
+
+	// BrandingMaxBodyBytes caps POST /api/branding/logo (tournament logo
+	// upload, mp-scf). Same rationale and size as SponsorMaxBodyBytes.
+	BrandingMaxBodyBytes int64 = 2 << 20 // 2 MB
 )
 
 // SponsorMaxFileBytes is the in-handler cap on the logo file itself

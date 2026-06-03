@@ -787,6 +787,31 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to delete sponsor (Status ${res.status})`);
         }
+    },
+    // mp-scf: tournament branding — logo upload/delete and theme color update.
+    async uploadBrandingLogo({ file, password }) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch('/api/branding/logo', {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password },
+            body: fd,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to upload logo (Status ${res.status})`);
+        }
+        return res.json();
+    },
+    async deleteBrandingLogo(password) {
+        const res = await fetch('/api/branding/logo', {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password },
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to delete logo (Status ${res.status})`);
+        }
     }
 };
 

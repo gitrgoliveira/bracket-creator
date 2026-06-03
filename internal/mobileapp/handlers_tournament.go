@@ -327,6 +327,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
+		// Validate hex color fields on the optional theme block (mp-scf).
+		if err := state.ValidateTheme(t.Theme); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		if err := validateTournamentDurationDays(t.DurationDays); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -400,6 +406,20 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// via PUT /api/auth/admin-password, never here.
 			if current != nil {
 				desired.AdminPassword = current.AdminPassword
+			}
+
+			// Preserve Theme.LogoPath (mp-scf): LogoPath has json:"-" so the
+			// bound body never carries it. The logo is managed via
+			// POST/DELETE /api/branding/logo; this PUT must not clear it.
+			// Also preserve the entire Theme when the client omits it (nil)
+			// so a routine name/venue save doesn't wipe configured colors.
+			if current != nil && current.Theme != nil {
+				if desired.Theme == nil {
+					desired.Theme = &state.Theme{}
+					*desired.Theme = *current.Theme
+				} else {
+					desired.Theme.LogoPath = current.Theme.LogoPath
+				}
 			}
 
 			// Immutability of Mode (mp-7h7): Mode is chosen once at creation

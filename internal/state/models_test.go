@@ -98,6 +98,80 @@ func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
 	})
 }
 
+// TestTournamentTheme_RoundTrip verifies that Theme survives a YAML marshal/
+// unmarshal cycle and that LogoPath is not exposed via JSON (mp-scf).
+func TestTournamentTheme_RoundTrip(t *testing.T) {
+	t.Run("full theme survives YAML round-trip", func(t *testing.T) {
+		tour := &Tournament{
+			Name: "Test",
+			Theme: &Theme{
+				PrimaryColor:    "#ff0000",
+				AccentSoftColor: "#ffe0e0",
+				LogoPath:        "logo.png",
+			},
+		}
+		b, err := yaml.Marshal(tour)
+		require.NoError(t, err)
+		var got Tournament
+		require.NoError(t, yaml.Unmarshal(b, &got))
+		require.NotNil(t, got.Theme)
+		assert.Equal(t, "#ff0000", got.Theme.PrimaryColor)
+		assert.Equal(t, "#ffe0e0", got.Theme.AccentSoftColor)
+		assert.Equal(t, "logo.png", got.Theme.LogoPath)
+	})
+	t.Run("logo_path is omitted from JSON", func(t *testing.T) {
+		tour := &Tournament{
+			Name:  "Test",
+			Theme: &Theme{PrimaryColor: "#1d3557", LogoPath: "logo.png"},
+		}
+		b, err := json.Marshal(tour)
+		require.NoError(t, err)
+		s := string(b)
+		assert.Contains(t, s, `"primaryColor":"#1d3557"`)
+		assert.NotContains(t, s, "logoPath")
+		assert.NotContains(t, s, "logo_path")
+		assert.NotContains(t, s, "logo.png")
+	})
+	t.Run("legacy tournament without theme key parses cleanly", func(t *testing.T) {
+		raw := `name: Old Tournament
+password: secret
+courts: [A]
+`
+		var got Tournament
+		require.NoError(t, yaml.Unmarshal([]byte(raw), &got))
+		assert.Nil(t, got.Theme)
+	})
+}
+
+// TestValidateTheme covers the hex-color acceptance criteria (mp-scf).
+func TestValidateTheme(t *testing.T) {
+	cases := []struct {
+		name    string
+		theme   *Theme
+		wantErr bool
+	}{
+		{"nil is valid", nil, false},
+		{"empty struct is valid", &Theme{}, false},
+		{"valid colors", &Theme{PrimaryColor: "#1d3557", AccentSoftColor: "#e7eaf3"}, false},
+		{"uppercase hex valid", &Theme{PrimaryColor: "#1D3557"}, false},
+		{"bad primary", &Theme{PrimaryColor: "red"}, true},
+		{"bad primary short", &Theme{PrimaryColor: "#fff"}, true},
+		{"bad accent", &Theme{AccentSoftColor: "notacolor"}, true},
+		{"empty primary ok", &Theme{AccentSoftColor: "#e7eaf3"}, false},
+		{"empty accent ok", &Theme{PrimaryColor: "#1d3557"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateTheme(tc.theme)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 // --- Tournament.Days() ---
 
 func TestTournament_Days(t *testing.T) {

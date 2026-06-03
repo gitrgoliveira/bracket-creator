@@ -1,14 +1,10 @@
-2. Add PDF generator from spreadsheet (with Web UI, etc)
-0. Simplify and review
-3. add square_prep examples
 5. Should have an Agent skill on how to use the CLI/API
+
+2. Add PDF generator from spreadsheet (with Web UI, etc)
+3. add square_prep examples
 1. Make brew install work.
 
 
-1. Need to be able to create a tournament from scratch, when there's no tournament.md file.
-1. When storing the tournament, the folder names should be based on the competition name.
-
-1. The tournament is over 3 days. Competitions have different start time within those days.
 4. Schedule also needs an admin view, so we can setup the times per match on pools and playoffs, and get an estimation of the tournament duration. We will need to include breaks in the schedule. 
 4. Improve the schedule view.
 5. in brackets and pools, it needs to be very clear which side is Red and which side is White. when scoring and for the viewer mode and the schedule view.
@@ -45,6 +41,37 @@
 * Team order and players can change between each team match
 
 
+===================================================
+
+* Ability to add Sponsors to the main page 
+
+* Allow UI customization (colours and logo)
+
+===================================================
+
+* Needs a way to host this for free in AWS, GCP and Azure, with the respective Terraform code and instructions
+
+* Excel and PDF generation according to London Cup 2026. Single competition generation and whole tournament PDF generation.
+
+* Replicate LondonCup 2026 with test data
+
+* Replicate LondonCup 2026 with real data
+
+* Replicate LondonCup 2025 with real data
+
+* UI localization files in Portuguese, French, Japanese, and Spanish
+
+===================================================
+BUGS
+Announcements UI appears twice.
+remove Check-in start (HH:MM) / Check-in end (HH:MM)
+I want to be able to edit/replace competitors, even after the draw has been generated.
+
+Do not use real club names for examples.
+
+Excel exports need to match the app.
+
+===================================================
 
 Some match rules:
 https://www.kendo-guide.com/match-in-kendo-shiai.html

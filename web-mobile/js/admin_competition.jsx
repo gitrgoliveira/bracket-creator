@@ -298,6 +298,10 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
           <div className="card__title" style={{ marginBottom: 6 }}>Live results →</div>
           <div className="card__sub">Visual bracket / pool standings</div>
         </button>
+        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection("settings")}>
+          <div className="card__title" style={{ marginBottom: 6 }}>Edit Competition →</div>
+          <div className="card__sub">Change format, courts, and settings</div>
+        </button>
       </div>
     </div>
   );

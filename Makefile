@@ -24,7 +24,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -34,7 +34,7 @@ clean: ## Clean build artifacts
 	rm -rf dist/
 	@echo "Done!"
 
-local/deps: ## Install project dependencies
+local/deps: hooks/install ## Install project dependencies
 	@echo "Installing dependencies..."
 	go mod tidy
 	go install github.com/spf13/cobra-cli@v1.3.0
@@ -45,6 +45,11 @@ local/deps: ## Install project dependencies
 	python3 -m pip install -r docs/requirements.txt
 	@cd web-mobile && npm install
 	@cd web && npm install
+
+hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone
+	@chmod +x scripts/hooks/*
+	@git config core.hooksPath scripts/hooks
+	@echo "Git hooks: core.hooksPath=$$(git config --get core.hooksPath)"
 
 go/fmt: ## Format Go code
 	@echo "Formatting Go code..."

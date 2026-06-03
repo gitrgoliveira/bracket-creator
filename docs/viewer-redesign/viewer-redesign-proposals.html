@@ -383,8 +383,8 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
   <h3>Decide: column cap (the clutter control)</h3>
   <div class="opts">
     <label class="opt sel" data-group="g3">
-      <div class="opt__hd"><input type="radio" name="g3" value="A · cap at 2 columns" checked><span class="opt__t">A — Cap at 2 columns</span><span class="pill">recommended</span></div>
-      <p class="opt__d">2-up at tablet & laptop. Clean even for the dense 8-column team table; full names on laptop. This is what the existing <code>.pools-grid</code> already resolves to — smallest, safest change.</p>
+      <div class="opt__hd"><input type="radio" name="g3" value="A · 2 cols landscape / 1 col portrait" checked><span class="opt__t">A — 2 columns in landscape, 1 in portrait <span class="pill">✓ chosen</span></span></div>
+      <p class="opt__d"><b>Decided:</b> portrait (phones held upright, narrow tablets) stays single-column for full-width readable tiles; landscape (rotated phone/tablet, laptops) goes 2-up. Implemented with an <code>@media (orientation: landscape)</code> rule on top of the existing <code>.pools-grid</code>. Never more than 2 columns, so the dense 8-column team table never wraps badly.</p>
     </label>
     <label class="opt" data-group="g3">
       <div class="opt__hd"><input type="radio" name="g3" value="B · up to 3 columns"><span class="opt__t">B — Allow up to 3 columns on wide screens</span></div>
@@ -440,7 +440,7 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
         <tr><td><input type="checkbox" class="chk" data-qw="label-person" checked></td><td>Comp eyebrow (individual)</td><td><span class="bad">Individual · 1-person</span></td><td><span class="fix">Individual</span></td></tr>
         <tr><td><input type="checkbox" class="chk" data-qw="team-count" checked></td><td>Team comp meta</td><td><span class="bad">36 teams</span> (counts players)</td><td><span class="fix">12 teams</span></td></tr>
         <tr><td><input type="checkbox" class="chk" data-qw="winner-tick" checked></td><td>Bracket winner</td><td><span class="bad">bold weight only</span></td><td><span class="fix">winner ✓ + advance rail</span></td></tr>
-        <tr><td><input type="checkbox" class="chk" data-qw="bye-final" checked></td><td>Unresolved slot</td><td><span class="bad">TBD … Final</span></td><td><span class="fix">Bye</span> (or hidden until resolved)</td></tr>
+        <tr><td><input type="checkbox" class="chk" data-qw="bye-final"></td><td>Unresolved slot</td><td><span class="bad">TBD … Final</span></td><td><span class="fix">Bye</span> (or hidden until resolved)</td></tr>
         <tr><td><input type="checkbox" class="chk" data-qw="results-order" checked></td><td>Per-comp Recent Results</td><td><span class="bad">not time-ordered</span></td><td><span class="fix">reverse-chronological</span></td></tr>
         <tr><td><input type="checkbox" class="chk" data-qw="queue-yours"></td><td>Queue label (no follow)</td><td><span class="bad">“1 before yours”</span></td><td><span class="fix">“1 ahead on court”</span></td></tr>
         <tr><td><input type="checkbox" class="chk" data-qw="ippon-zero"></td><td>Ippon score notation</td><td><span class="bad">·—M</span> ( · = zero )</td><td><span class="fix">0–M</span> + tooltip legend</td></tr>

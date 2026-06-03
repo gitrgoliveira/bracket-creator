@@ -1,7 +1,7 @@
 // Pure-logic tests for buildPlayerMatchHighlight (FR-020, FR-022).
 // Slice 4 / T108–T109: drives "Find my matches" filtering on the viewer home.
 import { describe, it, expect } from 'vitest';
-import { buildPlayerMatchHighlight, isFollowedPlayer, mymatchQueueLabel } from '../viewer.jsx';
+import { buildPlayerMatchHighlight, buildFollowedNextMatch, isFollowedPlayer, mymatchQueueLabel } from '../viewer.jsx';
 
 describe('buildPlayerMatchHighlight', () => {
   it('returns matches where playerId is on SideA', () => {
@@ -166,35 +166,19 @@ describe('mymatchQueueLabel', () => {
   });
 });
 
-// mp-wvkh: myUpcoming derivation logic — tested as a pure function that
-// mirrors the inline useMemo in ViewerCompetition. Exercises the three
-// behaviours Copilot flagged: running-match precedence, scheduledAt
-// ordering, and name-fallback when followed player has no UUID.
-function deriveMyUpcoming(followedPlayer, allMatches) {
-  if (!followedPlayer || (!followedPlayer.id && !followedPlayer.name)) return null;
-  const hasBothSides = (m) => m.sideA && m.sideB;
-  const mine = buildPlayerMatchHighlight(followedPlayer.id || "", allMatches, followedPlayer.name)
-    .filter(hasBothSides)
-    .filter((m) => m.status !== "completed");
-  mine.sort((a, b) => {
-    const ao = a.status === "running" ? 0 : 1;
-    const bo = b.status === "running" ? 0 : 1;
-    if (ao !== bo) return ao - bo;
-    return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
-  });
-  return mine[0] || null;
-}
-
-describe('deriveMyUpcoming (mp-wvkh)', () => {
+// mp-wvkh: Tests for buildFollowedNextMatch — the extracted helper used by
+// ViewerCompetition to derive the followed player's next match. Covers:
+// running-match precedence, scheduledAt ordering, name-fallback (no UUID).
+describe('buildFollowedNextMatch (mp-wvkh)', () => {
   const mkMatch = (id, sideA, sideB, status, scheduledAt) => ({
     id, sideA, sideB, status, scheduledAt,
   });
   const player = { id: 'p1', name: 'Alice' };
 
   it('returns null when followedPlayer is null or has no id/name', () => {
-    expect(deriveMyUpcoming(null, [])).toBeNull();
-    expect(deriveMyUpcoming({}, [])).toBeNull();
-    expect(deriveMyUpcoming({ id: '', name: '' }, [])).toBeNull();
+    expect(buildFollowedNextMatch(null, [])).toBeNull();
+    expect(buildFollowedNextMatch({}, [])).toBeNull();
+    expect(buildFollowedNextMatch({ id: '', name: '' }, [])).toBeNull();
   });
 
   it('returns the running match over a scheduled match', () => {
@@ -202,7 +186,7 @@ describe('deriveMyUpcoming (mp-wvkh)', () => {
       mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'scheduled', '09:00'),
       mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'running', '09:30'),
     ];
-    const result = deriveMyUpcoming(player, matches);
+    const result = buildFollowedNextMatch(player, matches);
     expect(result.id).toBe('m2');
   });
 
@@ -211,7 +195,7 @@ describe('deriveMyUpcoming (mp-wvkh)', () => {
       mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'scheduled', '10:00'),
       mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '09:00'),
     ];
-    const result = deriveMyUpcoming(player, matches);
+    const result = buildFollowedNextMatch(player, matches);
     expect(result.id).toBe('m2');
   });
 
@@ -220,7 +204,7 @@ describe('deriveMyUpcoming (mp-wvkh)', () => {
       mkMatch('m1', { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }, 'completed', '08:00'),
       mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '10:00'),
     ];
-    const result = deriveMyUpcoming(player, matches);
+    const result = buildFollowedNextMatch(player, matches);
     expect(result.id).toBe('m2');
   });
 
@@ -229,7 +213,7 @@ describe('deriveMyUpcoming (mp-wvkh)', () => {
     const matches = [
       mkMatch('m1', { id: 'x1', name: 'Alice' }, { id: 'x2', name: 'Bob' }, 'scheduled', '09:00'),
     ];
-    const result = deriveMyUpcoming(nameOnly, matches);
+    const result = buildFollowedNextMatch(nameOnly, matches);
     expect(result).not.toBeNull();
     expect(result.id).toBe('m1');
   });
@@ -238,7 +222,7 @@ describe('deriveMyUpcoming (mp-wvkh)', () => {
     const matches = [
       mkMatch('m1', { id: 'p5', name: 'Eve' }, { id: 'p6', name: 'Frank' }, 'scheduled', '09:00'),
     ];
-    expect(deriveMyUpcoming(player, matches)).toBeNull();
+    expect(buildFollowedNextMatch(player, matches)).toBeNull();
   });
 
   it('skips matches missing a side (hasBothSides guard)', () => {
@@ -246,7 +230,7 @@ describe('deriveMyUpcoming (mp-wvkh)', () => {
       mkMatch('m1', { id: 'p1', name: 'Alice' }, null, 'scheduled', '09:00'),
       mkMatch('m2', { id: 'p1', name: 'Alice' }, { id: 'p3', name: 'Charlie' }, 'scheduled', '10:00'),
     ];
-    const result = deriveMyUpcoming(player, matches);
+    const result = buildFollowedNextMatch(player, matches);
     expect(result.id).toBe('m2');
   });
 });

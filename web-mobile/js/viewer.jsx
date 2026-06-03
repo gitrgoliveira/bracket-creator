@@ -2222,9 +2222,10 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 <span className="pool-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {
-                if (ri === ci) return <td key={colPlayer.name} className="pool-matrix__cell pool-matrix__cell--self">&mdash;</td>;
+                const colMe = isHighlighted(colPlayer) ? " pool-matrix__col--me" : "";
+                if (ri === ci) return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--self${colMe}`}>&mdash;</td>;
                 const m = matchMap[`${rowPlayer.name}||${colPlayer.name}`];
-                if (!m) return <td key={colPlayer.name} className="pool-matrix__cell pool-matrix__cell--empty"></td>;
+                if (!m) return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--empty${colMe}`}></td>;
 
                 const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
                 const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
@@ -2238,7 +2239,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
+                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2263,7 +2264,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 }
 
                 return (
-                  <td key={colPlayer.name} className={`pool-matrix__cell ${rowWon ? "pool-matrix__cell--win" : isDraw ? "pool-matrix__cell--draw" : "pool-matrix__cell--loss"}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={colPlayer.name} className={`pool-matrix__cell ${rowWon ? "pool-matrix__cell--win" : isDraw ? "pool-matrix__cell--draw" : "pool-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );

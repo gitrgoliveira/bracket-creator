@@ -1504,7 +1504,7 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   );
 }
 
-function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, tweaks }) {
+function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, authed, onEditCompetition, tweaks }) {
   const [tab, setTab] = useState("overview");
   const c = competition;
 
@@ -1661,6 +1661,9 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
           <StatusBadge status={c.status} showLiveDot format={c.format} />
+          {authed && onEditCompetition && (
+            <button className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}>✎ Edit</button>
+          )}
         </div>
         <div className="viewer__tabs">
           {tabs.map((tb) => (

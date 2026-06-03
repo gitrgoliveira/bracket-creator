@@ -182,6 +182,51 @@ func TestDeleteBrandingLogo_RemovesFile(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestDeleteBrandingLogo_PreservesWindowTitle verifies that deleting the logo
+// does not nil-out the Theme when a windowTitle is configured, so operators
+// don't silently lose their window title setting.
+func TestDeleteBrandingLogo_PreservesWindowTitle(t *testing.T) {
+	h, _, cleanup := brandingTestSetup(t)
+	defer cleanup()
+
+	// Set a windowTitle via PUT /tournament.
+	body := `{"name":"Test Cup","password":"secret","courts":["A"],"theme":{"windowTitle":"My Cup 2026"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	(*h).ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Upload a logo.
+	logoBody, ct := buildBrandingUpload(t, "logo.png", tinyPNG)
+	req = httptest.NewRequest(http.MethodPost, "/api/branding/logo", logoBody)
+	req.Header.Set("Content-Type", ct)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w = httptest.NewRecorder()
+	(*h).ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Delete the logo.
+	req = httptest.NewRequest(http.MethodDelete, "/api/branding/logo", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w = httptest.NewRecorder()
+	(*h).ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Theme must survive with the windowTitle intact.
+	req = httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w = httptest.NewRecorder()
+	(*h).ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	theme, _ := got["theme"].(map[string]any)
+	require.NotNil(t, theme, "theme must not be nil after logo delete when windowTitle is set")
+	assert.Equal(t, "My Cup 2026", theme["windowTitle"], "windowTitle must be preserved after logo delete")
+}
+
 func TestDeleteBrandingLogo_NoLogoReturns404(t *testing.T) {
 	h, _, cleanup := brandingTestSetup(t)
 	defer cleanup()
@@ -204,9 +249,9 @@ func TestPutTournament_ThemeColorsAccepted(t *testing.T) {
 	w := httptest.NewRecorder()
 	(*h).ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	var resp map[string]interface{}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	theme, _ := resp["theme"].(map[string]interface{})
+	theme, _ := resp["theme"].(map[string]any)
 	require.NotNil(t, theme)
 	assert.Equal(t, "#ff0000", theme["primaryColor"])
 }

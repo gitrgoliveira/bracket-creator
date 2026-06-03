@@ -27,6 +27,9 @@ var validBrandingContentTypes = map[string]string{
 // serves the tournament logo bytes. Returns 404 when no logo is configured.
 func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 	r.GET("/branding/logo", func(c *gin.Context) {
+		// Prevent browsers/proxies from caching 404s — a newly uploaded logo
+		// would otherwise stay "missing" until a hard refresh.
+		c.Header("Cache-Control", "no-cache")
 		t, err := store.LoadTournament()
 		if err != nil || t == nil || t.Theme == nil || t.Theme.LogoPath == "" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no logo configured"})
@@ -130,10 +133,18 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "logo must be ≤1 MB"})
 			return
 		}
+		// os.Rename is atomic on POSIX but fails on Windows when the
+		// destination already exists. Remove the destination first and retry
+		// once so repeated logo uploads work on all platforms.
 		if err := os.Rename(tmpPath, fullPath); err != nil {
-			_ = os.Remove(tmpPath)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			if removeErr := os.Remove(fullPath); removeErr == nil {
+				err = os.Rename(tmpPath, fullPath)
+			}
+			if err != nil {
+				_ = os.Remove(tmpPath)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 		}
 
 		// Update state before removing the other extension so GET never
@@ -178,7 +189,9 @@ func handleBrandingLogoDelete(store *state.Store) gin.HandlerFunc {
 			desired.Theme.LogoPath = ""
 			// Nil-out the Theme pointer when all fields are now empty so
 			// tournament.md doesn't persist a bare "theme: {}" block.
-			if desired.Theme.PrimaryColor == "" && desired.Theme.AccentSoftColor == "" {
+			// Include WindowTitle in the check so deleting only the logo
+			// doesn't silently clear a configured window title.
+			if desired.Theme.PrimaryColor == "" && desired.Theme.AccentSoftColor == "" && desired.Theme.WindowTitle == "" {
 				desired.Theme = nil
 			}
 			return nil

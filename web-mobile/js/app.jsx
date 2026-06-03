@@ -37,6 +37,9 @@ function applyTheme(theme) {
   }
   document.title = (theme && theme.windowTitle) || "Bracket Creator Mobile";
 }
+// Expose globally so BrandingManager (loaded as a separate module) can call
+// window.applyTheme() for live previews without duplicating the logic.
+window.applyTheme = applyTheme;
 
 // Pure helper: parse the current pathname into the App's view state.
 // Extracted so it remains unit-testable; previously inlined as a

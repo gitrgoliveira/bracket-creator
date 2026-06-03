@@ -216,7 +216,7 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
 
   <!-- ===================== GROUP 2 ===================== -->
   <h2><span class="gtag">Group 2</span><br>Type-aware standings + qualification / tiebreak clarity</h2>
-  <div class="finding">Individual pools reuse the <b>team</b> column set (IV/IL/PW/PL, all zero). Nothing marks which rows <b>advance</b>, and three players tied 2–1 are ranked 1/2/3 with identical visible stats — the order looks arbitrary. Jargon headers have no tooltips.</div>
+  <div class="finding">Individual pools wrongly reuse the <b>team</b> columns (IV/IL), and PW/PL aren't populated — so three players tied 2–1 show identical stats and the order looks arbitrary, with nothing marking who advances. <b>The scoring/ranking criteria stay exactly as the handbook</b> (individual: W → L → T → PW → PL; team: W → L → T → IV → IL → IT → PW → PL) — we only fix the individual column set, populate the points, highlight the qualifiers, and add header tooltips.</div>
 
   <div class="cols">
     <div class="col">
@@ -226,43 +226,77 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
           <div style="font-weight:600;margin-bottom:2px">Pool A</div>
           <table class="std">
             <tr><th>#</th><th>Player</th><th>W</th><th>L</th><th>T</th><th>IV</th><th>IL</th><th>PW</th><th>PL</th></tr>
-            <tr><td class="rk">1</td><td class="tm">Isaac Asimov</td><td>2</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
-            <tr><td class="rk">2</td><td class="tm">Oscar Wilde</td><td>2</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
-            <tr><td class="rk">3</td><td class="tm">Vincent King</td><td>2</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
-            <tr><td class="rk">4</td><td class="tm">Charles Dickens</td><td>0</td><td>3</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+            <tr><td class="rk">1</td><td class="tm">Isaac Asimov</td><td>2</td><td>1</td><td>0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+            <tr><td class="rk">2</td><td class="tm">Oscar Wilde</td><td>2</td><td>1</td><td>0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+            <tr><td class="rk">3</td><td class="tm">Vincent King</td><td>2</td><td>1</td><td>0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+            <tr><td class="rk">4</td><td class="tm">Charles Dickens</td><td>0</td><td>3</td><td>0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
           </table>
         </div>
       </div>
-      <p class="note">4 dead columns; ranks 1–3 indistinguishable; no advance line.</p>
+      <p class="note"><b style="color:var(--red)">IV/IL are team-only columns</b> (always 0 for individuals); <b>PW/PL show 0</b> too (points not aggregated) — so ranks 1–3 are indistinguishable and there's no advance line.</p>
     </div>
     <div class="col">
-      <div class="lbl lbl--new"><span class="dot dot--new"></span>Proposed — individual columns + advance cut + tiebreak</div>
+      <div class="lbl lbl--new"><span class="dot dot--new"></span>Proposed — canonical individual columns + advance cut (scoring unchanged)</div>
       <div class="frame frame--good">
         <div class="card">
           <div style="font-weight:600;margin-bottom:2px">Pool A <span style="float:right;font-size:11px;color:var(--ink-3)">Top 2 advance</span></div>
           <table class="std">
-            <tr><th>#</th><th>Player</th><th><span class="help" title="Fights won">W</span></th><th><span class="help" title="Fights lost">L</span></th><th><span class="help" title="Hikiwake — draws">Draw</span></th><th><span class="help" title="Ippon points scored − conceded">±Pts</span></th></tr>
-            <tr class="qual"><td class="rk">1</td><td class="tm">Isaac Asimov<small class="tiebreak">won tiebreak +3 pts</small></td><td>2</td><td>1</td><td>0</td><td>+4</td></tr>
-            <tr class="qual qualline"><td class="rk">2</td><td class="tm">Oscar Wilde<small class="tiebreak">+1 pts</small></td><td>2</td><td>1</td><td>0</td><td>+1</td></tr>
-            <tr><td class="rk">3</td><td class="tm">Vincent King</td><td>2</td><td>1</td><td>0</td><td>−2</td></tr>
-            <tr><td class="rk">4</td><td class="tm">Charles Dickens</td><td>0</td><td>3</td><td>0</td><td>−3</td></tr>
+            <tr><th>#</th><th>Player</th><th><span class="help" title="Fights won">W</span></th><th><span class="help" title="Fights lost">L</span></th><th><span class="help" title="Hikiwake — draws">T</span></th><th><span class="help" title="Points (ippon) won">PW</span></th><th><span class="help" title="Points (ippon) lost">PL</span></th></tr>
+            <tr class="qual"><td class="rk">1</td><td class="tm">Isaac Asimov</td><td>2</td><td>1</td><td>0</td><td>5</td><td>2</td></tr>
+            <tr class="qual qualline"><td class="rk">2</td><td class="tm">Oscar Wilde</td><td>2</td><td>1</td><td>0</td><td>4</td><td>3</td></tr>
+            <tr><td class="rk">3</td><td class="tm">Vincent King</td><td>2</td><td>1</td><td>0</td><td>3</td><td>4</td></tr>
+            <tr><td class="rk">4</td><td class="tm">Charles Dickens</td><td>0</td><td>3</td><td>0</td><td>1</td><td>5</td></tr>
           </table>
           <div class="cut">⎯ advance line ⎯</div>
         </div>
       </div>
-      <p class="note">Green = qualifying; dashed = advance cut; tiebreak reason shown; headers carry glossary tooltips (hover W/Draw/±Pts).</p>
+      <p class="note"><b>Columns &amp; ranking unchanged</b> — exactly the handbook's <b>W → L → T → PW → PL</b>. The only additions are: qualifying rows shaded green, a dashed advance line, and header glossary tooltips. The 2–1 trio now separates on PW/PL, so the order is self-explanatory; truly identical rows are still broken by a supplementary ippon-shobu fight.</p>
     </div>
   </div>
 
-  <h3>Decide: how literal should the individual columns be?</h3>
+  <h3>Team pools keep the full handbook column set — decide the layout</h3>
+  <p class="note" style="margin:0 0 8px">Per the handbook, team ranking is <b>W → L → T → IV → IL → IT → PW → PL</b>. Both options below show those exact columns and the same qualifier highlight; only the arrangement differs.</p>
   <div class="opts">
     <label class="opt sel" data-group="g2">
-      <div class="opt__hd"><input type="radio" name="g2" value="A · simplified ±Pts" checked><span class="opt__t">A — Simplified (W / L / Draw / ±Pts)</span><span class="pill">recommended</span></div>
-      <p class="opt__d">Fewest columns, fits phones comfortably, “±Pts” captures the points tiebreak in one signed number.</p>
+      <div class="opt__hd"><input type="radio" name="g2" value="A · one combined team table" checked><span class="opt__t">A — One combined table</span><span class="pill">recommended</span></div>
+      <div class="frame frame--good">
+        <div class="card" style="margin:0">
+          <div style="font-weight:600;margin-bottom:2px">Pool A <span style="float:right;font-size:11px;color:var(--ink-3)">Top 2 advance</span></div>
+          <table class="std">
+            <tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>IV</th><th>IL</th><th>IT</th><th>PW</th><th>PL</th></tr>
+            <tr class="qual"><td class="rk">1</td><td class="tm">Team Alpha</td><td>3</td><td>0</td><td>0</td><td>8</td><td>4</td><td>3</td><td>16</td><td>9</td></tr>
+            <tr class="qual qualline"><td class="rk">2</td><td class="tm">Team Beta</td><td>2</td><td>1</td><td>0</td><td>7</td><td>6</td><td>2</td><td>14</td><td>12</td></tr>
+            <tr><td class="rk">3</td><td class="tm">Team Gamma</td><td>1</td><td>2</td><td>0</td><td>5</td><td>8</td><td>2</td><td>10</td><td>15</td></tr>
+            <tr><td class="rk">4</td><td class="tm">Team Delta</td><td>0</td><td>3</td><td>0</td><td>4</td><td>6</td><td>5</td><td>8</td><td>12</td></tr>
+          </table>
+          <div class="cut">⎯ advance line ⎯</div>
+        </div>
+      </div>
+      <p class="opt__d">All 8 stat columns on one row. Compact, one glance — but tight on a narrow phone (horizontal scroll possible).</p>
     </label>
     <label class="opt" data-group="g2">
-      <div class="opt__hd"><input type="radio" name="g2" value="B · explicit PW/PL"><span class="opt__t">B — Explicit (W / L / Draw / Pts+ / Pts−)</span></div>
-      <p class="opt__d">Keeps points-for and points-against as separate columns (matches the official tie-break wording), one extra column.</p>
+      <div class="opt__hd"><input type="radio" name="g2" value="B · two stacked tables (handbook)"><span class="opt__t">B — Two stacked tables (handbook layout)</span></div>
+      <div class="frame frame--good">
+        <div class="card" style="margin:0">
+          <div style="font-weight:600;margin-bottom:2px">Pool A — team result <span style="float:right;font-size:11px;color:var(--ink-3)">Top 2 advance</span></div>
+          <table class="std">
+            <tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th></tr>
+            <tr class="qual"><td class="rk">1</td><td class="tm">Team Alpha</td><td>3</td><td>0</td><td>0</td></tr>
+            <tr class="qual qualline"><td class="rk">2</td><td class="tm">Team Beta</td><td>2</td><td>1</td><td>0</td></tr>
+            <tr><td class="rk">3</td><td class="tm">Team Gamma</td><td>1</td><td>2</td><td>0</td></tr>
+            <tr><td class="rk">4</td><td class="tm">Team Delta</td><td>0</td><td>3</td><td>0</td></tr>
+          </table>
+          <div style="font-weight:600;margin:10px 0 2px">Individual aggregate</div>
+          <table class="std">
+            <tr><th>Team</th><th>IV</th><th>IL</th><th>IT</th><th>PW</th><th>PL</th></tr>
+            <tr class="qual"><td class="tm">Team Alpha</td><td>8</td><td>4</td><td>3</td><td>16</td><td>9</td></tr>
+            <tr class="qual"><td class="tm">Team Beta</td><td>7</td><td>6</td><td>2</td><td>14</td><td>12</td></tr>
+            <tr><td class="tm">Team Gamma</td><td>5</td><td>8</td><td>2</td><td>10</td><td>15</td></tr>
+            <tr><td class="tm">Team Delta</td><td>4</td><td>6</td><td>5</td><td>8</td><td>12</td></tr>
+          </table>
+        </div>
+      </div>
+      <p class="opt__d">Mirrors the handbook's two-table scoreboard (team result + individual aggregate). Easier to read on phones; takes more vertical space.</p>
     </label>
   </div>
 

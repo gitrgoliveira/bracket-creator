@@ -1660,6 +1660,10 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
               upcomingMatches={upcomingMatches}
               recentMatches={recentMatches}
               tweaks={tweaks}
+              standings={standings}
+              pools={pools}
+              poolMatches={poolMatches}
+              onSwitchTab={setTab}
             />
           )}
           {tab === "bracket" && derivedBracket && (
@@ -1790,8 +1794,18 @@ function MatchDetailCard({ match, onClose }) {
   );
 }
 
-function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks }) {
+function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, standings, pools, poolMatches, onSwitchTab }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
+
+  const isLeague = c.format === "league";
+  const isTeam = c.kind === "team" || c.teamSize > 0;
+  const leaguePoolName = isLeague && pools && pools[0] ? pools[0].poolName : null;
+  const leagueStandings = leaguePoolName && standings ? (standings[leaguePoolName] || []) : [];
+  const allMatchesComplete = isLeague && (() => {
+    const all = poolMatches || [];
+    return all.length > 0 && all.every(m => m.status === "completed");
+  })();
+  const leagueWinner = allMatchesComplete && leagueStandings.length > 0 ? leagueStandings[0] : null;
 
   // setup: no draw yet — plain "not started" message.
   if (!c.status || c.status === "setup") {
@@ -1860,6 +1874,66 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           })()}
         </div>
       ) : null}
+
+      {/* League standings summary (mp-ldnr) */}
+      {isLeague && leagueStandings.length > 0 && (c.status === "pools" || c.status === "playoffs" || c.status === "completed") && (
+        <div className="pool" style={{ padding: 14, marginBottom: 12 }} data-testid="league-overview-standings">
+          {leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} testId="league-overview-winner" marginBottom={12} />}
+          <div className="pool__head">
+            <div className="pool__name">{allMatchesComplete ? "Final standings" : "Standings"}</div>
+            {poolMatches && (
+              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                {poolMatches.filter(m => m.status === "completed").length}/{poolMatches.length} matches
+              </div>
+            )}
+          </div>
+          <table className="pool__table">
+            <thead>
+              {isTeam ? (
+                <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">PW</th><th className="num">PL</th></tr>
+              ) : (
+                <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
+              )}
+            </thead>
+            <tbody>
+              {leagueStandings.slice(0, 5).map((s, i) => (
+                <tr key={s.player?.id || s.player?.name || i}>
+                  <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
+                  <td>
+                    <div style={{ fontWeight: 500 }}>
+                      {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
+                      {s.player?.name || ""}
+                    </div>
+                    {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
+                  </td>
+                  <td className="num">{s.wins || 0}</td>
+                  <td className="num">{s.losses || 0}</td>
+                  <td className="num">{s.draws || 0}</td>
+                  {isTeam && <td className="num">{s.individualWins || 0}</td>}
+                  {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                  <td className="num">{isTeam ? (s.pointsWon || 0) : (s.ipponsGiven || 0)}</td>
+                  <td className="num">{isTeam ? (s.pointsLost || 0) : (s.ipponsTaken || 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {leagueStandings.length > 5 && (
+            <div style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
+              Showing top 5 of {leagueStandings.length}
+            </div>
+          )}
+          {onSwitchTab && (
+            <button
+              className="btn btn--link"
+              style={{ marginTop: 8, fontSize: 13, padding: 0 }}
+              onClick={() => onSwitchTab("pools")}
+              data-testid="league-overview-view-all"
+            >
+              View full standings →
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Current match — shown inline, before Up Next */}
       {currentMatch && currentMatch.status === "running" && (

@@ -20,6 +20,27 @@ const THEME = {
   "cardVariant": 1
 };
 
+// mp-scf: apply tournament-configured CSS custom properties. Called once
+// after tournament load and again on tournament_updated. Removes overrides
+// when the theme field is absent so the CSS defaults take over.
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme && theme.primaryColor) {
+    root.style.setProperty("--accent", theme.primaryColor);
+  } else {
+    root.style.removeProperty("--accent");
+  }
+  if (theme && theme.accentSoftColor) {
+    root.style.setProperty("--accent-soft", theme.accentSoftColor);
+  } else {
+    root.style.removeProperty("--accent-soft");
+  }
+  document.title = (theme && theme.windowTitle) || "Bracket Creator Mobile";
+}
+// Expose globally so BrandingManager (loaded as a separate module) can call
+// window.applyTheme() for live previews without duplicating the logic.
+window.applyTheme = applyTheme;
+
 // Pure helper: parse the current pathname into the App's view state.
 // Extracted so it remains unit-testable; previously inlined as a
 // closure in App() which prevented both reuse and isolated testing.
@@ -399,6 +420,7 @@ function App() {
         const comps = await window.API.fetchCompetitions();
         t.competitions = comps;
         setTournament(t);
+        applyTheme(t.theme); // mp-scf: apply custom colors
       }
     } catch (e) {
       console.error("Failed to load tournament", e);
@@ -932,7 +954,7 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
     // dialog could be obscured by chrome or by announcement cards.
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
-        <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="auth__logo" decoding="async" />
+        <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="auth__logo" decoding="async" />
         <div className="auth__title">Admin sign in</div>
         <div className="auth__sub">Enter the tournament password to manage brackets, schedules and live results.</div>
         <form onSubmit={submit}>

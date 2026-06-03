@@ -327,6 +327,25 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
+		// Trim windowTitle so whitespace-only input doesn't persist as an
+		// effectively-blank browser title instead of falling back to the default.
+		// Also nil-out a fully-empty Theme (no colors, no title set by the
+		// client) so tournament.md stays clean and the UI doesn't treat an
+		// unintentional "theme: {}" as "branding is configured".
+		// LogoPath is excluded: it has json:"-" and is never set via this path.
+		if t.Theme != nil {
+			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
+			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" {
+				t.Theme = nil
+			}
+		}
+
+		// Validate hex color fields on the optional theme block (mp-scf).
+		if err := state.ValidateTheme(t.Theme); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		if err := validateTournamentDurationDays(t.DurationDays); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -400,6 +419,20 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// via PUT /api/auth/admin-password, never here.
 			if current != nil {
 				desired.AdminPassword = current.AdminPassword
+			}
+
+			// Preserve Theme.LogoPath (mp-scf): LogoPath has json:"-" so the
+			// bound body never carries it. The logo is managed via
+			// POST/DELETE /api/branding/logo; this PUT must not clear it.
+			// Also preserve the entire Theme when the client omits it (nil)
+			// so a routine name/venue save doesn't wipe configured colors.
+			if current != nil && current.Theme != nil {
+				if desired.Theme == nil {
+					desired.Theme = &state.Theme{}
+					*desired.Theme = *current.Theme
+				} else {
+					desired.Theme.LogoPath = current.Theme.LogoPath
+				}
 			}
 
 			// Immutability of Mode (mp-7h7): Mode is chosen once at creation
@@ -612,6 +645,21 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if t.Mode == "" {
 			t.Mode = state.TournamentModeOfficiated
+		}
+
+		// Trim windowTitle so whitespace-only input doesn't persist as an
+		// effectively-blank browser title instead of falling back to the default.
+		// Also nil-out a fully-empty Theme so tournament.md stays clean.
+		if t.Theme != nil {
+			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
+			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" {
+				t.Theme = nil
+			}
+		}
+
+		if err := state.ValidateTheme(t.Theme); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		// Reject empty Password on POST (initial setup) in file mode.

@@ -5,6 +5,7 @@ const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const formatLabel = window.formatLabel;
+const formatViewerHeaderEyebrow = window.formatViewerHeaderEyebrow;
 
 // shouldShowRegister returns true when a "Register for this competition" button
 // should be shown on a competition card. Extracted for unit testability (mp-e5j).
@@ -695,9 +696,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     <div className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head viewer__head--hero">
-          <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="topbar__logo viewer__logo" decoding="async" />
+          <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="topbar__logo viewer__logo" decoding="async" />
           <div className="viewer__title-block">
-            <div className="viewer__eyebrow">{formatDate(t.date)} · {t.venue}</div>
+            <div className="viewer__eyebrow">
+              {formatViewerHeaderEyebrow(formatDate(t.date), t.venue)}
+            </div>
             <div className="viewer__title viewer__title--lg">{t.name}</div>
           </div>
           <button className="viewer__admin-pill" onClick={onAdminClick}>
@@ -2321,7 +2324,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
         return (
           <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
             <div className="pool__head">
-              <div className="pool__name">{isLeague ? "Final standings" : pool.poolName}</div>
+              <div className="pool__name">{isLeague ? (allMatchesComplete ? "Final standings" : "Standings") : pool.poolName}</div>
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
                 {matches.filter(m => m.status === "completed").length}/{matches.length} matches
               </div>
@@ -2535,7 +2538,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

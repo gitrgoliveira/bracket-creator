@@ -1872,7 +1872,6 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
   // logic in ViewerCompetition), so the pointer text must match.
   if (c.status === "draw-ready") {
     const isSwiss = c.format === "swiss";
-    const isLeague = c.format === "league";
     return (
       <div className="empty" style={{ padding: 32 }}>
         <div className="icon">📋</div>

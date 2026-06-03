@@ -84,7 +84,7 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 ## Building and Running
 
 ### Prerequisites
-- Go 1.26.3+
+- Go 1.26.4+
 - Make
 
 ### Key Commands

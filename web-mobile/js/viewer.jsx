@@ -1548,8 +1548,8 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
 
   const watchedIds = useMemo(() => {
     const ids = new Set();
-    if (followedPlayer && followedPlayer.id) ids.add(followedPlayer.id);
-    (watchlist || []).forEach(w => { if (w.id) ids.add(w.id); });
+    if (followedPlayer && followedPlayer.id) ids.add(String(followedPlayer.id));
+    (watchlist || []).forEach(w => { if (w.id) ids.add(String(w.id)); });
     return ids;
   }, [followedPlayer, watchlist]);
 

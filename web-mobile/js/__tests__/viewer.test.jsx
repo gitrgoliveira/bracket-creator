@@ -643,6 +643,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
+    global.window = global.window || {};
     savedIsHikiwake = global.window.isHikiwake;
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
@@ -748,6 +749,17 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
     const preventDefaultSpy = vi.fn();
     winCell.props.onKeyDown({ key: 'Enter', preventDefault: preventDefaultSpy });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(preventDefaultSpy).toHaveBeenCalled();
+  });
+
+  it('Space key on interactive cell fires onMatchClick', () => {
+    const spy = vi.fn();
+    const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const preventDefaultSpy = vi.fn();
+    winCell.props.onKeyDown({ key: ' ', preventDefault: preventDefaultSpy });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(preventDefaultSpy).toHaveBeenCalled();
   });

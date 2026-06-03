@@ -52,5 +52,3 @@ read the diff. See CONTRIBUTING and CLAUDE.md.
 
 <!-- Bead reference: -->
 Closes mp-xxxx
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)

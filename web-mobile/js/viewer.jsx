@@ -1945,7 +1945,19 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 
       {/* Current match — shown inline, before Up Next */}
       {currentMatch && currentMatch.status === "running" && (
-        <div style={{ marginBottom: 12, cursor: isSelfRun ? "pointer" : undefined }} role={isSelfRun ? "button" : undefined} tabIndex={isSelfRun ? 0 : undefined} onClick={isSelfRun ? () => handleMatchClick(currentMatch) : undefined} onKeyDown={isSelfRun ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleMatchClick(currentMatch); } } : undefined}>
+        <div
+          style={{ marginBottom: 12, cursor: isSelfRun ? "pointer" : undefined }}
+          role={isSelfRun ? "button" : undefined}
+          aria-label={isSelfRun ? "View current match details" : undefined}
+          tabIndex={isSelfRun ? 0 : undefined}
+          onClick={isSelfRun ? () => handleMatchClick(currentMatch) : undefined}
+          onKeyDown={isSelfRun ? (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handleMatchClick(currentMatch);
+            }
+          } : undefined}
+        >
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span className="dot dot--live"></span> ON NOW
           </div>

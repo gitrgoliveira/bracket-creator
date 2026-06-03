@@ -879,8 +879,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
     expect(vsched).toBeTruthy();
     vsched.props.onClick();
     const updated = runtime.currentTree();
-    // MatchViewerModal is a function component with tournament + compId props
-    const modal = findInTree(updated, n => typeof n?.type === 'function' && n?.props?.tournament && n?.props?.compId);
+    const modal = findInTree(updated, n => n?.type?.name === 'MatchViewerModal');
     expect(modal).toBeTruthy();
     expect(modal.props.match).toBeTruthy();
     expect(modal.props.match.id).toBe('m1');
@@ -908,8 +907,54 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
     const detailCard = findInTree(updated, n => typeof n?.type === 'function' && n?.props?.match && n?.props?.onClose !== undefined && !n?.props?.tournament);
     expect(detailCard).toBeTruthy();
     // No modal-backdrop (no MatchViewerModal)
-    const modal = findInTree(updated, n => n?.props?.className === 'modal-backdrop');
+    const modal = findInTree(updated, n => n?.type?.name === 'MatchViewerModal');
     expect(modal).toBeNull();
+  });
+
+  it('self-run: clicking the ON NOW current match opens MatchViewerModal', () => {
+    const running = { ...mkMatch('curr1'), status: 'running' };
+    runtime.mount(ViewerOverview, {
+      c: mkComp(),
+      myPlayer: null,
+      myUpcoming: null,
+      currentMatch: running,
+      liveMatches: [],
+      upcomingMatches: [],
+      recentMatches: [],
+      tweaks: {},
+      tournament: { mode: 'self-run' },
+      compId: 'c1',
+    });
+    const onNow = findInTree(runtime.currentTree(), n => n?.type === 'div' && n?.props?.role === 'button');
+    expect(onNow).toBeTruthy();
+    onNow.props.onClick();
+    const modal = findInTree(runtime.currentTree(), n => n?.type?.name === 'MatchViewerModal');
+    expect(modal).toBeTruthy();
+    expect(modal.props.match.id).toBe('curr1');
+  });
+
+  it('self-run: Enter key on ON NOW current match opens MatchViewerModal', () => {
+    const running = { ...mkMatch('curr2'), status: 'running' };
+    runtime.mount(ViewerOverview, {
+      c: mkComp(),
+      myPlayer: null,
+      myUpcoming: null,
+      currentMatch: running,
+      liveMatches: [],
+      upcomingMatches: [],
+      recentMatches: [],
+      tweaks: {},
+      tournament: { mode: 'self-run' },
+      compId: 'c1',
+    });
+    const onNow = findInTree(runtime.currentTree(), n => n?.type === 'div' && n?.props?.role === 'button');
+    expect(onNow).toBeTruthy();
+    const fakeEvent = { key: 'Enter', preventDefault: vi.fn() };
+    onNow.props.onKeyDown(fakeEvent);
+    expect(fakeEvent.preventDefault).toHaveBeenCalled();
+    const modal = findInTree(runtime.currentTree(), n => n?.type?.name === 'MatchViewerModal');
+    expect(modal).toBeTruthy();
+    expect(modal.props.match.id).toBe('curr2');
   });
 });
 

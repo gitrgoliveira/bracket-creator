@@ -166,6 +166,33 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 - Duplicate participant names in the CSV are rejected up front by `helper.CheckDuplicateEntries`; the web handler surfaces these to the user
 - Chained match navigation in the admin score editor (Prev/Next buttons, Finish + Start Next, ←/→ keys) must stay on the current match's shiaijo — operators run matches per-court, so hopping courts mid-flow breaks the workflow. See `AdminScoreEditor` in `web-mobile/js/admin_schedule.jsx`: filter to `(m.court || "") === (openMatch.court || "")` so empty/undefined courts share one "unassigned" bucket.
 
+## PR Workflow
+
+- **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional — execute them, then check them.
+- **Keep the bead `in_progress` until the PR actually merges.** A green review is not a merge. Only `bd close <id>` after the merge lands, with a reason referencing the merge commit/PR.
+- **After a merge, run the full `/cleanup` sequence** (close bead → fast-forward main → remove worktree → delete local + remote branch → prune). Don't wait to be asked for each step. See `.claude/skills/cleanup/SKILL.md`.
+
+## Code Review (Copilot)
+
+- **Never report a review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix or dismissal with a reason), then re-verify the count is zero. The `/review-loop` skill (`.claude/skills/review-loop/SKILL.md`) encodes the full loop.
+- **Re-request Copilot via REST**, not `gh pr edit --add-reviewer` (which lowercases the login and fails):
+  `gh api repos/<owner>/<repo>/pulls/<pr>/requested_reviewers -X POST -f "reviewers[]=Copilot"`
+- Run `make go/test` after fixes and before pushing — a red gate means fix-or-revert, never push.
+
+## Testing & Verification
+
+- **Verify in the browser, never substitute API/curl calls.** Manual test-plan items and UAT must be executed through the actual UI.
+- **Test self-run / public features from the PUBLIC page, not the admin UI** — the public flow is what users hit; admin-side scoring proves nothing about it.
+- **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.
+- Frontend changes under `web-mobile/` require a rebuild to take effect (`//go:embed`); use `make run-mobile` or rebuild + restart.
+
+## Merge & Rebase
+
+When rebasing or resolving conflicts, watch for these recurring breakages:
+- Duplicate declarations introduced by the rebase (same symbol defined twice after a merge).
+- UUID-vs-name-string mismatches in player/entity maps — match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
+- Re-run `make go/test` after every rebase; a clean rebase that compiles can still be semantically broken.
+
 
 # Validation
 

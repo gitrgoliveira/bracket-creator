@@ -28,18 +28,6 @@ function findInTree(node, predicate) {
   return null;
 }
 
-function findAllInTree(node, predicate, acc = []) {
-  if (!node || typeof node !== 'object') return acc;
-  if (Array.isArray(node)) {
-    node.forEach(k => findAllInTree(k, predicate, acc));
-    return acc;
-  }
-  if (predicate(node)) acc.push(node);
-  const kids = node.children || node.props?.children || [];
-  [].concat(kids).forEach(k => findAllInTree(k, predicate, acc));
-  return acc;
-}
-
 describe('ViewerOverview league standings (mp-ldnr)', () => {
   const realReact = global.React;
   let runtime;

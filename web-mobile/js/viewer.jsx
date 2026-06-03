@@ -1507,7 +1507,6 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
 function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, tweaks }) {
   const [tab, setTab] = useState("overview");
   const c = competition;
-  const [followedPlayer] = useFollowedPlayer();
 
   // Phase 2 (mp-rrd) — link a pools/mixed comp to its separate playoffs comp
   // and vice-versa. A mixed tournament is TWO competitions: the pools/mixed

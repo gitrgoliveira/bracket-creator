@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'url';
 import path from 'path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // JSX transformation: @vitejs/plugin-react handles `.jsx` files with the
 // classic React.createElement runtime so the global `React` stub in

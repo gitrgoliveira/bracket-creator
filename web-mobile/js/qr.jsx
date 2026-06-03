@@ -472,9 +472,11 @@ export function renderQR(canvas, text, { moduleSize = 6, quietZone = 4 } = {}) {
   canvas.height = pxHeight;
 
   const ctx = canvas.getContext("2d");
-  // Use the actual backing-to-CSS ratio so the scale matches the rounded
-  // pixel dimensions exactly, avoiding fractional-pixel bleed on non-integer
-  // devicePixelRatios (e.g. 1.5×, 2.625×).
+  if (!ctx) return; // defensive — should never happen in a real browser
+  // Reset any prior transform (prevents scale accumulation on re-renders),
+  // then apply the backing-to-CSS ratio so the scale matches the rounded
+  // pixel dimensions exactly on non-integer devicePixelRatios.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(pxWidth / cssSize, pxHeight / cssSize);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, cssSize, cssSize);

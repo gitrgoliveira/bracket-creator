@@ -62,9 +62,15 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 
 	var results []state.MatchResult
 	for pi, p := range pools {
-		court := ""
+		poolCourts := []string{""}
 		if len(comp.Courts) > 0 {
-			court = comp.Courts[courtAssign[pi]]
+			poolCourts = []string{comp.Courts[courtAssign[pi]]}
+			// When there is only one pool (league format) and multiple
+			// courts, spread that pool's matches round-robin across all
+			// competition courts so no court sits idle.
+			if len(pools) == 1 && len(comp.Courts) > 1 {
+				poolCourts = comp.Courts
+			}
 		}
 		for i, m := range p.Matches {
 			results = append(results, state.MatchResult{
@@ -72,7 +78,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				SideA:  m.SideA.Name,
 				SideB:  m.SideB.Name,
 				Status: state.MatchStatusScheduled,
-				Court:  court,
+				Court:  poolCourts[i%len(poolCourts)],
 				// ScheduledAt is populated below by
 				// assignPoolMatchSlots — uniform start times were
 				// retired in T150.

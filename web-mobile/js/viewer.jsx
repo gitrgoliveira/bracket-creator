@@ -5,6 +5,7 @@ const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const formatLabel = window.formatLabel;
+const formatViewerHeaderEyebrow = window.formatViewerHeaderEyebrow;
 
 // shouldShowRegister returns true when a "Register for this competition" button
 // should be shown on a competition card. Extracted for unit testability (mp-e5j).
@@ -698,7 +699,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
           <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="topbar__logo viewer__logo" decoding="async" />
           <div className="viewer__title-block">
             <div className="viewer__eyebrow">
-              {[formatDate(t.date), t.venue].filter(Boolean).join(" · ")}
+              {formatViewerHeaderEyebrow(formatDate(t.date), t.venue)}
             </div>
             <div className="viewer__title viewer__title--lg">{t.name}</div>
           </div>

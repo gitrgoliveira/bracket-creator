@@ -129,6 +129,20 @@ function pluralize(count, singular, plural) {
   return count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`;
 }
 
+function formatAdminHeaderSub(dateStr, venue, courtsCount, compsCount, participantsCount) {
+  return [
+    dateStr,
+    venue,
+    pluralize(courtsCount, "shiaijo (court)", "shiaijo (courts)"),
+    pluralize(compsCount, "competition"),
+    pluralize(participantsCount, "participant")
+  ].filter(Boolean).join(" · ");
+}
+
+function formatViewerHeaderEyebrow(dateStr, venue) {
+  return [dateStr, venue].filter(Boolean).join(" · ");
+}
+
 function formatLabel(format) {
   if (format === "mixed")   return "Pools + Knockout";
   if (format === "league")  return "League";
@@ -177,7 +191,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget };
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -190,5 +204,7 @@ if (typeof window !== "undefined") {
   window.useEscapeToClose = useEscapeToClose;
   window.isTextEntry = isTextEntry;
   window.isInteractiveTarget = isInteractiveTarget;
+  window.formatAdminHeaderSub = formatAdminHeaderSub;
+  window.formatViewerHeaderEyebrow = formatViewerHeaderEyebrow;
 }
 

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 // Tests for the "Share registration link" feature added in mp-a1jz:
-// CompCard share-button visibility (canShare predicate), ShareRegistrationModal
-// rendering, and copyToClipboard fallback behavior.
+// CompCard share-button visibility (canShare predicate) — asserts which
+// tournament/competition configurations show or hide the share button.
 
 let CompCard;
 
@@ -40,17 +40,6 @@ function collectText(node) {
   if (Array.isArray(node)) return node.map(collectText).join('');
   if (node.children !== undefined) return collectText(node.children);
   return '';
-}
-
-// Recursively collect all vnode props (including nested children) to find
-// specific text or element types.
-function findNodes(node, predicate) {
-  const results = [];
-  if (node == null || typeof node === 'string' || typeof node === 'number') return results;
-  if (predicate(node)) results.push(node);
-  if (Array.isArray(node)) node.forEach(n => results.push(...findNodes(n, predicate)));
-  if (node.children) results.push(...findNodes(node.children, predicate));
-  return results;
 }
 
 function hasShareButton(vnode) {

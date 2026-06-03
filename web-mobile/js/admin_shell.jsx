@@ -253,9 +253,12 @@ async function copyToClipboard(text) {
   ta.style.opacity = '0';
   document.body.appendChild(ta);
   ta.select();
-  const ok = document.execCommand('copy');
-  document.body.removeChild(ta);
-  if (!ok) throw new Error('execCommand copy failed');
+  try {
+    const ok = document.execCommand('copy');
+    if (!ok) throw new Error('execCommand copy failed');
+  } finally {
+    document.body.removeChild(ta);
+  }
 }
 
 function ShareRegistrationModal({ url, onClose, showToast }) {

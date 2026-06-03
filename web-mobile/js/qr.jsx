@@ -1,5 +1,6 @@
-// qr.js — Zero-dependency QR Code Model 2 generator.
-// Encodes byte-mode data, error correction level M, versions 1-10.
+// qr.jsx — Zero-dependency QR Code Model 2 generator.
+// Encodes byte-mode data, error correction level M, versions 2-10.
+// (Version 1 / 21×21 modules is excluded: too small for reliable phone scanning.)
 // Implements ISO/IEC 18004:2015.
 //
 // Public API: renderQR(canvas, text, opts)
@@ -285,7 +286,7 @@ function placeData(mat, size, cw) {
 // ---------------------------------------------------------------------------
 const MASK_FN = [
   (r, c) => (r + c) % 2 === 0,
-  (r, c) => r % 2 === 0,
+  (r, _c) => r % 2 === 0,
   (r, c) => c % 3 === 0,
   (r, c) => (r + c) % 3 === 0,
   (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,

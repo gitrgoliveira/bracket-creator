@@ -94,10 +94,10 @@ function byteCapacity(v) {
 }
 
 function selectVersion(byteLen) {
-  // Start at version 2 (25×25). Version 1 (21×21) renders to only 29×29 pixels at
-  // 1px/module with a 4-module quiet zone, which is below jsQR's minimum detectable
-  // image size (~33×33 px). The registration URLs this encoder handles are always ≥ 14
-  // bytes anyway, so version 1 would never be chosen in practice.
+  // Start at version 2 (25×25). Version 1 (21×21) is intentionally excluded for
+  // scan reliability: at 1px/module + 4-module quiet zone it renders to only 29×29 px,
+  // below the minimum image size most phone cameras can reliably detect (~33×33 px).
+  // This applies regardless of payload length.
   for (let v = 2; v <= 10; v++) {
     if (byteCapacity(v) >= byteLen) return v;
   }

@@ -146,7 +146,7 @@ function buildPlayerMap(comp) {
     const map = {};
     const add = (p) => {
         const norm = normalizePlayer(p);
-        if (norm.name) map[norm.name] = { id: norm.name, name: norm.name, dojo: norm.dojo || "", seed: norm.seed ?? 0 };
+        if (norm.name) map[norm.name] = { id: norm.id || norm.name, name: norm.name, dojo: norm.dojo || "", seed: norm.seed ?? 0 };
     };
     if (comp?.config?.players) comp.config.players.forEach(add);
     if (comp?.players) comp.players.forEach(add);

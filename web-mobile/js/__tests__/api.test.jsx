@@ -229,6 +229,24 @@ describe('API Utils', () => {
       expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1 });
       expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0 });
     });
+
+    it('preserves UUID id when player has one (camelCase input)', () => {
+      const comp = {
+        players: [
+          { id: 'uuid-aaa', name: 'Alice', dojo: 'Dojo A', seed: 1 },
+          { id: 'uuid-bbb', name: 'Bob', dojo: 'Dojo B' }
+        ]
+      };
+      const map = buildPlayerMap(comp);
+      expect(map['Alice'].id).toBe('uuid-aaa');
+      expect(map['Bob'].id).toBe('uuid-bbb');
+    });
+
+    it('falls back to name as id when no id field', () => {
+      const comp = { players: [{ name: 'Carol', dojo: 'Dojo C' }] };
+      const map = buildPlayerMap(comp);
+      expect(map['Carol'].id).toBe('Carol');
+    });
   });
 
   describe('normalizePlayer', () => {

@@ -2413,11 +2413,12 @@ function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, setDojoTex
 
 function applyFilters(matches, picked, dojoText, compFilter) {
   const ids = new Set(picked.map((p) => p.id));
+  const names = new Set(picked.map((p) => p.name).filter(Boolean));
   const dt = (dojoText || "").trim().toLowerCase();
   return matches.filter((m) => {
     if (compFilter !== "all" && m.compId !== compFilter) return false;
     if (ids.size > 0) {
-      const hit = (m.sideA && ids.has(m.sideA.id)) || (m.sideB && ids.has(m.sideB.id));
+      const hit = (m.sideA && (ids.has(m.sideA.id) || names.has(m.sideA.name))) || (m.sideB && (ids.has(m.sideB.id) || names.has(m.sideB.name)));
       if (!hit) return false;
     }
     if (dt) {
@@ -2430,7 +2431,8 @@ function applyFilters(matches, picked, dojoText, compFilter) {
 
 function matchHighlightedBy(m, picked, dojoText) {
   const ids = new Set(picked.map((p) => p.id));
-  if (ids.size > 0 && ((m.sideA && ids.has(m.sideA.id)) || (m.sideB && ids.has(m.sideB.id)))) return true;
+  const names = new Set(picked.map((p) => p.name).filter(Boolean));
+  if (ids.size > 0 && ((m.sideA && (ids.has(m.sideA.id) || names.has(m.sideA.name))) || (m.sideB && (ids.has(m.sideB.id) || names.has(m.sideB.name))))) return true;
   const dt = (dojoText || "").trim().toLowerCase();
   if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(dt))) return true;
   return false;

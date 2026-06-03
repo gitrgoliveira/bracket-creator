@@ -63,19 +63,20 @@ function rsEncode(data, ecCount) {
 // Block structure for EC level M, versions 1-10
 // Source: ISO/IEC 18004:2015 Table 9 (verified against nayuki's reference)
 // Columns: [ecCWperBlock, nBlocks1, dcPerBlock1, nBlocks2, dcPerBlock2]
+// Total codewords = (n1*dc1 + n2*dc2) + (n1+n2)*ecCWperBlock
 // ---------------------------------------------------------------------------
 const QR_BLOCKS_M = [
-  null,                  // v0 (unused)
-  [6,  1, 10, 0,  0],   // v1
-  [10, 1, 16, 0,  0],   // v2
-  [15, 1, 26, 0,  0],   // v3
-  [20, 2, 18, 0,  0],   // v4
-  [26, 2, 24, 0,  0],   // v5
-  [36, 4, 16, 0,  0],   // v6
-  [40, 4, 19, 0,  0],   // v7
-  [48, 2, 22, 2, 23],   // v8
-  [60, 3, 16, 2, 17],   // v9
-  [72, 4, 15, 1, 16],   // v10
+  null,                    // v0 (unused)
+  [10, 1, 16, 0,  0],     // v1:  1 blk(16DC)+10EC/blk  -> 16DC+10EC=26  total
+  [16, 1, 28, 0,  0],     // v2:  1 blk(28DC)+16EC/blk  -> 28DC+16EC=44  total
+  [26, 1, 44, 0,  0],     // v3:  1 blk(44DC)+26EC/blk  -> 44DC+26EC=70  total
+  [18, 2, 32, 0,  0],     // v4:  2 blk(32DC)+18EC/blk  -> 64DC+36EC=100 total
+  [24, 2, 43, 0,  0],     // v5:  2 blk(43DC)+24EC/blk  -> 86DC+48EC=134 total
+  [16, 4, 27, 0,  0],     // v6:  4 blk(27DC)+16EC/blk  -> 108DC+64EC=172 total
+  [22, 4, 27, 0,  0],     // v7:  4 blk(27DC)+22EC/blk  -> 108DC+88EC=196 total
+  [22, 2, 38, 2, 39],     // v8:  2 blk(38DC)+2 blk(39DC)+22EC/blk -> 154DC+88EC=242 total
+  [22, 3, 36, 2, 37],     // v9:  3 blk(36DC)+2 blk(37DC)+22EC/blk -> 182DC+110EC=292 total
+  [26, 4, 43, 1, 44],     // v10: 4 blk(43DC)+1 blk(44DC)+26EC/blk -> 216DC+130EC=346 total
 ];
 
 function totalDataCW(v) {
@@ -92,10 +93,14 @@ function byteCapacity(v) {
 }
 
 function selectVersion(byteLen) {
-  for (let v = 1; v <= 10; v++) {
+  // Start at version 2 (25×25). Version 1 (21×21) renders to only 29×29 pixels at
+  // 1px/module with a 4-module quiet zone, which is below jsQR's minimum detectable
+  // image size (~33×33 px). The registration URLs this encoder handles are always ≥ 14
+  // bytes anyway, so version 1 would never be chosen in practice.
+  for (let v = 2; v <= 10; v++) {
     if (byteCapacity(v) >= byteLen) return v;
   }
-  throw new Error(`Text too long for QR versions 1-10 (max ~${byteCapacity(10)} bytes)`);
+  throw new Error(`Text too long for QR versions 2-10 (max ~${byteCapacity(10)} bytes)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -379,26 +384,32 @@ function computeFormatBits(maskId) {
 function placeFormatInfo(mat, size, maskId) {
   const fmt = computeFormatBits(maskId);
 
-  // First copy: around top-left finder.
-  // Bit 0 (LSB) at position (8,0), bit 14 (MSB) at position (0,8).
-  // Position sequence per ISO 18004:2015 Table C.1:
+  // jsQR reads format info bits by scanning the position sequence left-to-right
+  // using pushBit which makes the FIRST cell read the MSB (bit 14) of the
+  // accumulated word it compares against the FORMAT_INFO_TABLE.
+  // Therefore we must place bit 14 at the first position (8,0) and bit 0 at
+  // the last position (0,8) — i.e. place bit (14-i) at sequence position i.
+  //
+  // First copy: around top-left finder (ISO 18004:2015 Table C.1 sequence).
   const tlR = [8, 8, 8, 8, 8, 8, 8, 8, 7, 5, 4, 3, 2, 1, 0];
   const tlC = [0, 1, 2, 3, 4, 5, 7, 8, 8, 8, 8, 8, 8, 8, 8];
   for (let i = 0; i < 15; i++) {
-    mat[tlR[i] * size + tlC[i]] = (fmt >> i) & 1;
+    mat[tlR[i] * size + tlC[i]] = (fmt >> (14 - i)) & 1;
   }
 
-  // Second copy — bottom-left vertical: bits 0-7
-  // bit 0 at (size-1, 8), bit 7 at (size-8, 8). Bit 7 is overwritten
-  // by the always-dark module at (4v+9, 8), which is set in buildMatrix.
-  for (let i = 0; i <= 7; i++) {
-    mat[(size - 1 - i) * size + 8] = (fmt >> i) & 1;
+  // Second copy — bottom-left vertical (jsQR reads rows size-1..size-7, col 8,
+  // then cols size-8..size-1, row 8, accumulating MSB-first via pushBit).
+  // Rows size-1..size-7 carry bits 14..8 (7 cells), row size-8 is the dark module.
+  for (let i = 0; i < 7; i++) {
+    mat[(size - 1 - i) * size + 8] = (fmt >> (14 - i)) & 1;
   }
+  // (Row size-8, col 8 = dark module; set separately in buildQR.)
 
-  // Second copy — top-right horizontal: bits 8-14
-  // bit 8 at (8, size-7), bit 14 at (8, size-1).
-  for (let i = 8; i < 15; i++) {
-    mat[8 * size + (size - 15 + i)] = (fmt >> i) & 1;
+  // Second copy — top-right horizontal (cols size-8..size-1, row 8; 8 cells).
+  // jsQR pushes these after the 7 bottom-left cells, so col size-8 carries bit 7
+  // and col size-1 carries bit 0.
+  for (let i = 0; i < 8; i++) {
+    mat[8 * size + (size - 8 + i)] = (fmt >> (7 - i)) & 1;
   }
 }
 
@@ -431,6 +442,9 @@ function buildQR(text) {
   bestMat[(4 * version + 9) * size + 8] = 1;
   return { mat: bestMat, size };
 }
+
+// Exported for test-only decode verification (not used at runtime).
+export { buildQR as _buildQR_test };
 
 // ---------------------------------------------------------------------------
 // Public API

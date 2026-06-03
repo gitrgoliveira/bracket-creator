@@ -16,6 +16,7 @@
     "eslint-plugin-react": "^7.37.5",
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
+    "jsqr": "^1.4.0",
     "vitest": "^4.1.6"
   },
   "dependencies": {

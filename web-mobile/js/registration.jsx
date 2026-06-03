@@ -154,6 +154,7 @@ function RegistrationForm({ compId, onBack }) {
 
   const registerAnother = () => {
     setSuccess(false);
+    setSaving(false);
     setName("");
     setDojo("");
     setDanGrade("");

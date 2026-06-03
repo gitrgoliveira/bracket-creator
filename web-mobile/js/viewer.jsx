@@ -2164,7 +2164,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick }) {
 
                 if (m.status !== "completed") {
                   return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
-                    {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>&bull;</span> : "–"}
+                    {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
 

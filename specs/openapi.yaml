@@ -624,7 +624,7 @@ paths:
       description: |
         Public (no auth). Returns the raw PNG or JPEG bytes for a previously
         uploaded sponsor logo. The filename is server-generated (16 random hex
-        chars + `.png` or `.jpg`); any other shape returns `400`.
+        chars + `.png`, `.jpg`, or `.jpeg`); any other shape returns `400`.
 
         Response carries `Cache-Control: public, max-age=31536000, immutable`
         because the filename is unique per upload — the bytes at a given URL
@@ -636,7 +636,7 @@ paths:
           schema:
             type: string
             pattern: '^[a-f0-9]{16}\.(png|jpe?g)$'
-          description: Server-generated sponsor logo filename (16 hex chars + .png/.jpg).
+          description: Server-generated sponsor logo filename (16 hex chars + .png/.jpg/.jpeg).
       responses:
         '200':
           description: Sponsor logo image bytes.
@@ -2201,7 +2201,7 @@ components:
           example: "Acme Corp"
         file:
           type: string
-          description: Server-generated filename (16 random hex chars + .png or .jpg). Serves as the path component in GET /api/sponsors/{file}.
+          description: Server-generated filename (16 random hex chars + .png, .jpg, or .jpeg). Serves as the path component in GET /api/sponsors/{file}.
           example: "69a33e3dd2ebe03b.jpg"
         link:
           type: string

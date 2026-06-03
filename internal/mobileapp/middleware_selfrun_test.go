@@ -925,10 +925,12 @@ func TestSelfRun_Sponsors_RequireMainPassword(t *testing.T) {
 	buildMultipart := func() (*bytes.Buffer, string) {
 		buf := &bytes.Buffer{}
 		mw := multipart.NewWriter(buf)
-		_ = mw.WriteField("name", "Acme Corp")
-		fw, _ := mw.CreateFormFile("file", "logo.png")
-		_, _ = fw.Write(tinyPNG) // reuse tinyPNG defined in handlers_sponsors_test.go
-		_ = mw.Close()
+		require.NoError(t, mw.WriteField("name", "Acme Corp"))
+		fw, err := mw.CreateFormFile("file", "logo.png")
+		require.NoError(t, err)
+		_, err = fw.Write(tinyPNG) // reuse tinyPNG defined in handlers_sponsors_test.go
+		require.NoError(t, err)
+		require.NoError(t, mw.Close())
 		return buf, mw.FormDataContentType()
 	}
 

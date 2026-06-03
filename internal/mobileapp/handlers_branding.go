@@ -108,10 +108,12 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			return
 		}
 		fullPath := filepath.Join(brandingDir, fileName)
-		// fileName is always "logo.png" or "logo.jpg" — server-derived, no
-		// user-controlled input reaches the OS call.
-		// #nosec G304
-		dst, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		// Write to a temp file then rename atomically so concurrent GET
+		// requests never see a partial write. fileName is always "logo.png"
+		// or "logo.jpg" — server-derived; no user-controlled input reaches
+		// the OS call.
+		tmpPath := fullPath + ".tmp"
+		dst, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -119,23 +121,23 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 		written, copyErr := io.Copy(dst, io.LimitReader(src, SponsorMaxFileBytes+1))
 		cerr := dst.Close()
 		if copyErr != nil || cerr != nil {
-			_ = os.Remove(fullPath)
+			_ = os.Remove(tmpPath)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": errors.Join(copyErr, cerr).Error()})
 			return
 		}
 		if written > SponsorMaxFileBytes {
-			_ = os.Remove(fullPath)
+			_ = os.Remove(tmpPath)
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "logo must be ≤1 MB"})
 			return
 		}
-
-		// Remove the other extension if it exists (switching png→jpg or vice versa).
-		other := "logo.png"
-		if fileName == "logo.png" {
-			other = "logo.jpg"
+		if err := os.Rename(tmpPath, fullPath); err != nil {
+			_ = os.Remove(tmpPath)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
-		_ = os.Remove(filepath.Join(brandingDir, other))
 
+		// Update state before removing the other extension so GET never
+		// fetches a file that has already been deleted.
 		_, err = store.UpdateTournamentChanged(&state.Tournament{}, func(current, desired *state.Tournament) error {
 			if current == nil {
 				return errors.New("tournament not initialized")
@@ -152,6 +154,14 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+
+		// Remove the other extension only after state points to the new file.
+		other := "logo.png"
+		if fileName == "logo.png" {
+			other = "logo.jpg"
+		}
+		_ = os.Remove(filepath.Join(brandingDir, other))
+
 		c.JSON(http.StatusOK, gin.H{"logoPath": fileName})
 	}
 }
@@ -166,6 +176,11 @@ func handleBrandingLogoDelete(store *state.Store) gin.HandlerFunc {
 			*desired = *current
 			removed = current.Theme.LogoPath
 			desired.Theme.LogoPath = ""
+			// Nil-out the Theme pointer when all fields are now empty so
+			// tournament.md doesn't persist a bare "theme: {}" block.
+			if desired.Theme.PrimaryColor == "" && desired.Theme.AccentSoftColor == "" {
+				desired.Theme = nil
+			}
 			return nil
 		})
 		if err != nil {

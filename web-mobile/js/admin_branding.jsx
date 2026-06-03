@@ -26,10 +26,11 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   }, [logoKey]);
 
   // Sync incoming theme changes (e.g. after a tournament SSE reload).
+  // Always update — falsy values reset the pickers to their defaults.
   useEffectBr(() => {
     const t = (tournament && tournament.theme) || {};
-    if (t.primaryColor) setPrimaryColor(t.primaryColor);
-    if (t.accentSoftColor) setAccentSoftColor(t.accentSoftColor);
+    setPrimaryColor(t.primaryColor || "#1d3557");
+    setAccentSoftColor(t.accentSoftColor || "#e7eaf3");
   }, [tournament]);
 
   const handleColorChange = (field, value) => {

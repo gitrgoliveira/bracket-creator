@@ -634,6 +634,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			t.Mode = state.TournamentModeOfficiated
 		}
 
+		if err := state.ValidateTheme(t.Theme); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Reject empty Password on POST (initial setup) in file mode.
 		// AuthMiddleware allows POST /api/tournament unauthenticated
 		// when the tournament is uninitialized — this is the bootstrap

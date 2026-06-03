@@ -134,7 +134,7 @@ func TestPostBrandingLogo_AdminGated(t *testing.T) {
 }
 
 func TestGetBrandingLogo_ServesPNG(t *testing.T) {
-	h, dir, cleanup := brandingTestSetup(t)
+	h, _, cleanup := brandingTestSetup(t)
 	defer cleanup()
 
 	// Upload a PNG first.
@@ -145,7 +145,6 @@ func TestGetBrandingLogo_ServesPNG(t *testing.T) {
 	w := httptest.NewRecorder()
 	(*h).ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
-	_ = dir
 
 	// Now GET it.
 	req = httptest.NewRequest(http.MethodGet, "/api/branding/logo", nil)

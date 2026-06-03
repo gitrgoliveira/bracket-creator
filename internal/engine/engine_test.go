@@ -2040,6 +2040,78 @@ func TestStartCompetition_PreservesExplicitTeamSize(t *testing.T) {
 		"explicit TeamSize=7 must survive start (no auto-default applied)")
 }
 
+func TestStartCompetition_LeagueMultiCourt(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "league-multi-court"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:         compID,
+		Name:       "League Multi Court",
+		Kind:       "individual",
+		Format:     state.CompFormatLeague,
+		PoolSize:   5,
+		RoundRobin: true,
+		Courts:     []string{"A", "B"},
+		StartTime:  "09:00",
+		Status:     "setup",
+	}))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.Len(t, matches, 10, "5-player round-robin must produce 10 matches")
+
+	courts := map[string]int{}
+	for _, m := range matches {
+		courts[m.Court]++
+	}
+	assert.Greater(t, courts["A"], 0, "court A should have matches")
+	assert.Greater(t, courts["B"], 0, "court B should have matches")
+	assert.Equal(t, 5, courts["A"], "court A should have 5 matches")
+	assert.Equal(t, 5, courts["B"], "court B should have 5 matches")
+
+	// Round-robin assignment: match i goes to court i%2
+	for i, m := range matches {
+		expected := []string{"A", "B"}[i%2]
+		assert.Equal(t, expected, m.Court, "match %d should be on court %s", i, expected)
+	}
+}
+
+func TestStartCompetition_LeagueMultiCourt_ThreeCourts(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "league-three-courts"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:         compID,
+		Name:       "League Three Courts",
+		Kind:       "individual",
+		Format:     state.CompFormatLeague,
+		PoolSize:   6,
+		RoundRobin: true,
+		Courts:     []string{"A", "B", "C"},
+		StartTime:  "09:00",
+		Status:     "setup",
+	}))
+	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4", "P5", "P6"})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.Len(t, matches, 15, "6-player round-robin must produce 15 matches")
+
+	courts := map[string]int{}
+	for _, m := range matches {
+		courts[m.Court]++
+	}
+	assert.Equal(t, 3, len(courts), "all 3 courts should be used")
+	assert.Equal(t, 5, courts["A"], "court A should have 5 matches")
+	assert.Equal(t, 5, courts["B"], "court B should have 5 matches")
+	assert.Equal(t, 5, courts["C"], "court C should have 5 matches")
+}
+
 // TestStartCompetition_PreservesNumberPrefix pins the NumberPrefix /
 // StartTime / RoundRobin additions to the StartCompetition transform's
 // field-mismatch validation. With these fields in the validation list,

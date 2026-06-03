@@ -1721,8 +1721,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     highlightedMatchId={currentMatch?.id}
                     autoScrollMatchId={bracketScrollTarget}
                     scrollContainerRef={bracketScrollRef}
-                    highlightPlayerId={followedPlayer?.id}
-                    highlightPlayerName={followedPlayer?.name}
+                    highlightPlayer={followedPlayer}
                     onMatchClick={(m, ri) => {
                       const label = window.roundLabel(ri, derivedBracket.rounds.length);
                       setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, compKind: c.kind, teamSize: c.teamSize });
@@ -2029,9 +2028,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="vsched">
             {liveMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
               <React.Fragment key={m.id}>
-                <div className={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer) ? "vsched-item--me" : ""}>
-                  <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
-                </div>
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer)} />
                 {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}
@@ -2046,9 +2043,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="vsched">
             {upcomingMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <div className={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer) ? "vsched-item--me" : ""}>
-                  <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
-                </div>
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer)} />
                 {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}
@@ -2067,10 +2062,8 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="vsched">
             {recentMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <div className={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer) ? "vsched-item--me" : ""}>
-                  <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} />
-                </div>
-                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isFollowedPlayer(m.sideA, highlightPlayer) || isFollowedPlayer(m.sideB, highlightPlayer)} />
+                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}
           </div>
@@ -2081,7 +2074,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
   );
 }
 
-const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
+const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
   // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays.
@@ -2104,7 +2097,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick }) => {
     ? (window.queueLabel ? window.queueLabel(m) : _localQueueLabel(m))
     : null;
   return (
-    <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
+    <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="vsched-item__head">
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
@@ -2186,10 +2179,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
 
-  const isHighlighted = (p) => highlightPlayer && (
-    p.id === highlightPlayer.id ||
-    (p.name && highlightPlayer.name && p.name.trim().toLowerCase() === highlightPlayer.name.trim().toLowerCase())
-  );
+  const isHighlighted = (p) => isFollowedPlayer(p, highlightPlayer);
   const matchMap = {};
   matches.forEach(m => {
     const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
@@ -2342,7 +2332,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
               </thead>
               <tbody>
                 {poolStandings && poolStandings.length > 0 ? poolStandings.map((s, i) => (
-                  <tr key={s.player.name} className={highlightPlayer && (s.player.id === highlightPlayer.id || (s.player.name && highlightPlayer.name && s.player.name.trim().toLowerCase() === highlightPlayer.name.trim().toLowerCase())) ? "pool__row--me" : ""}>
+                  <tr key={s.player.name} className={isFollowedPlayer(s.player, highlightPlayer) ? "pool__row--me" : ""}>
                     <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
                     <td>
                       <div style={{ fontWeight: 500 }}>
@@ -2362,7 +2352,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                 )) : pool.players.map((p, i) => {
                   const cols = isTeam ? 7 : 5;
                   return (
-                    <tr key={p.name} className={highlightPlayer && (p.id === highlightPlayer.id || (p.name && highlightPlayer.name && p.name.trim().toLowerCase() === highlightPlayer.name.trim().toLowerCase())) ? "pool__row--me" : ""}>
+                    <tr key={p.name} className={isFollowedPlayer(p, highlightPlayer) ? "pool__row--me" : ""}>
                       <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>
@@ -3376,6 +3366,7 @@ window.AnnouncementCard = AnnouncementCard;
 window.AnnouncementBanner = AnnouncementBanner;
 window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;
+window.isFollowedPlayer = isFollowedPlayer;
 window.ViewerSchedule = ViewerSchedule;
 window.ScheduleViewer = ScheduleViewer;
 window.SwissStandingsViewer = SwissStandingsViewer;

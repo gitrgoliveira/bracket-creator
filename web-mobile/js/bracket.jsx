@@ -150,7 +150,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder, highlightPlayerId, highlightPlayerName }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder, highlightPlayer }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const live = match.status === "running";
@@ -165,11 +165,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const aTBD = isPlaceholder || (match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-"));
   const bTBD = isPlaceholder || (match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-"));
 
-  const playerHighlight = (highlightPlayerId || highlightPlayerName) && (
-    (highlightPlayerId && ((match.sideA?.id === highlightPlayerId) || (match.sideB?.id === highlightPlayerId))) ||
-    (highlightPlayerName && ((match.sideA?.name === highlightPlayerName) || (match.sideB?.name === highlightPlayerName) ||
-      (match.sideA?.id === highlightPlayerName) || (match.sideB?.id === highlightPlayerName)))
-  );
+  const _isFollowed = window.isFollowedPlayer || (() => false);
+  const playerHighlight = highlightPlayer && (_isFollowed(match.sideA, highlightPlayer) || _isFollowed(match.sideB, highlightPlayer));
 
   return (
     <button
@@ -255,7 +252,7 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
   );
 }
 
-function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayerId, highlightPlayerName }) {
+function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayer }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -297,8 +294,7 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
                   highlighted={m.id === highlightedMatchId}
                   matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
                   onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
-                  highlightPlayerId={highlightPlayerId}
-                  highlightPlayerName={highlightPlayerName}
+                  highlightPlayer={highlightPlayer}
                 />
               </div>
             ))}

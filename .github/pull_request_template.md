@@ -12,17 +12,21 @@ Title: conventional-commit style, e.g.
 -
 -
 
-<!-- Optional, include when relevant:
+<!-- Optional — include when it helps reviewers:
 
 ## Why
+
 Motivation / root cause. For fixes, state the root cause explicitly.
 
+-->
+
 ## Files changed
+
+<!-- REQUIRED. One row per file touched. -->
+
 | File | What |
 |---|---|
 | `path/to/file` | one-line description |
-
--->
 
 ## Screenshots
 

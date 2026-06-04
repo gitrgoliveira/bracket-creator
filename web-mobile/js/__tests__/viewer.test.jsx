@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL } from '../viewer.jsx';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL, linkBase, isNonPublicOrigin } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 
@@ -1014,6 +1014,126 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
     const modal = findInTree(runtime.currentTree(), n => n?.type?.name === 'MatchViewerModal');
     expect(modal).toBeTruthy();
     expect(modal.props.match.id).toBe('curr2');
+  });
+});
+
+// mp-s1gl: linkBase and isNonPublicOrigin unit tests.
+describe('linkBase', () => {
+  it('returns configured publicURL when set', () => {
+    expect(linkBase({ publicURL: 'https://my-tournament.example.com' })).toBe('https://my-tournament.example.com');
+  });
+
+  it('falls back to window.location.origin when publicURL is empty string', () => {
+    expect(linkBase({ publicURL: '' })).toBe(window.location.origin);
+  });
+
+  it('falls back to window.location.origin when publicURL is absent', () => {
+    expect(linkBase({})).toBe(window.location.origin);
+  });
+
+  it('falls back to window.location.origin when tournament is null', () => {
+    expect(linkBase(null)).toBe(window.location.origin);
+  });
+
+  it('falls back to window.location.origin when tournament is undefined', () => {
+    expect(linkBase(undefined)).toBe(window.location.origin);
+  });
+
+  it('returns empty string when publicURL is absent and origin is opaque ("null")', () => {
+    const origDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
+    try {
+      Object.defineProperty(window, 'location', {
+        value: { origin: 'null' },
+        writable: true, configurable: true,
+      });
+      expect(linkBase({})).toBe('');
+    } finally {
+      if (origDescriptor) {
+        Object.defineProperty(window, 'location', origDescriptor);
+      }
+    }
+  });
+});
+
+describe('isNonPublicOrigin', () => {
+  it('returns true for empty string', () => {
+    expect(isNonPublicOrigin('')).toBe(true);
+  });
+
+  it('returns true for null', () => {
+    expect(isNonPublicOrigin(null)).toBe(true);
+  });
+
+  it('returns true for undefined', () => {
+    expect(isNonPublicOrigin(undefined)).toBe(true);
+  });
+
+  it('returns true for the string "null" (opaque sandboxed-iframe origin)', () => {
+    expect(isNonPublicOrigin('null')).toBe(true);
+  });
+
+  it('returns true for localhost', () => {
+    expect(isNonPublicOrigin('http://localhost')).toBe(true);
+  });
+
+  it('returns true for localhost with port', () => {
+    expect(isNonPublicOrigin('http://localhost:8080')).toBe(true);
+  });
+
+  it('returns true for 0.0.0.0', () => {
+    expect(isNonPublicOrigin('http://0.0.0.0')).toBe(true);
+  });
+
+  it('returns true for 127.x.x.x loopback', () => {
+    expect(isNonPublicOrigin('http://127.0.0.1')).toBe(true);
+  });
+
+  it('returns true for 127.x.x.x loopback variant', () => {
+    expect(isNonPublicOrigin('http://127.1.2.3')).toBe(true);
+  });
+
+  it('returns true for 192.168.x.x LAN', () => {
+    expect(isNonPublicOrigin('http://192.168.1.100')).toBe(true);
+  });
+
+  it('returns true for 10.x.x.x private range', () => {
+    expect(isNonPublicOrigin('http://10.0.0.1')).toBe(true);
+  });
+
+  it('returns true for 172.16.x.x private range', () => {
+    expect(isNonPublicOrigin('http://172.16.0.1')).toBe(true);
+  });
+
+  it('returns true for 172.31.x.x private range', () => {
+    expect(isNonPublicOrigin('http://172.31.255.254')).toBe(true);
+  });
+
+  it('returns false for 172.15.x.x (not in private range)', () => {
+    expect(isNonPublicOrigin('http://172.15.0.1')).toBe(false);
+  });
+
+  it('returns false for 172.32.x.x (not in private range)', () => {
+    expect(isNonPublicOrigin('http://172.32.0.1')).toBe(false);
+  });
+
+  it('returns true for *.local mDNS names', () => {
+    expect(isNonPublicOrigin('http://myserver.local')).toBe(true);
+  });
+
+  it('returns true for a public hostname with a non-standard port', () => {
+    expect(isNonPublicOrigin('http://my-tournament.example.com:8080')).toBe(true);
+  });
+
+  it('returns false for a public https URL', () => {
+    expect(isNonPublicOrigin('https://my-tournament.example.com')).toBe(false);
+  });
+
+  it('returns false for a public http URL (non-localhost)', () => {
+    expect(isNonPublicOrigin('http://staging.example.com')).toBe(false);
+  });
+
+  it('returns true for IPv6 loopback ::1', () => {
+    expect(isNonPublicOrigin('http://[::1]')).toBe(true);
   });
 });
 

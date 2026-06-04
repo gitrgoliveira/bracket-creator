@@ -469,7 +469,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
       </div>
       {shareOpen && (
         <ShareRegistrationModal
-          url={`${window.location.origin}/register/${c.id}`}
+          url={`${(window.linkBase || (() => window.location.origin))(tournament)}/register/${c.id}`}
           onClose={() => setShareOpen(false)}
           showToast={showToast}
         />

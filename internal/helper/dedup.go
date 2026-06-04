@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -270,7 +271,7 @@ func FindNearDupWarnings(entries [][2]string) []NearDupWarning {
 						continue
 					}
 					warned[pair{i, j}] = true
-					score := "levenshtein:" + itoa(lev) + "/ratio:" + formatRatio(ratio)
+					score := fmt.Sprintf("levenshtein:%d/ratio:%.2f", lev, ratio)
 					warnings = append(warnings, NearDupWarning{
 						Kind:  "near-duplicate",
 						A:     entries[i][0],
@@ -282,40 +283,4 @@ func FindNearDupWarnings(entries [][2]string) []NearDupWarning {
 		}
 	}
 	return warnings
-}
-
-// itoa converts int to string without importing strconv here.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var buf [20]byte
-	pos := len(buf)
-	for n > 0 {
-		pos--
-		buf[pos] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		pos--
-		buf[pos] = '-'
-	}
-	return string(buf[pos:])
-}
-
-// formatRatio formats a ratio to 2 decimal places without fmt.
-func formatRatio(r float64) string {
-	// r is in [0,1]; format as "0.XX"
-	r100 := int(r*100 + 0.5)
-	if r100 >= 100 {
-		return "1.00"
-	}
-	const digits = "0123456789"
-	hi := r100 / 10
-	lo := r100 % 10
-	return "0." + digits[hi:hi+1] + digits[lo:lo+1]
 }

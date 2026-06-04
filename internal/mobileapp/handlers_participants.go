@@ -242,7 +242,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// understand warnings receive a regular array response and ignore
 			// the extra field.
 			type savedWithWarnings struct {
-				Players  interface{}             `json:"players"`
+				Players  any                     `json:"players"`
 				Warnings []helper.NearDupWarning `json:"warnings"`
 			}
 			c.JSON(http.StatusOK, savedWithWarnings{

@@ -855,6 +855,8 @@ paths:
           rejected regardless of `kind`; use 0 for individual, >= 2 for teams).
         - When `kind` is `"team"`, `teamSize` must be >= 2
           (`team competitions require teamSize >= 2`).
+        - When `kind` is not `"team"` (including omitted or `"individual"`),
+          `teamSize` must be 0 (`non-team competitions require teamSize == 0`).
 
         String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
         `format`, `poolSizeMode`, `startTime`, `date`.
@@ -910,8 +912,10 @@ paths:
         collides (case-insensitive) with another competition's name,
         if `date` is non-empty and not in canonical `DD-MM-YYYY`
         format, if `teamSize` is negative or equals 1 (1 is always
-        invalid regardless of `kind`), or if `kind` is `"team"` and
-        `teamSize` < 2 (`team competitions require teamSize >= 2`).
+        invalid regardless of `kind`), if `kind` is `"team"` and
+        `teamSize` < 2 (`team competitions require teamSize >= 2`),
+        or if `kind` is not `"team"` (including omitted or `"individual"`)
+        and `teamSize` > 0 (`non-team competitions require teamSize == 0`).
 
         **Roster-save (body INCLUDES `players`, even an empty array):**
         The server writes `participants.csv` (and clears or extracts

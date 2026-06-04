@@ -234,13 +234,13 @@ func poolMatchesPerPool(size int, roundRobin bool, poolFormat string) int {
 // advanced for auto-resolved (Completed) matches, so they must NOT be counted
 // for duration estimation.
 //
-// This is exactly players-1 (for players >= 2). The playoffs draw seeds the
-// bracket with helper.StandardSeedingFull (mp-sess), which distributes the
-// NextPow2(players)-players byes to the top seeds so every bye sits opposite a
-// real player. Each bye therefore auto-resolves a single player-vs-bye leaf
-// match (Completed, court cursor not advanced) and there are NO both-empty
-// matches and no upstream "ghost" propagation. Of the NextPow2(players)-1 total
-// slots, exactly (NextPow2(players)-players) are auto-completed byes, leaving
+// This is exactly players-1 (for players >= 2). The playoffs draw uses
+// StandardSeeding + CreateBalancedTree + TreeToLeafArray (mp-5ng7), which
+// places structural byes in the tree so each bye sits opposite a real player.
+// Each bye therefore auto-resolves a single player-vs-bye leaf match
+// (Completed, court cursor not advanced) and there are NO both-empty matches
+// and no upstream "ghost" propagation. Of the NextPow2(players)-1 total slots,
+// exactly (NextPow2(players)-players) are auto-completed byes, leaving
 // NextPow2(players)-1 - (NextPow2(players)-players) = players-1 real matches —
 // the familiar single-elimination identity (every match eliminates one of N
 // competitors; N-1 eliminations crown a winner).

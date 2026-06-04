@@ -670,7 +670,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		comp.SwissCurrentRound = 1
 		comp.Status = state.CompStatusDrawReady
 	default:
-		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
+		if err := e.generatePlayoffs(comp, players, seeds, rosterPopulated); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusDrawReady

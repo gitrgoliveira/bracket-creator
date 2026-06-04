@@ -826,8 +826,24 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// roster on disk even though the UI reported "Saved 0
 		// participants."
 		participantsChanged := false
+		// Tier-2 near-duplicate warnings (non-blocking). Computed server-side
+		// so the PUT roster path — the SPA's primary import flow — is the
+		// authoritative source; attached to the response below.
+		nearDupWarnings := []helper.NearDupWarning{}
 		if comp.Players != nil {
+			entries := make([][2]string, len(comp.Players))
+			for i, p := range comp.Players {
+				entries[i] = [2]string{p.Name, p.Dojo}
+			}
+			nearDupWarnings = helper.FindNearDupWarnings(entries)
 			if err := store.SaveParticipants(id, comp.Players); err != nil {
+				// Tier-1: a perfect (name, dojo) duplicate is a client error,
+				// not a server fault — surface it as 409 so the operator sees
+				// which entry collided.
+				if errors.Is(err, state.ErrDuplicateName) {
+					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+					return
+				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
 				return
 			}
@@ -934,7 +950,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				updated.Players = []domain.Player{}
 			}
 		}
-		c.JSON(http.StatusOK, updated)
+		// Embed the competition fields inline and add the near-duplicate
+		// warnings (empty array on the settings-only path). The embedded
+		// pointer promotes the competition's JSON fields to the top level,
+		// so existing clients see the same shape plus a `warnings` field.
+		c.JSON(http.StatusOK, struct {
+			*state.Competition
+			Warnings []helper.NearDupWarning `json:"warnings"`
+		}{Competition: updated, Warnings: nearDupWarnings})
 	})
 
 	r.DELETE("/competitions/:id", RequireElevatedPassword(elevated), func(c *gin.Context) {

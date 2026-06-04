@@ -94,8 +94,10 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
 // Build the participants list to save by reconciling existing players
 // against a newly-parsed roster. Returns { np, added, updatedCount }.
 //
-// - Existing players (matched by lowercase name) keep their stable id
-//   and seed.
+// - Existing players (matched by normalized name+dojo) keep their stable
+//   id and seed. The key is (name, dojo) — NOT name alone — because Tier-1
+//   dedup allows two same-named competitors from different dojos; keying on
+//   name only would cross-associate their id/seed/check-in.
 // - New players get the next free `${compID}-pN` slot, skipping any id
 //   already in use by an existing player who is still in the parsed
 //   list (two-pass: pre-populate usedIds before minting, so visible row
@@ -106,16 +108,18 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
 //
 // Exported for tests in __tests__/admin_participants.test.jsx.
 function mintParticipantIds(compID, existingPlayers, parsed) {
-  const existingMap = new Map((existingPlayers || []).map(p => [p.name.toLowerCase(), p]));
-  const parsedKeys = new Set(parsed.map(p => p.name.toLowerCase()));
+  const norm = window.normalizeParticipantName || (s => (s || '').toLowerCase().trim().replace(/\s+/g, ' '));
+  const idKey = (name, dojo) => norm(name) + '|' + norm(dojo);
+  const existingMap = new Map((existingPlayers || []).map(p => [idKey(p.name, p.dojo), p]));
+  const parsedKeys = new Set(parsed.map(p => idKey(p.name, p.dojo)));
   const usedIds = new Set();
   (existingPlayers || []).forEach(p => {
-    if (parsedKeys.has(p.name.toLowerCase())) usedIds.add(p.id);
+    if (parsedKeys.has(idKey(p.name, p.dojo))) usedIds.add(p.id);
   });
   let nextSlot = 1;
   let added = 0, updatedCount = 0;
   const np = parsed.map(({ name, displayName, dojo, danGrade, tag, checkedIn: parsedCheckedIn }) => {
-    const existing = existingMap.get(name.toLowerCase());
+    const existing = existingMap.get(idKey(name, dojo));
     if (existing) {
       updatedCount++;
       // Preserve existing check-in state; CSV token takes precedence if explicitly set.
@@ -133,7 +137,11 @@ function mintParticipantIds(compID, existingPlayers, parsed) {
 }
 
 function levenshtein(a, b) {
-  const m = a.length, n = b.length;
+  // Operate on Unicode code points (not UTF-16 code units) so non-BMP
+  // characters count as one edit and the distance stays consistent with
+  // Go's rune-based implementation.
+  const ra = [...a], rb = [...b];
+  const m = ra.length, n = rb.length;
   if (m === 0) return n;
   if (n === 0) return m;
   let prev = Array.from({ length: n + 1 }, (_, j) => j);
@@ -141,7 +149,7 @@ function levenshtein(a, b) {
   for (let i = 1; i <= m; i++) {
     curr[0] = i;
     for (let j = 1; j <= n; j++)
-      curr[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+      curr[j] = ra[i - 1] === rb[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
     [prev, curr] = [curr, prev];
   }
   return prev[n];
@@ -161,6 +169,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [replaceDojo, setReplaceDojo] = useStateA("");
   const [replaceDanGrade, setReplaceDanGrade] = useStateA("");
   const [replaceZekken, setReplaceZekken] = useStateA("");
+  // nearDupPending holds {pairs} when the server returned Tier-2 near-dup
+  // warnings on the roster save. The save has already committed (warnings are
+  // non-blocking); this drives a post-save informational banner.
+  const [nearDupPending, setNearDupPending] = useStateA(null);
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
@@ -589,19 +601,32 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       const withZekken = c.withZekkenName;
       const parsed = window.parseParticipantLines(lines, withZekken);
 
-      // Duplicate detection (case-insensitive)
-      const nameSeen = new Map();
+      // Tier-1: Duplicate detection — reject on perfect (normalizedName,
+      // normalizedDojo) collision.  Uses name+dojo so two people from
+      // different clubs with the same name are allowed.
+      // Fallback mirrors the shared normalizer (lower → trim → collapse
+      // internal whitespace) and guards undefined, so a missing
+      // window.normalizeParticipantName can't miss dups or throw.
+      const norm = window.normalizeParticipantName || (s => (s || '').toLowerCase().trim().replace(/\s+/g, ' '));
+      const keySeen = new Map();
       const dupes = [];
-      parsed.forEach(({ name }) => {
-        const key = name.toLowerCase();
-        if (nameSeen.has(key)) { if (!dupes.includes(name)) dupes.push(name); }
-        else nameSeen.set(key, true);
+      parsed.forEach(({ name, dojo }) => {
+        const key = norm(name) + '|' + norm(dojo || '');
+        // Label with name + dojo: identical names at different dojos are
+        // allowed, so a name-only message can't show which line collided.
+        const label = dojo ? `${name} (${dojo})` : name;
+        if (keySeen.has(key)) { if (!dupes.includes(label)) dupes.push(label); }
+        else keySeen.set(key, true);
       });
       if (dupes.length > 0) {
-        showToast(`Duplicate names detected: ${dupes.join(", ")}`, "error");
+        showToast(`Duplicate participants detected: ${dupes.join(", ")}`, "error");
         return;
       }
 
+      // Tier-2 near-duplicate warnings are computed server-side and returned
+      // by the roster PUT (see doSave) so Go is the single source of truth —
+      // the client no longer runs its own fuzzy pass (which would drift from
+      // Go's algorithm).
       ({ np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed));
     } catch (err) {
       // Local errors: parseParticipantLines throws on malformed input
@@ -612,14 +637,31 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       return;
     }
 
+    await doSave(np, added, updatedCount);
+  };
+
+  // doSave performs the PUT and shows the success toast. The roster PUT
+  // returns server-authoritative near-duplicate warnings; the save has
+  // already committed (warnings are non-blocking), so we surface them in a
+  // post-save informational banner the operator can review and dismiss.
+  const doSave = async (np, added, updatedCount) => {
+    // Clear any stale banner from a previous import up front, so a cancelled
+    // or failed save can't leave a misleading "Saved — …" banner on screen.
+    setNearDupPending(null);
     try {
-      await onUpdate({ ...c, players: np });
+      const warnings = await onUpdate({ ...c, players: np });
 
       // Bail if we unmounted during the in-flight PUT — see mountedRef
       // declaration above. showToast is safe (lifted to AdminApp, still
       // mounted on logout-free navigation), but setImportSummary targets
       // this component's local state.
       if (!mountedRef.current) return;
+
+      // updateCompetition returns undefined when it short-circuited without
+      // saving (e.g. the elevated-password prompt was cancelled). Don't show
+      // a "Saved" toast for a PUT that never happened. A real save returns the
+      // warnings array (possibly empty).
+      if (warnings === undefined) return;
 
       const label = c.kind === "team" ? "team" : "participant";
       let msg = `Saved ${pluralize(np.length, label)}`;
@@ -628,6 +670,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       }
       showToast(msg);
       setImportSummary(null);
+      setNearDupPending(Array.isArray(warnings) && warnings.length > 0 ? { pairs: warnings } : null);
     } catch (err) {
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack
@@ -993,6 +1036,23 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           )}
 
+          {nearDupPending && (
+            <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="near-dup-banner">
+              <div style={{ marginBottom: 6, fontWeight: 600 }}>Saved — but these entries look like possible duplicates. Review them:</div>
+              <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
+                {nearDupPending.pairs.map((w, i) => (
+                  <li key={i}><strong>{w.a}</strong> and <strong>{w.b}</strong> <span style={{ color: "var(--ink-3)", fontSize: 12 }}>({w.score})</span></li>
+                ))}
+              </ul>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn btn--sm"
+                  data-testid="near-dup-dismiss"
+                  onClick={() => setNearDupPending(null)}
+                >Dismiss</button>
+              </div>
+            </div>
+          )}
           <LinedTextarea
             value={text}
             onChange={(e) => setText(e.target.value)}

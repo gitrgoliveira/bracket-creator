@@ -1619,7 +1619,13 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             });
         });
     }
-    if (bracket && bracket.rounds) {
+    // mp-9dz/mp-8jbo: a preview bracket (bracket.preview === true) on a mixed
+    // (Pools + Knockout) competition carries pool-origin TBD placeholders
+    // ("Pool A-1st", "Pool B-2nd", …). These must NOT flow into allMatches
+    // because allMatches feeds Up next / upcoming / recent / watchlist, and
+    // spectators would see meaningless placeholder entries. The Bracket tab
+    // renders `bracket`/`derivedBracket` directly and is NOT affected.
+    if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
             round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), compKind: c.kind, teamSize: c.teamSize }));
         });

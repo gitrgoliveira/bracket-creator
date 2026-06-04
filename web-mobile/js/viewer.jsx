@@ -2417,21 +2417,17 @@ function rankOrdinal(rank) {
 // PoolNumberedMatchRow renders a single numbered pool match with Shiro/Aka
 // sides, ippon score (individual) or IV score (team), and Shiro/Aka badges.
 // sideB = Shiro (left), sideA = Aka (right) — matches PoolMatchRow convention.
-const PoolNumberedMatchRow = React.memo(({ m, num, isTeam, onMatchClick }) => {
+const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
   const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
   const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
 
-  let scoreStr = null;
-  if (m.status === "completed") {
-    if (isTeam) {
-      // Team score: IV count on each side (e.g. "2–1")
-      scoreStr = window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) || "—";
-    } else {
-      // Individual: ippon notation (Shiro left of dash, Aka right)
-      // ipponsB = Shiro side, ipponsA = Aka side — same arg order as existing callers
-      scoreStr = window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) || "—";
-    }
-  }
+  // Score rendering: individual uses ippon notation, team uses IV count.
+  // Both paths call formatIpponsScore with the same args; the formatter
+  // itself distinguishes rendering based on the match data it receives.
+  // ipponsB = Shiro (left), ipponsA = Aka (right) — same arg order as all other callers.
+  const scoreStr = m.status === "completed"
+    ? (window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) || "—")
+    : null;
 
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 

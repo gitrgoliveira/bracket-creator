@@ -545,7 +545,15 @@ export const isHttpURL = (u) => /^https?:\/\//i.test(u);
 // the single source of truth for building externally-shareable links (QR codes,
 // viewer share links) so operators can set one canonical URL regardless of what
 // address the admin browser is using.
-export const linkBase = (t) => (t && t.publicURL) || window.location.origin;
+// Guard against opaque-origin contexts (sandboxed iframes) where
+// window.location.origin is the literal string "null". Falling back to
+// window.location.origin in that case would produce "null/register/..." links,
+// so return an empty string instead so callers get a relative path.
+export const linkBase = (t) => {
+  if (t && t.publicURL) return t.publicURL;
+  const origin = window.location.origin;
+  return (!origin || origin === "null") ? "" : origin;
+};
 
 // isNonPublicOrigin returns true when the given origin looks like a device-local
 // or LAN address that won't be reachable by remote attendees. Used to warn the
@@ -563,6 +571,7 @@ export const isNonPublicOrigin = (origin) => {
     hasPort = u.port !== "";
   } catch { return true; }
   if (host === "localhost" || host === "0.0.0.0") return true;
+  if (host === "::1" || host === "[::1]") return true;  // IPv6 loopback
   if (host.endsWith(".local")) return true;
   if (/^127\./.test(host)) return true;
   if (/^10\./.test(host)) return true;

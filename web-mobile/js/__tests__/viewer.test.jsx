@@ -1038,6 +1038,19 @@ describe('linkBase', () => {
   it('falls back to window.location.origin when tournament is undefined', () => {
     expect(linkBase(undefined)).toBe(window.location.origin);
   });
+
+  it('returns empty string when publicURL is absent and origin is opaque ("null")', () => {
+    const orig = window.location.origin;
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, origin: 'null' },
+      writable: true, configurable: true,
+    });
+    expect(linkBase({})).toBe('');
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, origin: orig },
+      writable: true, configurable: true,
+    });
+  });
 });
 
 describe('isNonPublicOrigin', () => {
@@ -1115,6 +1128,10 @@ describe('isNonPublicOrigin', () => {
 
   it('returns false for a public http URL (non-localhost)', () => {
     expect(isNonPublicOrigin('http://staging.example.com')).toBe(false);
+  });
+
+  it('returns true for IPv6 loopback ::1', () => {
+    expect(isNonPublicOrigin('http://[::1]')).toBe(true);
   });
 });
 

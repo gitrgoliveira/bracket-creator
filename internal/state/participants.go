@@ -688,6 +688,20 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 }
 
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool) error {
+	// Tier-1 (perfect-duplicate) guard at the lowest write layer so EVERY
+	// persistence path — the bulk PUT /competitions/:id roster import (the
+	// SPA's primary flow), single add/edit, and any future caller — rejects
+	// duplicate (normalizedName, normalizedDojo) pairs uniformly. Enforcing
+	// only in the handlers would leave the guard bypassable, the same reason
+	// the elevated-password gate is inline on the roster PUT path.
+	entries := make([][2]string, len(players))
+	for i, p := range players {
+		entries[i] = [2]string{p.Name, p.Dojo}
+	}
+	if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
+		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
+	}
+
 	path := s.compPath(compID, "participants.csv")
 
 	data, err := marshalParticipantsCSV(players, withZekkenName)

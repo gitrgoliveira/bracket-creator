@@ -445,6 +445,49 @@ func TestAddParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	assert.NoError(t, err, "same name at a different dojo must be allowed")
 }
 
+// TestSaveParticipants_RejectsDuplicateNameDojo pins the Tier-1 guard at the
+// lowest write layer (saveParticipantsNoLock). This is the path the SPA's
+// PRIMARY batch/paste-import flow takes (PUT /competitions/:id →
+// SaveParticipants), so enforcing here makes the perfect-duplicate reject
+// non-bypassable across every persistence path, not just the single-add/edit
+// handlers. (mp-ljry)
+func TestSaveParticipants_RejectsDuplicateNameDojo(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "bulk-dup"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Bulk Dup"}))
+
+	// Perfect (name, dojo) duplicate within one bulk import — including a
+	// diacritic/whitespace/case variant — must be rejected.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Müller", Dojo: "Wakaba"},
+		{Name: "muller ", Dojo: "wakaba"},
+	})
+	assert.ErrorIs(t, err, ErrDuplicateName, "normalized (name,dojo) collision in a bulk save must be rejected")
+
+	// Same name at DIFFERENT dojos is allowed (two real people).
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "John Smith", Dojo: "Wakaba"},
+		{Name: "John Smith", Dojo: "Tora"},
+	})
+	assert.NoError(t, err, "same name at different dojos must be allowed in a bulk save")
+
+	// Two same-named teams with empty dojo collide (real duplicate).
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Shudokan", Dojo: ""},
+		{Name: "shudokan", Dojo: ""},
+	})
+	assert.ErrorIs(t, err, ErrDuplicateName, "identical team names with empty dojo must collide")
+
+	// Squad variants (different names) are NOT perfect duplicates.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Shudokan A", Dojo: ""},
+		{Name: "Shudokan B", Dojo: ""},
+	})
+	assert.NoError(t, err, "A/B squad teams are distinct names and must be allowed")
+}
+
 func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)

@@ -24,9 +24,10 @@ const (
 type NearDupWarning struct {
 	// Kind is always "near-duplicate".
 	Kind string `json:"kind"`
-	// A and B are the normalized display names of the near-duplicate pair.
+	// A and B are the ORIGINAL (un-normalized) input names of the pair, so
+	// the operator sees exactly what they typed/imported.
 	A string `json:"a"`
-	// B is the second member of the pair.
+	// B is the second member of the pair (also original, un-normalized).
 	B string `json:"b"`
 	// Score is a human-readable description of why the pair fired (e.g.
 	// "token-subset" or "levenshtein:2/ratio:0.90").
@@ -34,17 +35,18 @@ type NearDupWarning struct {
 }
 
 // NormalizeParticipantName applies the shared normalization used by both the
-// perfect-match dedup key and the near-duplicate signals:
+// perfect-match dedup key and the near-duplicate signals. The JS mirror in
+// web-mobile/js/data.jsx must stay byte-for-byte equivalent (parity fixture):
 //
-//  1. NFC precompose (canonical composed form)
-//  2. NFD decompose, then strip ONLY combining marks in U+0300–U+036F
-//     (Latin combining diacriticals).  This folds Müller→muller and
-//     Ï→i, but MUST leave Japanese dakuten (が) and all CJK/kana intact
-//     because dakuten's combining mark U+3099 is outside the stripped range.
-//  3. Re-NFC so the result is in canonical composed form.
-//  4. Lowercase, trim, and collapse internal whitespace.
+//  1. NFD decompose (canonical decomposition), then strip ONLY combining
+//     marks in U+0300–U+036F (Latin combining diacriticals).  This folds
+//     Müller→muller and Ï→i, but MUST leave Japanese dakuten (が) and all
+//     CJK/kana intact because dakuten's combining mark U+3099 is outside
+//     the stripped range.
+//  2. Re-NFC so the result is in canonical composed form.
+//  3. Lowercase, trim, and collapse internal whitespace.
 func NormalizeParticipantName(s string) string {
-	// Step 1+2: NFC → NFD → strip combining marks U+0300..U+036F
+	// Step 1: NFD decompose → strip combining marks U+0300..U+036F
 	nfd := norm.NFD.String(s)
 	var stripped strings.Builder
 	stripped.Grow(len(nfd))
@@ -96,9 +98,9 @@ func newDupKey(name, dojo string) dupKey {
 }
 
 // CheckDuplicateEntriesByNameDojo scans the raw entry list for perfect
-// duplicate (name, dojo) pairs.  Each entry is a two-element []string
-// {name, dojo}.  Returns a list of "name / dojo" strings that collide;
-// empty means the list is unique.
+// duplicate (name, dojo) pairs.  Each entry is a [2]string of {name, dojo}.
+// Returns a list of "name / dojo" strings that collide; empty means the
+// list is unique.
 //
 // This replaces the old whole-row CheckDuplicateEntries for contexts that
 // know the name and dojo fields.
@@ -195,16 +197,21 @@ func isSingleTrailingTokenDiff(na, nb string) bool {
 	}
 	lastA := ta[len(ta)-1]
 	lastB := tb[len(tb)-1]
-	// The differing tokens must both be single characters.
-	return len([]rune(lastA)) == 1 && len([]rune(lastB)) == 1
+	// The differing tokens must actually differ AND both be single
+	// characters. The lastA != lastB guard keeps the predicate honest to
+	// its name if it's ever reused without a prior na != nb check.
+	return lastA != lastB && len([]rune(lastA)) == 1 && len([]rune(lastB)) == 1
 }
 
 // FindNearDupWarnings scans normalised names for near-duplicate pairs.
 // Each entry is {name, dojo} already as raw (non-normalized) strings; the
 // function normalises internally.  Returns non-blocking warnings.
 //
-// Signal 1: token-subset — tokens of A ⊆ tokens of B (or vice-versa), and
-// token sets are unequal.  Catches "Chau Earn Tan" / "Chau Tan".
+// Signal 1: token-subset — tokens of A ⊆ tokens of B (or vice-versa).
+// Identical normalized strings are skipped first (na == nb → Tier-1), so the
+// surviving cases are a genuine proper subset ("Chau Earn Tan" / "Chau Tan")
+// OR equal token sets reached by reordering ("Vannier Martin" / "Martin
+// Vannier") — both are intentionally flagged as likely the same person.
 //
 // Signal 2: Levenshtein typo gate — lev ≤ NearDupLevenshteinMax AND
 // ratio ≥ NearDupRatioMin, suppressed when the two strings differ only in

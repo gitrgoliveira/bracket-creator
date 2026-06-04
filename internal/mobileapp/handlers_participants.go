@@ -183,9 +183,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Tier-2: near-duplicate warnings (non-blocking). Attached to the
-		// success response so the client can surface a confirmation banner.
-		nearDupWarnings := helper.FindNearDupWarnings(entries)
+		// Near-duplicate (Tier-2) warnings are surfaced authoritatively by the
+		// PUT /competitions/:id roster path (the SPA's primary import flow);
+		// this endpoint stays a plain array response to keep one shape.
 
 		// Load existing participants so we can preserve check-in state for
 		// players that survive the edit (matched by name). A full roster
@@ -222,6 +222,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		if err := store.SaveParticipants(id, players); err != nil {
+			// Defense-in-depth: saveParticipantsNoLock also enforces the
+			// Tier-1 (name, dojo) guard, so map that to 409 rather than 500
+			// in case the pre-check above ever diverges from the write layer.
+			if errors.Is(err, state.ErrDuplicateName) {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
 			return
 		}
@@ -237,20 +244,6 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
-		if len(nearDupWarnings) > 0 {
-			// Additive, back-compatible response field. Clients that don't
-			// understand warnings receive a regular array response and ignore
-			// the extra field.
-			type savedWithWarnings struct {
-				Players  any                     `json:"players"`
-				Warnings []helper.NearDupWarning `json:"warnings"`
-			}
-			c.JSON(http.StatusOK, savedWithWarnings{
-				Players:  saved,
-				Warnings: nearDupWarnings,
-			})
-			return
-		}
 		c.JSON(http.StatusOK, saved)
 	})
 

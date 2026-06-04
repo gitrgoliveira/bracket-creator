@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -61,6 +62,21 @@ func parsePoolsFile(path string) (any, error) {
 		}
 
 		player := helper.Player{Name: playerName}
+		// Default to 1-based append order so that a corrupt/missing col 2 never
+		// leaves PoolPosition at the zero value (which would misplace the player
+		// at the front of the stable sort and corrupt Excel pool-draw labels).
+		// col 2 overrides this only when it is present, parseable, AND non-negative.
+		// savePoolsLocked writes it as strconv.Itoa(i) — 0-indexed — so add 1 to
+		// align with the 1-based convention used by Excel pool/draw exporters.
+		// (Other producer paths may use different conventions; this +1 applies only
+		// to the CSV round-trip used by LoadPools.)
+		player.PoolPosition = int64(len(pools[idx].Players) + 1) // 1-based default
+		if len(rec) > 2 && rec[2] != "" {
+			if pos, err2 := strconv.ParseInt(rec[2], 10, 64); err2 == nil && pos >= 0 {
+				player.PoolPosition = pos + 1 // convert 0-indexed CSV value → 1-indexed
+			}
+			// negative or non-integer values leave the 1-based append-order default intact
+		}
 		if len(rec) > 3 {
 			player.DisplayName = rec[3]
 		}
@@ -76,6 +92,19 @@ func parsePoolsFile(path string) (any, error) {
 		}
 		pools[idx].Players = append(pools[idx].Players, player)
 	}
+
+	// Sort each pool's Players by their stored draw position so that the ordering
+	// is authoritative from the persisted field, not from CSV row order. This
+	// guarantees correct draw order even if rows were written out-of-order or
+	// the file was manually edited. Legacy files without col 2 receive sequential
+	// 1-based append-order defaults above. Ties (e.g. from a manually edited file
+	// with duplicate positions) are resolved by insertion order via SliceStable.
+	for i := range pools {
+		sort.SliceStable(pools[i].Players, func(a, b int) bool {
+			return pools[i].Players[a].PoolPosition < pools[i].Players[b].PoolPosition
+		})
+	}
+
 	return pools, nil
 }
 

@@ -386,3 +386,95 @@ func TestLoadPoolMatches_InvalidCompID(t *testing.T) {
 	_, err = store.LoadPoolMatches("../bad")
 	assert.Error(t, err)
 }
+
+// TestParsePoolsFile_DrawOrderSort verifies that parsePoolsFile restores
+// draw order from the persisted col-2 position even when CSV rows are
+// written in a different sequence.
+func TestParsePoolsFile_DrawOrderSort(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-draw-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Write a pools.csv where rows appear out of draw order (P2 before P1).
+	// The draw-position column (col 2) records the original 0-indexed order.
+	compDir := dir + "/competitions/sort-test"
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	csv := "Pool A,P2,1,,,0,\nPool A,P1,0,,,0,\n"
+	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// Fake competition so the store doesn't reject the compID.
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "sort-test", Name: "Sort Test"}))
+
+	loaded, err := store.LoadPools("sort-test")
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	// P1 (draw pos 0 → PoolPosition 1) must appear before P2 (draw pos 1 → PoolPosition 2)
+	require.Len(t, loaded[0].Players, 2)
+	assert.Equal(t, "P1", loaded[0].Players[0].Name, "P1 should be first (draw pos 0)")
+	assert.Equal(t, "P2", loaded[0].Players[1].Name, "P2 should be second (draw pos 1)")
+	assert.Equal(t, int64(1), loaded[0].Players[0].PoolPosition)
+	assert.Equal(t, int64(2), loaded[0].Players[1].PoolPosition)
+}
+
+// TestParsePoolsFile_InvalidPosition verifies that negative or non-integer
+// col-2 values fall back to 1-based append order rather than corrupting
+// draw order.
+func TestParsePoolsFile_InvalidPosition(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-inv-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	compDir := dir + "/competitions/inv-test"
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	// Row 1: negative position (-1) → must use fallback (append order = 1)
+	// Row 2: non-integer ("x") → must use fallback (append order = 2)
+	// Row 3: valid position (2) → PoolPosition 3 (pos+1)
+	csv := "Pool A,P1,-1,,,0,\nPool A,P2,x,,,0,\nPool A,P3,2,,,0,\n"
+	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "inv-test", Name: "Inv Test"}))
+
+	loaded, err := store.LoadPools("inv-test")
+	require.NoError(t, err)
+	require.Len(t, loaded[0].Players, 3)
+	// P1 and P2 get append-order defaults (1, 2); P3 gets pos+1=3.
+	// Stable sort: 1 < 2 < 3, so order is P1, P2, P3 — row order preserved.
+	assert.Equal(t, "P1", loaded[0].Players[0].Name)
+	assert.Equal(t, int64(1), loaded[0].Players[0].PoolPosition)
+	assert.Equal(t, "P2", loaded[0].Players[1].Name)
+	assert.Equal(t, int64(2), loaded[0].Players[1].PoolPosition)
+	assert.Equal(t, "P3", loaded[0].Players[2].Name)
+	assert.Equal(t, int64(3), loaded[0].Players[2].PoolPosition)
+}
+
+// TestParsePoolsFile_LegacyNoCol2 verifies that legacy CSV files without a
+// draw-position column (col 2) load in row order via stable sort on the
+// 1-based append-order defaults.
+func TestParsePoolsFile_LegacyNoCol2(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-legacy-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	compDir := dir + "/competitions/legacy-test"
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	// Only pool name + player name columns — no draw-position column.
+	csv := "Pool A,Alice\nPool A,Bob\nPool A,Charlie\n"
+	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "legacy-test", Name: "Legacy"}))
+
+	loaded, err := store.LoadPools("legacy-test")
+	require.NoError(t, err)
+	require.Len(t, loaded[0].Players, 3)
+	// Append-order defaults are unique (1, 2, 3), so row order is preserved.
+	assert.Equal(t, "Alice", loaded[0].Players[0].Name)
+	assert.Equal(t, "Bob", loaded[0].Players[1].Name)
+	assert.Equal(t, "Charlie", loaded[0].Players[2].Name)
+}

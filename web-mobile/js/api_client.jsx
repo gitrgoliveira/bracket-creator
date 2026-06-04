@@ -536,6 +536,21 @@ const API = {
         }
         return res.json();
     },
+    // mp-turx: start the in-place knockout phase of a mixed competition.
+    // POSTs to /api/competitions/:id/start-knockout; returns the updated
+    // competition (status "playoffs", bracket no longer preview). 409 when
+    // preconditions unmet; 404 when the competition is missing.
+    async startKnockout(compId, password) {
+        const res = await fetch(`/api/competitions/${compId}/start-knockout`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to start knockout");
+        }
+        return res.json();
+    },
     async deleteCompetition(id, password, adminPassword) {
         const res = await fetch(`/api/competitions/${id}`, {
             method: 'DELETE',

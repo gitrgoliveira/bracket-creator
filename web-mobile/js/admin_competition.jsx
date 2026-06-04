@@ -1043,7 +1043,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
       <div>
         {isPreview && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
-            <strong>Preview bracket</strong> — positions show where each pool's finishers feed the knockout (e.g. “Pool A 1st”). Create the <strong>Playoffs</strong> competition to play and score it.
+            <strong>Preview bracket</strong> — positions show where each pool's finishers feed the knockout (e.g. “Pool A 1st”). Finish all pool matches, then use <strong>Start knockout</strong> to play and score it here.
           </div>
         )}
         <div className="bracket-canvas" ref={scrollRef}>
@@ -1062,7 +1062,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
       </div>
       <div>
         {isPreview ? (
-          <div className="empty"><div className="icon">🌳</div><h3>Preview only</h3><div style={{ fontSize: 13 }}>This bracket is seeded from pool finishing positions. The knockout is played in the Playoffs competition created from these pools.</div></div>
+          <div className="empty"><div className="icon">🌳</div><h3>Preview only</h3><div style={{ fontSize: 13 }}>This bracket is seeded from pool finishing positions. Finish all pool matches, then click <strong>Start knockout</strong> to play and score it here.</div></div>
         ) : hasBothSides(selectedMatch) ? (
           <LiveMatchPanel
             match={selectedMatch}
@@ -1256,12 +1256,13 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
   );
 }
 
-function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onUpdate, onRefreshCompetition, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
+function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onUpdate, onRefreshCompetition, onCreatePlayoff, onStartKnockout, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
   const [generating, setGenerating] = useStateA(false);
   const [discarding, setDiscarding] = useStateA(false);
+  const [startingKnockout, setStartingKnockout] = useStateA(false);
   // localStatus lets AdminSettings report an invalidation immediately so the
   // page-header StatusBadge flips without waiting for the SSE refresh.
   // Cleared automatically when the prop status changes (SSE arrives).
@@ -1408,6 +1409,34 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     }
   };
 
+  // mp-turx: local handler that delegates to the prop; keeps spinner state
+  // local to AdminCompetition so the button disables while the call is in-flight.
+  const handleStartKnockout = async () => {
+    if (!onStartKnockout) return;
+    setStartingKnockout(true);
+    try {
+      await onStartKnockout(c.id);
+      if (!mountedRef.current) return;
+      // Backend moves the comp to "playoffs" and clears bracket.preview.
+      // The SSE refresh (competition_started / competition_updated) will
+      // update the bracket panel automatically — navigate there so the
+      // operator can see the live bracket immediately.
+      onSection("bracket");
+    } catch (e) {
+      // onStartKnockout in admin.jsx already shows a toast; nothing more to do.
+      console.error("Start knockout failed:", e);
+    } finally {
+      if (mountedRef.current) setStartingKnockout(false);
+    }
+  };
+
+  // mp-turx: a mixed comp is "pools complete" when every pool match has been
+  // scored (status === "completed") and the comp itself is in "pools" status.
+  // This is the precondition for the "Start knockout" button.
+  const poolsComplete = c.format === "mixed" && c.status === "pools" &&
+    Array.isArray(poolMatches) && poolMatches.length > 0 &&
+    poolMatches.every(m => m.status === "completed");
+
   const isDrawReady = c.status === "draw-ready";
   const sections = [
     {
@@ -1507,15 +1536,29 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start when ready</div>
               </div>
             )}
-            {(c.format === "mixed" || c.format === "league") && c.status !== "setup" && c.status !== "draw-ready" && onCreatePlayoff && (() => {
-              if (c.format === "league") {
-                return <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>League: standings determine the winner</div>;
+            {c.format === "league" && c.status !== "setup" && c.status !== "draw-ready" && (
+              <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>League: standings determine the winner</div>
+            )}
+            {/* mp-turx: mixed competition — show "Start knockout" when all pools are
+                complete (status "pools", every pool match done). Once the knockout
+                starts (status "playoffs") the bracket becomes live and scoreable. */}
+            {c.format === "mixed" && c.status !== "setup" && c.status !== "draw-ready" && (() => {
+              if (c.status === "playoffs") {
+                return <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>Knockout in progress</div>;
               }
-              const playoffName = c.name + " - Playoffs";
-              const hasPlayoff = (t.competitions || []).some(cc => cc.name === playoffName);
-              return hasPlayoff
-                ? <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>Playoff bracket already created</div>
-                : <button className="btn btn--primary" onClick={() => onCreatePlayoff(c.id)}>Create playoff bracket →</button>;
+              if (c.status === "completed") {
+                return null;
+              }
+              // status === "pools": show Start knockout when pools are done, else a hint
+              if (poolsComplete && onStartKnockout) {
+                return (
+                  <button className="btn btn--primary" onClick={handleStartKnockout} disabled={startingKnockout}>
+                    {startingKnockout && <span className="spinner" />}
+                    {startingKnockout ? "Starting knockout…" : "Start knockout →"}
+                  </button>
+                );
+              }
+              return <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>Finish all pool matches to unlock the knockout</div>;
             })()}
           </div>
         </div>

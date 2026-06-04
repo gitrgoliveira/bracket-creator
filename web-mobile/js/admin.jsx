@@ -363,6 +363,25 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     showToast(`${c.name} started`);
   };
 
+  // mp-turx: start the in-place knockout phase of a mixed competition.
+  // The backend moves it from status "pools" → "playoffs" and makes the
+  // bracket live (bracket.preview cleared). We refresh competition data
+  // via SSE/best-effort so the AdminBracket panel switches to scoreable.
+  const startKnockout = async (compId) => {
+    const c = t.competitions.find(cc => cc.id === compId);
+    if (!c) return;
+    showToast(`Starting knockout for ${c.name}…`);
+    try {
+      await window.API.startKnockout(compId, password);
+    } catch (e) {
+      if (mountedRef.current) showToast(e.message, "error");
+      return;
+    }
+    await refreshCompsBestEffort("StartKnockout");
+    if (!mountedRef.current) return;
+    showToast(`Knockout started for ${c.name}`);
+  };
+
   const updateTournament = async (patch) => {
     try {
       // Surface a new password to the parent BEFORE the API call so the
@@ -653,6 +672,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onUpdate={(next) => updateCompetition(c.id, next)}
       onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then(setAdminCompData).catch(err => console.error("refresh failed:", err))}
       onCreatePlayoff={createPlayoff}
+      onStartKnockout={startKnockout}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}
       onLogout={onLogout}

@@ -293,6 +293,37 @@ func TestValidateTeamMatchType(t *testing.T) {
 	}
 }
 
+func TestValidateCompetitionTeamSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     string
+		teamSize int
+		wantErr  bool
+	}{
+		{"team with size 0 errors", "team", 0, true},
+		{"team with size 1 errors", "team", 1, true},
+		{"team with size 2 ok", "team", 2, false},
+		{"team with size 5 ok", "team", 5, false},
+		{"individual with size 0 ok", "individual", 0, false},
+		{"individual with size 1 errors", "individual", 1, true},
+		{"individual with size 2 errors", "individual", 2, true},
+		{"negative value errors", "individual", -1, true},
+		{"empty kind with size 0 ok", "", 0, false},
+		{"empty kind with size 1 errors", "", 1, true},
+		{"empty kind with size 3 errors", "", 3, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCompetitionTeamSize(tc.kind, tc.teamSize)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 // --- Sponsors (mp-c38) ---
 
 // TestTournament_SponsorsRoundTrip pins the YAML round-trip contract:

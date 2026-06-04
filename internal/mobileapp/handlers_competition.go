@@ -360,6 +360,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Team competitions require at least 2 members per team.
+		if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Derive ID from name BEFORE acquiring the rename lock — the ID
 		// derivation has no concurrency concern (pure function of Name)
 		// and an empty derived ID should fast-fail without holding the
@@ -626,6 +632,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// settings fields), matching the gate logic for the other
 			// validators in this block.
 			if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Team competitions require at least 2 members per team.
+			if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}

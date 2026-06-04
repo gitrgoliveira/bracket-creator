@@ -1287,7 +1287,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
 }
 
 function AdminExport({ c, t, password }) {
-  const url = `${window.location.origin}/viewer.html?id=${t.id}#comp-${c.id}`;
+  const url = `${(window.linkBase || (() => window.location.origin))(t)}/viewer.html?id=${t.id}#comp-${c.id}`;
 
   const downloadXlsx = async () => {
     try {

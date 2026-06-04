@@ -540,6 +540,47 @@ function MyMatchAlertBanner({ match, onView, onDismiss }) {
 // testing (mp-ef3 Copilot round 2).
 export const isHttpURL = (u) => /^https?:\/\//i.test(u);
 
+// linkBase returns the configured publicURL (mp-s1gl) for the given tournament,
+// falling back to the current frame's origin when publicURL is not set. This is
+// the single source of truth for building externally-shareable links (QR codes,
+// viewer share links) so operators can set one canonical URL regardless of what
+// address the admin browser is using.
+// Guard against opaque-origin contexts (sandboxed iframes) where
+// window.location.origin is the literal string "null". Falling back to
+// window.location.origin in that case would produce "null/register/..." links,
+// so return an empty string instead so callers get a relative path.
+export const linkBase = (t) => {
+  if (t && t.publicURL) return t.publicURL;
+  const origin = window.location.origin;
+  return (!origin || origin === "null") ? "" : origin;
+};
+
+// isNonPublicOrigin returns true when the given origin looks like a device-local
+// or LAN address that won't be reachable by remote attendees. Used to warn the
+// operator when publicURL is unset and the fallback origin would produce
+// unworkable QR codes / share links (mp-s1gl).
+//
+// Treats falsy / "null" (opaque-origin sandboxed iframe) as non-public so the
+// warning degrades gracefully and never renders "null/register/..." links.
+export const isNonPublicOrigin = (origin) => {
+  if (!origin || origin === "null") return true;
+  let host, hasPort = false;
+  try {
+    const u = new URL(origin);
+    host = u.hostname;
+    hasPort = u.port !== "";
+  } catch { return true; }
+  if (host === "localhost" || host === "0.0.0.0") return true;
+  if (host === "::1" || host === "[::1]") return true;  // IPv6 loopback
+  if (host.endsWith(".local")) return true;
+  if (/^127\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  if (hasPort) return true;
+  return false;
+};
+
 // TournamentInfo renders optional public tournament info (mp-ef3) as a
 // read-only card on the viewer home page. Returns null when no info fields
 // are set so the card is invisible for tournaments that haven't filled them in.
@@ -3789,5 +3830,9 @@ window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
 window.NotificationSettings = NotificationSettings;
 window.LS_NOTIFICATIONS_ENABLED = LS_NOTIFICATIONS_ENABLED;
+// mp-s1gl: expose link-base helpers for admin_shell.jsx / admin_schedule.jsx
+// (those files don't ES-import viewer.jsx; they pick globals off window).
+window.linkBase = linkBase;
+window.isNonPublicOrigin = isNonPublicOrigin;
 export { shouldShowRegister };
 

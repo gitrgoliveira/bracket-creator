@@ -1312,25 +1312,148 @@ a:hover {
 
 .pool__table th.num,
 .pool__table td.num {
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
   font-size: 12.5px;
 }
 
+.pool__table th:last-child,
+.pool__table td:last-child {
+  padding-right: 16px;
+}
+
+/* Uniform green advancing row (no ▲ arrow, no cut-border — tint + badge carry the signal) */
 .pool__table tr.advancing {
   background: #ecfdf5;
 }
 
-.pool__table tr.advancing td:first-child::before {
-  content: "▲";
-  color: #16a34a;
-  margin-right: 6px;
-  font-size: 10px;
+/* Rank badge inline after player name in the standings table */
+.rank-badge {
+  display: inline-block;
+  font-size: 0.6em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  line-height: 1.45;
+  background: var(--line-2);
+  color: var(--ink-3);
+  vertical-align: middle;
+  margin-left: 4px;
 }
 
-.pool__table tr.advancing-cut td {
-  border-bottom: 2px solid #bbf7d0;
+.rank-badge--adv {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+/* Numbered match list section header */
+.pool-match-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 12px 14px 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pool-match-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line-2);
+}
+
+/* Numbered match list rows */
+.pool-match-numbered-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 14px;
+}
+
+.pool-match-numbered-row {
+  display: grid;
+  grid-template-columns: 20px 1fr auto 1fr;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.pool-match-numbered-row__num {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.pool-match-numbered-row__side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  min-width: 0;
+}
+
+.pool-match-numbered-row__side--shiro {
+  background: var(--white-side, #f6f7fb);
+  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(42,51,70,0.07) 3px, rgba(42,51,70,0.07) 6px);
+  border-radius: 6px 0 0 6px;
+}
+
+.pool-match-numbered-row__side--aka {
+  background: var(--red-soft, #fde7e8);
+  justify-content: flex-end;
+  flex-direction: row-reverse;
+  text-align: right;
+  border-radius: 0 6px 6px 0;
+}
+
+.pool-match-numbered-row__name {
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cbadge {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 5px;
+  border-radius: 3px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.cbadge--shiro {
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.cbadge--aka {
+  background: var(--red, #c1121f);
+  color: #fff;
+}
+
+.pool-match-numbered-row__score {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ink);
+  min-width: 52px;
+  text-align: center;
+  letter-spacing: 0.04em;
 }
 
 /* G1: phase strip inside a unified pools+knockout competition card */
@@ -4120,13 +4243,19 @@ button.my-match__opp {
 
 /* Competitor number prefix (e.g. "K1") shown before a player name. The value
    in player.number already embeds the competition's configured numberPrefix;
-   this only styles it as a compact monospace badge (mp-3 / numberPrefix). */
+   this only styles it as a compact monospace badge (mp-3 / numberPrefix).
+   Deliberately neutral (not red/navy) so it doesn't read as Aka/Shiro/liveness
+   (mp-938b colour law). */
 .num-prefix {
   font-family: var(--font-mono);
-  font-size: 0.78em;
+  font-size: 0.64em;
   font-weight: 700;
-  color: var(--accent);
-  margin-right: 6px;
+  color: var(--ink-2);
+  background: var(--line-2);
+  border: 1px solid var(--line);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-right: 4px;
   flex-shrink: 0;
 }
 

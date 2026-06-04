@@ -10,6 +10,223 @@ function collectText(node) {
   return '';
 }
 
+// Walk a vnode tree and collect all vnodes matching a predicate.
+function findAll(node, pred, acc = []) {
+  if (node == null || typeof node !== 'object') return acc;
+  if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, acc)); return acc; }
+  if (pred(node)) acc.push(node);
+  const kids = node.children || node.props?.children || [];
+  [].concat(kids).forEach(k => findAll(k, pred, acc));
+  return acc;
+}
+
+// ------------------------------------------------------------------
+// mp-938b: Draw-order standings table and rank badges
+// ------------------------------------------------------------------
+describe('PoolsViewer draw-order standings (mp-938b)', () => {
+  const realReact = global.React;
+  let runtime;
+  let PoolsViewer;
+  const savedGlobals = {};
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+
+  const baseComp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 2 };
+  const tweaks = { showDojo: false };
+
+  // Pool of 4: draw order is P1, P2, P3, P4.
+  // Standings (rank order): P3 (1st), P1 (2nd), P4 (3rd), P2 (4th).
+  // With poolWinners=2, advancing rows should be P3 and P1, NOT the first two draw rows.
+  const pool = {
+    poolName: 'Pool A',
+    players: [
+      { name: 'P1', dojo: 'Dojo1' },
+      { name: 'P2', dojo: 'Dojo2' },
+      { name: 'P3', dojo: 'Dojo3' },
+      { name: 'P4', dojo: 'Dojo4' },
+    ],
+  };
+
+  const standings = {
+    'Pool A': [
+      { player: { name: 'P3' }, wins: 3, losses: 0, draws: 0, ipponsGiven: 6, ipponsTaken: 0 },
+      { player: { name: 'P1' }, wins: 2, losses: 1, draws: 0, ipponsGiven: 4, ipponsTaken: 2 },
+      { player: { name: 'P4' }, wins: 1, losses: 2, draws: 0, ipponsGiven: 2, ipponsTaken: 4 },
+      { player: { name: 'P2' }, wins: 0, losses: 3, draws: 0, ipponsGiven: 0, ipponsTaken: 6 },
+    ],
+  };
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] }
+        : { had: false };
+    });
+    global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.isHikiwake = () => false;
+    global.window.formatIpponsScore = () => '';
+    global.window.ipponsFromScore = () => [];
+    global.window.queueLabel = () => '';
+    global.window.queueLabelCompact = () => null;
+    vi.resetModules();
+    ({ PoolsViewer } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('renders rows in draw-position order (pool.players order), not rank order', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool],
+      standings,
+      poolMatches: [],
+      tweaks,
+      competition: baseComp,
+    });
+    const text = collectText(tree);
+    // P1 should appear before P3 in the output (draw position 1 < draw position 3)
+    const p1Idx = text.indexOf('P1');
+    const p3Idx = text.indexOf('P3');
+    expect(p1Idx).toBeGreaterThanOrEqual(0);
+    expect(p3Idx).toBeGreaterThanOrEqual(0);
+    expect(p1Idx).toBeLessThan(p3Idx);
+  });
+
+  it('applies advancing class by looked-up rank, not row index', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool],
+      standings,
+      poolMatches: [],
+      tweaks,
+      competition: baseComp,
+    });
+    // Find all tr vnodes with advancing class
+    const advancingRows = findAll(tree, n => {
+      const cls = n.props?.className;
+      return n.type === 'tr' && typeof cls === 'string' && cls.includes('advancing');
+    });
+    // P3 (draw pos 3, rank 1) and P1 (draw pos 1, rank 2) should advance.
+    // P2 (draw pos 2, rank 4) and P4 (draw pos 4, rank 3) should not.
+    expect(advancingRows).toHaveLength(2);
+    const advancingText = advancingRows.map(r => collectText(r)).join(' ');
+    expect(advancingText).toContain('P3');
+    expect(advancingText).toContain('P1');
+    expect(advancingText).not.toContain('P2');
+    expect(advancingText).not.toContain('P4');
+  });
+
+  it('shows rank badges (1st/2nd/3rd/4th) for each player', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool],
+      standings,
+      poolMatches: [],
+      tweaks,
+      competition: baseComp,
+    });
+    const text = collectText(tree);
+    expect(text).toContain('1st');
+    expect(text).toContain('2nd');
+    expect(text).toContain('3rd');
+    expect(text).toContain('4th');
+  });
+
+  it('advancing rank badges have rank-badge--adv class, others do not', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool],
+      standings,
+      poolMatches: [],
+      tweaks,
+      competition: baseComp,
+    });
+    // Collect all rank-badge spans
+    const advBadges = findAll(tree, n => {
+      const cls = n.props?.className;
+      return typeof cls === 'string' && cls.includes('rank-badge--adv');
+    });
+    const allBadges = findAll(tree, n => {
+      const cls = n.props?.className;
+      return typeof cls === 'string' && cls.includes('rank-badge') && !cls.includes('rank-badge--adv');
+    });
+    // 2 advancing (P3=1st, P1=2nd), 2 non-advancing (P4=3rd, P2=4th)
+    expect(advBadges).toHaveLength(2);
+    const advText = advBadges.map(b => collectText(b)).join(' ');
+    expect(advText).toContain('1st');
+    expect(advText).toContain('2nd');
+    // Non-advancing badges contain 3rd and 4th
+    expect(allBadges).toHaveLength(2);
+    const otherText = allBadges.map(b => collectText(b)).join(' ');
+    expect(otherText).toContain('3rd');
+    expect(otherText).toContain('4th');
+  });
+
+  it('shows draw position in # column (1..N), not rank', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool],
+      standings,
+      poolMatches: [],
+      tweaks,
+      competition: baseComp,
+    });
+    // The first <td> of each row is the draw position cell; P1 is at draw pos 1.
+    // Check that the output contains draw positions 1,2,3,4 (not rank positions).
+    const text = collectText(tree);
+    expect(text).toContain('1'); // draw pos 1
+    expect(text).toContain('2'); // draw pos 2
+    expect(text).toContain('3'); // draw pos 3
+    expect(text).toContain('4'); // draw pos 4
+  });
+
+  it('renders numbered match list when matches are present', () => {
+    const matches = [
+      { id: 'Pool A-0', sideA: { name: 'P1' }, sideB: { name: 'P2' }, status: 'scheduled' },
+      { id: 'Pool A-1', sideA: { name: 'P3' }, sideB: { name: 'P4' }, status: 'scheduled' },
+    ];
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool],
+      standings,
+      poolMatches: matches,
+      tweaks,
+      competition: baseComp,
+    });
+    const text = collectText(tree);
+    expect(text).toContain('Matches');
+    // Match numbers 1 and 2 should appear
+    expect(text).toContain('1');
+    expect(text).toContain('2');
+  });
+
+  it('renders pre-match (no standings) rows in draw order with dashes', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool],
+      standings: {},
+      poolMatches: [],
+      tweaks,
+      competition: baseComp,
+    });
+    const text = collectText(tree);
+    // All 4 players appear
+    expect(text).toContain('P1');
+    expect(text).toContain('P2');
+    expect(text).toContain('P3');
+    expect(text).toContain('P4');
+    // No rank badges when no standings
+    expect(text).not.toContain('1st');
+    expect(text).not.toContain('2nd');
+  });
+});
+
+// ------------------------------------------------------------------
+
 describe('PoolsViewer league standings label (mp-mnwu)', () => {
   const realReact = global.React;
   let runtime;

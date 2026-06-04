@@ -14,7 +14,7 @@ type Player struct {
 	Tag         string   `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer"
 	CheckedIn   bool     `json:"checkedIn"`
 
-	PoolPosition int64  `json:"-"`
+	PoolPosition int64  `json:"poolPosition,omitempty"`
 	Seed         int    `json:"seed"`
 	Number       string `json:"number,omitempty"` // e.g. "K1" — assigned when --number-prefix is set
 }

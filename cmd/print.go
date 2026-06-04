@@ -176,8 +176,16 @@ func (o *printOptions) generatePDFs(cmd *cobra.Command, gen *pdf.Generator, sour
 		return fmt.Errorf("no pages produced for --type=%s from %s (no matching sheets)", o.pdfType, sourcesLabel)
 	}
 	if o.output != "" && o.output != produced {
+		// os.Rename fails on Windows when the destination already exists.
+		// Remove it first and retry once to handle re-running into an
+		// existing output path (mirrors handlers_branding.go pattern).
 		if err := os.Rename(produced, o.output); err != nil {
-			return fmt.Errorf("move output to %s: %w", o.output, err)
+			if removeErr := os.Remove(o.output); removeErr == nil {
+				err = os.Rename(produced, o.output)
+			}
+			if err != nil {
+				return fmt.Errorf("move output to %s: %w", o.output, err)
+			}
 		}
 		produced = o.output
 	}

@@ -64,10 +64,13 @@ func TestGenerateTagsSkipsTeamOnlySources(t *testing.T) {
 }
 
 func TestGenerateGroupsUnknownType(t *testing.T) {
-	requireSoffice(t)
-	gen, err := NewGenerator()
-	require.NoError(t, err)
-	_, err = gen.GenerateGroups(context.Background(), []string{"nonsense"}, []SourceWorkbook{{Path: "x"}}, t.TempDir())
+	// GenerateGroups validates type names before touching soffice, so this
+	// test does not require LibreOffice. Using a zero-value Generator is
+	// sufficient for the validation path; we can't call NewGenerator because
+	// that calls LocateSoffice, which may fail in CI without LibreOffice.
+	// Instead, construct a Generator directly to bypass the soffice check.
+	gen := &Generator{conv: nil}
+	_, err := gen.GenerateGroups(context.Background(), []string{"nonsense"}, []SourceWorkbook{{Path: "x"}}, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown PDF type")
 }

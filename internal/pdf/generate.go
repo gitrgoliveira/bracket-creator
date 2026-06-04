@@ -235,9 +235,17 @@ func publishAtomic(src, dst string) error {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("chmod temp output: %w", err)
 	}
+	// os.Rename is atomic on POSIX but fails on Windows when dst already
+	// exists (e.g. re-running print into an existing output directory).
+	// Mirror the remove-dst-then-retry pattern from handlers_branding.go.
 	if err := os.Rename(tmpName, dst); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("publish output: %w", err)
+		if removeErr := os.Remove(dst); removeErr == nil {
+			err = os.Rename(tmpName, dst)
+		}
+		if err != nil {
+			_ = os.Remove(tmpName)
+			return fmt.Errorf("publish output: %w", err)
+		}
 	}
 	return nil
 }

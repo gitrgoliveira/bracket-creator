@@ -101,12 +101,17 @@ func LocateSoffice() (string, error) {
 	return "", fmt.Errorf("%w: set $LIBREOFFICE_PATH or ensure 'soffice' is on PATH (install LibreOffice via your platform's package manager)", ErrSofficeNotFound)
 }
 
-// isExecutableFile reports whether path is an existing regular file with at
-// least one executable bit set.
+// isExecutableFile reports whether path is an existing regular file that can
+// be executed. On POSIX systems the check uses executable permission bits. On
+// Windows, os.Stat does not set +x, so any regular file is considered
+// executable — the OS itself decides based on the .exe/.bat extension and ACLs.
 func isExecutableFile(path string) bool {
 	info, err := os.Stat(path) // #nosec G304 G703 -- path is from a fixed candidate list or $LIBREOFFICE_PATH/$PATH lookup, not request data.
 	if err != nil || info.IsDir() {
 		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true // Windows: any regular file is potentially executable; defer to the OS.
 	}
 	return info.Mode().Perm()&0o111 != 0
 }

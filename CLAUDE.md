@@ -198,7 +198,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 When rebasing or resolving conflicts, watch for these recurring breakages:
 - Duplicate declarations introduced by the rebase (same symbol defined twice after a merge).
 - UUID-vs-name-string mismatches in player/entity maps — match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
-- Re-run `make go/test` after every rebase; a clean rebase that compiles can still be semantically broken.
+- Re-run `make go/test` after every rebase; a clean rebase that compiles must not be semantically broken.
 
 
 # Validation

@@ -62,13 +62,16 @@ func parsePoolsFile(path string) (any, error) {
 		}
 
 		player := helper.Player{Name: playerName}
-		// col 2: draw position (0-indexed) — written by SavePools as strconv.Itoa(i).
-		// Read it back so we can sort by it below and make draw order authoritative
-		// rather than relying on CSV row order.
+		// col 2: draw position written by savePoolsLocked as strconv.Itoa(i) — 0-indexed.
+		// PoolPosition is consumed by Excel exporters as a 1-based label, so add 1 here.
+		// For legacy files that omit col 2, fall back to append order (1-based) so that
+		// the sort below is a no-op and row order is preserved.
 		if len(rec) > 2 && rec[2] != "" {
 			if pos, err2 := strconv.ParseInt(rec[2], 10, 64); err2 == nil {
-				player.PoolPosition = pos
+				player.PoolPosition = pos + 1 // convert 0-indexed CSV value → 1-indexed
 			}
+		} else {
+			player.PoolPosition = int64(len(pools[idx].Players) + 1) // 1-indexed append order
 		}
 		if len(rec) > 3 {
 			player.DisplayName = rec[3]

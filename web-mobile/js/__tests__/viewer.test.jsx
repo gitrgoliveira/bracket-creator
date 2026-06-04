@@ -1040,16 +1040,18 @@ describe('linkBase', () => {
   });
 
   it('returns empty string when publicURL is absent and origin is opaque ("null")', () => {
-    const orig = window.location.origin;
-    Object.defineProperty(window, 'location', {
-      value: { ...window.location, origin: 'null' },
-      writable: true, configurable: true,
-    });
-    expect(linkBase({})).toBe('');
-    Object.defineProperty(window, 'location', {
-      value: { ...window.location, origin: orig },
-      writable: true, configurable: true,
-    });
+    const origDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
+    try {
+      Object.defineProperty(window, 'location', {
+        value: { origin: 'null' },
+        writable: true, configurable: true,
+      });
+      expect(linkBase({})).toBe('');
+    } finally {
+      if (origDescriptor) {
+        Object.defineProperty(window, 'location', origDescriptor);
+      }
+    }
   });
 });
 

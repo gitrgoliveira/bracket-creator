@@ -148,9 +148,15 @@ def run_competition_setup(cat):
     seeds_path = os.path.join(DATA_DIR, cat.get('seeds', "")) if cat.get('seeds') else None
 
     print(f"Creating competition: {title} (ID: {comp_id})")
+    team_size = cat.get('team_size', 1)
     payload = {
         "id": comp_id,
         "name": title,
+        # A competition with >1 player per team must be created with
+        # kind="team" so the viewer/admin label it as a team event and
+        # count entries as TEAMS (not players). Each CSV row is one team
+        # (TeamName, Dojo); team_size only sets the sub-bouts per encounter.
+        "kind": "team" if team_size > 1 else "individual",
         "format": "mixed",
         "poolSize": 3,
         "poolWinners": 2,
@@ -158,7 +164,7 @@ def run_competition_setup(cat):
         "courts": ["A", "B"],
         "withZekkenName": cat.get('zekken', True),
         "numberPrefix": cat.get('number_prefix', ""),
-        "teamSize": cat.get('team_size', 1),
+        "teamSize": team_size,
         "startTime": cat.get('startTime', ""),
         "date": cat.get('date', ""),
         "status": "setup"

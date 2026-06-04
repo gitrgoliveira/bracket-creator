@@ -432,9 +432,18 @@ func ValidateTeamMatchType(t TeamMatchType, teamSize int) error {
 	}
 }
 
-// ValidateCompetitionTeamSize returns an error when kind is "team" and
-// teamSize is less than 2. Individual competitions are unconstrained.
+// ValidateCompetitionTeamSize rejects invalid teamSize values:
+//   - negative values are always invalid
+//   - teamSize == 1 is always invalid (ambiguous: engine code uses TeamSize > 0
+//     to detect team competitions, so 1 would misclassify an individual comp)
+//   - kind == "team" requires teamSize >= 2
 func ValidateCompetitionTeamSize(kind string, teamSize int) error {
+	if teamSize < 0 {
+		return fmt.Errorf("teamSize must be non-negative")
+	}
+	if teamSize == 1 {
+		return fmt.Errorf("teamSize 1 is invalid: use 0 for individual competitions or >= 2 for teams")
+	}
 	if kind == "team" && teamSize < 2 {
 		return fmt.Errorf("team competitions require teamSize >= 2")
 	}

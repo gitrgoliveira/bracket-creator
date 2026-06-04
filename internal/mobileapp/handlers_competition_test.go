@@ -1594,6 +1594,20 @@ func TestCreateCompetitionTeamSizeValidation(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "teamSize")
 	})
 
+	t.Run("POST kind omitted with teamSize=1 returns 400", func(t *testing.T) {
+		comp := state.Competition{
+			Name:     "Ambiguous Size One",
+			TeamSize: 1,
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
 	t.Run("POST team with teamSize=2 succeeds", func(t *testing.T) {
 		comp := state.Competition{
 			Name:     "Team Size Two",

@@ -5,7 +5,7 @@
 - **Group 2 — standings:** A · **one combined team table**.
 - **Group 3 — grid:** A · **2 columns in landscape, 1 in portrait** (cap at 2).
 - **Group 4 — quick-wins:** label-person, team-count, winner-tick, results-order. (Dropped: bye-final, queue-yours, ippon-zero, dark-mode.)
-- Group 4 Awards redesign + the two-3rd-places fix were NOT among the picks — see "Open" below.
+- Group 4 Awards redesign + the two-3rd-places fix were initially deferred ("Open" below), then **approved by the operator and shipped** in this PR: the champion-hero awards layout (1st hero → 2nd → two joint 3rds) and the FIK two-3rds podium (`deriveAwards` 1/2/3/3, no 4th).
 
 ## ⚠️ Grounding correction — some findings were TEST-SEED artifacts, not app bugs
 Verified against real code, not the seeded demo (whose `setup_tournament.py` wrongly set `teamSize=1` for individuals and loaded 36 loose individuals into a 5-person team comp with no lineups):
@@ -29,7 +29,7 @@ Verified against real code, not the seeded demo (whose `setup_tournament.py` wro
 - Files: `web-mobile/js/viewer.jsx` (+ maybe `api_serializers.jsx` to expose `sourceCompID`/grouping), `styles.css` (phase strip).
 
 ### G2 — Combined team standings: add IT + wire qualifier highlight + tooltips
-- Team header today: `# Team W L T IV IL PW PL` (`viewer.jsx:2331`) — **missing IT** (individual ties) the handbook requires (W→L→T→IV→IL→**IT**→PW→PL). Add an IT column (`s.individualTies`); confirm the Go standings serializer emits it.
+- Team header today: `# Team W L T IV IL PW PL` (`viewer.jsx:2331`) — **missing IT** (individual ties) the handbook requires (W→L→T→IV→IL→**IT**→PW→PL). Add an IT column. NOTE: the backend JSON field is **`individualDraws`** (`internal/state/models.go` `IndividualDraws`), not `individualTies` — the UI reads `s.individualDraws`.
 - **Qualifier highlight**: `.pool__table tr.advancing` (green + ▲) **exists in CSS (styles.css:1301) but is never applied** in JSX. Wire `className="advancing"` onto the top `poolWinners` rows; add an advance-line divider after the cut.
 - Header **tooltips**: wrap W/L/T/IV/IL/IT/PW/PL headers with the existing glossary `Term` so the jargon is decodable.
 - Individual table: already correct — **no change**.

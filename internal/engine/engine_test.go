@@ -374,9 +374,18 @@ func TestStartCompetition_PlayoffsFormat_WithByes(t *testing.T) {
 		}
 	}
 	// 5 players in 8 slots → 3 byes, distributed to the top 3 seeds (mp-sess), so
-	// three first-round matches are player-vs-bye (one empty side each) and none is
-	// an empty-vs-empty double bye.
-	assert.GreaterOrEqual(t, byeCount, 2)
+	// exactly three first-round matches are player-vs-bye (one empty side each) and
+	// NONE is an empty-vs-empty double bye. (The old clustered behavior produced a
+	// double bye, so asserting doubleBye==0 — not just byeCount>=2 — is what
+	// actually pins the distribution.)
+	doubleBye := 0
+	for _, m := range bracket.Rounds[0] {
+		if m.SideA == "" && m.SideB == "" {
+			doubleBye++
+		}
+	}
+	assert.Equal(t, 0, doubleBye, "distributed byes must never pair two byes")
+	assert.Equal(t, 3, byeCount, "5 players → 3 single-bye first-round matches")
 
 	// Matches with one real player and one bye should have a winner
 	for _, m := range bracket.Rounds[0] {
@@ -1252,15 +1261,21 @@ func TestStartCompetition_PlayoffsFormat_LargeWithByes(t *testing.T) {
 	assert.Len(t, bracket.Rounds, 4)
 	assert.Len(t, bracket.Rounds[0], 8) // 8 first-round matches
 
-	// 4 empty slots means some matches have byes
+	// 12 players in 16 slots → 4 byes, distributed to the top 4 seeds (mp-sess):
+	// exactly 4 player-vs-bye first-round matches and NO empty-vs-empty double bye.
 	byeCount := 0
+	doubleBye := 0
 	for _, m := range bracket.Rounds[0] {
 		if m.SideA == "" || m.SideB == "" {
 			byeCount++
 			assert.Equal(t, state.MatchStatusCompleted, m.Status)
 		}
+		if m.SideA == "" && m.SideB == "" {
+			doubleBye++
+		}
 	}
-	assert.GreaterOrEqual(t, byeCount, 2, "should have bye matches")
+	assert.Equal(t, 0, doubleBye, "distributed byes must never pair two byes")
+	assert.Equal(t, 4, byeCount, "12 players → 4 single-bye first-round matches")
 
 	// Total real players across all first-round matches
 	realPlayers := map[string]bool{}

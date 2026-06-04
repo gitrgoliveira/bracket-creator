@@ -50,9 +50,9 @@ func partitionSeeded(players []Player) (seeded, unseeded []Player) {
 }
 
 // StandardSeedingFull places players into a FULL power-of-two bracket and returns
-// a slice of length NextPow2(len(players)). Each player is positioned by its
-// seeding RANK via generateBracketOrder, and the surplus high-rank slots are left
-// as zero-value Players (empty Name), i.e. byes.
+// a slice of length NextPow2(len(players)) — or nil for an empty input. Each
+// player is positioned by its seeding RANK via generateBracketOrder, and the
+// surplus high-rank slots are left as zero-value Players (empty Name), i.e. byes.
 //
 // Rank assignment matches StandardSeeding (and the Excel draw): a seeded player
 // (Seed > 0) claims its Seed NUMBER as its rank — so an operator who assigns

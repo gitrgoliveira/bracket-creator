@@ -479,6 +479,17 @@ func TestTournamentHandlers(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
+	t.Run("PUT rejects scheme-only publicURL (no host)", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "https://"}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "publicURL")
+	})
 }
 
 // TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange pins the

@@ -215,6 +215,9 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateHTTPURL("publicURL", t.PublicURL); err != nil {
 		return err
 	}
+	if err := validateURLHasHost("publicURL", t.PublicURL); err != nil {
+		return err
+	}
 	// Normalize trailing slash so callers can always append "/path" without
 	// worrying about double slashes. Done post-validation to keep the error
 	// message on the pre-trim value.

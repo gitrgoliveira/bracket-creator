@@ -19,6 +19,7 @@ package mobileapp
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -111,6 +112,24 @@ func validateHTTPURL(field, val string) error {
 		return &ValidationError{
 			Field:   field,
 			Message: "must start with http:// or https://",
+		}
+	}
+	return nil
+}
+
+// validateURLHasHost rejects scheme-only values like "https://" that pass the
+// prefix check in validateHTTPURL but have no host, which would produce a
+// broken base URL after trailing-slash normalization (e.g. "https:").
+// Empty strings pass (the field is optional).
+func validateURLHasHost(field, val string) error {
+	if val == "" {
+		return nil
+	}
+	u, err := url.Parse(val)
+	if err != nil || u.Host == "" {
+		return &ValidationError{
+			Field:   field,
+			Message: "must include a host (e.g. https://my-tournament.example.com)",
 		}
 	}
 	return nil

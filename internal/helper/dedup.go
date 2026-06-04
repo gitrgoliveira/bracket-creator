@@ -232,7 +232,9 @@ func FindNearDupWarnings(entries [][2]string) []NearDupWarning {
 		}
 	}
 
-	var warnings []NearDupWarning
+	// Non-nil so callers that serialize this to JSON always emit `[]` rather
+	// than `null` — keeps the roster-PUT response shape consistent.
+	warnings := []NearDupWarning{}
 	// Track pairs we've already warned about to avoid duplicates.
 	type pair struct{ i, j int }
 	warned := make(map[pair]bool)

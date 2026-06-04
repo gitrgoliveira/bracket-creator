@@ -38,6 +38,7 @@ const (
 	MaxLenCeremonyBlock      = 16  // "1h30m" etc.
 
 	// mp-ef3: public tournament info field caps.
+	MaxLenPublicURL       = 500 // mp-s1gl: externally-shareable base URL
 	MaxLenVenueAddress    = 300
 	MaxLenVenueMapURL     = 500
 	MaxLenDisplayTime     = 8 // "HH:MM" or "HH:MM:SS"

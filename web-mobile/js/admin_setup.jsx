@@ -18,6 +18,8 @@ const MAX_COURTS = window.MAX_COURTS;
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
+// mp-s1gl: link-base helpers from viewer.jsx (exposed on window at load time).
+const isNonPublicOrigin = window.isNonPublicOrigin || (() => false);
 
 // Returns the final competition name, trimming the raw user input before
 // the empty-check so a whitespace-only string ("   ") falls through to the
@@ -111,6 +113,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [lunchBlock, setLunchBlock] = useStateA(tournament.lunchBlock || "");
   const [closingBlock, setClosingBlock] = useStateA(tournament.closingBlock || "");
   // mp-ef3: public tournament info fields.
+  // mp-s1gl: externally-shareable base URL for QR codes / share links.
+  const [publicURL, setPublicURL] = useStateA(tournament.publicURL || "");
   const [venueAddress, setVenueAddress] = useStateA(tournament.venueAddress || "");
   const [venueMapURL, setVenueMapURL] = useStateA(tournament.venueMapURL || "");
   const [openingTime, setOpeningTime] = useStateA(tournament.openingTime || "");
@@ -179,6 +183,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       openingBlock: openingBlock.trim() || undefined,
       lunchBlock: lunchBlock.trim() || undefined,
       closingBlock: closingBlock.trim() || undefined,
+      publicURL: publicURL.trim() || undefined,
       venueAddress: venueAddress.trim() || undefined,
       venueMapURL: venueMapURL.trim() || undefined,
       openingTime: openingTime.trim() || undefined,
@@ -289,6 +294,22 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           {/* mp-ef3: Tournament Information (Public) */}
           <div style={{ borderTop: "1px solid var(--line)", marginTop: 20, paddingTop: 20 }}>
             <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--ink-3)", marginBottom: 12 }}>Tournament Information (Public)</div>
+            {/* mp-s1gl: Public URL — single source of truth for externally-shareable links */}
+            <div className="field">
+              <label className="field__label">Public URL</label>
+              <input
+                className="input"
+                value={publicURL}
+                onChange={(e) => setPublicURL(e.target.value)}
+                placeholder="https://my-tournament.example.com"
+              />
+              <div className="field__hint">The address participants reach this tournament at — used for QR codes and share links. Leave blank to use the current browser address.</div>
+              {publicURL.trim() === "" && isNonPublicOrigin(window.location.origin) && (
+                <div className="field__hint" style={{ color: "var(--red)", marginTop: 4 }}>
+                  {`Links will use this device's address (${window.location.origin}), which won't work for remote attendees. Set a Public URL to fix this.`}
+                </div>
+              )}
+            </div>
             <div className="field">
               <label className="field__label">Venue address</label>
               <input className="input" value={venueAddress} onChange={(e) => setVenueAddress(e.target.value)} placeholder="123 Sport Centre Dr, City" />

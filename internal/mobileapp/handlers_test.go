@@ -417,6 +417,68 @@ func TestTournamentHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "contacts[0].label")
 	})
+
+	// mp-s1gl: publicURL validation + trailing-slash normalization.
+	t.Run("PUT accepts empty publicURL (field is optional)", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: ""}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("PUT accepts valid https publicURL and strips trailing slash", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "https://my-tournament.example.com/"}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		stored, err := store.LoadTournament()
+		require.NoError(t, err)
+		assert.Equal(t, "https://my-tournament.example.com", stored.PublicURL, "trailing slash must be stripped")
+	})
+
+	t.Run("PUT rejects non-http publicURL", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "javascript:alert(1)"}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "publicURL")
+	})
+
+	t.Run("PUT rejects over-500-char publicURL", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		longURL := "https://example.com/" + strings.Repeat("x", MaxLenPublicURL)
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: longURL}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "publicURL")
+	})
+
+	t.Run("PUT accepts http publicURL (non-https passes validation)", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "http://staging.example.com"}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
 }
 
 // TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange pins the

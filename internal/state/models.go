@@ -79,6 +79,9 @@ type Tournament struct {
 
 	// Public tournament info fields (mp-ef3). All optional (omitempty).
 	// Rendered read-only on the viewer home page; editable in the admin setup form.
+	// PublicURL is the externally-shareable base URL for this tournament (mp-s1gl).
+	// When set it overrides window.location.origin for QR codes and share links.
+	PublicURL    string              `yaml:"public_url,omitempty" json:"publicURL,omitempty"`
 	VenueAddress string              `yaml:"venue_address,omitempty" json:"venueAddress,omitempty"`
 	VenueMapURL  string              `yaml:"venue_map_url,omitempty" json:"venueMapURL,omitempty"`
 	OpeningTime  string              `yaml:"opening_time,omitempty" json:"openingTime,omitempty"`

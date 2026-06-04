@@ -160,6 +160,7 @@ var errSelfRunRequiresAdminPassword = errors.New("self-run tournaments require a
 // /tournament handlers. Count validation (>MaxTournamentContacts) is enforced
 // by validateTournamentLengths as a 400 error rather than silently truncating.
 func trimPublicInfoFields(t *state.Tournament) {
+	t.PublicURL = strings.TrimSpace(t.PublicURL)
 	t.VenueAddress = strings.TrimSpace(t.VenueAddress)
 	t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
 	t.OpeningTime = strings.TrimSpace(t.OpeningTime)
@@ -207,6 +208,17 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
 		return err
 	}
+	// mp-s1gl: publicURL — externally-shareable base URL for QR codes / share links.
+	if err := validateMaxLen("publicURL", t.PublicURL, MaxLenPublicURL); err != nil {
+		return err
+	}
+	if err := validateHTTPURL("publicURL", t.PublicURL); err != nil {
+		return err
+	}
+	// Normalize trailing slash so callers can always append "/path" without
+	// worrying about double slashes. Done post-validation to keep the error
+	// message on the pre-trim value.
+	t.PublicURL = strings.TrimRight(t.PublicURL, "/")
 	// mp-ef3: public tournament info fields.
 	if err := validateMaxLen("venueAddress", t.VenueAddress, MaxLenVenueAddress); err != nil {
 		return err

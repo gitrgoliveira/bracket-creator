@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -61,6 +62,14 @@ func parsePoolsFile(path string) (any, error) {
 		}
 
 		player := helper.Player{Name: playerName}
+		// col 2: draw position (0-indexed) — written by SavePools as strconv.Itoa(i).
+		// Read it back so we can sort by it below and make draw order authoritative
+		// rather than relying on CSV row order.
+		if len(rec) > 2 && rec[2] != "" {
+			if pos, err2 := strconv.ParseInt(rec[2], 10, 64); err2 == nil {
+				player.PoolPosition = pos
+			}
+		}
 		if len(rec) > 3 {
 			player.DisplayName = rec[3]
 		}
@@ -76,6 +85,18 @@ func parsePoolsFile(path string) (any, error) {
 		}
 		pools[idx].Players = append(pools[idx].Players, player)
 	}
+
+	// Sort each pool's Players by their stored draw position so that the ordering
+	// is authoritative from the persisted field, not from CSV row order. This
+	// guarantees correct draw order even if rows were written out-of-order or
+	// the file was manually edited. Players whose PoolPosition was not written
+	// (legacy files) keep their existing row order (stable sort, 0 < 0 is false).
+	for i := range pools {
+		sort.SliceStable(pools[i].Players, func(a, b int) bool {
+			return pools[i].Players[a].PoolPosition < pools[i].Players[b].PoolPosition
+		})
+	}
+
 	return pools, nil
 }
 

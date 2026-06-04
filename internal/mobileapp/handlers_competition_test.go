@@ -1021,7 +1021,7 @@ func TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1(t *testing.T) {
 
 	// Near-duplicate (token-subset) → 200 with a warnings entry.
 	near := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
-		"players":[{"name":"Chau Earn Tan","dojo":"Kenyukai"},{"name":"Chau Tan","dojo":"London Kenyuka"}]}`)
+		"players":[{"name":"Ana Maria Rossi","dojo":"Tora"},{"name":"Ana Rossi","dojo":"Wakaba"}]}`)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(near))
 	req.Header.Set("Content-Type", "application/json")

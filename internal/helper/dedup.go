@@ -217,9 +217,9 @@ func isSingleTrailingTokenDiff(na, nb string) bool {
 //
 // Signal 1: token-subset — tokens of A ⊆ tokens of B (or vice-versa).
 // Identical normalized strings are skipped first (na == nb → Tier-1), so the
-// surviving cases are a genuine proper subset ("Chau Earn Tan" / "Chau Tan")
-// OR equal token sets reached by reordering ("Vannier Martin" / "Martin
-// Vannier") — both are intentionally flagged as likely the same person.
+// surviving cases are a genuine proper subset ("Ana Maria Rossi" / "Ana Rossi",
+// a middle-name-drop) OR equal token sets reached by reordering ("Rossi Ana" /
+// "Ana Rossi") — both are intentionally flagged as likely the same person.
 //
 // Signal 2: Levenshtein typo gate — lev ≤ NearDupLevenshteinMax AND
 // ratio ≥ NearDupRatioMin, suppressed when the two strings differ only in

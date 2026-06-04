@@ -135,10 +135,10 @@ func TestFindNearDupWarnings_TokenSubset(t *testing.T) {
 		wantFire bool
 	}{
 		{
-			desc: "real incident: Chau Earn Tan / Chau Tan fires",
+			desc: "middle-name-drop pattern fires (token-subset)",
 			entries: [][2]string{
-				{"Chau Earn Tan", "Wakaba"},
-				{"Chau Tan", "Wakaba"},
+				{"Ana Maria Rossi", "Wakaba"},
+				{"Ana Rossi", "Wakaba"},
 			},
 			wantFire: true,
 		},

@@ -2425,8 +2425,10 @@ const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
   // Both paths call formatIpponsScore with the same args; the formatter
   // itself distinguishes rendering based on the match data it receives.
   // ipponsB = Shiro (left), ipponsA = Aka (right) — same arg order as all other callers.
+  // Return raw formatted value (or null when not completed); the render span
+  // below handles the empty-string/null → "—" fallback in one place.
   const scoreStr = m.status === "completed"
-    ? (window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) || "—")
+    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
     : null;
 
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
@@ -2581,7 +2583,6 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                           key={m.id}
                           m={m}
                           num={idx + 1}
-                          isTeam={true}
                           onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
                         />
                       );
@@ -2593,7 +2594,6 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                           key={m.id}
                           m={m}
                           num={idx + 1}
-                          isTeam={false}
                           onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
                         />
                       );

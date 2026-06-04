@@ -187,6 +187,11 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 - **Test self-run / public features from the PUBLIC page, not the admin UI** — the public flow is what users hit; admin-side scoring proves nothing about it.
 - **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.
 - Frontend changes under `web-mobile/` require a rebuild to take effect (`//go:embed`); use `make run-mobile` or rebuild + restart.
+- **Test coverage gate: every package that has test files must maintain ≥85% statement coverage.** Verify before any PR with:
+  ```bash
+  go test -race -cover . ./cmd/... ./internal/... ./tests/...
+  ```
+  Packages below 85% must be brought up before merging. New packages must include test files covering their public API. Tracked in bead mp-3abe.
 
 ## Merge & Rebase
 

@@ -3202,7 +3202,7 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, 
         if (!cancelled) setKoAwards({ state: "in-progress", awards: [] });
       });
     return () => { cancelled = true; };
-  }, [c?.id, c?.format, linkedPlayoffComp?.id]);
+  }, [c?.id, c?.format, linkedPlayoffComp?.id, linkedPlayoffComp?.status]);
 
   const nameToPlayer = useMemo(() => {
     const m = new Map();

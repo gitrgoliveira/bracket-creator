@@ -148,9 +148,18 @@ def run_competition_setup(cat):
     seeds_path = os.path.join(DATA_DIR, cat.get('seeds', "")) if cat.get('seeds') else None
 
     print(f"Creating competition: {title} (ID: {comp_id})")
+    # teamSize follows the API contract: 0 = individual, >0 = team (engine
+    # checks comp.TeamSize > 0; OpenAPI Competition.teamSize: "0 for
+    # individual"). Categories without an explicit team_size are individual,
+    # so default to 0 — never 1, which would make them look like 1-person
+    # team comps internally. kind is derived the same way so kind and
+    # teamSize can never disagree. Each team CSV row is one team
+    # (TeamName, Dojo); team_size sets the sub-bouts per encounter.
+    team_size = cat.get('team_size', 0)
     payload = {
         "id": comp_id,
         "name": title,
+        "kind": "team" if team_size > 0 else "individual",
         "format": "mixed",
         "poolSize": 3,
         "poolWinners": 2,
@@ -158,7 +167,7 @@ def run_competition_setup(cat):
         "courts": ["A", "B"],
         "withZekkenName": cat.get('zekken', True),
         "numberPrefix": cat.get('number_prefix', ""),
-        "teamSize": cat.get('team_size', 1),
+        "teamSize": team_size,
         "startTime": cat.get('startTime', ""),
         "date": cat.get('date', ""),
         "status": "setup"

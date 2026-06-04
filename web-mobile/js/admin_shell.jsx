@@ -112,9 +112,10 @@ function initialSectionFor(status) {
   return "overview";
 }
 
-function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast }) {
+function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast }) {
   const t = tournament;
   const comps = t.competitions || [];
+  const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
 
   useEffectA(() => {
     // Coalesce bursts of events into a single dashboard refresh. On a busy
@@ -195,6 +196,7 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
           </div>
           <div className="page-head__actions">
             <button className="btn" onClick={onAnnounce}>📣 Announce</button>
+            <button className="btn" onClick={() => setExportPdfOpen(true)}>🖨 Export PDFs</button>
             <button className="btn" onClick={onEditTournament}>Edit details</button>
             {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
               <button className="btn btn--danger" onClick={onStartAll}>Start all</button>
@@ -245,6 +247,14 @@ function AdminDashboard({ tournament, onOpenCompetition, onCreateCompetition, on
           </button>
         </div>
       </div>
+      {exportPdfOpen && (
+        <ExportPdfModal
+          tournament={t}
+          password={password}
+          showToast={showToast}
+          onClose={() => setExportPdfOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -304,6 +314,92 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
             copyToClipboard(url).then(() => showToast && showToast("Registration link copied!")).catch(() => showToast && showToast("Copy failed — select the link above manually", "error"));
           }}>Copy link</button>
           <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// PDF_EXPORT_TYPES mirrors the server's POST /api/print/:type selectors.
+// "all" is offered as a single combined download.
+const PDF_EXPORT_TYPES = [
+  { type: "all", label: "All (everything)", hint: "Registration, names, tags, pools & trees, full bracket" },
+  { type: "registration", label: "Registration", hint: "The data sheet from every competition" },
+  { type: "names", label: "Names to Print", hint: "A3 landscape, one title page per competition" },
+  { type: "tags", label: "Tags", hint: "Competitor tags (team competitions excluded)" },
+  { type: "pools-trees", label: "Pools & Trees", hint: "Pool draw + bracket trees, page-numbered" },
+  { type: "full-bracket", label: "Full bracket", hint: "Pools, matches and trees, page-numbered" },
+];
+
+// ExportPdfModal lets an admin generate the print PDFs server-side (via
+// LibreOffice) and download them as a ZIP. Each row triggers one
+// POST /api/print/:type. Generation is slow (30–60s) so a per-row busy state
+// is shown; a 503 (LibreOffice absent) or 422 (no pages) surfaces as a toast.
+function ExportPdfModal({ tournament, password, onClose, showToast }) {
+  const [busyType, setBusyType] = useStateA("");
+
+  // Gate Escape-to-close while generating, the same as the backdrop/close
+  // button — otherwise Escape could unmount mid-download and the in-flight
+  // setBusyType("") would fire on an unmounted component.
+  window.useEscapeToClose(busyType ? undefined : onClose);
+
+  const download = async (type) => {
+    if (busyType) return; // soffice is serialized server-side — one at a time
+    setBusyType(type);
+    try {
+      const blob = await window.API.exportPDFs(type, password);
+      const dlUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = dlUrl;
+      const stem = (tournament && tournament.name ? tournament.name : "tournament")
+        .replace(/[^\w]+/g, "_").replace(/^_+|_+$/g, "") || "tournament";
+      a.download = `${stem}_${type}_pdfs.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Delay the revoke so the browser has time to initiate the download
+      // before the blob URL is torn down. An immediate revoke races with the
+      // download start and can produce an empty file in some browsers.
+      setTimeout(() => window.URL.revokeObjectURL(dlUrl), 100);
+      if (showToast) showToast("PDFs generated — download started.");
+    } catch (err) {
+      if (showToast) showToast("PDF export failed: " + err.message, "error");
+      else alert("PDF export failed: " + err.message);
+    } finally {
+      setBusyType("");
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={busyType ? undefined : onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Export PDFs">
+        <div className="modal__head">
+          <div className="modal__title">Export PDFs</div>
+          <button className="modal__close" onClick={onClose} aria-label="Close" disabled={!!busyType}>✕</button>
+        </div>
+        <div className="modal__body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <p style={{ margin: "0 0 4px", fontSize: 13, color: "var(--ink-3)" }}>
+            Generates print-ready PDFs from the current tournament using LibreOffice.
+            Each download is a ZIP. Generation can take up to a minute.
+          </p>
+          {PDF_EXPORT_TYPES.map(({ type, label, hint }) => (
+            <div key={type} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--surface-2, #eee)" }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{label}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{hint}</div>
+              </div>
+              <button
+                className={"btn btn--sm" + (type === "all" ? " btn--primary" : "")}
+                onClick={() => download(type)}
+                disabled={!!busyType}
+              >
+                {busyType === type ? "Generating…" : "Download"}
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="modal__foot">
+          <button className="btn" onClick={onClose} disabled={!!busyType}>Close</button>
         </div>
       </div>
     </div>
@@ -418,3 +514,4 @@ window.AdminTopbar = AdminTopbar;
 window.AdminDashboard = AdminDashboard;
 window.CompCard = CompCard;
 window.CourtPicker = CourtPicker;
+window.ExportPdfModal = ExportPdfModal;

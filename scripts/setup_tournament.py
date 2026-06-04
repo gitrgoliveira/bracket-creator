@@ -276,9 +276,12 @@ def score_all_matches(comp_id):
                 print(f"  Quick-scored {mid}: {sideA} vs {sideB} -> {res_data['winner_side']}")
             else:
                 res_data = get_predictable_result(False, i + iteration)
-                
+                raw_decision = res_data.get("decision", "")
+                if raw_decision == "X":
+                    raw_decision = "hikiwake"
+
                 # Knockout (bracket) matches can't end in a draw — convert to a win.
-                if not is_pool_match and res_data.get("decision") == "X":
+                if not is_pool_match and raw_decision == "hikiwake":
                     winner = sideA
                     ipponsA = ["M"]
                     ipponsB = []
@@ -289,7 +292,7 @@ def score_all_matches(comp_id):
                     elif res_data["winner_side"] == "B": winner = sideB
                     ipponsA = res_data["ipponsA"]
                     ipponsB = res_data["ipponsB"]
-                    decision = res_data.get("decision", "")
+                    decision = raw_decision
 
                 payload = {
                     "id": mid,

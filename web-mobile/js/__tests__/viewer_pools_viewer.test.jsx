@@ -46,12 +46,14 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     ],
   };
 
+  // standings.player must include dojo to match the real API contract and the
+  // composite id-or-name||dojo lookup key used by PoolsViewer.
   const standings = {
     'Pool A': [
-      { player: { name: 'P3' }, wins: 3, losses: 0, draws: 0, ipponsGiven: 6, ipponsTaken: 0 },
-      { player: { name: 'P1' }, wins: 2, losses: 1, draws: 0, ipponsGiven: 4, ipponsTaken: 2 },
-      { player: { name: 'P4' }, wins: 1, losses: 2, draws: 0, ipponsGiven: 2, ipponsTaken: 4 },
-      { player: { name: 'P2' }, wins: 0, losses: 3, draws: 0, ipponsGiven: 0, ipponsTaken: 6 },
+      { player: { name: 'P3', dojo: 'Dojo3' }, wins: 3, losses: 0, draws: 0, ipponsGiven: 6, ipponsTaken: 0 },
+      { player: { name: 'P1', dojo: 'Dojo1' }, wins: 2, losses: 1, draws: 0, ipponsGiven: 4, ipponsTaken: 2 },
+      { player: { name: 'P4', dojo: 'Dojo4' }, wins: 1, losses: 2, draws: 0, ipponsGiven: 2, ipponsTaken: 4 },
+      { player: { name: 'P2', dojo: 'Dojo2' }, wins: 0, losses: 3, draws: 0, ipponsGiven: 0, ipponsTaken: 6 },
     ],
   };
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
 // Regression: CompCard crashed the entire admin console with
 //   TypeError: Cannot read properties of null (reading 'join')
@@ -57,6 +57,103 @@ function collectText(node) {
   if (node.children !== undefined) return collectText(node.children);
   return '';
 }
+
+// Walk the React-stub vnode tree and collect all nodes matching pred.
+function findAll(node, pred) {
+  if (!node || typeof node !== 'object') return [];
+  const acc = Array.isArray(node) ? [] : (pred(node) ? [node] : []);
+  const kids = Array.isArray(node) ? node : (node.children ?? []);
+  for (const k of kids) acc.push(...findAll(k, pred));
+  return acc;
+}
+
+// ExportPdfModal — busy-gating, API call, filename construction.
+// The component is exported to window by admin_shell.jsx so tests can
+// exercise it directly without mounting a full AdminDashboard.
+describe('ExportPdfModal', () => {
+  // Snapshot and restore affected globals so this suite can't leak.
+  const saved = {};
+  const STUBS = ['API', 'useEscapeToClose'];
+
+  beforeAll(() => {
+    for (const k of STUBS) { saved[k] = { had: k in window, value: window[k] }; }
+    // URL.createObjectURL / revokeObjectURL are not implemented in jsdom.
+    saved._createObjectURL = window.URL?.createObjectURL;
+    saved._revokeObjectURL = window.URL?.revokeObjectURL;
+
+    window.useEscapeToClose = vi.fn();
+    window.URL.createObjectURL = vi.fn(() => 'blob:mock');
+    window.URL.revokeObjectURL = vi.fn();
+    window.API = {
+      exportPDFs: vi.fn().mockResolvedValue(new Blob([], { type: 'application/zip' })),
+    };
+  });
+
+  afterAll(() => {
+    for (const k of STUBS) {
+      if (saved[k].had) window[k] = saved[k].value;
+      else delete window[k];
+    }
+    if (saved._createObjectURL !== undefined) window.URL.createObjectURL = saved._createObjectURL;
+    if (saved._revokeObjectURL !== undefined) window.URL.revokeObjectURL = saved._revokeObjectURL;
+  });
+
+  it('renders without throwing', () => {
+    expect(() => window.ExportPdfModal({
+      tournament: { name: 'Kanto Open' }, password: 'pw',
+      onClose: vi.fn(), showToast: vi.fn(),
+    })).not.toThrow();
+  });
+
+  it('renders one Download button per PDF_EXPORT_TYPES entry (6 total)', () => {
+    const vnode = window.ExportPdfModal({ onClose: vi.fn(), showToast: vi.fn() });
+    // Each type row renders a single "Download" button; busyType="" (mocked
+    // useState always returns initial value) so no "Generating…" label.
+    const btns = findAll(vnode, n => n.type === 'button' && n.children?.[0] === 'Download');
+    expect(btns).toHaveLength(6);
+  });
+
+  it('calls API.exportPDFs with the correct type and password', async () => {
+    const exportPDFs = vi.fn().mockResolvedValue(new Blob([], { type: 'application/zip' }));
+    window.API = { exportPDFs };
+    const password = 'secret';
+    const vnode = window.ExportPdfModal({
+      tournament: { name: 'Test' }, password,
+      onClose: vi.fn(), showToast: vi.fn(),
+    });
+    // PDF_EXPORT_TYPES[0] is "all" — the first Download button.
+    const btn = findAll(vnode, n => n.type === 'button' && n.children?.[0] === 'Download')[0];
+    await btn.props.onClick();
+    expect(exportPDFs).toHaveBeenCalledWith('all', password);
+  });
+
+  it('sets a stable download filename from tournament name and type', async () => {
+    const exportPDFs = vi.fn().mockResolvedValue(new Blob([], { type: 'application/zip' }));
+    window.API = { exportPDFs };
+    const appendSpy = vi.spyOn(document.body, 'appendChild').mockImplementation(() => {});
+    const vnode = window.ExportPdfModal({
+      tournament: { name: 'Kanto Open 2026' }, password: 'pw',
+      onClose: vi.fn(), showToast: vi.fn(),
+    });
+    const btn = findAll(vnode, n => n.type === 'button' && n.children?.[0] === 'Download')[0];
+    await btn.props.onClick();
+    const anchor = appendSpy.mock.calls[0]?.[0];
+    expect(anchor?.download).toBe('Kanto_Open_2026_all_pdfs.zip');
+    appendSpy.mockRestore();
+  });
+
+  it('shows error toast when API call fails', async () => {
+    const exportPDFs = vi.fn().mockRejectedValue(new Error('LibreOffice unavailable'));
+    window.API = { exportPDFs };
+    const showToast = vi.fn();
+    const vnode = window.ExportPdfModal({ onClose: vi.fn(), showToast });
+    const btn = findAll(vnode, n => n.type === 'button' && n.children?.[0] === 'Download')[0];
+    await btn.props.onClick();
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining('LibreOffice unavailable'), 'error'
+    );
+  });
+});
 
 describe('CompCard', () => {
   const noop = () => {};

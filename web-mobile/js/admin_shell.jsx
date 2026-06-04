@@ -514,3 +514,4 @@ window.AdminTopbar = AdminTopbar;
 window.AdminDashboard = AdminDashboard;
 window.CompCard = CompCard;
 window.CourtPicker = CourtPicker;
+window.ExportPdfModal = ExportPdfModal;

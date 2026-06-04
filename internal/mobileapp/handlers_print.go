@@ -8,11 +8,24 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/pdf"
 )
+
+// printTypeList is the human-readable list of valid :type values for the
+// 400 error message. It is derived from pdf.Groups (plus "all") at init
+// time so it stays in sync automatically if groups are added or renamed.
+var printTypeList = func() string {
+	names := make([]string, 0, len(pdf.Groups)+1)
+	for _, g := range pdf.Groups {
+		names = append(names, g.Type)
+	}
+	names = append(names, "all")
+	return strings.Join(names, ", ")
+}()
 
 // RegisterPrintHandlers wires the admin-gated PDF export endpoint under r.
 // Route: POST /api/print/:type
@@ -32,13 +45,14 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 
 		// Validate :type against the canonical pdf.Groups list (plus "all").
 		// Deriving the check from pdf.Groups avoids the list drifting if a
-		// group is ever added, removed, or renamed.
+		// group is ever added, removed, or renamed. The error message uses
+		// printTypeList (also derived from pdf.Groups) for the same reason.
 		if printType != "all" {
 			if _, ok := pdf.GroupByType(printType); !ok {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error": fmt.Sprintf(
-						"unknown print type %q; valid values: registration, names, tags, pools-trees, full-bracket, all",
-						printType,
+						"unknown print type %q; valid values: %s",
+						printType, printTypeList,
 					),
 				})
 				return

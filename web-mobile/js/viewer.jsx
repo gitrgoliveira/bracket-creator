@@ -3013,8 +3013,67 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     );
   }
 
-  // Visual podium ordering is driven by CSS order rules: 2 left, 1 center, then 3rd-place cards.
-  // For the fullscreen ceremony layout we keep the same order but enlarge.
+  const champion = awards.find(a => a.place === 1) || null;
+  const second = awards.find(a => a.place === 2) || null;
+  const thirds = awards.filter(a => a.place === 3);
+
+  // League format: keep WinnerBadge above and fall back to the classic podium
+  // row layout — the hero card doesn't fit the league ceremony well.
+  if (isLeague) {
+    return (
+      <div
+        ref={containerRef}
+        className="awards"
+        data-testid="awards-view"
+        style={{
+          background: isFs ? "var(--bg)" : "transparent",
+          padding: isFs ? 40 : 0,
+          minHeight: isFs ? "100vh" : "auto",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
+              {c?.name ? `${c.name} — Awards` : "Awards"}
+            </div>
+            <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
+              Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
+            </div>
+          </div>
+          <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
+            {isFs ? "Exit fullscreen" : "Fullscreen"}
+          </button>
+        </div>
+        {leagueWinner && <WinnerBadge name={leagueWinner.name} isFs={isFs} testId="league-winner-badge" marginBottom={16} />}
+        <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
+          {awards.map((a, idx) => {
+            const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
+            return (
+              <div
+                key={`${a.place}-${a.name}-${idx}`}
+                className={`podium-step podium-step--${a.place}`}
+                data-testid={`awards-place-${a.place}-${idx}`}
+                style={{ borderTop: `4px solid ${style.accent}` }}
+              >
+                <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>
+                <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
+                <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
+                {a.dojo && (
+                  <div className="dojo" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // mp-8jbo: Champion-hero podium layout for non-league competitions.
+  // 1st place → large gold hero card (top, full width).
+  // 2nd place → single centered card in its own row.
+  // 3rd places → side-by-side equal-width cards in their own row (kendo has two
+  // joint 3rds — both beaten semi-finalists; no 4th, no bronze match).
   return (
     <div
       ref={containerRef}
@@ -3039,27 +3098,61 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           {isFs ? "Exit fullscreen" : "Fullscreen"}
         </button>
       </div>
-      {leagueWinner && <WinnerBadge name={leagueWinner.name} isFs={isFs} testId="league-winner-badge" marginBottom={16} />}
-      <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
-        {awards.map((a, idx) => {
-          const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
-          return (
+
+      {/* 1st place — champion hero */}
+      {champion && (
+        <div
+          className="awards-hero"
+          data-testid={`awards-place-1-${awards.indexOf(champion)}`}
+          style={isFs ? { padding: 32, marginBottom: 20 } : null}
+        >
+          <div className="awards-hero__crown" style={isFs ? { fontSize: 48 } : null}>🏆</div>
+          <div className="awards-hero__eyebrow" style={isFs ? { fontSize: 16 } : null}>Champion</div>
+          <div className="awards-hero__name" style={isFs ? { fontSize: 34 } : null}>{champion.name}</div>
+          {champion.dojo && (
+            <div className="awards-hero__dojo" style={isFs ? { fontSize: 18 } : null}>{champion.dojo}</div>
+          )}
+        </div>
+      )}
+
+      {/* 2nd place — single centered card */}
+      {second && (
+        <div className="awards-row awards-row--center">
+          <div
+            className="podium-step podium-step--2 place--eq"
+            data-testid={`awards-place-2-${awards.indexOf(second)}`}
+            style={isFs ? { fontSize: 18, padding: "20px 24px" } : null}
+          >
+            <div style={{ fontSize: isFs ? 40 : 22 }}>🥈</div>
+            <div className="place" style={{ fontSize: isFs ? 16 : 12 }}>2nd Place</div>
+            <div className="name" style={{ fontSize: isFs ? 24 : 16 }}>{second.name}</div>
+            {second.dojo && (
+              <div className="dojo" style={{ fontSize: isFs ? 14 : 12 }}>{second.dojo}</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 3rd places — side-by-side (kendo: two joint 3rds, no bronze match) */}
+      {thirds.length > 0 && (
+        <div className="awards-row">
+          {thirds.map((a, idx) => (
             <div
-              key={`${a.place}-${a.name}-${idx}`}
-              className={`podium-step podium-step--${a.place}`}
-              data-testid={`awards-place-${a.place}-${idx}`}
-              style={{ borderTop: `4px solid ${style.accent}` }}
+              key={`3-${a.name}-${idx}`}
+              className="podium-step podium-step--3 place--eq"
+              data-testid={`awards-place-3-${awards.indexOf(a)}`}
+              style={isFs ? { fontSize: 16, padding: "16px 20px" } : null}
             >
-              <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>
-              <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
-              <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
+              <div style={{ fontSize: isFs ? 36 : 20 }}>🥉</div>
+              <div className="place" style={{ fontSize: isFs ? 14 : 11 }}>3rd Place</div>
+              <div className="name" style={{ fontSize: isFs ? 20 : 14 }}>{a.name}</div>
               {a.dojo && (
-                <div className="dojo" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
+                <div className="dojo" style={{ fontSize: isFs ? 13 : 11 }}>{a.dojo}</div>
               )}
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

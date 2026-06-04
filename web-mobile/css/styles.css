@@ -2599,6 +2599,66 @@ button.my-match__opp {
   margin-top: 2px;
 }
 
+/* mp-8jbo: champion-hero awards podium layout */
+/* Hero card — 1st place champion, full width gold gradient */
+.awards-hero {
+  background: linear-gradient(135deg, #fef0b8, #f3cf5e);
+  border-radius: 14px;
+  padding: 18px 16px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.awards-hero__crown {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.awards-hero__eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.awards-hero__name {
+  font-size: 22px;
+  font-weight: 800;
+  margin-top: 4px;
+  line-height: 1.2;
+}
+
+.awards-hero__dojo {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+/* Row: stacked layout for 2nd and 3rd place cards */
+.awards-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* Center a single card (2nd place row) */
+.awards-row--center {
+  justify-content: center;
+}
+
+.awards-row--center .podium-step {
+  width: 180px;
+}
+
+/* Equal-width cards within a row (3rd place pair) */
+.place--eq {
+  flex: 1;
+  min-width: 0;
+  border-radius: 12px 12px 0 0;
+}
+
 /* Stats strip */
 .stats-strip {
   display: grid;

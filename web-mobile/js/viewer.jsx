@@ -2482,16 +2482,16 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           return id.startsWith(pool.poolName + "-");
         }) : [];
 
-        // Build id/composite→{rank, standingEntry} map from the rank-sorted standings array.
+        // Build playerKey→{rank, standingEntry} map from the rank-sorted standings array.
         // Rank is 1-based (index + 1). Used to look up each draw-position row's rank
         // without resorting the table (mp-938b: table is draw-order, not rank-order).
-        // Keyed by player.id when available; falls back to "name||dojo" composite so that
-        // duplicate names across different dojos don't collide — mirrors the lookup key below.
-        const rankByName = new Map();
+        // Key = player.id when available; falls back to "name||dojo" composite so that
+        // duplicate names across different dojos don't collide — mirrors the lookup below.
+        const rankByPlayerKey = new Map();
         if (poolStandings) {
           poolStandings.forEach((s, i) => {
             const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
-            rankByName.set(key, { rank: i + 1, standing: s });
+            rankByPlayerKey.set(key, { rank: i + 1, standing: s });
           });
         }
 
@@ -2526,8 +2526,8 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                 {drawOrderPlayers.map((p, i) => {
                   const drawPos = i + 1;
                   // Look up by id first (stable), fall back to name for legacy fixtures
-                  // that don't carry UUIDs. Mirrors the key used when building rankByName.
-                  const lookup = rankByName.get(p.id || `${p.name}||${p.dojo || ""}`);
+                  // that don't carry UUIDs. Mirrors the key used when building rankByPlayerKey.
+                  const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;
                   const isAdvancing = !isLeague && rank !== null && rank <= poolWinners;

@@ -1901,7 +1901,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             // actual winners; when the final has no winner yet, deriveAwards
             // explicitly falls through to the standings-based path rather
             // than short-circuiting.
-            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} linkedPlayoffComp={linkedComp && linkedComp.role === "playoffs" ? linkedComp.comp : null} />
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} linkedPlayoffComp={linkedComp && linkedComp.role === "playoffs" ? linkedComp.comp : null} allComps={(tournament && tournament.competitions) || []} />
           )}
         </div>
       </div>
@@ -3110,8 +3110,7 @@ function bracketHasDecidedFinal(bracket) {
 // resolves to the KNOCKOUT podium (1/2/3/3), never pool standings.
 // Returns { state, podium } where state is one of:
 //   'final'       — podium is the final result
-//   'in-progress' — pools+knockout whose knockout isn't decided yet (podium [])
-//   'none'        — no results yet (podium [])
+//   'in-progress' — knockout not yet decided (podium [])
 //   'skip'        — a linked playoffs shell; represented by its mixed parent
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 async function resolveCompetitionAwards(comp, allComps, fetchers) {
@@ -3156,7 +3155,7 @@ const PLACE_STYLE = {
   3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
 };
 
-function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp }) {
+function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, allComps }) {
   const containerRef = useRefV(null);
   const [isFs, setIsFs] = useState(false);
   const isLeague = c?.format === "league";
@@ -3193,7 +3192,7 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp }
       return;
     }
     let cancelled = false;
-    const syntheticAllComps = linkedPlayoffComp ? [linkedPlayoffComp] : [];
+    const syntheticAllComps = allComps && allComps.length > 0 ? allComps : (linkedPlayoffComp ? [linkedPlayoffComp] : []);
     const fetchers = { fetchCompetitionDetails: window.API.fetchCompetitionDetails, swissStandings: null };
     window.resolveCompetitionAwards(c, syntheticAllComps, fetchers)
       .then(({ state, podium }) => {

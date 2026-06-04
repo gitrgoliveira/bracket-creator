@@ -94,8 +94,10 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
 // Build the participants list to save by reconciling existing players
 // against a newly-parsed roster. Returns { np, added, updatedCount }.
 //
-// - Existing players (matched by lowercase name) keep their stable id
-//   and seed.
+// - Existing players (matched by normalized name+dojo) keep their stable
+//   id and seed. The key is (name, dojo) — NOT name alone — because Tier-1
+//   dedup allows two same-named competitors from different dojos; keying on
+//   name only would cross-associate their id/seed/check-in.
 // - New players get the next free `${compID}-pN` slot, skipping any id
 //   already in use by an existing player who is still in the parsed
 //   list (two-pass: pre-populate usedIds before minting, so visible row
@@ -106,16 +108,18 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
 //
 // Exported for tests in __tests__/admin_participants.test.jsx.
 function mintParticipantIds(compID, existingPlayers, parsed) {
-  const existingMap = new Map((existingPlayers || []).map(p => [p.name.toLowerCase(), p]));
-  const parsedKeys = new Set(parsed.map(p => p.name.toLowerCase()));
+  const norm = window.normalizeParticipantName || (s => (s || '').toLowerCase().trim().replace(/\s+/g, ' '));
+  const idKey = (name, dojo) => norm(name) + '|' + norm(dojo);
+  const existingMap = new Map((existingPlayers || []).map(p => [idKey(p.name, p.dojo), p]));
+  const parsedKeys = new Set(parsed.map(p => idKey(p.name, p.dojo)));
   const usedIds = new Set();
   (existingPlayers || []).forEach(p => {
-    if (parsedKeys.has(p.name.toLowerCase())) usedIds.add(p.id);
+    if (parsedKeys.has(idKey(p.name, p.dojo))) usedIds.add(p.id);
   });
   let nextSlot = 1;
   let added = 0, updatedCount = 0;
   const np = parsed.map(({ name, displayName, dojo, danGrade, tag, checkedIn: parsedCheckedIn }) => {
-    const existing = existingMap.get(name.toLowerCase());
+    const existing = existingMap.get(idKey(name, dojo));
     if (existing) {
       updatedCount++;
       // Preserve existing check-in state; CSV token takes precedence if explicitly set.
@@ -133,7 +137,11 @@ function mintParticipantIds(compID, existingPlayers, parsed) {
 }
 
 function levenshtein(a, b) {
-  const m = a.length, n = b.length;
+  // Operate on Unicode code points (not UTF-16 code units) so non-BMP
+  // characters count as one edit and the distance stays consistent with
+  // Go's rune-based implementation.
+  const ra = [...a], rb = [...b];
+  const m = ra.length, n = rb.length;
   if (m === 0) return n;
   if (n === 0) return m;
   let prev = Array.from({ length: n + 1 }, (_, j) => j);
@@ -141,7 +149,7 @@ function levenshtein(a, b) {
   for (let i = 1; i <= m; i++) {
     curr[0] = i;
     for (let j = 1; j <= n; j++)
-      curr[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+      curr[j] = ra[i - 1] === rb[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
     [prev, curr] = [curr, prev];
   }
   return prev[n];
@@ -601,7 +609,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       const dupes = [];
       parsed.forEach(({ name, dojo }) => {
         const key = norm(name) + '|' + norm(dojo || '');
-        if (keySeen.has(key)) { if (!dupes.includes(name)) dupes.push(name); }
+        // Label with name + dojo: identical names at different dojos are
+        // allowed, so a name-only message can't show which line collided.
+        const label = dojo ? `${name} (${dojo})` : name;
+        if (keySeen.has(key)) { if (!dupes.includes(label)) dupes.push(label); }
         else keySeen.set(key, true);
       });
       if (dupes.length > 0) {

@@ -196,9 +196,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load participants: " + err.Error()})
 			return
 		}
-		checkedInByName := make(map[string]bool, len(existing))
+		// Key by (normalizedName, normalizedDojo) — NOT name alone. Tier-1
+		// dedup allows two same-named competitors from different dojos, so a
+		// name-only key would transfer check-in state between distinct people.
+		checkInKey := func(name, dojo string) string {
+			return helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
+		}
+		checkedInByKey := make(map[string]bool, len(existing))
 		for _, ep := range existing {
-			checkedInByName[strings.ToLower(strings.TrimSpace(ep.Name))] = ep.CheckedIn
+			checkedInByKey[checkInKey(ep.Name, ep.Dojo)] = ep.CheckedIn
 		}
 
 		players := make([]domain.Player, 0, len(req.Players))
@@ -217,7 +223,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				Metadata:     p.Metadata,
 				Tag:          p.Tag,
 				PoolPosition: int64(i),
-				CheckedIn:    checkedInByName[strings.ToLower(strings.TrimSpace(p.Name))],
+				CheckedIn:    checkedInByKey[checkInKey(p.Name, p.Dojo)],
 			})
 		}
 

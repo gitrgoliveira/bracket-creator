@@ -341,6 +341,45 @@ func TestDuplicateNameRejection(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "PUT with unchanged name (dojo edit) must succeed")
 }
 
+// TestBatchPostDuplicateNameDojo_409 covers the batch (players array) POST
+// path: a perfect (name, dojo) duplicate within one request is rejected with
+// 409, while two same-named competitors at different dojos are accepted. This
+// complements TestDuplicateNameRejection (single-add) and the state-level
+// TestSaveParticipants_RejectsDuplicateNameDojo. (mp-ljry, Copilot round 2)
+func TestBatchPostDuplicateNameDojo_409(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-dup"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Dup Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	// Perfect (name, dojo) duplicate in one batch (case/whitespace variant) → 409.
+	dup, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "alice  smith", "dojo": "wakaba"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(dup))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, "batch POST with duplicate (name,dojo) must return 409")
+
+	// Same name at DIFFERENT dojos in one batch is allowed.
+	ok, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "Alice Smith", "dojo": "Tora"},
+	}})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(ok))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "same name at different dojos must be accepted in a batch")
+}
+
 // TestReplaceDoesNotInheritOldDisplayName ensures that replacing a participant
 // with displayName:"" (the corrected JS payload) writes a clean 2-column CSV
 // row, not a 3-column row that carries the old slot's stale SanitizeName value.

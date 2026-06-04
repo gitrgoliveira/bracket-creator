@@ -156,7 +156,7 @@ func GenerateFinals(pools []Pool, poolWinners int) []string {
 	finalists := make([][]string, len(pools))
 	for i := 0; i < len(pools); i++ {
 		for j := 0; j < poolWinners; j++ {
-			finalists[i] = append(finalists[i], fmt.Sprintf("%s-%s", pools[i].PoolName, getOrdinal(j+1)))
+			finalists[i] = append(finalists[i], fmt.Sprintf("%s-%s", pools[i].PoolName, GetOrdinal(j+1)))
 		}
 	}
 
@@ -251,6 +251,44 @@ func SubdivideTree(node *Node, numSubtrees int) []*Node {
 	return subtrees
 }
 
+// TreeToLeafArray converts a tree built by CreateBalancedTree into a
+// power-of-two leaf array suitable for buildBracketFromLeaves. Internal nodes
+// recurse into left and right subtrees, padding each side to
+// NextPow2(max(len(left), len(right))) with "" (bye slots) before
+// concatenating. The result length is always NextPow2(N) where N is the
+// number of real leaves, and bye positions mirror the tree's structural
+// asymmetry so the same matchups produced by the Excel bracket are reproduced.
+func TreeToLeafArray(node *Node) []string {
+	if node == nil {
+		return nil
+	}
+	if node.LeafNode {
+		return []string{node.LeafVal}
+	}
+	left := TreeToLeafArray(node.Left)
+	right := TreeToLeafArray(node.Right)
+	target := NextPow2(max(len(left), len(right)))
+	for len(left) < target {
+		left = append(left, "")
+	}
+	for len(right) < target {
+		right = append(right, "")
+	}
+	return append(left, right...)
+}
+
+// ApplyPoolAdjustments applies the same pre-order treeAdjustment traversal
+// that PrintLeafNodes performs when pools=true. Use before TreeToLeafArray
+// to reproduce the pool-finalist ordering the Excel bracket applies.
+func ApplyPoolAdjustments(node *Node) {
+	if node == nil || node.LeafNode {
+		return
+	}
+	treeAdjustment(node)
+	ApplyPoolAdjustments(node.Left)
+	ApplyPoolAdjustments(node.Right)
+}
+
 func RoundToPowerOf2(x, y float64) (int, error) {
 	if y == 0 {
 		return 0, fmt.Errorf("divisor cannot be zero")
@@ -303,7 +341,7 @@ func TreePageLayout(numPlayers, numCourts int, singleTree bool) (int, error) {
 	return numPages, nil
 }
 
-func getOrdinal(n int) string {
+func GetOrdinal(n int) string {
 	if n <= 0 {
 		return strconv.Itoa(n)
 	}

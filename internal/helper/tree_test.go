@@ -1003,7 +1003,7 @@ func TestGenerateFinalsEdgeCases(t *testing.T) {
 					t.Errorf("Expected 5 finalists, got %d", len(finalists))
 				}
 				for i := range 5 {
-					expected := fmt.Sprintf("Pool X-%s", getOrdinal(i+1))
+					expected := fmt.Sprintf("Pool X-%s", GetOrdinal(i+1))
 					if finalists[i] != expected {
 						t.Errorf("Position %d: expected %s, got %s", i, expected, finalists[i])
 					}
@@ -1166,15 +1166,112 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 	}
 }
 
-// applyTreeAdjustments replicates the pre-order traversal that PrintLeafNodes
-// performs when pools=true, calling treeAdjustment at each non-leaf node.
-func applyTreeAdjustments(node *Node) {
-	if node == nil || node.LeafNode {
-		return
+func TestTreeToLeafArray(t *testing.T) {
+	makeLeaves := func(names ...string) []string { return names }
+	makeLabels := func(n int) []string {
+		out := make([]string, n)
+		for i := range n {
+			out[i] = string(rune('A' + i))
+		}
+		return out
 	}
-	treeAdjustment(node)
-	applyTreeAdjustments(node.Left)
-	applyTreeAdjustments(node.Right)
+
+	cases := []struct {
+		name      string
+		input     []string
+		wantLen   int
+		wantSlots []string // nil means "don't check exact slots, just length + non-empty count"
+		wantReal  int      // number of non-empty slots
+	}{
+		{
+			name:      "1 leaf",
+			input:     makeLeaves("A"),
+			wantLen:   1,
+			wantSlots: []string{"A"},
+			wantReal:  1,
+		},
+		{
+			name:      "2 leaves",
+			input:     makeLeaves("A", "B"),
+			wantLen:   2,
+			wantSlots: []string{"A", "B"},
+			wantReal:  2,
+		},
+		{
+			name:  "3 leaves — A gets bye",
+			input: makeLeaves("A", "B", "C"),
+			// CreateBalancedTree splits [A] left, [B,C] right
+			// left → ["A"], right → ["B","C"]
+			// pad left to NextPow2(max(1,2))=2 → ["A",""]
+			// result: ["A","","B","C"]
+			wantLen:   4,
+			wantSlots: []string{"A", "", "B", "C"},
+			wantReal:  3,
+		},
+		{
+			name:     "4 leaves — identity",
+			input:    makeLeaves("A", "B", "C", "D"),
+			wantLen:  4,
+			wantReal: 4,
+		},
+		{
+			name:     "5 leaves",
+			input:    makeLabels(5),
+			wantLen:  8,
+			wantReal: 5,
+		},
+		{
+			name:     "7 leaves",
+			input:    makeLabels(7),
+			wantLen:  8,
+			wantReal: 7,
+		},
+		{
+			name:     "8 leaves — identity",
+			input:    makeLabels(8),
+			wantLen:  8,
+			wantReal: 8,
+		},
+		{
+			name:     "12 leaves",
+			input:    makeLabels(12),
+			wantLen:  16,
+			wantReal: 12,
+		},
+		{
+			name:     "24 leaves",
+			input:    makeLabels(24),
+			wantLen:  32,
+			wantReal: 24,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := CreateBalancedTree(tt.input)
+			got := TreeToLeafArray(tree)
+
+			assert.Len(t, got, tt.wantLen, "output length must be NextPow2(N)")
+
+			realCount := 0
+			for _, v := range got {
+				if v != "" {
+					realCount++
+				}
+			}
+			assert.Equal(t, tt.wantReal, realCount, "non-empty slot count must equal input count")
+
+			if tt.wantSlots != nil {
+				assert.Equal(t, tt.wantSlots, got, "exact slot layout")
+			}
+		})
+	}
+}
+
+// applyTreeAdjustments delegates to the exported ApplyPoolAdjustments so
+// test helpers stay in sync with the production traversal.
+func applyTreeAdjustments(node *Node) {
+	ApplyPoolAdjustments(node)
 }
 
 func leafPool(val string) string {

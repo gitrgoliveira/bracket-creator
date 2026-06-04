@@ -365,7 +365,12 @@ func TestStartCompetition_PlayoffsFormat_WithByes(t *testing.T) {
 	assert.Len(t, bracket.Rounds[1], 2) // 2 semifinal matches
 	assert.Len(t, bracket.Rounds[2], 1) // 1 final
 
-	// Bye matches (where at least one side is empty) should be auto-completed
+	// Bye matches (where at least one side is empty) should be auto-completed.
+	// Since mp-5ng7 the tree approach (StandardSeeding → CreateBalancedTree →
+	// TreeToLeafArray) mirrors the Excel bracket and clusters structural byes
+	// where the tree is asymmetric. For 5 players the leaf array is
+	// ["A","B","","","C","","D","E"] giving 1 double-bye and 1 single-bye in
+	// round 1. Both are Completed at generation time.
 	byeCount := 0
 	for _, m := range bracket.Rounds[0] {
 		if m.SideA == "" || m.SideB == "" {
@@ -373,19 +378,7 @@ func TestStartCompetition_PlayoffsFormat_WithByes(t *testing.T) {
 			assert.Equal(t, state.MatchStatusCompleted, m.Status)
 		}
 	}
-	// 5 players in 8 slots → 3 byes, distributed to the top 3 seeds (mp-sess), so
-	// exactly three first-round matches are player-vs-bye (one empty side each) and
-	// NONE is an empty-vs-empty double bye. (The old clustered behavior produced a
-	// double bye, so asserting doubleBye==0 — not just byeCount>=2 — is what
-	// actually pins the distribution.)
-	doubleBye := 0
-	for _, m := range bracket.Rounds[0] {
-		if m.SideA == "" && m.SideB == "" {
-			doubleBye++
-		}
-	}
-	assert.Equal(t, 0, doubleBye, "distributed byes must never pair two byes")
-	assert.Equal(t, 3, byeCount, "5 players → 3 single-bye first-round matches")
+	assert.Equal(t, 2, byeCount, "5 players → 2 bye matches (1 double + 1 single)")
 
 	// Matches with one real player and one bye should have a winner
 	for _, m := range bracket.Rounds[0] {

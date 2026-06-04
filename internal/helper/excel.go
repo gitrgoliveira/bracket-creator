@@ -358,7 +358,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 		// the rank-N IFERROR(INDEX(...MATCH(N,...))) cell directly so the
 		// resolved player name flows into the tree.
 		if rankNum <= numWinners {
-			matchWinners[fmt.Sprintf("%s-%s", pool.PoolName, getOrdinal(rankNum))] = MatchWinner{
+			matchWinners[fmt.Sprintf("%s-%s", pool.PoolName, GetOrdinal(rankNum))] = MatchWinner{
 				cellCoord: cellCoord{sheetName: sheetName, cell: fmt.Sprintf("%s%d", resNameColName, rankRow)},
 			}
 		}

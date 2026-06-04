@@ -67,13 +67,12 @@ func TestEstimateMatchCounts_PoolMatchCountPerPoolSize(t *testing.T) {
 // actually CONSUME COURT TIME (i.e., Status != Completed at generation time),
 // not the total slot count NextPow2(players)-1.
 //
-// Since mp-5ng7, generatePlayoffs seeds the draw with StandardSeeding +
-// CreateBalancedTree + TreeToLeafArray, which places structural byes so every
-// bye sits opposite a real player. Each bye therefore auto-resolves a single player-vs-bye leaf
-// match (pre-marked Completed; the court cursor is not advanced for it in
-// assignBracketMatchSlots), and there are NO both-empty matches or upstream
-// "ghost" propagation. The court-time count is thus the clean single-elimination
-// identity: exactly N-1 for N >= 2 (each match eliminates one of N competitors).
+// Since mp-5ng7, generatePlayoffs uses StandardSeeding + CreateBalancedTree +
+// TreeToLeafArray, which clusters structural byes where the tree is asymmetric.
+// This can produce "" vs "" double-bye slots and later-round "" vs "Winner of…"
+// latent byes. All such slots are auto-completed at generation time (Status=
+// Completed) and do not advance the court cursor. The court-time count is
+// therefore the clean single-elimination identity: exactly N-1 for N >= 2.
 func TestEstimateMatchCounts_BracketMatchCount(t *testing.T) {
 	tests := []struct {
 		players int

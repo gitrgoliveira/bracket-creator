@@ -236,14 +236,13 @@ func poolMatchesPerPool(size int, roundRobin bool, poolFormat string) int {
 //
 // This is exactly players-1 (for players >= 2). The playoffs draw uses
 // StandardSeeding + CreateBalancedTree + TreeToLeafArray (mp-5ng7), which
-// places structural byes in the tree so each bye sits opposite a real player.
-// Each bye therefore auto-resolves a single player-vs-bye leaf match
-// (Completed, court cursor not advanced) and there are NO both-empty matches
-// and no upstream "ghost" propagation. Of the NextPow2(players)-1 total slots,
-// exactly (NextPow2(players)-players) are auto-completed byes, leaving
-// NextPow2(players)-1 - (NextPow2(players)-players) = players-1 real matches —
-// the familiar single-elimination identity (every match eliminates one of N
-// competitors; N-1 eliminations crown a winner).
+// embeds the tree's structural byes into a pow2 leaf array. Byes are clustered
+// where the tree is asymmetric, so some first-round slots are "" vs "" (double
+// byes) and later rounds can have a "" vs "Winner of…" latent bye. All such
+// slots are auto-completed at generation time (Status=Completed) and do not
+// advance the court cursor, so they do not consume court time. The identity
+// still holds: every real match eliminates one of N competitors, so N-1
+// eliminations crown a winner regardless of where byes cluster.
 //
 // Returns 0 for zero or one player (no real match can be played).
 func bracketMatchCount(players int) int {

@@ -2,10 +2,12 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +16,6 @@ func makePlayers(n int) []domain.Player {
 	players := make([]domain.Player, n)
 	for i := range n {
 		players[i] = domain.Player{
-			ID:   fmt.Sprintf("p%d", i+1),
 			Name: fmt.Sprintf("Player%02d", i+1),
 		}
 	}
@@ -43,16 +44,66 @@ func excelPlayoffsLeaves(players []domain.Player) []string {
 	return helper.TreeToLeafArray(tree)
 }
 
-// enginePlayoffsLeaves mirrors what generatePlayoffs now does for standalone
-// (non-source-linked) playoffs — must produce the same result as the Excel path.
-func enginePlayoffsLeaves(players []domain.Player) []string {
-	seeded := helper.StandardSeeding(players)
-	names := make([]string, len(seeded))
-	for i, p := range seeded {
-		names[i] = p.Name
+// enginePlayoffsLeaves runs the REAL engine path (StartCompetition) and
+// extracts the round-0 leaf ordering from the generated bracket. This exercises
+// generatePlayoffs end-to-end so any drift in the engine path (seeding,
+// tree construction, leaf flattening, bye resolution) is caught.
+func enginePlayoffsLeaves(t *testing.T, players []domain.Player) []string {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+
+	compID := fmt.Sprintf("identity-%d", len(players))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:        compID,
+		Format:    state.CompFormatPlayoffs,
+		Kind:      "individual",
+		Courts:    []string{"A"},
+		StartTime: "09:00",
+		Status:    state.CompStatusSetup,
+	}))
+	// Strip IDs before saving — players with non-UUID IDs confuse the CSV
+	// hasIDs detector and corrupt names on reload. Let the store mint UUIDs.
+	stripped := make([]domain.Player, len(players))
+	for i, p := range players {
+		stripped[i] = domain.Player{Name: p.Name, Dojo: p.Dojo}
 	}
-	tree := helper.CreateBalancedTree(names)
-	return helper.TreeToLeafArray(tree)
+	require.NoError(t, store.SaveParticipants(compID, stripped))
+	// Seeds are stored separately; extract from the player Seed field.
+	var seeds []domain.SeedAssignment
+	for _, p := range players {
+		if p.Seed > 0 {
+			seeds = append(seeds, domain.SeedAssignment{Name: p.Name, SeedRank: p.Seed})
+		}
+	}
+	if len(seeds) > 0 {
+		require.NoError(t, store.SaveSeeds(compID, seeds))
+	}
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket)
+	require.NotEmpty(t, bracket.Rounds)
+
+	// Round 0 is the first round (closest to leaves). Collect the two sides
+	// of every match in order — this reconstructs the pow2 leaf array.
+	pow2 := helper.NextPow2(len(players))
+	leaves := make([]string, pow2)
+	for i, m := range bracket.Rounds[0] {
+		sideA := m.SideA
+		sideB := m.SideB
+		// Strip "Winner of…" placeholders — those are non-leaf slots that arose
+		// from latent byes; treat them as "" (structural bye) for leaf comparison.
+		if strings.HasPrefix(sideA, "Winner of") {
+			sideA = ""
+		}
+		if strings.HasPrefix(sideB, "Winner of") {
+			sideB = ""
+		}
+		leaves[i*2] = sideA
+		leaves[i*2+1] = sideB
+	}
+	return leaves
 }
 
 func excelMixedLeaves(pools []helper.Pool, poolWinners int) []string {
@@ -62,11 +113,59 @@ func excelMixedLeaves(pools []helper.Pool, poolWinners int) []string {
 	return helper.TreeToLeafArray(tree)
 }
 
-func engineMixedLeaves(pools []helper.Pool, poolWinners int) []string {
-	finals := helper.GenerateFinals(pools, poolWinners)
-	tree := helper.CreateBalancedTree(finals)
-	helper.ApplyPoolAdjustments(tree)
-	return helper.TreeToLeafArray(tree)
+// engineMixedLeaves runs the REAL engine path (StartCompetition on a mixed
+// comp) and extracts the preview bracket's round-0 leaf ordering. This
+// exercises generatePoolPreviewBracket end-to-end.
+func engineMixedLeaves(t *testing.T, pools []helper.Pool, poolWinners int) []string {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+
+	compID := fmt.Sprintf("identity-mixed-%d-%d", len(pools), poolWinners)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Format:       state.CompFormatMixed,
+		Kind:         "individual",
+		PoolSize:     2,
+		PoolSizeMode: "min",
+		PoolWinners:  poolWinners,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       state.CompStatusSetup,
+	}))
+
+	// Populate one participant per pool slot so pools get created.
+	names := make([]string, len(pools)*2)
+	for i := range names {
+		names[i] = fmt.Sprintf("P%02d", i+1)
+	}
+	players := make([]domain.Player, len(names))
+	for i, n := range names {
+		players[i] = domain.Player{Name: n, Dojo: "D"}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket)
+	require.NotEmpty(t, bracket.Rounds)
+
+	totalFinalists := len(pools) * poolWinners
+	pow2 := helper.NextPow2(totalFinalists)
+	leaves := make([]string, pow2)
+	for i, m := range bracket.Rounds[0] {
+		sideA, sideB := m.SideA, m.SideB
+		if strings.HasPrefix(sideA, "Winner of") {
+			sideA = ""
+		}
+		if strings.HasPrefix(sideB, "Winner of") {
+			sideB = ""
+		}
+		leaves[i*2] = sideA
+		leaves[i*2+1] = sideB
+	}
+	return leaves
 }
 
 // TestBracketIdentity_PurePlayoffs verifies that the engine's generatePlayoffs
@@ -94,7 +193,7 @@ func TestBracketIdentity_PurePlayoffs(t *testing.T) {
 			players := makeSeededPlayers(tt.playerCount, tt.numSeeds)
 
 			excelLeaves := excelPlayoffsLeaves(players)
-			engineLeaves := enginePlayoffsLeaves(players)
+			engineLeaves := enginePlayoffsLeaves(t, players)
 
 			require.Equal(t, len(excelLeaves), len(engineLeaves),
 				"leaf array lengths must match")
@@ -139,7 +238,7 @@ func TestBracketIdentity_MixedComp(t *testing.T) {
 			}
 
 			excelLeaves := excelMixedLeaves(pools, tt.poolWinners)
-			engineLeaves := engineMixedLeaves(pools, tt.poolWinners)
+			engineLeaves := engineMixedLeaves(t, pools, tt.poolWinners)
 
 			require.Equal(t, len(excelLeaves), len(engineLeaves),
 				"leaf array lengths must match")

@@ -118,7 +118,10 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 func (e *Engine) buildSourceLinkedLeaves(comp *state.Competition) ([]string, error) {
 	srcID := comp.SourceCompID
 	srcComp, err := e.store.LoadCompetition(srcID)
-	if err != nil || srcComp == nil {
+	if err != nil {
+		return nil, fmt.Errorf("loading source competition %q: %w", srcID, err)
+	}
+	if srcComp == nil {
 		return nil, notFoundErrorf("playoffs source competition %q not found", srcID)
 	}
 

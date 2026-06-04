@@ -460,9 +460,10 @@ func TestEstimateFinalistCount_UsesSourcePoolWinners(t *testing.T) {
 // bracketMatchCount returns the count of court-time-consuming bracket matches
 // (those NOT auto-marked Completed at generation time), not NextPow2(players)-1
 // (total slot count). Since mp-5ng7 the draw uses StandardSeeding +
-// CreateBalancedTree + TreeToLeafArray, placing structural byes so every bye
-// auto-resolves a single player-vs-bye match; the real count is the clean
-// single-elimination identity N-1 for every N.
+// CreateBalancedTree + TreeToLeafArray, clustering structural byes where the
+// tree is asymmetric. This produces "" vs "" double-bye slots and later-round
+// "" vs "Winner of…" latent byes — all auto-completed at generation time so
+// they do not consume court time. The real count remains the N-1 identity.
 //
 // The test runs the REAL draw pipeline via eng.StartCompetition, counts the
 // non-auto-resolved matches (Status != Completed at generation time), and

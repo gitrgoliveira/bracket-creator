@@ -338,7 +338,10 @@ const PDF_EXPORT_TYPES = [
 function ExportPdfModal({ tournament, password, onClose, showToast }) {
   const [busyType, setBusyType] = useStateA("");
 
-  window.useEscapeToClose(onClose);
+  // Gate Escape-to-close while generating, the same as the backdrop/close
+  // button — otherwise Escape could unmount mid-download and the in-flight
+  // setBusyType("") would fire on an unmounted component.
+  window.useEscapeToClose(busyType ? undefined : onClose);
 
   const download = async (type) => {
     if (busyType) return; // soffice is serialized server-side — one at a time

@@ -196,7 +196,8 @@ func TestPrintHandler_SofficeAbsent(t *testing.T) {
 			assert.Equal(t, http.StatusServiceUnavailable, w.Code,
 				"type=%s: expected 503 when soffice is absent", printType)
 			assert.Contains(t, w.Body.String(), "LibreOffice")
-			assert.Contains(t, w.Body.String(), "brew install")
+			// OS-agnostic actionable guidance (no platform-specific install cmd).
+			assert.Contains(t, w.Body.String(), "$LIBREOFFICE_PATH")
 		})
 	}
 }

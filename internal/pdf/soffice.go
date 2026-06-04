@@ -98,7 +98,7 @@ func LocateSoffice() (string, error) {
 			return cand, nil
 		}
 	}
-	return "", fmt.Errorf("%w: set $LIBREOFFICE_PATH, add soffice to PATH, or install LibreOffice (brew install --cask libreoffice)", ErrSofficeNotFound)
+	return "", fmt.Errorf("%w: set $LIBREOFFICE_PATH or ensure 'soffice' is on PATH (install LibreOffice via your platform's package manager)", ErrSofficeNotFound)
 }
 
 // isExecutableFile reports whether path is an existing regular file with at

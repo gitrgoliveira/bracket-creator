@@ -123,7 +123,7 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 	gen, err := pdf.NewGenerator()
 	if err != nil {
 		if errors.Is(err, pdf.ErrSofficeNotFound) {
-			return fmt.Errorf("PDF generation requires LibreOffice.\n  Install it with: brew install --cask libreoffice\n  or set $LIBREOFFICE_PATH to the soffice binary.\n(%w)", err)
+			return fmt.Errorf("PDF generation requires LibreOffice.\n  Install it via your platform's package manager and ensure 'soffice' is on PATH,\n  or set $LIBREOFFICE_PATH to the soffice binary.\n(%w)", err)
 		}
 		return err
 	}

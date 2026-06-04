@@ -54,8 +54,8 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			if errors.Is(err, pdf.ErrSofficeNotFound) {
 				c.JSON(http.StatusServiceUnavailable, gin.H{
 					"error": "PDF generation requires LibreOffice. " +
-						"Pull the bracket-creator-mobile-pdf image, or install LibreOffice locally " +
-						"(brew install --cask libreoffice).",
+						"Pull the bracket-creator-mobile-pdf image, or install LibreOffice locally and " +
+						"ensure 'soffice' is on PATH (or set $LIBREOFFICE_PATH).",
 				})
 				return
 			}

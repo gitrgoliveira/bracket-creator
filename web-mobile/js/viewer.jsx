@@ -3187,14 +3187,14 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, 
   React.useEffect(() => {
     if (!isMixed) return;
     setKoAwards(undefined);
-    if (!window.resolveCompetitionAwards || !window.API?.fetchCompetitionDetails) {
+    if (!window.API?.fetchCompetitionDetails) {
       setKoAwards({ state: "in-progress", awards: [] });
       return;
     }
     let cancelled = false;
     const syntheticAllComps = allComps && allComps.length > 0 ? allComps : (linkedPlayoffComp ? [linkedPlayoffComp] : []);
     const fetchers = { fetchCompetitionDetails: window.API.fetchCompetitionDetails, swissStandings: null };
-    window.resolveCompetitionAwards(c, syntheticAllComps, fetchers)
+    resolveCompetitionAwards(c, syntheticAllComps, fetchers)
       .then(({ state, podium }) => {
         if (!cancelled) setKoAwards({ state, awards: podium });
       })

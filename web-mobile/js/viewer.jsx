@@ -601,9 +601,13 @@ export function TournamentInfo({ tournament }) {
 }
 
 // PhaseChip — one phase badge inside the paired card phase strip.
+// A phase is "live" while its matches are being played — the COMPETITION status
+// is "pools" or "playoffs" then (mirrors StatusBadge's showLiveDot in ui.jsx).
+// Note: "running" is a MATCH status, not a competition status, so it must not be
+// used here (that was the bug — the live ● never appeared).
 function PhaseChip({ label, status }) {
   const isDone = status === "completed";
-  const isLive = status === "running";
+  const isLive = status === "pools" || status === "playoffs";
   const cls = `phase-chip phase-chip--${isDone ? "done" : isLive ? "live" : "pending"}`;
   return (
     <span className={cls}>

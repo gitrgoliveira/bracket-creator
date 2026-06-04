@@ -1604,12 +1604,14 @@ func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
 	require.NoError(t, eng.StartCompetition(compID))
 
 	bracket, _ := store.LoadBracket(compID)
-	// Pick any first-round match with two real players and override its winner.
+	// Pick any first-round match with two real players and override its winner to
+	// the LOWER side (SideB) — this exercises the branch where the overridden
+	// winner is NOT the left-hand/default side, a stronger regression than SideA.
 	var matchID, winner string
 	for _, m := range bracket.Rounds[0] {
 		if m.SideA != "" && m.SideB != "" {
 			matchID = m.ID
-			winner = m.SideA
+			winner = m.SideB
 			break
 		}
 	}

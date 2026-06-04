@@ -219,7 +219,6 @@ def score_all_matches(comp_id):
         resp.raise_for_status()
         detail = resp.json()
         
-        is_pools = detail['config']['format'] == 'pools'
         is_team = detail['config'].get('teamSize', 1) > 1
         
         # Identify unscored matches
@@ -238,14 +237,18 @@ def score_all_matches(comp_id):
                     if m.get('status') != 'completed' and not m['sideA'].startswith("Winner of") and not m['sideB'].startswith("Winner of") and m['sideA'] != "" and m['sideB'] != "":
                         bracket_matches.append(m)
         
-        to_score = pool_matches + bracket_matches
+        # Tag each match as a pool match (draws/hikiwake allowed) or a bracket
+        # match (knockout — no draw). The old code keyed this off the comp-level
+        # format=='pools', but 'pools' is a removed legacy value (mixed comps are
+        # 'mixed'), so pool matches in mixed comps were wrongly forced into wins.
+        to_score = [(m, True) for m in pool_matches] + [(m, False) for m in bracket_matches]
         if not to_score:
             print(f"No more matches to score for {comp_id}.")
             break
-            
+
         print(f"Found {len(to_score)} matches to score (Iteration {iteration})...")
-        
-        for i, match in enumerate(to_score):
+
+        for i, (match, is_pool_match) in enumerate(to_score):
             mid = match['id']
             sideA = match['sideA']
             sideB = match['sideB']
@@ -265,8 +268,8 @@ def score_all_matches(comp_id):
             else:
                 res_data = get_predictable_result(False, i + iteration)
                 
-                # If it's a playoff, we can't have a draw
-                if not is_pools and res_data.get("decision") == "X":
+                # Knockout (bracket) matches can't end in a draw — convert to a win.
+                if not is_pool_match and res_data.get("decision") == "X":
                     winner = sideA
                     ipponsA = ["M"]
                     ipponsB = []

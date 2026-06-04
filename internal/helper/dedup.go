@@ -116,7 +116,13 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 				out = append(out, seen[k])
 			}
 		} else {
-			seen[k] = e[0] + " / " + e[1]
+			// Label: "name / dojo", or just "name" for empty-dojo entries
+			// (common for teams) so the message has no dangling " / ".
+			label := e[0]
+			if e[1] != "" {
+				label += " / " + e[1]
+			}
+			seen[k] = label
 		}
 	}
 	return out

@@ -450,10 +450,12 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// while seeds.csv still holds "alice cooper", breaking seed merging.
 	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
 
-	// Duplicate guard: when the transform renames or moves the participant,
-	// reject if any OTHER participant already has the same (normalizedName,
-	// normalizedDojo) pair. Using both fields allows same-named competitors
-	// from different clubs while correctly rejecting diacritic/casing variants.
+	// Duplicate guard: reject if any OTHER participant already has the same
+	// (normalizedName, normalizedDojo) pair. This runs unconditionally — even
+	// for check-in-only transforms that don't rename — which is harmless
+	// because the participant being edited is skipped (i == foundIdx) and a
+	// no-op edit can't collide with itself. Using both fields allows same-named
+	// competitors from different clubs while rejecting diacritic/casing variants.
 	newNormName := helper.NormalizeParticipantName(players[foundIdx].Name)
 	newNormDojo := helper.NormalizeParticipantName(players[foundIdx].Dojo)
 	for i := range players {

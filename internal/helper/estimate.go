@@ -48,7 +48,8 @@ type EstimateMatchCountsInput struct {
 //     driven by PoolSizeMode == "max").
 //   - Pool matches: poolMatchesPerPool for each individual pool size.
 //   - Bracket matches: bracketMatchCount(numFinalists), which returns the
-//     court-time-consuming match count (excludes auto-resolved byes).
+//     court-time-consuming match count (excludes auto-resolved byes) — equal to
+//     numFinalists-1 now that byes are distributed to the top seeds (mp-sess).
 //
 // Pool count and per-pool sizes are derived by calling the real CreatePools
 // (no duplication). Per-pool match counting (poolMatchesPerPool) and bracket
@@ -57,7 +58,7 @@ type EstimateMatchCountsInput struct {
 // against the real generators. See mp-zoh plan's "Central design risk".
 //
 // Returned counts reflect court-time-consuming matches only. Auto-resolved
-// bracket byes (both-empty leaf pairs marked Completed at generation time)
+// bracket byes (player-vs-bye leaf matches marked Completed at generation time)
 // are excluded because assignBracketMatchSlots does not advance the court
 // cursor for them (scheduler_slots.go:286-291). Pool-side byes are not
 // applicable (pools have no bye mechanism). Negative PlayerCount or
@@ -233,77 +234,21 @@ func poolMatchesPerPool(size int, roundRobin bool, poolFormat string) int {
 // advanced for auto-resolved (Completed) matches, so they must NOT be counted
 // for duration estimation.
 //
-// The total slot count is NextPow2(players)-1; this function subtracts the
-// auto-resolved matches via completedAtGeneration. Auto-resolved matches fall
-// into two categories (bracket.go:102-111):
-//  1. Player-vs-bye leaf pairs (one side is "").
-//  2. Both-empty leaf pairs where two byes are paired.
-//
-// Propagation (scoring.go:690) can chain further completions upward. The
-// recursive chainComplete function mirrors that chain logic analytically.
+// This is exactly players-1 (for players >= 2). The playoffs draw seeds the
+// bracket with helper.StandardSeedingFull (mp-sess), which distributes the
+// NextPow2(players)-players byes to the top seeds so every bye sits opposite a
+// real player. Each bye therefore auto-resolves a single player-vs-bye leaf
+// match (Completed, court cursor not advanced) and there are NO both-empty
+// matches and no upstream "ghost" propagation. Of the NextPow2(players)-1 total
+// slots, exactly (NextPow2(players)-players) are auto-completed byes, leaving
+// NextPow2(players)-1 - (NextPow2(players)-players) = players-1 real matches —
+// the familiar single-elimination identity (every match eliminates one of N
+// competitors; N-1 eliminations crown a winner).
 //
 // Returns 0 for zero or one player (no real match can be played).
-//
-// Note: the result is NOT simply players-1. For example, N=6 gives real=6
-// because two paired byes produce a "ghost" upstream slot that is Scheduled
-// (not Completed) at generation time. Ground truth verified against the real
-// draw engine for N in [2..32].
 func bracketMatchCount(players int) int {
 	if players <= 1 {
 		return 0
 	}
-	pow2 := NextPow2(players)
-	byes := pow2 - players
-	total := pow2 - 1
-	return total - completedAtGeneration(byes)
-}
-
-// completedAtGeneration returns the number of bracket matches that are
-// automatically marked Completed immediately after generatePlayoffs, before
-// any real play. These matches do NOT advance the court cursor in
-// assignBracketMatchSlots (scheduler_slots.go:286-291).
-//
-// Byes always occupy the rightmost leaf positions [N..pow2-1], so the
-// auto-resolution pattern is determined entirely by the bye count. The
-// round-1 both-empty pairs propagate as "ghosts" to higher rounds, and
-// chainComplete tracks how those ghosts interact recursively.
-func completedAtGeneration(byes int) int {
-	if byes <= 0 {
-		return 0
-	}
-	// Round-1 completions: both-empty pairs + single player-vs-bye match.
-	bothEmpty := byes / 2
-	singleBye := byes % 2
-	base := bothEmpty + singleBye
-
-	// Ghosts from both-empty pairs propagate to round 2 and beyond.
-	// A winner from the single-bye match may additionally chain with an
-	// adjacent ghost (see propagateBracketWinner in scoring.go:690).
-	return base + chainComplete(bothEmpty, singleBye == 1)
-}
-
-// chainComplete returns the number of additional completed matches induced in
-// round 2 and above by `ghosts` ghost slots (from both-empty completions) and
-// an optional `winner` from a single-bye chain seeking an adjacent ghost.
-//
-// Rules (mirrors propagateBracketWinner):
-//   - Each adjacent pair of ghosts forms a both-empty match at this level
-//     (floor(ghosts/2) completions). Those completions produce floor(ghosts/2)
-//     new ghosts at the next level.
-//   - If ghosts is odd AND winner is true, the lone ghost pairs with the
-//     winner → one more completion, and the winner continues upward.
-//   - If ghosts is odd AND winner is false, the lone ghost pairs with an
-//     UNRESOLVED real match (still a "Winner of ..." placeholder) → no
-//     completion at generation time.
-func chainComplete(ghosts int, winner bool) int {
-	if ghosts == 0 {
-		return 0
-	}
-	completions := ghosts / 2 // both-empty pairs at this level
-	newWinner := false
-	if ghosts%2 == 1 && winner {
-		completions++
-		newWinner = true
-	}
-	return completions + chainComplete(ghosts/2, newWinner)
+	return players - 1
 }

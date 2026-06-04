@@ -911,10 +911,16 @@ a:hover {
 .bc-round-matches {
   display: flex;
   flex-direction: column;
-  justify-content: space-around;
-  flex: 1;
   gap: 8px;
   position: relative;
+}
+
+/* Rounds ≥ 1 absolutely position each card at the measured midpoint of its two
+   feeders (see BracketTree). flex: 1 makes the column fill the round height (all
+   .bc-round columns are stretched to the tallest — round 0 — by .bc-tree's
+   align-items: stretch), giving the absolutely-positioned cards their extent. */
+.bc-round-matches--abs {
+  flex: 1;
 }
 
 .bc-match-wrap {
@@ -1052,6 +1058,13 @@ a:hover {
 }
 .bc-side--winner .bc-name {
   color: var(--ink);
+}
+/* Explicit winner marker — weight/colour alone are weak signals (a11y +
+   colour-blind). A green check makes the advancing side unambiguous. */
+.bc-winner-tick {
+  color: #16a34a;
+  font-weight: 800;
+  margin-right: 4px;
 }
 
 .bc-side--empty .bc-name--tbd {
@@ -1229,8 +1242,14 @@ a:hover {
 /* ---------- Pools ---------- */
 .pools-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
+}
+
+@media (orientation: landscape) and (min-width: 580px) {
+  .pools-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .pool {
@@ -1291,6 +1310,7 @@ a:hover {
   letter-spacing: 0.04em;
 }
 
+.pool__table th.num,
 .pool__table td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -1307,6 +1327,49 @@ a:hover {
   color: #16a34a;
   margin-right: 6px;
   font-size: 10px;
+}
+
+.pool__table tr.advancing-cut td {
+  border-bottom: 2px solid #bbf7d0;
+}
+
+/* G1: phase strip inside a unified pools+knockout competition card */
+.phase-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.phase-strip__arrow {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.phase-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.phase-chip--done {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.phase-chip--live {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.phase-chip--pending {
+  background: var(--surface-2, #f1f5f9);
+  color: var(--ink-3);
 }
 
 /* ---------- Pool match results ---------- */
@@ -2534,6 +2597,66 @@ button.my-match__opp {
   font-size: 11px;
   color: var(--ink-3);
   margin-top: 2px;
+}
+
+/* mp-8jbo: champion-hero awards podium layout */
+/* Hero card — 1st place champion, full width gold gradient */
+.awards-hero {
+  background: linear-gradient(135deg, #fef0b8, #f3cf5e);
+  border-radius: 14px;
+  padding: 18px 16px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.awards-hero__crown {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.awards-hero__eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.awards-hero__name {
+  font-size: 22px;
+  font-weight: 800;
+  margin-top: 4px;
+  line-height: 1.2;
+}
+
+.awards-hero__dojo {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+/* Row: stacked layout for 2nd and 3rd place cards */
+.awards-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* Center a single card (2nd place row) */
+.awards-row--center {
+  justify-content: center;
+}
+
+.awards-row--center .podium-step {
+  width: 180px;
+}
+
+/* Equal-width cards within a row (3rd place pair) */
+.place--eq {
+  flex: 1;
+  min-width: 0;
+  border-radius: 12px 12px 0 0;
 }
 
 /* Stats strip */

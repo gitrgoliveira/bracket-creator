@@ -32,13 +32,10 @@ func generateBracketOrder(n int) []int {
 	return res
 }
 
-// StandardSeeding reorders players into bracket positions such that seeded participants (Seed > 0)
-// are spaced according to tournament standards (e.g., #1 and #2 on opposite halves).
-// Unseeded players fill the remaining slots.
-func StandardSeeding(players []Player) []Player {
-	seeded := make([]Player, 0)
-	unseeded := make([]Player, 0)
-
+// partitionSeeded splits players into a seeded group (Seed > 0, stable-sorted by
+// Seed ascending) and an unseeded group (Seed == 0, in original input order).
+// Shared by StandardSeeding and StandardSeedingFull.
+func partitionSeeded(players []Player) (seeded, unseeded []Player) {
 	for _, p := range players {
 		if p.Seed > 0 {
 			seeded = append(seeded, p)
@@ -46,10 +43,78 @@ func StandardSeeding(players []Player) []Player {
 			unseeded = append(unseeded, p)
 		}
 	}
-
 	sort.SliceStable(seeded, func(i, j int) bool {
 		return seeded[i].Seed < seeded[j].Seed
 	})
+	return seeded, unseeded
+}
+
+// StandardSeedingFull places players into a FULL power-of-two bracket and returns
+// a slice of length NextPow2(len(players)) — or nil for an empty input. Each
+// player is positioned by its seeding RANK via generateBracketOrder, and the
+// surplus high-rank slots are left as zero-value Players (empty Name), i.e. byes.
+//
+// Rank assignment matches StandardSeeding (and the Excel draw): a seeded player
+// (Seed > 0) claims its Seed NUMBER as its rank — so an operator who assigns
+// non-contiguous seeds (e.g. {1, 2, 5}) gets the #5 seed at the rank-5 bracket
+// position, not the third-from-top. Genuine unseeded players fill the remaining
+// ranks 1..N in input order; any seed whose number is out of range or collides
+// is then treated as unseeded too (appended after the genuine unseeded players,
+// so a displaced seed's exact slot is unspecified — these are degenerate inputs).
+//
+// Unlike StandardSeeding (which returns a dense len(players) slice and leaves the
+// caller to pad byes at the end of the leaf array), the byes here are interleaved
+// at their standard positions: a bracket of N players in a 2^k draw gives the top
+// 2^k − N seeds a first-round bye, and — because every bye rank pairs with a
+// distinct low (top-seed) rank in round 1 — the draw never contains an
+// empty-vs-empty match. Used by the live-playoffs leaf builder so the knockout
+// tree matches conventional seeding instead of clustering all byes at the bottom.
+func StandardSeedingFull(players []Player) []Player {
+	if len(players) == 0 {
+		return nil
+	}
+
+	seeded, unseeded := partitionSeeded(players)
+	n := len(players)
+
+	// rankToPlayer maps a 1-based seeding rank to its player. Seeded players claim
+	// their Seed number; out-of-range (Seed > n) or colliding seeds fall back to
+	// the unseeded pool. Unseeded then fill the remaining ranks 1..n in order.
+	rankToPlayer := make(map[int]Player, n)
+	for _, p := range seeded {
+		_, taken := rankToPlayer[p.Seed]
+		if p.Seed >= 1 && p.Seed <= n && !taken {
+			rankToPlayer[p.Seed] = p
+		} else {
+			unseeded = append(unseeded, p) // displaced seed → treat as unseeded
+		}
+	}
+	ui := 0
+	for rank := 1; rank <= n && ui < len(unseeded); rank++ {
+		if _, taken := rankToPlayer[rank]; !taken {
+			rankToPlayer[rank] = unseeded[ui]
+			ui++
+		}
+	}
+
+	power := NextPow2(n)
+	order := generateBracketOrder(power) // order[slot] = seeding rank at that slot
+
+	result := make([]Player, power)
+	for slot, rank := range order {
+		if p, ok := rankToPlayer[rank]; ok {
+			result[slot] = p
+		}
+		// rank not assigned (rank > n) → leave zero-value Player (a bye)
+	}
+	return result
+}
+
+// StandardSeeding reorders players into bracket positions such that seeded participants (Seed > 0)
+// are spaced according to tournament standards (e.g., #1 and #2 on opposite halves).
+// Unseeded players fill the remaining slots.
+func StandardSeeding(players []Player) []Player {
+	seeded, unseeded := partitionSeeded(players)
 
 	power := 1
 	for power < len(players) {

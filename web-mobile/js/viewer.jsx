@@ -600,6 +600,22 @@ export function TournamentInfo({ tournament }) {
   );
 }
 
+// PhaseChip — one phase badge inside the paired card phase strip.
+// A phase is "live" while its matches are being played — the COMPETITION status
+// is "pools" or "playoffs" then (mirrors StatusBadge's showLiveDot in ui.jsx).
+// Note: "running" is a MATCH status, not a competition status, so it must not be
+// used here (that was the bug — the live ● never appeared).
+function PhaseChip({ label, status }) {
+  const isDone = status === "completed";
+  const isLive = status === "pools" || status === "playoffs";
+  const cls = `phase-chip phase-chip--${isDone ? "done" : isLive ? "live" : "pending"}`;
+  return (
+    <span className={cls}>
+      {isDone ? "✓ " : isLive ? "● " : ""}{label}
+    </span>
+  );
+}
+
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -613,6 +629,39 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     return map;
   }, [comps, t.date]);
   const dates = Object.keys(compsByDate).sort(compareDmy);
+
+  // G1: build per-date display entries that group a mixed comp with its
+  // linked sourceCompID playoff into one card. Standalone playoff shells
+  // (those whose sourceCompID resolves to another comp in the list) are
+  // hidden — they appear as the Knockout phase inside their source's card.
+  const displayEntriesByDate = useMemo(() => {
+    const compIds = new Set(comps.map(c => c.id));
+    // sourceCompID → its single playoff comp, built once (avoids an O(n) scan per
+    // entry). Only pair a playoff whose source exists in the list. If a source
+    // somehow has MORE than one playoff, don't pair any of them (drop from the
+    // map) so none silently vanishes — they fall back to standalone cards.
+    const playoffBySourceId = new Map();
+    const collidedSources = new Set();
+    comps.forEach(c => {
+      if (!c.sourceCompID || !compIds.has(c.sourceCompID)) return;
+      if (playoffBySourceId.has(c.sourceCompID)) collidedSources.add(c.sourceCompID);
+      else playoffBySourceId.set(c.sourceCompID, c);
+    });
+    collidedSources.forEach(s => playoffBySourceId.delete(s));
+    // A playoff is hidden as a standalone only when it is the one paired to its
+    // source (derived from the same map, so the two stay consistent).
+    const pairedPlayoffIds = new Set([...playoffBySourceId.values()].map(p => p.id));
+    const result = {};
+    Object.keys(compsByDate).forEach(d => {
+      result[d] = compsByDate[d]
+        .filter(c => !pairedPlayoffIds.has(c.id))
+        .map(c => {
+          const playoffs = playoffBySourceId.get(c.id);
+          return playoffs ? { kind: "pair", source: c, playoffs } : { kind: "single", comp: c };
+        });
+    });
+    return result;
+  }, [comps, compsByDate]);
 
   const [courtFilter, setCourtFilter] = useState("all");
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -790,7 +839,55 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <div key={d}>
               <div className="section-title">{formatDate(d)}</div>
               <div className="vlist">
-                {compsByDate[d].map((c) => {
+                {(displayEntriesByDate[d] || []).map((entry) => {
+                  if (entry.kind === "pair") {
+                    const { source, playoffs } = entry;
+                    const srcM = compMatches(source).filter(hasBothSides);
+                    const poM = compMatches(playoffs).filter(hasBothSides);
+                    const allM = srcM.concat(poM);
+                    const total = allM.length;
+                    const done = allM.filter(m => m.status === "completed").length;
+                    const liveCount = allM.filter(m => m.status === "running").length;
+                    const pct = total ? Math.round(done / total * 100) : 0;
+                    const showRegister = shouldShowRegister(t, source, !!onRegister);
+                    return (
+                      <div key={source.id} style={{ position: "relative" }}>
+                        <button className="vlist-item vlist-item--comp" style={{ width: "100%" }} onClick={() => onSelectCompetition(source.id)}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div className="vlist-item__eyebrow">{competitionKindLabel(source)}{source.teamSize > 1 ? ` · ${source.teamSize}-person` : ""}</div>
+                              <div className="vlist-item__name">{source.name}</div>
+                              <div className="vlist-item__meta">
+                                {source.players.length} {source.kind === "team" ? "teams" : "players"} · Starts {source.startTime}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="phase-strip">
+                            <PhaseChip label="Pools" status={source.status} />
+                            <span className="phase-strip__arrow">→</span>
+                            <PhaseChip label="Knockout" status={playoffs.status} />
+                          </div>
+                          {total > 0 && (
+                            <div className="vlist-item__progress">
+                              <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
+                              <div className="vlist-item__pct">
+                                {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
+                              </div>
+                            </div>
+                          )}
+                        </button>
+                        {showRegister && (
+                          <div style={{ padding: "0 12px 12px" }}>
+                            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onRegister(source.id); }}>
+                              Register for this competition
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  // kind === "single"
+                  const c = entry.comp;
                   const matches = compMatches(c).filter(hasBothSides);
                   const total = matches.length;
                   const done = matches.filter((m) => m.status === "completed").length;
@@ -802,7 +899,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                       <button className="vlist-item vlist-item--comp" style={{ width: "100%" }} onClick={() => onSelectCompetition(c.id)}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                           <div style={{ minWidth: 0 }}>
-                            <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
+                            <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize > 1 ? ` · ${c.teamSize}-person` : ""}</div>
                             <div className="vlist-item__name">{c.name}</div>
                             <div className="vlist-item__meta">
                               {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
@@ -1541,7 +1638,13 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             });
         });
     }
-    if (bracket && bracket.rounds) {
+    // mp-9dz/mp-8jbo: a preview bracket (bracket.preview === true) on a mixed
+    // (Pools + Knockout) competition carries pool-origin TBD placeholders
+    // ("Pool A-1st", "Pool B-2nd", …). These must NOT flow into allMatches
+    // because allMatches feeds Up next / upcoming / recent / watchlist, and
+    // spectators would see meaningless placeholder entries. The Bracket tab
+    // renders `bracket`/`derivedBracket` directly and is NOT affected.
+    if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
             round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), compKind: c.kind, teamSize: c.teamSize }));
         });
@@ -1582,7 +1685,14 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && matchInvolvesWatched(m))
       .sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))
       .slice(0, hasActiveFilter ? 20 : 3);
-    const recent = allMatches.filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m)).slice(hasActiveFilter ? -20 : -5).reverse();
+    // Reverse-chronological by scheduled time. allMatches arrives in
+    // pool-then-bracket order (not time order), so a bare slice(-N).reverse()
+    // produced a jumbled "Recent results" list — sort by scheduledAt desc,
+    // then take the most recent N. Missing times sort last (oldest).
+    const recent = allMatches
+      .filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m))
+      .sort((a, b) => (b.scheduledAt || "00:00").localeCompare(a.scheduledAt || "00:00"))
+      .slice(0, hasActiveFilter ? 20 : 5);
     return { liveMatches: live, upcomingMatches: upcoming, recentMatches: recent };
   }, [allMatches, watchedIds, hasActiveFilter, followedName]);
 
@@ -2311,10 +2421,11 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
   const leagueWinner = (isLeague && allMatchesComplete && pools[0] && standings)
     ? (standings[pools[0].poolName] || [])[0]
     : null;
+  const poolWinners = competition ? (competition.poolWinners || 2) : 2;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {isLeague && leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} />}
+    <div className="pools-grid">
+      {isLeague && leagueWinner && <div style={{ gridColumn: "1 / -1" }}><WinnerBadge name={leagueWinner.player?.name || ""} /></div>}
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
         const matches = poolMatches ? poolMatches.filter(m => {
@@ -2334,14 +2445,20 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             <table className="pool__table">
               <thead>
                 {isTeam ? (
-                  <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">PW</th><th className="num">PL</th></tr>
+                  <tr><th>#</th><th>Team</th><th className="num" title="Team matches won">W</th><th className="num" title="Team matches lost">L</th><th className="num" title="Team matches tied">T</th><th className="num" title="Individual victories">IV</th><th className="num" title="Individual losses">IL</th><th className="num" title="Individual ties (draws)">IT</th><th className="num" title="Points won">PW</th><th className="num" title="Points lost">PL</th></tr>
                 ) : (
-                  <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
+                  <tr><th>#</th><th>Player</th><th className="num" title="Fights won">W</th><th className="num" title="Fights lost">L</th><th className="num" title="Draws (hikiwake)">D</th><th className="num" title="Points won (ippon)">PW</th><th className="num" title="Points lost">PL</th></tr>
                 )}
               </thead>
               <tbody>
-                {poolStandings && poolStandings.length > 0 ? poolStandings.map((s, i) => (
-                  <tr key={s.player.name} className={isFollowedPlayer(s.player, highlightPlayer) ? "pool__row--me" : ""}>
+                {poolStandings && poolStandings.length > 0 ? poolStandings.map((s, i) => {
+                  const rowClasses = [
+                    isFollowedPlayer(s.player, highlightPlayer) ? "pool__row--me" : "",
+                    !isLeague && i < poolWinners ? "advancing" : "",
+                    !isLeague && i === poolWinners - 1 ? "advancing-cut" : "",
+                  ].filter(Boolean).join(" ");
+                  return (
+                  <tr key={s.player.name} className={rowClasses || undefined}>
                     <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
                     <td>
                       <div style={{ fontWeight: 500 }}>
@@ -2355,11 +2472,13 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                     <td className="num">{s.draws}</td>
                     {isTeam && <td className="num">{s.individualWins || 0}</td>}
                     {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                    {isTeam && <td className="num">{s.individualDraws || 0}</td>}
                     <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
                     <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
                   </tr>
-                )) : pool.players.map((p, i) => {
-                  const cols = isTeam ? 7 : 5;
+                  );
+                }) : pool.players.map((p, i) => {
+                  const cols = isTeam ? 8 : 5;
                   return (
                     <tr key={p.name} className={isFollowedPlayer(p, highlightPlayer) ? "pool__row--me" : ""}>
                       <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
@@ -2916,8 +3035,73 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     );
   }
 
-  // Visual podium ordering is driven by CSS order rules: 2 left, 1 center, then 3rd-place cards.
-  // For the fullscreen ceremony layout we keep the same order but enlarge.
+  const champion = awards.find(a => a.place === 1) || null;
+  const second = awards.find(a => a.place === 2) || null;
+  const thirds = awards.filter(a => a.place === 3);
+
+  // Shared header (title + place count + fullscreen toggle) — identical for the
+  // league and champion-hero layouts.
+  const header = (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div>
+        <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
+          {c?.name ? `${c.name} — Awards` : "Awards"}
+        </div>
+        <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
+          Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
+        </div>
+      </div>
+      <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
+        {isFs ? "Exit fullscreen" : "Fullscreen"}
+      </button>
+    </div>
+  );
+
+  // League format: keep WinnerBadge above and fall back to the classic podium
+  // row layout — the hero card doesn't fit the league ceremony well.
+  if (isLeague) {
+    return (
+      <div
+        ref={containerRef}
+        className="awards"
+        data-testid="awards-view"
+        style={{
+          background: isFs ? "var(--bg)" : "transparent",
+          padding: isFs ? 40 : 0,
+          minHeight: isFs ? "100vh" : "auto",
+        }}
+      >
+        {header}
+        {leagueWinner && <WinnerBadge name={leagueWinner.name} isFs={isFs} testId="league-winner-badge" marginBottom={16} />}
+        <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
+          {awards.map((a, idx) => {
+            const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
+            return (
+              <div
+                key={`${a.place}-${a.name}-${idx}`}
+                className={`podium-step podium-step--${a.place}`}
+                data-testid={`awards-place-${a.place}-${idx}`}
+                style={{ borderTop: `4px solid ${style.accent}` }}
+              >
+                <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>
+                <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
+                <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
+                {a.dojo && (
+                  <div className="dojo" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // mp-8jbo: Champion-hero podium layout for non-league competitions.
+  // 1st place → large gold hero card (top, full width).
+  // 2nd place → single centered card in its own row.
+  // 3rd places → side-by-side equal-width cards in their own row (kendo has two
+  // joint 3rds — both beaten semi-finalists; no 4th, no bronze match).
   return (
     <div
       ref={containerRef}
@@ -2929,40 +3113,62 @@ function AwardsView({ c, bracket, standings, pools, players }) {
         minHeight: isFs ? "100vh" : "auto",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div>
-          <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
-            {c?.name ? `${c.name} — Awards` : "Awards"}
-          </div>
-          <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
-            Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
+      {header}
+
+      {/* 1st place — champion hero */}
+      {champion && (
+        <div
+          className="awards-hero"
+          data-testid={`awards-place-1-${awards.indexOf(champion)}`}
+          style={isFs ? { padding: 32, marginBottom: 20 } : null}
+        >
+          <div className="awards-hero__crown" style={isFs ? { fontSize: 48 } : null}>{PLACE_STYLE[1].icon}</div>
+          <div className="awards-hero__eyebrow" style={isFs ? { fontSize: 16 } : null}>Champion</div>
+          <div className="awards-hero__name" style={isFs ? { fontSize: 34 } : null}>{champion.name}</div>
+          {champion.dojo && (
+            <div className="awards-hero__dojo" style={isFs ? { fontSize: 18 } : null}>{champion.dojo}</div>
+          )}
+        </div>
+      )}
+
+      {/* 2nd place — single centered card */}
+      {second && (
+        <div className="awards-row awards-row--center">
+          <div
+            className="podium-step podium-step--2 place--eq"
+            data-testid={`awards-place-2-${awards.indexOf(second)}`}
+            style={isFs ? { fontSize: 18, padding: "20px 24px" } : null}
+          >
+            <div style={{ fontSize: isFs ? 40 : 22 }}>{PLACE_STYLE[2].icon}</div>
+            <div className="place" style={{ fontSize: isFs ? 16 : 12 }}>{PLACE_STYLE[2].label}</div>
+            <div className="name" style={{ fontSize: isFs ? 24 : 16 }}>{second.name}</div>
+            {second.dojo && (
+              <div className="dojo" style={{ fontSize: isFs ? 14 : 12 }}>{second.dojo}</div>
+            )}
           </div>
         </div>
-        <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
-          {isFs ? "Exit fullscreen" : "Fullscreen"}
-        </button>
-      </div>
-      {leagueWinner && <WinnerBadge name={leagueWinner.name} isFs={isFs} testId="league-winner-badge" marginBottom={16} />}
-      <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
-        {awards.map((a, idx) => {
-          const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
-          return (
+      )}
+
+      {/* 3rd places — side-by-side (kendo: two joint 3rds, no bronze match) */}
+      {thirds.length > 0 && (
+        <div className="awards-row">
+          {thirds.map((a, idx) => (
             <div
-              key={`${a.place}-${a.name}-${idx}`}
-              className={`podium-step podium-step--${a.place}`}
-              data-testid={`awards-place-${a.place}-${idx}`}
-              style={{ borderTop: `4px solid ${style.accent}` }}
+              key={`3-${a.name}-${idx}`}
+              className="podium-step podium-step--3 place--eq"
+              data-testid={`awards-place-3-${awards.indexOf(a)}`}
+              style={isFs ? { fontSize: 16, padding: "16px 20px" } : null}
             >
-              <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>
-              <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
-              <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
+              <div style={{ fontSize: isFs ? 36 : 20 }}>{PLACE_STYLE[3].icon}</div>
+              <div className="place" style={{ fontSize: isFs ? 14 : 11 }}>{PLACE_STYLE[3].label}</div>
+              <div className="name" style={{ fontSize: isFs ? 20 : 14 }}>{a.name}</div>
               {a.dojo && (
-                <div className="dojo" style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>{a.dojo}</div>
+                <div className="dojo" style={{ fontSize: isFs ? 13 : 11 }}>{a.dojo}</div>
               )}
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

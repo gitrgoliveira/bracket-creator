@@ -21,9 +21,13 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
 	}
 
-	seededPlayers := helper.StandardSeeding(players)
+	// StandardSeedingFull returns a full power-of-two bracket with byes interleaved
+	// at standard positions (empty Name = bye), so the top seeds draw the byes
+	// rather than the draw clustering all byes at the bottom (mp-sess).
+	seededPlayers := helper.StandardSeedingFull(players)
 
-	// Create balanced tree
+	// Create balanced tree. Leaves are already power-of-two length; empty names
+	// are byes, which buildBracketFromLeaves auto-resolves.
 	leaves := make([]string, len(seededPlayers))
 	for i, p := range seededPlayers {
 		leaves[i] = p.Name

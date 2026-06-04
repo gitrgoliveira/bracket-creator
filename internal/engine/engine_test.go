@@ -373,8 +373,19 @@ func TestStartCompetition_PlayoffsFormat_WithByes(t *testing.T) {
 			assert.Equal(t, state.MatchStatusCompleted, m.Status)
 		}
 	}
-	// 3 empty slots in 8 positions: m2 has one bye (P5 vs ""), m3 has double bye ("" vs "")
-	assert.GreaterOrEqual(t, byeCount, 2)
+	// 5 players in 8 slots → 3 byes, distributed to the top 3 seeds (mp-sess), so
+	// exactly three first-round matches are player-vs-bye (one empty side each) and
+	// NONE is an empty-vs-empty double bye. (The old clustered behavior produced a
+	// double bye, so asserting doubleBye==0 — not just byeCount>=2 — is what
+	// actually pins the distribution.)
+	doubleBye := 0
+	for _, m := range bracket.Rounds[0] {
+		if m.SideA == "" && m.SideB == "" {
+			doubleBye++
+		}
+	}
+	assert.Equal(t, 0, doubleBye, "distributed byes must never pair two byes")
+	assert.Equal(t, 3, byeCount, "5 players → 3 single-bye first-round matches")
 
 	// Matches with one real player and one bye should have a winner
 	for _, m := range bracket.Rounds[0] {
@@ -1250,15 +1261,21 @@ func TestStartCompetition_PlayoffsFormat_LargeWithByes(t *testing.T) {
 	assert.Len(t, bracket.Rounds, 4)
 	assert.Len(t, bracket.Rounds[0], 8) // 8 first-round matches
 
-	// 4 empty slots means some matches have byes
+	// 12 players in 16 slots → 4 byes, distributed to the top 4 seeds (mp-sess):
+	// exactly 4 player-vs-bye first-round matches and NO empty-vs-empty double bye.
 	byeCount := 0
+	doubleBye := 0
 	for _, m := range bracket.Rounds[0] {
 		if m.SideA == "" || m.SideB == "" {
 			byeCount++
 			assert.Equal(t, state.MatchStatusCompleted, m.Status)
 		}
+		if m.SideA == "" && m.SideB == "" {
+			doubleBye++
+		}
 	}
-	assert.GreaterOrEqual(t, byeCount, 2, "should have bye matches")
+	assert.Equal(t, 0, doubleBye, "distributed byes must never pair two byes")
+	assert.Equal(t, 4, byeCount, "12 players → 4 single-bye first-round matches")
 
 	// Total real players across all first-round matches
 	realPlayers := map[string]bool{}
@@ -1580,34 +1597,39 @@ func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
 	compID := "override-deep"
 
 	createTestCompetition(t, store, compID, "playoffs", 3)
-	// 5 players ensures padded to 8 slots -> 3 rounds
-	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "P3", "P4", "P5"})
+	// 8 players → a full 3-round bracket with no byes, so every first-round match
+	// has two real players. (With non-power-of-2 rosters the byes are distributed
+	// to the top seeds — mp-sess — and those top seeds play no first-round match.)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "P3", "P4", "P5", "P6", "P7", "P8"})
 	require.NoError(t, eng.StartCompetition(compID))
 
 	bracket, _ := store.LoadBracket(compID)
-	// Find Alice vs Bob match. StandardSeeding will place them.
-	matchID := ""
+	// Pick any first-round match with two real players and override its winner to
+	// the LOWER side (SideB) — this exercises the branch where the overridden
+	// winner is NOT the left-hand/default side, a stronger regression than SideA.
+	var matchID, winner string
 	for _, m := range bracket.Rounds[0] {
-		if (m.SideA == "Alice" && m.SideB == "Bob") || (m.SideA == "Bob" && m.SideB == "Alice") {
+		if m.SideA != "" && m.SideB != "" {
 			matchID = m.ID
+			winner = m.SideB
 			break
 		}
 	}
 	require.NotEmpty(t, matchID)
 
-	err := eng.OverrideBracketWinner(compID, matchID, "Bob")
+	err := eng.OverrideBracketWinner(compID, matchID, winner)
 	require.NoError(t, err)
 
 	reloaded, _ := store.LoadBracket(compID)
-	// Verify it reached at least Round 2
+	// Verify the overridden winner propagated to Round 2.
 	found := false
 	for _, m := range reloaded.Rounds[1] {
-		if m.SideA == "Bob" || m.SideB == "Bob" {
+		if m.SideA == winner || m.SideB == winner {
 			found = true
 			break
 		}
 	}
-	assert.True(t, found, "Bob should have propagated to Round 2")
+	assert.Truef(t, found, "overridden winner %q should have propagated to Round 2", winner)
 }
 
 func TestCalculatePoolStandings_EdgeCases(t *testing.T) {

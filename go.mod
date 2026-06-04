@@ -58,7 +58,7 @@ require (
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.6.0 // indirect
 	golang.org/x/arch v0.27.0 // indirect
-	golang.org/x/image v0.39.0 // indirect
+	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect

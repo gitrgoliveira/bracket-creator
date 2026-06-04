@@ -2538,7 +2538,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                   ].filter(Boolean).join(" ");
 
                   return (
-                    <tr key={p.id || p.name || drawPos} className={rowClasses || undefined}>
+                    <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
                       <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>

@@ -24,6 +24,18 @@ type printOptions struct {
 	teamFiles      []string
 }
 
+// printTypeUsage is derived from pdf.Groups at init time so that the --type
+// flag description and the unknown-type error message never drift from the
+// actual group definitions (mirrors the printTypeList var in handlers_print.go).
+var printTypeUsage = func() string {
+	names := make([]string, 0, len(pdf.Groups)+1)
+	for _, g := range pdf.Groups {
+		names = append(names, g.Type)
+	}
+	names = append(names, "all")
+	return strings.Join(names, "|")
+}()
+
 func newPrintCmd() *cobra.Command {
 	o := &printOptions{}
 
@@ -56,7 +68,7 @@ exits with installation instructions.`,
 		RunE:         o.run,
 	}
 
-	cmd.Flags().StringVar(&o.pdfType, "type", "", "PDF type: registration|names|tags|pools-trees|full-bracket|all (required)")
+	cmd.Flags().StringVar(&o.pdfType, "type", "", "PDF type: "+printTypeUsage+" (required)")
 	cmd.Flags().StringVar(&o.inputDir, "input", "", "directory containing the bracket XLSX files")
 	cmd.Flags().StringVar(&o.tournamentData, "tournament-data", "", "live mobile-app tournament-data directory (mutually exclusive with --input)")
 	cmd.Flags().StringVarP(&o.output, "output", "o", "", "output PDF path (single --type)")
@@ -81,7 +93,7 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 
 	if o.pdfType != "all" {
 		if _, ok := pdf.GroupByType(o.pdfType); !ok {
-			return fmt.Errorf("unknown --type %q (want registration|names|tags|pools-trees|full-bracket|all)", o.pdfType)
+			return fmt.Errorf("unknown --type %q (want %s)", o.pdfType, printTypeUsage)
 		}
 	}
 

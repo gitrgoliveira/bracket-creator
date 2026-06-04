@@ -1,6 +1,10 @@
 package pdf
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+)
 
 // matchKind controls how a sheetSpec matches the actual sheet names a workbook
 // produces. The current generator splits some logical sheets into suffixed
@@ -68,21 +72,22 @@ func (g Group) resolveSheets(present []string) []string {
 }
 
 // Groups is the canonical set of output PDFs, mirroring the PDF_GROUPS config
-// in square_prep/lc2026/xlsx_to_pdf.py. Sheet names use the Sheet* constants'
-// values from internal/helper/constants.go. Names/Tags/Tree match by prefix
-// because the generator splits them into suffixed physical sheets.
+// in square_prep/lc2026/xlsx_to_pdf.py. Sheet selectors use the Sheet*
+// constants from internal/helper/constants.go (compile-time drift safety).
+// Names/Tags/Tree match by prefix because the generator splits them into
+// suffixed physical sheets (e.g. "Names to Print A", "Tree 1").
 var Groups = []Group{
 	{
 		Type:        "registration",
 		Output:      "print_registration.pdf",
 		Description: "Registration (data sheets)",
-		Sheets:      []sheetSpec{exact("data")},
+		Sheets:      []sheetSpec{exact(helper.SheetData)},
 	},
 	{
 		Type:        "names",
 		Output:      "print_names_to_print.pdf",
 		Description: "Names to Print",
-		Sheets:      []sheetSpec{prefix("Names to Print")},
+		Sheets:      []sheetSpec{prefix(helper.SheetNamesToPrint)},
 		InsertTitle: true,
 		A3Landscape: true,
 	},
@@ -90,7 +95,7 @@ var Groups = []Group{
 		Type:              "tags",
 		Output:            "print_tags.pdf",
 		Description:       "Tags",
-		Sheets:            []sheetSpec{prefix("Tags")},
+		Sheets:            []sheetSpec{prefix(helper.SheetTags)},
 		InsertTitle:       true,
 		SkipTeamWorkbooks: true,
 	},
@@ -98,7 +103,7 @@ var Groups = []Group{
 		Type:        "pools-trees",
 		Output:      "print_pools_and_trees.pdf",
 		Description: "Pool Draw + Trees (participant booklet)",
-		Sheets:      []sheetSpec{exact("Pool Draw"), prefix("Tree")},
+		Sheets:      []sheetSpec{exact(helper.SheetPoolDraw), prefix(helper.SheetTree)},
 		PageNumbers: true,
 	},
 	{
@@ -106,10 +111,10 @@ var Groups = []Group{
 		Output:      "print_full_bracket.pdf",
 		Description: "Full bracket (pools, matches, trees)",
 		Sheets: []sheetSpec{
-			exact("Pool Draw"),
-			exact("Pool Matches"),
-			exact("Elimination Matches"),
-			prefix("Tree"),
+			exact(helper.SheetPoolDraw),
+			exact(helper.SheetPoolMatches),
+			exact(helper.SheetEliminationMatches),
+			prefix(helper.SheetTree),
 		},
 		PageNumbers: true,
 	},

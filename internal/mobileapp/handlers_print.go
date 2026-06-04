@@ -29,9 +29,9 @@ var validPrintTypes = map[string]bool{
 //
 // The handler is synchronous — PDF generation via LibreOffice takes 30–60 s
 // for a typical tournament. That is acceptable for an admin-initiated,
-// one-at-a-time operation. Concurrency is bounded by the process-wide mutex
-// inside pdf.Generator (soffice serialises workbook conversion); no
-// additional queue is needed here.
+// one-at-a-time operation. Concurrency is bounded by the package-level
+// sofficeMu mutex in internal/pdf, which serialises every soffice invocation
+// (pdf.Converter.ConvertToPDF); no additional queue is needed here.
 func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 	r.POST("/print/:type", func(c *gin.Context) {
 		printType := c.Param("type")
@@ -96,6 +96,16 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			return
 		}
 
+		// Emit ZIP entries in a stable order (pdf.Groups order) so the archive
+		// is deterministic across runs; `produced` is a map and would otherwise
+		// iterate in random order.
+		ordered := make([]string, 0, len(produced))
+		for _, g := range pdf.Groups {
+			if p, ok := produced[g.Type]; ok {
+				ordered = append(ordered, p)
+			}
+		}
+
 		// Stream a ZIP archive containing the produced PDFs directly into the
 		// response. No intermediate ZIP file is written to disk.
 		c.Header("Content-Type", "application/zip")
@@ -103,26 +113,32 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		c.Status(http.StatusOK)
 
 		zw := zip.NewWriter(c.Writer)
-		for _, pdfPath := range produced {
+		for _, pdfPath := range ordered {
 			data, readErr := os.ReadFile(pdfPath) // #nosec G304 -- pdfPath is an internally-generated PDF in a temp dir.
 			if readErr != nil {
-				// Header already written — log and skip rather than leaving a
-				// half-written ZIP. The client will detect a malformed archive.
+				// The 200 status + headers are already committed, so we cannot
+				// switch to an error response. Record the error on the context
+				// for server logs and abort; the truncated ZIP signals failure
+				// to the client.
+				_ = c.Error(fmt.Errorf("read generated pdf %s: %w", pdfPath, readErr))
 				_ = zw.Close()
 				return
 			}
 			entry, createErr := zw.Create(filepath.Base(pdfPath))
 			if createErr != nil {
+				_ = c.Error(fmt.Errorf("create zip entry for %s: %w", pdfPath, createErr))
 				_ = zw.Close()
 				return
 			}
 			if _, writeErr := entry.Write(data); writeErr != nil {
+				_ = c.Error(fmt.Errorf("write zip entry for %s: %w", pdfPath, writeErr))
 				_ = zw.Close()
 				return
 			}
 		}
 		if closeErr := zw.Close(); closeErr != nil {
-			// Archive already partially delivered; nothing more we can do.
+			// Archive already partially delivered; record for server logs.
+			_ = c.Error(fmt.Errorf("close zip writer: %w", closeErr))
 			return
 		}
 	})

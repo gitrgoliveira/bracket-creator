@@ -2402,6 +2402,55 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
   );
 }
 
+// rankOrdinal converts a 1-based rank integer to a short ordinal string.
+// Handles the 11th/12th/13th exception and the general st/nd/rd/th rules.
+function rankOrdinal(rank) {
+  const mod100 = rank % 100;
+  const mod10 = rank % 10;
+  if (mod100 >= 11 && mod100 <= 13) return rank + "th";
+  if (mod10 === 1) return rank + "st";
+  if (mod10 === 2) return rank + "nd";
+  if (mod10 === 3) return rank + "rd";
+  return rank + "th";
+}
+
+// PoolNumberedMatchRow renders a single numbered pool match with Shiro/Aka
+// sides and the formatted score string (via formatIpponsScore when completed).
+// sideB = Shiro (left), sideA = Aka (right) — matches PoolMatchRow convention.
+const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
+  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+
+  // scoreStr: non-null only for completed matches; the render span below
+  // handles the empty-string/null → "—" fallback in one place.
+  // ipponsB = Shiro (left), ipponsA = Aka (right) — same arg order as all other callers.
+  // Note: team pool matches typically don't persist ipponsA/B (only subResults is stored),
+  // so formatIpponsScore may return "" for those — see mp-o4xl for the follow-up.
+  const scoreStr = m.status === "completed"
+    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
+    : null;
+
+  const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
+
+  return (
+    <button type="button" className="pool-match-numbered-row" style={{ cursor: handleClick ? "pointer" : "default" }} onClick={handleClick}>
+      <span className="pool-match-numbered-row__num">{num}</span>
+      <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
+        <span className="cbadge cbadge--shiro">Shiro</span>
+        <span className="pool-match-numbered-row__name">{bName || "—"}</span>
+      </div>
+      <span className="pool-match-numbered-row__score">
+        {m.status === "completed" ? (scoreStr || "—") : m.status === "running" ? <span className="bc-live" style={{ fontSize: 10 }}>●</span> : "–"}
+      </span>
+      <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
+        <span className="cbadge cbadge--aka">Aka</span>
+        <span className="pool-match-numbered-row__name">{aName || "—"}</span>
+      </div>
+    </button>
+  );
+});
+PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
+
 function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayer }) {
   if (!pools || pools.length === 0) {
     return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3></div>;
@@ -2432,6 +2481,29 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           const id = m.id || "";
           return id.startsWith(pool.poolName + "-");
         }) : [];
+
+        // Build playerKey→{rank, standingEntry} map from the rank-sorted standings array.
+        // Rank is 1-based (index + 1). Used to look up each draw-position row's rank
+        // without resorting the table (mp-938b: table is draw-order, not rank-order).
+        // Key = player.id when available; falls back to "name||dojo" composite so that
+        // duplicate names across different dojos don't collide — mirrors the lookup below.
+        const rankByPlayerKey = new Map();
+        if (poolStandings) {
+          poolStandings.forEach((s, i) => {
+            const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
+            rankByPlayerKey.set(key, { rank: i + 1, standing: s });
+          });
+        }
+
+        // Determine which players to iterate.
+        // - League: standings already arrive in rank order; use them so the table is
+        //   rank-first (pool.players is not meaningful for leagues and may be empty).
+        // - Non-league pools: use pool.players draw order so operators can read the
+        //   fight-order chart alongside the standings.
+        const drawOrderPlayers = isLeague && poolStandings
+          ? poolStandings.map(s => s.player)
+          : (pool.players || []);
+
         return (
           <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
             <div className="pool__head">
@@ -2441,7 +2513,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
               </div>
             </div>
 
-            {/* Standings table */}
+            {/* Standings table — rows in draw position order, rank looked up by player key (id or name||dojo) */}
             <table className="pool__table">
               <thead>
                 {isTeam ? (
@@ -2451,73 +2523,94 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                 )}
               </thead>
               <tbody>
-                {poolStandings && poolStandings.length > 0 ? poolStandings.map((s, i) => {
+                {drawOrderPlayers.map((p, i) => {
+                  const drawPos = i + 1;
+                  // Look up by id first (stable), fall back to name||dojo composite for
+                  // legacy fixtures without UUIDs. Mirrors the key used when building rankByPlayerKey.
+                  const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
+                  const s = lookup ? lookup.standing : null;
+                  const rank = lookup ? lookup.rank : null;
+                  const isAdvancing = !isLeague && rank !== null && rank <= poolWinners;
+
                   const rowClasses = [
-                    isFollowedPlayer(s.player, highlightPlayer) ? "pool__row--me" : "",
-                    !isLeague && i < poolWinners ? "advancing" : "",
-                    !isLeague && i === poolWinners - 1 ? "advancing-cut" : "",
+                    isFollowedPlayer(p, highlightPlayer) ? "pool__row--me" : "",
+                    isAdvancing ? "advancing" : "",
                   ].filter(Boolean).join(" ");
+
                   return (
-                  <tr key={s.player.name} className={rowClasses || undefined}>
-                    <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
-                    <td>
-                      <div style={{ fontWeight: 500 }}>
-                        {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
-                        {s.player.name}
-                      </div>
-                      {tweaks.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div> : null}
-                    </td>
-                    <td className="num">{s.wins}</td>
-                    <td className="num">{s.losses}</td>
-                    <td className="num">{s.draws}</td>
-                    {isTeam && <td className="num">{s.individualWins || 0}</td>}
-                    {isTeam && <td className="num">{s.individualLosses || 0}</td>}
-                    {isTeam && <td className="num">{s.individualDraws || 0}</td>}
-                    <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
-                    <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
-                  </tr>
-                  );
-                }) : pool.players.map((p, i) => {
-                  const cols = isTeam ? 8 : 5;
-                  return (
-                    <tr key={p.name} className={isFollowedPlayer(p, highlightPlayer) ? "pool__row--me" : ""}>
-                      <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
+                    <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
+                      <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
                           {p.name}
+                          {rank !== null ? (
+                            <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
+                              {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
+                            </span>
+                          ) : null}
                         </div>
                         {tweaks.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{p.dojo}</div> : null}
                       </td>
-                      {Array.from({ length: cols }, (_, j) => <td key={j} className="num">—</td>)}
+                      {s ? (
+                        <>
+                          <td className="num">{s.wins}</td>
+                          <td className="num">{s.losses}</td>
+                          <td className="num">{s.draws}</td>
+                          {isTeam && <td className="num">{s.individualWins || 0}</td>}
+                          {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                          {isTeam && <td className="num">{s.individualDraws || 0}</td>}
+                          <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
+                          <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
+                        </>
+                      ) : (
+                        Array.from({ length: isTeam ? 8 : 5 }, (_, j) => <td key={j} className="num">—</td>)
+                      )}
                     </tr>
                   );
                 })}
               </tbody>
             </table>
 
-            {/* Round-robin matrix — always visible */}
-            {matches.length > 0 && !isTeam && (
-              <div style={{ marginTop: 12 }}>
-                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
-              </div>
-            )}
-
-            {/* Team matches: show as list (no matrix for team) */}
-            {matches.length > 0 && isTeam && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {matches.map(m => {
-                    // Thread the same metadata compMatches/allMatches supply so the
-                    // MatchViewerModal renders team sub-bouts (compKind/teamSize) and a
-                    // correct header (phase/poolName), not an empty round label. Pool
-                    // daihyosen bouts ("…-DH-…") are scored individually — null the team
-                    // flags so they route to the individual UI (mirrors compMatches).
-                    const isDH = isPoolDaihyosenID(m.id || "");
-                    const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
-                    return <PoolMatchRow key={m.id} m={m} onClick={() => onMatchClick && onMatchClick(enriched)} />;
+            {/* Numbered match list — shown for both individual and team pools */}
+            {matches.length > 0 && (
+              <>
+                <div className="pool-match-section-label">Matches</div>
+                <div className="pool-match-numbered-list">
+                  {matches.map((m, idx) => {
+                    if (isTeam) {
+                      // Team: enrich match the same way as the legacy PoolMatchRow path
+                      const isDH = isPoolDaihyosenID(m.id || "");
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
+                      return (
+                        <PoolNumberedMatchRow
+                          key={m.id}
+                          m={m}
+                          num={idx + 1}
+                          onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                        />
+                      );
+                    } else {
+                      // Individual: ippon notation score
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: "", teamSize: 0 };
+                      return (
+                        <PoolNumberedMatchRow
+                          key={m.id}
+                          m={m}
+                          num={idx + 1}
+                          onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                        />
+                      );
+                    }
                   })}
                 </div>
+              </>
+            )}
+
+            {/* Round-robin matrix — optional grid below the match list (individual only) */}
+            {matches.length > 0 && !isTeam && (
+              <div style={{ marginTop: 4 }}>
+                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
               </div>
             )}
           </div>

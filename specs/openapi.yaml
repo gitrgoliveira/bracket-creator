@@ -851,6 +851,12 @@ paths:
         - When `id` is omitted AND `name` slugs to empty (no alphanumerics)
           → 400 (`competition ID is required (could not derive one from name)`).
         - Provided `id` must match the path-parameter pattern (see CompetitionId).
+        - `teamSize` must be >= 0 and not equal to 1 (1 is always
+          rejected regardless of `kind`; use 0 for individual, >= 2 for teams).
+        - When `kind` is `"team"`, `teamSize` must be >= 2
+          (`team competitions require teamSize >= 2`).
+        - When `kind` is not `"team"` (including omitted or `"individual"`),
+          `teamSize` must be 0 (`non-team competitions require teamSize == 0`).
 
         String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
         `format`, `poolSizeMode`, `startTime`, `date`.
@@ -904,8 +910,12 @@ paths:
         `kind`, `mirror`. String fields are trimmed server-side.
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
-        or if `date` is non-empty and not in canonical `DD-MM-YYYY`
-        format.
+        if `date` is non-empty and not in canonical `DD-MM-YYYY`
+        format, if `teamSize` is negative or equals 1 (1 is always
+        invalid regardless of `kind`), if `kind` is `"team"` and
+        `teamSize` < 2 (`team competitions require teamSize >= 2`),
+        or if `kind` is not `"team"` (including omitted or `"individual"`)
+        and `teamSize` > 0 (`non-team competitions require teamSize == 0`).
 
         **Roster-save (body INCLUDES `players`, even an empty array):**
         The server writes `participants.csv` (and clears or extracts
@@ -2396,7 +2406,14 @@ components:
           enum: [pools, playoffs]
         teamSize:
           type: integer
-          description: Number of members per team (0 for individual).
+          minimum: 0
+          not:
+            enum: [1]
+          description: >
+            Number of members per team. 0 for individual competitions;
+            >= 2 for team competitions. The value 1 is always rejected
+            (regardless of kind) because engine code uses TeamSize > 0
+            to detect team competitions, making 1 ambiguous.
         poolSize:
           type: integer
         poolSizeMode:

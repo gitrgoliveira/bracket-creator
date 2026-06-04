@@ -604,7 +604,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // Tier-1: Duplicate detection — reject on perfect (normalizedName,
       // normalizedDojo) collision.  Uses name+dojo so two people from
       // different clubs with the same name are allowed.
-      const norm = window.normalizeParticipantName || (s => s.toLowerCase().trim());
+      // Fallback mirrors the shared normalizer (lower → trim → collapse
+      // internal whitespace) and guards undefined, so a missing
+      // window.normalizeParticipantName can't miss dups or throw.
+      const norm = window.normalizeParticipantName || (s => (s || '').toLowerCase().trim().replace(/\s+/g, ' '));
       const keySeen = new Map();
       const dupes = [];
       parsed.forEach(({ name, dojo }) => {
@@ -642,6 +645,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // already committed (warnings are non-blocking), so we surface them in a
   // post-save informational banner the operator can review and dismiss.
   const doSave = async (np, added, updatedCount) => {
+    // Clear any stale banner from a previous import up front, so a cancelled
+    // or failed save can't leave a misleading "Saved — …" banner on screen.
+    setNearDupPending(null);
     try {
       const warnings = await onUpdate({ ...c, players: np });
 
@@ -650,6 +656,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // mounted on logout-free navigation), but setImportSummary targets
       // this component's local state.
       if (!mountedRef.current) return;
+
+      // updateCompetition returns undefined when it short-circuited without
+      // saving (e.g. the elevated-password prompt was cancelled). Don't show
+      // a "Saved" toast for a PUT that never happened. A real save returns the
+      // warnings array (possibly empty).
+      if (warnings === undefined) return;
 
       const label = c.kind === "team" ? "team" : "participant";
       let msg = `Saved ${pluralize(np.length, label)}`;

@@ -15,12 +15,13 @@ import (
 // ErrParticipantNotFound is returned by UpdateParticipant when the pid is not in the roster.
 var ErrParticipantNotFound = errors.New("participant not found")
 
-// ErrDuplicateName is returned by AddParticipant and UpdateParticipant when
-// the supplied Player.Name collides with another participant in the same
-// roster (excluding the participant being edited, for the update path). The
-// comparison is case-insensitive (strings.EqualFold) to match the on-disk
-// canonicalization applied by helper.CreatePlayers.
-var ErrDuplicateName = errors.New("participant name already exists")
+// ErrDuplicateName is returned by AddParticipant, UpdateParticipant, and the
+// bulk write path when the supplied (Player.Name, Player.Dojo) pair collides
+// with another participant in the same roster (excluding the participant being
+// edited, for the update path). The comparison is on the normalized
+// (name, dojo) key — the SAME name at a DIFFERENT dojo is allowed (two real
+// people at different clubs), so the message names both fields.
+var ErrDuplicateName = errors.New("a participant with the same name and dojo already exists")
 
 // ErrCompetitionNotInSetup is returned by the setup-gated write paths
 // (Store.AddParticipant and Store.ReplaceParticipant — both call

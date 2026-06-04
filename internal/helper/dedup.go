@@ -57,10 +57,10 @@ func NormalizeParticipantName(s string) string {
 		}
 		stripped.WriteRune(r)
 	}
-	// Step 3: re-NFC
+	// Step 2: re-NFC
 	nfc := norm.NFC.String(stripped.String())
 
-	// Step 4: lowercase, trim, collapse whitespace.
+	// Step 3: lowercase, trim, collapse whitespace.
 	lower := strings.ToLower(nfc)
 	trimmed := strings.TrimSpace(lower)
 	// Collapse internal runs of whitespace to a single space.
@@ -220,7 +220,6 @@ func FindNearDupWarnings(entries [][2]string) []NearDupWarning {
 	type entry struct {
 		norm   string
 		tokens map[string]struct{}
-		orig   string
 	}
 	all := make([]entry, len(entries))
 	for i, e := range entries {
@@ -228,7 +227,6 @@ func FindNearDupWarnings(entries [][2]string) []NearDupWarning {
 		all[i] = entry{
 			norm:   n,
 			tokens: tokenSet(n),
-			orig:   e[0],
 		}
 	}
 

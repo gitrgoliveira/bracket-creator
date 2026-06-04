@@ -539,6 +539,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     return <>
       <AdminDashboard
         tournament={t}
+        password={password}
         onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
         onCreateCompetition={() => setView({ kind: "createComp" })}
         onEditTournament={() => setView({ kind: "editTournament" })}

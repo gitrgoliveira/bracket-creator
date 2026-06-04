@@ -253,7 +253,8 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup — organiser
 		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
 		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload — organiser setup, not operational play
-		http.MethodDelete + " /api/sponsors/:index":                                    // mp-c38: sponsor deletion — organiser setup, not operational play
+		http.MethodDelete + " /api/sponsors/:index",                                    // mp-c38: sponsor deletion — organiser setup, not operational play
+		http.MethodPost + " /api/print/:type":                                          // mp-w87e: PDF export — admin/CPU-heavy, not operational play
 		return true
 	default:
 		return false

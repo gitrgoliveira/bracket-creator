@@ -373,7 +373,9 @@ func TestStartCompetition_PlayoffsFormat_WithByes(t *testing.T) {
 			assert.Equal(t, state.MatchStatusCompleted, m.Status)
 		}
 	}
-	// 3 empty slots in 8 positions: m2 has one bye (P5 vs ""), m3 has double bye ("" vs "")
+	// 5 players in 8 slots → 3 byes, distributed to the top 3 seeds (mp-sess), so
+	// three first-round matches are player-vs-bye (one empty side each) and none is
+	// an empty-vs-empty double bye.
 	assert.GreaterOrEqual(t, byeCount, 2)
 
 	// Matches with one real player and one bye should have a winner
@@ -1580,34 +1582,37 @@ func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
 	compID := "override-deep"
 
 	createTestCompetition(t, store, compID, "playoffs", 3)
-	// 5 players ensures padded to 8 slots -> 3 rounds
-	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "P3", "P4", "P5"})
+	// 8 players → a full 3-round bracket with no byes, so every first-round match
+	// has two real players. (With non-power-of-2 rosters the byes are distributed
+	// to the top seeds — mp-sess — and those top seeds play no first-round match.)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "P3", "P4", "P5", "P6", "P7", "P8"})
 	require.NoError(t, eng.StartCompetition(compID))
 
 	bracket, _ := store.LoadBracket(compID)
-	// Find Alice vs Bob match. StandardSeeding will place them.
-	matchID := ""
+	// Pick any first-round match with two real players and override its winner.
+	var matchID, winner string
 	for _, m := range bracket.Rounds[0] {
-		if (m.SideA == "Alice" && m.SideB == "Bob") || (m.SideA == "Bob" && m.SideB == "Alice") {
+		if m.SideA != "" && m.SideB != "" {
 			matchID = m.ID
+			winner = m.SideA
 			break
 		}
 	}
 	require.NotEmpty(t, matchID)
 
-	err := eng.OverrideBracketWinner(compID, matchID, "Bob")
+	err := eng.OverrideBracketWinner(compID, matchID, winner)
 	require.NoError(t, err)
 
 	reloaded, _ := store.LoadBracket(compID)
-	// Verify it reached at least Round 2
+	// Verify the overridden winner propagated to Round 2.
 	found := false
 	for _, m := range reloaded.Rounds[1] {
-		if m.SideA == "Bob" || m.SideB == "Bob" {
+		if m.SideA == winner || m.SideB == winner {
 			found = true
 			break
 		}
 	}
-	assert.True(t, found, "Bob should have propagated to Round 2")
+	assert.True(t, found, "overridden winner %q should have propagated to Round 2", winner)
 }
 
 func TestCalculatePoolStandings_EdgeCases(t *testing.T) {

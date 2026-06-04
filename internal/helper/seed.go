@@ -32,6 +32,58 @@ func generateBracketOrder(n int) []int {
 	return res
 }
 
+// StandardSeedingFull places players into a FULL power-of-two bracket and returns
+// a slice of length NextPow2(len(players)). Each player is positioned by its
+// seeding rank — seeded participants (Seed > 0) sorted by seed, then unseeded in
+// input order — using generateBracketOrder, and the surplus high-rank slots are
+// left as zero-value Players (empty Name), i.e. byes.
+//
+// Unlike StandardSeeding (which returns a dense len(players) slice and leaves the
+// caller to pad byes at the end of the leaf array), the byes here are interleaved
+// at their standard positions: a bracket of N players in a 2^k draw gives the top
+// 2^k − N seeds a first-round bye, and — because every bye rank pairs with a
+// distinct low (top-seed) rank in round 1 — the draw never contains an
+// empty-vs-empty match. Used by the live-playoffs leaf builder so the knockout
+// tree matches conventional seeding instead of clustering all byes at the bottom.
+func StandardSeedingFull(players []Player) []Player {
+	if len(players) == 0 {
+		return nil
+	}
+
+	seeded := make([]Player, 0)
+	unseeded := make([]Player, 0)
+	for _, p := range players {
+		if p.Seed > 0 {
+			seeded = append(seeded, p)
+		} else {
+			unseeded = append(unseeded, p)
+		}
+	}
+	sort.SliceStable(seeded, func(i, j int) bool {
+		return seeded[i].Seed < seeded[j].Seed
+	})
+
+	// ranked[r-1] is the player with seeding rank r (1-based): seeded by seed,
+	// then unseeded in input order. This mirrors StandardSeeding's ordering but
+	// expressed as a dense rank list rather than slot placement.
+	ranked := make([]Player, 0, len(players))
+	ranked = append(ranked, seeded...)
+	ranked = append(ranked, unseeded...)
+
+	n := len(ranked)
+	power := NextPow2(n)
+	order := generateBracketOrder(power) // order[slot] = seeding rank at that slot
+
+	result := make([]Player, power)
+	for slot, rank := range order {
+		if rank <= n {
+			result[slot] = ranked[rank-1]
+		}
+		// rank > n → leave zero-value Player (a bye)
+	}
+	return result
+}
+
 // StandardSeeding reorders players into bracket positions such that seeded participants (Seed > 0)
 // are spaced according to tournament standards (e.g., #1 and #2 on opposite halves).
 // Unseeded players fill the remaining slots.

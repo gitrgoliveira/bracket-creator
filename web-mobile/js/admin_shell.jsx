@@ -147,8 +147,17 @@ function AllWinnersModal({ comps, onClose }) {
 
   window.useEscapeToClose(onClose);
 
+  // Stable signature of every comp's id:status. A pools+knockout podium can
+  // change without the *completed* set changing — e.g. a mixed comp is already
+  // completed (pools done) while its linked playoffs comp finishes its final.
+  // Keying the effect on all comps' statuses makes the open modal refetch when
+  // any competition completes or its knockout resolves, rather than showing
+  // stale results.
+  const compsSig = (comps || []).map((c) => `${c.id}:${c.status}`).join("|");
+
   useEffectA(() => {
     let cancelled = false;
+    setState((s) => ({ ...s, loading: true }));
     buildAllWinners(completed, comps, {
       fetchCompetitionDetails: window.API.fetchCompetitionDetails.bind(window.API),
       swissStandings: window.API.swissStandings ? window.API.swissStandings.bind(window.API) : null,
@@ -158,7 +167,7 @@ function AllWinnersModal({ comps, onClose }) {
       if (!cancelled) setState({ loading: false, results: [], error: err.message });
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [compsSig]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

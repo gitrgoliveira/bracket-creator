@@ -29,6 +29,10 @@ function findAll(node, pred) {
 
 // ── module setup / teardown ───────────────────────────────────────────────────
 
+// Every global this suite stubs lives here so beforeAll can snapshot the prior
+// value and afterAll can restore (or delete) it — otherwise stubs like
+// window.API / window.deriveAwards leak into later suites and cause
+// order-dependent flakes.
 const STUBBED_GLOBALS = {
   pluralize: (n, s, p) => `${n} ${n === 1 ? s : (p || `${s}s`)}`,
   formatLabelShort: (f) => f,
@@ -36,6 +40,15 @@ const STUBBED_GLOBALS = {
   competitionKindLabel: (c) => c.kind === 'team' ? 'Teams' : 'Individual',
   StatusBadge: function StatusBadge() { return null; },
   formatAdminHeaderSub: () => '',
+  useEscapeToClose: vi.fn(),
+  API: {
+    fetchCompetitionDetails: vi.fn(),
+    swissStandings: vi.fn(),
+  },
+  // Real viewer helpers so resolveCompetitionAwards works correctly.
+  deriveAwards,
+  bracketHasDecidedFinal,
+  resolveCompetitionAwards,
 };
 const originalGlobals = {};
 
@@ -48,18 +61,6 @@ beforeAll(async () => {
     originalGlobals[key] = { had: key in window, value: window[key] };
     window[key] = stub;
   }
-
-  // Stub window.API and window.deriveAwards before the module loads.
-  window.API = {
-    fetchCompetitionDetails: vi.fn(),
-    swissStandings: vi.fn(),
-  };
-  window.useEscapeToClose = vi.fn();
-
-  // Expose the real viewer helpers so resolveCompetitionAwards works correctly.
-  window.deriveAwards = deriveAwards;
-  window.bracketHasDecidedFinal = bracketHasDecidedFinal;
-  window.resolveCompetitionAwards = resolveCompetitionAwards;
 
   await import('../admin_shell.jsx');
 });

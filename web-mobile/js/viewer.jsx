@@ -2403,10 +2403,14 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
 }
 
 // rankOrdinal converts a 1-based rank integer to a short ordinal string.
+// Handles the 11th/12th/13th exception and the general st/nd/rd/th rules.
 function rankOrdinal(rank) {
-  if (rank === 1) return "1st";
-  if (rank === 2) return "2nd";
-  if (rank === 3) return "3rd";
+  const mod100 = rank % 100;
+  const mod10 = rank % 10;
+  if (mod100 >= 11 && mod100 <= 13) return rank + "th";
+  if (mod10 === 1) return rank + "st";
+  if (mod10 === 2) return rank + "nd";
+  if (mod10 === 3) return rank + "rd";
   return rank + "th";
 }
 
@@ -2432,7 +2436,7 @@ const PoolNumberedMatchRow = React.memo(({ m, num, isTeam, onMatchClick }) => {
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 
   return (
-    <div className="pool-match-numbered-row" style={{ cursor: handleClick ? "pointer" : "default" }} onClick={handleClick}>
+    <button type="button" className="pool-match-numbered-row" style={{ cursor: handleClick ? "pointer" : "default" }} onClick={handleClick} disabled={!handleClick}>
       <span className="pool-match-numbered-row__num">{num}</span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <span className="cbadge cbadge--shiro">Shiro</span>
@@ -2445,7 +2449,7 @@ const PoolNumberedMatchRow = React.memo(({ m, num, isTeam, onMatchClick }) => {
         <span className="cbadge cbadge--aka">Aka</span>
         <span className="pool-match-numbered-row__name">{aName || "—"}</span>
       </div>
-    </div>
+    </button>
   );
 });
 PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
@@ -2528,7 +2532,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
 
                   return (
                     <tr key={p.name} className={rowClasses || undefined}>
-                      <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
+                      <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}

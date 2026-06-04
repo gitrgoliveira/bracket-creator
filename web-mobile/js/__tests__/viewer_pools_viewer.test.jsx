@@ -177,13 +177,16 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
       tweaks,
       competition: baseComp,
     });
-    // The first <td> of each row is the draw position cell; P1 is at draw pos 1.
-    // Check that the output contains draw positions 1,2,3,4 (not rank positions).
-    const text = collectText(tree);
-    expect(text).toContain('1'); // draw pos 1
-    expect(text).toContain('2'); // draw pos 2
-    expect(text).toContain('3'); // draw pos 3
-    expect(text).toContain('4'); // draw pos 4
+    // Assert on pool-standings__draw-pos cells specifically, not substring
+    // matching (which could match digits in player names like "P1", "P2").
+    const drawPosCells = findAll(tree, n => {
+      const cls = n.props?.className;
+      return n.type === 'td' && typeof cls === 'string' && cls.includes('pool-standings__draw-pos');
+    });
+    expect(drawPosCells).toHaveLength(4);
+    const drawPosTexts = drawPosCells.map(cell => collectText(cell));
+    // Pool players are in draw order P1→P2→P3→P4, so positions are 1,2,3,4
+    expect(drawPosTexts).toEqual(['1', '2', '3', '4']);
   });
 
   it('renders numbered match list when matches are present', () => {
@@ -200,9 +203,18 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     });
     const text = collectText(tree);
     expect(text).toContain('Matches');
-    // Match numbers 1 and 2 should appear
-    expect(text).toContain('1');
-    expect(text).toContain('2');
+    // Assert on the PoolNumberedMatchRow component vnodes and their num props.
+    // The test framework doesn't call sub-components, so we check the vnode
+    // props rather than the rendered DOM output (which would be opaque here).
+    const matchRows = findAll(tree, n => {
+      // React.memo wraps the inner function; displayName may be on the wrapper
+      // directly or on n.type.type (the inner fn). Handle both.
+      const displayName = n.type?.displayName || n.type?.type?.displayName;
+      return displayName === 'PoolNumberedMatchRow';
+    });
+    expect(matchRows).toHaveLength(2);
+    // num={idx+1} so first match gets num=1, second gets num=2
+    expect(matchRows.map(r => r.props?.num)).toEqual([1, 2]);
   });
 
   it('renders pre-match (no standings) rows in draw order with dashes', () => {

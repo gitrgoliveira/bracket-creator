@@ -439,7 +439,7 @@ func TestStandardSeedingFull(t *testing.T) {
 			assert.Equal(t, tt.wantByes, byes, "bye count")
 			assert.Len(t, seen, tt.playerCount, "every player present exactly once")
 			for name, c := range seen {
-				assert.Equal(t, 1, c, "player %s duplicated", name)
+				assert.Equalf(t, 1, c, "player %s duplicated", name)
 			}
 
 			// No round-1 match has two byes (the core fix).
@@ -512,7 +512,7 @@ func TestStandardSeedingFull_HonorsSeedNumbers(t *testing.T) {
 	assert.Equal(t, 2, byes)
 	assert.Len(t, seen, 6)
 	for name, c := range seen {
-		assert.Equal(t, 1, c, "player %s duplicated", name)
+		assert.Equalf(t, 1, c, "player %s duplicated", name)
 	}
 }
 

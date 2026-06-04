@@ -57,8 +57,10 @@ func partitionSeeded(players []Player) (seeded, unseeded []Player) {
 // Rank assignment matches StandardSeeding (and the Excel draw): a seeded player
 // (Seed > 0) claims its Seed NUMBER as its rank — so an operator who assigns
 // non-contiguous seeds (e.g. {1, 2, 5}) gets the #5 seed at the rank-5 bracket
-// position, not the third-from-top. Unseeded players (and any seed whose number
-// is out of range or collides) fill the remaining ranks 1..N in input order.
+// position, not the third-from-top. Genuine unseeded players fill the remaining
+// ranks 1..N in input order; any seed whose number is out of range or collides
+// is then treated as unseeded too (appended after the genuine unseeded players,
+// so a displaced seed's exact slot is unspecified — these are degenerate inputs).
 //
 // Unlike StandardSeeding (which returns a dense len(players) slice and leaves the
 // caller to pad byes at the end of the leaf array), the byes here are interleaved

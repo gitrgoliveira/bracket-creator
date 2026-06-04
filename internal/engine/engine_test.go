@@ -1629,7 +1629,7 @@ func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
 			break
 		}
 	}
-	assert.True(t, found, "overridden winner %q should have propagated to Round 2", winner)
+	assert.Truef(t, found, "overridden winner %q should have propagated to Round 2", winner)
 }
 
 func TestCalculatePoolStandings_EdgeCases(t *testing.T) {

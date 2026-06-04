@@ -911,8 +911,6 @@ a:hover {
 .bc-round-matches {
   display: flex;
   flex-direction: column;
-  justify-content: space-around;
-  flex: 1;
   gap: 8px;
   position: relative;
 }

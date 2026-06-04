@@ -212,6 +212,22 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
   const [size, setSize] = useStateBC({ w: 0, h: 0 });
 
   useLayoutEffectBC(() => {
+    // Anchor connectors to the midline of a card's two competitor sides rather
+    // than the card's geometric centre. A card stacks a meta header (time/court)
+    // above the two .bc-side rows, so its geometric centre sits inside the upper
+    // (Aka) row — a connector landing there reads as pointing at one competitor
+    // instead of the seam where the two feeders merge. The sides-block midline is
+    // the visual join point. Offset from geometric centre is uniform across cards,
+    // so the arms stay horizontal. Falls back to geometric centre if sides absent.
+    const anchorY = (el, rect, treeTop) => {
+      const sides = el.querySelectorAll(".bc-side");
+      if (sides.length >= 2) {
+        const first = sides[0].getBoundingClientRect();
+        const last = sides[sides.length - 1].getBoundingClientRect();
+        return (first.top + last.bottom) / 2 - treeTop;
+      }
+      return rect.top + rect.height / 2 - treeTop;
+    };
     const compute = () => {
       const tree = treeRef.current;
       if (!tree || !rounds) return;
@@ -226,9 +242,9 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
           const aR = a.getBoundingClientRect();
           const bR = b.getBoundingClientRect();
           const nR = next.getBoundingClientRect();
-          const aMidY = aR.top + aR.height / 2 - treeRect.top;
-          const bMidY = bR.top + bR.height / 2 - treeRect.top;
-          const nMidY = nR.top + nR.height / 2 - treeRect.top;
+          const aMidY = anchorY(a, aR, treeRect.top);
+          const bMidY = anchorY(b, bR, treeRect.top);
+          const nMidY = anchorY(next, nR, treeRect.top);
           const aRight = aR.right - treeRect.left;
           const nLeft = nR.left - treeRect.left;
           const midX = (aRight + nLeft) / 2;
@@ -281,29 +297,40 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
   }, [autoScrollMatchId, version]);
 
   if (!rounds) return null;
+  // Compute vertical padding per round so each match card is perfectly centred
+  // between its two feeder cards regardless of bracket size. SLOT_BASE is the
+  // height one match card occupies in round 0: card height (~104px, i.e.
+  // bc-match-meta ~28px + 2 × bc-side 38px) + row gap (8px) = 112px.
+  // For round r, each card must span 2^r slots; the extra height goes in as equal
+  // top/bottom padding so the DOM midpoint stays centred for the SVG connectors.
+  // Formula: padV = (2^r - 1) * SLOT_BASE / 2.
+  const SLOT_BASE = 112;
   return (
     <div className={`bc-tree bc-tree--v${variant}`} ref={treeRef}>
       <BracketConnectors rounds={rounds} treeRef={treeRef} refMap={refMap} version={version} />
-      {rounds.map((round, ri) => (
-        <div key={ri} className="bc-round" style={{ "--round": ri }}>
-          <div className="bc-round-label">{roundLabel(ri, rounds.length)}</div>
-          <div className="bc-round-matches">
-            {round.map((m, mi) => (
-              <div className="bc-match-wrap" key={m.id} style={{ "--mi": mi }}>
-                <MatchCard
-                  match={m}
-                  variant={variant}
-                  showDojo={showDojo}
-                  highlighted={m.id === highlightedMatchId}
-                  matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
-                  onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
-                  highlightPlayer={highlightPlayer}
-                />
-              </div>
-            ))}
+      {rounds.map((round, ri) => {
+        const padV = Math.round((Math.pow(2, ri) - 1) * SLOT_BASE / 2);
+        return (
+          <div key={ri} className="bc-round" style={{ "--round": ri }}>
+            <div className="bc-round-label">{roundLabel(ri, rounds.length)}</div>
+            <div className="bc-round-matches">
+              {round.map((m, mi) => (
+                <div className="bc-match-wrap" key={m.id} style={{ "--mi": mi, paddingTop: padV, paddingBottom: padV }}>
+                  <MatchCard
+                    match={m}
+                    variant={variant}
+                    showDojo={showDojo}
+                    highlighted={m.id === highlightedMatchId}
+                    matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
+                    onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
+                    highlightPlayer={highlightPlayer}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

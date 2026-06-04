@@ -239,6 +239,23 @@ const API = {
         }
         return res.json();
     },
+    // exportPDFs POSTs to /api/print/:type (admin-gated) and returns the
+    // response as a Blob (a ZIP of the produced PDFs). `type` is one of
+    // registration|names|tags|pools-trees|full-bracket|all. Throws with the
+    // server's error message on non-2xx (e.g. 503 when LibreOffice is absent,
+    // 422 when no pages were produced). Generation runs LibreOffice and can
+    // take 30–60s, so callers should show a busy state.
+    async exportPDFs(type, password) {
+        const res = await fetch(`/api/print/${type}`, {
+            method: 'POST',
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to generate PDFs");
+        }
+        return res.blob();
+    },
     async startCompetition(id, password) {
         const res = await fetch(`/api/competitions/${id}/start`, {
             method: 'POST',

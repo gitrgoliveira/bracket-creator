@@ -1,0 +1,74 @@
+# Opt-in PDF variant of the mobile app image.
+#
+# WHY THIS IS SEPARATE: the lean images (Dockerfile, Dockerfile.mobile) use
+# "FROM scratch" and weigh ~20 MB. LibreOffice headless + a JRE add ~500 MB and
+# a significantly larger attack surface. PDF export is an infrequent, admin-only
+# operation, so it ships as an explicit opt-in rather than inflating every
+# deployment. Pull this image only when you need the `print` CLI command or the
+# /api/print endpoint.
+#
+# Runtime: soffice is on $PATH at /usr/bin/soffice (symlink installed by
+# libreoffice-nogui). The Go binary's LocateSoffice() probes $PATH first, so no
+# additional env vars are required.
+
+ARG GO_VERSION=1.26.4
+
+# ---------------------------------------------------------------------------
+# Build stage — identical to Dockerfile.mobile
+# ---------------------------------------------------------------------------
+FROM golang:${GO_VERSION} AS builder
+
+ARG GIT_COMMIT
+ARG VERSION
+
+ENV CGO_ENABLED=0
+
+WORKDIR /bracket-creator
+
+# Install Node.js for frontend build dependencies (npx esbuild)
+RUN apt-get update && apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN make go/build
+
+# ---------------------------------------------------------------------------
+# Final stage — Debian slim + LibreOffice headless
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim
+
+LABEL maintainer="Ricardo Oliveira @gitrgoliveira"
+LABEL org.opencontainers.image.description="bracket-creator mobile app with LibreOffice for PDF export (opt-in, ~500 MB+)"
+
+# Install LibreOffice headless + default JRE (required by some LO filters).
+# --no-install-recommends keeps the layer as lean as possible while still
+# providing a working headless conversion environment.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libreoffice-nogui \
+        default-jre-headless \
+        fonts-liberation \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user identical to the scratch images (uid/gid 65534).
+RUN echo "nonroot:x:65534:65534:Non root:/nonroot:/usr/sbin/nologin" >> /etc/passwd && \
+    mkdir -p /nonroot && chown 65534:65534 /nonroot
+
+# Copy the compiled binary from the builder stage.
+COPY --from=builder /bracket-creator/bin/bracket-creator /bin/bracket-creator
+
+# LibreOffice needs a writable home directory for its profile even in headless
+# mode. Set HOME so it lands inside /nonroot (owned by uid 65534).
+ENV HOME=/nonroot
+ENV TOURNAMENT_DATA_DIR=/tournament-data
+
+USER 65534
+
+EXPOSE 8080
+ENTRYPOINT [ "/bin/bracket-creator" ]
+CMD [ "mobile-app", "--bind=0.0.0.0" ]

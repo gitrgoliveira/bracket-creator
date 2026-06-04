@@ -121,3 +121,57 @@ jobs:
           flags: ${{ matrix.packages.name }}
           fail_ci_if_error: true
           use_oidc: true
+
+  #   ____  ____  _____   _____         _
+  #  |  _ \|  _ \|  ___| |_   _|__  ___| |_
+  #  | |_) | | | | |_      | |/ _ \/ __| __|
+  #  |  __/| |_| |  _|     | |  __/\__ \ |_
+  #  |_|   |____/|_|        |_|\___||___/\__|
+  #
+  # Runs the PDF-dependent tests (internal/pdf/...) that skip themselves when
+  # LibreOffice is absent. The regular "test" matrix above covers everything
+  # else; this job only adds the soffice codepath. It runs on every PR and push
+  # to main, matching the cadence of the main test matrix.
+  test-pdf:
+    permissions:
+      contents: read
+      id-token: write # for codecov/codecov-action
+    runs-on: ubuntu-latest
+    env:
+      GO111MODULE: on
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.4"
+          cache: true
+
+      - name: Install LibreOffice headless
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-nogui \
+            default-jre-headless \
+            fonts-liberation
+
+      - name: Init project
+        run: |
+          go mod tidy
+          go generate ./...
+
+      - name: Generate example workbooks (required by PDF pipeline tests)
+        run: make examples
+
+      - name: Run PDF tests (with soffice)
+        run: go test ./internal/pdf/... -timeout=10m -coverprofile=coverage-pdf.txt -covermode=atomic
+
+      - name: Upload coverage to Codecov (pdf)
+        uses: codecov/codecov-action@v6
+        with:
+          files: ./coverage-pdf.txt
+          flags: pdf
+          fail_ci_if_error: true
+          use_oidc: true

@@ -14,7 +14,7 @@ describe('normalizeParticipantName', () => {
   const cases = [
     ['lowercase', 'Alice Smith', 'alice smith'],
     ['trim spaces', '  Bob  ', 'bob'],
-    ['collapse internal spaces', 'Chau  Earn  Tan', 'chau earn tan'],
+    ['collapse internal spaces', 'Ana  Maria  Rossi', 'ana maria rossi'],
     ['Latin diacritic fold — Müller', 'Müller', 'muller'],
     ['Latin diacritic fold — Ï', 'Ï', 'i'],
     ['Latin diacritic fold — accented', 'Résumé Café', 'resume cafe'],

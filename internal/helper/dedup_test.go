@@ -17,7 +17,7 @@ func TestNormalizeParticipantName(t *testing.T) {
 	}{
 		{"lowercase", "Alice Smith", "alice smith"},
 		{"trim spaces", "  Bob  ", "bob"},
-		{"collapse internal spaces", "Chau  Earn  Tan", "chau earn tan"},
+		{"collapse internal spaces", "Ana  Maria  Rossi", "ana maria rossi"},
 		{"Latin diacritic fold — Müller", "Müller", "muller"},
 		{"Latin diacritic fold — Ï", "Ï", "i"},
 		{"Latin diacritic fold — accented name", "Résumé Café", "resume cafe"},
@@ -268,10 +268,10 @@ func TestIsSingleTrailingTokenDiff(t *testing.T) {
 		{"shobukai a", "shobukai b", true},
 		{"manchester x", "manchester z", true},
 		{"tora a", "tora b", true},
-		{"gb men", "gb women", false},        // last tokens differ, both > 1 char
-		{"shobukai", "shudokan", false},      // only one token each
-		{"a b c x", "a b c y", true},         // multi-token, last is single char
-		{"chau earn tan", "chau tan", false}, // token counts differ
+		{"gb men", "gb women", false},           // last tokens differ, both > 1 char
+		{"shobukai", "shudokan", false},         // only one token each
+		{"a b c x", "a b c y", true},            // multi-token, last is single char
+		{"ana maria rossi", "ana rossi", false}, // token counts differ
 	}
 	for _, tc := range cases {
 		got := isSingleTrailingTokenDiff(tc.a, tc.b)

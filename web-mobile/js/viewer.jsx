@@ -599,6 +599,18 @@ export function TournamentInfo({ tournament }) {
   );
 }
 
+// PhaseChip — one phase badge inside the paired card phase strip.
+function PhaseChip({ label, status }) {
+  const isDone = status === "completed";
+  const isLive = status === "running";
+  const cls = isDone ? "phase-chip phase-chip--done" : isLive ? "phase-chip phase-chip--live" : "phase-chip phase-chip--pending";
+  return (
+    <span className={cls}>
+      {isDone ? "✓ " : isLive ? "● " : ""}{label}
+    </span>
+  );
+}
+
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -612,6 +624,27 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     return map;
   }, [comps, t.date]);
   const dates = Object.keys(compsByDate).sort(compareDmy);
+
+  // G1: build per-date display entries that group a mixed comp with its
+  // linked sourceCompID playoff into one card. Standalone playoff shells
+  // (those whose sourceCompID resolves to another comp in the list) are
+  // hidden — they appear as the Knockout phase inside their source's card.
+  const displayEntriesByDate = useMemo(() => {
+    const compIds = new Set(comps.map(c => c.id));
+    const pairedPlayoffIds = new Set(
+      comps.filter(c => c.sourceCompID && compIds.has(c.sourceCompID)).map(c => c.id)
+    );
+    const result = {};
+    Object.keys(compsByDate).forEach(d => {
+      result[d] = compsByDate[d]
+        .filter(c => !pairedPlayoffIds.has(c.id))
+        .map(c => {
+          const playoffs = comps.find(x => x.sourceCompID === c.id);
+          return playoffs ? { kind: "pair", source: c, playoffs } : { kind: "single", comp: c };
+        });
+    });
+    return result;
+  }, [comps, compsByDate]);
 
   const [courtFilter, setCourtFilter] = useState("all");
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -787,7 +820,55 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <div key={d}>
               <div className="section-title">{formatDate(d)}</div>
               <div className="vlist">
-                {compsByDate[d].map((c) => {
+                {(displayEntriesByDate[d] || []).map((entry) => {
+                  if (entry.kind === "pair") {
+                    const { source, playoffs } = entry;
+                    const srcM = compMatches(source).filter(hasBothSides);
+                    const poM = compMatches(playoffs).filter(hasBothSides);
+                    const allM = srcM.concat(poM);
+                    const total = allM.length;
+                    const done = allM.filter(m => m.status === "completed").length;
+                    const liveCount = allM.filter(m => m.status === "running").length;
+                    const pct = total ? Math.round(done / total * 100) : 0;
+                    const showRegister = shouldShowRegister(t, source, !!onRegister);
+                    return (
+                      <div key={source.id} style={{ position: "relative" }}>
+                        <button className="vlist-item vlist-item--comp" style={{ width: "100%" }} onClick={() => onSelectCompetition(source.id)}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div className="vlist-item__eyebrow">{competitionKindLabel(source)}{source.teamSize > 1 ? ` · ${source.teamSize}-person` : ""}</div>
+                              <div className="vlist-item__name">{source.name}</div>
+                              <div className="vlist-item__meta">
+                                {source.players.length} {source.kind === "team" ? "teams" : "players"} · Starts {source.startTime}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="phase-strip">
+                            <PhaseChip label="Pools" status={source.status} />
+                            <span className="phase-strip__arrow">→</span>
+                            <PhaseChip label="Knockout" status={playoffs.status} />
+                          </div>
+                          {total > 0 && (
+                            <div className="vlist-item__progress">
+                              <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
+                              <div className="vlist-item__pct">
+                                {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
+                              </div>
+                            </div>
+                          )}
+                        </button>
+                        {showRegister && (
+                          <div style={{ padding: "0 12px 12px" }}>
+                            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onRegister(source.id); }}>
+                              Register for this competition
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  // kind === "single"
+                  const c = entry.comp;
                   const matches = compMatches(c).filter(hasBothSides);
                   const total = matches.length;
                   const done = matches.filter((m) => m.status === "completed").length;

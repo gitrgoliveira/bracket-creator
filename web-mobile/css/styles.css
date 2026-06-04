@@ -1325,6 +1325,45 @@ a:hover {
   border-bottom: 2px solid #bbf7d0;
 }
 
+/* G1: phase strip inside a unified pools+knockout competition card */
+.phase-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.phase-strip__arrow {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.phase-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.phase-chip--done {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.phase-chip--live {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.phase-chip--pending {
+  background: var(--surface-2, #f1f5f9);
+  color: var(--ink-3);
+}
+
 /* ---------- Pool match results ---------- */
 .pool-match-row {
   display: flex;

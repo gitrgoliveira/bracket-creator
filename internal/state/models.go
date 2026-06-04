@@ -432,6 +432,29 @@ func ValidateTeamMatchType(t TeamMatchType, teamSize int) error {
 	}
 }
 
+// ValidateCompetitionTeamSize rejects invalid teamSize values. Engine code
+// uses both TeamSize > 0 and Kind == "team" in different paths; an inconsistent
+// pair (e.g. kind="individual" with teamSize=3) causes misclassification:
+//   - negative values are always invalid
+//   - teamSize == 1 is always invalid (would flag as team via TeamSize > 0)
+//   - non-team kinds require teamSize == 0
+//   - kind == "team" requires teamSize >= 2
+func ValidateCompetitionTeamSize(kind string, teamSize int) error {
+	if teamSize < 0 {
+		return fmt.Errorf("teamSize must be non-negative")
+	}
+	if teamSize == 1 {
+		return fmt.Errorf("teamSize 1 is invalid: use 0 for individual competitions or >= 2 for teams")
+	}
+	if kind != "team" && teamSize > 0 {
+		return fmt.Errorf("non-team competitions require teamSize == 0 (got %d)", teamSize)
+	}
+	if kind == "team" && teamSize < 2 {
+		return fmt.Errorf("team competitions require teamSize >= 2")
+	}
+	return nil
+}
+
 // DecisionDraw is the canonical value for a tied (hikiwake) match.
 const DecisionDraw = "hikiwake"
 

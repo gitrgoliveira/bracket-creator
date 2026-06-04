@@ -137,6 +137,9 @@ func (o *printOptions) generatePDFs(cmd *cobra.Command, gen *pdf.Generator, sour
 	ctx := context.Background()
 
 	if o.pdfType == "all" {
+		if o.output != "" {
+			return fmt.Errorf("--output is not valid with --type=all; use --output-dir")
+		}
 		outDir := o.outputDir
 		if outDir == "" {
 			return fmt.Errorf("--type=all requires --output-dir")
@@ -149,11 +152,17 @@ func (o *printOptions) generatePDFs(cmd *cobra.Command, gen *pdf.Generator, sour
 		return nil
 	}
 
-	// Single type. Produce into a scratch dir under the destination, then move
-	// to the requested --output (or default filename in --output-dir).
+	// Single type. Exactly one of --output / --output-dir must be given;
+	// allowing both is ambiguous and could trigger a cross-filesystem rename
+	// (EXDEV) when the generated file in --output-dir is moved to --output.
 	if o.output == "" && o.outputDir == "" {
 		return fmt.Errorf("provide --output <file> or --output-dir <dir>")
 	}
+	if o.output != "" && o.outputDir != "" {
+		return fmt.Errorf("--output and --output-dir are mutually exclusive for a single --type")
+	}
+	// Generate into the destination directory directly. When --output is given
+	// we use its parent dir, so the final rename stays within one filesystem.
 	destDir := o.outputDir
 	if destDir == "" {
 		destDir = filepath.Dir(o.output)

@@ -3,6 +3,7 @@ package pdf
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -201,22 +202,41 @@ func (g *Generator) buildGroup(ctx context.Context, grp Group, conv []converted,
 	return outPath, true, nil
 }
 
-// publishAtomic copies src into the destination directory under a temp name and
-// renames it onto dst. src and dst may be on different filesystems (work dir is
-// in the OS temp area), so we copy rather than rename across the boundary; the
-// final rename within dst's directory is atomic.
+// publishAtomic copies src into dst's directory under a unique temp file and
+// renames it onto dst. src and dst may be on different filesystems (the work
+// dir is in the OS temp area), so we stream-copy rather than rename across the
+// boundary; the final rename within dst's directory is atomic. The copy is
+// streamed (io.Copy) to avoid buffering whole PDFs in memory, and the temp file
+// is created with os.CreateTemp so concurrent publishes can't collide.
 func publishAtomic(src, dst string) error {
-	data, err := os.ReadFile(src) // #nosec G304 -- src is an internally-generated PDF in a temp work dir.
+	in, err := os.Open(src) // #nosec G304 -- src is an internally-generated PDF in a temp work dir.
 	if err != nil {
-		return fmt.Errorf("read generated pdf: %w", err)
+		return fmt.Errorf("open generated pdf: %w", err)
 	}
-	tmp := dst + ".tmp"
-	// #nosec G703 G304 -- dst is the caller's output dir joined with a fixed group filename constant.
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write temp output: %w", err)
+	defer func() { _ = in.Close() }()
+
+	dir, base := filepath.Dir(dst), filepath.Base(dst)
+	// #nosec G304 -- dir is the caller's output dir; base is a fixed group filename constant.
+	tmp, err := os.CreateTemp(dir, base+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp output: %w", err)
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
+	tmpName := tmp.Name()
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("copy generated pdf: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close temp output: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("chmod temp output: %w", err)
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("publish output: %w", err)
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -114,24 +115,12 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 
 		zw := zip.NewWriter(c.Writer)
 		for _, pdfPath := range ordered {
-			data, readErr := os.ReadFile(pdfPath) // #nosec G304 -- pdfPath is an internally-generated PDF in a temp dir.
-			if readErr != nil {
+			if err := streamPDFIntoZip(zw, pdfPath); err != nil {
 				// The 200 status + headers are already committed, so we cannot
 				// switch to an error response. Record the error on the context
 				// for server logs and abort; the truncated ZIP signals failure
 				// to the client.
-				_ = c.Error(fmt.Errorf("read generated pdf %s: %w", pdfPath, readErr))
-				_ = zw.Close()
-				return
-			}
-			entry, createErr := zw.Create(filepath.Base(pdfPath))
-			if createErr != nil {
-				_ = c.Error(fmt.Errorf("create zip entry for %s: %w", pdfPath, createErr))
-				_ = zw.Close()
-				return
-			}
-			if _, writeErr := entry.Write(data); writeErr != nil {
-				_ = c.Error(fmt.Errorf("write zip entry for %s: %w", pdfPath, writeErr))
+				_ = c.Error(err)
 				_ = zw.Close()
 				return
 			}
@@ -142,4 +131,23 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			return
 		}
 	})
+}
+
+// streamPDFIntoZip adds one PDF to the ZIP, copying it with io.Copy so a large
+// PDF is never fully buffered in memory.
+func streamPDFIntoZip(zw *zip.Writer, pdfPath string) error {
+	f, err := os.Open(pdfPath) // #nosec G304 -- pdfPath is an internally-generated PDF in a temp dir.
+	if err != nil {
+		return fmt.Errorf("open generated pdf %s: %w", pdfPath, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	entry, err := zw.Create(filepath.Base(pdfPath))
+	if err != nil {
+		return fmt.Errorf("create zip entry for %s: %w", pdfPath, err)
+	}
+	if _, err := io.Copy(entry, f); err != nil {
+		return fmt.Errorf("write zip entry for %s: %w", pdfPath, err)
+	}
+	return nil
 }

@@ -360,6 +360,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			ID: "trim-fields-update", Name: "Trim Fields Update",
 			Kind: "  team  ", Format: "  playoffs  ",
 			PoolSizeMode: "  exact  ", StartTime: "  10:30  ", Date: "  15-06-2026  ",
+			TeamSize: 2,
 		}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
@@ -1556,6 +1557,55 @@ func TestGenerateDrawHandler(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/competitions/no-such-comp/generate-draw", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+func TestCreateCompetitionTeamSizeValidation(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	t.Run("POST team with teamSize=1 returns 400", func(t *testing.T) {
+		comp := state.Competition{
+			Name:     "Team Size One",
+			Kind:     "team",
+			TeamSize: 1,
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("POST team with teamSize=0 returns 400", func(t *testing.T) {
+		comp := state.Competition{
+			Name:     "Team Size Zero",
+			Kind:     "team",
+			TeamSize: 0,
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("POST team with teamSize=2 succeeds", func(t *testing.T) {
+		comp := state.Competition{
+			Name:     "Team Size Two",
+			Kind:     "team",
+			TeamSize: 2,
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusCreated, w.Code)
 	})
 }
 

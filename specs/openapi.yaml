@@ -851,6 +851,8 @@ paths:
         - When `id` is omitted AND `name` slugs to empty (no alphanumerics)
           → 400 (`competition ID is required (could not derive one from name)`).
         - Provided `id` must match the path-parameter pattern (see CompetitionId).
+        - When `kind` is `"team"`, `teamSize` must be >= 2
+          (`team competitions require teamSize >= 2`).
 
         String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
         `format`, `poolSizeMode`, `startTime`, `date`.
@@ -904,8 +906,9 @@ paths:
         `kind`, `mirror`. String fields are trimmed server-side.
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
-        or if `date` is non-empty and not in canonical `DD-MM-YYYY`
-        format.
+        if `date` is non-empty and not in canonical `DD-MM-YYYY`
+        format, or if `kind` is `"team"` and `teamSize` < 2
+        (`team competitions require teamSize >= 2`).
 
         **Roster-save (body INCLUDES `players`, even an empty array):**
         The server writes `participants.csv` (and clears or extracts
@@ -2396,7 +2399,10 @@ components:
           enum: [pools, playoffs]
         teamSize:
           type: integer
-          description: Number of members per team (0 for individual).
+          minimum: 0
+          description: >
+            Number of members per team. Must be >= 2 when kind is "team";
+            0 for individual competitions.
         poolSize:
           type: integer
         poolSizeMode:

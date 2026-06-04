@@ -432,6 +432,15 @@ func ValidateTeamMatchType(t TeamMatchType, teamSize int) error {
 	}
 }
 
+// ValidateCompetitionTeamSize returns an error when kind is "team" and
+// teamSize is less than 2. Individual competitions are unconstrained.
+func ValidateCompetitionTeamSize(kind string, teamSize int) error {
+	if kind == "team" && teamSize < 2 {
+		return fmt.Errorf("team competitions require teamSize >= 2")
+	}
+	return nil
+}
+
 // DecisionDraw is the canonical value for a tied (hikiwake) match.
 const DecisionDraw = "hikiwake"
 

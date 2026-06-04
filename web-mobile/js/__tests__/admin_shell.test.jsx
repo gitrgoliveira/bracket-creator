@@ -94,8 +94,19 @@ describe('ExportPdfModal', () => {
       if (saved[k].had) window[k] = saved[k].value;
       else delete window[k];
     }
-    if (saved._createObjectURL !== undefined) window.URL.createObjectURL = saved._createObjectURL;
-    if (saved._revokeObjectURL !== undefined) window.URL.revokeObjectURL = saved._revokeObjectURL;
+    // Mirror the window-global restore logic: delete the property when the
+    // original was undefined (jsdom typically doesn't implement these) so the
+    // stubs can't leak into later suites and cause order-dependent flakes.
+    if (saved._createObjectURL !== undefined) {
+      window.URL.createObjectURL = saved._createObjectURL;
+    } else {
+      delete window.URL.createObjectURL;
+    }
+    if (saved._revokeObjectURL !== undefined) {
+      window.URL.revokeObjectURL = saved._revokeObjectURL;
+    } else {
+      delete window.URL.revokeObjectURL;
+    }
   });
 
   it('renders without throwing', () => {

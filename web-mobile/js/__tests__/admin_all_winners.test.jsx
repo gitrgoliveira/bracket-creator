@@ -6,6 +6,7 @@
 // state from the vnode and the async aggregation logic separately via
 // buildAllWinners.
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { bracketHasDecidedFinal, resolveCompetitionAwards, deriveAwards } from '../viewer.jsx';
 
 // ── tree helpers ─────────────────────────────────────────────────────────────
 
@@ -55,32 +56,10 @@ beforeAll(async () => {
   };
   window.useEscapeToClose = vi.fn();
 
-  // Stub deriveAwards — tests for the real function are in viewer_awards.test.jsx.
-  window.deriveAwards = vi.fn((bracket, standings, _pools, _nameToPlayer) => {
-    // Minimal fixture behaviour: return bracket-based podium if bracket has a winner,
-    // otherwise first-4 from standings array.
-    if (bracket && bracket.rounds) {
-      const finalRound = bracket.rounds[bracket.rounds.length - 1];
-      const final = finalRound && finalRound[0];
-      if (final && final.winner) {
-        const sfRound = bracket.rounds[bracket.rounds.length - 2] || [];
-        const thirds = sfRound.map((m) => m.winner === m.sideA ? m.sideB : m.sideA).filter(Boolean);
-        return [
-          { place: 1, name: final.winner, dojo: '' },
-          { place: 2, name: final.winner === final.sideA ? final.sideB : final.sideA, dojo: '' },
-          ...thirds.map((t) => ({ place: 3, name: t, dojo: '' })),
-        ];
-      }
-    }
-    if (Array.isArray(standings) && standings.length > 0) {
-      return standings.slice(0, 4).map((s, i) => ({
-        place: i < 3 ? i + 1 : 3,
-        name: s.player?.name || '',
-        dojo: s.player?.dojo || '',
-      })).filter((e) => e.name);
-    }
-    return [];
-  });
+  // Expose the real viewer helpers so resolveCompetitionAwards works correctly.
+  window.deriveAwards = deriveAwards;
+  window.bracketHasDecidedFinal = bracketHasDecidedFinal;
+  window.resolveCompetitionAwards = resolveCompetitionAwards;
 
   await import('../admin_shell.jsx');
 });
@@ -99,7 +78,7 @@ describe('buildAllWinners', () => {
     expect(typeof window.buildAllWinners).toBe('function');
   });
 
-  it('returns podium for a knockout competition with 4 placings (two 3rds)', async () => {
+  it('returns podium for a standalone knockout competition with 4 placings (two 3rds)', async () => {
     const bracket = {
       rounds: [
         [
@@ -109,17 +88,18 @@ describe('buildAllWinners', () => {
         [{ sideA: 'Alice', sideB: 'Carol', winner: 'Alice' }],
       ],
     };
-    const comp = { id: 'ko-1', name: 'Knockout', format: 'playoffs-only', status: 'completed', players: [] };
-    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, config: comp, players: [] });
+    const comp = { id: 'ko-1', name: 'Knockout', format: 'playoffs', status: 'completed', players: [] };
+    const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, config: comp, players: [] });
 
-    const results = await window.buildAllWinners([comp], {
-      fetchCompetitionDetails: window.API.fetchCompetitionDetails,
+    const results = await window.buildAllWinners([comp], [comp], {
+      fetchCompetitionDetails,
       swissStandings: null,
     });
 
     expect(results).toHaveLength(1);
     expect(results[0].comp.id).toBe('ko-1');
-    // The stub deriveAwards returns the champion + runner-up + two thirds
+    expect(results[0].state).toBe('final');
+    // deriveAwards returns champion + runner-up + two thirds
     expect(results[0].podium[0].place).toBe(1);
     expect(results[0].podium[1].place).toBe(2);
     expect(results[0].podium[2].place).toBe(3);
@@ -127,45 +107,91 @@ describe('buildAllWinners', () => {
     expect(results[0].podium).toHaveLength(4);
   });
 
-  it('returns podium for a pool/standings competition with distinct 3rd and 4th', async () => {
+  it('filters out linked playoffs comp (sourceCompID set) — state "skip"', async () => {
+    const mixedComp = { id: 'mixed-1', name: 'Pools+KO', format: 'mixed', status: 'completed' };
+    const playoffComp = { id: 'po-1', name: 'Playoffs', format: 'playoffs', sourceCompID: 'mixed-1', status: 'completed' };
+    const allComps = [mixedComp, playoffComp];
+    const bracket = {
+      rounds: [
+        [{ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' }, { sideA: 'Carol', sideB: 'Dan', winner: 'Carol' }],
+        [{ sideA: 'Alice', sideB: 'Carol', winner: 'Alice' }],
+      ],
+    };
+    const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, players: [] });
+
+    // Pass both completed comps; the playoffs shell should be filtered (skip)
+    const results = await window.buildAllWinners([mixedComp, playoffComp], allComps, {
+      fetchCompetitionDetails,
+      swissStandings: null,
+    });
+
+    // playoffComp (linked shell) must be filtered out; mixedComp resolved to final
+    expect(results.find(r => r.comp.id === 'po-1')).toBeUndefined();
+    expect(results.find(r => r.comp.id === 'mixed-1')).toBeDefined();
+    const mixedResult = results.find(r => r.comp.id === 'mixed-1');
+    expect(mixedResult.state).toBe('final');
+    expect(mixedResult.podium).toHaveLength(4);
+    expect(mixedResult.podium[2].place).toBe(3);
+    expect(mixedResult.podium[3].place).toBe(3);
+  });
+
+  it('mixed comp whose linked playoffs final is undecided → state "in-progress", podium []', async () => {
+    const mixedComp = { id: 'mixed-2', name: 'Pools+KO', format: 'mixed', status: 'completed' };
+    const playoffComp = { id: 'po-2', name: 'Playoffs', format: 'playoffs', sourceCompID: 'mixed-2', status: 'playoffs' };
+    const allComps = [mixedComp, playoffComp];
+    // undecided final
+    const bracket = {
+      rounds: [
+        [{ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' }, { sideA: 'Carol', sideB: 'Dan', winner: 'Carol' }],
+        [{ sideA: 'Alice', sideB: 'Carol', winner: null }],
+      ],
+    };
+    const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, players: [] });
+
+    const results = await window.buildAllWinners([mixedComp], allComps, {
+      fetchCompetitionDetails,
+      swissStandings: null,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].state).toBe('in-progress');
+    expect(results[0].podium).toEqual([]);
+  });
+
+  it('returns podium for a pool/standings competition (league format)', async () => {
     const standings = [
       { player: { name: 'Alice', dojo: 'Aoyama' } },
       { player: { name: 'Bob', dojo: 'Bunkyo' } },
       { player: { name: 'Carol', dojo: 'Chiba' } },
       { player: { name: 'Dan', dojo: 'Denenchofu' } },
     ];
-    const comp = { id: 'pool-1', name: 'Pools', format: 'pools-and-playoffs', status: 'completed', players: [] };
-    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings, pools: [{ poolName: 'Pool A' }], config: comp, players: [] });
+    const comp = { id: 'league-1', name: 'League', format: 'league', status: 'completed', players: [] };
+    const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings, pools: [{ poolName: 'Pool A' }], config: comp, players: [] });
 
-    const results = await window.buildAllWinners([comp], {
-      fetchCompetitionDetails: window.API.fetchCompetitionDetails,
+    const results = await window.buildAllWinners([comp], [comp], {
+      fetchCompetitionDetails,
       swissStandings: null,
     });
 
     expect(results).toHaveLength(1);
     const podium = results[0].podium;
-    // standings-based: places 1,2,3,3 (last two are both 3 per deriveAwards logic)
+    expect(podium[0].name).toBe('Alice');
+    expect(podium[1].name).toBe('Bob');
     expect(podium[2].place).toBe(3);
     expect(podium[3].place).toBe(3);
-    // names are distinct
-    expect(podium[2].name).toBe('Carol');
-    expect(podium[3].name).toBe('Dan');
   });
 
   it('excludes non-completed competitions (caller is responsible for pre-filtering)', async () => {
-    // buildAllWinners only receives the comps the caller passes — the
-    // filtering (status === "completed") happens in the component; here we
-    // verify buildAllWinners faithfully processes whatever it receives.
-    const comp = { id: 'running-1', name: 'In Progress', format: 'playoffs-only', status: 'pools', players: [] };
-    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, config: comp, players: [] });
+    const comp = { id: 'running-1', name: 'In Progress', format: 'playoffs', status: 'pools', players: [] };
+    const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, config: comp, players: [] });
 
     // Caller passes only completed comps — if we pass none the result is empty.
-    const results = await window.buildAllWinners([], {
-      fetchCompetitionDetails: window.API.fetchCompetitionDetails,
+    const results = await window.buildAllWinners([], [comp], {
+      fetchCompetitionDetails,
       swissStandings: null,
     });
     expect(results).toHaveLength(0);
-    expect(window.API.fetchCompetitionDetails).not.toHaveBeenCalled();
+    expect(fetchCompetitionDetails).not.toHaveBeenCalled();
   });
 
   it('fetches swissStandings for swiss-format competitions and passes them to deriveAwards', async () => {
@@ -174,37 +200,25 @@ describe('buildAllWinners', () => {
       { player: { name: 'Hiro', dojo: 'Musashi Dojo' } },
     ];
     const comp = { id: 'swiss-1', name: 'Swiss', format: 'swiss', status: 'completed', players: [] };
-    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, config: { format: 'swiss' }, players: [] });
+    const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, config: { format: 'swiss' }, players: [] });
     const mockSwissStandings = vi.fn().mockResolvedValue(swissStandingsData);
 
-    const deriveAwardsSpy = vi.fn().mockReturnValue([{ place: 1, name: 'Kenji', dojo: 'Kendo Club' }]);
-    const origDerive = window.deriveAwards;
-    window.deriveAwards = deriveAwardsSpy;
-
-    try {
-      await window.buildAllWinners([comp], {
-        fetchCompetitionDetails: window.API.fetchCompetitionDetails,
-        swissStandings: mockSwissStandings,
-      });
-      expect(mockSwissStandings).toHaveBeenCalledWith('swiss-1');
-      // deriveAwards should have been called with the swiss standings array
-      expect(deriveAwardsSpy).toHaveBeenCalledWith(
-        null,
-        swissStandingsData,
-        null,
-        expect.any(Map)
-      );
-    } finally {
-      window.deriveAwards = origDerive;
-    }
+    const results = await window.buildAllWinners([comp], [comp], {
+      fetchCompetitionDetails,
+      swissStandings: mockSwissStandings,
+    });
+    expect(mockSwissStandings).toHaveBeenCalledWith('swiss-1');
+    expect(results[0].state).toBe('final');
+    // standings-based: Kenji is 1st
+    expect(results[0].podium[0].name).toBe('Kenji');
   });
 
   it('returns error field when fetchCompetitionDetails throws, without rejecting the whole Promise', async () => {
-    const comp = { id: 'err-1', name: 'Broken', format: 'playoffs-only', status: 'completed', players: [] };
-    window.API.fetchCompetitionDetails = vi.fn().mockRejectedValue(new Error('Network error'));
+    const comp = { id: 'err-1', name: 'Broken', format: 'playoffs', status: 'completed', players: [] };
+    const fetchCompetitionDetails = vi.fn().mockRejectedValue(new Error('Network error'));
 
-    const results = await window.buildAllWinners([comp], {
-      fetchCompetitionDetails: window.API.fetchCompetitionDetails,
+    const results = await window.buildAllWinners([comp], [comp], {
+      fetchCompetitionDetails,
       swissStandings: null,
     });
 
@@ -235,7 +249,7 @@ describe('AllWinnersModal', () => {
   });
 
   it('shows loading state initially (useState returns initial value in static stub)', () => {
-    const comp = { id: 'c1', name: 'Open', status: 'completed', format: 'playoffs-only', players: [] };
+    const comp = { id: 'c1', name: 'Open', status: 'completed', format: 'playoffs', players: [] };
     const vnode = window.AllWinnersModal({ comps: [comp], onClose: vi.fn() });
     const text = collectText(vnode);
     // Initial state is loading:true — should render loading text

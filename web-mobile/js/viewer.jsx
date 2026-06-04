@@ -1860,7 +1860,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             // actual winners; when the final has no winner yet, deriveAwards
             // explicitly falls through to the standings-based path rather
             // than short-circuiting.
-            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} />
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} linkedPlayoffComp={linkedComp && linkedComp.role === "playoffs" ? linkedComp.comp : null} />
           )}
         </div>
       </div>
@@ -2657,7 +2657,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2666,6 +2666,8 @@ if (typeof window !== 'undefined') {
     window.buildPlayerMatchHighlight = buildPlayerMatchHighlight;
     window.buildWatchlistUpcoming = buildWatchlistUpcoming;
     window.deriveAwards = deriveAwards;
+    window.bracketHasDecidedFinal = bracketHasDecidedFinal;
+    window.resolveCompetitionAwards = resolveCompetitionAwards;
     window.addDojoToWatchlist = addDojoToWatchlist;
 }
 
@@ -2961,20 +2963,75 @@ function deriveAwards(bracket, standings, pools, nameToPlayer) {
   return [];
 }
 
+// bracketHasDecidedFinal: true iff the bracket's last round has a decided final.
+function bracketHasDecidedFinal(bracket) {
+  if (!bracket || !bracket.rounds || bracket.rounds.length === 0) return false;
+  const finalRound = bracket.rounds[bracket.rounds.length - 1];
+  const final = finalRound && finalRound[0];
+  return !!(final && final.winner);
+}
+
+// resolveCompetitionAwards: the single source of truth for a competition's
+// podium. Handles the mixed→linked-playoffs rule so pools+knockout always
+// resolves to the KNOCKOUT podium (1/2/3/3), never pool standings.
+// Returns { state, podium } where state is one of:
+//   'final'       — podium is the final result
+//   'in-progress' — pools+knockout whose knockout isn't decided yet (podium [])
+//   'none'        — no results yet (podium [])
+//   'skip'        — a linked playoffs shell; represented by its mixed parent
+// fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
+async function resolveCompetitionAwards(comp, allComps, fetchers) {
+  const fmt = comp && comp.format;
+  const ntpFrom = (players) => {
+    const m = new Map();
+    (players || []).forEach((p) => { if (p && p.name) m.set(p.name, p); });
+    return m;
+  };
+  if (fmt === "mixed") {
+    const playoff = (allComps || []).find((p) => p && p.sourceCompID === comp.id);
+    if (!playoff) return { state: "in-progress", podium: [] };
+    const pd = await fetchers.fetchCompetitionDetails(playoff.id);
+    if (bracketHasDecidedFinal(pd.bracket)) {
+      return { state: "final", podium: deriveAwards(pd.bracket, null, null, ntpFrom(pd.players)) };
+    }
+    return { state: "in-progress", podium: [] };
+  }
+  if (fmt === "playoffs" && comp.sourceCompID) {
+    return { state: "skip", podium: [] };
+  }
+  if (fmt === "playoffs") {
+    const d = await fetchers.fetchCompetitionDetails(comp.id);
+    if (bracketHasDecidedFinal(d.bracket)) {
+      return { state: "final", podium: deriveAwards(d.bracket, null, null, ntpFrom(d.players)) };
+    }
+    return { state: "none", podium: [] };
+  }
+  // league / swiss (and any standings-based) → standings
+  const d = await fetchers.fetchCompetitionDetails(comp.id);
+  let standings = d.standings;
+  if (fmt === "swiss" && fetchers.swissStandings) {
+    try { standings = await fetchers.swissStandings(comp.id); } catch (_) { /* keep detail standings */ }
+  }
+  return { state: "final", podium: deriveAwards(null, standings, d.pools, ntpFrom(d.players)) };
+}
+
 const PLACE_STYLE = {
   1: { icon: "🏆", label: "1st Place", accent: "var(--gold, #d4af37)" },
   2: { icon: "🥈", label: "2nd Place", accent: "var(--silver, #c0c0c0)" },
   3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
 };
 
-function AwardsView({ c, bracket, standings, pools, players }) {
+function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp }) {
   const containerRef = useRefV(null);
   const [isFs, setIsFs] = useState(false);
   const isLeague = c?.format === "league";
+  const isMixed = c?.format === "mixed";
   // Swiss standings aren't part of the competition-detail payload — they live
   // behind /swiss/standings. Fetch them here when the format is swiss so the
   // Awards tab works for Swiss competitions too.
   const [swissStandings, setSwissStandings] = useState(null);
+  // koAwards: undefined = not yet loaded, object = { state, awards } for mixed comps.
+  const [koAwards, setKoAwards] = useState(undefined);
 
   React.useEffect(() => {
     const onFsChange = () => setIsFs(!!document.fullscreenElement);
@@ -2991,6 +3048,32 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     return () => { cancelled = true; };
   }, [c?.id, c?.format, c?.swissCurrentRound]);
 
+  // For mixed (pools+knockout) comps, fetch the linked playoffs bracket to get
+  // the true podium (1/2/3/3 from the knockout final+semis).
+  React.useEffect(() => {
+    if (!isMixed) return;
+    if (!linkedPlayoffComp || !window.API?.fetchCompetitionDetails) {
+      setKoAwards({ state: "in-progress", awards: [] });
+      return;
+    }
+    let cancelled = false;
+    window.API.fetchCompetitionDetails(linkedPlayoffComp.id)
+      .then((pd) => {
+        if (cancelled) return;
+        if (window.bracketHasDecidedFinal(pd.bracket)) {
+          const ntp = new Map();
+          (pd.players || []).forEach((p) => { if (p && p.name) ntp.set(p.name, p); });
+          setKoAwards({ state: "final", awards: window.deriveAwards(pd.bracket, null, null, ntp) });
+        } else {
+          setKoAwards({ state: "in-progress", awards: [] });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setKoAwards({ state: "in-progress", awards: [] });
+      });
+    return () => { cancelled = true; };
+  }, [c?.id, c?.format, linkedPlayoffComp?.id]);
+
   const nameToPlayer = useMemo(() => {
     const m = new Map();
     (players || []).forEach((p) => {
@@ -3001,10 +3084,27 @@ function AwardsView({ c, bracket, standings, pools, players }) {
 
   const effectiveStandings = c?.format === "swiss" ? swissStandings : standings;
   const isSwissLoading = c?.format === "swiss" && swissStandings === null;
-  const awards = useMemo(
+  const baseAwards = useMemo(
     () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer),
     [bracket, effectiveStandings, pools, nameToPlayer]
   );
+
+  // Determine the awards array and state to use for rendering.
+  let awards, resolvedState;
+  if (isMixed) {
+    if (koAwards === undefined) {
+      // Still loading — show loading spinner below.
+      awards = [];
+      resolvedState = "loading";
+    } else {
+      awards = koAwards.awards;
+      resolvedState = koAwards.state;
+    }
+  } else {
+    awards = baseAwards;
+    resolvedState = "final";
+  }
+
   const leagueWinner = isLeague ? (awards.find(a => a.place === 1) || null) : null;
 
   const toggleFs = () => {
@@ -3017,7 +3117,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
     }
   };
 
-  if (isSwissLoading) {
+  if (isSwissLoading || resolvedState === "loading") {
     return (
       <div className="empty" data-testid="awards-loading">
         <div className="icon">🏆</div>
@@ -3027,6 +3127,14 @@ function AwardsView({ c, bracket, standings, pools, players }) {
   }
 
   if (awards.length === 0) {
+    if (isMixed && resolvedState === "in-progress") {
+      return (
+        <div className="empty" data-testid="awards-in-progress">
+          <div className="icon">🏆</div>
+          <h3>Knockout in progress</h3>
+        </div>
+      );
+    }
     return (
       <div className="empty" data-testid="awards-empty">
         <div className="icon">🏆</div>

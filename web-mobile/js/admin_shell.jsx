@@ -120,48 +120,27 @@ const PLACE_STYLE_ADMIN = {
   3: { icon: "🥉", label: "3rd" },
 };
 
-// buildAllWinners fetches full competition details for each completed comp,
-// calls window.deriveAwards, and returns a Promise resolving to an array of
-// { comp, podium } objects.  Exported as a pure function so it can be unit-
-// tested without mounting a component.
-async function buildAllWinners(completedComps, fetchers) {
-  const { fetchCompetitionDetails, swissStandings } = fetchers;
+// buildAllWinners resolves podium for each completed comp using the shared
+// resolveCompetitionAwards helper (handles mixed→linked-playoffs rule).
+// Signature: buildAllWinners(completedComps, allComps, fetchers)
+// Returns a Promise resolving to an array of { comp, state, podium } objects,
+// with results whose state === "skip" filtered out (linked playoffs shells).
+async function buildAllWinners(completedComps, allComps, fetchers) {
   const results = await Promise.all(
     completedComps.map(async (comp) => {
       try {
-        const detail = await fetchCompetitionDetails(comp.id);
-        const { bracket, standings, pools, config } = detail;
-
-        // For swiss competitions the detail payload does not include standings —
-        // those live behind a separate endpoint.
-        let resolvedStandings = standings;
-        if ((config || comp).format === "swiss" && swissStandings) {
-          try {
-            resolvedStandings = await swissStandings(comp.id);
-          } catch (_) {
-            resolvedStandings = standings;
-          }
-        }
-
-        // Build nameToPlayer from the competition's player list so bracket
-        // entries get dojo enrichment — mirrors AwardsView in viewer.jsx.
-        const nameToPlayer = new Map();
-        (detail.players || comp.players || []).forEach((p) => {
-          if (p && p.name) nameToPlayer.set(p.name, p);
-        });
-
-        const podium = window.deriveAwards(bracket, resolvedStandings, pools, nameToPlayer);
-        return { comp, podium };
+        const { state, podium } = await window.resolveCompetitionAwards(comp, allComps, fetchers);
+        return { comp, state, podium };
       } catch (err) {
-        return { comp, podium: [], error: err.message };
+        return { comp, state: "error", podium: [], error: err.message };
       }
     })
   );
-  return results;
+  return results.filter((r) => r.state !== "skip");
 }
 
 // AllWinnersModal renders a summary of every completed competition with its
-// podium placings, computed via window.deriveAwards.
+// podium placings, computed via window.resolveCompetitionAwards.
 function AllWinnersModal({ comps, onClose }) {
   const completed = (comps || []).filter((c) => c.status === "completed");
   const [state, setState] = useStateA({ loading: true, results: [], error: null });
@@ -170,7 +149,7 @@ function AllWinnersModal({ comps, onClose }) {
 
   useEffectA(() => {
     let cancelled = false;
-    buildAllWinners(completed, {
+    buildAllWinners(completed, comps, {
       fetchCompetitionDetails: window.API.fetchCompetitionDetails.bind(window.API),
       swissStandings: window.API.swissStandings ? window.API.swissStandings.bind(window.API) : null,
     }).then((results) => {
@@ -198,7 +177,7 @@ function AllWinnersModal({ comps, onClose }) {
           {!state.loading && !state.error && state.results.length === 0 && (
             <div style={{ color: "var(--ink-3)", padding: "8px 0" }}>No completed competitions.</div>
           )}
-          {!state.loading && state.results.map(({ comp, podium, error: compErr }) => (
+          {!state.loading && state.results.map(({ comp, state: compState, podium, error: compErr }) => (
             <div key={comp.id} className="card" style={{ padding: "12px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{comp.name}</div>
@@ -209,7 +188,10 @@ function AllWinnersModal({ comps, onClose }) {
               {compErr && (
                 <div style={{ fontSize: 13, color: "var(--red)" }}>Could not load results: {compErr}</div>
               )}
-              {!compErr && podium.length === 0 && (
+              {!compErr && compState === "in-progress" && podium.length === 0 && (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Knockout in progress</div>
+              )}
+              {!compErr && compState !== "in-progress" && podium.length === 0 && (
                 <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No results yet</div>
               )}
               {!compErr && podium.length > 0 && (

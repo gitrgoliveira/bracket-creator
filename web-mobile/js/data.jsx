@@ -323,18 +323,18 @@ const PARTICIPANT_TAGS = new Set(["manual", "registered", "transfer"]);
 //
 // Mirrors Go's NormalizeParticipantName exactly so fixture tests can assert
 // byte-identical output from both sides:
-//   1. NFC precompose
-//   2. NFD decompose, strip combining marks U+0300–U+036F only
+//   1. NFD decompose, strip combining marks U+0300–U+036F only
 //      (Latin diacriticals: Müller→muller, Ï→i)
 //      Japanese dakuten U+3099 is OUTSIDE the range and is preserved (が→が).
-//   3. Re-NFC
-//   4. Lowercase, trim, collapse internal whitespace.
+//   2. Re-NFC
+//   3. Lowercase, trim, collapse internal whitespace.
 function normalizeParticipantName(s) {
   if (!s) return '';
-  // Step 1+2: NFC → NFD → strip combining marks U+0300..U+036F
-  // Step 3: re-NFC
-  const stripped = s.normalize('NFD').replace(/[̀-ͯ]/g, '').normalize('NFC');
-  // Step 4
+  // Step 1: NFD decompose → strip combining marks U+0300..U+036F.
+  // Explicit \u escapes (not literal combining glyphs) so the range is
+  // readable and editor-safe. Step 2: re-NFC.
+  const stripped = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC');
+  // Step 3
   return stripped.toLowerCase().trim().replace(/\s+/g, ' ');
 }
 

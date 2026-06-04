@@ -215,6 +215,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       showToast(e.message, "error");
       throw e;
     }
+    // The roster-PUT response carries a transient `warnings` array (server-
+    // authoritative near-duplicate detection). Strip it before merging so it
+    // never leaks into competition state (and back onto the next PUT); return
+    // it so callers (AdminParticipants.apply) can surface the post-save banner.
+    const { warnings: nearDupWarnings, ...updatedComp } = updated || {};
     // Merge PUT response into the LATEST tournament state. tRef.current
     // (not the closure-captured `t`) — see mergeCompetitionsIntoTournament
     // at the top of this file for why: SSE may have updated `t` during
@@ -222,7 +227,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // those updates with stale state. Same reasoning applies to
     // onUpdateRef.current vs the closure-captured onUpdate.
     onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
-      comps => comps.map(c => c.id === cid ? { ...c, ...updated } : c)));
+      comps => comps.map(c => c.id === cid ? { ...c, ...updatedComp } : c)));
     // Best-effort detail refresh. Isolated from the rethrow above —
     // a transient failure fetching details after a successful save
     // should not make callers (AdminSettings.saveNow, AdminParticipants.apply)
@@ -235,6 +240,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         console.error("Failed to refresh competition details after save:", e);
       }
     }
+    return nearDupWarnings || [];
   };
 
   // Mutation handlers split into two phases:

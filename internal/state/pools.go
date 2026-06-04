@@ -94,8 +94,8 @@ func parsePoolsFile(path string) (any, error) {
 	// is authoritative from the persisted field, not from CSV row order. This
 	// guarantees correct draw order even if rows were written out-of-order or
 	// the file was manually edited. Legacy files without col 2 receive sequential
-	// 1-based append-order defaults above, so their relative order is preserved by
-	// the stable sort (ties keep insertion order, but there are no ties here).
+	// 1-based append-order defaults above. Ties (e.g. from a manually edited file
+	// with duplicate positions) are resolved by insertion order via SliceStable.
 	for i := range pools {
 		sort.SliceStable(pools[i].Players, func(a, b int) bool {
 			return pools[i].Players[a].PoolPosition < pools[i].Players[b].PoolPosition

@@ -118,9 +118,11 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 		} else {
 			// Label: "name / dojo", or just "name" for empty-dojo entries
 			// (common for teams) so the message has no dangling " / ".
-			label := e[0]
-			if e[1] != "" {
-				label += " / " + e[1]
+			// Trim for display to match the normalization semantics — a
+			// whitespace-only dojo keys as empty, so it must render as empty too.
+			label := strings.TrimSpace(e[0])
+			if d := strings.TrimSpace(e[1]); d != "" {
+				label += " / " + d
 			}
 			seen[k] = label
 		}

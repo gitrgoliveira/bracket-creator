@@ -294,9 +294,17 @@ type Competition struct {
 	// starts with an empty roster on disk; StartCompetition resolves the
 	// source's final pool winners into the roster at draw time (see
 	// engine.resolvePoolWinners). Empty for all other competitions.
-	SourceCompID         string `yaml:"source_comp_id,omitempty" json:"sourceCompID,omitempty"`
-	PoolMatchDuration    int    `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
-	PlayoffMatchDuration int    `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+	SourceCompID string `yaml:"source_comp_id,omitempty" json:"sourceCompID,omitempty"`
+	// RosterSourceResolved is set to true by the draw pipeline the first
+	// time it auto-resolves pool winners into this playoffs competition's
+	// roster (engine.StartCompetition, rosterPopulated branch). On a
+	// DiscardDraw/GenerateDraw retry the roster is already on disk so
+	// rosterPopulated would be false, but the bracket topology must still
+	// mirror the pool preview — this flag is the durable signal that the
+	// roster was source-resolved and not manually set.
+	RosterSourceResolved bool `yaml:"roster_source_resolved,omitempty" json:"rosterSourceResolved,omitempty"`
+	PoolMatchDuration    int  `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
+	PlayoffMatchDuration int  `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
 	// MaxEnchoPeriods caps how many encho (overtime) periods one match
 	// may run before the operator must call daihyosen. Zero means
 	// unlimited (FIK general default). T104, CHK029.

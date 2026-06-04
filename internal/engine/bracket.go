@@ -2,13 +2,21 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
+// generatePlayoffs builds and saves an elimination bracket. sourceLinked must
+// be true when players were resolved from a source competition via
+// resolvePoolWinners; false for manually-populated or standalone rosters.
+// When sourceLinked the bracket topology mirrors the pool preview bracket
+// (GenerateFinals ordering + pool adjustments); standalone uses
+// StandardSeeding + CreateBalancedTree, matching the Excel create-playoffs
+// path (mp-5ng7).
+func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment, sourceLinked bool) error {
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
@@ -21,16 +29,24 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
 	}
 
-	// StandardSeedingFull returns a full power-of-two bracket with byes interleaved
-	// at standard positions (empty Name = bye), so the top seeds draw the byes
-	// rather than the draw clustering all byes at the bottom (mp-sess).
-	seededPlayers := helper.StandardSeedingFull(players)
-
-	// Create balanced tree. Leaves are already power-of-two length; empty names
-	// are byes, which buildBracketFromLeaves auto-resolves.
-	leaves := make([]string, len(seededPlayers))
-	for i, p := range seededPlayers {
-		leaves[i] = p.Name
+	var leaves []string
+	if sourceLinked {
+		var err error
+		leaves, err = e.buildSourceLinkedLeaves(comp)
+		if err != nil {
+			return err
+		}
+	} else {
+		// StandardSeeding → CreateBalancedTree → TreeToLeafArray mirrors the
+		// Excel create-playoffs path exactly (mp-5ng7). The unbalanced tree's
+		// structural byes are embedded as "" slots in the pow2 array.
+		seededPlayers := helper.StandardSeeding(players)
+		names := make([]string, len(seededPlayers))
+		for i, p := range seededPlayers {
+			names[i] = p.Name
+		}
+		tree := helper.CreateBalancedTree(names)
+		leaves = helper.TreeToLeafArray(tree)
 	}
 
 	bracket, err := e.buildBracketFromLeaves(comp, leaves)
@@ -76,7 +92,15 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 		return nil
 	}
 
-	bracket, err := e.buildBracketFromLeaves(comp, finals)
+	// Mirror the Excel create-pools path: build tree, apply pool adjustments
+	// so 1st-place finishers get byes, then flatten to a pow2 leaf array
+	// (mp-5ng7). This gives the preview bracket the same topology as the
+	// printed Excel bracket.
+	tree := helper.CreateBalancedTree(finals)
+	helper.ApplyPoolAdjustments(tree)
+	previewLeaves := helper.TreeToLeafArray(tree)
+
+	bracket, err := e.buildBracketFromLeaves(comp, previewLeaves)
 	if err != nil {
 		return err
 	}
@@ -85,11 +109,81 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	return e.store.SaveBracket(comp.ID, bracket)
 }
 
+// buildSourceLinkedLeaves builds the ordered leaf array for a playoffs
+// competition that is source-linked to a finished mixed comp (SourceCompID
+// != ""). The topology (bye positions, court grouping) matches the pool
+// preview bracket generated for the source comp, and placeholders are
+// replaced with the actual pool-standings winners so the live bracket
+// names are resolved at draw time (mp-5ng7).
+func (e *Engine) buildSourceLinkedLeaves(comp *state.Competition) ([]string, error) {
+	srcID := comp.SourceCompID
+	srcComp, err := e.store.LoadCompetition(srcID)
+	if err != nil {
+		return nil, fmt.Errorf("loading source competition %q: %w", srcID, err)
+	}
+	if srcComp == nil {
+		return nil, notFoundErrorf("playoffs source competition %q not found", srcID)
+	}
+
+	pools, err := e.store.LoadPools(srcID)
+	if err != nil {
+		return nil, fmt.Errorf("loading source pools for %q: %w", srcID, err)
+	}
+
+	poolWinners := srcComp.PoolWinners
+	if poolWinners <= 0 {
+		poolWinners = 2
+	}
+
+	// Build placeholder array in the same order the preview bracket uses,
+	// then apply pool adjustments so the topology is identical.
+	finals := helper.GenerateFinals(pools, poolWinners)
+	if len(finals) == 0 {
+		return nil, validationErrorf("source competition %q has no pool finalists", srcComp.Name)
+	}
+	tree := helper.CreateBalancedTree(finals)
+	helper.ApplyPoolAdjustments(tree)
+	leaves := helper.TreeToLeafArray(tree)
+
+	// Build resolver: placeholder key "Pool X-Nth" → actual player name.
+	standings, err := e.CalculatePoolStandings(srcID)
+	if err != nil {
+		return nil, fmt.Errorf("calculating pool standings for %q: %w", srcID, err)
+	}
+	resolver := make(map[string]string, len(finals))
+	for _, pool := range pools {
+		poolStandings := standings[pool.PoolName]
+		for rank := 1; rank <= poolWinners && rank-1 < len(poolStandings); rank++ {
+			key := fmt.Sprintf("%s-%s", pool.PoolName, helper.GetOrdinal(rank))
+			resolver[key] = poolStandings[rank-1].Player.Name
+		}
+	}
+
+	// Replace placeholders; leave empty slots ("") as-is (they are byes).
+	// Any non-empty leaf that is absent from the resolver means a pool has
+	// fewer standings than poolWinners — fail fast rather than letting a
+	// raw placeholder like "Pool A-2nd" silently appear as a player name.
+	for i, leaf := range leaves {
+		if leaf == "" {
+			continue
+		}
+		name, ok := resolver[leaf]
+		if !ok {
+			return nil, validationErrorf("source competition %q: no standings entry for finalist slot %q (pool results may be incomplete)", srcComp.Name, leaf)
+		}
+		leaves[i] = name
+	}
+
+	return leaves, nil
+}
+
 // buildBracketFromLeaves builds a balanced single-elimination bracket from an
-// ordered slice of leaf labels. Labels may be resolved player names (live
-// playoffs) or pool-origin placeholders (preview bracket) — the tree shape,
-// court assignment, bye resolution, and scheduling are identical either way.
-// The caller persists the result (and sets Preview when appropriate).
+// ordered pow2 leaf array. Callers must provide a pow2-length slice produced
+// by helper.TreeToLeafArray (which mirrors the Excel bracket topology). Labels
+// may be resolved player names (live playoffs) or pool-origin placeholders
+// (preview bracket) — the tree shape, court assignment, bye resolution, and
+// scheduling are identical either way. The caller persists the result (and
+// sets Preview when appropriate).
 func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string) (*state.Bracket, error) {
 	// NextPow2 ensures we have a balanced tree with enough slots
 	pow2 := helper.NextPow2(len(leaves))
@@ -187,6 +281,28 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 			m := &bracket.Rounds[rIdx][mIdx]
 			if m.Status == state.MatchStatusCompleted {
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
+			}
+		}
+	}
+
+	// Latent byes: when TreeToLeafArray clusters structural byes
+	// (e.g. 5 players → ["A","B","","","C","","D","E"]), a "" vs ""
+	// dead match propagates "" into a round where the other feeder is
+	// a real "Winner of…" placeholder. That match will auto-resolve at
+	// runtime but at generation time it looks Scheduled. Mark it
+	// Completed so the real-match count stays N-1.
+	for rIdx := range bracket.Rounds {
+		for mIdx := range bracket.Rounds[rIdx] {
+			m := &bracket.Rounds[rIdx][mIdx]
+			if m.Status != state.MatchStatusScheduled {
+				continue
+			}
+			aEmpty := m.SideA == ""
+			bEmpty := m.SideB == ""
+			aPlaceholder := strings.HasPrefix(m.SideA, "Winner of")
+			bPlaceholder := strings.HasPrefix(m.SideB, "Winner of")
+			if (aEmpty && bPlaceholder) || (bEmpty && aPlaceholder) {
+				m.Status = state.MatchStatusCompleted
 			}
 		}
 	}

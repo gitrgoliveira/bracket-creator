@@ -240,7 +240,7 @@ func TestPoolWinnerCellsPointToRankingFormulas(t *testing.T) {
 			// that resolves the player name — NOT at a blank cell past the
 			// ranking block.
 			for rank := 1; rank <= numWinners; rank++ {
-				key := fmt.Sprintf("Pool A-%s", getOrdinal(rank))
+				key := fmt.Sprintf("Pool A-%s", GetOrdinal(rank))
 				mw, ok := matchWinners[key]
 				require.True(t, ok, "matchWinners[%q] missing", key)
 

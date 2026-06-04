@@ -670,7 +670,15 @@ func (e *Engine) runDrawPipeline(id string) error {
 		comp.SwissCurrentRound = 1
 		comp.Status = state.CompStatusDrawReady
 	default:
-		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
+		// sourceLinked governs bracket topology: true → mirror pool-preview
+		// topology via buildSourceLinkedLeaves; false → standalone seeding.
+		// rosterPopulated covers the FIRST draw (roster was empty, just
+		// resolved). comp.RosterSourceResolved covers SUBSEQUENT draws after a
+		// DiscardDraw/GenerateDraw: roster is on disk but was auto-resolved, not
+		// manually set. A comp that has a SourceCompID but a manually-set roster
+		// (ExistingRosterNotClobbered test) has neither flag and uses standalone
+		// seeding — which is the intended behaviour for that case.
+		if err := e.generatePlayoffs(comp, players, seeds, rosterPopulated || comp.RosterSourceResolved); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusDrawReady
@@ -842,6 +850,16 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// OLD non-UUID format. On next load, the HasIDs-hinted parser
 		// would misparse the file (UUID extraction on non-UUID rows).
 		// Deferral ensures the (flag, file) pair stays consistent.
+		//
+		// RosterSourceResolved marks that this comp's roster was built by
+		// resolving pool winners from SourceCompID, not manually. Set here
+		// (atomically with the Status commit) so a subsequent
+		// DiscardDraw/GenerateDraw replay sees the flag and keeps the
+		// source-linked bracket topology even though rosterPopulated will
+		// be false on re-entry (roster is already on disk).
+		if rosterPopulated {
+			current.RosterSourceResolved = true
+		}
 		return current, nil
 	})
 	if err != nil {

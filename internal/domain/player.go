@@ -14,7 +14,7 @@ type Player struct {
 	Tag         string   `json:"tag,omitempty"` // e.g. "manual", "registered", "transfer"
 	CheckedIn   bool     `json:"checkedIn"`
 
-	PoolPosition int64  `json:"-"`
+	PoolPosition int64  `json:"-"` // internal: used for Excel output and pool-draw ordering; not serialised to JSON because the value is inconsistently indexed across producer paths (0-based in handlers, 1-based in helper). Draw order on the wire is conveyed by pool.players array ordering.
 	Seed         int    `json:"seed"`
 	Number       string `json:"number,omitempty"` // e.g. "K1" — assigned when --number-prefix is set
 }

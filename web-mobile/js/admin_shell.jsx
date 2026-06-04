@@ -112,10 +112,137 @@ function initialSectionFor(status) {
   return "overview";
 }
 
+// PLACE_STYLE: icons and labels for podium places 1/2/3.
+// Replicated locally from viewer.jsx (PLACE_STYLE is not exported to window).
+const PLACE_STYLE_ADMIN = {
+  1: { icon: "🏆", label: "1st" },
+  2: { icon: "🥈", label: "2nd" },
+  3: { icon: "🥉", label: "3rd" },
+};
+
+// buildAllWinners fetches full competition details for each completed comp,
+// calls window.deriveAwards, and returns a Promise resolving to an array of
+// { comp, podium } objects.  Exported as a pure function so it can be unit-
+// tested without mounting a component.
+async function buildAllWinners(completedComps, fetchers) {
+  const { fetchCompetitionDetails, swissStandings } = fetchers;
+  const results = await Promise.all(
+    completedComps.map(async (comp) => {
+      try {
+        const detail = await fetchCompetitionDetails(comp.id);
+        const { bracket, standings, pools, config } = detail;
+
+        // For swiss competitions the detail payload does not include standings —
+        // those live behind a separate endpoint.
+        let resolvedStandings = standings;
+        if ((config || comp).format === "swiss" && swissStandings) {
+          try {
+            resolvedStandings = await swissStandings(comp.id);
+          } catch (_) {
+            resolvedStandings = standings;
+          }
+        }
+
+        // Build nameToPlayer from the competition's player list so bracket
+        // entries get dojo enrichment — mirrors AwardsView in viewer.jsx.
+        const nameToPlayer = new Map();
+        (detail.players || comp.players || []).forEach((p) => {
+          if (p && p.name) nameToPlayer.set(p.name, p);
+        });
+
+        const podium = window.deriveAwards(bracket, resolvedStandings, pools, nameToPlayer);
+        return { comp, podium };
+      } catch (err) {
+        return { comp, podium: [], error: err.message };
+      }
+    })
+  );
+  return results;
+}
+
+// AllWinnersModal renders a summary of every completed competition with its
+// podium placings, computed via window.deriveAwards.
+function AllWinnersModal({ comps, onClose }) {
+  const completed = (comps || []).filter((c) => c.status === "completed");
+  const [state, setState] = useStateA({ loading: true, results: [], error: null });
+
+  window.useEscapeToClose(onClose);
+
+  useEffectA(() => {
+    let cancelled = false;
+    buildAllWinners(completed, {
+      fetchCompetitionDetails: window.API.fetchCompetitionDetails.bind(window.API),
+      swissStandings: window.API.swissStandings ? window.API.swissStandings.bind(window.API) : null,
+    }).then((results) => {
+      if (!cancelled) setState({ loading: false, results, error: null });
+    }).catch((err) => {
+      if (!cancelled) setState({ loading: false, results: [], error: err.message });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 640, width: "95%" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="All winners">
+        <div className="modal__head">
+          <div className="modal__title">🏅 All winners</div>
+          <button className="modal__close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="modal__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {state.loading && (
+            <div style={{ textAlign: "center", color: "var(--ink-3)", padding: "24px 0" }}>Loading results…</div>
+          )}
+          {!state.loading && state.error && (
+            <div style={{ color: "var(--red)", padding: "8px 0" }}>Failed to load results: {state.error}</div>
+          )}
+          {!state.loading && !state.error && state.results.length === 0 && (
+            <div style={{ color: "var(--ink-3)", padding: "8px 0" }}>No completed competitions.</div>
+          )}
+          {!state.loading && state.results.map(({ comp, podium, error: compErr }) => (
+            <div key={comp.id} className="card" style={{ padding: "12px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{comp.name}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2, #f0f0f0)", borderRadius: 4, padding: "1px 6px" }}>
+                  {window.competitionKindLabel(comp)}
+                </div>
+              </div>
+              {compErr && (
+                <div style={{ fontSize: 13, color: "var(--red)" }}>Could not load results: {compErr}</div>
+              )}
+              {!compErr && podium.length === 0 && (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No results yet</div>
+              )}
+              {!compErr && podium.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {podium.map((entry, idx) => {
+                    const style = PLACE_STYLE_ADMIN[entry.place] || PLACE_STYLE_ADMIN[3];
+                    return (
+                      <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                        <span style={{ fontSize: 16, minWidth: 22 }}>{style.icon}</span>
+                        <span style={{ fontWeight: 600, minWidth: 32, color: "var(--ink-3)", fontSize: 12 }}>{style.label}</span>
+                        <span style={{ fontWeight: 600 }}>{entry.name}</span>
+                        {entry.dojo && <span style={{ color: "var(--ink-3)", fontSize: 13 }}>{entry.dojo}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="modal__foot">
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast }) {
   const t = tournament;
   const comps = t.competitions || [];
   const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
+  const [allWinnersOpen, setAllWinnersOpen] = useStateA(false);
 
   useEffectA(() => {
     // Coalesce bursts of events into a single dashboard refresh. On a busy
@@ -197,6 +324,9 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           <div className="page-head__actions">
             <button className="btn" onClick={onAnnounce}>📣 Announce</button>
             <button className="btn" onClick={() => setExportPdfOpen(true)}>🖨 Export PDFs</button>
+            {comps.some(c => c.status === "completed") && (
+              <button className="btn" onClick={() => setAllWinnersOpen(true)}>🏅 All winners</button>
+            )}
             <button className="btn" onClick={onEditTournament}>Edit details</button>
             {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
               <button className="btn btn--danger" onClick={onStartAll}>Start all</button>
@@ -253,6 +383,12 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           password={password}
           showToast={showToast}
           onClose={() => setExportPdfOpen(false)}
+        />
+      )}
+      {allWinnersOpen && (
+        <AllWinnersModal
+          comps={comps}
+          onClose={() => setAllWinnersOpen(false)}
         />
       )}
     </div>
@@ -515,3 +651,5 @@ window.AdminDashboard = AdminDashboard;
 window.CompCard = CompCard;
 window.CourtPicker = CourtPicker;
 window.ExportPdfModal = ExportPdfModal;
+window.AllWinnersModal = AllWinnersModal;
+window.buildAllWinners = buildAllWinners;

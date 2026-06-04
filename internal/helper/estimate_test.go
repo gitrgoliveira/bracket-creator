@@ -63,49 +63,42 @@ func TestEstimateMatchCounts_PoolMatchCountPerPoolSize(t *testing.T) {
 }
 
 // TestEstimateMatchCounts_BracketMatchCount pins the playoff bracket match count
-// for various roster sizes. Finding 3 fix: bracketMatchCount returns the count
-// of matches that actually CONSUME COURT TIME (i.e., Status != Completed at
-// generation time), not the total slot count NextPow2(players)-1.
+// for various roster sizes. bracketMatchCount returns the count of matches that
+// actually CONSUME COURT TIME (i.e., Status != Completed at generation time),
+// not the total slot count NextPow2(players)-1.
 //
-// Auto-resolved bye matches (where one or both sides are empty) are pre-marked
-// Completed in generatePlayoffs (bracket.go:102-111) and the court cursor is NOT
-// advanced for them in assignBracketMatchSlots (scheduler_slots.go:286-291).
-//
-// The correct count = NextPow2(N)-1 - completedAtGeneration(byes), where the
-// completed count is computed analytically via completedAtGeneration/chainComplete
-// (mirrors bracket.go's auto-resolve + propagateBracketWinner chain logic).
-//
-// Note: this is NOT simply players-1. For example N=6: real=6>N-1=5, because
-// two byes paired as "both-empty" produce a ghost upstream that consumes a slot.
-// Ground truth from the real draw (engine.generatePlayoffs + counting non-Completed):
-//
-//	N=3: real=2, N=5: real=4, N=6: real=6, N=7: real=6
-//	N=9: real=8, N=10: real=11, N=12: real=12, N=16: real=15
+// Since mp-sess, generatePlayoffs seeds the draw with StandardSeedingFull, which
+// distributes the NextPow2(N)-N byes to the top seeds so every bye sits opposite
+// a real player. Each bye therefore auto-resolves a single player-vs-bye leaf
+// match (pre-marked Completed; the court cursor is not advanced for it in
+// assignBracketMatchSlots), and there are NO both-empty matches or upstream
+// "ghost" propagation. The court-time count is thus the clean single-elimination
+// identity: exactly N-1 for N >= 2 (each match eliminates one of N competitors).
 func TestEstimateMatchCounts_BracketMatchCount(t *testing.T) {
 	tests := []struct {
 		players int
-		want    int // real court-time matches (from real draw, verified empirically)
+		want    int // real court-time matches = max(0, N-1) with distributed byes
 	}{
 		{0, 0},
 		{1, 0},
-		{2, 1},   // pow2=2, byes=0: real=1
-		{3, 2},   // pow2=4, byes=1: completed=1, real=3-1=2
-		{4, 3},   // pow2=4, byes=0: real=3
-		{5, 4},   // pow2=8, byes=3: completed=3, real=7-3=4
-		{6, 6},   // pow2=8, byes=2: completed=1 (1 both-empty pair), real=7-1=6
-		{7, 6},   // pow2=8, byes=1: completed=1, real=7-1=6
-		{8, 7},   // pow2=8, byes=0: real=7
-		{9, 8},   // pow2=16, byes=7: completed=7, real=15-7=8
-		{10, 11}, // pow2=16, byes=6: completed=4, real=15-4=11
-		{11, 11}, // pow2=16, byes=5: completed=4, real=15-4=11
-		{12, 12}, // pow2=16, byes=4: completed=3, real=15-3=12
-		{13, 12}, // pow2=16, byes=3: completed=3, real=15-3=12
-		{14, 14}, // pow2=16, byes=2: completed=1, real=15-1=14
-		{15, 14}, // pow2=16, byes=1: completed=1, real=15-1=14
-		{16, 15}, // pow2=16, byes=0: real=15
-		{17, 16}, // pow2=32, byes=15: completed=15, real=31-15=16
-		{24, 24}, // pow2=32, byes=8: completed=7, real=31-7=24
-		{32, 31}, // pow2=32, byes=0: real=31
+		{2, 1},
+		{3, 2},
+		{4, 3},
+		{5, 4},
+		{6, 5},
+		{7, 6},
+		{8, 7},
+		{9, 8},
+		{10, 9},
+		{11, 10},
+		{12, 11},
+		{13, 12},
+		{14, 13},
+		{15, 14},
+		{16, 15},
+		{17, 16},
+		{24, 23},
+		{32, 31},
 	}
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("players=%d", tc.players), func(t *testing.T) {
@@ -138,10 +131,10 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 		{
 			// 12 players, poolSize 4, min-mode → 3 pools of 4
 			// pool matches: 3 * C(4,2) = 3*6 = 18
-			// finalists: 6; bracketMatchCount(6)=6 (pow2=8, byes=2, completed=1, real=6)
+			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "12p size4 min rr winners2",
 			playerCount: 12, poolSize: 4, poolSizeMode: "min", poolWinners: 2, roundRobin: true,
-			wantPools: 3, wantPool: 18, wantPlayoff: 6,
+			wantPools: 3, wantPool: 18, wantPlayoff: 5,
 		},
 		{
 			// 13 players, poolSize 4, max-mode → ceil(13/4)=4 pools
@@ -155,10 +148,10 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 		{
 			// 9 players, poolSize 3, min-mode → 3 pools of 3
 			// pool matches: 3 * C(3,2) = 3*3 = 9
-			// finalists: 6; bracketMatchCount(6)=6 (pow2=8, byes=2, completed=1, real=6)
+			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "9p size3 min rr winners2",
 			playerCount: 9, poolSize: 3, poolSizeMode: "min", poolWinners: 2, roundRobin: true,
-			wantPools: 3, wantPool: 9, wantPlayoff: 6,
+			wantPools: 3, wantPool: 9, wantPlayoff: 5,
 		},
 		{
 			// 12 players, poolSize 4, min-mode, 1 winner per pool → 3 pools of 4
@@ -203,17 +196,17 @@ func TestEstimateMatchCounts_Mixed_NonRR(t *testing.T) {
 	}{
 		{
 			// 12p size4 min → 3 pools of 4 → 4 matches each (non-RR size 4)
-			// finalists: 6; bracketMatchCount(6)=6 (pow2=8, byes=2, completed=1, real=6)
+			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "12p size4 min non-rr winners2",
 			playerCount: 12, poolSize: 4, poolSizeMd: "min", poolWinners: 2,
-			wantPools: 3, wantPool: 12, wantPlayoff: 6,
+			wantPools: 3, wantPool: 12, wantPlayoff: 5,
 		},
 		{
 			// 15p size5 min → 3 pools of 5 → 5 matches each (non-RR size 5)
-			// finalists: 6; bracketMatchCount(6)=6 (pow2=8, byes=2, completed=1, real=6)
+			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "15p size5 min non-rr winners2",
 			playerCount: 15, poolSize: 5, poolSizeMd: "min", poolWinners: 2,
-			wantPools: 3, wantPool: 15, wantPlayoff: 6,
+			wantPools: 3, wantPool: 15, wantPlayoff: 5,
 		},
 	}
 	for _, tc := range tests {
@@ -248,17 +241,17 @@ func TestEstimateMatchCounts_Mixed_PartialRR(t *testing.T) {
 	}{
 		{
 			// 12p size4 min → 3 pools of 4 → N-1=3 matches each → 9
-			// finalists: 6; bracketMatchCount(6)=6 (pow2=8, byes=2, completed=1, real=6)
+			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "12p size4 partial",
 			playerCount: 12, poolSize: 4, poolSizeMd: "min", poolWinners: 2,
-			wantPool: 9, wantPlayoff: 6,
+			wantPool: 9, wantPlayoff: 5,
 		},
 		{
 			// 9p size3 min → 3 pools of 3 → N-1=2 matches each → 6
-			// finalists: 6; bracketMatchCount(6)=6 (pow2=8, byes=2, completed=1, real=6)
+			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "9p size3 partial",
 			playerCount: 9, poolSize: 3, poolSizeMd: "min", poolWinners: 2,
-			wantPool: 6, wantPlayoff: 6,
+			wantPool: 6, wantPlayoff: 5,
 		},
 	}
 	for _, tc := range tests {
@@ -280,19 +273,20 @@ func TestEstimateMatchCounts_Mixed_PartialRR(t *testing.T) {
 }
 
 // TestEstimateMatchCounts_PlayoffsOnly verifies that a playoffs-only competition
-// has zero pool matches and the correct non-bye bracket match count (Finding 3:
-// only real court-time-consuming matches, not total slots including auto-resolved
-// byes). The correct count = NextPow2(N)-1 - completedAtGeneration(byes).
+// has zero pool matches and the correct non-bye bracket match count: only real
+// court-time-consuming matches, not total slots including auto-resolved byes.
+// With distributed byes (mp-sess) the count is the single-elimination identity
+// N-1 for every N.
 func TestEstimateMatchCounts_PlayoffsOnly(t *testing.T) {
 	tests := []struct {
 		playerCount int
-		wantPlayoff int // real court-time matches (NOT NextPow2-1 for non-pow2 N)
+		wantPlayoff int // real court-time matches = N-1 (distributed byes)
 	}{
 		{4, 3},   // pow2=4, no byes: 3 real
 		{8, 7},   // pow2=8, no byes: 7 real
 		{16, 15}, // pow2=16, no byes: 15 real
-		{6, 6},   // pow2=8, byes=2: completed=1 (both-empty), real=6 (NOT 5=N-1!)
-		{12, 12}, // pow2=16, byes=4: completed=3, real=12 (NOT 11=N-1!)
+		{6, 5},   // pow2=8, byes=2 distributed: real=N-1=5
+		{12, 11}, // pow2=16, byes=4 distributed: real=N-1=11
 	}
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("players=%d", tc.playerCount), func(t *testing.T) {

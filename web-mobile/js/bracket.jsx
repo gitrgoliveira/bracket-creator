@@ -141,7 +141,10 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
       <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
       {player.seed ? <span className="bc-seed">{player.seed}</span> : <span className="bc-seed bc-seed--empty"></span>}
       <div className="bc-name-wrap">
-        <span className="bc-name">{player.name}</span>
+        <span className="bc-name">
+          {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
+          {player.name}
+        </span>
         {showDojo && player.dojo ? <span className="bc-dojo">{player.dojo}</span> : null}
       </div>
       {score != null ? <span className="bc-score">{score}</span> : null}
@@ -202,6 +205,23 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
 });
 MatchCard.displayName = "MatchCard";
 
+// Anchor connectors to the midline of a card's two competitor sides rather than
+// the card's geometric centre. A card stacks a meta header (time/court) above the
+// two .bc-side rows, so its geometric centre sits inside the upper (Aka) row — a
+// connector landing there reads as pointing at one competitor instead of the seam
+// where the two feeders merge. The sides-block midline is the visual join point;
+// the offset from geometric centre is uniform across cards, so the arms stay
+// horizontal. Falls back to geometric centre if sides are absent.
+function anchorY(el, rect, treeTop) {
+  const sides = el.querySelectorAll(".bc-side");
+  if (sides.length >= 2) {
+    const first = sides[0].getBoundingClientRect();
+    const last = sides[sides.length - 1].getBoundingClientRect();
+    return (first.top + last.bottom) / 2 - treeTop;
+  }
+  return rect.top + rect.height / 2 - treeTop;
+}
+
 // Computes connector lines from the DOM positions of each match card,
 // then draws them in an absolutely positioned SVG.
 function BracketConnectors({ rounds, treeRef, refMap, version }) {
@@ -223,9 +243,9 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
           const aR = a.getBoundingClientRect();
           const bR = b.getBoundingClientRect();
           const nR = next.getBoundingClientRect();
-          const aMidY = aR.top + aR.height / 2 - treeRect.top;
-          const bMidY = bR.top + bR.height / 2 - treeRect.top;
-          const nMidY = nR.top + nR.height / 2 - treeRect.top;
+          const aMidY = anchorY(a, aR, treeRect.top);
+          const bMidY = anchorY(b, bR, treeRect.top);
+          const nMidY = anchorY(next, nR, treeRect.top);
           const aRight = aR.right - treeRect.left;
           const nLeft = nR.left - treeRect.left;
           const midX = (aRight + nLeft) / 2;
@@ -256,8 +276,78 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
+  // Measured absolute top (px) for each round≥1 card, keyed by match id. Round 0
+  // flows naturally; every later card is then positioned at the exact midpoint of
+  // its two real feeder centres. This is measured rather than derived from a fixed
+  // slot pitch because card heights are not uniform within a bracket — a filled
+  // name+dojo card (~118px) is taller than a TBD/placeholder card (~104px), so no
+  // single pitch can centre every parent on its children.
+  const [cardTops, setCardTops] = useStateBC(null);
 
-  useEffectBC(() => { setVersion((v) => v + 1); }, [rounds]);
+  // On a bracket change, clear measured positions so the new rounds render in
+  // natural flow for one frame (their match ids differ, so stale tops wouldn't
+  // apply anyway) until the layout effect re-measures — avoids any stale-position
+  // flash. The version bump re-runs the measure effect.
+  useEffectBC(() => { setCardTops(null); setVersion((v) => v + 1); }, [rounds]);
+
+  useLayoutEffectBC(() => {
+    const measure = () => {
+      const tree = treeRef.current;
+      if (!tree || !rounds || rounds.length === 0) return;
+      const rmEls = tree.querySelectorAll(".bc-round-matches");
+      if (rmEls.length < rounds.length) return;
+      const heights = {};
+      const centers = []; // centers[r][i] — card centre relative to its round-matches top
+      for (let r = 0; r < rounds.length; r++) {
+        const rmTop = rmEls[r].getBoundingClientRect().top;
+        if (r === 0) {
+          const c0 = [];
+          for (const m of rounds[0]) {
+            const el = refMap.current[m.id];
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            heights[m.id] = rect.height;
+            c0.push(rect.top - rmTop + rect.height / 2);
+          }
+          centers.push(c0);
+        } else {
+          // Heights still come from the DOM (card content is unaffected by the
+          // absolute positioning, which keeps full width via left/right: 0).
+          for (const m of rounds[r]) {
+            const el = refMap.current[m.id];
+            if (!el) return;
+            heights[m.id] = el.getBoundingClientRect().height;
+          }
+          const prev = centers[r - 1];
+          centers.push(rounds[r].map((_, i) => {
+            const lo = prev[2 * i];
+            const hi = prev[2 * i + 1] != null ? prev[2 * i + 1] : lo;
+            return (lo + hi) / 2;
+          }));
+        }
+      }
+      const tops = {};
+      for (let r = 1; r < rounds.length; r++) {
+        rounds[r].forEach((m, i) => { tops[m.id] = centers[r][i] - heights[m.id] / 2; });
+      }
+      setCardTops((prev) => {
+        if (prev) {
+          const keys = Object.keys(tops);
+          const prevKeys = Object.keys(prev);
+          if (keys.length === prevKeys.length &&
+              keys.every((k) => Math.abs((prev[k] ?? 0) - tops[k]) < 0.5)) {
+            return prev; // unchanged — avoid a re-render loop
+          }
+        }
+        return tops;
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (treeRef.current) ro.observe(treeRef.current);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [rounds, version]);
 
   useLayoutEffectBC(() => {
     if (!autoScrollMatchId) return;
@@ -278,29 +368,43 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
   }, [autoScrollMatchId, version]);
 
   if (!rounds) return null;
+  // Round 0 flows naturally; rounds ≥ 1 are absolutely positioned at the measured
+  // midpoint of their two feeder cards (see the layout effect above). cardTops is
+  // null on the first paint, so every round renders in natural flow; the effect
+  // then measures real centres and re-renders the later rounds into place, and
+  // BracketConnectors' ResizeObserver redraws the SVG once the layout settles.
   return (
     <div className={`bc-tree bc-tree--v${variant}`} ref={treeRef}>
       <BracketConnectors rounds={rounds} treeRef={treeRef} refMap={refMap} version={version} />
-      {rounds.map((round, ri) => (
-        <div key={ri} className="bc-round" style={{ "--round": ri }}>
-          <div className="bc-round-label">{roundLabel(ri, rounds.length)}</div>
-          <div className="bc-round-matches">
-            {round.map((m, mi) => (
-              <div className="bc-match-wrap" key={m.id} style={{ "--mi": mi }}>
-                <MatchCard
-                  match={m}
-                  variant={variant}
-                  showDojo={showDojo}
-                  highlighted={m.id === highlightedMatchId}
-                  matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
-                  onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
-                  highlightPlayer={highlightPlayer}
-                />
-              </div>
-            ))}
+      {rounds.map((round, ri) => {
+        const positioned = ri > 0 && cardTops;
+        return (
+          <div key={ri} className="bc-round" style={{ "--round": ri }}>
+            <div className="bc-round-label">{roundLabel(ri, rounds.length)}</div>
+            <div className={`bc-round-matches${positioned ? " bc-round-matches--abs" : ""}`}>
+              {round.map((m, mi) => {
+                const top = positioned ? cardTops[m.id] : undefined;
+                const wrapStyle = top != null
+                  ? { "--mi": mi, position: "absolute", top: `${top}px`, left: 0, right: 0 }
+                  : { "--mi": mi };
+                return (
+                <div className="bc-match-wrap" key={m.id} style={wrapStyle}>
+                  <MatchCard
+                    match={m}
+                    variant={variant}
+                    showDojo={showDojo}
+                    highlighted={m.id === highlightedMatchId}
+                    matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
+                    onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
+                    highlightPlayer={highlightPlayer}
+                  />
+                </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

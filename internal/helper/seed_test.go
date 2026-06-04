@@ -391,6 +391,131 @@ func TestStandardSeeding_Integration(t *testing.T) {
 	assert.Equal(t, 4, unseededCount, "Should have 4 unseeded players")
 }
 
+func TestStandardSeedingFull(t *testing.T) {
+	// buildBracketFromLeaves pairs leaf 2k with 2k+1 in round 1. A bye is an
+	// empty leaf. For a correctly seeded draw, every bye must pair with a real
+	// player (giving a top seed a bye) — never two byes in the same match.
+	tests := []struct {
+		name        string
+		playerCount int
+		seedCount   int
+		wantSlots   int
+		wantByes    int
+	}{
+		{"24 players, 3 seeds (reproduces user bug)", 24, 3, 32, 8},
+		{"24 players, 8 seeds", 24, 8, 32, 8},
+		{"6 players, 2 seeds", 6, 2, 8, 2},
+		{"16 players (exact power of two)", 16, 4, 16, 0},
+		{"15 players, 5 seeds", 15, 5, 16, 1},
+		{"5 players, 0 seeds", 5, 0, 8, 3},
+		{"1 player", 1, 0, 1, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			players := make([]Player, tt.playerCount)
+			for i := range players {
+				if i < tt.seedCount {
+					players[i] = Player{Name: fmt.Sprintf("Seed%d", i+1), Seed: i + 1}
+				} else {
+					players[i] = Player{Name: fmt.Sprintf("Player%d", i)}
+				}
+			}
+
+			result := StandardSeedingFull(players)
+
+			require.Len(t, result, tt.wantSlots, "result length should be the full bracket size")
+
+			// Every real player appears exactly once; the rest are byes (empty Name).
+			byes := 0
+			seen := make(map[string]int)
+			for _, p := range result {
+				if p.Name == "" {
+					byes++
+					continue
+				}
+				seen[p.Name]++
+			}
+			assert.Equal(t, tt.wantByes, byes, "bye count")
+			assert.Len(t, seen, tt.playerCount, "every player present exactly once")
+			for name, c := range seen {
+				assert.Equalf(t, 1, c, "player %s duplicated", name)
+			}
+
+			// No round-1 match has two byes (the core fix).
+			for k := 0; k+1 < len(result); k += 2 {
+				if result[k].Name == "" && result[k+1].Name == "" {
+					t.Errorf("empty-vs-empty match at leaves %d,%d — byes not distributed", k, k+1)
+				}
+			}
+
+			// The top seeds should be the ones drawing byes: every bye's round-1
+			// partner is a real, top-ranked player.
+			if tt.seedCount > 0 {
+				for k := 0; k+1 < len(result); k += 2 {
+					a, b := result[k], result[k+1]
+					if a.Name == "" {
+						assert.NotEmpty(t, b.Name, "bye partner should be a real player")
+					}
+					if b.Name == "" {
+						assert.NotEmpty(t, a.Name, "bye partner should be a real player")
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestStandardSeedingFull_HonorsSeedNumbers verifies that a seeded player claims
+// its Seed NUMBER as its bracket rank (matching StandardSeeding / the Excel draw),
+// not merely its position among the seeded players. Regression for the
+// dense-rank bug found in review: with non-contiguous seeds {1,2,5} the #5 seed
+// must land at the rank-5 bracket slot, not the third-from-top.
+func TestStandardSeedingFull_HonorsSeedNumbers(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Seed: 1},
+		{Name: "Bob", Seed: 2},
+		{Name: "Charlie", Seed: 5},
+		{Name: "Dave"}, {Name: "Eve"}, {Name: "Frank"},
+	}
+	result := StandardSeedingFull(players) // n=6, pow2=8
+	require.Len(t, result, 8)
+
+	// order[slot] = seeding rank at that slot. A rank-k player must sit where
+	// order==k. Build slot-for-rank from the same primitive the impl uses.
+	order := generateBracketOrder(8)
+	slotForRank := map[int]int{}
+	for slot, rank := range order {
+		slotForRank[rank] = slot
+	}
+
+	// Seeded players land at their Seed-number rank.
+	assert.Equal(t, "Alice", result[slotForRank[1]].Name, "seed 1 → rank-1 slot")
+	assert.Equal(t, "Bob", result[slotForRank[2]].Name, "seed 2 → rank-2 slot")
+	assert.Equal(t, "Charlie", result[slotForRank[5]].Name, "seed 5 → rank-5 slot (not rank-3)")
+
+	// Unseeded fill the remaining in-range ranks (3,4,6) in input order.
+	assert.Equal(t, "Dave", result[slotForRank[3]].Name)
+	assert.Equal(t, "Eve", result[slotForRank[4]].Name)
+	assert.Equal(t, "Frank", result[slotForRank[6]].Name)
+
+	// Every player present exactly once; ranks 7,8 are byes.
+	seen := map[string]int{}
+	byes := 0
+	for _, p := range result {
+		if p.Name == "" {
+			byes++
+		} else {
+			seen[p.Name]++
+		}
+	}
+	assert.Equal(t, 2, byes)
+	assert.Len(t, seen, 6)
+	for name, c := range seen {
+		assert.Equalf(t, 1, c, "player %s duplicated", name)
+	}
+}
+
 func TestStandardSeeding_NoDuplicates(t *testing.T) {
 	tests := []struct {
 		name        string

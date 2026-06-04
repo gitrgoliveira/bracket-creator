@@ -16,7 +16,7 @@ import (
 const pageNumberDesc = "scale:1 abs, pos:bc, off:0 12, rot:0, op:1, fillc:#555555, points:9"
 
 // StampPageNumbers writes a copy of inPath to outPath with a "N / M" footer
-// stamped on every page. It is a no-op-style error if the PDF has no pages.
+// stamped on every page. It returns an error if the PDF has no pages.
 func StampPageNumbers(inPath, outPath string) error {
 	total, err := PageCount(inPath)
 	if err != nil {

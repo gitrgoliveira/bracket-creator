@@ -11,12 +11,13 @@ import (
 )
 
 // requireSoffice skips the test when LibreOffice is unavailable, with a clear
-// message. PDF tests are environment-dependent; CI runs them in the -pdf image.
+// message. PDF tests are environment-dependent; CI runs them in the dedicated
+// test-pdf job which installs LibreOffice before executing the tests.
 func requireSoffice(t *testing.T) *Converter {
 	t.Helper()
 	c, err := NewConverter()
 	if err != nil {
-		t.Skipf("skipping: %v (install LibreOffice or run in the -pdf image)", err)
+		t.Skipf("skipping: %v (install LibreOffice or use the CI test-pdf job)", err)
 	}
 	return c
 }

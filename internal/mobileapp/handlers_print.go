@@ -14,19 +14,12 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/pdf"
 )
 
-// validPrintTypes is the set of accepted :type values for POST /api/print/:type.
-// "all" is a meta-selector that maps to every group.
-var validPrintTypes = map[string]bool{
-	"all":          true,
-	"registration": true,
-	"names":        true,
-	"tags":         true,
-	"pools-trees":  true,
-	"full-bracket": true,
-}
-
 // RegisterPrintHandlers wires the admin-gated PDF export endpoint under r.
 // Route: POST /api/print/:type
+//
+// Valid :type values are the Type fields of pdf.Groups (e.g. "registration",
+// "names", "tags", "pools-trees", "full-bracket") plus the meta-selector "all".
+// The set is derived from pdf.Groups at call time so it never drifts.
 //
 // The handler is synchronous — PDF generation via LibreOffice takes 30–60 s
 // for a typical tournament. That is acceptable for an admin-initiated,
@@ -37,15 +30,19 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 	r.POST("/print/:type", func(c *gin.Context) {
 		printType := c.Param("type")
 
-		// Validate :type.
-		if !validPrintTypes[printType] {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf(
-					"unknown print type %q; valid values: registration, names, tags, pools-trees, full-bracket, all",
-					printType,
-				),
-			})
-			return
+		// Validate :type against the canonical pdf.Groups list (plus "all").
+		// Deriving the check from pdf.Groups avoids the list drifting if a
+		// group is ever added, removed, or renamed.
+		if printType != "all" {
+			if _, ok := pdf.GroupByType(printType); !ok {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": fmt.Sprintf(
+						"unknown print type %q; valid values: registration, names, tags, pools-trees, full-bracket, all",
+						printType,
+					),
+				})
+				return
+			}
 		}
 
 		// Acquire the PDF generator, detecting LibreOffice availability.
@@ -110,7 +107,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		// Stream a ZIP archive containing the produced PDFs directly into the
 		// response. No intermediate ZIP file is written to disk.
 		c.Header("Content-Type", "application/zip")
-		c.Header("Content-Disposition", `attachment; filename="tournament-pdfs.zip"`)
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="tournament-pdfs-%s.zip"`, printType))
 		c.Status(http.StatusOK)
 
 		zw := zip.NewWriter(c.Writer)

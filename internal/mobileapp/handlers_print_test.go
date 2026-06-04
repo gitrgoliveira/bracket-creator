@@ -153,7 +153,9 @@ func TestPrintHandler_ValidRequest(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code,
 				"type=%s: expected 200, got %d; body=%s", printType, w.Code, w.Body.String())
 			assert.Equal(t, "application/zip", w.Header().Get("Content-Type"))
-			assert.Contains(t, w.Header().Get("Content-Disposition"), "tournament-pdfs.zip")
+			// Filename now includes the type, e.g. "tournament-pdfs-all.zip".
+			assert.Contains(t, w.Header().Get("Content-Disposition"), "tournament-pdfs-")
+			assert.Contains(t, w.Header().Get("Content-Disposition"), ".zip")
 
 			// Verify the response is a valid non-empty ZIP.
 			body := w.Body.Bytes()

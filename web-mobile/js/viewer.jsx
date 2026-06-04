@@ -3052,6 +3052,7 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp }
   // the true podium (1/2/3/3 from the knockout final+semis).
   React.useEffect(() => {
     if (!isMixed) return;
+    setKoAwards(undefined);
     if (!linkedPlayoffComp || !window.API?.fetchCompetitionDetails) {
       setKoAwards({ state: "in-progress", awards: [] });
       return;

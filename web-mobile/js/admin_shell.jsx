@@ -132,7 +132,7 @@ async function buildAllWinners(completedComps, allComps, fetchers) {
         const { state, podium } = await window.resolveCompetitionAwards(comp, allComps, fetchers);
         return { comp, state, podium };
       } catch (err) {
-        return { comp, state: "error", podium: [], error: err.message };
+        return { comp, state: "error", podium: [], error: err?.message || String(err) };
       }
     })
   );
@@ -164,7 +164,7 @@ function AllWinnersModal({ comps, onClose }) {
     }).then((results) => {
       if (!cancelled) setState({ loading: false, results, error: null });
     }).catch((err) => {
-      if (!cancelled) setState({ loading: false, results: [], error: err.message });
+      if (!cancelled) setState({ loading: false, results: [], error: err?.message || String(err) });
     });
     return () => { cancelled = true; };
   }, [compsSig]);

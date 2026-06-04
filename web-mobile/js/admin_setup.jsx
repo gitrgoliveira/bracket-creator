@@ -487,7 +487,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // when kind=team. (Individual competitions don't expose this field;
     // teamSize=0 is the canonical value there.)
     if (kind === "team") {
-      if (!Number.isInteger(teamSize) || teamSize < 2 || teamSize > MAX_TEAM_SIZE) {
+      if (!Number.isInteger(teamSize)) {
+        setError('Team size must be a whole number.');
+        return;
+      }
+      if (teamSize < 2 || teamSize > MAX_TEAM_SIZE) {
         setError(`A team needs at least 2 members (max ${MAX_TEAM_SIZE}).`);
         return;
       }

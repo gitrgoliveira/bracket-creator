@@ -306,9 +306,11 @@ func TestValidateCompetitionTeamSize(t *testing.T) {
 		{"team with size 5 ok", "team", 5, false},
 		{"individual with size 0 ok", "individual", 0, false},
 		{"individual with size 1 errors", "individual", 1, true},
+		{"individual with size 2 errors", "individual", 2, true},
 		{"negative value errors", "individual", -1, true},
 		{"empty kind with size 0 ok", "", 0, false},
 		{"empty kind with size 1 errors", "", 1, true},
+		{"empty kind with size 3 errors", "", 3, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

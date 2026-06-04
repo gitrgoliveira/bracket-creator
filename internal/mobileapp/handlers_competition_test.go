@@ -1623,6 +1623,60 @@ func TestCreateCompetitionTeamSizeValidation(t *testing.T) {
 	})
 }
 
+func TestUpdateCompetitionTeamSizeValidation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       "put-team-size-test",
+		Name:     "PUT Team Size",
+		Kind:     "team",
+		TeamSize: 3,
+		Status:   state.CompStatusSetup,
+	}))
+
+	t.Run("PUT team with teamSize=1 returns 400", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"name":     "PUT Team Size",
+			"kind":     "team",
+			"teamSize": 1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/put-team-size-test", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("PUT team with teamSize=0 returns 400", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"name":     "PUT Team Size",
+			"kind":     "team",
+			"teamSize": 0,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/put-team-size-test", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("PUT team with teamSize=2 succeeds", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"name":     "PUT Team Size",
+			"kind":     "team",
+			"teamSize": 2,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/put-team-size-test", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
 func TestDiscardDrawHandler(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

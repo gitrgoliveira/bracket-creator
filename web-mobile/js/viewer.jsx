@@ -3081,8 +3081,9 @@ async function resolveCompetitionAwards(comp, allComps, fetchers) {
     return m;
   };
   if (fmt === "mixed") {
-    const playoff = (allComps || []).find((p) => p && p.sourceCompID === comp.id);
-    if (!playoff) return { state: "in-progress", podium: [] };
+    const matchingPlayoffs = (allComps || []).filter((p) => p && p.sourceCompID === comp.id);
+    if (matchingPlayoffs.length !== 1) return { state: "in-progress", podium: [] };
+    const playoff = matchingPlayoffs[0];
     const pd = await fetchers.fetchCompetitionDetails(playoff.id);
     if (bracketHasDecidedFinal(pd.bracket)) {
       return { state: "final", podium: deriveAwards(pd.bracket, null, null, ntpFrom(pd.players)) };
@@ -3097,7 +3098,7 @@ async function resolveCompetitionAwards(comp, allComps, fetchers) {
     if (bracketHasDecidedFinal(d.bracket)) {
       return { state: "final", podium: deriveAwards(d.bracket, null, null, ntpFrom(d.players)) };
     }
-    return { state: "none", podium: [] };
+    return { state: "in-progress", podium: [] };
   }
   // league / swiss (and any standings-based) → standings
   const d = await fetchers.fetchCompetitionDetails(comp.id);
@@ -3141,26 +3142,21 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp }
     return () => { cancelled = true; };
   }, [c?.id, c?.format, c?.swissCurrentRound]);
 
-  // For mixed (pools+knockout) comps, fetch the linked playoffs bracket to get
-  // the true podium (1/2/3/3 from the knockout final+semis).
+  // For mixed (pools+knockout) comps, delegate to resolveCompetitionAwards so
+  // this view and the All Winners modal share the same resolver (no drift).
   React.useEffect(() => {
     if (!isMixed) return;
     setKoAwards(undefined);
-    if (!linkedPlayoffComp || !window.API?.fetchCompetitionDetails) {
+    if (!window.resolveCompetitionAwards || !window.API?.fetchCompetitionDetails) {
       setKoAwards({ state: "in-progress", awards: [] });
       return;
     }
     let cancelled = false;
-    window.API.fetchCompetitionDetails(linkedPlayoffComp.id)
-      .then((pd) => {
-        if (cancelled) return;
-        if (window.bracketHasDecidedFinal(pd.bracket)) {
-          const ntp = new Map();
-          (pd.players || []).forEach((p) => { if (p && p.name) ntp.set(p.name, p); });
-          setKoAwards({ state: "final", awards: window.deriveAwards(pd.bracket, null, null, ntp) });
-        } else {
-          setKoAwards({ state: "in-progress", awards: [] });
-        }
+    const syntheticAllComps = linkedPlayoffComp ? [linkedPlayoffComp] : [];
+    const fetchers = { fetchCompetitionDetails: window.API.fetchCompetitionDetails, swissStandings: null };
+    window.resolveCompetitionAwards(c, syntheticAllComps, fetchers)
+      .then(({ state, podium }) => {
+        if (!cancelled) setKoAwards({ state, awards: podium });
       })
       .catch(() => {
         if (!cancelled) setKoAwards({ state: "in-progress", awards: [] });

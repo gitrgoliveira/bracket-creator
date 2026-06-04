@@ -915,6 +915,14 @@ a:hover {
   position: relative;
 }
 
+/* Rounds ≥ 1 absolutely position each card at the measured midpoint of its two
+   feeders (see BracketTree). flex: 1 makes the column fill the round height (all
+   .bc-round columns are stretched to the tallest — round 0 — by .bc-tree's
+   align-items: stretch), giving the absolutely-positioned cards their extent. */
+.bc-round-matches--abs {
+  flex: 1;
+}
+
 .bc-match-wrap {
   position: relative;
 }

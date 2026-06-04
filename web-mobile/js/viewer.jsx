@@ -2495,9 +2495,14 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           });
         }
 
-        // Determine which players to iterate: always draw-order (pool.players).
-        // When standings exist, join each draw-position player to its standing entry.
-        const drawOrderPlayers = pool.players || [];
+        // Determine which players to iterate.
+        // - League: standings already arrive in rank order; use them so the table is
+        //   rank-first (pool.players is not meaningful for leagues and may be empty).
+        // - Non-league pools: use pool.players draw order so operators can read the
+        //   fight-order chart alongside the standings.
+        const drawOrderPlayers = isLeague && poolStandings
+          ? poolStandings.map(s => s.player)
+          : (pool.players || []);
 
         return (
           <div key={pool.poolName} className="pool" style={{ padding: 14 }}>

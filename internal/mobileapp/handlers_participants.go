@@ -188,9 +188,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// this endpoint stays a plain array response to keep one shape.
 
 		// Load existing participants so we can preserve check-in state for
-		// players that survive the edit (matched by name). A full roster
-		// replacement via this endpoint must not silently clear check-ins
-		// that were already recorded.
+		// players that survive the edit (matched by normalizedName+normalizedDojo).
+		// A full roster replacement via this endpoint must not silently clear
+		// check-ins that were already recorded.
 		existing, err := store.LoadParticipants(id, comp.WithZekkenName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load participants: " + err.Error()})

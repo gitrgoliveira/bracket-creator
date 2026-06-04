@@ -213,8 +213,8 @@ func TestFindNearDupWarnings_Levenshtein(t *testing.T) {
 		{"Takahashi vs Takahasi (lev=1, ratio>=0.85)", "Takahashi", "Takahasi", true},
 		// lev=2, ratio = 1 - 2/10 = 0.80 < 0.85 → NO
 		{"Smith vs Smath (lev=2, ratio<0.85)", "Smith", "Smath", false},
-		// lev=2, ratio = 1 - 2/12 ≈ 0.83 < 0.85 → NO
-		{"Yamamoto vs Yamamotoo (lev=1 actually, 0.92)", "Yamamoto", "Yamamotoo", true},
+		// lev=1, ratio = 1 - 1/9 ≈ 0.89 ≥ 0.85 → YES (one extra char appended)
+		{"Yamamoto vs Yamamotoo (lev=1, ratio≈0.89)", "Yamamoto", "Yamamotoo", true},
 		// lev=3 → never fires
 		{"Three edits never fires", "abcdef", "xyz123", false},
 		// Squad suffix suppression: Shobukai A vs Shobukai B — lev=1, ratio high

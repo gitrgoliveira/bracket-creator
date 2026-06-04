@@ -452,7 +452,7 @@ func TestParsePoolsFile_InvalidPosition(t *testing.T) {
 	assert.Equal(t, int64(3), loaded[0].Players[2].PoolPosition)
 }
 
-// TestParsePoolsFile_LegacyNoCOl2 verifies that legacy CSV files without a
+// TestParsePoolsFile_LegacyNoCol2 verifies that legacy CSV files without a
 // draw-position column (col 2) load in row order via stable sort on the
 // 1-based append-order defaults.
 func TestParsePoolsFile_LegacyNoCol2(t *testing.T) {

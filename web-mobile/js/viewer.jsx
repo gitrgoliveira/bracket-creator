@@ -2513,7 +2513,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
               </div>
             </div>
 
-            {/* Standings table — rows in draw position order, rank looked up by name */}
+            {/* Standings table — rows in draw position order, rank looked up by player key (id or name||dojo) */}
             <table className="pool__table">
               <thead>
                 {isTeam ? (
@@ -2525,8 +2525,8 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
               <tbody>
                 {drawOrderPlayers.map((p, i) => {
                   const drawPos = i + 1;
-                  // Look up by id first (stable), fall back to name for legacy fixtures
-                  // that don't carry UUIDs. Mirrors the key used when building rankByPlayerKey.
+                  // Look up by id first (stable), fall back to name||dojo composite for
+                  // legacy fixtures without UUIDs. Mirrors the key used when building rankByPlayerKey.
                   const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;

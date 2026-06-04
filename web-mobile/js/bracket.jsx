@@ -284,7 +284,11 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
   // single pitch can centre every parent on its children.
   const [cardTops, setCardTops] = useStateBC(null);
 
-  useEffectBC(() => { setVersion((v) => v + 1); }, [rounds]);
+  // On a bracket change, clear measured positions so the new rounds render in
+  // natural flow for one frame (their match ids differ, so stale tops wouldn't
+  // apply anyway) until the layout effect re-measures — avoids any stale-position
+  // flash. The version bump re-runs the measure effect.
+  useEffectBC(() => { setCardTops(null); setVersion((v) => v + 1); }, [rounds]);
 
   useLayoutEffectBC(() => {
     const measure = () => {

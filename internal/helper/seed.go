@@ -51,9 +51,14 @@ func partitionSeeded(players []Player) (seeded, unseeded []Player) {
 
 // StandardSeedingFull places players into a FULL power-of-two bracket and returns
 // a slice of length NextPow2(len(players)). Each player is positioned by its
-// seeding rank — seeded participants (Seed > 0) sorted by seed, then unseeded in
-// input order — using generateBracketOrder, and the surplus high-rank slots are
-// left as zero-value Players (empty Name), i.e. byes.
+// seeding RANK via generateBracketOrder, and the surplus high-rank slots are left
+// as zero-value Players (empty Name), i.e. byes.
+//
+// Rank assignment matches StandardSeeding (and the Excel draw): a seeded player
+// (Seed > 0) claims its Seed NUMBER as its rank — so an operator who assigns
+// non-contiguous seeds (e.g. {1, 2, 5}) gets the #5 seed at the rank-5 bracket
+// position, not the third-from-top. Unseeded players (and any seed whose number
+// is out of range or collides) fill the remaining ranks 1..N in input order.
 //
 // Unlike StandardSeeding (which returns a dense len(players) slice and leaves the
 // caller to pad byes at the end of the leaf array), the byes here are interleaved
@@ -68,24 +73,37 @@ func StandardSeedingFull(players []Player) []Player {
 	}
 
 	seeded, unseeded := partitionSeeded(players)
+	n := len(players)
 
-	// ranked[r-1] is the player with seeding rank r (1-based): seeded by seed,
-	// then unseeded in input order. This mirrors StandardSeeding's ordering but
-	// expressed as a dense rank list rather than slot placement.
-	ranked := make([]Player, 0, len(players))
-	ranked = append(ranked, seeded...)
-	ranked = append(ranked, unseeded...)
+	// rankToPlayer maps a 1-based seeding rank to its player. Seeded players claim
+	// their Seed number; out-of-range (Seed > n) or colliding seeds fall back to
+	// the unseeded pool. Unseeded then fill the remaining ranks 1..n in order.
+	rankToPlayer := make(map[int]Player, n)
+	for _, p := range seeded {
+		_, taken := rankToPlayer[p.Seed]
+		if p.Seed >= 1 && p.Seed <= n && !taken {
+			rankToPlayer[p.Seed] = p
+		} else {
+			unseeded = append(unseeded, p) // displaced seed → treat as unseeded
+		}
+	}
+	ui := 0
+	for rank := 1; rank <= n && ui < len(unseeded); rank++ {
+		if _, taken := rankToPlayer[rank]; !taken {
+			rankToPlayer[rank] = unseeded[ui]
+			ui++
+		}
+	}
 
-	n := len(ranked)
 	power := NextPow2(n)
 	order := generateBracketOrder(power) // order[slot] = seeding rank at that slot
 
 	result := make([]Player, power)
 	for slot, rank := range order {
-		if rank <= n {
-			result[slot] = ranked[rank-1]
+		if p, ok := rankToPlayer[rank]; ok {
+			result[slot] = p
 		}
-		// rank > n → leave zero-value Player (a bye)
+		// rank not assigned (rank > n) → leave zero-value Player (a bye)
 	}
 	return result
 }

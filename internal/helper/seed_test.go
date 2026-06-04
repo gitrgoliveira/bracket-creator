@@ -466,6 +466,56 @@ func TestStandardSeedingFull(t *testing.T) {
 	}
 }
 
+// TestStandardSeedingFull_HonorsSeedNumbers verifies that a seeded player claims
+// its Seed NUMBER as its bracket rank (matching StandardSeeding / the Excel draw),
+// not merely its position among the seeded players. Regression for the
+// dense-rank bug found in review: with non-contiguous seeds {1,2,5} the #5 seed
+// must land at the rank-5 bracket slot, not the third-from-top.
+func TestStandardSeedingFull_HonorsSeedNumbers(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Seed: 1},
+		{Name: "Bob", Seed: 2},
+		{Name: "Charlie", Seed: 5},
+		{Name: "Dave"}, {Name: "Eve"}, {Name: "Frank"},
+	}
+	result := StandardSeedingFull(players) // n=6, pow2=8
+	require.Len(t, result, 8)
+
+	// order[slot] = seeding rank at that slot. A rank-k player must sit where
+	// order==k. Build slot-for-rank from the same primitive the impl uses.
+	order := generateBracketOrder(8)
+	slotForRank := map[int]int{}
+	for slot, rank := range order {
+		slotForRank[rank] = slot
+	}
+
+	// Seeded players land at their Seed-number rank.
+	assert.Equal(t, "Alice", result[slotForRank[1]].Name, "seed 1 → rank-1 slot")
+	assert.Equal(t, "Bob", result[slotForRank[2]].Name, "seed 2 → rank-2 slot")
+	assert.Equal(t, "Charlie", result[slotForRank[5]].Name, "seed 5 → rank-5 slot (not rank-3)")
+
+	// Unseeded fill the remaining in-range ranks (3,4,6) in input order.
+	assert.Equal(t, "Dave", result[slotForRank[3]].Name)
+	assert.Equal(t, "Eve", result[slotForRank[4]].Name)
+	assert.Equal(t, "Frank", result[slotForRank[6]].Name)
+
+	// Every player present exactly once; ranks 7,8 are byes.
+	seen := map[string]int{}
+	byes := 0
+	for _, p := range result {
+		if p.Name == "" {
+			byes++
+		} else {
+			seen[p.Name]++
+		}
+	}
+	assert.Equal(t, 2, byes)
+	assert.Len(t, seen, 6)
+	for name, c := range seen {
+		assert.Equal(t, 1, c, "player %s duplicated", name)
+	}
+}
+
 func TestStandardSeeding_NoDuplicates(t *testing.T) {
 	tests := []struct {
 		name        string

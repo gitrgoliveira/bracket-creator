@@ -632,12 +632,21 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // hidden — they appear as the Knockout phase inside their source's card.
   const displayEntriesByDate = useMemo(() => {
     const compIds = new Set(comps.map(c => c.id));
-    // sourceCompID → playoff comp, built once (avoids an O(n) scan per entry).
+    // sourceCompID → its single playoff comp, built once (avoids an O(n) scan per
+    // entry). Only pair a playoff whose source exists in the list. If a source
+    // somehow has MORE than one playoff, don't pair any of them (drop from the
+    // map) so none silently vanishes — they fall back to standalone cards.
     const playoffBySourceId = new Map();
-    comps.forEach(c => { if (c.sourceCompID) playoffBySourceId.set(c.sourceCompID, c); });
-    const pairedPlayoffIds = new Set(
-      comps.filter(c => c.sourceCompID && compIds.has(c.sourceCompID)).map(c => c.id)
-    );
+    const collidedSources = new Set();
+    comps.forEach(c => {
+      if (!c.sourceCompID || !compIds.has(c.sourceCompID)) return;
+      if (playoffBySourceId.has(c.sourceCompID)) collidedSources.add(c.sourceCompID);
+      else playoffBySourceId.set(c.sourceCompID, c);
+    });
+    collidedSources.forEach(s => playoffBySourceId.delete(s));
+    // A playoff is hidden as a standalone only when it is the one paired to its
+    // source (derived from the same map, so the two stay consistent).
+    const pairedPlayoffIds = new Set([...playoffBySourceId.values()].map(p => p.id));
     const result = {};
     Object.keys(compsByDate).forEach(d => {
       result[d] = compsByDate[d]

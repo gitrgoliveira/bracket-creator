@@ -160,13 +160,18 @@ func (e *Engine) buildSourceLinkedLeaves(comp *state.Competition) ([]string, err
 	}
 
 	// Replace placeholders; leave empty slots ("") as-is (they are byes).
+	// Any non-empty leaf that is absent from the resolver means a pool has
+	// fewer standings than poolWinners — fail fast rather than letting a
+	// raw placeholder like "Pool A-2nd" silently appear as a player name.
 	for i, leaf := range leaves {
 		if leaf == "" {
 			continue
 		}
-		if name, ok := resolver[leaf]; ok {
-			leaves[i] = name
+		name, ok := resolver[leaf]
+		if !ok {
+			return nil, validationErrorf("source competition %q: no standings entry for finalist slot %q (pool results may be incomplete)", srcComp.Name, leaf)
 		}
+		leaves[i] = name
 	}
 
 	return leaves, nil

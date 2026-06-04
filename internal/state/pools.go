@@ -62,16 +62,17 @@ func parsePoolsFile(path string) (any, error) {
 		}
 
 		player := helper.Player{Name: playerName}
-		// col 2: draw position written by savePoolsLocked as strconv.Itoa(i) — 0-indexed.
-		// PoolPosition is consumed by Excel exporters as a 1-based label, so add 1 here.
-		// For legacy files that omit col 2, fall back to append order (1-based) so that
-		// the sort below is a no-op and row order is preserved.
+		// Default to 1-based append order so that a corrupt/missing col 2 never
+		// leaves PoolPosition at the zero value (which would misplace the player
+		// at the front of the stable sort and corrupt Excel export labels).
+		// col 2 overrides this only when it is present AND parseable.
+		// savePoolsLocked writes it as strconv.Itoa(i) — 0-indexed — so add 1 here
+		// to keep PoolPosition 1-based throughout the codebase.
+		player.PoolPosition = int64(len(pools[idx].Players) + 1) // 1-based default
 		if len(rec) > 2 && rec[2] != "" {
 			if pos, err2 := strconv.ParseInt(rec[2], 10, 64); err2 == nil {
 				player.PoolPosition = pos + 1 // convert 0-indexed CSV value → 1-indexed
 			}
-		} else {
-			player.PoolPosition = int64(len(pools[idx].Players) + 1) // 1-indexed append order
 		}
 		if len(rec) > 3 {
 			player.DisplayName = rec[3]
@@ -92,8 +93,9 @@ func parsePoolsFile(path string) (any, error) {
 	// Sort each pool's Players by their stored draw position so that the ordering
 	// is authoritative from the persisted field, not from CSV row order. This
 	// guarantees correct draw order even if rows were written out-of-order or
-	// the file was manually edited. Players whose PoolPosition was not written
-	// (legacy files) keep their existing row order (stable sort, 0 < 0 is false).
+	// the file was manually edited. Legacy files without col 2 receive sequential
+	// 1-based append-order defaults above, so their relative order is preserved by
+	// the stable sort (ties keep insertion order, but there are no ties here).
 	for i := range pools {
 		sort.SliceStable(pools[i].Players, func(a, b int) bool {
 			return pools[i].Players[a].PoolPosition < pools[i].Players[b].PoolPosition

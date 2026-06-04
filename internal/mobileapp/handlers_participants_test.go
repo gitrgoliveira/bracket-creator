@@ -306,16 +306,18 @@ func TestDuplicateNameRejection(t *testing.T) {
 	_, err = store.AddParticipant(compID, domain.Player{Name: "Bob", Dojo: "Dojo B"}, false)
 	require.NoError(t, err)
 
-	// 1. POST add duplicate → 409.
-	dupAdd, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo X"})
+	// 1. POST add duplicate — same (name, dojo) → 409. Different dojo with same
+	// name is allowed (two real people at different clubs), so we must use the
+	// SAME dojo as Alice to trigger the conflict.
+	dupAdd, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(dupAdd))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusConflict, w.Code, "POST add of duplicate name must return 409")
+	assert.Equal(t, http.StatusConflict, w.Code, "POST add of duplicate name+dojo must return 409")
 
-	// 2. PUT replace of Bob renaming to Alice → 409.
-	dupReplace, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo B"})
+	// 2. PUT replace: move Bob to Alice's dojo AND rename → same (name,dojo) → 409.
+	dupReplace, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
 	bobID := ""
 	for _, p := range mustLoad(t, store, compID) {
 		if p.Name == "Bob" {
@@ -328,7 +330,7 @@ func TestDuplicateNameRejection(t *testing.T) {
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+bobID, bytes.NewBuffer(dupReplace))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusConflict, w.Code, "PUT replace renaming Bob→Alice must return 409")
+	assert.Equal(t, http.StatusConflict, w.Code, "PUT replace renaming Bob→Alice with same dojo must return 409")
 
 	// 3. PUT renaming Alice to her OWN current name is a no-op rename and must succeed.
 	sameName, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A2"})
@@ -337,6 +339,45 @@ func TestDuplicateNameRejection(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code, "PUT with unchanged name (dojo edit) must succeed")
+}
+
+// TestBatchPostDuplicateNameDojo_409 covers the batch (players array) POST
+// path: a perfect (name, dojo) duplicate within one request is rejected with
+// 409, while two same-named competitors at different dojos are accepted. This
+// complements TestDuplicateNameRejection (single-add) and the state-level
+// TestSaveParticipants_RejectsDuplicateNameDojo. (mp-ljry, Copilot round 2)
+func TestBatchPostDuplicateNameDojo_409(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-dup"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Dup Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	// Perfect (name, dojo) duplicate in one batch (case/whitespace variant) → 409.
+	dup, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "alice  smith", "dojo": "wakaba"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(dup))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, "batch POST with duplicate (name,dojo) must return 409")
+
+	// Same name at DIFFERENT dojos in one batch is allowed.
+	ok, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "Alice Smith", "dojo": "Tora"},
+	}})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(ok))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "same name at different dojos must be accepted in a batch")
 }
 
 // TestReplaceDoesNotInheritOldDisplayName ensures that replacing a participant

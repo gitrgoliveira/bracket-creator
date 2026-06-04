@@ -170,18 +170,41 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 		}
 
+		// Tier-1: Reject perfect duplicates (normalizedName, normalizedDojo).
+		// Uses name+dojo so "John Smith / Wakaba" and "John Smith / Tora" are
+		// treated as distinct competitors (different clubs) while
+		// "Müller / Wakaba" vs "muller / wakaba" are rejected.
+		entries := make([][2]string, len(req.Players))
+		for i, p := range req.Players {
+			entries[i] = [2]string{p.Name, p.Dojo}
+		}
+		if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("duplicate participant(s) in request: %s", strings.Join(dupes, "; "))})
+			return
+		}
+
+		// Near-duplicate (Tier-2) warnings are surfaced authoritatively by the
+		// PUT /competitions/:id roster path (the SPA's primary import flow);
+		// this endpoint stays a plain array response to keep one shape.
+
 		// Load existing participants so we can preserve check-in state for
-		// players that survive the edit (matched by name). A full roster
-		// replacement via this endpoint must not silently clear check-ins
-		// that were already recorded.
+		// players that survive the edit (matched by normalizedName+normalizedDojo).
+		// A full roster replacement via this endpoint must not silently clear
+		// check-ins that were already recorded.
 		existing, err := store.LoadParticipants(id, comp.WithZekkenName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load participants: " + err.Error()})
 			return
 		}
-		checkedInByName := make(map[string]bool, len(existing))
+		// Key by (normalizedName, normalizedDojo) — NOT name alone. Tier-1
+		// dedup allows two same-named competitors from different dojos, so a
+		// name-only key would transfer check-in state between distinct people.
+		checkInKey := func(name, dojo string) string {
+			return helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
+		}
+		checkedInByKey := make(map[string]bool, len(existing))
 		for _, ep := range existing {
-			checkedInByName[strings.ToLower(strings.TrimSpace(ep.Name))] = ep.CheckedIn
+			checkedInByKey[checkInKey(ep.Name, ep.Dojo)] = ep.CheckedIn
 		}
 
 		players := make([]domain.Player, 0, len(req.Players))
@@ -200,11 +223,18 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				Metadata:     p.Metadata,
 				Tag:          p.Tag,
 				PoolPosition: int64(i),
-				CheckedIn:    checkedInByName[strings.ToLower(strings.TrimSpace(p.Name))],
+				CheckedIn:    checkedInByKey[checkInKey(p.Name, p.Dojo)],
 			})
 		}
 
 		if err := store.SaveParticipants(id, players); err != nil {
+			// Defense-in-depth: saveParticipantsNoLock also enforces the
+			// Tier-1 (name, dojo) guard, so map that to 409 rather than 500
+			// in case the pre-check above ever diverges from the write layer.
+			if errors.Is(err, state.ErrDuplicateName) {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
 			return
 		}

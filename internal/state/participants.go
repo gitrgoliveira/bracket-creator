@@ -15,12 +15,13 @@ import (
 // ErrParticipantNotFound is returned by UpdateParticipant when the pid is not in the roster.
 var ErrParticipantNotFound = errors.New("participant not found")
 
-// ErrDuplicateName is returned by AddParticipant and UpdateParticipant when
-// the supplied Player.Name collides with another participant in the same
-// roster (excluding the participant being edited, for the update path). The
-// comparison is case-insensitive (strings.EqualFold) to match the on-disk
-// canonicalization applied by helper.CreatePlayers.
-var ErrDuplicateName = errors.New("participant name already exists")
+// ErrDuplicateName is returned by AddParticipant, UpdateParticipant, and the
+// bulk write path when the supplied (Player.Name, Player.Dojo) pair collides
+// with another participant in the same roster (excluding the participant being
+// edited, for the update path). The comparison is on the normalized
+// (name, dojo) key — the SAME name at a DIFFERENT dojo is allowed (two real
+// people at different clubs), so the message names both fields.
+var ErrDuplicateName = errors.New("a participant with the same name and dojo already exists")
 
 // ErrCompetitionNotInSetup is returned by the setup-gated write paths
 // (Store.AddParticipant and Store.ReplaceParticipant — both call
@@ -449,20 +450,21 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// while seeds.csv still holds "alice cooper", breaking seed merging.
 	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
 
-	// Duplicate-name guard: when the transform renames the participant,
-	// reject if any OTHER participant already has that name. Trim both
-	// sides — LoadParticipants canonicalises via helper.CreatePlayers
-	// (TrimSpace + cases.Title), so "Alice " collapses to "Alice" on
-	// the next load and would reintroduce ambiguous name-keyed lookups.
-	if players[foundIdx].Name != oldName {
-		newTrimmed := strings.TrimSpace(players[foundIdx].Name)
-		for i := range players {
-			if i == foundIdx {
-				continue
-			}
-			if strings.EqualFold(strings.TrimSpace(players[i].Name), newTrimmed) {
-				return nil, ErrDuplicateName
-			}
+	// Duplicate guard: reject if any OTHER participant already has the same
+	// (normalizedName, normalizedDojo) pair. This runs unconditionally — even
+	// for check-in-only transforms that don't rename — which is harmless
+	// because the participant being edited is skipped (i == foundIdx) and a
+	// no-op edit can't collide with itself. Using both fields allows same-named
+	// competitors from different clubs while rejecting diacritic/casing variants.
+	newNormName := helper.NormalizeParticipantName(players[foundIdx].Name)
+	newNormDojo := helper.NormalizeParticipantName(players[foundIdx].Dojo)
+	for i := range players {
+		if i == foundIdx {
+			continue
+		}
+		if helper.NormalizeParticipantName(players[i].Name) == newNormName &&
+			helper.NormalizeParticipantName(players[i].Dojo) == newNormDojo {
+			return nil, ErrDuplicateName
 		}
 	}
 
@@ -642,14 +644,14 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 		return nil, err
 	}
 
-	// Duplicate-name guard (per bead acceptance criteria): the admin
-	// UI accepts the same name twice without warning otherwise, and
-	// the rest of the roster identifies competitors by display name.
-	// Trim both sides: LoadParticipants canonicalises via SanitizeName
-	// (TrimSpace + Title), so a trailing-space variant like "Alice "
-	// collapses to "Alice" on the next load — reject it up front.
+	// Duplicate-name guard: reject when (normalizedName, normalizedDojo)
+	// matches an existing entry. Using both name and dojo means that two
+	// real people at different clubs with the same name are allowed, while
+	// diacritic / casing variants ("Müller/Wakaba" vs "muller/wakaba") are
+	// correctly rejected.
 	for _, existing := range players {
-		if strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(p.Name)) {
+		if helper.NormalizeParticipantName(existing.Name) == helper.NormalizeParticipantName(strings.TrimSpace(p.Name)) &&
+			helper.NormalizeParticipantName(existing.Dojo) == helper.NormalizeParticipantName(strings.TrimSpace(p.Dojo)) {
 			return nil, ErrDuplicateName
 		}
 	}
@@ -689,6 +691,20 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 }
 
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool) error {
+	// Tier-1 (perfect-duplicate) guard at the lowest write layer so EVERY
+	// persistence path — the bulk PUT /competitions/:id roster import (the
+	// SPA's primary flow), single add/edit, and any future caller — rejects
+	// duplicate (normalizedName, normalizedDojo) pairs uniformly. Enforcing
+	// only in the handlers would leave the guard bypassable, the same reason
+	// the elevated-password gate is inline on the roster PUT path.
+	entries := make([][2]string, len(players))
+	for i, p := range players {
+		entries[i] = [2]string{p.Name, p.Dojo}
+	}
+	if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
+		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
+	}
+
 	path := s.compPath(compID, "participants.csv")
 
 	data, err := marshalParticipantsCSV(players, withZekkenName)

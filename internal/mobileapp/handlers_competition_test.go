@@ -994,6 +994,58 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 //     on load — the loader trusts HasParticipantIDs).
 //   - A second PUT with the same body produces an idempotent round-trip
 //     (ids don't churn).
+//
+// TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1 pins the
+// server-authoritative duplicate handling on the PRIMARY roster-import path
+// (PUT /competitions/:id): a perfect (name,dojo) duplicate is rejected 409,
+// and a near-duplicate pair is surfaced as non-blocking `warnings` in the
+// response. (mp-ljry, Copilot round 2)
+func TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "comp-ndw"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "NDW", Date: "12-05-2026",
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	// Perfect (name,dojo) duplicate → 409.
+	dup := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+		"players":[{"name":"John Smith","dojo":"Wakaba"},{"name":"john  smith","dojo":"wakaba"}]}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(dup))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusConflict, w.Code, "perfect (name,dojo) dup on roster PUT must 409: %s", w.Body.String())
+
+	// Near-duplicate (token-subset) → 200 with a warnings entry.
+	near := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+		"players":[{"name":"Chau Earn Tan","dojo":"Kenyukai"},{"name":"Chau Tan","dojo":"London Kenyuka"}]}`)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(near))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "near-dup roster PUT must succeed: %s", w.Body.String())
+
+	var resp struct {
+		Warnings []helper.NearDupWarning `json:"warnings"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Warnings, 1, "near-dup pair must produce exactly one warning")
+	assert.Equal(t, "token-subset", resp.Warnings[0].Score)
+
+	// Clean roster → warnings present as an empty array (consistent shape).
+	clean := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+		"players":[{"name":"Shudokan A","dojo":"X"},{"name":"Shudokan B","dojo":"Y"}]}`)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(clean))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"warnings":[]`, "clean roster must serialize warnings as [] not null")
+}
+
 func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

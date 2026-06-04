@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -92,6 +93,11 @@ type Tournament struct {
 	// Stored as omitempty so legacy tournament.md files without sponsors
 	// round-trip cleanly (no `sponsors: []` key emitted).
 	Sponsors []Sponsor `yaml:"sponsors,omitempty" json:"sponsors,omitempty"`
+
+	// Theme holds optional branding overrides: custom accent colors and a
+	// tournament logo (mp-scf). All fields are omitempty so existing
+	// tournament.md files without a theme block round-trip cleanly.
+	Theme *Theme `yaml:"theme,omitempty" json:"theme,omitempty"`
 }
 
 // TournamentContact is a single contact entry for attendees (mp-ef3).
@@ -150,6 +156,43 @@ func ValidateSponsor(s Sponsor) error {
 	u, err := url.Parse(s.Link)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return ErrSponsorLinkInvalid
+	}
+	return nil
+}
+
+// Theme holds per-tournament branding overrides (mp-scf). PrimaryColor and
+// AccentSoftColor are CSS hex values (#rrggbb). WindowTitle overrides the
+// browser tab/window title; it defaults to "Bracket Creator Mobile" when
+// empty. LogoPath stores the uploaded logo filename under
+// tournament-data/branding/; it is NOT exposed in JSON responses (the logo
+// is served via GET /api/branding/logo instead).
+// All fields are optional; omit the whole block for the default styling.
+type Theme struct {
+	PrimaryColor    string `yaml:"primary_color,omitempty"    json:"primaryColor,omitempty"`
+	AccentSoftColor string `yaml:"accent_soft_color,omitempty" json:"accentSoftColor,omitempty"`
+	WindowTitle     string `yaml:"window_title,omitempty"      json:"windowTitle,omitempty"`
+	LogoPath        string `yaml:"logo_path,omitempty"         json:"-"` // disk filename; served via /api/branding/logo
+}
+
+const maxWindowTitleLen = 100
+
+var hexColorRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// ValidateTheme returns an error when any non-empty color field is not a
+// valid 6-digit CSS hex value, or when WindowTitle exceeds 100 characters.
+// An entirely nil/empty Theme is always valid.
+func ValidateTheme(theme *Theme) error {
+	if theme == nil {
+		return nil
+	}
+	if theme.PrimaryColor != "" && !hexColorRE.MatchString(theme.PrimaryColor) {
+		return errors.New("primaryColor must be a 6-digit hex color (e.g. #1d3557)")
+	}
+	if theme.AccentSoftColor != "" && !hexColorRE.MatchString(theme.AccentSoftColor) {
+		return errors.New("accentSoftColor must be a 6-digit hex color (e.g. #e7eaf3)")
+	}
+	if len([]rune(theme.WindowTitle)) > maxWindowTitleLen {
+		return fmt.Errorf("windowTitle must be %d characters or fewer", maxWindowTitleLen)
 	}
 	return nil
 }

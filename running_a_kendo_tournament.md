@@ -244,7 +244,7 @@ Each match has a **red (aka)** side and a **white (shiro)** side. Before each bo
 
 ### In Pool Matches
 
-The first-listed player/team in the match-up is **red (aka)** and the second-listed is **white (shiro)**. The pool draw order determines who is listed first — typically the player with the lower pool position number takes red.
+The first-listed player/team in the match-up is **red (aka)** and the second-listed is **white (shiro)**. The pool draw order determines who is listed first.
 
 ### In Elimination (Knockout) Matches
 

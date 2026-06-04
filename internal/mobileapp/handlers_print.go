@@ -89,7 +89,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 
 		if len(produced) == 0 {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{
-				"error": "no PDF pages were produced; the tournament may have no started competitions or the requested type has no matching sheets",
+				"error": "no PDF pages were produced; the tournament may have no competitions started, or the requested type has no matching sheets",
 			})
 			return
 		}

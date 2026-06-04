@@ -36,6 +36,7 @@ func titlePageHTML(title string, a3Landscape bool) string {
     font-family: Arial, sans-serif; font-size: 36pt; font-weight: bold;
     text-align: center;
   }
+  p { margin: 0; }
 </style>
 </head>
 <body><p>%[3]s</p></body>

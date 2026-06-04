@@ -141,7 +141,7 @@ func (c *Converter) ConvertToPDF(ctx context.Context, srcPath, outDir string) (s
 		"--headless",
 		"--nologo",
 		"--nofirststartwizard",
-		fmt.Sprintf("-env:UserInstallation=file://%s", profileDir),
+		fmt.Sprintf("-env:UserInstallation=%s", profileInstallURI(profileDir)),
 		"--convert-to", "pdf",
 		srcPath,
 		"--outdir", outDir,
@@ -168,4 +168,22 @@ func (c *Converter) ConvertToPDF(ctx context.Context, srcPath, outDir string) (s
 func stemWithoutExt(name string) string {
 	ext := filepath.Ext(name)
 	return name[:len(name)-len(ext)]
+}
+
+// profileInstallURI converts an absolute filesystem path (from os.MkdirTemp)
+// to a file:// URI suitable for soffice's -env:UserInstallation flag.
+//
+// filepath.ToSlash normalises Windows backslashes to forward slashes. A POSIX
+// absolute path already starts with '/', so "file://" + "/tmp/..." →
+// "file:///tmp/..." (correct three-slash form). A Windows absolute path starts
+// with a drive letter, so an extra slash is prepended: "C:/..." →
+// "file:///C:/..." (RFC 8089 §2).
+func profileInstallURI(path string) string {
+	s := filepath.ToSlash(path)
+	if len(s) > 0 && s[0] != '/' {
+		// Windows: C:/Users/TEMP/lo-profile-xyz → file:///C:/Users/TEMP/lo-profile-xyz
+		return "file:///" + s
+	}
+	// POSIX: /tmp/lo-profile-xyz → file:///tmp/lo-profile-xyz
+	return "file://" + s
 }

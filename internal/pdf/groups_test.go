@@ -79,3 +79,26 @@ func TestOnlyTagsSkipsTeamWorkbooks(t *testing.T) {
 		assert.Equal(t, g.Type == "tags", g.SkipTeamWorkbooks, "group %q team-skip flag", g.Type)
 	}
 }
+
+func TestProfileInstallURI(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		// POSIX absolute paths produce file:// + path (three slashes total
+		// because the path begins with '/').
+		{"posix tmp", "/tmp/lo-profile-abc", "file:///tmp/lo-profile-abc"},
+		{"posix nested", "/var/folders/x/y/T/lo-profile-123", "file:///var/folders/x/y/T/lo-profile-123"},
+		// Windows absolute paths: after filepath.ToSlash the drive letter is
+		// first, so an extra leading slash gives the correct file:///C:/... form
+		// (RFC 8089 §2). os.MkdirTemp on Windows produces forward-slashed paths
+		// after ToSlash, so we test that form here.
+		{"windows forward slashes", "C:/Temp/lo-profile-xyz", "file:///C:/Temp/lo-profile-xyz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, profileInstallURI(tt.path))
+		})
+	}
+}

@@ -604,7 +604,7 @@ export function TournamentInfo({ tournament }) {
 function PhaseChip({ label, status }) {
   const isDone = status === "completed";
   const isLive = status === "running";
-  const cls = isDone ? "phase-chip phase-chip--done" : isLive ? "phase-chip phase-chip--live" : "phase-chip phase-chip--pending";
+  const cls = `phase-chip phase-chip--${isDone ? "done" : isLive ? "live" : "pending"}`;
   return (
     <span className={cls}>
       {isDone ? "✓ " : isLive ? "● " : ""}{label}
@@ -632,6 +632,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // hidden — they appear as the Knockout phase inside their source's card.
   const displayEntriesByDate = useMemo(() => {
     const compIds = new Set(comps.map(c => c.id));
+    // sourceCompID → playoff comp, built once (avoids an O(n) scan per entry).
+    const playoffBySourceId = new Map();
+    comps.forEach(c => { if (c.sourceCompID) playoffBySourceId.set(c.sourceCompID, c); });
     const pairedPlayoffIds = new Set(
       comps.filter(c => c.sourceCompID && compIds.has(c.sourceCompID)).map(c => c.id)
     );
@@ -640,7 +643,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
       result[d] = compsByDate[d]
         .filter(c => !pairedPlayoffIds.has(c.id))
         .map(c => {
-          const playoffs = comps.find(x => x.sourceCompID === c.id);
+          const playoffs = playoffBySourceId.get(c.id);
           return playoffs ? { kind: "pair", source: c, playoffs } : { kind: "single", comp: c };
         });
     });
@@ -3023,6 +3026,24 @@ function AwardsView({ c, bracket, standings, pools, players }) {
   const second = awards.find(a => a.place === 2) || null;
   const thirds = awards.filter(a => a.place === 3);
 
+  // Shared header (title + place count + fullscreen toggle) — identical for the
+  // league and champion-hero layouts.
+  const header = (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div>
+        <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
+          {c?.name ? `${c.name} — Awards` : "Awards"}
+        </div>
+        <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
+          Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
+        </div>
+      </div>
+      <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
+        {isFs ? "Exit fullscreen" : "Fullscreen"}
+      </button>
+    </div>
+  );
+
   // League format: keep WinnerBadge above and fall back to the classic podium
   // row layout — the hero card doesn't fit the league ceremony well.
   if (isLeague) {
@@ -3037,19 +3058,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           minHeight: isFs ? "100vh" : "auto",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <div>
-            <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
-              {c?.name ? `${c.name} — Awards` : "Awards"}
-            </div>
-            <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
-              Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
-            </div>
-          </div>
-          <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
-            {isFs ? "Exit fullscreen" : "Fullscreen"}
-          </button>
-        </div>
+        {header}
         {leagueWinner && <WinnerBadge name={leagueWinner.name} isFs={isFs} testId="league-winner-badge" marginBottom={16} />}
         <div className="podium" style={isFs ? { gap: 24, fontSize: 18 } : null}>
           {awards.map((a, idx) => {
@@ -3091,19 +3100,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
         minHeight: isFs ? "100vh" : "auto",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div>
-          <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
-            {c?.name ? `${c.name} — Awards` : "Awards"}
-          </div>
-          <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
-            Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
-          </div>
-        </div>
-        <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
-          {isFs ? "Exit fullscreen" : "Fullscreen"}
-        </button>
-      </div>
+      {header}
 
       {/* 1st place — champion hero */}
       {champion && (
@@ -3112,7 +3109,7 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           data-testid={`awards-place-1-${awards.indexOf(champion)}`}
           style={isFs ? { padding: 32, marginBottom: 20 } : null}
         >
-          <div className="awards-hero__crown" style={isFs ? { fontSize: 48 } : null}>🏆</div>
+          <div className="awards-hero__crown" style={isFs ? { fontSize: 48 } : null}>{PLACE_STYLE[1].icon}</div>
           <div className="awards-hero__eyebrow" style={isFs ? { fontSize: 16 } : null}>Champion</div>
           <div className="awards-hero__name" style={isFs ? { fontSize: 34 } : null}>{champion.name}</div>
           {champion.dojo && (
@@ -3129,8 +3126,8 @@ function AwardsView({ c, bracket, standings, pools, players }) {
             data-testid={`awards-place-2-${awards.indexOf(second)}`}
             style={isFs ? { fontSize: 18, padding: "20px 24px" } : null}
           >
-            <div style={{ fontSize: isFs ? 40 : 22 }}>🥈</div>
-            <div className="place" style={{ fontSize: isFs ? 16 : 12 }}>2nd Place</div>
+            <div style={{ fontSize: isFs ? 40 : 22 }}>{PLACE_STYLE[2].icon}</div>
+            <div className="place" style={{ fontSize: isFs ? 16 : 12 }}>{PLACE_STYLE[2].label}</div>
             <div className="name" style={{ fontSize: isFs ? 24 : 16 }}>{second.name}</div>
             {second.dojo && (
               <div className="dojo" style={{ fontSize: isFs ? 14 : 12 }}>{second.dojo}</div>
@@ -3149,8 +3146,8 @@ function AwardsView({ c, bracket, standings, pools, players }) {
               data-testid={`awards-place-3-${awards.indexOf(a)}`}
               style={isFs ? { fontSize: 16, padding: "16px 20px" } : null}
             >
-              <div style={{ fontSize: isFs ? 36 : 20 }}>🥉</div>
-              <div className="place" style={{ fontSize: isFs ? 14 : 11 }}>3rd Place</div>
+              <div style={{ fontSize: isFs ? 36 : 20 }}>{PLACE_STYLE[3].icon}</div>
+              <div className="place" style={{ fontSize: isFs ? 14 : 11 }}>{PLACE_STYLE[3].label}</div>
               <div className="name" style={{ fontSize: isFs ? 20 : 14 }}>{a.name}</div>
               {a.dojo && (
                 <div className="dojo" style={{ fontSize: isFs ? 13 : 11 }}>{a.dojo}</div>

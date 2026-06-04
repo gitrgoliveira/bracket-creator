@@ -205,6 +205,23 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
 });
 MatchCard.displayName = "MatchCard";
 
+// Anchor connectors to the midline of a card's two competitor sides rather than
+// the card's geometric centre. A card stacks a meta header (time/court) above the
+// two .bc-side rows, so its geometric centre sits inside the upper (Aka) row — a
+// connector landing there reads as pointing at one competitor instead of the seam
+// where the two feeders merge. The sides-block midline is the visual join point;
+// the offset from geometric centre is uniform across cards, so the arms stay
+// horizontal. Falls back to geometric centre if sides are absent.
+function anchorY(el, rect, treeTop) {
+  const sides = el.querySelectorAll(".bc-side");
+  if (sides.length >= 2) {
+    const first = sides[0].getBoundingClientRect();
+    const last = sides[sides.length - 1].getBoundingClientRect();
+    return (first.top + last.bottom) / 2 - treeTop;
+  }
+  return rect.top + rect.height / 2 - treeTop;
+}
+
 // Computes connector lines from the DOM positions of each match card,
 // then draws them in an absolutely positioned SVG.
 function BracketConnectors({ rounds, treeRef, refMap, version }) {
@@ -212,22 +229,6 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
   const [size, setSize] = useStateBC({ w: 0, h: 0 });
 
   useLayoutEffectBC(() => {
-    // Anchor connectors to the midline of a card's two competitor sides rather
-    // than the card's geometric centre. A card stacks a meta header (time/court)
-    // above the two .bc-side rows, so its geometric centre sits inside the upper
-    // (Aka) row — a connector landing there reads as pointing at one competitor
-    // instead of the seam where the two feeders merge. The sides-block midline is
-    // the visual join point. Offset from geometric centre is uniform across cards,
-    // so the arms stay horizontal. Falls back to geometric centre if sides absent.
-    const anchorY = (el, rect, treeTop) => {
-      const sides = el.querySelectorAll(".bc-side");
-      if (sides.length >= 2) {
-        const first = sides[0].getBoundingClientRect();
-        const last = sides[sides.length - 1].getBoundingClientRect();
-        return (first.top + last.bottom) / 2 - treeTop;
-      }
-      return rect.top + rect.height / 2 - treeTop;
-    };
     const compute = () => {
       const tree = treeRef.current;
       if (!tree || !rounds) return;
@@ -328,7 +329,8 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
       setCardTops((prev) => {
         if (prev) {
           const keys = Object.keys(tops);
-          if (keys.length === Object.keys(prev).length &&
+          const prevKeys = Object.keys(prev);
+          if (keys.length === prevKeys.length &&
               keys.every((k) => Math.abs((prev[k] ?? 0) - tops[k]) < 0.5)) {
             return prev; // unchanged — avoid a re-render loop
           }

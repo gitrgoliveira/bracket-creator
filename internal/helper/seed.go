@@ -32,6 +32,23 @@ func generateBracketOrder(n int) []int {
 	return res
 }
 
+// partitionSeeded splits players into a seeded group (Seed > 0, stable-sorted by
+// Seed ascending) and an unseeded group (Seed == 0, in original input order).
+// Shared by StandardSeeding and StandardSeedingFull.
+func partitionSeeded(players []Player) (seeded, unseeded []Player) {
+	for _, p := range players {
+		if p.Seed > 0 {
+			seeded = append(seeded, p)
+		} else {
+			unseeded = append(unseeded, p)
+		}
+	}
+	sort.SliceStable(seeded, func(i, j int) bool {
+		return seeded[i].Seed < seeded[j].Seed
+	})
+	return seeded, unseeded
+}
+
 // StandardSeedingFull places players into a FULL power-of-two bracket and returns
 // a slice of length NextPow2(len(players)). Each player is positioned by its
 // seeding rank — seeded participants (Seed > 0) sorted by seed, then unseeded in
@@ -50,18 +67,7 @@ func StandardSeedingFull(players []Player) []Player {
 		return nil
 	}
 
-	seeded := make([]Player, 0)
-	unseeded := make([]Player, 0)
-	for _, p := range players {
-		if p.Seed > 0 {
-			seeded = append(seeded, p)
-		} else {
-			unseeded = append(unseeded, p)
-		}
-	}
-	sort.SliceStable(seeded, func(i, j int) bool {
-		return seeded[i].Seed < seeded[j].Seed
-	})
+	seeded, unseeded := partitionSeeded(players)
 
 	// ranked[r-1] is the player with seeding rank r (1-based): seeded by seed,
 	// then unseeded in input order. This mirrors StandardSeeding's ordering but
@@ -88,20 +94,7 @@ func StandardSeedingFull(players []Player) []Player {
 // are spaced according to tournament standards (e.g., #1 and #2 on opposite halves).
 // Unseeded players fill the remaining slots.
 func StandardSeeding(players []Player) []Player {
-	seeded := make([]Player, 0)
-	unseeded := make([]Player, 0)
-
-	for _, p := range players {
-		if p.Seed > 0 {
-			seeded = append(seeded, p)
-		} else {
-			unseeded = append(unseeded, p)
-		}
-	}
-
-	sort.SliceStable(seeded, func(i, j int) bool {
-		return seeded[i].Seed < seeded[j].Seed
-	})
+	seeded, unseeded := partitionSeeded(players)
 
 	power := 1
 	for power < len(players) {

@@ -2481,13 +2481,16 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           return id.startsWith(pool.poolName + "-");
         }) : [];
 
-        // Build name→{rank, standingEntry} map from the rank-sorted standings array.
+        // Build id/name→{rank, standingEntry} map from the rank-sorted standings array.
         // Rank is 1-based (index + 1). Used to look up each draw-position row's rank
         // without resorting the table (mp-938b: table is draw-order, not rank-order).
+        // Keyed by player.id when available, falling back to player.name, so duplicate
+        // names across dojos don't collide — mirrors the lookup key below.
         const rankByName = new Map();
         if (poolStandings) {
           poolStandings.forEach((s, i) => {
-            rankByName.set(s.player.name, { rank: i + 1, standing: s });
+            const key = s.player.id || s.player.name;
+            rankByName.set(key, { rank: i + 1, standing: s });
           });
         }
 
@@ -2516,7 +2519,9 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
               <tbody>
                 {drawOrderPlayers.map((p, i) => {
                   const drawPos = i + 1;
-                  const lookup = rankByName.get(p.name);
+                  // Look up by id first (stable), fall back to name for legacy fixtures
+                  // that don't carry UUIDs. Mirrors the key used when building rankByName.
+                  const lookup = rankByName.get(p.id || p.name);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;
                   const isAdvancing = !isLeague && rank !== null && rank <= poolWinners;
@@ -2527,7 +2532,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                   ].filter(Boolean).join(" ");
 
                   return (
-                    <tr key={p.name} className={rowClasses || undefined}>
+                    <tr key={p.id || p.name || drawPos} className={rowClasses || undefined}>
                       <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>

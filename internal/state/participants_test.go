@@ -430,14 +430,19 @@ func TestAddParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "WS Dup"}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{{Name: "Alice", Dojo: "Dojo A"}}))
 
-	_, err = store.AddParticipant(compID, domain.Player{Name: "Alice ", Dojo: "Dojo B"}, false)
-	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space variant must be caught by duplicate guard")
+	// Same name AND same dojo (normalized) must be rejected.
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Alice ", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space name variant with same dojo must be caught by duplicate guard")
 
-	_, err = store.AddParticipant(compID, domain.Player{Name: " Alice", Dojo: "Dojo B"}, false)
-	assert.ErrorIs(t, err, ErrDuplicateName, "leading-space variant must be caught by duplicate guard")
+	_, err = store.AddParticipant(compID, domain.Player{Name: " Alice", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "leading-space name variant with same dojo must be caught by duplicate guard")
 
-	_, err = store.AddParticipant(compID, domain.Player{Name: "alice", Dojo: "Dojo B"}, false)
-	assert.ErrorIs(t, err, ErrDuplicateName, "case-only variant must be caught by duplicate guard")
+	_, err = store.AddParticipant(compID, domain.Player{Name: "alice", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "case-only name variant with same dojo must be caught by duplicate guard")
+
+	// Same name but DIFFERENT dojo is explicitly ALLOWED (two real people).
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo B"}, false)
+	assert.NoError(t, err, "same name at a different dojo must be allowed")
 }
 
 func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
@@ -448,7 +453,7 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "WS Dup Upd"}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice", Dojo: "Dojo A"},
-		{Name: "Bob", Dojo: "Dojo B"},
+		{Name: "Bob", Dojo: "Dojo A"}, // same dojo so rename collides
 	}))
 
 	loaded, err := store.LoadParticipants(compID, false)
@@ -461,19 +466,19 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	}
 	require.NotEmpty(t, bobID)
 
-	// Renaming Bob to "Alice " (trailing space) must be rejected.
+	// Renaming Bob to "Alice " (trailing space) must be rejected — same name+dojo.
 	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
 		p.Name = "Alice "
 		return nil
 	})
-	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space rename colliding with existing name must be rejected")
+	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space rename colliding with existing name+dojo must be rejected")
 
-	// Renaming Bob to "alice" (case variant) must also be rejected.
+	// Renaming Bob to "alice" (case variant) must also be rejected — same name+dojo.
 	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
 		p.Name = "alice"
 		return nil
 	})
-	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name must be rejected")
+	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name+dojo must be rejected")
 }
 
 // TestZekkenWithTagDoesNotCorruptCSV pins the marshalParticipantsCSV column-

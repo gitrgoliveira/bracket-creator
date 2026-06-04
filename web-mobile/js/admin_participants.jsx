@@ -147,6 +147,81 @@ function levenshtein(a, b) {
   return prev[n];
 }
 
+// Near-duplicate detection constants — mirror Go's NearDupLevenshteinMax /
+// NearDupRatioMin so the JS and Go gates fire on the same inputs.
+const NEAR_DUP_LEV_MAX = 2;
+const NEAR_DUP_RATIO_MIN = 0.85;
+
+// isSingleTrailingTokenDiff returns true when a and b (normalized strings)
+// differ only in their last single-character token — the squad-suffix
+// convention ("Shudokan A" / "Shudokan B", "Tora A" / "Tora B").
+function isSingleTrailingTokenDiff(a, b) {
+  const ta = a.split(/\s+/), tb = b.split(/\s+/);
+  if (ta.length < 2 || ta.length !== tb.length) return false;
+  for (let i = 0; i < ta.length - 1; i++) {
+    if (ta[i] !== tb[i]) return false;
+  }
+  const la = ta[ta.length - 1], lb = tb[tb.length - 1];
+  return [...la].length === 1 && [...lb].length === 1;
+}
+
+// findNearDups takes an array of {name, dojo} objects (parsed participant rows)
+// and returns an array of near-duplicate warning objects:
+//   { kind: "near-duplicate", a, b, score }
+//
+// Signal 1: token-subset — tokens of A ⊆ tokens of B (or vice-versa) and sets
+// are unequal.  Catches "Chau Earn Tan" / "Chau Tan".
+//
+// Signal 2: Levenshtein typo gate — lev ≤ NEAR_DUP_LEV_MAX AND ratio ≥
+// NEAR_DUP_RATIO_MIN.  Suppressed for single-trailing-token differences
+// (squad-suffix convention).
+function findNearDups(participants) {
+  const norm = window.normalizeParticipantName || (s => s.toLowerCase().trim().replace(/\s+/g, ' '));
+  const all = participants.map(p => {
+    const n = norm(p.name || '');
+    const tokens = new Set(n.split(/\s+/).filter(Boolean));
+    return { norm: n, tokens, orig: p.name || '' };
+  });
+
+  const warnings = [];
+  const warned = new Set();
+
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const key = `${i}:${j}`;
+      if (warned.has(key)) continue;
+      const na = all[i].norm, nb = all[j].norm;
+      if (na === nb) continue; // perfect match → Tier-1 handles it
+
+      // Signal 1: token-subset
+      const ta = all[i].tokens, tb = all[j].tokens;
+      if (ta.size > 0 && tb.size > 0) {
+        const aInB = [...ta].every(t => tb.has(t));
+        const bInA = [...tb].every(t => ta.has(t));
+        if (aInB || bInA) {
+          warned.add(key);
+          warnings.push({ kind: 'near-duplicate', a: all[i].orig, b: all[j].orig, score: 'token-subset' });
+          continue;
+        }
+      }
+
+      // Signal 2: Levenshtein
+      const lev = levenshtein(na, nb);
+      if (lev <= NEAR_DUP_LEV_MAX) {
+        const maxLen = Math.max([...na].length, [...nb].length);
+        if (maxLen === 0) continue;
+        const ratio = 1 - lev / maxLen;
+        if (ratio >= NEAR_DUP_RATIO_MIN) {
+          if (isSingleTrailingTokenDiff(na, nb)) continue;
+          warned.add(key);
+          warnings.push({ kind: 'near-duplicate', a: all[i].orig, b: all[j].orig, score: `levenshtein:${lev}/ratio:${ratio.toFixed(2)}` });
+        }
+      }
+    }
+  }
+  return warnings;
+}
+
 function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
@@ -161,6 +236,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [replaceDojo, setReplaceDojo] = useStateA("");
   const [replaceDanGrade, setReplaceDanGrade] = useStateA("");
   const [replaceZekken, setReplaceZekken] = useStateA("");
+  // nearDupPending holds {pairs, pendingApply} when Tier-2 near-dups are
+  // detected in the batch import but the user has not yet confirmed.
+  // pendingApply is the resolved {np, added, updatedCount} from the parse
+  // step so we can re-use it in the "Import anyway" path without re-parsing.
+  const [nearDupPending, setNearDupPending] = useStateA(null);
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
@@ -589,16 +669,30 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       const withZekken = c.withZekkenName;
       const parsed = window.parseParticipantLines(lines, withZekken);
 
-      // Duplicate detection (case-insensitive)
-      const nameSeen = new Map();
+      // Tier-1: Duplicate detection — reject on perfect (normalizedName,
+      // normalizedDojo) collision.  Uses name+dojo so two people from
+      // different clubs with the same name are allowed.
+      const norm = window.normalizeParticipantName || (s => s.toLowerCase().trim());
+      const keySeen = new Map();
       const dupes = [];
-      parsed.forEach(({ name }) => {
-        const key = name.toLowerCase();
-        if (nameSeen.has(key)) { if (!dupes.includes(name)) dupes.push(name); }
-        else nameSeen.set(key, true);
+      parsed.forEach(({ name, dojo }) => {
+        const key = norm(name) + '|' + norm(dojo || '');
+        if (keySeen.has(key)) { if (!dupes.includes(name)) dupes.push(name); }
+        else keySeen.set(key, true);
       });
       if (dupes.length > 0) {
-        showToast(`Duplicate names detected: ${dupes.join(", ")}`, "error");
+        showToast(`Duplicate participants detected: ${dupes.join(", ")}`, "error");
+        return;
+      }
+
+      // Tier-2: near-duplicate warnings (non-blocking).
+      const nearDups = findNearDups(parsed);
+      if (nearDups.length > 0) {
+        ({ np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed));
+        // Suspend and show confirmation banner — the user decides whether
+        // to proceed.  pendingApply carries the already-minted IDs so we
+        // don't re-parse on "Import anyway".
+        setNearDupPending({ pairs: nearDups, pendingApply: { np, added, updatedCount } });
         return;
       }
 
@@ -612,6 +706,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       return;
     }
 
+    await doSave(np, added, updatedCount);
+  };
+
+  // doSave performs the PUT and shows the success toast.  Factored out so
+  // both the normal apply() path and the "Import anyway" confirmation path
+  // share identical save logic.
+  const doSave = async (np, added, updatedCount) => {
     try {
       await onUpdate({ ...c, players: np });
 
@@ -628,6 +729,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       }
       showToast(msg);
       setImportSummary(null);
+      setNearDupPending(null);
     } catch (err) {
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack
@@ -993,6 +1095,31 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           )}
 
+          {nearDupPending && (
+            <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="near-dup-banner">
+              <div style={{ marginBottom: 6, fontWeight: 600 }}>Possible duplicate participants detected:</div>
+              <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
+                {nearDupPending.pairs.map((w, i) => (
+                  <li key={i}><strong>{w.a}</strong> and <strong>{w.b}</strong> <span style={{ color: "var(--ink-3)", fontSize: 12 }}>({w.score})</span></li>
+                ))}
+              </ul>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn btn--sm btn--primary"
+                  data-testid="near-dup-import-anyway"
+                  onClick={async () => {
+                    const { np, added, updatedCount } = nearDupPending.pendingApply;
+                    await doSave(np, added, updatedCount);
+                  }}
+                >Import anyway</button>
+                <button
+                  className="btn btn--sm"
+                  data-testid="near-dup-cancel"
+                  onClick={() => setNearDupPending(null)}
+                >Cancel</button>
+              </div>
+            </div>
+          )}
           <LinedTextarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -1044,4 +1171,4 @@ window.AdminParticipants = AdminParticipants;
 
 // ES export for the vitest suite — pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
-export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget };
+export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, findNearDups, isSingleTrailingTokenDiff };

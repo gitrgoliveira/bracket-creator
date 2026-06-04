@@ -357,9 +357,10 @@ func TestRegistration_POST_DuplicateName_Returns409WithFriendlyMessage(t *testin
 	})
 	require.Equal(t, http.StatusOK, w1.Code)
 
-	// Try to register Alice again.
+	// Try to register Alice again with the SAME dojo — same (name,dojo) pair
+	// is a duplicate under the new name+dojo dedup key.
 	w2 := doRegister(r, compID, map[string]any{
-		"name": "Alice Yamamoto", "dojo": "Other Dojo",
+		"name": "Alice Yamamoto", "dojo": "Raizan",
 	})
 	assert.Equal(t, http.StatusConflict, w2.Code)
 	// Friendly message (not the raw internal error).

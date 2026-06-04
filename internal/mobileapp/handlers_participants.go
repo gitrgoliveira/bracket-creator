@@ -170,6 +170,23 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 		}
 
+		// Tier-1: Reject perfect duplicates (normalizedName, normalizedDojo).
+		// Uses name+dojo so "John Smith / Wakaba" and "John Smith / Tora" are
+		// treated as distinct competitors (different clubs) while
+		// "Müller / Wakaba" vs "muller / wakaba" are rejected.
+		entries := make([][2]string, len(req.Players))
+		for i, p := range req.Players {
+			entries[i] = [2]string{p.Name, p.Dojo}
+		}
+		if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("duplicate participant(s) in request: %s", strings.Join(dupes, "; "))})
+			return
+		}
+
+		// Tier-2: near-duplicate warnings (non-blocking). Attached to the
+		// success response so the client can surface a confirmation banner.
+		nearDupWarnings := helper.FindNearDupWarnings(entries)
+
 		// Load existing participants so we can preserve check-in state for
 		// players that survive the edit (matched by name). A full roster
 		// replacement via this endpoint must not silently clear check-ins
@@ -220,6 +237,20 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		if len(nearDupWarnings) > 0 {
+			// Additive, back-compatible response field. Clients that don't
+			// understand warnings receive a regular array response and ignore
+			// the extra field.
+			type savedWithWarnings struct {
+				Players  interface{}             `json:"players"`
+				Warnings []helper.NearDupWarning `json:"warnings"`
+			}
+			c.JSON(http.StatusOK, savedWithWarnings{
+				Players:  saved,
+				Warnings: nearDupWarnings,
+			})
+			return
+		}
 		c.JSON(http.StatusOK, saved)
 	})
 

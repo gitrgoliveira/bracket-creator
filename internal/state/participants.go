@@ -449,20 +449,19 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// while seeds.csv still holds "alice cooper", breaking seed merging.
 	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
 
-	// Duplicate-name guard: when the transform renames the participant,
-	// reject if any OTHER participant already has that name. Trim both
-	// sides — LoadParticipants canonicalises via helper.CreatePlayers
-	// (TrimSpace + cases.Title), so "Alice " collapses to "Alice" on
-	// the next load and would reintroduce ambiguous name-keyed lookups.
-	if players[foundIdx].Name != oldName {
-		newTrimmed := strings.TrimSpace(players[foundIdx].Name)
-		for i := range players {
-			if i == foundIdx {
-				continue
-			}
-			if strings.EqualFold(strings.TrimSpace(players[i].Name), newTrimmed) {
-				return nil, ErrDuplicateName
-			}
+	// Duplicate guard: when the transform renames or moves the participant,
+	// reject if any OTHER participant already has the same (normalizedName,
+	// normalizedDojo) pair. Using both fields allows same-named competitors
+	// from different clubs while correctly rejecting diacritic/casing variants.
+	newNormName := helper.NormalizeParticipantName(players[foundIdx].Name)
+	newNormDojo := helper.NormalizeParticipantName(players[foundIdx].Dojo)
+	for i := range players {
+		if i == foundIdx {
+			continue
+		}
+		if helper.NormalizeParticipantName(players[i].Name) == newNormName &&
+			helper.NormalizeParticipantName(players[i].Dojo) == newNormDojo {
+			return nil, ErrDuplicateName
 		}
 	}
 
@@ -642,14 +641,14 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 		return nil, err
 	}
 
-	// Duplicate-name guard (per bead acceptance criteria): the admin
-	// UI accepts the same name twice without warning otherwise, and
-	// the rest of the roster identifies competitors by display name.
-	// Trim both sides: LoadParticipants canonicalises via SanitizeName
-	// (TrimSpace + Title), so a trailing-space variant like "Alice "
-	// collapses to "Alice" on the next load — reject it up front.
+	// Duplicate-name guard: reject when (normalizedName, normalizedDojo)
+	// matches an existing entry. Using both name and dojo means that two
+	// real people at different clubs with the same name are allowed, while
+	// diacritic / casing variants ("Müller/Wakaba" vs "muller/wakaba") are
+	// correctly rejected.
 	for _, existing := range players {
-		if strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(p.Name)) {
+		if helper.NormalizeParticipantName(existing.Name) == helper.NormalizeParticipantName(strings.TrimSpace(p.Name)) &&
+			helper.NormalizeParticipantName(existing.Dojo) == helper.NormalizeParticipantName(strings.TrimSpace(p.Dojo)) {
 			return nil, ErrDuplicateName
 		}
 	}

@@ -306,16 +306,18 @@ func TestDuplicateNameRejection(t *testing.T) {
 	_, err = store.AddParticipant(compID, domain.Player{Name: "Bob", Dojo: "Dojo B"}, false)
 	require.NoError(t, err)
 
-	// 1. POST add duplicate → 409.
-	dupAdd, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo X"})
+	// 1. POST add duplicate — same (name, dojo) → 409. Different dojo with same
+	// name is allowed (two real people at different clubs), so we must use the
+	// SAME dojo as Alice to trigger the conflict.
+	dupAdd, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(dupAdd))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusConflict, w.Code, "POST add of duplicate name must return 409")
+	assert.Equal(t, http.StatusConflict, w.Code, "POST add of duplicate name+dojo must return 409")
 
-	// 2. PUT replace of Bob renaming to Alice → 409.
-	dupReplace, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo B"})
+	// 2. PUT replace: move Bob to Alice's dojo AND rename → same (name,dojo) → 409.
+	dupReplace, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
 	bobID := ""
 	for _, p := range mustLoad(t, store, compID) {
 		if p.Name == "Bob" {
@@ -328,7 +330,7 @@ func TestDuplicateNameRejection(t *testing.T) {
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+bobID, bytes.NewBuffer(dupReplace))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusConflict, w.Code, "PUT replace renaming Bob→Alice must return 409")
+	assert.Equal(t, http.StatusConflict, w.Code, "PUT replace renaming Bob→Alice with same dojo must return 409")
 
 	// 3. PUT renaming Alice to her OWN current name is a no-op rename and must succeed.
 	sameName, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A2"})

@@ -318,6 +318,26 @@ const SAMPLE_TOURNAMENTS = [
 
 const PARTICIPANT_TAGS = new Set(["manual", "registered", "transfer"]);
 
+// normalizeParticipantName applies the shared normalization used by the
+// duplicate-detection system (Tier-1 dedup key and Tier-2 near-dup signals).
+//
+// Mirrors Go's NormalizeParticipantName exactly so fixture tests can assert
+// byte-identical output from both sides:
+//   1. NFC precompose
+//   2. NFD decompose, strip combining marks U+0300–U+036F only
+//      (Latin diacriticals: Müller→muller, Ï→i)
+//      Japanese dakuten U+3099 is OUTSIDE the range and is preserved (が→が).
+//   3. Re-NFC
+//   4. Lowercase, trim, collapse internal whitespace.
+function normalizeParticipantName(s) {
+  if (!s) return '';
+  // Step 1+2: NFC → NFD → strip combining marks U+0300..U+036F
+  // Step 3: re-NFC
+  const stripped = s.normalize('NFD').replace(/[̀-ͯ]/g, '').normalize('NFC');
+  // Step 4
+  return stripped.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
 // parseParticipantLines parses an array of non-empty CSV lines into player objects.
 // Used by both AdminParticipants.apply() and the live parse preview.
 function parseParticipantLines(lines, withZekken) {
@@ -365,7 +385,7 @@ export {
   buildPools, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt, arraysEqual, mergeMatchPatch
+  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName
 };
 
 if (typeof window !== 'undefined') {
@@ -380,6 +400,7 @@ if (typeof window !== 'undefined') {
   window.standardSeedOrder = standardSeedOrder; window.nextPow2 = nextPow2;
   window.poolWinners = poolWinners;
   window.parseParticipantLines = parseParticipantLines;
+  window.normalizeParticipantName = normalizeParticipantName;
   window.mergeMatchPatch = mergeMatchPatch;
   window.addMinutes = addMinutes;
   window.diffMinutes = diffMinutes;

@@ -458,9 +458,15 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// When the name DID change, check the raw pre-TitleCase value: TitleCase
 	// alters ordinal suffixes ("3rd"→"3Rd") so the post-TitleCase form would
 	// never match the reserved regex.
-	trimmedName := strings.TrimSpace(players[foundIdx].Name)
-	if trimmedName != oldName && helper.IsReservedParticipantName(trimmedName) {
-		return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
+	// Detect rename by comparing raw values (before TrimSpace) so that a
+	// stored name like "Alice" is never spuriously considered changed by a
+	// check-in transform that doesn't touch Name at all.  TrimSpace is only
+	// for the regex match, not for change detection.
+	if players[foundIdx].Name != oldName {
+		trimmedName := strings.TrimSpace(players[foundIdx].Name)
+		if helper.IsReservedParticipantName(trimmedName) {
+			return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
+		}
 	}
 
 	// Canonicalize to match what CreatePlayers produces on load (Title-case),
@@ -739,8 +745,8 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// AddParticipant and updateParticipantNoLock apply their own pre-TitleCase
 	// checks before reaching here; for those paths the guard is defence-in-depth.
 	for _, p := range players {
-		if helper.IsReservedParticipantName(strings.TrimSpace(p.Name)) {
-			return fmt.Errorf("%w: %q", ErrReservedName, p.Name)
+		if trimmed := strings.TrimSpace(p.Name); helper.IsReservedParticipantName(trimmed) {
+			return fmt.Errorf("%w: %q", ErrReservedName, trimmed)
 		}
 	}
 

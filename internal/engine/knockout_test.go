@@ -212,6 +212,43 @@ func TestResolveQualifiedPools_LonePoolNoMatches(t *testing.T) {
 	assert.Contains(t, sides, "B1")
 }
 
+// TestResolveQualifiedPools_DegeneratePoolClampsBye verifies that a completed
+// pool with fewer finishers than PoolWinners does not error — instead the
+// unfillable placeholder is resolved as a bye ("") so the bracket advances.
+// This scenario is unreachable via supported flows (generatePools rejects it)
+// but can arise from hand-edited tournament-data or legacy imports.
+func TestResolveQualifiedPools_DegeneratePoolClampsBye(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "degenerate"
+
+	// Pool A has 2 players (normal), Pool B has 1 player (degenerate when
+	// poolWinners=2: can only supply a 1st-place finisher, not a 2nd).
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}}},
+	}
+	saveMixedScaffold(t, store, compID, pools, 2)
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err, "degenerate pool must not return an error — clamp to bye instead")
+	assert.True(t, allResolved, "both pools should be fully resolved (B's 2nd-place slot is a bye)")
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.False(t, bracketHasPoolPlaceholders(b), "no pool placeholder should remain")
+
+	sides := bracketSides(b)
+	assert.Contains(t, sides, "A1")
+	assert.Contains(t, sides, "A2")
+	assert.Contains(t, sides, "B1")
+}
+
 // TestResolveQualifiedPools_NonMixedNoOp verifies the resolver is a no-op for
 // competitions that have no pool placeholders (standalone playoffs / league).
 func TestResolveQualifiedPools_NonMixedNoOp(t *testing.T) {

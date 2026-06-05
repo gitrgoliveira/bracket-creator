@@ -401,3 +401,358 @@ func TestRecordMatchResultWithIneligibilityTx_HansokuAutoAward(t *testing.T) {
 	assert.Equal(t, []string{"H"}, stored[0].IpponsB)
 	assert.Equal(t, []string{"M"}, stored[0].IpponsA)
 }
+
+// --- mp-e2k1: pool re-score guard against scored downstream knockout --------
+
+// saveMixedCompWithBracket sets up a minimal mixed competition with two pools
+// (poolWinners=1 by default), saves the pool matches and the preview bracket.
+// Returns the engine, store, compID, and the round-0 bracket match ID so tests
+// can record a knockout score directly.
+func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Store, string) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	compID := "guard-test"
+
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+	}
+	// Build competition.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        compID,
+		Kind:        "individual",
+		Format:      state.CompFormatMixed,
+		Status:      state.CompStatusPools,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		PoolWinners: 1,
+		TeamSize:    teamSize,
+	}))
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+	}))
+
+	// Save the initial scheduled pool matches.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Status: state.MatchStatusScheduled},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
+	}))
+
+	// Build the preview bracket from the pools.
+	finals := helper.GenerateFinals(pools, 1)
+	tree := helper.CreateBalancedTree(finals)
+	helper.ApplyPoolAdjustments(tree)
+	leaves := helper.TreeToLeafArray(tree)
+	comp, _ := store.LoadCompetition(compID)
+	bracket, err := eng.buildBracketFromLeaves(comp, leaves)
+	require.NoError(t, err)
+	bracket.Preview = true
+	require.NoError(t, store.SaveBracket(compID, bracket))
+
+	return eng, store, compID
+}
+
+// scorePoolMatchTx is a test helper that writes a pool match result inside a tx.
+func scorePoolMatchTx(t *testing.T, eng *Engine, store *state.Store, compID, matchID, sideA, sideB, winner string) {
+	t.Helper()
+	result := &state.MatchResult{
+		SideA:   sideA,
+		SideB:   sideB,
+		Winner:  winner,
+		IpponsA: []string{"M"},
+		Status:  state.MatchStatusCompleted,
+	}
+	if winner == sideB {
+		result.IpponsA = nil
+		result.IpponsB = []string{"M"}
+	}
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result)
+		return err
+	})
+	require.NoError(t, txErr)
+}
+
+// TestPoolRescore_NoFinisherChange_Allowed verifies that re-scoring a pool match
+// does NOT trigger the guard when the top-N finisher identity is unchanged.
+// (e.g. A1 still wins after re-scoring with different ippons)
+func TestPoolRescore_NoFinisherChange_Allowed(t *testing.T) {
+	eng, store, compID := saveMixedCompForGuardTest(t, 0)
+
+	// Score Pool A: A1 wins. Score Pool B: B1 wins.
+	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+
+	// Resolve the bracket so A1 and B1 land in the knockout leaf.
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	// Score the knockout match (A1 vs B1) → A1 wins.
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, b.Rounds, 1)
+	require.Len(t, b.Rounds[0], 1)
+	knockoutMatchID := b.Rounds[0][0].ID
+
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, knockoutMatchID, &state.MatchResult{
+			SideA:   "A1",
+			SideB:   "B1",
+			Winner:  "A1",
+			IpponsA: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return err
+	})
+	require.NoError(t, txErr)
+
+	// RE-SCORE Pool A — A1 still wins, just with a different ippons count.
+	// The finisher set is unchanged, so the guard must NOT fire.
+	var rescore error
+	txErr = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
+			SideA:   "A1",
+			SideB:   "A2",
+			Winner:  "A1",
+			IpponsA: []string{"M", "M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return nil
+	})
+	require.NoError(t, txErr)
+	assert.NoError(t, rescore, "re-score with same finisher must be allowed even after knockout match is scored")
+}
+
+// TestPoolRescore_FinisherFlip_LeafScheduled_Allowed verifies that re-scoring
+// a pool match to flip the 1st-place finisher while the knockout leaf is still
+// scheduled succeeds and does NOT trigger the guard.
+func TestPoolRescore_FinisherFlip_LeafScheduled_Allowed(t *testing.T) {
+	eng, store, compID := saveMixedCompForGuardTest(t, 0)
+
+	// Score Pool A: A1 wins. Score Pool B: B1 wins.
+	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+
+	// Resolve the bracket so the knockout leaf has real names.
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	// Do NOT score the knockout leaf — it stays scheduled.
+
+	// RE-SCORE Pool A to flip finisher (A2 now wins).
+	var rescore error
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
+			SideA:   "A1",
+			SideB:   "A2",
+			Winner:  "A2",
+			IpponsB: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return nil
+	})
+	require.NoError(t, txErr)
+	assert.NoError(t, rescore, "finisher flip on unscored knockout leaf must be allowed")
+}
+
+// TestPoolRescore_FinisherFlip_KnockoutCompleted_Rejected verifies that re-scoring
+// a pool match to flip a finisher whose knockout leaf is completed returns
+// DownstreamKnockoutScoredError (wrapping ErrDownstreamKnockoutScored) and rolls
+// back the pool-match result to the prior state.
+func TestPoolRescore_FinisherFlip_KnockoutCompleted_Rejected(t *testing.T) {
+	eng, store, compID := saveMixedCompForGuardTest(t, 0)
+
+	// Score Pool A (A1 wins) and Pool B (B1 wins).
+	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+
+	// Resolve bracket.
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	// Score the knockout match (A1 vs B1) → A1 wins.
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, b.Rounds[0], 1)
+	knockoutMatchID := b.Rounds[0][0].ID
+
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, knockoutMatchID, &state.MatchResult{
+			SideA:   "A1",
+			SideB:   "B1",
+			Winner:  "A1",
+			IpponsA: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return err
+	})
+	require.NoError(t, txErr)
+
+	// Attempt to re-score Pool A flipping the finisher (A2 beats A1).
+	var rescore error
+	txErr = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
+			SideA:   "A1",
+			SideB:   "A2",
+			Winner:  "A2",
+			IpponsB: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.Error(t, rescore, "flipping finisher of a scored knockout must be rejected")
+	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+
+	var dkErr *DownstreamKnockoutScoredError
+	require.ErrorAs(t, rescore, &dkErr)
+	assert.Equal(t, "Pool A", dkErr.Pool)
+	assert.Equal(t, "A1", dkErr.Finisher)
+	assert.Equal(t, knockoutMatchID, dkErr.MatchID)
+
+	// Verify the pool match was rolled back to prior state (A1 wins).
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var poolA0 *state.MatchResult
+	for i := range matches {
+		if matches[i].ID == "Pool A-0" {
+			poolA0 = &matches[i]
+			break
+		}
+	}
+	require.NotNil(t, poolA0)
+	assert.Equal(t, "A1", poolA0.Winner, "pool match result must have been rolled back to prior (A1 wins)")
+
+	// Verify the bracket was NOT modified (A1 is still the knockout match winner).
+	b, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "A1", b.Rounds[0][0].Winner, "knockout match winner must remain unchanged after rejected pool re-score")
+}
+
+// TestPoolRescore_FinisherFlip_KnockoutRunning_Rejected verifies the guard
+// also fires when the downstream bracket match is RUNNING (not yet completed).
+func TestPoolRescore_FinisherFlip_KnockoutRunning_Rejected(t *testing.T) {
+	eng, store, compID := saveMixedCompForGuardTest(t, 0)
+
+	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	// Mark the knockout match as RUNNING (not completed).
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	knockoutMatchID := b.Rounds[0][0].ID
+
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, knockoutMatchID, &state.MatchResult{
+			SideA:  "A1",
+			SideB:  "B1",
+			Status: state.MatchStatusRunning,
+		})
+		return err
+	})
+	require.NoError(t, txErr)
+
+	// Attempt re-score Pool A flipping the finisher.
+	var rescore error
+	txErr = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
+			SideA:   "A1",
+			SideB:   "A2",
+			Winner:  "A2",
+			IpponsB: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.Error(t, rescore)
+	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored, "running knockout leaf must also block a finisher flip")
+}
+
+// TestPoolRescore_NonMixedComp_GuardIsNoOp verifies the guard is skipped
+// entirely for standalone (non-mixed) competitions.
+func TestPoolRescore_NonMixedComp_GuardIsNoOp(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "league-guard-test"
+	createTestCompetition(t, store, compID, "league", 2)
+
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	// Re-score to flip winner — should succeed with no guard.
+	var rescore error
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Bob",
+			IpponsB: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return nil
+	})
+	require.NoError(t, txErr)
+	assert.NoError(t, rescore, "non-mixed comp must never trigger the downstream knockout guard")
+}
+
+// TestPoolRescore_TeamMixed_GuardFires verifies that the guard applies equally
+// to team-format mixed competitions (TeamSize > 0).
+func TestPoolRescore_TeamMixed_GuardFires(t *testing.T) {
+	eng, store, compID := saveMixedCompForGuardTest(t, 3 /* TeamSize */)
+
+	// Score Pool A and Pool B.
+	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+
+	// Resolve the bracket.
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	// Score the knockout leaf.
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	knockoutMatchID := b.Rounds[0][0].ID
+
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, knockoutMatchID, &state.MatchResult{
+			SideA:   "A1",
+			SideB:   "B1",
+			Winner:  "A1",
+			IpponsA: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return err
+	})
+	require.NoError(t, txErr)
+
+	// Attempt to flip Pool A finisher.
+	var rescore error
+	txErr = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
+			SideA:   "A1",
+			SideB:   "A2",
+			Winner:  "A2",
+			IpponsB: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		})
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.Error(t, rescore, "team mixed comp must also be protected by the downstream knockout guard")
+	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+}

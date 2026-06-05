@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -362,17 +363,41 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 	return e.CalculatePoolStandings(compId)
 }
 
+// poolStandingsLoader is the read surface computeStandingsFrom needs. Both
+// *state.Store and state.StoreTx satisfy it (identical signatures), so the
+// single scoring core below can run either against the cached/single-flight
+// store path (CalculatePoolStandings) or inside a write transaction (the
+// mp-e2k1 pool-rescore guard in scoring_tx.go), with NO duplicated formula.
+type poolStandingsLoader interface {
+	LoadCompetition(compID string) (*state.Competition, error)
+	LoadPools(compID string) ([]helper.Pool, error)
+	LoadPoolMatches(compID string) ([]state.MatchResult, error)
+}
+
+// computeStandings is the non-tx standings core. It delegates to the shared
+// computeStandingsFrom so the kendo scoring weights, tiebreaker/daihyosen
+// grouping, and override sort live in exactly ONE place.
 func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStanding, error) {
-	pools, err := e.store.LoadPools(compId)
+	return e.computeStandingsFrom(e.store, compId)
+}
+
+// computeStandingsFrom is the single source of truth for pool standings. It
+// reads pools/matches/competition through loader (so a transaction can pass a
+// StoreTx and see its just-applied write), and reads overrides via
+// e.store.LoadOverrides directly — overrides are read-only in the scoring path
+// and are not part of any transaction's mutation set, so no tx variant is
+// needed.
+func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string) (map[string][]state.PlayerStanding, error) {
+	pools, err := loader.LoadPools(compId)
 	if err != nil {
 		return nil, err
 	}
-	results, err := e.store.LoadPoolMatches(compId)
+	results, err := loader.LoadPoolMatches(compId)
 	if err != nil {
 		return nil, err
 	}
 
-	comp, _ := e.store.LoadCompetition(compId)
+	comp, _ := loader.LoadCompetition(compId)
 	isTeam := comp != nil && comp.TeamSize > 0
 
 	// Map match results by pool using poolNameFromMatchID so hyphenated pool

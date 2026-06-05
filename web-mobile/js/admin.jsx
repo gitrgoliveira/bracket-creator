@@ -328,27 +328,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
   };
 
-  const createPlayoff = async (sourceId) => {
-    let created;
-    try {
-      created = await window.API.createPlayoff(sourceId, password);
-    } catch (e) {
-      if (mountedRef.current) showToast(e.message, "error");
-      return;
-    }
-    // See addCompetition: refresh-failure merges `created` into local
-    // state so setView's navigation to the new playoff's ID finds it in
-    // t.competitions. Pre-fix, refresh failure left the caller's
-    // setView({kind:"competition", id: created.id, ...}) navigating to
-    // a comp that AdminApp's `t.competitions.find(cc => cc.id === view.id)`
-    // can't locate, producing the "Competition not found" empty state
-    // until the next refresh.
-    await refreshCompsAfterCreate(created, "Playoff create");
-    if (!mountedRef.current) return;
-    setView({ kind: "competition", id: created.id, section: "participants" });
-    showToast(`Playoff "${created.name}" created`);
-  };
-
   const startCompetition = async (cid) => {
     const c = t.competitions.find(cc => cc.id === cid);
     if (!c) return;
@@ -671,7 +650,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
       onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then(setAdminCompData).catch(err => console.error("refresh failed:", err))}
-      onCreatePlayoff={createPlayoff}
       onStartKnockout={startKnockout}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}

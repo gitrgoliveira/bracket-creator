@@ -10,7 +10,7 @@
 //      "pools" and all pool matches complete; hidden when pools are not done;
 //      hidden once status is "playoffs"; bracket becomes scoreable when preview=false
 
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 
 // ---------------------------------------------------------------------------
@@ -400,7 +400,6 @@ describe('AdminCompetition: Start knockout button (mp-turx)', () => {
     onOpenCompetition: vi.fn(),
     onUpdate: vi.fn(),
     onRefreshCompetition: vi.fn(),
-    onCreatePlayoff: vi.fn(),
     onMoveCourt: vi.fn(),
     onEditScore: vi.fn(),
     onLogout: vi.fn(),

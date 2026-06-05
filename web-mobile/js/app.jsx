@@ -75,6 +75,9 @@ function parsePath(path) {
     if (path === "/schedule") {
       return { mode: "viewer", viewerScreen: "schedule" };
     }
+    if (path === "/results") {
+      return { mode: "viewer", viewerScreen: "results" };
+    }
     // U1: /glossary — the kendo-term reference page (rendered by
     // GlossaryPage from glossary.jsx). Public, no auth required;
     // linked from viewer home as "Help / Glossary".
@@ -117,6 +120,7 @@ function pathFromState(m, vs, vcid, av) {
     if (vs === "schedule") return "/schedule";
     if (vs === "glossary") return "/glossary";
     if (vs === "reset") return "/reset";
+    if (vs === "results") return "/results";
     return "/";
 }
 
@@ -272,7 +276,7 @@ function App() {
   });
   const [authPrompt, setAuthPrompt] = useS(false);
   const [viewerCompId, setViewerCompId] = useS(initialRoute.viewerCompId || null);
-  const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset
+  const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset | results
   const [adminView, setAdminView] = useS(initialRoute.admin || { kind: "dashboard" });
   const [toast, setToast] = useS(null);
   // T063: SSE connection status, surfaced to display surfaces so the
@@ -849,6 +853,15 @@ function App() {
               }}
             />
           : <div className="loading">Loading…</div>
+      ) : viewerScreen === "results" ? (
+        // mp-koqh: public results summary — all competition placings.
+        window.AllWinnersView
+          ? <window.AllWinnersView
+              tournament={tournament}
+              onBack={() => setViewerScreen("home")}
+              tweaks={THEME}
+            />
+          : <div className="loading">Loading…</div>
       ) : (
         <window.ViewerHome
           tournament={tournament}
@@ -859,6 +872,7 @@ function App() {
             setViewerCompId(compId);
             setViewerScreen("register");
           }}
+          onOpenResults={() => setViewerScreen("results")}
         />
       )}
       {authPrompt && (

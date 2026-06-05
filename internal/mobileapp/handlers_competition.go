@@ -1321,25 +1321,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusOK)
 	})
 
-	// POST /competitions/:id/playoffs is DEPRECATED.
-	// Creating a separate playoffs competition is no longer needed; use
-	// POST /competitions/:id/start-knockout to run the knockout in-place
-	// inside the mixed competition itself. This route now returns HTTP 410
-	// Gone to signal the deprecation. Legacy separate-playoffs competitions
-	// that already exist can still be operated (StartCompetition's playoffs
-	// branch still resolves their SourceCompID), but new ones should not be
-	// created via this route.
-	//
-	// NOTE: StartCompetition for the FORMAT=playoffs + SourceCompID path
-	// remains fully functional for any already-existing separate playoffs
-	// competitions created before this deprecation (legacy back-compat).
-	r.POST("/competitions/:id/playoffs", func(c *gin.Context) {
-		c.JSON(http.StatusGone, gin.H{
-			"error": "creating a separate playoffs competition is deprecated; " +
-				"use POST /api/competitions/:id/start-knockout to run the knockout in place",
-		})
-	})
-
 	// POST /competitions/:id/start-knockout resolves pool winners into the
 	// mixed competition's own bracket and transitions it to "playoffs" status.
 	// This is the canonical way to start the knockout phase for a mixed

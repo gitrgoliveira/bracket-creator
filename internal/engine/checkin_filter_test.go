@@ -218,58 +218,6 @@ func TestStartCompetition_PlayoffsFormat_ExcludesNonCheckedIn(t *testing.T) {
 	assert.NotContains(t, names, "Eve", "non-checked-in player must be excluded")
 }
 
-// TestStartCompetition_PlayoffsFromSource_FinalistsNotExcluded is the critical
-// regression guard for mp-w7x GAP 1: a playoffs competition whose roster is
-// resolved from a source's pool winners must NOT have those finalists dropped.
-// resolvePoolWinners builds them with CheckedIn=false, so a filter placed after
-// resolution would empty the bracket. The filter must run on the (empty) disk
-// roster BEFORE resolution, leaving the finalists untouched.
-func TestStartCompetition_PlayoffsFromSource_FinalistsNotExcluded(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-
-	srcID := "src-mixed"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     srcID,
-		Name:   "Source Mixed",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusComplete,
-	}))
-	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
-		{Name: "Alice", Dojo: "DojoA"},
-		{Name: "Bob", Dojo: "DojoB"},
-	}))
-	require.NoError(t, store.SavePools(srcID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
-			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
-
-	playoffID := "src-mixed-playoffs"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:             playoffID,
-		Name:           "Source Mixed - Playoffs",
-		Kind:           "individual",
-		Format:         state.CompFormatPlayoffs,
-		SourceCompID:   srcID,
-		Courts:         []string{"A"},
-		StartTime:      "09:00",
-		Status:         "setup",
-		CheckInEnabled: true,
-	}))
-
-	require.NoError(t, eng.StartCompetition(playoffID))
-
-	bracket, err := store.LoadBracket(playoffID)
-	require.NoError(t, err)
-	names := bracketLeafNames(bracket)
-
-	assert.Len(t, names, 2, "both resolved finalists must seed the bracket despite CheckedIn=false")
-	assert.Contains(t, names, "Alice")
-	assert.Contains(t, names, "Bob")
-}
-
 // TestGenerateSwissRound_ExcludesNonCheckedIn is the regression guard for
 // mp-w7x GAP 2: the Swiss path reloads the roster from disk, so the filter
 // must live inside GenerateSwissRound, not only in runDrawPipeline.

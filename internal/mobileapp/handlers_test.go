@@ -1414,41 +1414,6 @@ func TestCompetitionHandlers_ConcurrentPOSTSameName(t *testing.T) {
 	}
 }
 
-// TestCreatePlayoff_RejectsNameCollision historically verified that POST
-// /competitions/:id/playoffs rejected name collisions. Since that endpoint
-// is now deprecated (returns HTTP 410 Gone), this test pins the 410 behavior
-// and verifies the pre-existing competition is untouched.
-func TestCreatePlayoff_RejectsNameCollision(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     "source",
-		Name:   "Source",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusPools,
-	}))
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           "manually-created",
-		Name:         "Source - Playoffs",
-		NumberPrefix: "PRESERVED",
-	}))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/source/playoffs", nil)
-	r.ServeHTTP(w, req)
-	// POST /playoffs is deprecated → 410 Gone (not 400).
-	assert.Equal(t, http.StatusGone, w.Code,
-		"POST /playoffs must return 410 Gone (deprecated)")
-
-	// Verify the manually-created comp's config is still untouched.
-	preserved, err := store.LoadCompetition("manually-created")
-	require.NoError(t, err)
-	require.NotNil(t, preserved)
-	assert.Equal(t, "PRESERVED", preserved.NumberPrefix,
-		"existing comp's config must be untouched")
-}
-
 // TestPUTCompetition_RejectsBodyIDMismatch pins the Copilot #1 fix:
 // PUT /api/competitions/comp-a with body `{id: "comp-b"}` previously
 // silently overrode body.ID = "comp-a" (the URL value) and saved the
@@ -1505,41 +1470,6 @@ func TestPOSTCompetition_RejectsExistingID(t *testing.T) {
 	require.NotNil(t, stored)
 	assert.Equal(t, "Existing", stored.Name, "existing name must be preserved")
 	assert.Equal(t, "PRESERVED", stored.NumberPrefix, "existing config must be preserved")
-}
-
-// TestPlayoff_RejectsDerivedIDCollision historically verified that POST
-// /competitions/:id/playoffs rejected ID collisions. Since that endpoint
-// is now deprecated (returns HTTP 410 Gone), this test pins the 410 behavior
-// and verifies any pre-existing competition is untouched.
-func TestPlayoff_RejectsDerivedIDCollision(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     "source",
-		Name:   "Source",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusPools,
-	}))
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           "source-playoffs",
-		Name:         "Unrelated Cup",
-		NumberPrefix: "PRESERVED",
-	}))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/source/playoffs", nil)
-	r.ServeHTTP(w, req)
-	// POST /playoffs is deprecated → 410 Gone.
-	assert.Equal(t, http.StatusGone, w.Code,
-		"POST /playoffs must return 410 Gone (deprecated)")
-
-	// Existing comp still untouched (no side effects from a 410 response).
-	stored, _ := store.LoadCompetition("source-playoffs")
-	require.NotNil(t, stored)
-	assert.Equal(t, "Unrelated Cup", stored.Name)
-	assert.Equal(t, "PRESERVED", stored.NumberPrefix)
 }
 
 // TestPOSTCompetition_RollbackOnSaveParticipantsFailure pins the K3

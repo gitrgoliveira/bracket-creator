@@ -2,11 +2,9 @@
 //
 // Covers:
 //   1. API.startKnockout client method (URL, method, password header, error handling)
-//   2. ViewerCompetition: new merged mixed comp renders as a single card (no cross-link)
-//      when no separate playoffs comp exists
-//   3. ViewerCompetition: legacy split still renders cross-link when a comp with
-//      sourceCompID is present in the tournament
-//   4. AdminCompetition: "Start knockout" button visible for mixed comp with status
+//   2. ViewerCompetition: mixed comp renders as a single card (no cross-link);
+//      Pools and Bracket tabs are present; Bracket works with preview and live bracket
+//   3. AdminCompetition: "Start knockout" button visible for mixed comp with status
 //      "pools" and all pool matches complete; hidden when pools are not done;
 //      hidden once status is "playoffs"; bracket becomes scoreable when preview=false
 
@@ -111,7 +109,7 @@ describe('API.startKnockout', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Suite 2 & 3: Viewer — single card vs legacy cross-link
+// Suite 2: Viewer — single-competition rendering for mixed comps
 // ---------------------------------------------------------------------------
 
 describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back-compat)', () => {
@@ -244,35 +242,6 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     expect(labels.some(l => l.includes('Bracket'))).toBe(true);
   });
 
-  it('BACK-COMPAT: still renders cross-link when a legacy playoffs comp references this comp via sourceCompID', () => {
-    const poolsComp = mkMixedComp();
-    const playoffsComp = {
-      id: 'playoffs-1',
-      name: 'Open Mixed - Playoffs',
-      sourceCompID: 'mixed-1',
-      status: 'setup',
-      format: 'playoffs',
-      kind: 'individual',
-      teamSize: 0,
-      courts: ['A'],
-      players: [],
-      startTime: '11:00',
-      poolWinners: 0,
-    };
-    const tree = runtime.mount(ViewerCompetition, {
-      tournament: { competitions: [poolsComp, playoffsComp] },
-      competition: poolsComp,
-      pools: samplePools,
-      poolMatches: [],
-      standings: [],
-      bracket: previewBracket,
-      onBack: () => {},
-      onSelectCompetition: vi.fn(),
-      tweaks: {},
-    });
-    const text = collectText(tree);
-    expect(text).toContain('View the playoffs bracket');
-  });
 });
 
 // ---------------------------------------------------------------------------

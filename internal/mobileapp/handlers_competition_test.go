@@ -1274,36 +1274,6 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
 }
 
-// TestPlayoff_CreatesSourceLinkWithEmptyRoster verifies that POST /playoffs
-// now returns HTTP 410 Gone, since creating a separate playoffs competition
-// is deprecated. Use POST /competitions/:id/start-knockout instead.
-//
-// Historical note: this endpoint used to create a linked playoff competition
-// with an empty roster (pool winners resolved at draw time). The new approach
-// runs the knockout in-place inside the mixed competition itself.
-func TestPlayoff_CreatesSourceLinkWithEmptyRoster(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	src := state.Competition{
-		ID:          "src",
-		Name:        "Source",
-		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
-		PoolSize:    3,
-		PoolWinners: 2,
-	}
-	require.NoError(t, store.SaveCompetition(&src))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/src/playoffs", nil)
-	r.ServeHTTP(w, req)
-	// POST /playoffs is deprecated and now returns HTTP 410 Gone.
-	assert.Equal(t, http.StatusGone, w.Code, "POST /playoffs must return 410 Gone (deprecated)")
-	assert.Contains(t, w.Body.String(), "deprecated")
-	assert.Contains(t, w.Body.String(), "start-knockout")
-}
-
 // TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure pins the
 // Copilot round-12 finding (#1): the transform used to flip
 // HasParticipantIDs=true BEFORE the post-transform SaveParticipants
@@ -1804,27 +1774,4 @@ func TestStartKnockoutHandler(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
-}
-
-// TestPlayoffsRouteDeprecated verifies that POST /competitions/:id/playoffs
-// now returns HTTP 410 Gone.
-func TestPlayoffsRouteDeprecated(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	// Create a mixed competition.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     "deprecated-src",
-		Name:   "Deprecated Source",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusComplete,
-	}))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/deprecated-src/playoffs", nil)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusGone, w.Code)
-	assert.Contains(t, w.Body.String(), "deprecated")
-	assert.Contains(t, w.Body.String(), "start-knockout")
 }

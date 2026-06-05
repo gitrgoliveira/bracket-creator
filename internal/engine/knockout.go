@@ -165,28 +165,17 @@ func (e *Engine) StartKnockout(compID string) error {
 	}
 
 	// Resolve pool winners from THIS competition's own pools (in-place).
-	// Identity preservation: carry ID and Number through so bracket match sides
-	// reference real participant UUIDs. Status check is pools (allowed for in-place).
-	resolvedPlayers, err := e.resolvePoolWinnersFromSource(compID, true)
+	// resolvePoolWinnersFromSource returns finalists in helper.FinalsSlotOrder —
+	// the SAME bracket-leaf order GenerateFinals uses for the placeholders above —
+	// so resolvedPlayers[i] is exactly the player for placeholders[i]'s slot.
+	// ID and Number are preserved so bracket match sides reference real
+	// participant UUIDs.
+	resolvedPlayers, err := e.resolvePoolWinnersFromSource(compID)
 	if err != nil {
 		return fmt.Errorf("resolving pool winners for knockout: %w", err)
 	}
 
-	// Build a mapping from placeholder label → real player, preserving order.
-	// GetPoolRanking maps global rank → player, and GetPoolRanking's rank index
-	// matches the order returned by resolvePoolWinnersFromSource (rank 1, 2, …, N).
-	//
-	// resolvePoolWinnersFromSource returns players in rank order:
-	//   rank 1 → Pool A-1st, rank 2 → Pool B-1st (or Pool A-2nd depending on layout),
-	// BUT the placeholder order from GenerateFinals uses its own interleaving.
-	// We must map each placeholder to its specific pool winner using GetPoolRanking
-	// individually.
-	//
-	// Key insight: GenerateFinals's placeholders are in the SAME order as the
-	// global rank sequence from GetPoolRanking: placeholder[i] corresponds to
-	// rank i+1. This is because resolvePoolWinnersFromSource iterates ranks
-	// 1..totalWinners and GenerateFinals produces the same interleaving.
-	// We verify this assertion by matching lengths.
+	// Sanity: the resolver and GenerateFinals must agree on slot count.
 	if len(resolvedPlayers) != len(placeholders) {
 		return validationErrorf("mismatch: %d placeholders but %d resolved winners", len(placeholders), len(resolvedPlayers))
 	}

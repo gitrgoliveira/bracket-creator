@@ -63,16 +63,14 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 // helper.GenerateFinals — the same labels the Excel Tree sheet uses — so the
 // operator can see, on the source competition, the knockout structure that the
 // pools feed (mp-9dz). The bracket is flagged Preview so the UI renders it
-// read-only: the live knockout is played in the separate playoffs competition
-// created via POST /competitions/:id/playoffs.
+// read-only: the live knockout phase is started via POST /competitions/:id/start-knockout.
 //
 // No-ops (returns nil without writing bracket.json) when there are no pools
 // (nothing to seed a tree from) or when helper.GenerateFinals returns an empty
-// list. PoolWinners <= 0 is coerced to 2 (mirroring resolvePoolWinners' default
-// used when the playoffs competition is started) rather than treated as
-// "skip" — a mixed source with the field unset still has a knockout to
-// preview, and matching resolvePoolWinners ensures the preview shape equals
-// what the operator will get when they click "Create playoff bracket".
+// list. PoolWinners <= 0 is coerced to 2 (mirroring resolvePoolWinnersFromSource's
+// default) rather than treated as "skip" — a mixed source with the field unset
+// still has a knockout to preview, and matching the resolver default ensures the
+// preview shape equals the live knockout bracket.
 func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil {
@@ -84,7 +82,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 
 	poolWinners := comp.PoolWinners
 	if poolWinners <= 0 {
-		poolWinners = 2 // mirror resolvePoolWinners' default — see doc comment
+		poolWinners = 2 // mirror resolvePoolWinnersFromSource's default — see doc comment
 	}
 
 	finals := helper.GenerateFinals(pools, poolWinners)

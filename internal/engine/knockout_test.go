@@ -258,6 +258,87 @@ func TestMaybeAutoCompletePools_LeagueFormat_Completes(t *testing.T) {
 	assert.Equal(t, state.CompStatusComplete, comp.Status)
 }
 
+// TestStartKnockout_CrossSeedOrder is the regression test for the seeding bug
+// where finalists were resolved in global-rank order ([A-1st, B-1st, A-2nd,
+// B-2nd]) and fed positionally to the bracket builder, which put the two pool
+// WINNERS into the same first-round match. With poolWinners=2 the cross-seed
+// order ([A-1st, B-2nd, A-2nd, B-1st]) differs from rank order, so this catches
+// the bug; the earlier poolWinners=1 SlotParity test could not. The live bracket
+// must match the preview's cross-seeding: pool winners on opposite ends, only
+// able to meet in the final.
+func TestStartKnockout_CrossSeedOrder(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "knockout-crossseed"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Cross Seed Test",
+		Kind:        "individual",
+		Format:      state.CompFormatMixed,
+		Status:      state.CompStatusPools,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		PoolWinners: 2,
+	}))
+
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "A3"}, {Name: "A4"},
+		{Name: "B1"}, {Name: "B2"}, {Name: "B3"}, {Name: "B4"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}, {Name: "A3"}, {Name: "A4"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}, {Name: "B3"}, {Name: "B4"}}},
+	}))
+
+	// Round-robin results giving distinct win counts (no ties → no tiebreakers):
+	// A1=3, A2=2, A3=1, A4=0 (and likewise for Pool B).
+	win := func(id, a, b, w string) state.MatchResult {
+		return state.MatchResult{ID: id, SideA: a, SideB: b, Winner: w, IpponsA: []string{"M"}, Status: state.MatchStatusCompleted}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		win("Pool A-0", "A1", "A2", "A1"), win("Pool A-1", "A1", "A3", "A1"), win("Pool A-2", "A1", "A4", "A1"),
+		win("Pool A-3", "A2", "A3", "A2"), win("Pool A-4", "A2", "A4", "A2"), win("Pool A-5", "A3", "A4", "A3"),
+		win("Pool B-0", "B1", "B2", "B1"), win("Pool B-1", "B1", "B3", "B1"), win("Pool B-2", "B1", "B4", "B1"),
+		win("Pool B-3", "B2", "B3", "B2"), win("Pool B-4", "B2", "B4", "B2"), win("Pool B-5", "B3", "B4", "B3"),
+	}))
+
+	// Preview bracket as generatePoolPreviewBracket would build it:
+	// GenerateFinals(pools, 2) = [A-1st, B-2nd, A-2nd, B-1st] → pairs
+	// (A-1st,B-2nd),(A-2nd,B-1st).
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Preview: true,
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-2nd", Status: state.MatchStatusScheduled},
+			{ID: "m-r1-1", SideA: "Pool A-2nd", SideB: "Pool B-1st", Status: state.MatchStatusScheduled},
+		}},
+	}))
+
+	require.NoError(t, eng.StartKnockout(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, bracket.Rounds[0], 2, "two first-round matches expected")
+
+	// sidesOf returns the {SideA,SideB} set of the match containing name.
+	matchOf := func(name string) (string, string) {
+		for _, m := range bracket.Rounds[0] {
+			if m.SideA == name || m.SideB == name {
+				return m.SideA, m.SideB
+			}
+		}
+		return "", ""
+	}
+
+	// Pool winners A1 and B1 must NOT meet in the first round (the bug put them
+	// in the same match). A1 cross-seeds against B's runner-up (B2); A2 against B1.
+	a1A, a1B := matchOf("A1")
+	assert.ElementsMatch(t, []string{"A1", "B2"}, []string{a1A, a1B},
+		"Pool A winner (A1) must face Pool B runner-up (B2), not Pool B winner")
+	a2A, a2B := matchOf("A2")
+	assert.ElementsMatch(t, []string{"A2", "B1"}, []string{a2A, a2B},
+		"Pool A runner-up (A2) must face Pool B winner (B1)")
+}
+
 // TestStartKnockout_BracketScoreableAfterStart verifies that after StartKnockout,
 // it is possible to record a match result in the bracket (Preview=false means
 // the scoring gate no longer blocks it).
@@ -439,60 +520,12 @@ func TestStartKnockout_UUIDAndNumberPreserved(t *testing.T) {
 		}},
 	}))
 
-	// resolvePoolWinnersFromSource with preserveIdentity=true should carry through UUID/Number.
-	resolved, err := eng.resolvePoolWinnersFromSource(compID, true)
+	// resolvePoolWinnersFromSource should carry through UUID/Number.
+	resolved, err := eng.resolvePoolWinnersFromSource(compID)
 	require.NoError(t, err)
 	require.Len(t, resolved, 1)
 	assert.Equal(t, "Alice", resolved[0].Name)
 	// UUID and Number must be preserved.
 	assert.Equal(t, "aaaaaaaa-0000-0000-0000-000000000001", resolved[0].ID)
 	assert.Equal(t, "1", resolved[0].Number)
-}
-
-// TestLegacySeparatePlayoffsStillWorks verifies that the legacy
-// StartCompetition playoffs path (with SourceCompID) still functions for
-// existing separate playoffs competitions after the refactor.
-func TestLegacySeparatePlayoffsStillWorks(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-
-	srcID := "src-legacy"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     srcID,
-		Name:   "Legacy Source",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusComplete,
-	}))
-	require.NoError(t, store.SaveParticipants(srcID, []domain.Player{
-		{Name: "Alice", Dojo: "DojoA"},
-		{Name: "Bob", Dojo: "DojoB"},
-	}))
-	require.NoError(t, store.SavePools(srcID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(srcID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
-			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
-
-	// Create a legacy separate playoffs competition.
-	playoffID := "legacy-playoffs"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           playoffID,
-		Name:         "Legacy - Playoffs",
-		Format:       state.CompFormatPlayoffs,
-		SourceCompID: srcID,
-		Courts:       []string{"A"},
-		StartTime:    "09:00",
-	}))
-
-	// StartCompetition must still work for the legacy path.
-	require.NoError(t, eng.StartCompetition(playoffID))
-
-	comp, err := store.LoadCompetition(playoffID)
-	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
-
-	bracket, err := store.LoadBracket(playoffID)
-	require.NoError(t, err)
-	assert.NotEmpty(t, bracket.Rounds)
 }

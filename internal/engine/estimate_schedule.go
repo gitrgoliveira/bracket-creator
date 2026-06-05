@@ -22,7 +22,7 @@ import (
 //     when comp.CheckInEnabled (opt-in: full roster when nobody checked in).
 //     - Source-linked playoffs (comp.SourceCompID != "" and comp has an
 //     empty roster): derive from the SOURCE competition's pool count ×
-//     SOURCE competition's PoolWinners (mirrors resolvePoolWinners/ranking.go).
+//     SOURCE competition's PoolWinners (mirrors resolvePoolWinnersFromSource/ranking.go).
 //     If the source has no pools yet (draw not generated), returns a zero
 //     ScheduleEstimate without an error — the estimate is unknown at that stage.
 //  4. Map comp.Format → helper.EstimateMatchCountsInput and call
@@ -104,8 +104,8 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 //
 // For source-linked playoffs (comp.SourceCompID != "" and roster is empty),
 // the participant count is derived from the SOURCE competition's pool count ×
-// SOURCE comp.PoolWinners. This mirrors resolvePoolWinners in ranking.go, which
-// uses len(pools) × winnersPerPool as the authoritative finalist count (not
+// SOURCE comp.PoolWinners. This mirrors resolvePoolWinnersFromSource in ranking.go,
+// which uses len(pools) × winnersPerPool as the authoritative finalist count (not
 // recomputed from participant count + pool size, because CreatePools may choose
 // a different pool count in "min" vs "max" mode).
 //
@@ -154,7 +154,7 @@ func (e *Engine) estimateParticipantCount(comp *state.Competition) (int, error) 
 //
 // Finding 2 fix: the winners-per-pool comes from the SOURCE competition's
 // PoolWinners field, not from the playoffs competition's PoolWinners. This
-// mirrors resolvePoolWinners in ranking.go:168 which uses srcComp.PoolWinners.
+// mirrors resolvePoolWinnersFromSource in ranking.go which uses srcComp.PoolWinners.
 //
 // It reads:
 //  1. The source competition config to get its PoolWinners (default 2 when ≤0).
@@ -183,7 +183,7 @@ func (e *Engine) estimateFinalistCount(srcCompID string) (int, error) {
 		// Source draw not generated yet — can't estimate.
 		return 0, nil
 	}
-	// Mirror resolvePoolWinners (ranking.go:168-171): use srcComp.PoolWinners,
+	// Mirror resolvePoolWinnersFromSource (ranking.go): use srcComp.PoolWinners,
 	// default 2 when ≤0.
 	winnersPerPool := srcComp.PoolWinners
 	if winnersPerPool <= 0 {

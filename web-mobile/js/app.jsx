@@ -791,14 +791,9 @@ function App() {
       )}
       {selectedCompData && viewerScreen !== "register" ? (
         <window.ViewerCompetition
-          // key on the competition id so switching comps (notably the
-          // mp-rrd pools<->playoffs cross-link, which calls
-          // onSelectCompetition without unmounting) remounts the
-          // component and resets its per-comp UI state (active tab,
-          // open match modal, bracket scroll target). Otherwise a tab
-          // that doesn't exist in the destination comp (e.g. "pools"
-          // when navigating to a playoffs comp) would leave the body
-          // rendering empty.
+          // key on the competition id so switching comps remounts the
+          // component and resets per-comp UI state (active tab, open
+          // match modal, bracket scroll target).
           key={selectedCompData.config.id}
           tournament={tournament}
           competition={selectedCompData.config}
@@ -807,7 +802,6 @@ function App() {
           standings={selectedCompData.standings}
           bracket={selectedCompData.bracket}
           onBack={() => setViewerCompId(null)}
-          onSelectCompetition={setViewerCompId}
           onAdminClick={requestAdmin}
           authed={authed}
           onEditCompetition={(id) => { setMode("admin"); setAdminView({ kind: "competition", id, section: "settings" }); }}

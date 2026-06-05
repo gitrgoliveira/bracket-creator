@@ -873,3 +873,44 @@ func TestHasStartedKnockoutMatchTx_ReportsMatchedFinisher(t *testing.T) {
 	assert.Empty(t, name)
 	assert.Empty(t, id)
 }
+
+// TestKnockoutRescore_NotGatedAsPoolMatch verifies the guard does not mistake a
+// knockout (bracket) match for a pool match. Bracket IDs ("m-rN-i") parse as a
+// pool via poolNameFromMatchID's trailing-"-digits" rule, so without the
+// IsPoolMatchID gate a KO re-score would run the pool-standings guard. Re-scoring
+// a KO match must succeed and never raise DownstreamKnockoutScoredError.
+// (Copilot review, PR #246.)
+func TestKnockoutRescore_NotGatedAsPoolMatch(t *testing.T) {
+	eng, store, compID := saveMixedCompForGuardTest(t, 0)
+
+	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	knockoutMatchID := b.Rounds[0][0].ID
+	require.False(t, IsPoolMatchID(knockoutMatchID), "precondition: KO match ID must not be a pool ID")
+
+	// Score the knockout match (A1 beats B1).
+	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, knockoutMatchID, &state.MatchResult{
+			SideA: "A1", SideB: "B1", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,
+		})
+		return err
+	}))
+
+	// RE-SCORE the same knockout match (flip to B1). The pool guard must not
+	// engage for a bracket match — the re-score is allowed.
+	var rescore error
+	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, knockoutMatchID, &state.MatchResult{
+			SideA: "A1", SideB: "B1", Winner: "B1", IpponsB: []string{"M"}, Status: state.MatchStatusCompleted,
+		})
+		return nil
+	}))
+	assert.NoError(t, rescore, "knockout re-score must not be gated by the pool re-score guard")
+	assert.NotErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+}

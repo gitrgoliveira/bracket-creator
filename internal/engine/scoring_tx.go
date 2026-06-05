@@ -262,7 +262,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			return nil, fmt.Errorf("mp-e2k1: load competition %s: %w", compID, compErr)
 		}
 		if comp != nil && comp.Format == state.CompFormatMixed {
-			if pn, ok := poolNameFromMatchID(matchID); ok {
+			// Only actual pool matches ("Pool X-…") can change pool finishers.
+			// Gate on IsPoolMatchID so a knockout re-score ("m-rN-i") — whose ID
+			// would otherwise parse as a pool via poolNameFromMatchID's trailing
+			// "-<digits>" rule — skips the standings pre-read entirely.
+			if pn, ok := poolNameFromMatchID(matchID); ok && IsPoolMatchID(matchID) {
 				poolRescoredName = pn
 				poolWinners = comp.EffectivePoolWinners()
 				// Fail closed: if we can't establish the pre-write finishers we

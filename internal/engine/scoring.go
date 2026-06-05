@@ -397,7 +397,14 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		return nil, err
 	}
 
-	comp, _ := loader.LoadCompetition(compId)
+	comp, err := loader.LoadCompetition(compId)
+	if err != nil {
+		// Propagate a genuine read/parse fault rather than silently proceeding
+		// with comp==nil, which would pick the wrong scoring mode (individual vs
+		// team) and undermine the tx guard's fail-closed intent. A genuinely
+		// absent competition maps to (nil, nil) and is left as individual mode.
+		return nil, fmt.Errorf("computeStandingsFrom: load competition %s: %w", compId, err)
+	}
 	isTeam := comp != nil && comp.TeamSize > 0
 
 	// Map match results by pool using poolNameFromMatchID so hyphenated pool

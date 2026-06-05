@@ -134,38 +134,15 @@ func parsePoolRank(rankStr string) int64 {
 	return pos
 }
 
-// FinalsSlotOrder returns, in bracket-leaf order, the (poolIndex, rankInPool)
-// of each qualifying finalist for a pools→knockout draw. Slot i of the returned
-// slice is the [poolIndex, rankIndex] (both 0-based) that occupies leaf i of the
-// finals bracket. This is the single source of truth for the cross-seed
-// interleaving used by both GenerateFinals (label rendering) and the engine's
-// in-place knockout resolution (StartKnockout), so the resolved bracket lands
-// players in exactly the slots the preview bracket previewed.
-func FinalsSlotOrder(numPools, poolWinners int) [][2]int {
-	if poolWinners <= 0 || numPools <= 0 {
-		return nil
-	}
-	slots := make([][2]int, 0, numPools*poolWinners)
-	round := -1
-	for i := 0; i < numPools*poolWinners; i++ {
-		poolPos := i % numPools
-		if poolPos == 0 && numPools%poolWinners == 0 {
-			round++
-		} else if round < 0 {
-			round = 0
-		}
-		pos := (i + round) % poolWinners
-		slots = append(slots, [2]int{poolPos, pos})
-	}
-	return slots
-}
-
 // GenerateFinals interleaves pool finalists so that when CreateBalancedTree
 // distributes them into bracket slots, the first-place finisher of one pool
 // is paired against the second-place finisher of another pool.
 //
-// The slot order comes from FinalsSlotOrder; this function renders each slot
-// as a "<PoolName>-<ordinal>" placeholder label.
+// The algorithm cycles through all pools, advancing a round counter every
+// time a full set of pools has been placed.  The position rank for each slot
+// is computed as (i + round) % poolWinners, which shifts the rank picked for
+// successive pools so that adjacent bracket slots always contain different
+// finishing positions.
 //
 // Example with 4 pools and 2 winners per pool:
 //
@@ -176,11 +153,26 @@ func GenerateFinals(pools []Pool, poolWinners int) []string {
 		return nil
 	}
 
-	slots := FinalsSlotOrder(len(pools), poolWinners)
-	matches := make([]string, 0, len(slots))
-	for _, s := range slots {
-		poolPos, pos := s[0], s[1]
-		matches = append(matches, fmt.Sprintf("%s-%s", pools[poolPos].PoolName, GetOrdinal(pos+1)))
+	finalists := make([][]string, len(pools))
+	for i := 0; i < len(pools); i++ {
+		for j := 0; j < poolWinners; j++ {
+			finalists[i] = append(finalists[i], fmt.Sprintf("%s-%s", pools[i].PoolName, GetOrdinal(j+1)))
+		}
+	}
+
+	matches := make([]string, 0, len(pools)*poolWinners)
+	round := -1
+	for i := 0; i < len(pools)*poolWinners; i++ {
+
+		poolPos := i % len(pools)
+
+		if poolPos == 0 && len(pools)%poolWinners == 0 {
+			round++
+		} else if round < 0 {
+			round = 0
+		}
+		pos := (i + round) % poolWinners
+		matches = append(matches, finalists[poolPos][pos])
 	}
 
 	return matches

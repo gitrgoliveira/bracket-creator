@@ -476,16 +476,17 @@ func TestStartKnockout_SlotParity(t *testing.T) {
 	assert.Contains(t, allSides, "Dave", "Pool B winner (Dave) must be in bracket")
 }
 
-// TestStartKnockout_UUIDAndNumberPreserved verifies that when GetPoolRanking
-// returns a player with a UUID and Number, those values are preserved in the
-// resolved roster (identity preservation flag = true).
-func TestStartKnockout_UUIDAndNumberPreserved(t *testing.T) {
+// TestStartKnockout_ResolvesByeWinnerField verifies that when a finalist draws
+// a bye (single-winner pool → 1 finalist → auto-advanced), the in-place resolver
+// replaces the placeholder in the bye match's SideA AND its Winner field, and
+// that the participant roster (UUID/Number) is left untouched by StartKnockout.
+func TestStartKnockout_ResolvesByeWinnerField(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "knockout-identity"
+	compID := "knockout-bye"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:          compID,
-		Name:        "Identity Preservation",
+		Name:        "Bye Winner Resolution",
 		Kind:        "individual",
 		Format:      state.CompFormatMixed,
 		Status:      state.CompStatusPools,
@@ -494,7 +495,6 @@ func TestStartKnockout_UUIDAndNumberPreserved(t *testing.T) {
 		PoolWinners: 1,
 	}))
 
-	// Participants carry real UUIDs and numbers.
 	players := []domain.Player{
 		{ID: "aaaaaaaa-0000-0000-0000-000000000001", Name: "Alice", Dojo: "DojoA", Number: "1"},
 		{ID: "aaaaaaaa-0000-0000-0000-000000000002", Name: "Bob", Dojo: "DojoB", Number: "2"},
@@ -512,7 +512,8 @@ func TestStartKnockout_UUIDAndNumberPreserved(t *testing.T) {
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 	}))
 
-	// Single pool needs only 1 winner; PoolWinners=1 → 1 slot.
+	// Single pool, 1 winner → the lone finalist drew a bye: SideA and Winner
+	// both hold the placeholder "Pool A-1st".
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Preview: true,
 		Rounds: [][]state.BracketMatch{{
@@ -520,12 +521,26 @@ func TestStartKnockout_UUIDAndNumberPreserved(t *testing.T) {
 		}},
 	}))
 
-	// resolvePoolWinnersFromSource should carry through UUID/Number.
-	resolved, err := eng.resolvePoolWinnersFromSource(compID)
+	require.NoError(t, eng.StartKnockout(compID))
+
+	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	require.Len(t, resolved, 1)
-	assert.Equal(t, "Alice", resolved[0].Name)
-	// UUID and Number must be preserved.
-	assert.Equal(t, "aaaaaaaa-0000-0000-0000-000000000001", resolved[0].ID)
-	assert.Equal(t, "1", resolved[0].Number)
+	require.False(t, bracket.Preview)
+	m := bracket.Rounds[0][0]
+	assert.Equal(t, "Alice", m.SideA, "bye match SideA placeholder must resolve to the player")
+	assert.Equal(t, "Alice", m.Winner, "bye match Winner placeholder must also resolve to the player")
+
+	// StartKnockout must NOT mutate the participant roster — the participant UUID
+	// is still present after the knockout starts. (Number lives in pools.csv, not
+	// participants.csv, so it is not asserted here.)
+	roster, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	var alice *domain.Player
+	for i := range roster {
+		if roster[i].Name == "Alice" {
+			alice = &roster[i]
+		}
+	}
+	require.NotNil(t, alice)
+	assert.Equal(t, "aaaaaaaa-0000-0000-0000-000000000001", alice.ID)
 }

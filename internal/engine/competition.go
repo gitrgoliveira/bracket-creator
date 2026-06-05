@@ -641,9 +641,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 		comp.Status = state.CompStatusDrawReady
 	default:
 		// A standalone playoffs competition (the only remaining playoffs case
-		// after the derived-playoffs path was removed in mp-turx) always uses
-		// standalone seeding — there is no pool-preview topology to mirror.
-		if err := e.generatePlayoffs(comp, players, seeds, false); err != nil {
+		// after the derived-playoffs path was removed in mp-turx) uses standalone
+		// seeding — there is no pool-preview topology to mirror.
+		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusDrawReady

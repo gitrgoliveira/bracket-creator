@@ -143,55 +143,44 @@ func (e *Engine) StartKnockout(compID string) error {
 		return validationErrorf("StartKnockout requires all pool matches to be complete for competition %s", compID)
 	}
 
-	// Load pools to determine the GenerateFinals leaf order.
-	pools, err := e.store.LoadPools(compID)
+	// Resolve the EXISTING preview bracket in place: replace each pool-origin
+	// placeholder ("Pool A-1st", …) with the real pool-standings finisher,
+	// preserving the bracket's topology (cross-seed interleaving, bye placement
+	// via ApplyPoolAdjustments, court/schedule assignment) EXACTLY as previewed.
+	// Resolving the persisted preview — rather than rebuilding from scratch —
+	// guarantees the live bracket matches the preview slot-for-slot and cannot
+	// drift from generatePoolPreviewBracket's seeding logic.
+	bracket, err := e.store.LoadBracket(compID)
 	if err != nil {
-		return fmt.Errorf("loading pools for knockout: %w", err)
+		return fmt.Errorf("loading preview bracket for knockout: %w", err)
 	}
-	if len(pools) == 0 {
-		return validationErrorf("competition %s has no pools to build knockout from", compID)
-	}
-
-	poolWinners := comp.PoolWinners
-	if poolWinners <= 0 {
-		poolWinners = 2
+	if bracket == nil || len(bracket.Rounds) == 0 {
+		return validationErrorf("competition %s has no preview bracket to resolve", compID)
 	}
 
-	// Generate the leaf placeholder labels in the same order the preview used.
-	// This gives us the ORDER of slots: "Pool A-1st", "Pool B-1st", "Pool A-2nd", …
-	placeholders := helper.GenerateFinals(pools, poolWinners)
-	if len(placeholders) == 0 {
-		return validationErrorf("competition %s GenerateFinals returned no leaves", compID)
-	}
-
-	// Resolve pool winners from THIS competition's own pools (in-place).
-	// resolvePoolWinnersFromSource returns finalists in helper.FinalsSlotOrder —
-	// the SAME bracket-leaf order GenerateFinals uses for the placeholders above —
-	// so resolvedPlayers[i] is exactly the player for placeholders[i]'s slot.
-	// ID and Number are preserved so bracket match sides reference real
-	// participant UUIDs.
-	resolvedPlayers, err := e.resolvePoolWinnersFromSource(compID)
+	resolver, err := e.buildFinalistResolver(comp)
 	if err != nil {
-		return fmt.Errorf("resolving pool winners for knockout: %w", err)
+		return err
 	}
 
-	// Sanity: the resolver and GenerateFinals must agree on slot count.
-	if len(resolvedPlayers) != len(placeholders) {
-		return validationErrorf("mismatch: %d placeholders but %d resolved winners", len(placeholders), len(resolvedPlayers))
-	}
-
-	// Replace placeholders with real player names — same slot order as the preview.
-	realLeaves := make([]string, len(placeholders))
-	for i, p := range resolvedPlayers {
-		realLeaves[i] = p.Name
-	}
-
-	// Build the live bracket using the same builder the preview used.
-	// This produces a structurally identical bracket with the placeholder names
-	// replaced by real player names.
-	bracket, err := e.buildBracketFromLeaves(comp, realLeaves)
-	if err != nil {
-		return fmt.Errorf("building knockout bracket: %w", err)
+	// Replace placeholder labels across ALL rounds. Round 0 holds the pool-origin
+	// placeholders; a finalist that drew a bye is auto-advanced, so its placeholder
+	// also appears as a later round's side AND as the bye match's Winner — resolve
+	// all three fields. "Winner of rX-mY" and "" (bye) values are not in the
+	// resolver and are left untouched.
+	for ri := range bracket.Rounds {
+		for mi := range bracket.Rounds[ri] {
+			m := &bracket.Rounds[ri][mi]
+			if name, ok := resolver[m.SideA]; ok {
+				m.SideA = name
+			}
+			if name, ok := resolver[m.SideB]; ok {
+				m.SideB = name
+			}
+			if name, ok := resolver[m.Winner]; ok {
+				m.Winner = name
+			}
+		}
 	}
 	bracket.Preview = false
 
@@ -221,4 +210,41 @@ func (e *Engine) StartKnockout(compID string) error {
 
 	// Generate the bracket schedule now that the bracket is live.
 	return e.GenerateSchedule(compID)
+}
+
+// buildFinalistResolver maps each pool-origin finalist placeholder label
+// ("<PoolName>-<ordinal>", e.g. "Pool A-1st") to the real participant name that
+// finished at that pool rank, using the competition's OWN pool standings. The
+// label format mirrors helper.GenerateFinals exactly so the keys match the
+// placeholders in the preview bracket. Fails fast if any pool has fewer ranked
+// finishers than PoolWinners (pool results incomplete), so an unresolved
+// "Pool A-2nd" placeholder can never leak into the live bracket as a player name.
+func (e *Engine) buildFinalistResolver(comp *state.Competition) (map[string]string, error) {
+	pools, err := e.store.LoadPools(comp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("loading pools for %q: %w", comp.ID, err)
+	}
+	if len(pools) == 0 {
+		return nil, validationErrorf("competition %s has no pools to resolve finalists from", comp.ID)
+	}
+	poolWinners := comp.PoolWinners
+	if poolWinners <= 0 {
+		poolWinners = 2
+	}
+	standings, err := e.CalculatePoolStandings(comp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("calculating pool standings for %q: %w", comp.ID, err)
+	}
+	resolver := make(map[string]string, len(pools)*poolWinners)
+	for _, pool := range pools {
+		ps := standings[pool.PoolName]
+		if len(ps) < poolWinners {
+			return nil, validationErrorf("pool %q has only %d ranked finishers, need %d", pool.PoolName, len(ps), poolWinners)
+		}
+		for rank := 1; rank <= poolWinners; rank++ {
+			key := fmt.Sprintf("%s-%s", pool.PoolName, helper.GetOrdinal(rank))
+			resolver[key] = ps[rank-1].Player.Name
+		}
+	}
+	return resolver, nil
 }

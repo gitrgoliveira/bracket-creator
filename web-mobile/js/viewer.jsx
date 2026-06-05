@@ -1769,7 +1769,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             // actual winners; when the final has no winner yet, deriveAwards
             // explicitly falls through to the standings-based path rather
             // than short-circuiting.
-            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} linkedPlayoffComp={linkedComp && linkedComp.role === "playoffs" ? linkedComp.comp : null} allComps={(tournament && tournament.competitions) || []} />
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} linkedPlayoffComp={null} allComps={(tournament && tournament.competitions) || []} />
           )}
         </div>
       </div>

@@ -81,11 +81,13 @@ function undecidedBracket() {
 }
 
 describe('resolveCompetitionAwards', () => {
-  // ── mixed → final (two 3rds) ──────────────────────────────────────────────
-  it('mixed comp with decided linked-playoffs final → state "final", podium has two 3rds', async () => {
+  // Single-competition mixed model (mp-turx): the knockout fills in place on the
+  // mixed comp's OWN bracket — there is no linked "- Playoffs" comp to fetch.
+
+  // ── mixed → final (two 3rds), derived from the comp's OWN bracket ─────────
+  it('mixed comp with decided OWN-bracket final → state "final", podium has two 3rds', async () => {
     const mixedComp = { id: 'mixed-1', format: 'mixed' };
-    const playoffComp = { id: 'po-1', format: 'playoffs', sourceCompID: 'mixed-1' };
-    const allComps = [mixedComp, playoffComp];
+    const allComps = [mixedComp]; // no linked playoffs comp in the single-comp model
     const bracket = decidedBracket();
     const fetchers = {
       fetchCompetitionDetails: vi.fn().mockResolvedValue({ bracket, players: [] }),
@@ -100,15 +102,14 @@ describe('resolveCompetitionAwards', () => {
     expect(result.podium[1]).toMatchObject({ place: 2, name: 'Carol' });
     expect(result.podium[2]).toMatchObject({ place: 3 });
     expect(result.podium[3]).toMatchObject({ place: 3 });
-    // Verify it fetches the linked PLAYOFF comp, not the mixed comp itself
-    expect(fetchers.fetchCompetitionDetails).toHaveBeenCalledWith('po-1');
+    // Derives from the mixed comp's OWN bracket — fetches its own id, NOT a linked comp.
+    expect(fetchers.fetchCompetitionDetails).toHaveBeenCalledWith('mixed-1');
   });
 
-  // ── mixed → in-progress (knockout not decided) ────────────────────────────
-  it('mixed comp with undecided linked-playoffs final → state "in-progress", podium []', async () => {
+  // ── mixed → in-progress (own knockout not decided) ────────────────────────
+  it('mixed comp with undecided OWN-bracket final → state "in-progress", podium []', async () => {
     const mixedComp = { id: 'mixed-2', format: 'mixed' };
-    const playoffComp = { id: 'po-2', format: 'playoffs', sourceCompID: 'mixed-2' };
-    const allComps = [mixedComp, playoffComp];
+    const allComps = [mixedComp];
     const bracket = undecidedBracket();
     const fetchers = {
       fetchCompetitionDetails: vi.fn().mockResolvedValue({ bracket, players: [] }),
@@ -119,14 +120,17 @@ describe('resolveCompetitionAwards', () => {
 
     expect(result.state).toBe('in-progress');
     expect(result.podium).toEqual([]);
+    expect(fetchers.fetchCompetitionDetails).toHaveBeenCalledWith('mixed-2');
   });
 
-  // ── mixed → in-progress (no linked playoff comp yet) ─────────────────────
-  it('mixed comp with no linked playoffs comp → state "in-progress", podium []', async () => {
+  // ── mixed → in-progress (knockout still has pool placeholders) ────────────
+  it('mixed comp whose bracket is still pool placeholders → state "in-progress"', async () => {
     const mixedComp = { id: 'mixed-3', format: 'mixed' };
-    const allComps = [mixedComp]; // no playoffs comp yet
+    const allComps = [mixedComp];
+    // Bracket exists but the final is a forward reference (pools still feeding in).
+    const bracket = { rounds: [[{ sideA: 'Pool A-1st', sideB: 'Pool B-1st', winner: null }]] };
     const fetchers = {
-      fetchCompetitionDetails: vi.fn(),
+      fetchCompetitionDetails: vi.fn().mockResolvedValue({ bracket, players: [] }),
       swissStandings: null,
     };
 
@@ -134,7 +138,6 @@ describe('resolveCompetitionAwards', () => {
 
     expect(result.state).toBe('in-progress');
     expect(result.podium).toEqual([]);
-    expect(fetchers.fetchCompetitionDetails).not.toHaveBeenCalled();
   });
 
   // ── standalone playoffs → final ───────────────────────────────────────────

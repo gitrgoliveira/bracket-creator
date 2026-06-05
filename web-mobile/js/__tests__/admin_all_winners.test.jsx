@@ -136,10 +136,9 @@ describe('buildAllWinners', () => {
     expect(mixedResult.podium[3].place).toBe(3);
   });
 
-  it('mixed comp whose linked playoffs final is undecided → state "in-progress", podium []', async () => {
-    const mixedComp = { id: 'mixed-2', name: 'Pools+KO', format: 'mixed', status: 'completed' };
-    const playoffComp = { id: 'po-2', name: 'Playoffs', format: 'playoffs', sourceCompID: 'mixed-2', status: 'playoffs' };
-    const allComps = [mixedComp, playoffComp];
+  it('mixed comp whose OWN knockout final is undecided → state "in-progress", podium []', async () => {
+    const mixedComp = { id: 'mixed-2', name: 'Pools+KO', format: 'mixed', status: 'playoffs' };
+    const allComps = [mixedComp];
     // undecided final
     const bracket = {
       rounds: [

@@ -291,12 +291,13 @@ type Competition struct {
 	// SourceCompID links a playoffs competition back to the mixed
 	// (Pools + Knockout) competition that this competition was seeded from.
 	// NEW competitions never set this field — the split-playoffs flow was
-	// replaced by in-place StartKnockout (mp-turx). The field is retained for
-	// YAML round-trip compatibility with existing tournament data files, and
-	// engine/estimate_schedule.go still reads it on the legacy code path that
-	// estimates source-linked playoffs that may already exist on disk. That
-	// legacy read is harmless for new comps (the field is always empty) and is
-	// tracked for removal in bead mp-c3pf.
+	// replaced by a single mixed competition whose knockout bracket fills in
+	// incrementally as pools finish (engine.ResolveQualifiedPools, mp-turx).
+	// The field is retained for YAML round-trip compatibility with existing
+	// tournament data files, and engine/estimate_schedule.go still reads it on
+	// the legacy code path that estimates source-linked playoffs that may
+	// already exist on disk. That legacy read is harmless for new comps (the
+	// field is always empty) and is tracked for removal in bead mp-c3pf.
 	SourceCompID         string `yaml:"source_comp_id,omitempty" json:"sourceCompID,omitempty"`
 	PoolMatchDuration    int    `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
 	PlayoffMatchDuration int    `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`

@@ -13,8 +13,9 @@ import (
 // (direct-elimination) playoffs competition. StandardSeeding → CreateBalancedTree
 // → TreeToLeafArray mirrors the Excel create-playoffs path exactly (mp-5ng7);
 // the unbalanced tree's structural byes are embedded as "" slots in the pow2
-// array. (The derived-from-pools knockout is handled in place by StartKnockout,
-// not here.)
+// array. (A mixed competition's pool-fed knockout is NOT built here — it is the
+// preview bracket from generatePoolPreviewBracket, filled in by
+// ResolveQualifiedPools as each pool finishes.)
 func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.

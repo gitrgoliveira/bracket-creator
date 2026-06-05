@@ -2974,12 +2974,14 @@ function bracketHasDecidedFinal(bracket) {
 }
 
 // resolveCompetitionAwards: the single source of truth for a competition's
-// podium. Handles the mixed→linked-playoffs rule so pools+knockout always
-// resolves to the KNOCKOUT podium (1/2/3/3), never pool standings.
+// podium. Mixed (Pools + Knockout) is a single competition whose knockout fills
+// in place, so its podium is derived from its OWN bracket (the KNOCKOUT result,
+// 1/2/3/3 — never pool standings) once the final is decided.
 // Returns { state, podium } where state is one of:
 //   'final'       — podium is the final result
 //   'in-progress' — knockout not yet decided (podium [])
-//   'skip'        — a linked playoffs shell; represented by its mixed parent
+//   'skip'        — a LEGACY linked playoffs shell (sourceCompID set); its podium
+//                   is represented by its mixed parent. New data never hits this.
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 async function resolveCompetitionAwards(comp, allComps, fetchers) {
   const fmt = comp && comp.format;
@@ -2988,20 +2990,17 @@ async function resolveCompetitionAwards(comp, allComps, fetchers) {
     (players || []).forEach((p) => { if (p && p.name) m.set(p.name, p); });
     return m;
   };
-  if (fmt === "mixed") {
-    const matchingPlayoffs = (allComps || []).filter((p) => p && p.sourceCompID === comp.id);
-    if (matchingPlayoffs.length !== 1) return { state: "in-progress", podium: [] };
-    const playoff = matchingPlayoffs[0];
-    const pd = await fetchers.fetchCompetitionDetails(playoff.id);
-    if (bracketHasDecidedFinal(pd.bracket)) {
-      return { state: "final", podium: deriveAwards(pd.bracket, null, null, ntpFrom(pd.players)) };
-    }
-    return { state: "in-progress", podium: [] };
-  }
   if (fmt === "playoffs" && comp.sourceCompID) {
+    // Legacy split-model shell (a "- Playoffs" comp seeded from a mixed parent);
+    // represented by its parent, so skip to avoid double-listing. New data never
+    // sets sourceCompID.
     return { state: "skip", podium: [] };
   }
-  if (fmt === "playoffs") {
+  if (fmt === "mixed" || fmt === "playoffs") {
+    // Mixed is now a SINGLE competition: its knockout bracket fills in place as
+    // pools finish (no separate "- Playoffs" comp). Both mixed and standalone
+    // playoffs derive their podium from their OWN bracket once the final is
+    // decided; until then the knockout is still in progress.
     const d = await fetchers.fetchCompetitionDetails(comp.id);
     if (bracketHasDecidedFinal(d.bracket)) {
       return { state: "final", podium: deriveAwards(d.bracket, null, null, ntpFrom(d.players)) };

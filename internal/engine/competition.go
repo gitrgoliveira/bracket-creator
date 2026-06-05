@@ -52,25 +52,24 @@ const (
 	AutoCompletePoolsResolved AutoCompleteOutcome = 4
 )
 
-// MaybeAutoCompletePools advances a competition past its pool phase when every
-// pool match is recorded as completed:
+// MaybeAutoCompletePools advances a competition past its pool phase after a pool
+// score:
 //
-//   - League format → transitions to CompStatusComplete.
-//   - Mixed format → auto-starts the in-place knockout (StartKnockout), moving
-//     the competition to CompStatusPlayoffs with a live, scoreable bracket.
-//     Operators no longer have to click a separate "Start knockout" button on
-//     the happy path; the bracket simply lights up after the final pool match
-//     is scored. (The manual /api/competitions/:id/start-knockout endpoint
-//     remains as an operator-override / recovery path.)
+//   - League format → transitions to CompStatusComplete once every pool match
+//     is recorded as completed.
+//   - Mixed format → delegates to advanceMixedPools, which seeds each COMPLETED
+//     pool's finishers into the in-place knockout bracket incrementally (no
+//     separate playoffs competition, no manual "start knockout" step), and flips
+//     the competition to CompStatusPlayoffs once the LAST pool has been seeded.
+//     Knockout matches become scoreable per-match as their feeder pools finish —
+//     there is no wait for the whole pool phase.
 //
-// The function is a no-op for any other format or status, or when at least
-// one pool match is still scheduled/running.
+// The function is a no-op for any other format or status.
 //
-// When all regular pool matches are done but tied competitors remain,
-// supplementary ippon-shobu tiebreaker matches are injected and
-// AutoCompleteTiebreakInjected is returned instead of transitioning — for
-// either format. Auto-start only fires once the tiebreaker matches have been
-// scored and pools are truly clean.
+// For league, when all regular pool matches are done but tied competitors
+// remain, supplementary ippon-shobu tiebreaker matches are injected and
+// AutoCompleteTiebreakInjected is returned. (Mixed handles tie-break injection
+// per-pool inside advanceMixedPools.)
 //
 // Atomic: the league status flip runs inside state.Store.UpdateCompetitionChanged.
 // The mixed path delegates to advanceMixedPools, which takes its own per-comp

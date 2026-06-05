@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -16,6 +15,12 @@ import (
 // or team name can never collide with this shape.
 var poolFinalistPlaceholderRE = regexp.MustCompile(`^Pool .+-\d+(st|nd|rd|th)$`)
 
+// winnerOfPlaceholderRE matches the EXACT next-round feeder placeholder the
+// engine emits (buildBracketFromLeaves: "Winner of r<d>-m<i>"). Anchored so a
+// real competitor named e.g. "Winner of the 2025 Cup" is NOT mistaken for an
+// unresolved feeder (which would make their match unscoreable).
+var winnerOfPlaceholderRE = regexp.MustCompile(`^Winner of r\d+-m\d+$`)
+
 // isUnresolvedBracketSide reports whether a bracket side is still a forward
 // reference rather than a resolved competitor: an empty structural bye slot, a
 // "Winner of rX-mY" feeder, or a pool-origin finalist placeholder that has not
@@ -24,7 +29,7 @@ func isUnresolvedBracketSide(side string) bool {
 	if side == "" {
 		return true
 	}
-	if strings.HasPrefix(side, "Winner of ") {
+	if winnerOfPlaceholderRE.MatchString(side) {
 		return true
 	}
 	return poolFinalistPlaceholderRE.MatchString(side)
@@ -87,10 +92,12 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 		return nil, err
 	}
 
+	playerCount := make(map[string]int, len(pools))
 	done := make(map[string]bool, len(pools))
 	seen := make(map[string]bool, len(pools))
 	for _, p := range pools {
 		done[p.PoolName] = true // optimistic; cleared below on any incomplete match
+		playerCount[p.PoolName] = len(p.Players)
 	}
 	for _, m := range matches {
 		pn, ok := poolNameFromMatchID(m.ID)
@@ -108,10 +115,16 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 			}
 		}
 	}
-	// A pool with zero matches on disk is not "complete" (nothing has run).
+	// A pool with NO matches on disk is "complete" ONLY when it has exactly one
+	// participant: round-robin (and partial) match generation skips pools of size
+	// 0/1, so a lone qualifier legitimately produces zero matches and is already
+	// decided (they are the pool's 1st place). A 0-participant pool, or a ≥2-player
+	// pool with no matches yet (draw not generated / mid-generation), is NOT
+	// complete — otherwise the mixed comp could get stuck in `pools` forever (a
+	// single-competitor pool's placeholder would never resolve).
 	for pn := range done {
 		if !seen[pn] {
-			done[pn] = false
+			done[pn] = playerCount[pn] == 1
 		}
 	}
 

@@ -111,6 +111,40 @@ func TestResolveQualifiedPools_Incremental(t *testing.T) {
 	assert.False(t, b.Preview, "Preview flag must be cleared once the bracket is seeded")
 }
 
+// TestResolveQualifiedPools_LonePoolNoMatches verifies that a pool with exactly
+// one participant (round-robin generates ZERO matches for it) is treated as
+// complete, so its lone finisher is seeded and the comp does not get stuck in
+// `pools`. Scenario: 3 participants, PoolSize=2, max mode → Pool A (2 players,
+// 1 match) + Pool B (1 player, 0 matches), poolWinners=1.
+func TestResolveQualifiedPools_LonePoolNoMatches(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "lone-pool"
+
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}}}, // lone qualifier, no matches
+	}
+	saveMixedScaffold(t, store, compID, pools, 1)
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"},
+	}))
+	// Only Pool A has a match; Pool B has none (size 1).
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	assert.True(t, allResolved, "a 1-participant pool (zero matches) must count as complete so the comp isn't stuck")
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.False(t, bracketHasPoolPlaceholders(b), "both A1 (Pool A 1st) and B1 (lone Pool B) must be seeded")
+	sides := bracketSides(b)
+	assert.Contains(t, sides, "A1")
+	assert.Contains(t, sides, "B1")
+}
+
 // TestResolveQualifiedPools_NonMixedNoOp verifies the resolver is a no-op for
 // competitions that have no pool placeholders (standalone playoffs / league).
 func TestResolveQualifiedPools_NonMixedNoOp(t *testing.T) {

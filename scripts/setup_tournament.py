@@ -242,7 +242,11 @@ def score_all_matches(comp_id):
         # iteration means newly-seeded knockout matches are picked up as pools
         # complete.
         def _resolved(side):
-            return bool(side) and not side.startswith("Winner of") and not re.match(r'^Pool .+-\d+(st|nd|rd|th)$', side)
+            # Exact placeholder patterns only (mirrors engine isUnresolvedBracketSide):
+            # a real competitor named "Winner of …" must not be treated as a feeder.
+            return (bool(side)
+                    and not re.match(r'^Winner of r\d+-m\d+$', side)
+                    and not re.match(r'^Pool .+-\d+(st|nd|rd|th)$', side))
         if bracket and 'rounds' in bracket:
             for round_matches in bracket['rounds']:
                 for m in round_matches:

@@ -44,13 +44,17 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 	return e.store.SaveBracket(comp.ID, bracket)
 }
 
-// generatePoolPreviewBracket builds a PREVIEW elimination bracket for a mixed
-// (Pools + Knockout) competition at draw time. Its leaves are pool-origin
-// placeholders ("Pool A 1st", "Pool B 2nd", …) produced by
-// helper.GenerateFinals — the same labels the Excel Tree sheet uses — so the
-// operator can see, on the source competition, the knockout structure that the
-// pools feed (mp-9dz). The bracket is flagged Preview so the UI renders it
-// read-only: the live knockout phase is started via POST /competitions/:id/start-knockout.
+// generatePoolPreviewBracket builds the in-place knockout bracket for a mixed
+// (Pools + Knockout) competition at draw time. Its leaves start as pool-origin
+// placeholders ("Pool A-1st", "Pool B-2nd", …) produced by helper.GenerateFinals
+// — the same hyphenated labels the Excel Tree sheet uses — and the bracket is
+// scheduled here so knockout matches have court/time slots from the start. As
+// each pool finishes, ResolveQualifiedPools replaces that pool's placeholders
+// with the real finishers IN PLACE (no separate playoffs competition, no manual
+// start step); a knockout match becomes scoreable once both its sides resolve.
+// The Preview flag is set here and cleared by ResolveQualifiedPools on the first
+// seeding; scoring playability is per-match (bracketMatchPlayable), not gated on
+// this flag.
 //
 // No-ops (returns nil without writing bracket.json) when there are no pools
 // (nothing to seed a tree from) or when helper.GenerateFinals returns an empty

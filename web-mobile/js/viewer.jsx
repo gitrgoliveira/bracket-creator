@@ -655,8 +655,6 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   }, [comps, t.date]);
   const dates = Object.keys(compsByDate).sort(compareDmy);
 
-  // Every competition renders as its own standalone entry — the old split model
-  // (sourceCompID pairing) is gone; mixed comps are now a single competition.
   const displayEntriesByDate = useMemo(() => {
     const result = {};
     Object.keys(compsByDate).forEach(d => {
@@ -2981,22 +2979,16 @@ function bracketHasDecidedFinal(bracket) {
 // Returns { state, podium } where state is one of:
 //   'final'       — podium is the final result
 //   'in-progress' — knockout not yet decided (podium [])
-//   'skip'        — a LEGACY linked playoffs shell (sourceCompID set); its podium
-//                   is represented by its mixed parent. New data never hits this.
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
-async function resolveCompetitionAwards(comp, allComps, fetchers) {
+// NOTE: _allComps is vestigial (was used by the removed sourceCompID skip
+// branch) — tracked for removal in bead mp-i385.
+async function resolveCompetitionAwards(comp, _allComps, fetchers) {
   const fmt = comp && comp.format;
   const ntpFrom = (players) => {
     const m = new Map();
     (players || []).forEach((p) => { if (p && p.name) m.set(p.name, p); });
     return m;
   };
-  if (fmt === "playoffs" && comp.sourceCompID) {
-    // Legacy split-model shell (a "- Playoffs" comp seeded from a mixed parent);
-    // represented by its parent, so skip to avoid double-listing. New data never
-    // sets sourceCompID.
-    return { state: "skip", podium: [] };
-  }
   if (fmt === "mixed" || fmt === "playoffs") {
     // Mixed is now a SINGLE competition: its knockout bracket fills in place as
     // pools finish (no separate "- Playoffs" comp). Both mixed and standalone
@@ -3061,8 +3053,6 @@ function AwardsView({ c, bracket, standings, pools, players, allComps }) {
     }
     let cancelled = false;
     const fetchers = { fetchCompetitionDetails: window.API.fetchCompetitionDetails, swissStandings: null };
-    // Mixed awards derive from the comp's OWN bracket (single-competition model);
-    // allComps is only consulted for the legacy sourceCompID skip branch.
     resolveCompetitionAwards(c, allComps || [], fetchers)
       .then(({ state, podium }) => {
         if (!cancelled) setKoAwards({ state, awards: podium });

@@ -142,7 +142,7 @@ describe('resolveCompetitionAwards', () => {
 
   // ── standalone playoffs → final ───────────────────────────────────────────
   it('standalone playoffs comp with decided final → state "final", podium has two 3rds', async () => {
-    const comp = { id: 'ko-1', format: 'playoffs' }; // no sourceCompID
+    const comp = { id: 'ko-1', format: 'playoffs' };
     const allComps = [comp];
     const bracket = decidedBracket();
     const fetchers = {
@@ -157,22 +157,6 @@ describe('resolveCompetitionAwards', () => {
     expect(result.podium[0]).toMatchObject({ place: 1, name: 'Alice' });
     expect(result.podium[2]).toMatchObject({ place: 3 });
     expect(result.podium[3]).toMatchObject({ place: 3 });
-  });
-
-  // ── linked playoffs shell → skip ──────────────────────────────────────────
-  it('playoffs comp with sourceCompID → state "skip", podium []', async () => {
-    const comp = { id: 'po-99', format: 'playoffs', sourceCompID: 'mixed-99' };
-    const allComps = [comp];
-    const fetchers = {
-      fetchCompetitionDetails: vi.fn(),
-      swissStandings: null,
-    };
-
-    const result = await resolveCompetitionAwards(comp, allComps, fetchers);
-
-    expect(result.state).toBe('skip');
-    expect(result.podium).toEqual([]);
-    expect(fetchers.fetchCompetitionDetails).not.toHaveBeenCalled();
   });
 
   // ── league (standings-based) → final ─────────────────────────────────────

@@ -1770,7 +1770,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             // actual winners; when the final has no winner yet, deriveAwards
             // explicitly falls through to the standings-based path rather
             // than short-circuiting.
-            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} linkedPlayoffComp={null} allComps={(tournament && tournament.competitions) || []} />
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} allComps={(tournament && tournament.competitions) || []} />
           )}
         </div>
       </div>
@@ -3023,7 +3023,7 @@ const PLACE_STYLE = {
   3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
 };
 
-function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, allComps }) {
+function AwardsView({ c, bracket, standings, pools, players, allComps }) {
   const containerRef = useRefV(null);
   const [isFs, setIsFs] = useState(false);
   const isLeague = c?.format === "league";
@@ -3060,9 +3060,10 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, 
       return;
     }
     let cancelled = false;
-    const syntheticAllComps = allComps && allComps.length > 0 ? allComps : (linkedPlayoffComp ? [linkedPlayoffComp] : []);
     const fetchers = { fetchCompetitionDetails: window.API.fetchCompetitionDetails, swissStandings: null };
-    resolveCompetitionAwards(c, syntheticAllComps, fetchers)
+    // Mixed awards derive from the comp's OWN bracket (single-competition model);
+    // allComps is only consulted for the legacy sourceCompID skip branch.
+    resolveCompetitionAwards(c, allComps || [], fetchers)
       .then(({ state, podium }) => {
         if (!cancelled) setKoAwards({ state, awards: podium });
       })
@@ -3070,7 +3071,7 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, 
         if (!cancelled) setKoAwards({ state: "in-progress", awards: [] });
       });
     return () => { cancelled = true; };
-  }, [c?.id, c?.format, linkedPlayoffComp?.id, linkedPlayoffComp?.status]);
+  }, [c?.id, c?.format, allComps]);
 
   const nameToPlayer = useMemo(() => {
     const m = new Map();

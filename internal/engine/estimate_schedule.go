@@ -66,10 +66,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 	}
 
 	// Step 4: derive match counts via the Phase 1 helper.
-	poolWinners := comp.PoolWinners
-	if poolWinners <= 0 {
-		poolWinners = 2 // mirrors ResolveQualifiedPools' default in engine/knockout.go
-	}
+	poolWinners := comp.EffectivePoolWinners()
 	in := helper.EstimateMatchCountsInput{
 		Format:       comp.Format,
 		PlayerCount:  playerCount,
@@ -183,11 +180,6 @@ func (e *Engine) estimateFinalistCount(srcCompID string) (int, error) {
 		// Source draw not generated yet — can't estimate.
 		return 0, nil
 	}
-	// Mirror ResolveQualifiedPools (engine/knockout.go): use srcComp.PoolWinners,
-	// default 2 when ≤0.
-	winnersPerPool := srcComp.PoolWinners
-	if winnersPerPool <= 0 {
-		winnersPerPool = 2
-	}
-	return len(pools) * winnersPerPool, nil
+	// Single source of truth for the qualifier-count default (Competition.EffectivePoolWinners).
+	return len(pools) * srcComp.EffectivePoolWinners(), nil
 }

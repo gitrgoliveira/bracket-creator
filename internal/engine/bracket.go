@@ -72,10 +72,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 		return nil
 	}
 
-	poolWinners := comp.PoolWinners
-	if poolWinners <= 0 {
-		poolWinners = 2 // match ResolveQualifiedPools' default — see doc comment
-	}
+	poolWinners := comp.EffectivePoolWinners()
 
 	finals := helper.GenerateFinals(pools, poolWinners)
 	if len(finals) == 0 {

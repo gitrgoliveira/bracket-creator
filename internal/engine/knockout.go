@@ -213,10 +213,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
-	poolWinners := comp.PoolWinners
-	if poolWinners <= 0 {
-		poolWinners = 2
-	}
+	poolWinners := comp.EffectivePoolWinners()
 
 	// Build a label→player resolver for COMPLETED pools only. Incomplete pools
 	// contribute nothing, so their placeholders survive untouched.

@@ -42,12 +42,8 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// default PoolWinners=2 that 1-player pool could never produce a 2nd-place
 		// finisher, and ResolveQualifiedPools would later fail mid-tournament
 		// ("only N ranked finishers"). Catch it here so the operator gets an
-		// actionable error BEFORE any match is played. PoolWinners defaults to 2,
-		// mirroring ResolveQualifiedPools.
-		poolWinners := comp.PoolWinners
-		if poolWinners <= 0 {
-			poolWinners = 2
-		}
+		// actionable error BEFORE any match is played.
+		poolWinners := comp.EffectivePoolWinners()
 		for _, p := range pools {
 			if len(p.Players) < poolWinners {
 				return validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d) — every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)

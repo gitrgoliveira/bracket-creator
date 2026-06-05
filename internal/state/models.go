@@ -374,6 +374,18 @@ func (c Competition) IsPlayoffEnabled() bool {
 	}
 }
 
+// EffectivePoolWinners returns the number of finishers each pool promotes to the
+// knockout, defaulting to 2 when unset (<=0). Single source of truth for the
+// qualifier count so the draw-time validation (pools.go), preview-bracket build
+// (bracket.go), incremental seeding (knockout.go), and schedule estimation
+// (estimate_schedule.go) cannot drift from one another.
+func (c Competition) EffectivePoolWinners() int {
+	if c.PoolWinners > 0 {
+		return c.PoolWinners
+	}
+	return 2
+}
+
 type CompetitionStatus string
 
 const (

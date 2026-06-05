@@ -215,7 +215,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				// finishers than PoolWinners. Map the unfillable placeholder
 				// to "" (bye) so the bracket slot auto-resolves. Draw-time
 				// validation prevents this in supported flows.
-				log.Printf("WARN: pool %q has only %d ranked finisher(s) but PoolWinners=%d; treating rank %d as bye", pool.PoolName, len(ps), poolWinners, rank)
+				log.Printf("engine.ResolveQualifiedPools: pool %q has only %d ranked finisher(s) but PoolWinners=%d; treating rank %d as bye", pool.PoolName, len(ps), poolWinners, rank)
 				resolver[key] = ""
 				continue
 			}
@@ -271,6 +271,36 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				}
 			}
 		}
+		// Auto-complete newly created bye matches: a resolver mapping to ""
+		// (degenerate pool) leaves a match with one empty side still
+		// Scheduled. Mirror buildBracketFromLeaves's bye logic and
+		// propagate winners so downstream matches become playable.
+		for ri := range bracket.Rounds {
+			for mi := range bracket.Rounds[ri] {
+				live := &bracket.Rounds[ri][mi]
+				if live.Status != state.MatchStatusScheduled {
+					continue
+				}
+				aEmpty := live.SideA == ""
+				bEmpty := live.SideB == ""
+				if aEmpty && !bEmpty {
+					live.Winner = live.SideB
+					live.Status = state.MatchStatusCompleted
+					e.propagateBracketWinner(bracket, ri, mi)
+					n++
+				} else if !aEmpty && bEmpty {
+					live.Winner = live.SideA
+					live.Status = state.MatchStatusCompleted
+					e.propagateBracketWinner(bracket, ri, mi)
+					n++
+				} else if aEmpty && bEmpty {
+					live.Status = state.MatchStatusCompleted
+					e.propagateBracketWinner(bracket, ri, mi)
+					n++
+				}
+			}
+		}
+
 		allResolved = !bracketHasPoolPlaceholders(bracket)
 		if n == 0 {
 			return errMatchNotFound // no effective change → skip the rewrite

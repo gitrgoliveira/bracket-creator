@@ -247,6 +247,21 @@ func TestResolveQualifiedPools_DegeneratePoolClampsBye(t *testing.T) {
 	assert.Contains(t, sides, "A1")
 	assert.Contains(t, sides, "A2")
 	assert.Contains(t, sides, "B1")
+
+	// The match with one empty side (the degenerate bye) must be
+	// auto-completed with Winner set to the non-empty side.
+	for _, round := range b.Rounds {
+		for _, m := range round {
+			if (m.SideA == "" && m.SideB != "") || (m.SideA != "" && m.SideB == "") {
+				assert.Equal(t, state.MatchStatusCompleted, m.Status, "bye match must be auto-completed")
+				nonEmpty := m.SideA
+				if nonEmpty == "" {
+					nonEmpty = m.SideB
+				}
+				assert.Equal(t, nonEmpty, m.Winner, "bye match Winner must be the non-empty side")
+			}
+		}
+	}
 }
 
 // TestResolveQualifiedPools_NonMixedNoOp verifies the resolver is a no-op for

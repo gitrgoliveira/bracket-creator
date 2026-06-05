@@ -6,6 +6,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const compMatchStats = window.compMatchStats;
 const hasBothSides = window.hasBothSides;
+const hasPoolOriginPlaceholder = window.hasPoolOriginPlaceholder;
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
 const isValidDate = window.isValidDate;
@@ -1039,11 +1040,15 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
   // `isPreview` gate is replaced: the tree always renders, and individual matches
   // are non-interactive until their sides are decided. This supports the incremental
   // fill-in model where pool finishers seed into the knockout as each pool completes.
-  const hasAnyUnresolved = bracket.rounds.some(r => (r || []).some(m => !hasBothSides(m)));
+  // Show the "filling in" banner ONLY when pool-origin placeholders remain (a
+  // mixed comp whose feeder pools haven't all finished) — NOT for ordinary
+  // "Winner of rX-mY" feeders or structural byes, which standalone playoffs and
+  // bye-containing brackets legitimately have.
+  const hasUnseededPools = bracket.rounds.some(r => (r || []).some(m => hasPoolOriginPlaceholder(m)));
   return (
     <div className="row" style={{ gridTemplateColumns: "1fr 360px", alignItems: "start" }}>
       <div>
-        {hasAnyUnresolved && (
+        {hasUnseededPools && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
             <strong>Knockout filling in</strong> — this bracket fills in automatically as each pool finishes. Matches become live once both sides are decided.
           </div>

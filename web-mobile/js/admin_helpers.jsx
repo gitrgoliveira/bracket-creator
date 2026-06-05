@@ -46,6 +46,19 @@ function hasBothSides(m) {
   return true;
 }
 
+// hasPoolOriginPlaceholder reports whether a bracket match still has a pool-origin
+// "Pool A-1st" side (a mixed comp whose feeder pool hasn't finished). Unlike
+// !hasBothSides, this is TRUE only for pool placeholders — NOT for normal
+// "Winner of rX-mY" feeders or structural byes — so the "Knockout filling in"
+// banner shows ONLY for an incomplete mixed knockout, not standalone playoffs or
+// bye-containing brackets.
+function hasPoolOriginPlaceholder(m) {
+  if (!m) return false;
+  const a = sideName(m.sideA);
+  const b = sideName(m.sideB);
+  return POOL_ORIGIN_PLACEHOLDER_RE.test(a) || POOL_ORIGIN_PLACEHOLDER_RE.test(b);
+}
+
 // Returns { total, done, live } match counts for a single competition object.
 // Accepts either:
 //   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
@@ -299,6 +312,7 @@ function deriveTournamentDays(startDate, durationDays) {
 if (typeof window !== "undefined") {
   window.sideName = sideName;
   window.hasBothSides = hasBothSides;
+  window.hasPoolOriginPlaceholder = hasPoolOriginPlaceholder;
   window.compMatchStats = compMatchStats;
   window.normalizeDate = normalizeDate;
   window.dmyToIso = dmyToIso;
@@ -382,6 +396,7 @@ export {
   promptAdminPassword,
   sideName,
   hasBothSides,
+  hasPoolOriginPlaceholder,
   compMatchStats,
   normalizeDate,
   dmyToIso,

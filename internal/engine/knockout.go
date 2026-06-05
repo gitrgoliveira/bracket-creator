@@ -276,6 +276,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				}
 				if name, ok := resolver[tpl.Winner]; ok && live.Winner != name {
 					live.Winner = name
+					n++ // count Winner-only changes so a bye-propagated Winner fix is persisted
 				}
 			}
 		}

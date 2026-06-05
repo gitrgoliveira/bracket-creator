@@ -559,8 +559,8 @@ func dropSeedAssignments(seeds []domain.SeedAssignment, excluded map[string]bool
 //     OUTSIDE the comp-config lock. Two concurrent GenerateDraw calls
 //     could overwrite each other's pools.csv before the atomic Status
 //     commit serializes them. Left as a follow-up.
-//   - SaveParticipants (source-linked playoffs roster path) also has its own
-//     lock acquisition. A failure mid-pipeline leaves partial state on disk.
+//   - SaveParticipants also has its own lock acquisition. A failure
+//     mid-pipeline leaves partial state on disk.
 func (e *Engine) runDrawPipeline(id string) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {

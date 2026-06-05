@@ -43,5 +43,6 @@ func TestVersionEndpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, version.GetVersion(), resp.Version)
+	assert.Equal(t, version.GetGitCommit(), resp.GitCommit)
 	assert.Equal(t, version.GetBuildDate(), resp.BuildDate)
 }

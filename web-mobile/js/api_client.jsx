@@ -63,6 +63,17 @@ const API = {
             return { mode: 'file', resetEnabled: true };
         }
     },
+    async fetchVersion() {
+        try {
+            const res = await fetch('/api/version');
+            if (!res.ok) {
+                return null;
+            }
+            return await res.json();
+        } catch {
+            return null;
+        }
+    },
     // Reset the tournament password. Unauthenticated by design — the
     // server enforces "is this endpoint enabled" via the verifier's
     // ResetEnabled() (locked mode returns 404). Throws on non-2xx so

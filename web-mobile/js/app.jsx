@@ -327,6 +327,7 @@ function App() {
   // useEffect below always resolves the null state (success or
   // fail-open) within one HTTP round-trip.
   const [authConfig, setAuthConfig] = useS(null);
+  const [_versionInfo, setVersionInfo] = useS(null);
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
@@ -506,6 +507,17 @@ function App() {
       // Fail-open: unknown server errors default to file mode so the
       // recovery-via-/reset path stays accessible and sign-in works.
       setAuthConfig(fileDefault);
+    });
+  }, []);
+
+  useE(() => {
+    window.API.fetchVersion().then((info) => {
+      setVersionInfo(info);
+      if (typeof window !== 'undefined') {
+        window.appVersionInfo = info;
+      }
+    }).catch(() => {
+      setVersionInfo(null);
     });
   }, []);
 
@@ -1258,8 +1270,50 @@ function CreateTournament({ onCreated, authConfig }) {
           </button>
         </form>
       </div>
+      <window.VersionFooter />
     </div>
   );
+}
+
+function VersionFooter() {
+  const [info, setInfo] = React.useState(window.appVersionInfo || null);
+  React.useEffect(() => {
+    if (window.appVersionInfo) {
+      setInfo(window.appVersionInfo);
+      return;
+    }
+    const interval = setInterval(() => {
+      if (window.appVersionInfo) {
+        setInfo(window.appVersionInfo);
+        clearInterval(interval);
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!info || !info.version) return null;
+  const versionStr = info.version;
+  const isSemver = /^v?\d+\.\d+\.\d+/.test(versionStr);
+  if (isSemver) {
+    return (
+      <div className="app-version-footer" data-testid="app-version-footer">
+        {versionStr}
+      </div>
+    );
+  }
+  const commitShort = info.gitCommit ? info.gitCommit.slice(0, 7) : '';
+  const parts = [];
+  if (commitShort) parts.push(commitShort);
+  if (info.buildDate) parts.push(info.buildDate);
+  return (
+    <div className="app-version-footer" data-testid="app-version-footer">
+      {parts.join(' · ')}
+    </div>
+  );
+}
+
+if (typeof window !== 'undefined') {
+  window.VersionFooter = VersionFooter;
 }
 
 window.App = App;

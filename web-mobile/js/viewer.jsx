@@ -1784,7 +1784,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             // actual winners; when the final has no winner yet, deriveAwards
             // explicitly falls through to the standings-based path rather
             // than short-circuiting.
-            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} allComps={(tournament && tournament.competitions) || []} />
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} />
           )}
         </div>
       </div>
@@ -2996,9 +2996,7 @@ function bracketHasDecidedFinal(bracket) {
 //   'final'       — podium is the final result
 //   'in-progress' — knockout not yet decided (podium [])
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
-// NOTE: _allComps is vestigial (was used by the removed sourceCompID skip
-// branch) — tracked for removal in bead mp-i385.
-async function resolveCompetitionAwards(comp, _allComps, fetchers) {
+async function resolveCompetitionAwards(comp, fetchers) {
   const fmt = comp && comp.format;
   const ntpFrom = (players) => {
     const m = new Map();
@@ -3031,7 +3029,7 @@ const PLACE_STYLE = {
   3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
 };
 
-function AwardsView({ c, bracket, standings, pools, players, allComps }) {
+function AwardsView({ c, bracket, standings, pools, players }) {
   const containerRef = useRefV(null);
   const [isFs, setIsFs] = useState(false);
   const isLeague = c?.format === "league";
@@ -3069,7 +3067,7 @@ function AwardsView({ c, bracket, standings, pools, players, allComps }) {
     }
     let cancelled = false;
     const fetchers = { fetchCompetitionDetails: window.API.fetchCompetitionDetails, swissStandings: null };
-    resolveCompetitionAwards(c, allComps || [], fetchers)
+    resolveCompetitionAwards(c, fetchers)
       .then(({ state, podium }) => {
         if (!cancelled) setKoAwards({ state, awards: podium });
       })
@@ -3077,7 +3075,7 @@ function AwardsView({ c, bracket, standings, pools, players, allComps }) {
         if (!cancelled) setKoAwards({ state: "in-progress", awards: [] });
       });
     return () => { cancelled = true; };
-  }, [c?.id, c?.format, allComps]);
+  }, [c?.id, c?.format]);
 
   const nameToPlayer = useMemo(() => {
     const m = new Map();

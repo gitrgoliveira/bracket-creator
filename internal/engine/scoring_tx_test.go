@@ -825,3 +825,51 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	require.NotNil(t, poolA0)
 	assert.Equal(t, "A1", poolA0.Winner, "prior pool result must be preserved after a fail-closed rejection")
 }
+
+// TestHasStartedKnockoutMatchTx_ReportsMatchedFinisher verifies the helper
+// returns the displaced name actually sitting in the started match — not just
+// the first input name — so the 409 payload's Finisher stays consistent with
+// MatchID when more than one finisher is displaced (poolWinners > 1).
+// (Copilot review, PR #246.)
+func TestHasStartedKnockoutMatchTx_ReportsMatchedFinisher(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "matched-finisher"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Kind: "individual",
+		Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 2,
+	}))
+	// A1's leaf is still scheduled; A2's leaf is running. Scanning for both must
+	// return A2 (the one in the started match), regardless of slice order.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "r0-m0", SideA: "A1", SideB: "X1", Status: state.MatchStatusScheduled},
+			{ID: "r0-m1", SideA: "X2", SideB: "A2", Status: state.MatchStatusRunning},
+		}},
+	}))
+
+	run := func(names []string) (string, string) {
+		var gotName, gotID string
+		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+			var err error
+			gotName, gotID, err = eng.hasStartedKnockoutMatchTx(tx, compID, names)
+			return err
+		}))
+		return gotName, gotID
+	}
+
+	name, id := run([]string{"A1", "A2"})
+	assert.Equal(t, "A2", name, "must report the finisher in the started match, not displaced[0]")
+	assert.Equal(t, "r0-m1", id)
+
+	// Order-independence: A2 first must give the same result.
+	name, id = run([]string{"A2", "A1"})
+	assert.Equal(t, "A2", name)
+	assert.Equal(t, "r0-m1", id)
+
+	// Only a scheduled-leaf finisher → no started match found.
+	name, id = run([]string{"A1"})
+	assert.Empty(t, name)
+	assert.Empty(t, id)
+}

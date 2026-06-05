@@ -252,7 +252,16 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		poolWinners      int      // EffectivePoolWinners, captured so the post-write block needn't reload the comp
 	)
 	if prior != nil {
-		if comp, compErr := tx.LoadCompetition(compID); compErr == nil && comp != nil && comp.Format == state.CompFormatMixed {
+		// Fail closed at the gate too: if the competition record can't be read
+		// we can't tell whether this re-score needs the guard, so abort rather
+		// than let a potentially-unsafe re-score through. Nothing is staged yet,
+		// so returning here aborts cleanly. (First scores have prior == nil and
+		// skip this block entirely, so non-re-score writes are unaffected.)
+		comp, compErr := tx.LoadCompetition(compID)
+		if compErr != nil {
+			return nil, fmt.Errorf("mp-e2k1: load competition %s: %w", compID, compErr)
+		}
+		if comp != nil && comp.Format == state.CompFormatMixed {
 			if pn, ok := poolNameFromMatchID(matchID); ok {
 				poolRescoredName = pn
 				poolWinners = comp.EffectivePoolWinners()
@@ -322,20 +331,22 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			}
 		}
 		if len(displaced) > 0 {
-			started, knockoutMatchID, hErr := e.hasStartedKnockoutMatchTx(tx, compID, displaced)
+			blockingFinisher, knockoutMatchID, hErr := e.hasStartedKnockoutMatchTx(tx, compID, displaced)
 			if hErr != nil {
 				e.rollbackMatchResultTx(tx, compID, matchID, prior)
 				return nil, fmt.Errorf("mp-e2k1: checking started knockout matches for %s: %w", compID, hErr)
 			}
-			if started {
+			if blockingFinisher != "" {
 				// Reject: restore the prior result so the corrupting re-score
 				// never lands. Within a tx, writes are in-memory WAL intents
 				// coalesced last-write-wins, so this rollback supersedes the
-				// forward write before Commit applies the final state.
+				// forward write before Commit applies the final state. Report the
+				// finisher actually sitting in the blocking match so Finisher and
+				// MatchID stay consistent (matters when poolWinners > 1).
 				e.rollbackMatchResultTx(tx, compID, matchID, prior)
 				return nil, &DownstreamKnockoutScoredError{
 					Pool:     poolRescoredName,
-					Finisher: displaced[0],
+					Finisher: blockingFinisher,
 					MatchID:  knockoutMatchID,
 				}
 			}
@@ -631,7 +642,7 @@ func (e *Engine) hasDownstreamMatchStartedTx(tx state.StoreTx, compID string, pl
 // trip the guard.
 //
 // mp-e2k1.
-func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, playerNames []string) (bool, string, error) {
+func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, playerNames []string) (matchedName, matchID string, err error) {
 	wantSet := make(map[string]struct{}, len(playerNames))
 	for _, n := range playerNames {
 		if n != "" {
@@ -639,14 +650,20 @@ func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, play
 		}
 	}
 	if len(wantSet) == 0 {
-		return false, "", nil
+		return "", "", nil
 	}
-	involvesAny := func(a, b string) bool {
+	// matchedSide returns the displaced name found on this match (a or b), or ""
+	// if neither side is one of the displaced finishers. Returning the name keeps
+	// the caller's error payload consistent: the reported Finisher is the one
+	// actually sitting in the blocking match, not just displaced[0].
+	matchedSide := func(a, b string) string {
 		if _, ok := wantSet[a]; ok {
-			return true
+			return a
 		}
-		_, ok := wantSet[b]
-		return ok
+		if _, ok := wantSet[b]; ok {
+			return b
+		}
+		return ""
 	}
 	isStarted := func(s state.MatchStatus) bool {
 		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
@@ -659,19 +676,22 @@ func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, play
 		// bracket.json, permission/IO error). Propagate it rather than treating
 		// it as "no started knockout match", which would let the caller's guard
 		// fail open and allow a re-score that should be blocked.
-		return false, "", err
+		return "", "", err
 	}
 	if bracket == nil {
-		return false, "", nil
+		return "", "", nil
 	}
 	for _, round := range bracket.Rounds {
 		for _, bm := range round {
-			if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
-				return true, bm.ID, nil
+			if !isStarted(bm.Status) {
+				continue
+			}
+			if name := matchedSide(bm.SideA, bm.SideB); name != "" {
+				return name, bm.ID, nil
 			}
 		}
 	}
-	return false, "", nil
+	return "", "", nil
 }
 
 // restoreCompetitorEligibilityTx is the tx-aware twin of

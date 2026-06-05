@@ -758,6 +758,17 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				})
 				return
 			}
+			var downstreamKnockoutErr *engine.DownstreamKnockoutScoredError
+			if errors.As(engErr, &downstreamKnockoutErr) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":    "downstream_knockout_scored",
+					"pool":     downstreamKnockoutErr.Pool,
+					"finisher": downstreamKnockoutErr.Finisher,
+					"matchId":  downstreamKnockoutErr.MatchID,
+					"message":  downstreamKnockoutErr.Error(),
+				})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": engErr.Error()})
 			return
 		}

@@ -641,7 +641,7 @@ export function TournamentInfo({ tournament }) {
   );
 }
 
-function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister }) {
+function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults }) {
   const t = tournament;
   const comps = t.competitions || [];
   const compsByDate = useMemo(() => {
@@ -823,6 +823,22 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </div>
             <span className="vlist-item__rowchev">→</span>
           </button>
+
+          {/* mp-koqh: Results summary — only shown when at least one comp has completed. */}
+          {onOpenResults && comps.some((c) => c.status === "completed") && (
+            <button
+              className="vlist-item vlist-item--row"
+              onClick={onOpenResults}
+              data-testid="open-results-btn"
+            >
+              <span className="vlist-item__icon">🏅</span>
+              <div className="vlist-item__rowbody">
+                <div className="vlist-item__rowtitle">Results</div>
+                <div className="vlist-item__rowsub">All competition placings</div>
+              </div>
+              <span className="vlist-item__rowchev">→</span>
+            </button>
+          )}
 
           {dates.length === 0 ? (
             <>
@@ -3672,6 +3688,129 @@ function AnnouncementBanner({ announcements, onDismiss }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// buildAllWinnersPublic — public-viewer equivalent of admin_shell's
+// buildAllWinners. Thin orchestrator: filter completed comps, resolve each
+// through resolveCompetitionAwards, drop linked-playoffs shells (state==="skip").
+// Exported to window so AllWinnersView and tests can reach it.
+// ---------------------------------------------------------------------------
+async function buildAllWinnersPublic(comps, fetchers) {
+  const completed = (comps || []).filter((c) => c.status === "completed");
+  const results = await Promise.all(
+    completed.map(async (comp) => {
+      try {
+        const { state, podium } = await resolveCompetitionAwards(comp, comps, fetchers);
+        return { comp, state, podium };
+      } catch (err) {
+        return { comp, state: "error", podium: [], error: err?.message || String(err) };
+      }
+    })
+  );
+  return results.filter((r) => r.state !== "skip");
+}
+
+// ---------------------------------------------------------------------------
+// AllWinnersView — full-page public results summary.  Mirrors the admin
+// AllWinnersModal rendering but as a full-page view (not a modal), matching
+// the ViewerSchedule / GlossaryPage page pattern. Props: { tournament, onBack, tweaks }.
+// ---------------------------------------------------------------------------
+function AllWinnersView({ tournament, onBack, tweaks }) {
+  const comps = (tournament && tournament.competitions) || [];
+  const [viewState, setViewState] = useState({ loading: true, results: [], error: null });
+
+  // Stable signature of every comp's id:status — triggers refetch when any
+  // competition completes or its knockout resolves (same pattern as admin modal).
+  const compsSig = comps.map((c) => `${c.id}:${c.status}`).join("|");
+
+  useEffect(() => {
+    let cancelled = false;
+    setViewState((s) => ({ ...s, loading: true }));
+    buildAllWinnersPublic(comps, {
+      fetchCompetitionDetails: window.API.fetchCompetitionDetails.bind(window.API),
+      swissStandings: window.API.swissStandings ? window.API.swissStandings.bind(window.API) : null,
+    }).then((results) => {
+      if (!cancelled) setViewState({ loading: false, results, error: null });
+    }).catch((err) => {
+      if (!cancelled) setViewState({ loading: false, results: [], error: err?.message || String(err) });
+    });
+    return () => { cancelled = true; };
+  }, [compsSig]);
+
+  return (
+    <div className="viewer">
+      <div className="viewer__shell">
+        <div className="viewer__head">
+          <button className="viewer__back" onClick={onBack} aria-label="Back">←</button>
+          <div className="viewer__title-block">
+            <div className="viewer__eyebrow">{tournament && tournament.name}</div>
+            <div className="viewer__title">Results</div>
+            <div className="viewer__sub">All competition placings</div>
+          </div>
+        </div>
+        <div className="viewer__body">
+          {viewState.loading && (
+            <div style={{ textAlign: "center", color: "var(--ink-3)", padding: "24px 0" }} data-testid="all-winners-loading">
+              Loading results…
+            </div>
+          )}
+          {!viewState.loading && viewState.error && (
+            <div style={{ color: "var(--red)", padding: "8px 0" }} data-testid="all-winners-error">
+              Failed to load results: {viewState.error}
+            </div>
+          )}
+          {!viewState.loading && !viewState.error && viewState.results.length === 0 && (
+            <div className="empty" data-testid="all-winners-empty">
+              <div className="icon">🏅</div>
+              <h3>No completed competitions</h3>
+              <div style={{ fontSize: 13 }}>Check back once competitions have finished.</div>
+            </div>
+          )}
+          {!viewState.loading && viewState.results.map(({ comp, state: compState, podium, error: compErr }) => (
+            <div key={comp.id} className="card" style={{ padding: "12px 16px", marginBottom: 12 }} data-testid={`all-winners-card-${comp.id}`}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{comp.name}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2, #f0f0f0)", borderRadius: 4, padding: "1px 6px" }}>
+                  {competitionKindLabel(comp)}
+                </div>
+              </div>
+              {compErr && (
+                <div style={{ fontSize: 13, color: "var(--red)" }} data-testid={`all-winners-error-${comp.id}`}>
+                  Could not load results: {compErr}
+                </div>
+              )}
+              {!compErr && compState === "in-progress" && (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }} data-testid={`all-winners-inprogress-${comp.id}`}>
+                  Knockout in progress
+                </div>
+              )}
+              {!compErr && compState === "final" && podium.length === 0 && (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No results yet</div>
+              )}
+              {!compErr && compState === "final" && podium.map((a, idx) => {
+                const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
+                return (
+                  <div
+                    key={`${a.place}-${a.name}-${idx}`}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: idx < podium.length - 1 ? "1px solid var(--line)" : "none" }}
+                    data-testid={`all-winners-place-${comp.id}-${a.place}-${idx}`}
+                  >
+                    <span style={{ fontSize: 22 }}>{style.icon}</span>
+                    <span style={{ fontSize: 12, color: "var(--ink-3)", minWidth: 60 }}>{style.label}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{a.name}</div>
+                      {tweaks.showDojo && a.dojo && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{a.dojo}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 window.AnnouncementCard = AnnouncementCard;
 window.AnnouncementBanner = AnnouncementBanner;
 window.ViewerHome = ViewerHome;
@@ -3690,5 +3829,8 @@ window.LS_NOTIFICATIONS_ENABLED = LS_NOTIFICATIONS_ENABLED;
 // (those files don't ES-import viewer.jsx; they pick globals off window).
 window.linkBase = linkBase;
 window.isNonPublicOrigin = isNonPublicOrigin;
+// mp-koqh: public results page.
+window.buildAllWinnersPublic = buildAllWinnersPublic;
+window.AllWinnersView = AllWinnersView;
 export { shouldShowRegister };
 

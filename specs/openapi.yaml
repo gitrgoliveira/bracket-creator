@@ -2438,16 +2438,6 @@ components:
           type: string
         hasParticipantIDs:
           type: boolean
-        sourceCompID:
-          type: string
-          maxLength: 64
-          description: >
-            DEPRECATED / legacy. Historically linked a separate `playoffs`
-            competition back to a mixed source. New competitions never set it —
-            a mixed (Pools + Knockout) competition now contains its own knockout
-            bracket, which fills in incrementally as each pool finishes (no
-            separate playoffs competition is created). Retained only for YAML
-            round-trip compatibility with pre-existing tournament data.
         teamMatchType:
           type: string
           description: Team-match scoring model — `fixed` (positions) or `kachinuki` (winner-stays).

@@ -23,9 +23,7 @@ type EstimateMatchCountsInput struct {
 	Format string
 
 	// PlayerCount is the number of participants that will take part in
-	// this competition. For competitions with an empty pre-draw roster
-	// (source-linked playoffs) the caller must derive the count from the
-	// source competition's pool count × PoolWinners.
+	// this competition.
 	PlayerCount int
 
 	// Pool-phase fields — relevant for "mixed" and "league" formats.

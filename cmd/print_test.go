@@ -131,11 +131,14 @@ func setupTestTournamentData(t *testing.T) string {
 	store, err := state.NewStore(dir)
 	require.NoError(t, err)
 
+	// League format: this fixture tests Print/PDF store construction, not
+	// mixed-knockout semantics. League produces a single pool (mixed would
+	// need ≥2 pools by invariant).
 	comp := &state.Competition{
 		ID:           "test-comp",
 		Name:         "Test Competition",
 		Kind:         "individual",
-		Format:       "mixed",
+		Format:       state.CompFormatLeague,
 		PoolSize:     3,
 		PoolSizeMode: "min",
 		PoolWinners:  2,

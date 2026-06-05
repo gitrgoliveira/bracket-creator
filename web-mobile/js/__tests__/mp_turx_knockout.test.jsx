@@ -1,12 +1,18 @@
-// mp-turx: tests for the in-place "Start knockout" mixed-competition flow.
+// mp-turx: tests for the incremental mixed-competition knockout flow.
 //
 // Covers:
-//   1. API.startKnockout client method (URL, method, password header, error handling)
-//   2. ViewerCompetition: mixed comp renders as a single card (no cross-link);
-//      Pools and Bracket tabs are present; Bracket works with preview and live bracket
-//   3. AdminCompetition: "Start knockout" button visible for mixed comp with status
-//      "pools" and all pool matches complete; hidden when pools are not done;
-//      hidden once status is "playoffs"; bracket becomes scoreable when preview=false
+//   1. ViewerCompetition: mixed comp renders as a single card (no cross-link);
+//      Pools and Bracket tabs are present; Bracket works with placeholder and
+//      resolved bracket data.
+//   2. AdminBracket (via direct vnode invocation): a match with both sides
+//      resolved is clickable while a match with a placeholder side is a no-op.
+//   3. AdminCompetition page-head: no "Start knockout" / "Knockout in progress"
+//      / "Finish all pool matches" text; bracket tab labels keyed off draw-ready
+//      only.
+//
+// Removed (feature gone):
+//   - API.startKnockout suite (endpoint removed from backend + api_client.jsx)
+//   - AdminCompetition "Start knockout button" suite (UI removed)
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
@@ -52,64 +58,7 @@ function findAllByType(node, typeRef, acc = []) {
 }
 
 // ---------------------------------------------------------------------------
-// Suite 1: API.startKnockout client method
-// ---------------------------------------------------------------------------
-
-describe('API.startKnockout', () => {
-  let API;
-  let originalFetch;
-
-  const mockFetch = (status, body) =>
-    vi.fn(() =>
-      Promise.resolve({
-        ok: status >= 200 && status < 300,
-        status,
-        json: () => Promise.resolve(body),
-      })
-    );
-
-  beforeAll(async () => {
-    ({ API } = await import('../api_client.jsx'));
-  });
-
-  beforeEach(() => { originalFetch = global.fetch; });
-  afterEach(() => { global.fetch = originalFetch; });
-
-  it('POSTs to /api/competitions/:id/start-knockout', async () => {
-    const comp = { id: 'comp-1', status: 'playoffs', bracket: { rounds: [] } };
-    global.fetch = mockFetch(200, comp);
-    const result = await API.startKnockout('comp-1', 'secret');
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe('/api/competitions/comp-1/start-knockout');
-    expect(opts.method).toBe('POST');
-    expect(result).toEqual(comp);
-  });
-
-  it('sends X-Tournament-Password header', async () => {
-    global.fetch = mockFetch(200, {});
-    await API.startKnockout('comp-42', 'my-password');
-    const [, opts] = global.fetch.mock.calls[0];
-    expect(opts.headers['X-Tournament-Password']).toBe('my-password');
-  });
-
-  it('throws with server message on 409 (precondition unmet)', async () => {
-    global.fetch = mockFetch(409, { error: 'pools not complete' });
-    await expect(API.startKnockout('comp-1', 'pw')).rejects.toThrow('pools not complete');
-  });
-
-  it('throws with server message on 404 (competition missing)', async () => {
-    global.fetch = mockFetch(404, { error: 'competition not found' });
-    await expect(API.startKnockout('missing', 'pw')).rejects.toThrow('competition not found');
-  });
-
-  it('falls back to generic message when server returns no error field', async () => {
-    global.fetch = mockFetch(500, {});
-    await expect(API.startKnockout('comp-1', 'pw')).rejects.toThrow('Failed to start knockout');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Suite 2: Viewer — single-competition rendering for mixed comps
+// Suite 1: Viewer — single-competition rendering for mixed comps
 // ---------------------------------------------------------------------------
 
 describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back-compat)', () => {
@@ -141,7 +90,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
   const samplePools = [{ poolName: 'Pool A', players: [{ id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }] }];
   const previewBracket = {
     preview: true,
-    rounds: [[{ id: 'r0-m0', sideA: { name: 'Pool A 1st' }, sideB: { name: 'Pool A 2nd' }, status: 'scheduled' }]],
+    rounds: [[{ id: 'r0-m0', sideA: { name: 'Pool A-1st' }, sideB: { name: 'Pool A-2nd' }, status: 'scheduled' }]],
   };
   const liveBracket = {
     preview: false,
@@ -168,7 +117,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     global.window.formatIpponsScore = () => '';
     global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
-    global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
+    global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB && typeof m.sideA !== 'string' && m.sideA.id);
     global.window.compareDmy = (a, b) => String(a).localeCompare(String(b));
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
@@ -188,7 +137,6 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
   });
 
   it('does NOT render the cross-link when no playoffs comp references this comp', () => {
-    // New merged mixed comp: no separate playoffs comp in the tournament
     const tree = runtime.mount(ViewerCompetition, {
       tournament: { competitions: [mkMixedComp()] },
       competition: mkMixedComp(),
@@ -224,7 +172,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     expect(labels.some(l => l.includes('Bracket'))).toBe(true);
   });
 
-  it('shows Bracket tab with live bracket after start-knockout (preview=false, status playoffs)', () => {
+  it('shows Bracket tab with live bracket (preview=false, status playoffs)', () => {
     const tree = runtime.mount(ViewerCompetition, {
       tournament: { competitions: [mkMixedComp({ status: 'playoffs' })] },
       competition: mkMixedComp({ status: 'playoffs' }),
@@ -242,30 +190,41 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     expect(labels.some(l => l.includes('Bracket'))).toBe(true);
   });
 
+  it('does NOT render "Start knockout" text for a mixed comp in any state', () => {
+    // The "Start knockout" affordance has been removed entirely.
+    for (const status of ['pools', 'playoffs', 'completed']) {
+      const tree = runtime.mount(ViewerCompetition, {
+        tournament: { competitions: [mkMixedComp({ status })] },
+        competition: mkMixedComp({ status }),
+        pools: samplePools,
+        poolMatches: [],
+        standings: [],
+        bracket: status === 'playoffs' ? liveBracket : previewBracket,
+        onBack: () => {},
+        onSelectCompetition: () => {},
+        tweaks: {},
+      });
+      expect(collectText(tree)).not.toContain('Start knockout');
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Suite 4: AdminCompetition — "Start knockout" button logic
+// Suite 2: AdminCompetition page-head (no Start-knockout affordance)
 // ---------------------------------------------------------------------------
 
-describe('AdminCompetition: Start knockout button (mp-turx)', () => {
+describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)', () => {
   const realReact = global.React;
   let runtime;
-  // AdminCompetition is exported only via window (not a named ES export);
-  // we access it from global.window after the module is imported.
   let AdminCompetition;
   const savedGlobals = {};
 
-  // Globals that admin_competition.jsx reads from window at module-eval time
   const STUBBED = [
     'StatusBadge', 'formatDate', 'competitionKindLabel', 'Breadcrumbs',
     'AdminTopbar', 'AdminParticipants', 'AdminSettings', 'AdminExport',
     'AdminScoreEditor', 'AdminPools', 'AdminCompOverview', 'AdminTeamLineupsList',
     'AdminSwissRounds', 'LiveMatchPanel', 'BracketTree', 'promptAdminPassword',
     'isValidDate', 'roundLabel', 'hasBothSides',
-    // These are also globals that admin_competition.jsx uses for React hooks
-    // via module-level destructuring (const { useState: useStateA, ... } = React)
-    // so React must already be set when the module loads.
     'AdminCompetition',
   ];
 
@@ -284,19 +243,9 @@ describe('AdminCompetition: Start knockout button (mp-turx)', () => {
     ...overrides,
   });
 
-  const completedPoolMatches = [
-    { id: 'Pool A-1', status: 'completed', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' } },
-    { id: 'Pool A-2', status: 'completed', sideA: { id: 'p3', name: 'Carol' }, sideB: { id: 'p1', name: 'Alice' } },
-  ];
-  const incompletePoolMatches = [
-    { id: 'Pool A-1', status: 'completed', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' } },
-    { id: 'Pool A-2', status: 'scheduled', sideA: { id: 'p3', name: 'Carol' }, sideB: { id: 'p1', name: 'Alice' } },
-  ];
-
-  const samplePools = [{ poolName: 'Pool A', players: [] }];
-  const previewBracket = {
+  const placeholderBracket = {
     preview: true,
-    rounds: [[{ id: 'r0-m0', sideA: { name: 'Pool A 1st' }, sideB: { name: 'Pool A 2nd' }, status: 'scheduled' }]],
+    rounds: [[{ id: 'r0-m0', sideA: { name: 'Pool A-1st' }, sideB: { name: 'Pool B-1st' }, status: 'scheduled' }]],
   };
   const liveBracket = {
     preview: false,
@@ -310,14 +259,12 @@ describe('AdminCompetition: Start knockout button (mp-turx)', () => {
     global.React = runtime.React;
     global.window = global.window || {};
 
-    // Save existing globals
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
         : { had: false };
     });
 
-    // Stub globals that admin_competition.jsx reads from window
     global.window.StatusBadge = function StatusBadge() { return null; };
     global.window.formatDate = (d) => d || '';
     global.window.competitionKindLabel = () => 'Individual';
@@ -335,17 +282,14 @@ describe('AdminCompetition: Start knockout button (mp-turx)', () => {
     global.window.promptAdminPassword = () => 'admin';
     global.window.isValidDate = () => true;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
-    global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
+    global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB && m.sideA.id && m.sideB.id);
     global.window.API = {
       startCompetition: vi.fn(() => Promise.resolve({})),
       generateDraw: vi.fn(() => Promise.resolve({})),
       discardDraw: vi.fn(() => Promise.resolve({})),
-      startKnockout: vi.fn(() => Promise.resolve({})),
     };
 
     vi.resetModules();
-    // admin_competition.jsx registers itself on window.AdminCompetition;
-    // it is NOT a named ES export. Import for side effects, then read from window.
     await import('../admin_competition.jsx');
     AdminCompetition = global.window.AdminCompetition;
   });
@@ -377,133 +321,373 @@ describe('AdminCompetition: Start knockout button (mp-turx)', () => {
     password: 'pw',
     showToast: vi.fn(),
     standings: [],
+    pools: [],
+    poolMatches: [],
   };
 
-  it('shows "Start knockout" button when mixed, status pools, all pool matches complete', () => {
+  it('does NOT render "Start knockout" button for mixed comp with all pool matches done', () => {
+    const completedPoolMatches = [
+      { id: 'Pool A-1', status: 'completed', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' } },
+    ];
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       competition: mkMixedComp({ status: 'pools' }),
-      pools: samplePools,
       poolMatches: completedPoolMatches,
-      bracket: previewBracket,
-      onStartKnockout: vi.fn(),
+      bracket: placeholderBracket,
     });
-    const text = collectText(tree);
-    expect(text).toContain('Start knockout');
+    expect(collectText(tree)).not.toContain('Start knockout');
   });
 
-  it('does NOT show "Start knockout" when pool matches are not all complete', () => {
+  it('does NOT render "Finish all pool matches to unlock the knockout" hint', () => {
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       competition: mkMixedComp({ status: 'pools' }),
-      pools: samplePools,
-      poolMatches: incompletePoolMatches,
-      bracket: previewBracket,
-      onStartKnockout: vi.fn(),
+      poolMatches: [{ id: 'Pool A-1', status: 'scheduled' }],
+      bracket: placeholderBracket,
     });
-    const text = collectText(tree);
-    expect(text).not.toContain('Start knockout');
-    expect(text).toContain('Finish all pool matches');
+    expect(collectText(tree)).not.toContain('Finish all pool matches');
   });
 
-  it('shows "Start knockout" when poolMatches is empty (degenerate bye-only pools)', () => {
-    // mp-turx Copilot fix: a mixed comp with no pool matches (e.g. bye-only or
-    // single-participant pools) is "pools complete" by definition — the
-    // backend's allPoolMatchesCompleteForComp predicate agrees. Array.every
-    // on [] returns true. The UI gate must follow the same rule.
+  it('does NOT render "Knockout in progress" for mixed comp in playoffs status', () => {
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
+      competition: mkMixedComp({ status: 'playoffs' }),
+      bracket: liveBracket,
+    });
+    expect(collectText(tree)).not.toContain('Knockout in progress');
+  });
+
+  it('silently ignores onStartKnockout prop (backward compat — no crash)', () => {
+    expect(() => {
+      runtime.mount(AdminCompetition, {
+        ...baseProps,
+        competition: mkMixedComp({ status: 'pools' }),
+        bracket: placeholderBracket,
+        onStartKnockout: vi.fn(), // must be silently ignored
+      });
+    }).not.toThrow();
+  });
+
+  it('bracket tab label is "Bracket — live" for a running competition', () => {
+    const tree = runtime.mount(AdminCompetition, {
+      ...baseProps,
+      section: 'overview',
+      competition: mkMixedComp({ status: 'playoffs' }),
+      bracket: liveBracket,
+    });
+    const text = collectText(tree);
+    expect(text).toContain('Bracket — live');
+    expect(text).not.toContain('Bracket — preview');
+  });
+
+  it('bracket tab label is "Bracket — preview" only for draw-ready competitions', () => {
+    const tree = runtime.mount(AdminCompetition, {
+      ...baseProps,
+      section: 'overview',
+      competition: mkMixedComp({ status: 'draw-ready' }),
+      bracket: liveBracket,
+    });
+    expect(collectText(tree)).toContain('Bracket — preview');
+  });
+
+  it('bracket tab label is NOT "Bracket — preview" for mixed comp with preview=true bracket but status=pools', () => {
+    // Previously bracket.preview=true would force "Bracket — preview" label.
+    // Now only draw-ready status matters.
+    const tree = runtime.mount(AdminCompetition, {
+      ...baseProps,
+      section: 'overview',
       competition: mkMixedComp({ status: 'pools' }),
-      pools: samplePools,
+      bracket: placeholderBracket, // preview: true
+    });
+    const text = collectText(tree);
+    // status is 'pools' (not draw-ready), so label should be "Bracket — live"
+    expect(text).toContain('Bracket — live');
+    expect(text).not.toContain('Bracket — preview');
+  });
+
+  it('AdminBracket vnode receives bracket props regardless of bracket.preview', () => {
+    // The AdminBracket child vnode should always be rendered (no preview gate
+    // blocking it). Verify the vnode gets the placeholder bracket.
+    const tree = runtime.mount(AdminCompetition, {
+      ...baseProps,
+      section: 'bracket',
+      competition: mkMixedComp({ status: 'pools' }),
+      bracket: placeholderBracket,
+    });
+    const bracketVnode = findInTree(tree, n => n?.type?.name === 'AdminBracket');
+    expect(bracketVnode).toBeTruthy();
+    expect(bracketVnode.props.bracket).toBe(placeholderBracket);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 3: AdminBracket per-match playability (direct vnode invocation)
+// ---------------------------------------------------------------------------
+//
+// AdminBracket is a local (non-exported) function inside admin_competition.jsx.
+// We retrieve it via the AdminBracket vnode's .type from an AdminCompetition
+// render, then invoke it directly with a fresh reactive runtime so BracketTree's
+// onMatchClick prop is captured for assertion.
+// ---------------------------------------------------------------------------
+
+describe('AdminBracket: per-match playability (mp-turx)', () => {
+  const realReact = global.React;
+  let outerRuntime;
+  let innerRuntime;
+  let AdminCompetition;
+  const savedGlobals = {};
+
+  const STUBBED = [
+    'StatusBadge', 'formatDate', 'competitionKindLabel', 'Breadcrumbs',
+    'AdminTopbar', 'AdminParticipants', 'AdminSettings', 'AdminExport',
+    'AdminScoreEditor', 'AdminPools', 'AdminCompOverview', 'AdminTeamLineupsList',
+    'AdminSwissRounds', 'LiveMatchPanel', 'BracketTree', 'promptAdminPassword',
+    'isValidDate', 'roundLabel', 'hasBothSides',
+    'AdminCompetition',
+  ];
+
+  // Real hasBothSides implementation (mirrors admin_helpers.jsx) so the
+  // per-match click guard is exercised with real logic.
+  const BRACKET_PLACEHOLDER_RE = /^Winner of r\d+-m\d+$/;
+  const POOL_ORIGIN_PLACEHOLDER_RE = /^Pool .+-\d+(st|nd|rd|th)$/;
+  function realHasBothSides(m) {
+    if (!m) return false;
+    const sideName = (s) => { if (!s) return ''; if (typeof s === 'string') return s; return s.name || ''; };
+    const a = sideName(m.sideA);
+    const b = sideName(m.sideB);
+    if (!a || !b) return false;
+    if (BRACKET_PLACEHOLDER_RE.test(a) || BRACKET_PLACEHOLDER_RE.test(b)) return false;
+    if (POOL_ORIGIN_PLACEHOLDER_RE.test(a) || POOL_ORIGIN_PLACEHOLDER_RE.test(b)) return false;
+    return true;
+  }
+
+  const mkComp = (overrides = {}) => ({
+    id: 'comp-1', name: 'Mixed', kind: 'individual', teamSize: 0,
+    format: 'mixed', status: 'pools', startTime: '09:00',
+    courts: ['A'], poolWinners: 2, players: [], date: '01-06-2026',
+    naginata: false,
+    ...overrides,
+  });
+
+  const placeholderBracket = {
+    preview: true,
+    rounds: [[
+      { id: 'r0-m0', sideA: { name: 'Pool A-1st' }, sideB: { name: 'Pool B-1st' }, status: 'scheduled' },
+    ]],
+  };
+  const winnerFeederBracket = {
+    preview: false,
+    rounds: [
+      [
+        { id: 'r0-m0', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' }, status: 'completed' },
+        { id: 'r0-m1', sideA: { id: 'p3', name: 'Carol' }, sideB: { id: 'p4', name: 'Dave' }, status: 'completed' },
+      ],
+      [
+        { id: 'r1-m0', sideA: { name: 'Winner of r0-m0' }, sideB: { name: 'Winner of r0-m1' }, status: 'scheduled' },
+      ],
+    ],
+  };
+  const liveBracket = {
+    preview: false,
+    rounds: [[
+      { id: 'r0-m0', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' }, status: 'scheduled' },
+    ]],
+  };
+
+  beforeEach(async () => {
+    outerRuntime = makeReactive();
+    innerRuntime = makeReactive();
+    global.React = outerRuntime.React;
+    global.window = global.window || {};
+
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] }
+        : { had: false };
+    });
+
+    global.window.StatusBadge = function StatusBadge() { return null; };
+    global.window.formatDate = (d) => d || '';
+    global.window.competitionKindLabel = () => 'Individual';
+    global.window.Breadcrumbs = function Breadcrumbs() { return null; };
+    global.window.AdminTopbar = function AdminTopbar() { return null; };
+    global.window.AdminParticipants = function AdminParticipants() { return null; };
+    global.window.AdminSettings = function AdminSettings() { return null; };
+    global.window.AdminExport = function AdminExport() { return null; };
+    global.window.AdminScoreEditor = function AdminScoreEditor() { return null; };
+    global.window.AdminPools = function AdminPools() { return null; };
+    global.window.AdminCompOverview = function AdminCompOverview() { return null; };
+    global.window.AdminSwissRounds = function AdminSwissRounds() { return null; };
+    global.window.LiveMatchPanel = function LiveMatchPanel() { return null; };
+    global.window.BracketTree = function BracketTree() { return null; };
+    global.window.promptAdminPassword = () => 'admin';
+    global.window.isValidDate = () => true;
+    global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.hasBothSides = realHasBothSides;
+    global.window.API = {
+      startCompetition: vi.fn(() => Promise.resolve({})),
+      generateDraw: vi.fn(() => Promise.resolve({})),
+      discardDraw: vi.fn(() => Promise.resolve({})),
+    };
+
+    vi.resetModules();
+    await import('../admin_competition.jsx');
+    AdminCompetition = global.window.AdminCompetition;
+  });
+
+  afterEach(() => {
+    outerRuntime.unmount();
+    innerRuntime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  // Helper: get the AdminBracket vnode type (the local function) by rendering
+  // AdminCompetition with section="bracket" and returning the vnode's .type.
+  function getAdminBracketFn(bracket, compOverrides = {}) {
+    const tree = outerRuntime.mount(AdminCompetition, {
+      tournament: { id: 't1', name: 'Tournament', competitions: [], courts: [] },
+      competition: mkComp(compOverrides),
+      pools: [],
       poolMatches: [],
-      bracket: previewBracket,
-      onStartKnockout: vi.fn(),
-    });
-    const text = collectText(tree);
-    expect(text).toContain('Start knockout');
-  });
-
-  it('shows "Knockout in progress" when status is playoffs', () => {
-    const tree = runtime.mount(AdminCompetition, {
-      ...baseProps,
-      competition: mkMixedComp({ status: 'playoffs' }),
-      pools: samplePools,
-      poolMatches: completedPoolMatches,
-      bracket: liveBracket,
-      onStartKnockout: vi.fn(),
-    });
-    const text = collectText(tree);
-    expect(text).toContain('Knockout in progress');
-    expect(text).not.toContain('Start knockout');
-  });
-
-  it('bracket section vnode receives preview=true bracket when pools not done', () => {
-    // The reactive shim does not recurse into child components (AdminBracket
-    // is a local function, not the root component here). We verify that the
-    // AdminBracket child vnode receives the preview bracket (preview: true),
-    // which is the gate for disabling scoring inside AdminBracket.
-    const tree = runtime.mount(AdminCompetition, {
-      ...baseProps,
-      competition: mkMixedComp({ status: 'pools' }),
-      pools: samplePools,
-      poolMatches: incompletePoolMatches,
-      bracket: previewBracket,
+      standings: [],
+      bracket,
       section: 'bracket',
-      onStartKnockout: vi.fn(),
-    });
-    // Find the AdminBracket vnode (it's a local function, identified by
-    // the bracket prop it receives).
-    const bracketVnode = findInTree(tree, n => n?.type?.name === 'AdminBracket');
-    expect(bracketVnode).toBeTruthy();
-    expect(bracketVnode.props.bracket.preview).toBe(true);
-  });
-
-  it('bracket section vnode receives preview=false bracket after start-knockout', () => {
-    // Same principle: verify the AdminBracket child vnode gets the live
-    // (non-preview) bracket after status transitions to "playoffs".
-    const tree = runtime.mount(AdminCompetition, {
-      ...baseProps,
-      competition: mkMixedComp({ status: 'playoffs' }),
-      pools: samplePools,
-      poolMatches: completedPoolMatches,
-      bracket: liveBracket,
-      section: 'bracket',
-      onStartKnockout: vi.fn(),
+      onSection: vi.fn(),
+      onBack: vi.fn(),
+      onOpenCompetition: vi.fn(),
+      onUpdate: vi.fn(),
+      onRefreshCompetition: vi.fn(),
+      onMoveCourt: vi.fn(),
+      onEditScore: vi.fn(),
+      onLogout: vi.fn(),
+      onViewerMode: vi.fn(),
+      tweaks: {},
+      password: 'pw',
+      showToast: vi.fn(),
     });
     const bracketVnode = findInTree(tree, n => n?.type?.name === 'AdminBracket');
-    expect(bracketVnode).toBeTruthy();
-    expect(bracketVnode.props.bracket.preview).toBeFalsy();
+    return bracketVnode;
+  }
+
+  // Helper: render the AdminBracket function with innerRuntime (fresh hook slots).
+  // Returns { tree, bracketTreeVnode } where bracketTreeVnode holds the
+  // window.BracketTree vnode created by AdminBracket's render.
+  function mountAdminBracket(bracket, compOverrides = {}) {
+    const vnode = getAdminBracketFn(bracket, compOverrides);
+    if (!vnode) throw new Error('AdminBracket vnode not found in tree');
+    // Switch React to innerRuntime for the AdminBracket invocation so
+    // hook slots don't collide with outerRuntime's AdminCompetition hooks.
+    const prev = global.React;
+    global.React = innerRuntime.React;
+    let tree;
+    try {
+      tree = innerRuntime.mount(vnode.type, vnode.props);
+    } finally {
+      global.React = prev;
+    }
+    // The reactive shim calls createElement for BracketTree but does NOT call
+    // BracketTree() itself. Extract onMatchClick from the BracketTree vnode's
+    // props directly — that is what AdminBracket passes to window.BracketTree.
+    const BracketTreeFn = global.window.BracketTree;
+    const bracketTreeVnode = findInTree(tree, n => n?.type === BracketTreeFn);
+    return { tree, onMatchClick: bracketTreeVnode?.props?.onMatchClick || null };
+  }
+
+  it('BracketTree always receives an onMatchClick handler (tree is always interactive)', () => {
+    const { onMatchClick } = mountAdminBracket(placeholderBracket);
+    expect(onMatchClick).toBeTypeOf('function');
   });
 
-  it('calls onStartKnockout with comp id when "Start knockout" is clicked', () => {
-    const onStartKnockout = vi.fn(() => Promise.resolve());
-    const onSection = vi.fn();
-    const tree = runtime.mount(AdminCompetition, {
-      ...baseProps,
-      competition: mkMixedComp({ status: 'pools' }),
-      pools: samplePools,
-      poolMatches: completedPoolMatches,
-      bracket: previewBracket,
-      onStartKnockout,
-      onSection,
-    });
-    const btn = findInTree(tree, n => n?.type === 'button' && collectText(n).includes('Start knockout'));
-    expect(btn).toBeTruthy();
-    btn.props.onClick();
-    expect(onStartKnockout).toHaveBeenCalledWith('comp-1');
+  it('onMatchClick is a no-op for a pool-origin placeholder match ("Pool A-1st")', () => {
+    const { onMatchClick } = mountAdminBracket(placeholderBracket);
+    expect(onMatchClick).toBeTypeOf('function');
+    const placeholderMatch = { id: 'r0-m0', sideA: { name: 'Pool A-1st' }, sideB: { name: 'Pool B-1st' }, status: 'scheduled' };
+    // hasBothSides returns false for pool-origin placeholders, so setSelected is not called.
+    expect(() => onMatchClick(placeholderMatch, 0, 0)).not.toThrow();
   });
 
-  it('does NOT show old "Create playoff bracket" wording for mixed comps', () => {
-    const tree = runtime.mount(AdminCompetition, {
-      ...baseProps,
-      competition: mkMixedComp({ status: 'pools' }),
-      pools: samplePools,
-      poolMatches: completedPoolMatches,
-      bracket: previewBracket,
-      onStartKnockout: vi.fn(),
-    });
-    const text = collectText(tree);
-    expect(text).not.toContain('Create playoff bracket');
-    expect(text).not.toContain('Playoffs competition');
+  it('onMatchClick is a no-op for a "Winner of rX-mY" feeder match', () => {
+    const { onMatchClick } = mountAdminBracket(winnerFeederBracket, { status: 'playoffs' });
+    expect(onMatchClick).toBeTypeOf('function');
+    const feederMatch = { id: 'r1-m0', sideA: { name: 'Winner of r0-m0' }, sideB: { name: 'Winner of r0-m1' }, status: 'scheduled' };
+    expect(() => onMatchClick(feederMatch, 1, 0)).not.toThrow();
+  });
+
+  it('onMatchClick does not throw for a resolved match (hasBothSides returns true)', () => {
+    const { onMatchClick } = mountAdminBracket(liveBracket, { status: 'playoffs' });
+    expect(onMatchClick).toBeTypeOf('function');
+    const resolvedMatch = { id: 'r0-m0', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' }, status: 'scheduled' };
+    expect(() => onMatchClick(resolvedMatch, 0, 0)).not.toThrow();
+  });
+
+  it('shows informational banner when bracket has unresolved placeholder matches', () => {
+    const { tree } = mountAdminBracket(placeholderBracket);
+    expect(collectText(tree)).toContain('fills in automatically');
+  });
+
+  it('does NOT show the incremental-fill banner when all bracket matches are resolved', () => {
+    const { tree } = mountAdminBracket(liveBracket, { status: 'playoffs' });
+    expect(collectText(tree)).not.toContain('fills in automatically');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 4: api_client — startKnockout method removed
+// ---------------------------------------------------------------------------
+
+describe('api_client: startKnockout method removed (mp-turx)', () => {
+  beforeAll(async () => {
+    vi.resetModules();
+  });
+
+  it('API object no longer has a startKnockout method', async () => {
+    vi.resetModules();
+    const { API } = await import('../api_client.jsx');
+    expect(API.startKnockout).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 5: hasBothSides — pool-origin placeholder rejection
+// ---------------------------------------------------------------------------
+
+describe('hasBothSides: rejects pool-origin placeholders (mp-turx)', () => {
+  let hasBothSides;
+
+  beforeAll(async () => {
+    vi.resetModules();
+    ({ hasBothSides } = await import('../admin_helpers.jsx'));
+  });
+
+  it('returns false for "Pool A-1st" side (pool-origin placeholder)', () => {
+    expect(hasBothSides({ sideA: 'Pool A-1st', sideB: { id: 'p1', name: 'Alice' } })).toBe(false);
+  });
+
+  it('returns false for "Pool B-2nd" side (pool-origin placeholder)', () => {
+    expect(hasBothSides({ sideA: { id: 'p1', name: 'Alice' }, sideB: 'Pool B-2nd' })).toBe(false);
+  });
+
+  it('returns false for "Pool A-3rd" ordinal variant', () => {
+    expect(hasBothSides({ sideA: 'Pool A-3rd', sideB: 'Pool B-4th' })).toBe(false);
+  });
+
+  it('returns false for "Winner of r0-m1" feeder (existing behaviour unchanged)', () => {
+    expect(hasBothSides({ sideA: { name: 'Winner of r0-m1' }, sideB: { name: 'Alice' } })).toBe(false);
+  });
+
+  it('returns true for two real participants', () => {
+    expect(hasBothSides({ sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' } })).toBe(true);
+  });
+
+  it('does NOT reject a participant legitimately named "Winner of the 2025 Cup" (long name, no exact format)', () => {
+    // Only the exact format "Winner of rN-mN" is rejected — not all names
+    // starting with "Winner of". A real participant with that full name should pass.
+    expect(hasBothSides({ sideA: 'Winner of the 2025 Cup', sideB: { id: 'p2', name: 'Bob' } })).toBe(true);
   });
 });

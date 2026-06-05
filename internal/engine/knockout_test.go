@@ -10,291 +10,145 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestStartKnockout_HappyPath verifies:
-//  1. Status transitions from pools → playoffs.
-//  2. Bracket.Preview is cleared (false).
-//  3. Pool winner UUIDs and Numbers are preserved in the bracket (identity).
-//  4. Slot parity: the slot that was "Pool A-1st" now holds Pool A's rank-1 player.
-func TestStartKnockout_HappyPath(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "knockout-happy"
+// --- helpers ---------------------------------------------------------------
 
-	// Set up a competition with completed pools and a preview bracket.
-	// Use poolWinners=1 so we get exactly 2 slots (Pool A-1st, Pool B-1st).
+// saveMixedScaffold writes a mixed competition with the given pools and a
+// pool-origin PREVIEW bracket (placeholders) shaped like generatePoolPreviewBracket
+// would produce. poolWinners controls how many finishers each pool promotes.
+func saveMixedScaffold(t *testing.T, store *state.Store, compID string, pools []helper.Pool, poolWinners int) {
+	t.Helper()
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:          compID,
-		Name:        "Knockout Happy Test",
+		Name:        compID,
 		Kind:        "individual",
 		Format:      state.CompFormatMixed,
 		Status:      state.CompStatusPools,
 		Courts:      []string{"A"},
 		StartTime:   "09:00",
-		PoolWinners: 1,
+		PoolWinners: poolWinners,
 	}))
-
-	// Save players with specific IDs so we can assert identity preservation.
-	players := []domain.Player{
-		{ID: "uuid-alice", Name: "Alice", Dojo: "DojoA"},
-		{ID: "uuid-bob", Name: "Bob", Dojo: "DojoB"},
-		{ID: "uuid-charlie", Name: "Charlie", Dojo: "DojoC"},
-		{ID: "uuid-dave", Name: "Dave", Dojo: "DojoD"},
-	}
-	require.NoError(t, store.SaveParticipants(compID, players))
-
-	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{ID: "uuid-alice", Name: "Alice"},
-			{ID: "uuid-bob", Name: "Bob"},
-		}},
-		{PoolName: "Pool B", Players: []helper.Player{
-			{ID: "uuid-charlie", Name: "Charlie"},
-			{ID: "uuid-dave", Name: "Dave"},
-		}},
-	}
 	require.NoError(t, store.SavePools(compID, pools))
 
-	matches := []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-		{ID: "Pool B-0", SideA: "Charlie", SideB: "Dave", Winner: "Charlie", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}
-	require.NoError(t, store.SavePoolMatches(compID, matches))
-
-	// Save a preview bracket.
-	previewBracket := &state.Bracket{
-		Preview: true,
-		Rounds: [][]state.BracketMatch{
-			{
-				{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-1st", Status: state.MatchStatusScheduled},
-			},
-		},
-	}
-	require.NoError(t, store.SaveBracket(compID, previewBracket))
-
-	// Run StartKnockout.
-	err := eng.StartKnockout(compID)
+	// Build the preview bracket the same way the engine does so placeholder
+	// labels match exactly (GenerateFinals → CreateBalancedTree →
+	// ApplyPoolAdjustments → TreeToLeafArray → buildBracketFromLeaves).
+	finals := helper.GenerateFinals(pools, poolWinners)
+	tree := helper.CreateBalancedTree(finals)
+	helper.ApplyPoolAdjustments(tree)
+	leaves := helper.TreeToLeafArray(tree)
+	eng := New(store)
+	comp, _ := store.LoadCompetition(compID)
+	bracket, err := eng.buildBracketFromLeaves(comp, leaves)
 	require.NoError(t, err)
+	bracket.Preview = true
+	require.NoError(t, store.SaveBracket(compID, bracket))
+}
 
-	// 1. Status must be playoffs.
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPlayoffs, comp.Status, "status must transition to playoffs")
-
-	// 2. Bracket.Preview must be cleared.
-	bracket, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.False(t, bracket.Preview, "bracket must not be preview after StartKnockout")
-
-	// 3 & 4. Slot parity: the first round match must contain real player names.
-	// Pool A winner is Alice, Pool B winner is Charlie (from the completed matches above).
-	require.NotEmpty(t, bracket.Rounds, "bracket must have rounds")
-	firstRound := bracket.Rounds[0]
-	require.NotEmpty(t, firstRound, "first round must have matches")
-
-	// The two players in the bracket should be Alice (Pool A-1st) and Charlie (Pool B-1st).
-	allSides := make([]string, 0, len(firstRound)*2)
-	for _, m := range firstRound {
-		if m.SideA != "" {
-			allSides = append(allSides, m.SideA)
-		}
-		if m.SideB != "" {
-			allSides = append(allSides, m.SideB)
+func bracketSides(b *state.Bracket) []string {
+	var out []string
+	for _, round := range b.Rounds {
+		for _, m := range round {
+			out = append(out, m.SideA, m.SideB)
 		}
 	}
-	assert.Contains(t, allSides, "Alice", "Pool A-1st (Alice) must appear in bracket")
-	assert.Contains(t, allSides, "Charlie", "Pool B-1st (Charlie) must appear in bracket")
-	assert.NotContains(t, allSides, "Pool A-1st", "placeholder must be replaced by real player name")
-	assert.NotContains(t, allSides, "Pool B-1st", "placeholder must be replaced by real player name")
+	return out
 }
 
-// TestStartKnockout_PreCondition_NotMixed verifies that a non-mixed competition
-// returns a validation error.
-func TestStartKnockout_PreCondition_NotMixed(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "knockout-not-mixed"
+// --- ResolveQualifiedPools: incremental seeding ----------------------------
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     compID,
-		Name:   "Not Mixed",
-		Format: state.CompFormatPlayoffs,
-		Status: state.CompStatusPlayoffs,
+// TestResolveQualifiedPools_Incremental is the core test for gate-free, per-pool
+// knockout seeding: a pool's finishers drop into their bracket slots the moment
+// that pool finishes, while other pools are still in progress.
+func TestResolveQualifiedPools_Incremental(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "incremental"
+
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+	}
+	saveMixedScaffold(t, store, compID, pools, 2)
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
 	}))
 
-	err := eng.StartKnockout(compID)
-	require.Error(t, err)
-	var ve *ValidationError
-	require.ErrorAs(t, err, &ve, "must return a ValidationError")
-	assert.Contains(t, err.Error(), "mixed")
-}
-
-// TestStartKnockout_PreCondition_NotPools verifies that a competition not in
-// pools status returns a validation error.
-func TestStartKnockout_PreCondition_NotPools(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-
-	tests := []struct {
-		name   string
-		status state.CompetitionStatus
-	}{
-		{"setup", state.CompStatusSetup},
-		{"draw-ready", state.CompStatusDrawReady},
-		{"playoffs", state.CompStatusPlayoffs},
-		{"completed", state.CompStatusComplete},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			compID := "knockout-wrong-status-" + string(tc.status)
-			require.NoError(t, store.SaveCompetition(&state.Competition{
-				ID:     compID,
-				Name:   "Wrong Status",
-				Format: state.CompFormatMixed,
-				Status: tc.status,
-			}))
-
-			err := eng.StartKnockout(compID)
-			require.Error(t, err)
-			var ve *ValidationError
-			require.ErrorAs(t, err, &ve, "must return a ValidationError")
-			assert.Contains(t, err.Error(), "pools")
-		})
-	}
-}
-
-// TestStartKnockout_PreCondition_PoolsIncomplete verifies that a competition
-// with incomplete pool matches returns a validation error.
-func TestStartKnockout_PreCondition_PoolsIncomplete(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "knockout-incomplete"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:          compID,
-		Name:        "Incomplete Pools",
-		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
-		PoolWinners: 1,
+	// Pool A round-robin done (A1 > A2); Pool B still scheduled.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
 	}))
 
-	// One match not yet completed.
-	matches := []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted},
-		{ID: "Pool B-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled},
-	}
-	require.NoError(t, store.SavePoolMatches(compID, matches))
-
-	err := eng.StartKnockout(compID)
-	require.Error(t, err)
-	var ve *ValidationError
-	require.ErrorAs(t, err, &ve)
-	assert.Contains(t, err.Error(), "complete")
-}
-
-// TestStartKnockout_NotFound verifies a not-found error for a missing competition.
-func TestStartKnockout_NotFound(t *testing.T) {
-	eng, _, _ := setupTestEngine(t)
-	err := eng.StartKnockout("nonexistent")
-	require.Error(t, err)
-	var nfe *NotFoundError
-	assert.ErrorAs(t, err, &nfe)
-}
-
-// TestMaybeAutoCompletePools_MixedFormat_StaysInPools verifies that a mixed-format
-// competition does NOT auto-transition to "completed" after all pool matches are done.
-// It should stay in "pools" status so StartKnockout can be called.
-func TestMaybeAutoCompletePools_MixedFormat_StaysInPools(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "mixed-stays-pools"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     compID,
-		Name:   "Mixed No Auto Complete",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusPools,
-		Courts: []string{"A"},
-	}))
-
-	matches := []state.MatchResult{
-		{ID: "P1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
-		{ID: "P1-1", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusCompleted, Winner: "Charlie"},
-	}
-	require.NoError(t, store.SavePoolMatches(compID, matches))
-
-	outcome, err := eng.MaybeAutoCompletePools(compID)
+	resolvedNow, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteNoChange, outcome, "mixed format must NOT transition to completed; it must stay in pools")
+	assert.Greater(t, resolvedNow, 0, "Pool A finishers must be seeded immediately")
+	assert.False(t, allResolved, "Pool B is still running, so not all pools resolved")
 
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	sides := bracketSides(b)
+	assert.Contains(t, sides, "A1", "Pool A 1st must be seeded")
+	assert.Contains(t, sides, "A2", "Pool A 2nd must be seeded")
+	assert.Contains(t, sides, "Pool B-1st", "Pool B placeholders must remain until Pool B finishes")
+	assert.NotContains(t, sides, "B1", "Pool B not finished — must not be seeded yet")
+
+	// Competition must remain in pools (Pool B still running).
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPools, comp.Status, "mixed status must remain pools after all pool matches done")
+	assert.Equal(t, state.CompStatusPools, comp.Status)
+
+	// Now finish Pool B.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+	_, allResolved, err = eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	assert.True(t, allResolved, "with both pools finished, every placeholder must be resolved")
+
+	b, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.False(t, bracketHasPoolPlaceholders(b), "no pool placeholders may remain")
+	assert.False(t, b.Preview, "Preview flag must be cleared once the bracket is seeded")
 }
 
-// TestMaybeAutoCompletePools_LeagueFormat_Completes verifies that a league
-// competition still auto-transitions to completed (regression test for the
-// change that narrows the transition to league-only).
-func TestMaybeAutoCompletePools_LeagueFormat_Completes(t *testing.T) {
+// TestResolveQualifiedPools_NonMixedNoOp verifies the resolver is a no-op for
+// competitions that have no pool placeholders (standalone playoffs / league).
+func TestResolveQualifiedPools_NonMixedNoOp(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "league-completes"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     compID,
-		Name:   "League Completes",
-		Format: state.CompFormatLeague,
-		Status: state.CompStatusPools,
-		Courts: []string{"A"},
-	}))
-
-	matches := []state.MatchResult{
-		{ID: "P1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
-		{ID: "P1-1", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Alice"},
-		{ID: "P1-2", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Bob"},
+	for _, format := range []string{state.CompFormatPlayoffs, state.CompFormatLeague} {
+		compID := "noop-" + format
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: compID, Format: format, Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+		}))
+		n, all, err := eng.ResolveQualifiedPools(compID)
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
+		assert.False(t, all)
 	}
-	require.NoError(t, store.SavePoolMatches(compID, matches))
-
-	outcome, err := eng.MaybeAutoCompletePools(compID)
-	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteTransitioned, outcome, "league format must transition to completed")
-
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusComplete, comp.Status)
 }
 
-// TestStartKnockout_CrossSeedOrder is the regression test for the seeding bug
-// where finalists were resolved in global-rank order ([A-1st, B-1st, A-2nd,
-// B-2nd]) and fed positionally to the bracket builder, which put the two pool
-// WINNERS into the same first-round match. With poolWinners=2 the cross-seed
-// order ([A-1st, B-2nd, A-2nd, B-1st]) differs from rank order, so this catches
-// the bug; the earlier poolWinners=1 SlotParity test could not. The live bracket
-// must match the preview's cross-seeding: pool winners on opposite ends, only
-// able to meet in the final.
-func TestStartKnockout_CrossSeedOrder(t *testing.T) {
+// TestResolveQualifiedPools_CrossSeedOrder is the regression test for the
+// seeding bug: with poolWinners=2 the cross-seed order differs from rank order,
+// so the two pool WINNERS must land on opposite ends of the draw (never in the
+// same first-round match).
+func TestResolveQualifiedPools_CrossSeedOrder(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "knockout-crossseed"
+	compID := "crossseed"
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:          compID,
-		Name:        "Cross Seed Test",
-		Kind:        "individual",
-		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
-		Courts:      []string{"A"},
-		StartTime:   "09:00",
-		PoolWinners: 2,
-	}))
-
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}, {Name: "A3"}, {Name: "A4"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}, {Name: "B3"}, {Name: "B4"}}},
+	}
+	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "A1"}, {Name: "A2"}, {Name: "A3"}, {Name: "A4"},
 		{Name: "B1"}, {Name: "B2"}, {Name: "B3"}, {Name: "B4"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}, {Name: "A3"}, {Name: "A4"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}, {Name: "B3"}, {Name: "B4"}}},
-	}))
 
-	// Round-robin results giving distinct win counts (no ties → no tiebreakers):
-	// A1=3, A2=2, A3=1, A4=0 (and likewise for Pool B).
 	win := func(id, a, b, w string) state.MatchResult {
 		return state.MatchResult{ID: id, SideA: a, SideB: b, Winner: w, IpponsA: []string{"M"}, Status: state.MatchStatusCompleted}
 	}
+	// Distinct win counts → A1>A2>A3>A4 and B1>B2>B3>B4 (no ties → no tiebreakers).
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		win("Pool A-0", "A1", "A2", "A1"), win("Pool A-1", "A1", "A3", "A1"), win("Pool A-2", "A1", "A4", "A1"),
 		win("Pool A-3", "A2", "A3", "A2"), win("Pool A-4", "A2", "A4", "A2"), win("Pool A-5", "A3", "A4", "A3"),
@@ -302,245 +156,243 @@ func TestStartKnockout_CrossSeedOrder(t *testing.T) {
 		win("Pool B-3", "B2", "B3", "B2"), win("Pool B-4", "B2", "B4", "B2"), win("Pool B-5", "B3", "B4", "B3"),
 	}))
 
-	// Preview bracket as generatePoolPreviewBracket would build it:
-	// GenerateFinals(pools, 2) = [A-1st, B-2nd, A-2nd, B-1st] → pairs
-	// (A-1st,B-2nd),(A-2nd,B-1st).
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Preview: true,
-		Rounds: [][]state.BracketMatch{{
-			{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-2nd", Status: state.MatchStatusScheduled},
-			{ID: "m-r1-1", SideA: "Pool A-2nd", SideB: "Pool B-1st", Status: state.MatchStatusScheduled},
-		}},
-	}))
-
-	require.NoError(t, eng.StartKnockout(compID))
-
-	bracket, err := store.LoadBracket(compID)
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
-	require.Len(t, bracket.Rounds[0], 2, "two first-round matches expected")
+	require.True(t, allResolved)
 
-	// sidesOf returns the {SideA,SideB} set of the match containing name.
-	matchOf := func(name string) (string, string) {
-		for _, m := range bracket.Rounds[0] {
-			if m.SideA == name || m.SideB == name {
-				return m.SideA, m.SideB
-			}
-		}
-		return "", ""
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	r0 := b.Rounds[0]
+	for _, m := range r0 {
+		pair := map[string]bool{m.SideA: true, m.SideB: true}
+		assert.False(t, pair["A1"] && pair["B1"],
+			"pool winners A1 and B1 must NOT meet in the first round (cross-seed must keep them apart)")
 	}
-
-	// Pool winners A1 and B1 must NOT meet in the first round (the bug put them
-	// in the same match). A1 cross-seeds against B's runner-up (B2); A2 against B1.
-	a1A, a1B := matchOf("A1")
-	assert.ElementsMatch(t, []string{"A1", "B2"}, []string{a1A, a1B},
-		"Pool A winner (A1) must face Pool B runner-up (B2), not Pool B winner")
-	a2A, a2B := matchOf("A2")
-	assert.ElementsMatch(t, []string{"A2", "B1"}, []string{a2A, a2B},
-		"Pool A runner-up (A2) must face Pool B winner (B1)")
 }
 
-// TestStartKnockout_BracketScoreableAfterStart verifies that after StartKnockout,
-// it is possible to record a match result in the bracket (Preview=false means
-// the scoring gate no longer blocks it).
-func TestStartKnockout_BracketScoreableAfterStart(t *testing.T) {
+// TestResolveQualifiedPools_ByeWinnerField verifies that when a finisher draws a
+// bye (odd finalist count), the placeholder is resolved in the bye match's SideA
+// AND its pre-filled Winner field. Uses 3 pools × 1 winner = 3 finalists in a
+// 4-slot bracket → one bye.
+func TestResolveQualifiedPools_ByeWinnerField(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "knockout-scoreable"
+	compID := "bye"
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:          compID,
-		Name:        "Scoreable Bracket",
-		Kind:        "individual",
-		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
-		Courts:      []string{"A"},
-		StartTime:   "09:00",
-		PoolWinners: 1,
-	}))
-
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+		{PoolName: "Pool C", Players: []helper.Player{{Name: "C1"}, {Name: "C2"}}},
+	}
+	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice", Dojo: "DojoA"},
-		{Name: "Bob", Dojo: "DojoB"},
-		{Name: "Charlie", Dojo: "DojoC"},
-		{Name: "Dave", Dojo: "DojoD"},
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"}, {Name: "C1"}, {Name: "C2"},
 	}))
-
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "Charlie"}, {Name: "Dave"}}},
-	}))
-
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-		{ID: "Pool B-0", SideA: "Charlie", SideB: "Dave", Winner: "Charlie", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool C-0", SideA: "C1", SideB: "C2", Winner: "C1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 	}))
 
-	// Save a preview bracket.
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	// No placeholder may survive in ANY field, including the bye match's Winner.
+	for _, round := range b.Rounds {
+		for _, m := range round {
+			assert.False(t, poolFinalistPlaceholderRE.MatchString(m.SideA), "SideA placeholder leaked: %q", m.SideA)
+			assert.False(t, poolFinalistPlaceholderRE.MatchString(m.SideB), "SideB placeholder leaked: %q", m.SideB)
+			assert.False(t, poolFinalistPlaceholderRE.MatchString(m.Winner), "Winner placeholder leaked: %q", m.Winner)
+		}
+	}
+}
+
+// --- per-match playability gate --------------------------------------------
+
+// TestBracketMatchPlayable covers the structural predicate used to gate scoring.
+func TestBracketMatchPlayable(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"Alice", "Bob", true},
+		{"Pool A-1st", "Bob", false},
+		{"Alice", "Pool B-2nd", false},
+		{"Winner of r2-m0", "Alice", false},
+		{"Alice", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got := bracketMatchPlayable(&state.BracketMatch{SideA: c.a, SideB: c.b})
+		assert.Equalf(t, c.want, got, "playable(%q,%q)", c.a, c.b)
+	}
+}
+
+// TestScoreKnockout_PerMatchGate verifies that the scoring path rejects a
+// knockout match with an unresolved side and accepts one with both sides
+// resolved — replacing the old bracket-wide Preview gate.
+func TestScoreKnockout_PerMatchGate(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "permatch"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Kind: "individual", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Preview: true,
 		Rounds: [][]state.BracketMatch{{
-			{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-1st", Status: state.MatchStatusScheduled},
+			{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+			{ID: "m-r1-1", SideA: "Pool B-1st", SideB: "Carol", Status: state.MatchStatusScheduled},
 		}},
 	}))
 
-	// Start knockout.
-	require.NoError(t, eng.StartKnockout(compID))
-
-	// Load the live bracket and score the first match.
-	bracket, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	require.NotEmpty(t, bracket.Rounds)
-	firstMatch := bracket.Rounds[0][0]
-	require.NotEmpty(t, firstMatch.SideA)
-
-	// Recording a bracket result must succeed (no Preview block).
-	err = eng.RecordMatchResult(compID, firstMatch.ID, &state.MatchResult{
-		Winner: firstMatch.SideA,
-		Status: state.MatchStatusCompleted,
+	// Unresolved side → rejected.
+	err := eng.RecordMatchResult(compID, "m-r1-1", &state.MatchResult{
+		SideA: "Pool B-1st", SideB: "Carol", Winner: "Carol", Status: state.MatchStatusCompleted,
 	})
-	assert.NoError(t, err, "must be able to score bracket match after StartKnockout")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not ready to score")
+
+	// Both sides resolved → accepted.
+	err = eng.RecordMatchResult(compID, "m-r1-0", &state.MatchResult{
+		SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", b.Rounds[0][0].Winner)
 }
 
-// TestStartKnockout_SlotParity verifies that the slot that was "Pool A-1st"
-// in the preview bracket now holds Pool A's rank-1 player, and "Pool B-1st"
-// now holds Pool B's rank-1 player. This ensures the preview structure is
-// preserved exactly.
-func TestStartKnockout_SlotParity(t *testing.T) {
+// TestKnockoutOnly_ScoreableFromDraw verifies that a standalone (knockout-only)
+// playoffs competition is scoreable from draw time — its round-1 leaves are real
+// players, so the per-match gate lets them through with no pool resolution.
+func TestKnockoutOnly_ScoreableFromDraw(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "knockout-slot-parity"
-
+	compID := "ko-only"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:          compID,
-		Name:        "Slot Parity Test",
-		Kind:        "individual",
-		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
-		Courts:      []string{"A"},
-		StartTime:   "09:00",
-		PoolWinners: 1,
+		ID: compID, Name: compID, Kind: "individual", Format: state.CompFormatPlayoffs,
+		Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+				{ID: "m-r1-1", SideA: "Carol", SideB: "Dan", Status: state.MatchStatusScheduled},
+			},
+			{
+				{ID: "m-r2-0", SideA: "Winner of r2-m0", SideB: "Winner of r2-m1", Status: state.MatchStatusScheduled},
+			},
+		},
 	}))
 
+	// Round-1 match is playable immediately.
+	require.NoError(t, eng.RecordMatchResult(compID, "m-r1-0", &state.MatchResult{
+		SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted,
+	}))
+	// The final is NOT playable yet — its sides are "Winner of …" feeders.
+	err := eng.RecordMatchResult(compID, "m-r2-0", &state.MatchResult{
+		SideA: "Winner of r2-m0", SideB: "Winner of r2-m1", Winner: "Winner of r2-m0", Status: state.MatchStatusCompleted,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not ready to score")
+}
+
+// --- MaybeAutoCompletePools mixed/league branches --------------------------
+
+// TestMaybeAutoCompletePools_MixedStaysInPoolsWhileScheduled: a mixed comp with
+// an unfinished pool match must not flip to playoffs.
+func TestMaybeAutoCompletePools_MixedStaysInPoolsWhileScheduled(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "mixed-running"
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+	}
+	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice", Dojo: "DojoA"},
-		{Name: "Bob", Dojo: "DojoB"},
-		{Name: "Charlie", Dojo: "DojoC"},
-		{Name: "Dave", Dojo: "DojoD"},
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
 	}))
-
-	// Two pools: A (Alice/Bob, Alice wins), B (Charlie/Dave, Dave wins).
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "Charlie"}, {Name: "Dave"}}},
-	}))
-
-	// Pool A: Alice beats Bob. Pool B: Dave beats Charlie.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-		{ID: "Pool B-0", SideA: "Charlie", SideB: "Dave", Winner: "Dave", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
 	}))
 
-	// Build a preview bracket using GenerateFinals order.
-	// With pools [Pool A, Pool B] and poolWinners=1:
-	// GenerateFinals returns ["Pool A-1st", "Pool B-1st"].
-	// buildBracketFromLeaves puts Pool A-1st as SideA and Pool B-1st as SideB.
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Preview: true,
-		Rounds: [][]state.BracketMatch{{
-			{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-1st", Status: state.MatchStatusScheduled},
-		}},
-	}))
-
-	require.NoError(t, eng.StartKnockout(compID))
-
-	// After StartKnockout:
-	// - Pool A-1st (rank 1 of Pool A) = Alice
-	// - Pool B-1st (rank 1 of Pool B) = Dave
-	// The live bracket must have Alice in the slot formerly occupied by "Pool A-1st"
-	// and Dave in the slot formerly occupied by "Pool B-1st".
-	bracket, err := store.LoadBracket(compID)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	require.NotEmpty(t, bracket.Rounds)
-	firstRound := bracket.Rounds[0]
-	require.NotEmpty(t, firstRound)
-
-	// Find the sides.
-	allSides := make([]string, 0, 4)
-	for _, m := range firstRound {
-		if m.SideA != "" {
-			allSides = append(allSides, m.SideA)
-		}
-		if m.SideB != "" {
-			allSides = append(allSides, m.SideB)
-		}
-	}
-	assert.Contains(t, allSides, "Alice", "Pool A winner (Alice) must be in bracket")
-	assert.Contains(t, allSides, "Dave", "Pool B winner (Dave) must be in bracket")
+	assert.Equal(t, AutoCompletePoolsResolved, outcome, "Pool A seeded → bracket changed, but comp stays in pools")
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status)
 }
 
-// TestStartKnockout_ResolvesByeWinnerField verifies that when a finalist draws
-// a bye (single-winner pool → 1 finalist → auto-advanced), the in-place resolver
-// replaces the placeholder in the bye match's SideA AND its Winner field, and
-// that the participant roster (UUID/Number) is left untouched by StartKnockout.
-func TestStartKnockout_ResolvesByeWinnerField(t *testing.T) {
+// TestMaybeAutoCompletePools_MixedFlipsWhenAllPoolsDone: once the last pool is
+// seeded, the comp moves pools → playoffs.
+func TestMaybeAutoCompletePools_MixedFlipsWhenAllPoolsDone(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "knockout-bye"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:          compID,
-		Name:        "Bye Winner Resolution",
-		Kind:        "individual",
-		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
-		Courts:      []string{"A"},
-		StartTime:   "09:00",
-		PoolWinners: 1,
-	}))
-
-	players := []domain.Player{
-		{ID: "aaaaaaaa-0000-0000-0000-000000000001", Name: "Alice", Dojo: "DojoA", Number: "1"},
-		{ID: "aaaaaaaa-0000-0000-0000-000000000002", Name: "Bob", Dojo: "DojoB", Number: "2"},
+	compID := "mixed-flip"
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
 	}
-	require.NoError(t, store.SaveParticipants(compID, players))
-
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{ID: "aaaaaaaa-0000-0000-0000-000000000001", Name: "Alice", Number: "1"},
-			{ID: "aaaaaaaa-0000-0000-0000-000000000002", Name: "Bob", Number: "2"},
-		}},
+	saveMixedScaffold(t, store, compID, pools, 1)
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
 	}))
-
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 	}))
 
-	// Single pool, 1 winner → the lone finalist drew a bye: SideA and Winner
-	// both hold the placeholder "Pool A-1st".
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Preview: true,
-		Rounds: [][]state.BracketMatch{{
-			{ID: "m-r1-0", SideA: "Pool A-1st", Status: state.MatchStatusCompleted, Winner: "Pool A-1st"},
-		}},
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteKnockoutStarted, outcome)
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
+}
+
+// TestMaybeAutoCompletePools_LeagueCompletes: league still auto-completes.
+func TestMaybeAutoCompletePools_LeagueCompletes(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "league-done"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
 	}))
-
-	require.NoError(t, eng.StartKnockout(compID))
-
-	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "A1", SideB: "A3", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-2", SideA: "A2", SideB: "A3", Winner: "A2", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	require.False(t, bracket.Preview)
-	m := bracket.Rounds[0][0]
-	assert.Equal(t, "Alice", m.SideA, "bye match SideA placeholder must resolve to the player")
-	assert.Equal(t, "Alice", m.Winner, "bye match Winner placeholder must also resolve to the player")
-
-	// StartKnockout must NOT mutate the participant roster — the participant UUID
-	// is still present after the knockout starts. (Number lives in pools.csv, not
-	// participants.csv, so it is not asserted here.)
-	roster, err := store.LoadParticipants(compID, false)
+	assert.Equal(t, AutoCompleteTransitioned, outcome)
+	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	var alice *domain.Player
-	for i := range roster {
-		if roster[i].Name == "Alice" {
-			alice = &roster[i]
-		}
-	}
-	require.NotNil(t, alice)
-	assert.Equal(t, "aaaaaaaa-0000-0000-0000-000000000001", alice.ID)
+	assert.Equal(t, state.CompStatusComplete, comp.Status)
+}
+
+// --- draw-time invariant ---------------------------------------------------
+
+// TestGeneratePools_MixedRequiresTwoPools verifies the draw-time invariant: a
+// mixed competition refuses to generate when participants + PoolSize would
+// produce fewer than 2 pools.
+func TestGeneratePools_MixedRequiresTwoPools(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "mixed-too-few-pools"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Tiny Mixed", Kind: "individual",
+		Format: state.CompFormatMixed, Status: state.CompStatusSetup,
+		Courts: []string{"A"}, StartTime: "09:00",
+		PoolSize: 10, PoolSizeMode: "max", PoolWinners: 2,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"}, {Name: "Carol"}, {Name: "Dan"}, {Name: "Eve"},
+	}))
+	err := eng.GenerateDraw(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least 2 pools")
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusSetup, comp.Status)
 }

@@ -1321,69 +1321,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusOK)
 	})
 
-	// POST /competitions/:id/start-knockout resolves pool winners into the
-	// mixed competition's own bracket and transitions it to "playoffs" status.
-	// This is the canonical way to start the knockout phase for a mixed
-	// (Pools + Knockout) competition.
-	//
-	// Preconditions (HTTP 409 on failure):
-	//   - Competition exists (404 otherwise).
-	//   - Format == "mixed".
-	//   - Status == "pools".
-	//   - All pool matches are complete (including tiebreaker/DH resolution).
-	//
-	// Success response (HTTP 200):
-	//   { "competition": <Competition>, "bracket": <Bracket> }
-	r.POST("/competitions/:id/start-knockout", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-
-		if err := eng.StartKnockout(id); err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			}
-			return
-		}
-
-		comp, err := store.LoadCompetition(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "knockout started but failed to load updated competition: " + err.Error()})
-			return
-		}
-		if comp == nil {
-			// Race: competition deleted between StartKnockout and this reload.
-			// Separate from the err != nil branch so we never deref a nil error.
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "knockout started but competition " + id + " disappeared before the response could be built"})
-			return
-		}
-
-		bracket, err := store.LoadBracket(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "knockout started but failed to load updated bracket: " + err.Error()})
-			return
-		}
-
-		// Broadcast events so connected clients (viewer, admin) update their
-		// state without a manual reload. Mirror the events the playoffs start
-		// path uses.
-		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-		hub.Broadcast(EventScheduleUpdated, nil)
-
-		c.JSON(http.StatusOK, gin.H{
-			"competition": comp,
-			"bracket":     bracket,
-		})
-	})
-
 	r.DELETE("/competitions/:id/overrides", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

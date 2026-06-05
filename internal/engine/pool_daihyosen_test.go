@@ -124,7 +124,7 @@ func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *stat
 	eng, store, _ := setupTestEngine(t)
 
 	// Use league format: league auto-completes after all pool matches (including DH).
-	// Mixed format no longer auto-completes — it waits for StartKnockout instead.
+	// Mixed format does not auto-complete after pools; the knockout fills in incrementally.
 	// DH injection logic is format-agnostic (it depends only on isTeamComp), so
 	// changing the format here doesn't affect the tiebreaker-injection behavior
 	// being tested.

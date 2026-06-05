@@ -37,26 +37,60 @@ const (
 	// and the competition remains in CompStatusPools. Callers should broadcast
 	// EventMatchUpdated and EventScheduleUpdated.
 	AutoCompleteTiebreakInjected AutoCompleteOutcome = 2
+	// AutoCompleteKnockoutStarted means the LAST pool of a mixed competition was
+	// just seeded into the knockout bracket: every pool is now resolved, so the
+	// competition moved CompStatusPools → CompStatusPlayoffs (only knockout
+	// matches remain). Callers should broadcast EventCompetitionStarted and
+	// EventScheduleUpdated.
+	AutoCompleteKnockoutStarted AutoCompleteOutcome = 3
+	// AutoCompletePoolsResolved means one or more (but not all) pools of a mixed
+	// competition were just seeded into the knockout bracket, OR tiebreaker/DH
+	// matches were injected. The competition stays in CompStatusPools while the
+	// remaining pools run, but the bracket changed and newly-playable knockout
+	// matches may now be schedulable. Callers should broadcast EventMatchUpdated
+	// and EventScheduleUpdated.
+	AutoCompletePoolsResolved AutoCompleteOutcome = 4
 )
 
-// MaybeAutoCompletePools transitions a league-format competition from
-// CompStatusPools to CompStatusComplete when every pool match has been
-// recorded as completed. For mixed-format competitions the pools phase is
-// followed by a knockout bracket (StartKnockout), so they intentionally
-// stay in CompStatusPools after pools finish — do NOT call MaybeAutoCompletePools
-// to complete a mixed competition.
+// MaybeAutoCompletePools advances a competition past its pool phase when every
+// pool match is recorded as completed:
+//
+//   - League format → transitions to CompStatusComplete.
+//   - Mixed format → auto-starts the in-place knockout (StartKnockout), moving
+//     the competition to CompStatusPlayoffs with a live, scoreable bracket.
+//     Operators no longer have to click a separate "Start knockout" button on
+//     the happy path; the bracket simply lights up after the final pool match
+//     is scored. (The manual /api/competitions/:id/start-knockout endpoint
+//     remains as an operator-override / recovery path.)
 //
 // The function is a no-op for any other format or status, or when at least
 // one pool match is still scheduled/running.
 //
 // When all regular pool matches are done but tied competitors remain,
 // supplementary ippon-shobu tiebreaker matches are injected and
-// AutoCompleteTiebreakInjected is returned instead of transitioning.
+// AutoCompleteTiebreakInjected is returned instead of transitioning — for
+// either format. Auto-start only fires once the tiebreaker matches have been
+// scored and pools are truly clean.
 //
-// Atomic: the status check and the save run inside
-// state.Store.UpdateCompetitionChanged so a concurrent
-// invalidate-vs-auto-complete pair can't lose either mutation.
+// Atomic: the league status flip runs inside state.Store.UpdateCompetitionChanged.
+// The mixed path delegates to advanceMixedPools, which takes its own per-comp
+// locks; that is safe because MaybeAutoCompletePools is NOT inside an open
+// transform at that point.
 func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, error) {
+	// Determine whether this is a team competition for tie-injection routing.
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
+
+	// MIXED (Pools + Knockout): resolve incrementally — pool finishers drop into
+	// their knockout slots the moment each pool completes, with NO wait for the
+	// rest of the pool phase. Short-circuit BEFORE the comp-wide "all pools done"
+	// gate below (which is only meaningful for league completion).
+	if comp != nil && comp.Format == state.CompFormatMixed && comp.Status == state.CompStatusPools {
+		return e.advanceMixedPools(compID, comp)
+	}
+
 	// Optional fast-path outside the lock — avoids taking the
 	// per-comp write lock for the common "still in progress" case.
 	matches, err := e.store.LoadPoolMatches(compID)
@@ -64,11 +98,6 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		return AutoCompleteNoChange, err
 	}
 
-	// Determine whether this is a team competition for tie-injection routing.
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return AutoCompleteNoChange, err
-	}
 	isTeamComp := comp != nil && comp.TeamSize > 0
 
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
@@ -160,10 +189,11 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		}
 	}
 
-	// No ties (or ties already resolved). Transition to complete.
-	// NOTE: mixed-format competitions do NOT auto-complete here — their pools
-	// phase is followed by a knockout bracket (StartKnockout). Only league
-	// format transitions to complete after all pool matches are done.
+	// No ties (or ties already resolved). Advance past pools.
+	//
+	// Only league reaches here (mixed short-circuited at the top to
+	// advanceMixedPools; other formats are no-ops). League flips to
+	// CompStatusComplete once every pool match is done.
 	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
 		if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusPools {
 			return nil, nil
@@ -189,6 +219,68 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	}
 	if changed {
 		return AutoCompleteTransitioned, nil
+	}
+	return AutoCompleteNoChange, nil
+}
+
+// advanceMixedPools drives the incremental Pools → Knockout flow for a mixed
+// competition after a pool score. It is gate-free: each pool's finishers are
+// seeded into their knockout slots as soon as that pool completes, regardless of
+// whether the other pools are still running. Concretely:
+//
+//  1. Inject tiebreaker/DH matches for any newly-tied pools (idempotent).
+//  2. Seed every COMPLETED pool's finishers into the bracket placeholders
+//     (ResolveQualifiedPools) — newly-playable knockout matches were already
+//     scheduled at draw time, so they become live immediately.
+//  3. When the final pool has been seeded (no pool placeholders remain), flip
+//     CompStatusPools → CompStatusPlayoffs (informational — knockout matches are
+//     already playable per-match during "pools").
+//
+// Outcomes: AutoCompleteKnockoutStarted (last pool seeded, status flipped),
+// AutoCompletePoolsResolved (some pools seeded and/or tiebreakers injected —
+// bracket/schedule changed), or AutoCompleteNoChange (nothing new this score).
+func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (AutoCompleteOutcome, error) {
+	// 1. Inject tie-break matches for tied pools (idempotent; per-tied-pool).
+	injected := 0
+	if comp.TeamSize > 0 {
+		m, err := e.InjectPoolDaihyosenMatches(compID)
+		if err != nil {
+			return AutoCompleteNoChange, err
+		}
+		injected = len(m)
+	} else {
+		m, err := e.InjectTiebreakerMatches(compID)
+		if err != nil {
+			return AutoCompleteNoChange, err
+		}
+		injected = len(m)
+	}
+
+	// 2. Seed every completed pool into the bracket (no all-pools gate).
+	resolvedNow, allResolved, err := e.ResolveQualifiedPools(compID)
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
+
+	// 3. Flip pools → playoffs once every pool is seeded.
+	if allResolved {
+		changed, cerr := e.store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+			if c == nil || c.Format != state.CompFormatMixed || c.Status != state.CompStatusPools {
+				return nil, nil
+			}
+			c.Status = state.CompStatusPlayoffs
+			return c, nil
+		})
+		if cerr != nil {
+			return AutoCompleteNoChange, cerr
+		}
+		if changed {
+			return AutoCompleteKnockoutStarted, nil
+		}
+	}
+
+	if resolvedNow > 0 || injected > 0 {
+		return AutoCompletePoolsResolved, nil
 	}
 	return AutoCompleteNoChange, nil
 }

@@ -226,7 +226,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 
 	// Use league format — league auto-completes after all pool matches.
 	// Mixed format no longer auto-completes: it stays in pools status until
-	// the operator calls StartKnockout to transition to playoffs.
+	// pool finishers are seeded into the knockout incrementally as pools complete.
 	compID := "auto-complete"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "Auto", Format: state.CompFormatLeague, Status: state.CompStatusPools,
@@ -277,24 +277,10 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
 	})
 
-	t.Run("ignored for mixed-format competitions (must use StartKnockout instead)", func(t *testing.T) {
-		// Mixed format never auto-completes via MaybeAutoCompletePools: it stays
-		// in pools status waiting for the operator to call StartKnockout.
-		mixedID := "auto-complete-mixed"
-		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: mixedID, Name: "Mixed", Format: state.CompFormatMixed, Status: state.CompStatusPools,
-		}))
-		require.NoError(t, store.SavePoolMatches(mixedID, []state.MatchResult{
-			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
-		}))
-		outcome, err := eng.MaybeAutoCompletePools(mixedID)
-		require.NoError(t, err)
-		assert.Equal(t, AutoCompleteNoChange, outcome,
-			"mixed format must NOT auto-complete; StartKnockout handles the transition")
-		comp, _ := store.LoadCompetition(mixedID)
-		assert.Equal(t, state.CompStatusPools, comp.Status,
-			"mixed status must remain pools after all pool matches done")
-	})
+	// (Mixed-format MaybeAutoCompletePools behavior is covered in
+	// knockout_test.go: TestMaybeAutoCompletePools_MixedFormat_StaysInPools_WhileScheduled
+	// and TestMaybeAutoCompletePools_MixedFormat_AutoStartsKnockout — auto-start
+	// fires when pools are clean, no transition while a match is pending.)
 
 	t.Run("transitions when there are zero pool matches", func(t *testing.T) {
 		// e.g. a single-participant league comp where no match was generated.
@@ -610,7 +596,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 
 		compID := "auto-vs-invalidate"
 		// Use league format: league auto-completes after all pool matches.
-		// Mixed format no longer auto-completes (waits for StartKnockout).
+		// Mixed format does not auto-complete after pools; the knockout fills in incrementally.
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: compID, Name: "Auto vs Invalidate",
 			Format: state.CompFormatLeague, Status: state.CompStatusPools,
@@ -1153,8 +1139,13 @@ func TestRecordBracketMatchResult_DaihyosenWinnerDerived(t *testing.T) {
 // bracket.Preview is true (mp-9dz). The UI disables scoring for preview
 // brackets, but server-side enforcement prevents direct API calls or stale
 // cached clients from persisting bogus winners/scores into bracket.json.
-func TestPreviewBracket_RejectsAllMutations(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-preview-readonly-*")
+// TestUnresolvedKnockoutMatch_ScoringGated verifies the per-match playability
+// gate that replaced the old bracket-wide Preview gate: a knockout match whose
+// sides are still pool-origin placeholders cannot be SCORED or have its winner
+// OVERRIDDEN, but CAN still be rescheduled (court/time) so operators can
+// pre-arrange the draw before the feeder pools finish.
+func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-unresolved-ko-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -1162,54 +1153,51 @@ func TestPreviewBracket_RejectsAllMutations(t *testing.T) {
 	require.NoError(t, err)
 	eng := New(store)
 
-	compID := "preview-comp"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Preview Test"}))
+	compID := "unresolved-ko"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Unresolved KO"}))
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
 
-	preview := &state.Bracket{
-		Preview: true,
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{{
 			{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-2nd", Status: state.MatchStatusScheduled},
 		}},
-	}
-	require.NoError(t, store.SaveBracket(compID, preview))
+	}))
 
 	result := &state.MatchResult{Winner: "Pool A-1st", Status: state.MatchStatusCompleted}
 
-	t.Run("RecordMatchResult rejected", func(t *testing.T) {
+	t.Run("RecordMatchResult rejected (not ready)", func(t *testing.T) {
 		err := eng.RecordMatchResult(compID, "m-r1-0", result)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "read-only preview")
+		assert.Contains(t, err.Error(), "not ready to score")
 	})
 
-	t.Run("RecordMatchResultWithIneligibility rejected", func(t *testing.T) {
+	t.Run("RecordMatchResultWithIneligibility rejected (not ready)", func(t *testing.T) {
 		_, err := eng.RecordMatchResultWithIneligibility(compID, "m-r1-0", result)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "read-only preview")
+		assert.Contains(t, err.Error(), "not ready to score")
 	})
 
-	t.Run("OverrideBracketWinner rejected", func(t *testing.T) {
+	t.Run("OverrideBracketWinner rejected (not ready)", func(t *testing.T) {
 		err := eng.OverrideBracketWinner(compID, "m-r1-0", "Pool A-1st")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "read-only preview")
+		assert.Contains(t, err.Error(), "not ready to override")
 	})
 
-	t.Run("UpdateMatchCourt rejected", func(t *testing.T) {
-		err := eng.UpdateMatchCourt(compID, "m-r1-0", "B")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "read-only preview")
+	// Scheduling a not-yet-resolved match IS allowed — operators may pre-assign
+	// courts/times before the feeder pools finish.
+	t.Run("UpdateMatchCourt allowed on unresolved match", func(t *testing.T) {
+		require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "B"))
+	})
+	t.Run("UpdateMatchTime allowed on unresolved match", func(t *testing.T) {
+		require.NoError(t, eng.UpdateMatchTime(compID, "m-r1-0", "10:00"))
 	})
 
-	t.Run("UpdateMatchTime rejected", func(t *testing.T) {
-		err := eng.UpdateMatchTime(compID, "m-r1-0", "10:00")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "read-only preview")
-	})
-
-	// Confirm the bracket was not mutated by any of the rejected calls.
+	// The match must NOT have been scored, but the scheduling edits must have
+	// landed.
 	loaded, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.True(t, loaded.Preview, "Preview flag must still be set")
-	assert.Equal(t, state.MatchStatusScheduled, loaded.Rounds[0][0].Status, "match status must not have changed")
+	assert.Equal(t, state.MatchStatusScheduled, loaded.Rounds[0][0].Status, "match must not have been scored")
 	assert.Empty(t, loaded.Rounds[0][0].Winner, "winner must not have been set")
+	assert.Equal(t, "B", loaded.Rounds[0][0].Court, "court reschedule must have landed")
+	assert.Equal(t, "10:00", loaded.Rounds[0][0].ScheduledAt, "time reschedule must have landed")
 }

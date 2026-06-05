@@ -57,14 +57,14 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compID)
 		}
-		if bracket.Preview {
-			return validationErrorf("bracket for competition %s is a read-only preview; run the Playoffs competition to score elimination matches", compID)
-		}
 
 		found := false
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, m := range round {
 				if m.ID == matchID {
+					if !bracketMatchPlayable(&bracket.Rounds[rIdx][mIdx]) {
+						return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
+					}
 					if result.SideA == "" {
 						result.SideA = m.SideA
 					}

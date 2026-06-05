@@ -298,7 +298,7 @@ func TestMatchHandlers_Extended(t *testing.T) {
 // pool match emits EventCompetitionCompleted exactly once, and that scoring a
 // non-final match does not emit it.
 // NOTE: uses league format — mixed format no longer auto-completes after pools
-// (it stays in pools status until StartKnockout is called).
+// (it stays in pools status; the knockout fills in incrementally as each pool finishes).
 func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -438,7 +438,7 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 // quick-scoring the last remaining pool match emits EventCompetitionCompleted
 // exactly once, and a non-final quick-score does not.
 // NOTE: uses league format with TeamSize=3 — mixed format no longer auto-completes
-// after pools (it stays in pools status until StartKnockout is called).
+// after pools (it stays in pools status; the knockout fills in incrementally as each pool finishes).
 func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

@@ -213,6 +213,18 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 	case engine.AutoCompleteTiebreakInjected:
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
 		hub.Broadcast(EventScheduleUpdated, nil)
+	case engine.AutoCompleteKnockoutStarted:
+		// The LAST pool was just seeded → status moved pools → playoffs (only
+		// knockout matches remain). Tell clients to reload the now-fully-live
+		// competition.
+		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": compID})
+		hub.Broadcast(EventScheduleUpdated, nil)
+	case engine.AutoCompletePoolsResolved:
+		// Some (not all) pools were seeded into the knockout, and/or tiebreakers
+		// were injected. The bracket/schedule changed and newly-playable knockout
+		// matches may now be live — refresh without a full status change.
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
+		hub.Broadcast(EventScheduleUpdated, nil)
 	}
 }
 

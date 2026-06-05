@@ -130,7 +130,7 @@ func TestStartCompetition_MixedFormat_ExcludesNonCheckedIn(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "checkin-pools"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	enableCheckIn(t, store, compID)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
@@ -158,7 +158,7 @@ func TestStartCompetition_NoneCheckedIn_IncludesAll(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "no-checkin-pools"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	enableCheckIn(t, store, compID)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
@@ -181,7 +181,7 @@ func TestStartCompetition_CheckInDisabled_IgnoresStaleMarkers(t *testing.T) {
 	compID := "checkin-disabled"
 
 	// NOTE: enableCheckIn is deliberately NOT called — CheckInEnabled stays false.
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
 		map[string]bool{"Alice": true, "Bob": true}, // stale markers on 2 players
@@ -304,7 +304,7 @@ func TestStartCompetition_SeededNonCheckedIn_Drawable(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "seeded-checkin"
 
-	createTestCompetition(t, store, compID, "mixed", 4)
+	createTestCompetition(t, store, compID, "league", 4)
 	enableCheckIn(t, store, compID)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve"},

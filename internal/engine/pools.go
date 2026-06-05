@@ -25,6 +25,17 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		return err
 	}
 
+	// A "mixed" competition is "Pools + Knockout" by definition — a single
+	// pool collapses to a round-robin with a tacked-on 2-player "final", which
+	// is the same shape as `league` and is NOT what an operator picking
+	// "mixed" intends. Refuse to start a mixed competition whose participant
+	// count + PoolSize would produce fewer than 2 pools, so the operator can
+	// either reduce PoolSize, add participants, or switch to `league` format.
+	// (league/swiss legitimately produce 1 pool — exempted.)
+	if comp.Format == state.CompFormatMixed && len(pools) < 2 {
+		return validationErrorf("mixed (Pools + Knockout) competition %s requires at least 2 pools — got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", comp.ID, len(pools), len(players), comp.PoolSize)
+	}
+
 	if comp.NumberPrefix != "" {
 		counter := 1
 		for i := range pools {

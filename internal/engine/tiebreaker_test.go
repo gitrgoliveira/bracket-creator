@@ -243,7 +243,7 @@ func TestMaybeAutoCompletePools_TiesDetected(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Tie Detect",
-		Format: state.CompFormatMixed,
+		Format: state.CompFormatLeague,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -286,7 +286,7 @@ func TestMaybeAutoCompletePools_TiebreakersIncomplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "TB Pending",
-		Format: state.CompFormatMixed,
+		Format: state.CompFormatLeague,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -311,7 +311,7 @@ func TestMaybeAutoCompletePools_TiebreakersComplete(t *testing.T) {
 	compID := "auto-tb-done"
 
 	// Use league format: league auto-completes after all pool matches (including TB).
-	// Mixed format no longer auto-completes — it waits for StartKnockout instead.
+	// Mixed format does not auto-complete after pools; the knockout fills in incrementally.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "TB Done",
@@ -434,7 +434,7 @@ func TestMaybeAutoCompletePools_NoTies(t *testing.T) {
 	compID := "auto-no-ties"
 
 	// Use league format: league auto-completes after all pool matches without ties.
-	// Mixed format no longer auto-completes — it waits for StartKnockout instead.
+	// Mixed format does not auto-complete after pools; the knockout fills in incrementally.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "No Ties",

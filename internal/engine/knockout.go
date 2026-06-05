@@ -1,254 +1,251 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// allPoolMatchesCompleteForComp returns true when every pool match (including
-// supplementary tiebreaker/DH matches) for compID is complete AND resolved
-// (tiebreaker/DH matches must have a non-empty Winner). It also ensures no
-// outstanding tiebreaker/DH round is waiting to be played.
-//
-// This is the same completeness predicate used by MaybeAutoCompletePools, so
-// StartKnockout and MaybeAutoCompletePools agree on what "pools are done" means.
-// Extracted as a shared helper to keep both callers in sync.
-func (e *Engine) allPoolMatchesCompleteForComp(compID string) (bool, error) {
+// poolFinalistPlaceholderRE matches a pool-origin finalist placeholder label as
+// produced by helper.GenerateFinals: "<PoolName>-<ordinal>", e.g. "Pool A-1st".
+// Pool names are always "Pool <char>" (helper.CreatePools), so a real competitor
+// or team name can never collide with this shape.
+var poolFinalistPlaceholderRE = regexp.MustCompile(`^Pool .+-\d+(st|nd|rd|th)$`)
+
+// isUnresolvedBracketSide reports whether a bracket side is still a forward
+// reference rather than a resolved competitor: an empty structural bye slot, a
+// "Winner of rX-mY" feeder, or a pool-origin finalist placeholder that has not
+// been seeded yet (its feeder pool is still in progress).
+func isUnresolvedBracketSide(side string) bool {
+	if side == "" {
+		return true
+	}
+	if strings.HasPrefix(side, "Winner of ") {
+		return true
+	}
+	return poolFinalistPlaceholderRE.MatchString(side)
+}
+
+// bracketMatchPlayable reports whether a bracket match can be scored: both sides
+// must be resolved competitors. This is the per-match replacement for the old
+// bracket-wide Preview gate — a knockout match becomes playable as soon as both
+// its feeder pools (or feeder matches) have produced real competitors, with NO
+// wait for the rest of the pool phase. Standalone (knockout-only) competitions
+// satisfy this from draw time because their round-1 leaves are real players.
+func bracketMatchPlayable(m *state.BracketMatch) bool {
+	return !isUnresolvedBracketSide(m.SideA) && !isUnresolvedBracketSide(m.SideB)
+}
+
+// bracketHasPoolPlaceholders reports whether any side anywhere in the bracket is
+// still an unseeded pool-origin finalist placeholder. Used to decide when every
+// pool has been folded into the knockout (status pools → playoffs).
+func bracketHasPoolPlaceholders(b *state.Bracket) bool {
+	if b == nil {
+		return false
+	}
+	for _, round := range b.Rounds {
+		for _, m := range round {
+			if poolFinalistPlaceholderRE.MatchString(m.SideA) || poolFinalistPlaceholderRE.MatchString(m.SideB) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// completedPoolNames returns poolName → isComplete for every pool in compID. A
+// pool is complete when all of its matches (regular + any tiebreaker/daihyosen)
+// are completed with a winner, no further tiebreaker/DH injection is pending for
+// it, and — for team competitions — its daihyosen results actually broke the
+// ties (no cycle). Tiebreaker/DH injection runs comp-wide first (idempotent).
+func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map[string]bool, error) {
+	isTeam := comp != nil && comp.TeamSize > 0
+
+	// Inject supplementary tie-break matches for any tied pools. Both injectors
+	// are idempotent and only add matches for pools that need them, so a pool
+	// that just became tied flips to "not complete" on the next call.
+	if isTeam {
+		if _, err := e.InjectPoolDaihyosenMatches(compID); err != nil {
+			return nil, err
+		}
+	} else {
+		if _, err := e.InjectTiebreakerMatches(compID); err != nil {
+			return nil, err
+		}
+	}
+
+	pools, err := e.store.LoadPools(compID)
+	if err != nil {
+		return nil, err
+	}
 	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	allComplete := true
-	hasIncompleteTB := false
-	hasCompleteTB := false
-	hasIncompleteDH := false
-	hasCompleteDH := false
+
+	done := make(map[string]bool, len(pools))
+	seen := make(map[string]bool, len(pools))
+	for _, p := range pools {
+		done[p.PoolName] = true // optimistic; cleared below on any incomplete match
+	}
 	for _, m := range matches {
-		switch {
-		case IsTiebreakerMatchID(m.ID):
-			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
-				hasIncompleteTB = true
-			} else {
-				hasCompleteTB = true
-			}
-		case IsPoolDaihyosenMatchID(m.ID):
-			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
-				hasIncompleteDH = true
-			} else {
-				hasCompleteDH = true
-			}
-		default:
-			if m.Status != state.MatchStatusCompleted {
-				allComplete = false
+		pn, ok := poolNameFromMatchID(m.ID)
+		if !ok {
+			continue
+		}
+		seen[pn] = true
+		complete := m.Status == state.MatchStatusCompleted
+		if (IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID)) && m.Winner == "" {
+			complete = false
+		}
+		if !complete {
+			if _, known := done[pn]; known {
+				done[pn] = false
 			}
 		}
 	}
-	if !allComplete || hasIncompleteTB || hasIncompleteDH {
-		return false, nil
-	}
-	// All regular + any outstanding supplementary matches are done.
-	// Check for pending tiebreaker injection (same guard as MaybeAutoCompletePools).
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return false, err
-	}
-	isTeamComp := comp != nil && comp.TeamSize > 0
-	if isTeamComp && !hasCompleteDH {
-		injected, injErr := e.InjectPoolDaihyosenMatches(compID)
-		if injErr != nil {
-			return false, injErr
-		}
-		if len(injected) > 0 {
-			return false, nil // ties found, DH injected — not complete yet
-		}
-	} else if !isTeamComp && !hasCompleteTB {
-		injected, injErr := e.InjectTiebreakerMatches(compID)
-		if injErr != nil {
-			return false, injErr
-		}
-		if len(injected) > 0 {
-			return false, nil // ties found, TB injected — not complete yet
+	// A pool with zero matches on disk is not "complete" (nothing has run).
+	for pn := range done {
+		if !seen[pn] {
+			done[pn] = false
 		}
 	}
-	// For team competitions where DH matches have been played: verify the DH
-	// results actually broke all ties (same cycle check as MaybeAutoCompletePools).
-	if isTeamComp && hasCompleteDH {
-		freshMatches, ferr := e.store.LoadPoolMatches(compID)
-		if ferr != nil {
-			return false, ferr
+
+	// Team competitions: a pool whose daihyosen results produced a cycle (ties
+	// not broken) must not be treated as resolvable.
+	if isTeam {
+		standings, serr := e.CalculatePoolStandings(compID)
+		if serr != nil {
+			return nil, serr
 		}
-		standings, standErr := e.CalculatePoolStandings(compID)
-		if standErr != nil {
-			return false, standErr
-		}
-		overridesObj, _ := e.store.LoadOverrides(compID)
+		overrides, _ := e.store.LoadOverrides(compID)
 		var poolRanks map[string]map[string]int
-		if overridesObj != nil {
-			poolRanks = overridesObj.PoolRanks
+		if overrides != nil {
+			poolRanks = overrides.PoolRanks
 		}
-		if dhCycleExists(standings, freshMatches, poolRanks) {
-			return false, nil
+		for pn, ok := range done {
+			if !ok {
+				continue
+			}
+			scoped := map[string][]state.PlayerStanding{pn: standings[pn]}
+			if dhCycleExists(scoped, matches, poolRanks) {
+				done[pn] = false
+			}
 		}
 	}
-	return true, nil
+	return done, nil
 }
 
-// StartKnockout resolves the in-place knockout for a mixed (Pools + Knockout)
-// competition that has completed its pool phase. It replaces every pool-origin
-// placeholder label ("Pool A-1st", …) in the persisted preview bracket with the
-// real participant Name from pool standings — and clears the Preview flag — so
-// the bracket becomes live and scoreable while preserving the previewed
-// topology (court assignment, cross-seed slots, bye placement) byte-for-byte.
-// Bracket sides are name strings; participant UUIDs/Numbers continue to live
-// on the roster (state.Participants) and are looked up by name as needed. The
-// competition transitions from CompStatusPools to CompStatusPlayoffs.
+// ResolveQualifiedPools incrementally seeds the in-place knockout bracket of a
+// mixed (Pools + Knockout) competition. For EVERY pool whose results are final
+// it replaces that pool's finalist placeholders ("Pool A-1st", …) in the bracket
+// with the real pool finishers, and resolves any bye those finishers inherit.
+// Pools still in progress keep their placeholders. There is NO all-pools gate: a
+// knockout match becomes playable the moment both its feeder pools have
+// finished, while other pools are still running.
 //
-// Preconditions (any failure returns a ValidationError mapped to HTTP 409):
-//   - The competition exists.
-//   - Format == mixed.
-//   - Status == pools.
-//   - ALL pool matches are complete (including any tiebreaker/DH resolution).
+// The bracket is generated and scheduled at draw time (generatePoolPreviewBracket
+// → assignBracketMatchSlots), so resolving placeholders never changes a match's
+// court or time — only its competitor labels. Idempotent: once a placeholder is
+// replaced it is gone, so re-running only seeds newly-completed pools.
 //
-// The bracket structure is IDENTICAL to the preview bracket (same GenerateFinals
-// leaf order, same buildBracketFromLeaves call) so what was previewed is exactly
-// what gets played. StandardSeedingFull is NOT re-applied.
-//
-// Idempotent: calling StartKnockout on a competition already in CompStatusPlayoffs
-// is rejected by the precondition check (returns validation error), but the
-// bracket written is deterministic from the pool results, so a retry after a
-// partial failure can safely rebuild.
-func (e *Engine) StartKnockout(compID string) error {
+// Returns (resolvedNow, allResolved): how many placeholder labels were replaced
+// THIS call, and whether the bracket now has zero pool-origin placeholders left
+// (every pool seeded). No-op (0, false, nil) for non-mixed competitions —
+// standalone playoffs brackets carry no pool placeholders.
+func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
-	if comp == nil {
-		return notFoundErrorf("competition %s not found", compID)
-	}
-
-	// Precondition: must be a mixed competition.
-	if comp.Format != state.CompFormatMixed {
-		return validationErrorf("StartKnockout requires a mixed (Pools + Knockout) competition (got %q)", comp.Format)
+	if comp == nil || comp.Format != state.CompFormatMixed {
+		return 0, false, nil
 	}
 
-	// Precondition: must be in pools status.
-	if comp.Status != state.CompStatusPools {
-		return validationErrorf("StartKnockout requires competition %s to be in pools status (got %q)", compID, comp.Status)
-	}
-
-	// Precondition: all pool matches must be complete.
-	complete, err := e.allPoolMatchesCompleteForComp(compID)
+	pools, err := e.store.LoadPools(compID)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
-	if !complete {
-		return validationErrorf("StartKnockout requires all pool matches to be complete for competition %s", compID)
+	// Mixed requires ≥2 pools by invariant (enforced at draw in generatePools);
+	// defend against legacy/hand-edited data so we never seed a degenerate
+	// single-pool "knockout".
+	if len(pools) < 2 {
+		return 0, false, validationErrorf("mixed competition %s has only %d pool(s) — at least 2 are required for a knockout phase; this competition should be 'league' format", compID, len(pools))
 	}
 
-	// Resolve the EXISTING preview bracket in place: replace each pool-origin
-	// placeholder ("Pool A-1st", …) with the real pool-standings finisher,
-	// preserving the bracket's topology (cross-seed interleaving, bye placement
-	// via ApplyPoolAdjustments, court/schedule assignment) EXACTLY as previewed.
-	// Resolving the persisted preview — rather than rebuilding from scratch —
-	// guarantees the live bracket matches the preview slot-for-slot and cannot
-	// drift from generatePoolPreviewBracket's seeding logic.
-	bracket, err := e.store.LoadBracket(compID)
+	completed, err := e.completedPoolNames(compID, comp)
 	if err != nil {
-		return fmt.Errorf("loading preview bracket for knockout: %w", err)
+		return 0, false, err
 	}
-	if bracket == nil || len(bracket.Rounds) == 0 {
-		return validationErrorf("competition %s has no preview bracket to resolve", compID)
-	}
-
-	resolver, err := e.buildFinalistResolver(comp)
+	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
-		return err
-	}
-
-	// Replace placeholder labels across ALL rounds. Round 0 holds the pool-origin
-	// placeholders; a finalist that drew a bye is auto-advanced, so its placeholder
-	// also appears as a later round's side AND as the bye match's Winner — resolve
-	// all three fields. "Winner of rX-mY" and "" (bye) values are not in the
-	// resolver and are left untouched.
-	for ri := range bracket.Rounds {
-		for mi := range bracket.Rounds[ri] {
-			m := &bracket.Rounds[ri][mi]
-			if name, ok := resolver[m.SideA]; ok {
-				m.SideA = name
-			}
-			if name, ok := resolver[m.SideB]; ok {
-				m.SideB = name
-			}
-			if name, ok := resolver[m.Winner]; ok {
-				m.Winner = name
-			}
-		}
-	}
-	bracket.Preview = false
-
-	// Persist the live bracket.
-	if err := e.store.SaveBracket(compID, bracket); err != nil {
-		return fmt.Errorf("saving knockout bracket: %w", err)
-	}
-
-	// Atomically transition from pools → playoffs, re-checking preconditions
-	// under the lock so a concurrent action can't race us.
-	_, err = e.store.UpdateCompetitionChanged(compID, func(current *state.Competition) (*state.Competition, error) {
-		if current == nil {
-			return nil, notFoundErrorf("competition %s not found (deleted during StartKnockout)", compID)
-		}
-		if current.Format != state.CompFormatMixed {
-			return nil, validationErrorf("StartKnockout: competition %s is no longer mixed format", compID)
-		}
-		if current.Status != state.CompStatusPools {
-			return nil, validationErrorf("StartKnockout: competition %s is no longer in pools status (concurrent modification?)", compID)
-		}
-		current.Status = state.CompStatusPlayoffs
-		return current, nil
-	})
-	if err != nil {
-		return err
-	}
-
-	// Generate the bracket schedule now that the bracket is live.
-	return e.GenerateSchedule(compID)
-}
-
-// buildFinalistResolver maps each pool-origin finalist placeholder label
-// ("<PoolName>-<ordinal>", e.g. "Pool A-1st") to the real participant name that
-// finished at that pool rank, using the competition's OWN pool standings. The
-// label format mirrors helper.GenerateFinals exactly so the keys match the
-// placeholders in the preview bracket. Fails fast if any pool has fewer ranked
-// finishers than PoolWinners (pool results incomplete), so an unresolved
-// "Pool A-2nd" placeholder can never leak into the live bracket as a player name.
-func (e *Engine) buildFinalistResolver(comp *state.Competition) (map[string]string, error) {
-	pools, err := e.store.LoadPools(comp.ID)
-	if err != nil {
-		return nil, fmt.Errorf("loading pools for %q: %w", comp.ID, err)
-	}
-	if len(pools) == 0 {
-		return nil, validationErrorf("competition %s has no pools to resolve finalists from", comp.ID)
+		return 0, false, err
 	}
 	poolWinners := comp.PoolWinners
 	if poolWinners <= 0 {
 		poolWinners = 2
 	}
-	standings, err := e.CalculatePoolStandings(comp.ID)
-	if err != nil {
-		return nil, fmt.Errorf("calculating pool standings for %q: %w", comp.ID, err)
-	}
-	resolver := make(map[string]string, len(pools)*poolWinners)
+
+	// Build a label→player resolver for COMPLETED pools only. Incomplete pools
+	// contribute nothing, so their placeholders survive untouched.
+	resolver := make(map[string]string)
 	for _, pool := range pools {
-		ps := standings[pool.PoolName]
-		if len(ps) < poolWinners {
-			return nil, validationErrorf("pool %q has only %d ranked finishers, need %d", pool.PoolName, len(ps), poolWinners)
+		if !completed[pool.PoolName] {
+			continue
 		}
+		ps := standings[pool.PoolName]
 		for rank := 1; rank <= poolWinners; rank++ {
+			if rank-1 >= len(ps) {
+				return 0, false, validationErrorf("pool %q is marked complete but has only %d ranked finishers (need %d)", pool.PoolName, len(ps), poolWinners)
+			}
 			key := fmt.Sprintf("%s-%s", pool.PoolName, helper.GetOrdinal(rank))
 			resolver[key] = ps[rank-1].Player.Name
 		}
 	}
-	return resolver, nil
+
+	resolvedNow := 0
+	allResolved := false
+	uerr := e.store.UpdateBracket(compID, func(bracket *state.Bracket) error {
+		if bracket == nil || len(bracket.Rounds) == 0 {
+			return errMatchNotFound // nothing to resolve; signal no-save
+		}
+		n := 0
+		for ri := range bracket.Rounds {
+			for mi := range bracket.Rounds[ri] {
+				m := &bracket.Rounds[ri][mi]
+				// Resolve SideA/SideB and the Winner field (a bye match pre-fills
+				// Winner with the placeholder; later rounds carry the propagated
+				// placeholder too). "Winner of …" and "" values are not resolver
+				// keys, so they are left untouched.
+				if name, ok := resolver[m.SideA]; ok {
+					m.SideA = name
+					n++
+				}
+				if name, ok := resolver[m.SideB]; ok {
+					m.SideB = name
+					n++
+				}
+				if name, ok := resolver[m.Winner]; ok {
+					m.Winner = name
+				}
+			}
+		}
+		allResolved = !bracketHasPoolPlaceholders(bracket)
+		if n == 0 {
+			return errMatchNotFound // no change → skip the rewrite
+		}
+		resolvedNow = n
+		// The bracket is now (partially) live; the legacy global Preview flag is
+		// obsolete — playability is per-match from here on.
+		bracket.Preview = false
+		return nil
+	})
+	if uerr != nil && !errors.Is(uerr, errMatchNotFound) {
+		return 0, false, uerr
+	}
+	return resolvedNow, allResolved, nil
 }

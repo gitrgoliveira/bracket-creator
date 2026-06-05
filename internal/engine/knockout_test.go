@@ -430,3 +430,29 @@ func TestGeneratePools_MixedRequiresTwoPools(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusSetup, comp.Status)
 }
+
+// TestGeneratePools_MixedRejectsUnderfilledPool verifies the draw-time invariant
+// that every pool can supply PoolWinners finishers. With PoolSize=2 in "max"
+// mode an odd participant count leaves a 1-participant last pool; with the
+// default PoolWinners=2 that pool can't produce a 2nd finisher, so the draw must
+// be rejected up front rather than failing mid-tournament in ResolveQualifiedPools.
+func TestGeneratePools_MixedRejectsUnderfilledPool(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "mixed-underfilled-pool"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Uneven Mixed", Kind: "individual",
+		Format: state.CompFormatMixed, Status: state.CompStatusSetup,
+		Courts: []string{"A"}, StartTime: "09:00",
+		PoolSize: 2, PoolSizeMode: "max", PoolWinners: 2,
+	}))
+	// 5 participants @ PoolSize=2 (max) → at least one pool of size 1.
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice"}, {Name: "Bob"}, {Name: "Carol"}, {Name: "Dan"}, {Name: "Eve"},
+	}))
+	err := eng.GenerateDraw(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "advance to the knockout")
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusSetup, comp.Status, "draw must not advance status on validation failure")
+}

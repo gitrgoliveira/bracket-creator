@@ -121,11 +121,15 @@ func engineMixedLeaves(t *testing.T, pools []helper.Pool, poolWinners int) []str
 	eng, store, _ := setupTestEngine(t)
 
 	compID := fmt.Sprintf("identity-mixed-%d-%d", len(pools), poolWinners)
+	// PoolSize == poolWinners so each pool is populated with exactly PoolWinners
+	// participants — a valid mixed config (every pool can supply PoolWinners
+	// finishers). This still produces len(pools) pools, so the preview bracket's
+	// placeholder topology ("Pool A-1st" …) is identical to the Excel reference.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:           compID,
 		Format:       state.CompFormatMixed,
 		Kind:         "individual",
-		PoolSize:     2,
+		PoolSize:     poolWinners,
 		PoolSizeMode: "min",
 		PoolWinners:  poolWinners,
 		RoundRobin:   true,
@@ -134,8 +138,9 @@ func engineMixedLeaves(t *testing.T, pools []helper.Pool, poolWinners int) []str
 		Status:       state.CompStatusSetup,
 	}))
 
-	// Populate one participant per pool slot so pools get created.
-	names := make([]string, len(pools)*2)
+	// Populate PoolWinners participants per pool so every pool can supply its
+	// finishers (and pools get created).
+	names := make([]string, len(pools)*poolWinners)
 	for i := range names {
 		names[i] = fmt.Sprintf("P%02d", i+1)
 	}

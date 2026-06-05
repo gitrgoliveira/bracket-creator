@@ -32,8 +32,27 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// count + PoolSize would produce fewer than 2 pools, so the operator can
 	// either reduce PoolSize, add participants, or switch to `league` format.
 	// (league/swiss legitimately produce 1 pool — exempted.)
-	if comp.Format == state.CompFormatMixed && len(pools) < 2 {
-		return validationErrorf("mixed (Pools + Knockout) competition %s requires at least 2 pools — got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", comp.ID, len(pools), len(players), comp.PoolSize)
+	if comp.Format == state.CompFormatMixed {
+		if len(pools) < 2 {
+			return validationErrorf("mixed (Pools + Knockout) competition %s requires at least 2 pools — got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", comp.ID, len(pools), len(players), comp.PoolSize)
+		}
+		// Every pool must be able to supply PoolWinners finishers to the knockout.
+		// In "max" mode an odd participant count can leave an under-filled last
+		// pool (e.g. PoolSize=2 with 3 players → pools of 2 and 1); with the
+		// default PoolWinners=2 that 1-player pool could never produce a 2nd-place
+		// finisher, and ResolveQualifiedPools would later fail mid-tournament
+		// ("only N ranked finishers"). Catch it here so the operator gets an
+		// actionable error BEFORE any match is played. PoolWinners defaults to 2,
+		// mirroring ResolveQualifiedPools.
+		poolWinners := comp.PoolWinners
+		if poolWinners <= 0 {
+			poolWinners = 2
+		}
+		for _, p := range pools {
+			if len(p.Players) < poolWinners {
+				return validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d) — every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
+			}
+		}
 	}
 
 	if comp.NumberPrefix != "" {

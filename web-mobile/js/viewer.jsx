@@ -1831,7 +1831,7 @@ function MatchDetailCard({ match, onClose }) {
         </div>
         <div className="match-detail-card__score">
           {isDone
-            ? <span>{window.formatIpponsScore(mdcIpponsB, mdcIpponsA, match.score, match.decision, match.encho, match.decidedByHantei) || "—"}</span>
+            ? <span>{window.matchScoreStr(match, mdcIpponsB, mdcIpponsA) || "—"}</span>
             : <span className="match-detail-card__vs">vs</span>}
         </div>
         <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
@@ -2125,7 +2125,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
   // both ippon arrays are absent (which would invert left/right when AKA wins).
   const vIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
   const vIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(vIpponsB, vIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
+  const scoreStr = m.status === "completed" ? window.matchScoreStr(m, vIpponsB, vIpponsA) : null;
   // FR-025: queue position is 1-indexed per court for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
@@ -2190,7 +2190,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
   const bWin = winnerName && winnerName === bName;
 
   const scoreStr = m.status === "completed"
-    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
+    ? window.matchScoreStr(m, m.ipponsB, m.ipponsA)
     : null;
 
   return (
@@ -2347,11 +2347,11 @@ const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
 
   // scoreStr: non-null only for completed matches; the render span below
   // handles the empty-string/null → "—" fallback in one place.
+  // For team matches, teamIVScore derives the IV aggregate from subResults (mp-o4xl);
+  // for individual matches it returns null and formatIpponsScore is used instead.
   // ipponsB = Shiro (left), ipponsA = Aka (right) — same arg order as all other callers.
-  // Note: team pool matches typically don't persist ipponsA/B (only subResults is stored),
-  // so formatIpponsScore may return "" for those — see mp-o4xl for the follow-up.
   const scoreStr = m.status === "completed"
-    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
+    ? window.matchScoreStr(m, m.ipponsB, m.ipponsA)
     : null;
 
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
@@ -2674,7 +2674,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer, PoolNumberedMatchRow };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2860,7 +2860,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   // score cell renders the derived winnerPts–loserPts string instead of "—".
   const twIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
   const twIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
-  const scoreStr = m.status === "completed" ? window.formatIpponsScore(twIpponsB, twIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : null;
+  const scoreStr = m.status === "completed" ? window.matchScoreStr(m, twIpponsB, twIpponsA) : null;
   // FR-025: per-court queue position — see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned

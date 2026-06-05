@@ -530,6 +530,39 @@ func TestAddParticipant_RejectsReservedName(t *testing.T) {
 	assert.ErrorIs(t, err, ErrReservedName, "reserved winner-of name must be rejected by AddParticipant")
 }
 
+func TestReplaceParticipant_RejectsReservedName(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "reserved-replace"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Reserved Replace"}))
+
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Pool C-1st"
+		p.Dojo = "Dojo A"
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrReservedName, "rename to a reserved pool-finalist name must be rejected")
+
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Winner of r1-m0"
+		p.Dojo = "Dojo A"
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrReservedName, "rename to a reserved winner-of name must be rejected")
+
+	// A non-reserved rename must succeed.
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Alice Renamed"
+		p.Dojo = "Dojo A"
+		return nil
+	})
+	assert.NoError(t, err, "non-reserved rename must succeed")
+}
+
 func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)

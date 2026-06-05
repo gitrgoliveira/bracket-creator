@@ -303,9 +303,9 @@ func TestResolveQualifiedPools_ByeWinnerField(t *testing.T) {
 	// No placeholder may survive in ANY field, including the bye match's Winner.
 	for _, round := range b.Rounds {
 		for _, m := range round {
-			assert.False(t, poolFinalistPlaceholderRE.MatchString(m.SideA), "SideA placeholder leaked: %q", m.SideA)
-			assert.False(t, poolFinalistPlaceholderRE.MatchString(m.SideB), "SideB placeholder leaked: %q", m.SideB)
-			assert.False(t, poolFinalistPlaceholderRE.MatchString(m.Winner), "Winner placeholder leaked: %q", m.Winner)
+			assert.False(t, helper.IsPoolFinalistPlaceholder(m.SideA), "SideA placeholder leaked: %q", m.SideA)
+			assert.False(t, helper.IsPoolFinalistPlaceholder(m.SideB), "SideB placeholder leaked: %q", m.SideB)
+			assert.False(t, helper.IsPoolFinalistPlaceholder(m.Winner), "Winner placeholder leaked: %q", m.Winner)
 		}
 	}
 }

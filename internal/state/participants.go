@@ -451,11 +451,16 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		return nil, err
 	}
 
-	// Reserved-name check before TitleCase — same reason as AddParticipant:
-	// the raw input may match the reserved regex even though TitleCase would
-	// alter the ordinal suffix.
-	if helper.IsReservedParticipantName(strings.TrimSpace(players[foundIdx].Name)) {
-		return nil, fmt.Errorf("%w: %q", ErrReservedName, strings.TrimSpace(players[foundIdx].Name))
+	// Reserved-name check before TitleCase, but ONLY when the name actually
+	// changed.  Check-in transforms leave the name untouched; running the
+	// guard unconditionally would break check-in for any participant whose
+	// stored name happens to match the reserved pattern (however unlikely).
+	// When the name DID change, check the raw pre-TitleCase value: TitleCase
+	// alters ordinal suffixes ("3rd"→"3Rd") so the post-TitleCase form would
+	// never match the reserved regex.
+	trimmedName := strings.TrimSpace(players[foundIdx].Name)
+	if trimmedName != oldName && helper.IsReservedParticipantName(trimmedName) {
+		return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
 	}
 
 	// Canonicalize to match what CreatePlayers produces on load (Title-case),
@@ -674,8 +679,9 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 	// ("Pool B-3rd") even though TitleCase would transform the ordinal suffix to
 	// a non-matching form ("Pool B-3Rd"). The bulk SaveParticipants path skips
 	// TitleCase, so saveParticipantsNoLock also carries this guard for that path.
-	if helper.IsReservedParticipantName(strings.TrimSpace(p.Name)) {
-		return nil, fmt.Errorf("%w: %q", ErrReservedName, strings.TrimSpace(p.Name))
+	trimmedName := strings.TrimSpace(p.Name)
+	if helper.IsReservedParticipantName(trimmedName) {
+		return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
 	}
 
 	p.Name = helper.TitleCaseName(p.Name)
@@ -727,11 +733,12 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
 	}
 
-	// Reserved-name guard: reject any participant whose name matches a
-	// bracket-placeholder pattern.  Names are already TitleCased at this
-	// point (AddParticipant / UpdateParticipant apply TitleCaseName before
-	// calling save), so the regex match is reliable regardless of how the
-	// original input was cased.
+	// Reserved-name guard for the bulk SaveParticipants path: that caller
+	// passes names through without TitleCasing, so this is the only backstop
+	// for names like "Pool A-1st" arriving via roster import.
+	// AddParticipant and updateParticipantNoLock apply their own pre-TitleCase
+	// checks and will never reach here with a matching name (TitleCase alters
+	// ordinal suffixes so the post-TitleCase form never matches the regex).
 	for _, p := range players {
 		if helper.IsReservedParticipantName(p.Name) {
 			return fmt.Errorf("%w: %q", ErrReservedName, p.Name)

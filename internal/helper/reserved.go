@@ -20,3 +20,13 @@ var reservedWinnerOfRE = regexp.MustCompile(`^Winner of r\d+-m\d+$`)
 func IsReservedParticipantName(name string) bool {
 	return reservedPoolFinalistRE.MatchString(name) || reservedWinnerOfRE.MatchString(name)
 }
+
+// IsPoolFinalistPlaceholder reports whether s is a pool-origin finalist
+// placeholder ("Pool A-1st", "Pool B-2nd", etc.) as emitted by
+// helper.GenerateFinals.  Unlike IsReservedParticipantName, this does NOT
+// match next-round feeder labels ("Winner of r1-m3") — callers that need
+// to distinguish the two patterns (e.g. bracketHasPoolPlaceholders) should
+// use this instead.
+func IsPoolFinalistPlaceholder(s string) bool {
+	return reservedPoolFinalistRE.MatchString(s)
+}

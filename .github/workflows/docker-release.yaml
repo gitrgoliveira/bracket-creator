@@ -48,3 +48,11 @@ jobs:
           file: Dockerfile.mobile
           push: true
           tags: ghcr.io/${{ github.repository }}-mobile:${{ env.IMAGE_TAG }}
+
+      - name: Build and push Mobile PDF Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.mobile-pdf
+          push: true
+          tags: ghcr.io/${{ github.repository }}-mobile-pdf:${{ env.IMAGE_TAG }}

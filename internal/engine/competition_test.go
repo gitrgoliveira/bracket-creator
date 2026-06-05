@@ -41,8 +41,10 @@ func TestCourtsEqual(t *testing.T) {
 }
 
 // TestMaybeAutoCompletePools_AllComplete verifies that calling
-// MaybeAutoCompletePools on a pools competition whose every match is
+// MaybeAutoCompletePools on a league competition whose every match is
 // completed transitions Status to "completed" and returns AutoCompleteTransitioned.
+// NOTE: mixed-format competitions no longer auto-complete after pools — they
+// wait for StartKnockout instead. This test covers the league case only.
 func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "auto-complete-all"
@@ -50,7 +52,7 @@ func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Auto Complete Test",
-		Format: state.CompFormatMixed,
+		Format: state.CompFormatLeague,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -63,7 +65,7 @@ func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteTransitioned, outcome, "all matches completed should trigger status transition")
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "all matches completed should trigger status transition (league)")
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)

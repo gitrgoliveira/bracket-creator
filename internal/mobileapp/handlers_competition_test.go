@@ -1275,13 +1275,12 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 }
 
 // TestPlayoff_CreatesSourceLinkWithEmptyRoster verifies that POST /playoffs
-// stores a SourceCompID link to the mixed source and returns an EMPTY (but
-// non-nil) roster — the pool winners are resolved into the roster later, at
-// draw time (engine.resolvePoolWinners). The non-nil empty slice pins the
-// Copilot round-12 finding (#6): the response must not ship `players: null`
-// (Go nil slice → JSON null), because admin.jsx's refreshCompsAfterCreate
-// fallback appends the response into local state and render paths that read
-// `c.players.length` would crash.
+// now returns HTTP 410 Gone, since creating a separate playoffs competition
+// is deprecated. Use POST /competitions/:id/start-knockout instead.
+//
+// Historical note: this endpoint used to create a linked playoff competition
+// with an empty roster (pool winners resolved at draw time). The new approach
+// runs the knockout in-place inside the mixed competition itself.
 func TestPlayoff_CreatesSourceLinkWithEmptyRoster(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1295,31 +1294,14 @@ func TestPlayoff_CreatesSourceLinkWithEmptyRoster(t *testing.T) {
 		PoolWinners: 2,
 	}
 	require.NoError(t, store.SaveCompetition(&src))
-	require.NoError(t, store.SaveParticipants("src", []domain.Player{
-		{ID: "p1", Name: "P1", Dojo: "D1"},
-		{ID: "p2", Name: "P2", Dojo: "D2"},
-	}))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/src/playoffs", nil)
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "response: %s", w.Body.String())
-
-	var resp state.Competition
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "src", resp.SourceCompID, "playoff must link back to the mixed source")
-	assert.Equal(t, state.CompFormatPlayoffs, resp.Format)
-	require.NotNil(t, resp.Players, "Players must NOT be null in POST /playoffs response")
-	assert.NotContains(t, w.Body.String(), `"players":null`,
-		"response must not ship `players: null` — client appends this into local state")
-	assert.Empty(t, resp.Players,
-		"playoff roster starts empty; pool winners are resolved at draw time")
-
-	// The link is persisted on disk, not just echoed in the response.
-	stored, err := store.LoadCompetition(resp.ID)
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-	assert.Equal(t, "src", stored.SourceCompID)
+	// POST /playoffs is deprecated and now returns HTTP 410 Gone.
+	assert.Equal(t, http.StatusGone, w.Code, "POST /playoffs must return 410 Gone (deprecated)")
+	assert.Contains(t, w.Body.String(), "deprecated")
+	assert.Contains(t, w.Body.String(), "start-knockout")
 }
 
 // TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure pins the
@@ -1714,4 +1696,135 @@ func TestDiscardDrawHandler(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
+}
+
+// TestStartKnockoutHandler verifies POST /competitions/:id/start-knockout.
+func TestStartKnockoutHandler(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	setupMixedCompForHandler := func(t *testing.T, compID string) {
+		t.Helper()
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:          compID,
+			Name:        "Knockout Handler Test",
+			Kind:        "individual",
+			Format:      state.CompFormatMixed,
+			Status:      state.CompStatusPools,
+			Courts:      []string{"A"},
+			StartTime:   "09:00",
+			PoolWinners: 1,
+		}))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{Name: "Alice", Dojo: "DojoA"},
+			{Name: "Bob", Dojo: "DojoB"},
+			{Name: "Charlie", Dojo: "DojoC"},
+			{Name: "Dave", Dojo: "DojoD"},
+		}))
+		require.NoError(t, store.SavePools(compID, []helper.Pool{
+			{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+			{PoolName: "Pool B", Players: []helper.Player{{Name: "Charlie"}, {Name: "Dave"}}},
+		}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+			{ID: "Pool B-0", SideA: "Charlie", SideB: "Dave", Winner: "Charlie", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		}))
+		// Save a preview bracket.
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+			Preview: true,
+			Rounds: [][]state.BracketMatch{{
+				{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-1st", Status: state.MatchStatusScheduled},
+			}},
+		}))
+	}
+
+	t.Run("Success: pools complete → playoffs", func(t *testing.T) {
+		compID := "handler-knockout-ok"
+		setupMixedCompForHandler(t, compID)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/start-knockout", nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp, "competition", "response must include competition")
+		assert.Contains(t, resp, "bracket", "response must include bracket")
+
+		// Verify competition transitioned to playoffs.
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
+
+		// Verify bracket is no longer preview.
+		bracket, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.False(t, bracket.Preview)
+	})
+
+	t.Run("HTTP 409: not mixed format", func(t *testing.T) {
+		compID := "handler-knockout-notmixed"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:     compID,
+			Format: state.CompFormatPlayoffs,
+			Status: state.CompStatusPlayoffs,
+		}))
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/start-knockout", nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+	})
+
+	t.Run("HTTP 409: pools not complete", func(t *testing.T) {
+		compID := "handler-knockout-incomplete"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:          compID,
+			Format:      state.CompFormatMixed,
+			Status:      state.CompStatusPools,
+			PoolWinners: 1,
+		}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/start-knockout", nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+	})
+
+	t.Run("HTTP 404: competition not found", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/nonexistent-ko/start-knockout", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+// TestPlayoffsRouteDeprecated verifies that POST /competitions/:id/playoffs
+// now returns HTTP 410 Gone.
+func TestPlayoffsRouteDeprecated(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Create a mixed competition.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "deprecated-src",
+		Name:   "Deprecated Source",
+		Format: state.CompFormatMixed,
+		Status: state.CompStatusComplete,
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/deprecated-src/playoffs", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGone, w.Code)
+	assert.Contains(t, w.Body.String(), "deprecated")
+	assert.Contains(t, w.Body.String(), "start-knockout")
 }

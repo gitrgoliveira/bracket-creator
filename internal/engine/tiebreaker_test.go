@@ -310,10 +310,12 @@ func TestMaybeAutoCompletePools_TiebreakersComplete(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "auto-tb-done"
 
+	// Use league format: league auto-completes after all pool matches (including TB).
+	// Mixed format no longer auto-completes — it waits for StartKnockout instead.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "TB Done",
-		Format: state.CompFormatMixed,
+		Format: state.CompFormatLeague,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -330,7 +332,7 @@ func TestMaybeAutoCompletePools_TiebreakersComplete(t *testing.T) {
 
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteTransitioned, outcome, "completed TB match must allow completion")
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "completed TB match must allow completion (league format)")
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
@@ -431,10 +433,12 @@ func TestMaybeAutoCompletePools_NoTies(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "auto-no-ties"
 
+	// Use league format: league auto-completes after all pool matches without ties.
+	// Mixed format no longer auto-completes — it waits for StartKnockout instead.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "No Ties",
-		Format: state.CompFormatMixed,
+		Format: state.CompFormatLeague,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -453,7 +457,7 @@ func TestMaybeAutoCompletePools_NoTies(t *testing.T) {
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteTransitioned, outcome,
-		"no ties → must transition directly to completed without TB injection")
+		"no ties → must transition directly to completed without TB injection (league format)")
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)

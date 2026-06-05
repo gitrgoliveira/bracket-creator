@@ -224,9 +224,12 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 	require.NoError(t, err)
 	eng := New(store)
 
+	// Use league format — league auto-completes after all pool matches.
+	// Mixed format no longer auto-completes: it stays in pools status until
+	// the operator calls StartKnockout to transition to playoffs.
 	compID := "auto-complete"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Auto", Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		ID: compID, Name: "Auto", Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
 
 	t.Run("no transition while a pool match is still scheduled", func(t *testing.T) {
@@ -274,12 +277,31 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
 	})
 
+	t.Run("ignored for mixed-format competitions (must use StartKnockout instead)", func(t *testing.T) {
+		// Mixed format never auto-completes via MaybeAutoCompletePools: it stays
+		// in pools status waiting for the operator to call StartKnockout.
+		mixedID := "auto-complete-mixed"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: mixedID, Name: "Mixed", Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		}))
+		require.NoError(t, store.SavePoolMatches(mixedID, []state.MatchResult{
+			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
+		}))
+		outcome, err := eng.MaybeAutoCompletePools(mixedID)
+		require.NoError(t, err)
+		assert.Equal(t, AutoCompleteNoChange, outcome,
+			"mixed format must NOT auto-complete; StartKnockout handles the transition")
+		comp, _ := store.LoadCompetition(mixedID)
+		assert.Equal(t, state.CompStatusPools, comp.Status,
+			"mixed status must remain pools after all pool matches done")
+	})
+
 	t.Run("transitions when there are zero pool matches", func(t *testing.T) {
-		// e.g. a single-participant pools comp where no match was generated.
+		// e.g. a single-participant league comp where no match was generated.
 		// Without this branch the competition would be stuck in `pools` forever.
 		emptyID := "auto-complete-empty"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: emptyID, Name: "Empty", Format: state.CompFormatMixed, Status: state.CompStatusPools,
+			ID: emptyID, Name: "Empty", Format: state.CompFormatLeague, Status: state.CompStatusPools,
 		}))
 		require.NoError(t, store.SavePoolMatches(emptyID, []state.MatchResult{}))
 		outcome, err := eng.MaybeAutoCompletePools(emptyID)
@@ -587,9 +609,11 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		eng := New(store)
 
 		compID := "auto-vs-invalidate"
+		// Use league format: league auto-completes after all pool matches.
+		// Mixed format no longer auto-completes (waits for StartKnockout).
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: compID, Name: "Auto vs Invalidate",
-			Format: state.CompFormatMixed, Status: state.CompStatusPools,
+			Format: state.CompFormatLeague, Status: state.CompStatusPools,
 		}))
 		// All matches already completed — auto-complete is eligible.
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{

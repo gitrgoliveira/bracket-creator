@@ -1414,35 +1414,20 @@ func TestCompetitionHandlers_ConcurrentPOSTSameName(t *testing.T) {
 	}
 }
 
-// TestCreatePlayoff_RejectsNameCollision pins the cross-file guard
-// symmetry fix for POST /competitions/:id/playoffs. Pre-fix, the
-// playoff path computed `name = src.Name + " - Playoffs"`,
-// slugified to an ID, and called SaveCompetitionChanged directly —
-// no uniqueness check. If an admin manually created a competition
-// whose name matched the derived playoff name (e.g. a comp named
-// "Cup - Playoffs" exists, then create a playoff from a comp named
-// "Cup"), SaveCompetitionChanged would silently overwrite the
-// existing comp's config — data loss.
-//
-// Now the playoff save runs under WithCompetitionRenameLock with a
-// checkUniqueCompName — same symmetry as POST + PUT /competitions.
-// Collision → 400 with "already exists" error; the existing
-// competition is untouched.
+// TestCreatePlayoff_RejectsNameCollision historically verified that POST
+// /competitions/:id/playoffs rejected name collisions. Since that endpoint
+// is now deprecated (returns HTTP 410 Gone), this test pins the 410 behavior
+// and verifies the pre-existing competition is untouched.
 func TestCreatePlayoff_RejectsNameCollision(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// Source competition that, when used to create a playoff, would
-	// produce name "Source - Playoffs".
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     "source",
 		Name:   "Source",
 		Format: state.CompFormatMixed,
 		Status: state.CompStatusPools,
 	}))
-	// Pre-existing competition with the same name the playoff would
-	// derive. Pre-fix, SaveCompetitionChanged would have overwritten
-	// this config.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:           "manually-created",
 		Name:         "Source - Playoffs",
@@ -1452,19 +1437,16 @@ func TestCreatePlayoff_RejectsNameCollision(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/source/playoffs", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code,
-		"POST /playoffs should reject when derived name collides with existing comp")
-	assert.Contains(t, w.Body.String(), "already exists",
-		"error message should explain the collision")
+	// POST /playoffs is deprecated → 410 Gone (not 400).
+	assert.Equal(t, http.StatusGone, w.Code,
+		"POST /playoffs must return 410 Gone (deprecated)")
 
-	// Verify the manually-created comp's config is untouched (the
-	// pre-fix bug would have replaced it with the default playoff
-	// config, losing the NumberPrefix).
+	// Verify the manually-created comp's config is still untouched.
 	preserved, err := store.LoadCompetition("manually-created")
 	require.NoError(t, err)
 	require.NotNil(t, preserved)
 	assert.Equal(t, "PRESERVED", preserved.NumberPrefix,
-		"existing comp's config must be untouched on playoff-name collision")
+		"existing comp's config must be untouched")
 }
 
 // TestPUTCompetition_RejectsBodyIDMismatch pins the Copilot #1 fix:
@@ -1525,17 +1507,14 @@ func TestPOSTCompetition_RejectsExistingID(t *testing.T) {
 	assert.Equal(t, "PRESERVED", stored.NumberPrefix, "existing config must be preserved")
 }
 
-// TestPlayoff_RejectsDerivedIDCollision pins the Copilot #3 fix: the
-// playoff endpoint derived `name = src.Name + " - Playoffs"` and
-// `id = slugifyID(name)` and called SaveCompetitionChanged directly.
-// If a competition existed with the same slug ID but a different
-// name, the playoff save silently overwrote it. Now both ID and name
-// uniqueness are checked inside the rename lock.
+// TestPlayoff_RejectsDerivedIDCollision historically verified that POST
+// /competitions/:id/playoffs rejected ID collisions. Since that endpoint
+// is now deprecated (returns HTTP 410 Gone), this test pins the 410 behavior
+// and verifies any pre-existing competition is untouched.
 func TestPlayoff_RejectsDerivedIDCollision(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// Source comp; derived playoff ID will be "source-playoffs".
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     "source",
 		Name:   "Source",
@@ -1543,10 +1522,6 @@ func TestPlayoff_RejectsDerivedIDCollision(t *testing.T) {
 		Status: state.CompStatusPools,
 	}))
 
-	// Pre-existing comp with the SAME slug as the derived playoff ID
-	// but a DIFFERENT name. checkUniqueCompName would have passed
-	// (names differ), then SaveCompetitionChanged would have
-	// overwritten this with the new playoff config — data loss.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:           "source-playoffs",
 		Name:         "Unrelated Cup",
@@ -1556,11 +1531,11 @@ func TestPlayoff_RejectsDerivedIDCollision(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/source/playoffs", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code,
-		"POST /playoffs must reject when derived ID collides with existing comp")
-	assert.Contains(t, w.Body.String(), "already exists")
+	// POST /playoffs is deprecated → 410 Gone.
+	assert.Equal(t, http.StatusGone, w.Code,
+		"POST /playoffs must return 410 Gone (deprecated)")
 
-	// Existing comp untouched.
+	// Existing comp still untouched (no side effects from a 410 response).
 	stored, _ := store.LoadCompetition("source-playoffs")
 	require.NotNil(t, stored)
 	assert.Equal(t, "Unrelated Cup", stored.Name)

@@ -48,10 +48,15 @@ const (
 	AutoCompleteTiebreakInjected AutoCompleteOutcome = 2
 )
 
-// MaybeAutoCompletePools transitions a pools-format competition from
+// MaybeAutoCompletePools transitions a league-format competition from
 // CompStatusPools to CompStatusComplete when every pool match has been
-// recorded as completed. It is a no-op for any other format or status,
-// or when at least one pool match is still scheduled/running.
+// recorded as completed. For mixed-format competitions the pools phase is
+// followed by a knockout bracket (StartKnockout), so they intentionally
+// stay in CompStatusPools after pools finish — do NOT call MaybeAutoCompletePools
+// to complete a mixed competition.
+//
+// The function is a no-op for any other format or status, or when at least
+// one pool match is still scheduled/running.
 //
 // When all regular pool matches are done but tied competitors remain,
 // supplementary ippon-shobu tiebreaker matches are injected and
@@ -165,8 +170,11 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	}
 
 	// No ties (or ties already resolved). Transition to complete.
+	// NOTE: mixed-format competitions do NOT auto-complete here — their pools
+	// phase is followed by a knockout bracket (StartKnockout). Only league
+	// format transitions to complete after all pool matches are done.
 	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
-		if comp == nil || (comp.Format != state.CompFormatMixed && comp.Format != state.CompFormatLeague) || comp.Status != state.CompStatusPools {
+		if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
 		// Re-check under the lock.

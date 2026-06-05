@@ -297,13 +297,15 @@ func TestMatchHandlers_Extended(t *testing.T) {
 // TestScoreHandler_CompletionBroadcastContract verifies that scoring the final
 // pool match emits EventCompetitionCompleted exactly once, and that scoring a
 // non-final match does not emit it.
+// NOTE: uses league format — mixed format no longer auto-completes after pools
+// (it stays in pools status until StartKnockout is called).
 func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
 	comp := state.Competition{
 		ID:     "pools1",
-		Format: state.CompFormatMixed,
+		Format: state.CompFormatLeague,
 		Status: state.CompStatusPools,
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
@@ -385,12 +387,13 @@ func countCompletedEvents(t *testing.T, events []SSEEvent, wantCompID string) in
 // TestBulkScoreHandler_CompletionBroadcastContract verifies that bulk-scoring
 // the last remaining pool matches emits EventCompetitionCompleted exactly
 // once (and partial bulk completion does not).
+// NOTE: uses league format — mixed format no longer auto-completes after pools.
 func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "bulk1", Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		ID: "bulk1", Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants("bulk1", []domain.Player{
 		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
@@ -434,12 +437,14 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 // TestQuickScoreHandler_CompletionBroadcastContract verifies that
 // quick-scoring the last remaining pool match emits EventCompetitionCompleted
 // exactly once, and a non-final quick-score does not.
+// NOTE: uses league format with TeamSize=3 — mixed format no longer auto-completes
+// after pools (it stays in pools status until StartKnockout is called).
 func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "qs1", Format: state.CompFormatMixed, Status: state.CompStatusPools, TeamSize: 3,
+		ID: "qs1", Format: state.CompFormatLeague, Status: state.CompStatusPools, TeamSize: 3,
 	}))
 	require.NoError(t, store.SavePools("qs1", []helper.Pool{
 		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}, {Name: "TeamC"}}},

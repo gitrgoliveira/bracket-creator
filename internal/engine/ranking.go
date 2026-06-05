@@ -115,12 +115,10 @@ func (e *Engine) GetPoolRanking(compID string, rank int) (*domain.Player, error)
 		rank, poolName, rankInPool, compID)
 }
 
-// resolvePoolWinners builds the roster for a playoffs competition that was
-// created from a mixed (Pools + Knockout) source via POST /playoffs. It reads
-// playoffsComp.SourceCompID, verifies the source is a finalized mixed
-// competition, and resolves the qualifying pool winners (ranks
-// 1..totalWinners) into real players via GetPoolRanking. Returns the resolved
-// roster.
+// resolvePoolWinnersFromSource resolves pool winners from the competition
+// identified by srcID into a player roster. It is the shared core used by
+// both the legacy separate-playoffs path (called via resolvePoolWinners) and
+// the in-place StartKnockout path.
 //
 // totalWinners is derived from the source's PERSISTED pools — the actual
 // finalized pool count (len(pools)) × PoolWinners — NOT recomputed from
@@ -131,28 +129,25 @@ func (e *Engine) GetPoolRanking(compID string, rank int) (*domain.Player, error)
 // non-qualifiers. The source is required to be final here, so pools.csv is
 // authoritative.
 //
-// The returned roster carries each winner's display fields (Name/DisplayName/
-// Dojo) but NOT the source-inherited ID: the playoffs comp is a brand-new set
-// of participants with no prior references, so we leave ID empty and let
-// SaveParticipants mint a fresh UUID. That keeps participants.csv column 0 a
-// UUID even when the source carried non-UUID (client-slug) IDs — so the
-// loader's auto-detect parses it correctly regardless of the HasParticipantIDs
-// flag (see the deferred-flip note in runDrawPipeline). Resolution is
-// read-only against the source competition, so it never contends with the
-// playoffs comp's own lock.
-func (e *Engine) resolvePoolWinners(playoffsComp *state.Competition) ([]domain.Player, error) {
-	srcID := playoffsComp.SourceCompID
+// When preserveIdentity is true, the returned players carry the source's ID
+// and Number fields through (so bracket match sides can reference real
+// participant UUIDs). When false, ID is left empty so SaveParticipants mints
+// a fresh UUID — the legacy separate-playoffs path needs this to avoid column-
+// shift hazards when the source carried non-UUID (client-slug) IDs.
+//
+// The source is required to be in status CompStatusPools or later (i.e., pools
+// must be final). Resolution is read-only against the source competition so it
+// never contends with the caller's own lock.
+func (e *Engine) resolvePoolWinnersFromSource(srcID string, preserveIdentity bool) ([]domain.Player, error) {
 	srcComp, err := e.store.LoadCompetition(srcID)
 	if err != nil || srcComp == nil {
 		return nil, notFoundErrorf("playoffs source competition %q not found", srcID)
 	}
-	// Enforce the POST /playoffs API contract: the source is a mixed
-	// (Pools + Knockout) competition. GetPoolRanking ranks pool standings, so
-	// a non-pool source would silently mis-resolve.
+	// Only mixed (Pools + Knockout) competitions have pool winners to promote.
 	if srcComp.Format != state.CompFormatMixed {
 		return nil, validationErrorf("playoffs source %q must be a mixed (Pools + Knockout) competition (got %q)", srcComp.Name, srcComp.Format)
 	}
-	if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
+	if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs && srcComp.Status != state.CompStatusPools {
 		return nil, validationErrorf("source competition %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
 	}
 
@@ -177,15 +172,50 @@ func (e *Engine) resolvePoolWinners(playoffsComp *state.Competition) ([]domain.P
 		if err != nil {
 			return nil, fmt.Errorf("cannot resolve pool winner rank %d from %q: %w", rank, srcID, err)
 		}
-		// Fresh participant from display fields only — ID deliberately left
-		// empty so SaveParticipants mints a UUID (see the function comment).
-		// We also drop the source seed/number/metadata/tag: the playoffs
-		// bracket is seeded independently and these would be stale here.
-		players = append(players, domain.Player{
+		player := domain.Player{
 			Name:        p.Name,
 			DisplayName: p.DisplayName,
 			Dojo:        p.Dojo,
-		})
+		}
+		if preserveIdentity {
+			// Preserve ID and Number so bracket match sides carry the real
+			// participant UUID and display number. Seed/metadata/tag are still
+			// dropped — they are stale in a knockout context.
+			player.ID = p.ID
+			player.Number = p.Number
+		}
+		// When preserveIdentity is false: ID deliberately left empty so
+		// SaveParticipants mints a UUID. That keeps participants.csv column 0 a
+		// UUID even when the source carried non-UUID (client-slug) IDs — so the
+		// loader's auto-detect parses it correctly regardless of HasParticipantIDs.
+		players = append(players, player)
 	}
 	return players, nil
+}
+
+// resolvePoolWinners builds the roster for a playoffs competition that was
+// created from a mixed (Pools + Knockout) source via POST /playoffs. It reads
+// playoffsComp.SourceCompID, verifies the source is a finalized mixed
+// competition, and resolves the qualifying pool winners (ranks
+// 1..totalWinners) into real players via GetPoolRanking. Returns the resolved
+// roster.
+//
+// The returned roster carries each winner's display fields (Name/DisplayName/
+// Dojo) but NOT the source-inherited ID: the playoffs comp is a brand-new set
+// of participants with no prior references, so we leave ID empty and let
+// SaveParticipants mint a fresh UUID. See resolvePoolWinnersFromSource for the
+// full rationale.
+func (e *Engine) resolvePoolWinners(playoffsComp *state.Competition) ([]domain.Player, error) {
+	srcID := playoffsComp.SourceCompID
+	// Legacy path: require the source to be in complete/playoffs (fully final).
+	srcComp, err := e.store.LoadCompetition(srcID)
+	if err != nil || srcComp == nil {
+		return nil, notFoundErrorf("playoffs source competition %q not found", srcID)
+	}
+	if srcComp.Status != state.CompStatusComplete && srcComp.Status != state.CompStatusPlayoffs {
+		return nil, validationErrorf("source competition %q pool results are not final yet (status: %s)", srcComp.Name, srcComp.Status)
+	}
+	// Delegate to the shared resolver without identity preservation (legacy
+	// behavior: fresh UUIDs for the separate playoffs comp's participants).
+	return e.resolvePoolWinnersFromSource(srcID, false)
 }

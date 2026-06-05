@@ -1321,80 +1321,80 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusOK)
 	})
 
+	// POST /competitions/:id/playoffs is DEPRECATED.
+	// Creating a separate playoffs competition is no longer needed; use
+	// POST /competitions/:id/start-knockout to run the knockout in-place
+	// inside the mixed competition itself. This route now returns HTTP 410
+	// Gone to signal the deprecation. Legacy separate-playoffs competitions
+	// that already exist can still be operated (StartCompetition's playoffs
+	// branch still resolves their SourceCompID), but new ones should not be
+	// created via this route.
+	//
+	// NOTE: StartCompetition for the FORMAT=playoffs + SourceCompID path
+	// remains fully functional for any already-existing separate playoffs
+	// competitions created before this deprecation (legacy back-compat).
 	r.POST("/competitions/:id/playoffs", func(c *gin.Context) {
+		c.JSON(http.StatusGone, gin.H{
+			"error": "creating a separate playoffs competition is deprecated; " +
+				"use POST /api/competitions/:id/start-knockout to run the knockout in place",
+		})
+	})
+
+	// POST /competitions/:id/start-knockout resolves pool winners into the
+	// mixed competition's own bracket and transitions it to "playoffs" status.
+	// This is the canonical way to start the knockout phase for a mixed
+	// (Pools + Knockout) competition.
+	//
+	// Preconditions (HTTP 409 on failure):
+	//   - Competition exists (404 otherwise).
+	//   - Format == "mixed".
+	//   - Status == "pools".
+	//   - All pool matches are complete (including tiebreaker/DH resolution).
+	//
+	// Success response (HTTP 200):
+	//   { "competition": <Competition>, "bracket": <Bracket> }
+	r.POST("/competitions/:id/start-knockout", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
 		}
-		src, err := store.LoadCompetition(id)
-		if err != nil || src == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "source competition not found"})
-			return
-		}
 
-		if src.Format != state.CompFormatMixed {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "source competition must use mixed (Pools + Knockout) format"})
-			return
-		}
-
-		// The playoffs competition is linked back to its source via
-		// SourceCompID and starts with an EMPTY roster. The source's pool
-		// winners are resolved into the roster at draw time by
-		// engine.resolvePoolWinners (see StartCompetition) — recomputed from
-		// the source's final pool configuration rather than snapshotted here,
-		// so the bracket always reflects the source as drawn.
-		playoff := state.Competition{
-			Name:           src.Name + " - Playoffs",
-			Format:         state.CompFormatPlayoffs,
-			Courts:         src.Courts,
-			WithZekkenName: src.WithZekkenName,
-			NumberPrefix:   src.NumberPrefix,
-			StartTime:      src.StartTime,
-			Status:         state.CompStatusSetup,
-			SourceCompID:   id,
-		}
-		playoff.ID = slugifyID(playoff.Name)
-
-		// Cross-file guard symmetry with POST + PUT /competitions:
-		// uniqueness-check + save under WithCompetitionRenameLock,
-		// AND an ID-existence check (a manually-created competition
-		// could have the same slug but a different name —
-		// checkUniqueCompName would pass, then SaveCompetitionChanged
-		// would silently overwrite the existing config). Both checks
-		// run inside the lock to avoid TOCTOU.
-		var nameErr, idErr error
-		err = store.WithCompetitionRenameLock(func() error {
-			if existing, _ := store.LoadCompetition(playoff.ID); existing != nil {
-				idErr = fmt.Errorf("derived playoff ID %q already exists (rename the conflicting competition or its source)", playoff.ID)
-				return nil
+		if err := eng.StartKnockout(id); err != nil {
+			var notFound *engine.NotFoundError
+			var validation *engine.ValidationError
+			switch {
+			case errors.As(err, &notFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validation):
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			}
-			if nameErr = checkUniqueCompName(store, playoff.Name, ""); nameErr != nil {
-				return nil
-			}
-			_, saveErr := store.SaveCompetitionChanged(&playoff)
-			return saveErr
-		})
-		if idErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
 			return
 		}
-		if nameErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+
+		comp, err := store.LoadCompetition(id)
+		if err != nil || comp == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "knockout started but failed to load updated competition: " + err.Error()})
 			return
 		}
+
+		bracket, err := store.LoadBracket(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "knockout started but failed to load updated bracket: " + err.Error()})
 			return
 		}
 
-		// The playoff starts with no participants (the roster is resolved
-		// from the source's pool winners at draw time). Return an empty but
-		// non-nil Players slice so the frontend's refreshCompsAfterCreate
-		// fallback can merge this record without a null-Players crash in
-		// render paths reading `c.players.length`.
-		playoff.Players = []domain.Player{}
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.JSON(http.StatusCreated, playoff)
+		// Broadcast events so connected clients (viewer, admin) update their
+		// state without a manual reload. Mirror the events the playoffs start
+		// path uses.
+		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
+		hub.Broadcast(EventScheduleUpdated, nil)
+
+		c.JSON(http.StatusOK, gin.H{
+			"competition": comp,
+			"bracket":     bracket,
+		})
 	})
 
 	r.DELETE("/competitions/:id/overrides", RequireElevatedPassword(elevated), func(c *gin.Context) {

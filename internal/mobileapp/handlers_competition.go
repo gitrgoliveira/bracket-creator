@@ -1355,8 +1355,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "knockout started but failed to load updated competition: " + err.Error()})
+			return
+		}
+		if comp == nil {
+			// Race: competition deleted between StartKnockout and this reload.
+			// Separate from the err != nil branch so we never deref a nil error.
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "knockout started but competition " + id + " disappeared before the response could be built"})
 			return
 		}
 

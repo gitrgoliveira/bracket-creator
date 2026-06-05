@@ -1433,8 +1433,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // mp-turx: a mixed comp is "pools complete" when every pool match has been
   // scored (status === "completed") and the comp itself is in "pools" status.
   // This is the precondition for the "Start knockout" button.
+  //
+  // We do NOT require poolMatches.length > 0 — a degenerate mixed comp with no
+  // pool matches (e.g. bye-only pools / single-participant pools) is "pools
+  // complete" by definition, which matches the backend's
+  // allPoolMatchesCompleteForComp predicate. Array.every on an empty array
+  // returns true, which is the behaviour we want.
   const poolsComplete = c.format === "mixed" && c.status === "pools" &&
-    Array.isArray(poolMatches) && poolMatches.length > 0 &&
+    Array.isArray(poolMatches) &&
     poolMatches.every(m => m.status === "completed");
 
   const isDrawReady = c.status === "draw-ready";

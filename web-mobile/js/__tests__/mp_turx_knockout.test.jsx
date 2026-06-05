@@ -406,7 +406,11 @@ describe('AdminCompetition: Start knockout button (mp-turx)', () => {
     expect(text).toContain('Finish all pool matches');
   });
 
-  it('does NOT show "Start knockout" when no pool matches exist yet', () => {
+  it('shows "Start knockout" when poolMatches is empty (degenerate bye-only pools)', () => {
+    // mp-turx Copilot fix: a mixed comp with no pool matches (e.g. bye-only or
+    // single-participant pools) is "pools complete" by definition — the
+    // backend's allPoolMatchesCompleteForComp predicate agrees. Array.every
+    // on [] returns true. The UI gate must follow the same rule.
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       competition: mkMixedComp({ status: 'pools' }),
@@ -416,7 +420,7 @@ describe('AdminCompetition: Start knockout button (mp-turx)', () => {
       onStartKnockout: vi.fn(),
     });
     const text = collectText(tree);
-    expect(text).not.toContain('Start knockout');
+    expect(text).toContain('Start knockout');
   });
 
   it('shows "Knockout in progress" when status is playoffs', () => {

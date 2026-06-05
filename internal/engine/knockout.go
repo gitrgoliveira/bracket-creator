@@ -96,10 +96,14 @@ func (e *Engine) allPoolMatchesCompleteForComp(compID string) (bool, error) {
 }
 
 // StartKnockout resolves the in-place knockout for a mixed (Pools + Knockout)
-// competition that has completed its pool phase. It replaces the competition's
-// placeholder preview bracket with a live, scoreable bracket whose leaf slots
-// hold the real pool winners (UUID + Number preserved), and transitions the
-// competition from CompStatusPools to CompStatusPlayoffs.
+// competition that has completed its pool phase. It replaces every pool-origin
+// placeholder label ("Pool A-1st", …) in the persisted preview bracket with the
+// real participant Name from pool standings — and clears the Preview flag — so
+// the bracket becomes live and scoreable while preserving the previewed
+// topology (court assignment, cross-seed slots, bye placement) byte-for-byte.
+// Bracket sides are name strings; participant UUIDs/Numbers continue to live
+// on the roster (state.Participants) and are looked up by name as needed. The
+// competition transitions from CompStatusPools to CompStatusPlayoffs.
 //
 // Preconditions (any failure returns a ValidationError mapped to HTTP 409):
 //   - The competition exists.

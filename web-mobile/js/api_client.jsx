@@ -526,8 +526,9 @@ const API = {
         return res.json();
     },
     // mp-turx: start the in-place knockout phase of a mixed competition.
-    // POSTs to /api/competitions/:id/start-knockout; returns the updated
-    // competition (status "playoffs", bracket no longer preview). 409 when
+    // POSTs to /api/competitions/:id/start-knockout. On 200 the response body
+    // is { competition, bracket } — the updated competition (status now
+    // "playoffs") and its live bracket (Preview cleared). 409 when
     // preconditions unmet; 404 when the competition is missing.
     async startKnockout(compId, password) {
         const res = await fetch(`/api/competitions/${compId}/start-knockout`, {

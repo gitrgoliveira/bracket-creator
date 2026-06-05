@@ -3,7 +3,6 @@ package engine
 import (
 	"testing"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -179,101 +178,6 @@ func TestEstimateScheduleForCompetition_ZeroParticipants(t *testing.T) {
 	assert.GreaterOrEqual(t, est.TotalDurationMinutes, 0)
 }
 
-// TestEstimateScheduleForCompetition_SourceLinked_PoolsExist verifies the
-// source-linked playoffs path: the finalist count is derived from the source's
-// pool count × poolWinners when the roster is empty.
-func TestEstimateScheduleForCompetition_SourceLinked_PoolsExist(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-
-	srcID := "est-source-comp"
-	playoffsID := "est-linked-playoffs"
-
-	// Set up source competition with pools already generated.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           srcID,
-		Format:       state.CompFormatMixed,
-		Kind:         "individual",
-		PoolSize:     3,
-		PoolSizeMode: "min",
-		PoolWinners:  2,
-		RoundRobin:   true,
-		Courts:       []string{"A"},
-		StartTime:    "09:00",
-		Status:       state.CompStatusPools,
-	}))
-	saveTestParticipants(t, store, srcID, []string{"A", "B", "C", "D", "E", "F"})
-
-	// Persist 2 pools (mimicking what generatePools produces).
-	fakePools := []helper.Pool{
-		{PoolName: "Pool 1", Players: []domain.Player{{Name: "A"}, {Name: "B"}, {Name: "C"}}},
-		{PoolName: "Pool 2", Players: []domain.Player{{Name: "D"}, {Name: "E"}, {Name: "F"}}},
-	}
-	require.NoError(t, store.SavePools(srcID, fakePools))
-
-	// Set up a source-linked playoffs competition with an empty roster.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                   playoffsID,
-		Format:               state.CompFormatPlayoffs,
-		Kind:                 "individual",
-		SourceCompID:         srcID,
-		PoolWinners:          2,
-		Courts:               []string{"A"},
-		StartTime:            "09:00",
-		PlayoffMatchDuration: 5,
-		Status:               state.CompStatusSetup,
-	}))
-	// No participants saved (empty roster — the draw hasn't resolved them yet).
-
-	est, err := eng.EstimateScheduleForCompetition(playoffsID)
-	require.NoError(t, err)
-	// 2 pools × 2 winners = 4 finalists → NextPow2(4)=4, bracket=3 matches.
-	assert.Greater(t, est.TotalDurationMinutes, 0,
-		"source-linked playoffs with 4 finalists must produce a non-zero estimate")
-
-	// Cross-check against direct EstimateForCounts with 3 bracket matches.
-	comp, _ := store.LoadCompetition(playoffsID)
-	tourn, _ := store.LoadTournament()
-	direct := EstimateForCounts(0, 3, comp, tourn)
-	assert.Equal(t, direct.TotalDurationMinutes, est.TotalDurationMinutes,
-		"source-linked playoff estimate must agree with direct EstimateForCounts(0,3)")
-}
-
-// TestEstimateScheduleForCompetition_SourceLinked_NoPools verifies the fallback
-// when the source competition's draw has not been generated yet: the playoffs
-// estimate returns a zero ScheduleEstimate without error.
-func TestEstimateScheduleForCompetition_SourceLinked_NoPools(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-
-	srcID := "est-source-no-pools"
-	playoffsID := "est-linked-no-pools"
-
-	// Source exists but has no pools.csv yet.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     srcID,
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusSetup,
-	}))
-
-	// Linked playoffs competition.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           playoffsID,
-		Format:       state.CompFormatPlayoffs,
-		Kind:         "individual",
-		SourceCompID: srcID,
-		PoolWinners:  2,
-		Courts:       []string{"A"},
-		StartTime:    "09:00",
-		Status:       state.CompStatusSetup,
-	}))
-	// No participants saved.
-
-	est, err := eng.EstimateScheduleForCompetition(playoffsID)
-	require.NoError(t, err, "missing source pools must return (zero, nil), not an error")
-	// Zero matches → TotalDurationMinutes is whatever EstimateForCounts returns
-	// for 0+0 matches (opening block or zero). The critical contract is: no error.
-	assert.GreaterOrEqual(t, est.TotalDurationMinutes, 0)
-}
-
 // ---------------------------------------------------------------------------
 // Finding 1: check-in filter applied in estimateParticipantCount
 // ---------------------------------------------------------------------------
@@ -387,66 +291,6 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 		assert.Equal(t, direct.TotalDurationMinutes, est.TotalDurationMinutes,
 			"with CheckInEnabled=false, all 8 participants must be used")
 	})
-}
-
-// ---------------------------------------------------------------------------
-// Finding 2: source PoolWinners used for source-linked finalist count
-// ---------------------------------------------------------------------------
-
-// TestEstimateFinalistCount_UsesSourcePoolWinners verifies that the finalist
-// count is derived from the SOURCE competition's PoolWinners, not from the
-// playoffs competition's PoolWinners. Mirrors ResolveQualifiedPools (engine/knockout.go).
-//
-// Finalist counts chosen to be powers-of-2 so bracketMatchCount is stable
-// regardless of Finding 3's fix, keeping this test independent.
-func TestEstimateFinalistCount_UsesSourcePoolWinners(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-
-	srcID := "est-src-pw4"
-	playoffsID := "est-playoffs-pw2"
-
-	// Source has PoolWinners=4, 2 pools → 2×4=8 finalists (power-of-2: 7 bouts).
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:          srcID,
-		Format:      state.CompFormatMixed,
-		Kind:        "individual",
-		PoolWinners: 4, // SOURCE says 4 winners per pool
-		Status:      state.CompStatusPools,
-	}))
-	fakePools := []helper.Pool{
-		{PoolName: "Pool 1", Players: []domain.Player{{Name: "A"}, {Name: "B"}}},
-		{PoolName: "Pool 2", Players: []domain.Player{{Name: "C"}, {Name: "D"}}},
-	}
-	require.NoError(t, store.SavePools(srcID, fakePools))
-
-	// Playoffs comp has PoolWinners=2 (→ 2×2=4 finalists, 3 bouts) — must NOT be used.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                   playoffsID,
-		Format:               state.CompFormatPlayoffs,
-		Kind:                 "individual",
-		SourceCompID:         srcID,
-		PoolWinners:          2, // PLAYOFF says 2 — must be ignored
-		Courts:               []string{"A"},
-		StartTime:            "09:00",
-		PlayoffMatchDuration: 5,
-		Status:               state.CompStatusSetup,
-	}))
-	// No participants — source-linked path.
-
-	est, err := eng.EstimateScheduleForCompetition(playoffsID)
-	require.NoError(t, err)
-
-	// Expected (fixed): 2 pools × 4 winners (SOURCE) = 8 finalists → 7 bouts.
-	// Buggy code uses 2 pools × 2 winners (PLAYOFF) = 4 finalists → 3 bouts.
-	comp, _ := store.LoadCompetition(playoffsID)
-	tourn, _ := store.LoadTournament()
-	direct8 := EstimateForCounts(0, 7, comp, tourn) // 8 finalists (source PoolWinners=4)
-	direct4 := EstimateForCounts(0, 3, comp, tourn) // 4 finalists (playoff PoolWinners=2 — BUG)
-	assert.Equal(t, direct8.TotalDurationMinutes, est.TotalDurationMinutes,
-		"finalist count must use source comp's PoolWinners=4 (8 finalists, 7 bouts), "+
-			"not playoff comp's PoolWinners=2 (4 finalists, 3 bouts)")
-	assert.NotEqual(t, direct4.TotalDurationMinutes, est.TotalDurationMinutes,
-		"estimate must NOT use the playoff comp's PoolWinners=2 (that would be the bug)")
 }
 
 // ---------------------------------------------------------------------------

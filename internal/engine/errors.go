@@ -56,12 +56,12 @@ type DownstreamKnockoutScoredError struct {
 	// would be displaced by the re-score.
 	Finisher string
 	// MatchID is the ID of the downstream knockout match that has already
-	// been scored with the current finisher as a side.
+	// been started (running or completed) with the current finisher as a side.
 	MatchID string
 }
 
 func (e *DownstreamKnockoutScoredError) Error() string {
-	return fmt.Sprintf("pool %q re-score rejected: finisher %q is already in scored knockout match %q — reset that match first", e.Pool, e.Finisher, e.MatchID)
+	return fmt.Sprintf("pool %q re-score rejected: finisher %q is already in a started knockout match %q — reset that match first", e.Pool, e.Finisher, e.MatchID)
 }
 
 func (e *DownstreamKnockoutScoredError) Is(target error) bool {

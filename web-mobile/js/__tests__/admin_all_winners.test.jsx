@@ -92,7 +92,7 @@ describe('buildAllWinners', () => {
     const comp = { id: 'ko-1', name: 'Knockout', format: 'playoffs', status: 'completed', players: [] };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, config: comp, players: [] });
 
-    const results = await window.buildAllWinners([comp], [comp], {
+    const results = await window.buildAllWinners([comp], {
       fetchCompetitionDetails,
       swissStandings: null,
     });
@@ -110,7 +110,6 @@ describe('buildAllWinners', () => {
 
   it('mixed comp whose OWN knockout final is undecided → state "in-progress", podium []', async () => {
     const mixedComp = { id: 'mixed-2', name: 'Pools+KO', format: 'mixed', status: 'playoffs' };
-    const allComps = [mixedComp];
     // undecided final
     const bracket = {
       rounds: [
@@ -120,7 +119,7 @@ describe('buildAllWinners', () => {
     };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, players: [] });
 
-    const results = await window.buildAllWinners([mixedComp], allComps, {
+    const results = await window.buildAllWinners([mixedComp], {
       fetchCompetitionDetails,
       swissStandings: null,
     });
@@ -140,7 +139,7 @@ describe('buildAllWinners', () => {
     const comp = { id: 'league-1', name: 'League', format: 'league', status: 'completed', players: [] };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings, pools: [{ poolName: 'Pool A' }], config: comp, players: [] });
 
-    const results = await window.buildAllWinners([comp], [comp], {
+    const results = await window.buildAllWinners([comp], {
       fetchCompetitionDetails,
       swissStandings: null,
     });
@@ -158,7 +157,7 @@ describe('buildAllWinners', () => {
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, config: comp, players: [] });
 
     // Caller passes only completed comps — if we pass none the result is empty.
-    const results = await window.buildAllWinners([], [comp], {
+    const results = await window.buildAllWinners([], {
       fetchCompetitionDetails,
       swissStandings: null,
     });
@@ -175,7 +174,7 @@ describe('buildAllWinners', () => {
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, config: { format: 'swiss' }, players: [] });
     const mockSwissStandings = vi.fn().mockResolvedValue(swissStandingsData);
 
-    const results = await window.buildAllWinners([comp], [comp], {
+    const results = await window.buildAllWinners([comp], {
       fetchCompetitionDetails,
       swissStandings: mockSwissStandings,
     });
@@ -189,7 +188,7 @@ describe('buildAllWinners', () => {
     const comp = { id: 'err-1', name: 'Broken', format: 'playoffs', status: 'completed', players: [] };
     const fetchCompetitionDetails = vi.fn().mockRejectedValue(new Error('Network error'));
 
-    const results = await window.buildAllWinners([comp], [comp], {
+    const results = await window.buildAllWinners([comp], {
       fetchCompetitionDetails,
       swissStandings: null,
     });

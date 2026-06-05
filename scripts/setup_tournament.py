@@ -180,11 +180,10 @@ def run_competition_setup(cat):
         requests.post(f"{BASE_URL}/api/competitions/{comp_id}/participants",
                              json={"players": participants}, headers=HEADERS).raise_for_status()
 
-    # NOTE: cross-competition promotion (the old "reserved slots" feature) has
-    # been removed. The only automatic promotion is pools -> playoffs within a
-    # single mixed competition, created via POST /competitions/:id/playoffs.
-    # Promoting winners between separate competitions is now a manual step the
-    # operator performs by adding the resolved players to the target roster.
+    # NOTE: a mixed (Pools + Knockout) competition is a SINGLE competition. Its
+    # knockout bracket fills in automatically as each pool finishes — there is no
+    # separate playoffs competition to create. Cross-competition promotion (the
+    # old "reserved slots" feature) has also been removed.
 
     seeds = parse_seeds(seeds_path)
     if seeds:
@@ -235,15 +234,19 @@ def score_all_matches(comp_id):
         
         bracket_matches = []
         bracket = detail.get('bracket', {})
-        # A mixed competition's bracket is a READ-ONLY preview; the live
-        # knockout lives in the separate linked "playoffs" competition.
-        # Only score bracket matches when this is the playoffs comp.
-        if bracket and bracket.get('preview'):
-            bracket = {}
+        # A mixed competition's knockout bracket fills in IN PLACE as each pool
+        # finishes — there is no separate playoffs competition. Score any bracket
+        # match whose BOTH sides are resolved competitors: skip "Winner of …"
+        # feeders, empty bye slots, and unseeded pool-origin placeholders
+        # ("Pool A-1st") whose feeder pool hasn't finished yet. Re-fetching each
+        # iteration means newly-seeded knockout matches are picked up as pools
+        # complete.
+        def _resolved(side):
+            return bool(side) and not side.startswith("Winner of") and not re.match(r'^Pool .+-\d+(st|nd|rd|th)$', side)
         if bracket and 'rounds' in bracket:
             for round_matches in bracket['rounds']:
                 for m in round_matches:
-                    if m.get('status') != 'completed' and not m['sideA'].startswith("Winner of") and not m['sideB'].startswith("Winner of") and m['sideA'] != "" and m['sideB'] != "":
+                    if m.get('status') != 'completed' and _resolved(m['sideA']) and _resolved(m['sideB']):
                         bracket_matches.append(m)
         
         # Tag each match as a pool match (draws/hikiwake allowed) or a bracket
@@ -311,10 +314,13 @@ def score_all_matches(comp_id):
             # Small delay for realism
             time.sleep(0.05)
 
-    # Print summary (using the new readable scoreSummary if available)
+    # Print summary (using the new readable scoreSummary if available).
     resp = requests.get(f"{BASE_URL}/api/viewer/competitions/{comp_id}")
     detail = resp.json()
-    if detail['config']['format'] == 'pools':
+    fmt = detail['config'].get('format', '')
+    # league = pool-only (winner is decided by standings); everything else
+    # (mixed/playoffs) culminates in a knockout final.
+    if fmt == 'league':
         standings = detail.get('standings', {})
         for pool, std in standings.items():
             print(f"Final Standings for {pool}:")
@@ -328,114 +334,35 @@ def score_all_matches(comp_id):
             if final_round and final_round[0]['status'] == 'completed':
                 print(f"Tournament Winner: {final_round[0]['winner']}")
 
-def create_linked_playoff(pool_comp_id, cat):
-    print(f"Creating linked playoff for {pool_comp_id}...")
-    
-    # We now use the dedicated API endpoint for this!
-    resp = requests.post(f"{BASE_URL}/api/competitions/{pool_comp_id}/playoffs", 
-                                headers=HEADERS)
-    
-    if resp.status_code == 201:
-        playoff_id = resp.json()['id']
-        print(f"Playoff competition {playoff_id} created by API and linked to {pool_comp_id}.")
-        return playoff_id
-    
-    # Minimal fallback for older API versions or if it fails
-    print(f"Playoff endpoint failed ({resp.status_code}), falling back to manual setup.")
-    payload = {
-        "name": f"{cat['title']} - Playoffs",
-        "format": "playoffs",
-        "courts": ["A", "B"],
-        "withZekkenName": cat.get('zekken', False),
-        "status": "setup"
-    }
-    resp = requests.post(f"{BASE_URL}/api/competitions", json=payload, headers=HEADERS)
-    resp.raise_for_status()
-    playoff_id = resp.json()['id']
-    return playoff_id
-
-def wait_for_status(comp_id, expected, timeout_s=5.0, interval_s=0.2):
-    """Poll the competition until its status matches `expected` or timeout.
-
-    Used after scoring all pool matches to assert the backend's auto-completion
-    has fired. If this times out, the auto-completion logic has regressed.
-    Fails immediately on 4xx responses (auth/config problems, not transient).
-    """
-    deadline = time.time() + timeout_s
-    last_status = None
-    resp = None  # guard against UnboundLocalError if every attempt raises ConnectionError
-    # Use a forgiving per-request timeout: at least 1s so slow/busy machines
-    # don't spuriously time out on a healthy backend. The loop's own deadline
-    # still bounds total wait time, so a truly hung server can't block forever.
-    request_timeout = max(1.0, interval_s * 4)
-    while time.time() < deadline:
-        try:
-            resp = requests.get(
-                f"{BASE_URL}/api/competitions/{comp_id}",
-                headers=HEADERS,
-                timeout=request_timeout,
-            )
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-            # Transient — retry until deadline
-            print(f"  [WARN] Connection/timeout error polling {comp_id}: {e}")
-            time.sleep(interval_s)
-            continue
-        if 400 <= resp.status_code < 500:
-            raise RuntimeError(
-                f"[FAIL] {comp_id}: unexpected {resp.status_code} while polling status. "
-                f"Check auth/config. Response: {resp.text[:200]}"
-            )
-        if resp.status_code == 200:
-            try:
-                body = resp.json()
-            except ValueError as e:
-                # 200 with non-JSON body (HTML error page from a proxy, etc.) —
-                # treat as a transient poll failure rather than crashing.
-                print(f"  [WARN] Non-JSON 200 response polling {comp_id}: {e}. Body: {resp.text[:200]}")
-                time.sleep(interval_s)
-                continue
-            last_status = body.get("status") if isinstance(body, dict) else None
-            if last_status == expected:
-                return last_status
-        time.sleep(interval_s)
-    http_info = f" (HTTP {resp.status_code})" if resp is not None else " (no successful response)"
-    # Non-fatal: a mixed comp stays in 'pools' after pools finish (the live
-    # knockout is the separate linked playoffs comp). Warn and continue.
-    print(
-        f"[WARN] {comp_id}: expected status {expected!r} within {timeout_s}s, "
-        f"last seen {last_status!r}{http_info}. Continuing."
-    )
-    return last_status
-
-
 def main():
     wait_for_server()
     setup_tournament()
 
     for cat in CATEGORIES:
-        # Per-category isolation: a cyclic pool tie blocks one comp's
-        # pools->completed transition (which gates its linked playoff). Don't
-        # let that abort seeding of the remaining categories.
+        # Per-category isolation: a cyclic pool tie can block one comp from
+        # finishing. Don't let that abort seeding of the remaining categories.
         try:
-            # 1. Setup Pools
-            pool_comp_id = run_competition_setup(cat)
+            # 1. Setup pools (mixed competition — its knockout bracket fills in
+            #    automatically as each pool finishes; no separate playoff comp).
+            comp_id = run_competition_setup(cat)
 
-            # 2. Setup Linked Playoff
-            playoff_id = create_linked_playoff(pool_comp_id, cat)
+            # 2. Score everything: score_all_matches loops until no scoreable
+            #    match remains. As each pool completes, its finishers are seeded
+            #    into the knockout in place, so the subsequent loop iterations
+            #    pick up the now-playable knockout matches automatically — pools
+            #    and knockout are all driven by this one call.
+            score_all_matches(comp_id)
 
-            # 3. Run Pools — backend auto-transitions status to "completed" when
-            #    the last pool match is recorded (unless a cyclic tie blocks it).
-            score_all_matches(pool_comp_id)
-            status = wait_for_status(pool_comp_id, "completed")
-            if status != "completed":
-                print(f"[SKIP] {pool_comp_id} not completed (status={status!r}); "
-                      f"leaving pools as-is, skipping its playoff.")
-                continue
-            print(f"[OK] {pool_comp_id} auto-transitioned to 'completed'.")
-
-            # 4. Start and Run Playoffs (Promotion happens automatically!)
-            requests.post(f"{BASE_URL}/api/competitions/{playoff_id}/start", headers=HEADERS).raise_for_status()
-            score_all_matches(playoff_id)
+            # 3. Finalize. A mixed comp ends in 'playoffs' status once the
+            #    bracket final is scored; mark it completed (idempotent — a
+            #    league comp already auto-completes, so /complete is a no-op or
+            #    harmless there).
+            resp = requests.post(f"{BASE_URL}/api/competitions/{comp_id}/complete", headers=HEADERS)
+            if resp.status_code == 200:
+                print(f"[OK] {comp_id} marked completed.")
+            else:
+                print(f"[INFO] {comp_id} /complete returned {resp.status_code} "
+                      f"(may already be completed or have unscored matches): {resp.text[:120]}")
         except Exception as e:
             print(f"[WARN] category {cat['title']} failed: {e}. Continuing.")
             continue

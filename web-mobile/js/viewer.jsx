@@ -3726,7 +3726,7 @@ async function buildAllWinnersPublic(comps, fetchers) {
 // AllWinnersModal rendering but as a full-page view (not a modal), matching
 // the ViewerSchedule / GlossaryPage page pattern. Props: { tournament, onBack, tweaks }.
 // ---------------------------------------------------------------------------
-function AllWinnersView({ tournament, onBack }) {
+function AllWinnersView({ tournament, onBack, tweaks }) {
   const comps = (tournament && tournament.competitions) || [];
   const [viewState, setViewState] = useState({ loading: true, results: [], error: null });
 
@@ -3810,7 +3810,7 @@ function AllWinnersView({ tournament, onBack }) {
                     <span style={{ fontSize: 12, color: "var(--ink-3)", minWidth: 60 }}>{style.label}</span>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{a.name}</div>
-                      {a.dojo && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{a.dojo}</div>}
+                      {tweaks.showDojo && a.dojo && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{a.dojo}</div>}
                     </div>
                   </div>
                 );

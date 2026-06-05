@@ -121,13 +121,13 @@ const PLACE_STYLE_ADMIN = {
 };
 
 // buildAllWinners resolves podium for each completed comp using the shared
-// resolveCompetitionAwards helper (handles mixed→linked-playoffs rule).
+// resolveCompetitionAwards helper.
 // Signature: buildAllWinners(completedComps, fetchers)
 // Returns a Promise resolving to an array of { comp, state, podium } objects
-// (plus an `error` string field when state === "error"), with results whose
-// state === "skip" filtered out (linked playoffs shells).
+// (plus an `error` string field when state === "error").
+// state is one of "final" | "in-progress" | "error".
 async function buildAllWinners(completedComps, fetchers) {
-  const results = await Promise.all(
+  return Promise.all(
     completedComps.map(async (comp) => {
       try {
         const { state, podium } = await window.resolveCompetitionAwards(comp, fetchers);
@@ -137,7 +137,6 @@ async function buildAllWinners(completedComps, fetchers) {
       }
     })
   );
-  return results.filter((r) => r.state !== "skip");
 }
 
 // AllWinnersModal renders a summary of every completed competition with its

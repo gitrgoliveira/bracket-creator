@@ -7,15 +7,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// saveResolvedPlayoffRoster persists the roster resolved for a source-linked
-// playoffs competition. It's a package var (not a direct
-// store.SaveParticipants call) so tests can inject a deterministic failure to
-// exercise the rollback-to-setup path in runDrawPipeline below. Mirrors the
-// flipHasParticipantIDs seam in handlers_competition.go.
-var saveResolvedPlayoffRoster = func(store *state.Store, id string, players []domain.Player) error {
-	return store.SaveParticipants(id, players)
-}
-
 // courtsEqual returns true when two court-label slices are
 // element-wise equal (used by StartCompetition's mid-pipeline
 // settings-drift check). nil and empty slices are treated as
@@ -46,21 +37,60 @@ const (
 	// and the competition remains in CompStatusPools. Callers should broadcast
 	// EventMatchUpdated and EventScheduleUpdated.
 	AutoCompleteTiebreakInjected AutoCompleteOutcome = 2
+	// AutoCompleteKnockoutStarted means the LAST pool of a mixed competition was
+	// just seeded into the knockout bracket: every pool is now resolved, so the
+	// competition moved CompStatusPools → CompStatusPlayoffs (only knockout
+	// matches remain). Callers should broadcast EventCompetitionStarted and
+	// EventScheduleUpdated.
+	AutoCompleteKnockoutStarted AutoCompleteOutcome = 3
+	// AutoCompletePoolsResolved means one or more (but not all) pools of a mixed
+	// competition were just seeded into the knockout bracket, OR tiebreaker/DH
+	// matches were injected. The competition stays in CompStatusPools while the
+	// remaining pools run, but the bracket changed and knockout matches whose
+	// both sides are now resolved have become SCOREABLE (scheduling is never
+	// gated — court/time can be set on a placeholder match at any time). Callers
+	// should broadcast EventMatchUpdated and EventScheduleUpdated.
+	AutoCompletePoolsResolved AutoCompleteOutcome = 4
 )
 
-// MaybeAutoCompletePools transitions a pools-format competition from
-// CompStatusPools to CompStatusComplete when every pool match has been
-// recorded as completed. It is a no-op for any other format or status,
-// or when at least one pool match is still scheduled/running.
+// MaybeAutoCompletePools advances a competition past its pool phase after a pool
+// score:
 //
-// When all regular pool matches are done but tied competitors remain,
-// supplementary ippon-shobu tiebreaker matches are injected and
-// AutoCompleteTiebreakInjected is returned instead of transitioning.
+//   - League format → transitions to CompStatusComplete once every pool match
+//     is recorded as completed.
+//   - Mixed format → delegates to advanceMixedPools, which seeds each COMPLETED
+//     pool's finishers into the in-place knockout bracket incrementally (no
+//     separate playoffs competition, no manual "start knockout" step), and flips
+//     the competition to CompStatusPlayoffs once the LAST pool has been seeded.
+//     Knockout matches become scoreable per-match as their feeder pools finish —
+//     there is no wait for the whole pool phase.
 //
-// Atomic: the status check and the save run inside
-// state.Store.UpdateCompetitionChanged so a concurrent
-// invalidate-vs-auto-complete pair can't lose either mutation.
+// The function is a no-op for any other format or status.
+//
+// For league, when all regular pool matches are done but tied competitors
+// remain, supplementary ippon-shobu tiebreaker matches are injected and
+// AutoCompleteTiebreakInjected is returned. (Mixed handles tie-break injection
+// per-pool inside advanceMixedPools.)
+//
+// Atomic: the league status flip runs inside state.Store.UpdateCompetitionChanged.
+// The mixed path delegates to advanceMixedPools, which takes its own per-comp
+// locks; that is safe because MaybeAutoCompletePools is NOT inside an open
+// transform at that point.
 func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, error) {
+	// Determine whether this is a team competition for tie-injection routing.
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
+
+	// MIXED (Pools + Knockout): resolve incrementally — pool finishers drop into
+	// their knockout slots the moment each pool completes, with NO wait for the
+	// rest of the pool phase. Short-circuit BEFORE the comp-wide "all pools done"
+	// gate below (which is only meaningful for league completion).
+	if comp != nil && comp.Format == state.CompFormatMixed && comp.Status == state.CompStatusPools {
+		return e.advanceMixedPools(compID, comp)
+	}
+
 	// Optional fast-path outside the lock — avoids taking the
 	// per-comp write lock for the common "still in progress" case.
 	matches, err := e.store.LoadPoolMatches(compID)
@@ -68,11 +98,6 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		return AutoCompleteNoChange, err
 	}
 
-	// Determine whether this is a team competition for tie-injection routing.
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return AutoCompleteNoChange, err
-	}
 	isTeamComp := comp != nil && comp.TeamSize > 0
 
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
@@ -164,9 +189,13 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		}
 	}
 
-	// No ties (or ties already resolved). Transition to complete.
+	// No ties (or ties already resolved). Advance past pools.
+	//
+	// Only league reaches here (mixed short-circuited at the top to
+	// advanceMixedPools; other formats are no-ops). League flips to
+	// CompStatusComplete once every pool match is done.
 	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
-		if comp == nil || (comp.Format != state.CompFormatMixed && comp.Format != state.CompFormatLeague) || comp.Status != state.CompStatusPools {
+		if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
 		// Re-check under the lock.
@@ -190,6 +219,68 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	}
 	if changed {
 		return AutoCompleteTransitioned, nil
+	}
+	return AutoCompleteNoChange, nil
+}
+
+// advanceMixedPools drives the incremental Pools → Knockout flow for a mixed
+// competition after a pool score. It is gate-free: each pool's finishers are
+// seeded into their knockout slots as soon as that pool completes, regardless of
+// whether the other pools are still running. Concretely:
+//
+//  1. Inject tiebreaker/DH matches for any newly-tied pools (idempotent).
+//  2. Seed every COMPLETED pool's finishers into the bracket placeholders
+//     (ResolveQualifiedPools) — newly-playable knockout matches were already
+//     scheduled at draw time, so they become live immediately.
+//  3. When the final pool has been seeded (no pool placeholders remain), flip
+//     CompStatusPools → CompStatusPlayoffs (informational — knockout matches are
+//     already playable per-match during "pools").
+//
+// Outcomes: AutoCompleteKnockoutStarted (last pool seeded, status flipped),
+// AutoCompletePoolsResolved (some pools seeded and/or tiebreakers injected —
+// bracket/schedule changed), or AutoCompleteNoChange (nothing new this score).
+func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (AutoCompleteOutcome, error) {
+	// 1. Inject tie-break matches for tied pools (idempotent; per-tied-pool).
+	injected := 0
+	if comp.TeamSize > 0 {
+		m, err := e.InjectPoolDaihyosenMatches(compID)
+		if err != nil {
+			return AutoCompleteNoChange, err
+		}
+		injected = len(m)
+	} else {
+		m, err := e.InjectTiebreakerMatches(compID)
+		if err != nil {
+			return AutoCompleteNoChange, err
+		}
+		injected = len(m)
+	}
+
+	// 2. Seed every completed pool into the bracket (no all-pools gate).
+	resolvedNow, allResolved, err := e.ResolveQualifiedPools(compID)
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
+
+	// 3. Flip pools → playoffs once every pool is seeded.
+	if allResolved {
+		changed, cerr := e.store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+			if c == nil || c.Format != state.CompFormatMixed || c.Status != state.CompStatusPools {
+				return nil, nil
+			}
+			c.Status = state.CompStatusPlayoffs
+			return c, nil
+		})
+		if cerr != nil {
+			return AutoCompleteNoChange, cerr
+		}
+		if changed {
+			return AutoCompleteKnockoutStarted, nil
+		}
+	}
+
+	if resolvedNow > 0 || injected > 0 {
+		return AutoCompletePoolsResolved, nil
 	}
 	return AutoCompleteNoChange, nil
 }
@@ -552,13 +643,6 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// semantics still apply (see filterCheckedIn): if nobody is checked in,
 	// everyone is included.
 	//
-	// Filter the DISK roster HERE — after load, BEFORE the playoffs
-	// source-resolution below. resolvePoolWinners builds promoted finalists
-	// with CheckedIn=false (ranking.go: only Name/DisplayName/Dojo are set),
-	// so filtering after resolution would wrongly drop the entire playoff
-	// bracket. Source-resolved finalists are intentionally exempt and bypass
-	// this filter by virtue of placement.
-	//
 	// excludedByCheckIn captures the names check-in removes so we can drop
 	// their seed assignments too: helper.ApplySeeds errors with "seeded
 	// participant not found in main list" for a seed whose player is absent,
@@ -568,28 +652,6 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if comp.CheckInEnabled {
 		excludedByCheckIn = checkInExcludedNames(players)
 		players = filterCheckedIn(players)
-	}
-	// Playoffs competitions created from a mixed source (POST /playoffs)
-	// start with an empty roster on disk. Resolve the source's final pool
-	// winners into the roster now, BEFORE the empty-roster check. The
-	// resolved roster is persisted by the trailing save below (after the
-	// atomic Status commit) — keeping the write out of this pre-generation
-	// phase so the transform's participants.csv mtime-drift check does not
-	// false-trip on our own write.
-	//
-	// Guard tightly: only a PLAYOFFS comp whose roster is still EMPTY should
-	// auto-resolve. A non-playoffs comp must never source-resolve, and an
-	// already-populated roster (operator manually added participants, or a
-	// SourceCompID set by accident) must NOT be clobbered — fall through to
-	// generation with the existing players instead.
-	rosterPopulated := false
-	if comp.Format == state.CompFormatPlayoffs && comp.SourceCompID != "" && len(players) == 0 {
-		resolved, rerr := e.resolvePoolWinners(comp)
-		if rerr != nil {
-			return rerr
-		}
-		players = resolved
-		rosterPopulated = true
 	}
 
 	if len(players) == 0 {
@@ -670,15 +732,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 		comp.SwissCurrentRound = 1
 		comp.Status = state.CompStatusDrawReady
 	default:
-		// sourceLinked governs bracket topology: true → mirror pool-preview
-		// topology via buildSourceLinkedLeaves; false → standalone seeding.
-		// rosterPopulated covers the FIRST draw (roster was empty, just
-		// resolved). comp.RosterSourceResolved covers SUBSEQUENT draws after a
-		// DiscardDraw/GenerateDraw: roster is on disk but was auto-resolved, not
-		// manually set. A comp that has a SourceCompID but a manually-set roster
-		// (ExistingRosterNotClobbered test) has neither flag and uses standalone
-		// seeding — which is the intended behaviour for that case.
-		if err := e.generatePlayoffs(comp, players, seeds, rosterPopulated || comp.RosterSourceResolved); err != nil {
+		// A standalone playoffs competition (the only remaining playoffs case
+		// after the derived-playoffs path was removed in mp-turx) uses standalone
+		// seeding — there is no pool-preview topology to mirror.
+		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusDrawReady
@@ -775,13 +832,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// read). See seeds.go for the locking-strategy rationale.
 		//
 		// Remaining caveat: a write that lands AFTER this check but
-		// BEFORE the trailing SaveParticipants (rosterPopulated path)
-		// still races with our pipeline. That window remains because
-		// SaveParticipants takes the same per-comp lock that the
-		// transform holds, so it can't be folded inside. The mtime
-		// check shrinks the window from "outer Load → trailing save"
-		// to "transform commit → trailing save," which is acceptable
-		// in practice (microseconds of CPU + filesystem latency).
+		// BEFORE the transform commit still races with our pipeline.
+		// The mtime check shrinks the window from "outer Load → commit"
+		// which is acceptable in practice (microseconds of CPU +
+		// filesystem latency).
 		if e.store.FileMtime(id, "participants.csv") != loadedParticipantsMtime ||
 			e.store.FileMtime(id, "seeds.csv") != loadedSeedsMtime {
 			return nil, validationErrorf("competition %s participants or seeds changed during start; retry", id)
@@ -838,97 +892,11 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// start when participants.csv mtime changed, so a concurrent
 		// PUT is rejected before we reach this point. Defense in depth:
 		// preserve the fresh `current.HasParticipantIDs` (loaded inside
-		// the transform) by NOT overwriting it from the snapshot. The
-		// rosterPopulated branch below still upgrades to true when our
-		// pipeline rewrites the roster with UUIDs — that path is the
-		// only legitimate reason to flip the flag here.
-		// HasParticipantIDs flip for the rosterPopulated path is DEFERRED
-		// to AFTER SaveParticipants below — pre-fix, this transform
-		// flipped the flag to true, but if the trailing SaveParticipants
-		// then failed (disk full, EISDIR, etc.), the config carried
-		// HasParticipantIDs=true while participants.csv retained the
-		// OLD non-UUID format. On next load, the HasIDs-hinted parser
-		// would misparse the file (UUID extraction on non-UUID rows).
-		// Deferral ensures the (flag, file) pair stays consistent.
-		//
-		// RosterSourceResolved marks that this comp's roster was built by
-		// resolving pool winners from SourceCompID, not manually. Set here
-		// (atomically with the Status commit) so a subsequent
-		// DiscardDraw/GenerateDraw replay sees the flag and keeps the
-		// source-linked bracket topology even though rosterPopulated will
-		// be false on re-entry (roster is already on disk).
-		if rosterPopulated {
-			current.RosterSourceResolved = true
-		}
+		// the transform) by NOT overwriting it from the snapshot.
 		return current, nil
 	})
 	if err != nil {
 		return err
-	}
-
-	// Persist the resolved roster for a source-linked playoffs competition.
-	// participants.csv was empty on disk for these comps (POST /playoffs
-	// stores only the SourceCompID link); resolvePoolWinners built the roster
-	// in-memory above. We save AFTER the atomic Status commit so the
-	// transform's participants.csv mtime-drift check (which snapshotted the
-	// empty/absent file before generation) does not flag our own write as a
-	// concurrent change.
-	if rosterPopulated {
-		if err := saveResolvedPlayoffRoster(e.store, id, players); err != nil {
-			// The atomic transform above already committed Status=draw-ready,
-			// but the resolved roster did NOT land on disk. Without a rollback
-			// the comp is stuck in a broken draw-ready state: a retry would
-			// take StartCompetition's draw-ready fast path
-			// (transitionDrawToRunning) and start the playoffs with an empty
-			// participants.csv. Roll Status back to setup (best-effort) so the
-			// next GenerateDraw/StartCompetition re-runs the full pipeline —
-			// re-resolving the source winners and regenerating the bracket
-			// (which overwrites the orphaned bracket.json). Only source-linked
-			// playoffs comps reach this branch, and their participants.csv
-			// started empty, so reverting to setup loses no operator data.
-			if _, rbErr := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
-				if current == nil {
-					return nil, nil
-				}
-				// Only revert if WE are the writer that committed draw-ready;
-				// if a concurrent actor already moved it on, leave it alone.
-				if current.Status == state.CompStatusDrawReady {
-					current.Status = state.CompStatusSetup
-				}
-				return current, nil
-			}); rbErr != nil {
-				fmt.Printf("Warning: failed to roll back Status to setup after SaveParticipants failure for %s: %v\n", id, rbErr)
-			}
-			return err
-		}
-		// Deferred HasParticipantIDs flip — runs ONLY after the
-		// participants file lands successfully with UUID-prefixed rows.
-		// See the transform above for the bug-shape comment.
-		if _, fierr := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
-			if current == nil {
-				return nil, nil
-			}
-			current.HasParticipantIDs = true
-			return current, nil
-		}); fierr != nil {
-			// Log only — the file save succeeded (which is the
-			// load-bearing write). A stale `false` flag at this point
-			// is safe because EVERY reader site uses the conditional
-			// hint pattern (only pass &true when comp.HasParticipantIDs;
-			// otherwise nil → LoadParticipantsOpt auto-detects from the
-			// first line's UUID prefix). Auto-detect is GUARANTEED to
-			// succeed here because resolvePoolWinners builds the roster
-			// with empty IDs, so marshalParticipantsCSV mints UUIDs into
-			// column 0 — even when the source competition carried non-UUID
-			// (client-slug) IDs. Sites: handlers_viewer.go list
-			// (line ~45) and detail (line ~101), and StartCompetition
-			// itself (line ~183). Aborting the start here after a
-			// successful save would commit Status (transform above
-			// already ran) but surface a 500 to the operator — they'd
-			// retry and hit "already started," leaving the competition
-			// in a confusing half-started state.
-			fmt.Printf("Warning: failed to flip HasParticipantIDs after SaveParticipants: %v\n", fierr)
-		}
 	}
 
 	return nil

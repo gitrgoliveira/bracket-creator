@@ -226,8 +226,21 @@ describe('API Utils', () => {
         ]
       };
       const map = buildPlayerMap(comp);
-      expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1 });
-      expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0 });
+      // The map carries the full competitor identity (incl. displayName/number)
+      // so bracket sides resolved by name show zekken + number as players qualify.
+      expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', tag: '', danGrade: '' });
+      expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', tag: '', danGrade: '' });
+    });
+
+    it('carries displayName and number into the map (qualifier identity in bracket)', () => {
+      const comp = {
+        players: [
+          { Name: 'Carol', DisplayName: 'CAROL', Dojo: 'Dojo C', Number: 'K3', Seed: 0 },
+        ],
+      };
+      const map = buildPlayerMap(comp);
+      expect(map['Carol'].displayName).toBe('CAROL');
+      expect(map['Carol'].number).toBe('K3');
     });
 
     it('preserves UUID id when player has one (camelCase input)', () => {

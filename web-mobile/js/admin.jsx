@@ -51,7 +51,7 @@ const AdminScoreEditorPage = window.AdminScoreEditorPage;
 //
 // Bug shape this fixes: AdminApp's handlers (updateCompetition,
 // moveMatchCourt, editMatchScore, addCompetition, startCompetition,
-// createPlayoff, startAllCompetitions, the import onImported callback)
+// startAllCompetitions, the import onImported callback)
 // all do `await window.API.X(...)` then
 // `onUpdate({ ...t, competitions: comps })`. The closure-captured `t`
 // is the tournament at handler-definition time — if SSE fires during
@@ -128,13 +128,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
   // AdminApp unmounts on logout / viewer-mode switch. Several async
   // handlers below (updateCompetition's fetchCompetitionDetails,
-  // startAllCompetitions, createPlayoff) setAdminCompData / setAdminLoading
+  // startAllCompetitions) setAdminCompData / setAdminLoading
   // / setView post-await. Narrow window but real — gate via mountedRef.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Best-effort post-mutation refresh. Several mutation handlers below
-  // (moveMatchCourt, editMatchScore, addCompetition, createPlayoff,
+  // (moveMatchCourt, editMatchScore, addCompetition,
   // startCompetition) used to wrap the mutation AND the follow-up
   // fetchCompetitions in the same try/catch — so a transient refresh
   // failure (server slow, network blip) surfaced as a mutation failure,
@@ -155,7 +155,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
   };
 
-  // Specialised variant for CREATE flows (addCompetition / createPlayoff).
+  // Specialised variant for CREATE flows (addCompetition).
   // On refresh failure, merge the just-created record into local state so
   // the caller's immediate navigation to `view.kind="competition", id:
   // created.id` finds the comp in `t.competitions`. Pre-fix, the caller
@@ -328,27 +328,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
   };
 
-  const createPlayoff = async (sourceId) => {
-    let created;
-    try {
-      created = await window.API.createPlayoff(sourceId, password);
-    } catch (e) {
-      if (mountedRef.current) showToast(e.message, "error");
-      return;
-    }
-    // See addCompetition: refresh-failure merges `created` into local
-    // state so setView's navigation to the new playoff's ID finds it in
-    // t.competitions. Pre-fix, refresh failure left the caller's
-    // setView({kind:"competition", id: created.id, ...}) navigating to
-    // a comp that AdminApp's `t.competitions.find(cc => cc.id === view.id)`
-    // can't locate, producing the "Competition not found" empty state
-    // until the next refresh.
-    await refreshCompsAfterCreate(created, "Playoff create");
-    if (!mountedRef.current) return;
-    setView({ kind: "competition", id: created.id, section: "participants" });
-    showToast(`Playoff "${created.name}" created`);
-  };
-
   const startCompetition = async (cid) => {
     const c = t.competitions.find(cc => cc.id === cid);
     if (!c) return;
@@ -386,8 +365,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
       await window.API.updateTournament(sendBody, password);
       // Bail if the admin navigated away during the in-flight PUT —
-      // mirrors startAllCompetitions / refreshCompsAfterCreate /
-      // createPlayoff. Without this gate, onUpdateRef.current (parent's
+      // mirrors startAllCompetitions / refreshCompsAfterCreate.
+      // Without this gate, onUpdateRef.current (parent's
       // setState) and showToast fire on an unmounted component,
       // producing the standard React setState-after-unmount warning.
       // Caught by /deep-review iterative pass after round-11 swept
@@ -652,7 +631,6 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
       onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then(setAdminCompData).catch(err => console.error("refresh failed:", err))}
-      onCreatePlayoff={createPlayoff}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}
       onLogout={onLogout}

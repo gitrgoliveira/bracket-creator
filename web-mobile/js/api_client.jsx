@@ -525,17 +525,6 @@ const API = {
         }
         return res.json();
     },
-    async createPlayoff(sourceId, password) {
-        const res = await fetch(`/api/competitions/${sourceId}/playoffs`, {
-            method: 'POST',
-            headers: { 'X-Tournament-Password': password }
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to create playoff");
-        }
-        return res.json();
-    },
     async deleteCompetition(id, password, adminPassword) {
         const res = await fetch(`/api/competitions/${id}`, {
             method: 'DELETE',

@@ -188,6 +188,12 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	}
 	poolDH := map[string]*poolDHInfo{}
 	poolCourt := map[string]string{}
+	// regularIncomplete[pool] is true if any regular (non-DH) match in the pool
+	// is not yet completed. Daihyosen tie-breaks must only be injected after a
+	// pool's regular round-robin is finished — otherwise a partial-result tie
+	// would inject DH matches that a later result breaks, orphaning them. (See
+	// the matching guard in InjectTiebreakerMatches.)
+	regularIncomplete := map[string]bool{}
 	for _, m := range allMatches {
 		pn, ok := poolNameFromMatchID(m.ID)
 		if !ok {
@@ -207,11 +213,17 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 			}
 			poolDH[pn].count++
 			poolDH[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
+		} else if m.Status != state.MatchStatusCompleted {
+			regularIncomplete[pn] = true
 		}
 	}
 
 	var injected []state.MatchResult
 	for poolName, poolStandings := range standings {
+		// Don't inject daihyosen until the pool's regular matches are all done.
+		if regularIncomplete[poolName] {
+			continue
+		}
 		info := poolDH[poolName]
 		existingCount := 0
 		existingPairs := map[string]bool{}

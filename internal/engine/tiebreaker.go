@@ -105,6 +105,14 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	}
 	poolTB := map[string]*poolTBInfo{}
 	poolCourt := map[string]string{}
+	// regularIncomplete[pool] becomes true if ANY regular (non-TB) match in the
+	// pool is not yet completed. Tiebreakers must only be injected once a pool's
+	// regular round-robin is finished — otherwise an intermediate, partial-result
+	// tie (e.g. everyone 0–0 after one match) would spuriously inject TB matches
+	// that a later result then breaks, leaving orphaned scheduled TB matches that
+	// never clear. (The pre-incremental caller enforced this via a comp-wide
+	// "all regular matches complete" gate; per-pool seeding needs it here.)
+	regularIncomplete := map[string]bool{}
 	for _, m := range allMatches {
 		pn, ok := poolNameFromMatchID(m.ID)
 		if !ok {
@@ -122,11 +130,17 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			}
 			poolTB[pn].count++
 			poolTB[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
+		} else if m.Status != state.MatchStatusCompleted {
+			regularIncomplete[pn] = true
 		}
 	}
 
 	var injected []state.MatchResult
 	for poolName, poolStandings := range standings {
+		// Don't inject tiebreakers until the pool's regular matches are all done.
+		if regularIncomplete[poolName] {
+			continue
+		}
 		info := poolTB[poolName]
 		existingCount := 0
 		existingPairs := map[string]bool{}

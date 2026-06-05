@@ -289,22 +289,18 @@ type Competition struct {
 	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
 	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
 	// SourceCompID links a playoffs competition back to the mixed
-	// (Pools + Knockout) competition whose pool winners seed it. Set by
-	// POST /competitions/:id/playoffs. When non-empty, the playoffs comp
-	// starts with an empty roster on disk; StartCompetition resolves the
-	// source's final pool winners into the roster at draw time (see
-	// engine.resolvePoolWinners). Empty for all other competitions.
-	SourceCompID string `yaml:"source_comp_id,omitempty" json:"sourceCompID,omitempty"`
-	// RosterSourceResolved is set to true by the draw pipeline the first
-	// time it auto-resolves pool winners into this playoffs competition's
-	// roster (engine.StartCompetition, rosterPopulated branch). On a
-	// DiscardDraw/GenerateDraw retry the roster is already on disk so
-	// rosterPopulated would be false, but the bracket topology must still
-	// mirror the pool preview — this flag is the durable signal that the
-	// roster was source-resolved and not manually set.
-	RosterSourceResolved bool `yaml:"roster_source_resolved,omitempty" json:"rosterSourceResolved,omitempty"`
-	PoolMatchDuration    int  `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
-	PlayoffMatchDuration int  `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+	// (Pools + Knockout) competition that this competition was seeded from.
+	// NEW competitions never set this field — the split-playoffs flow was
+	// replaced by a single mixed competition whose knockout bracket fills in
+	// incrementally as pools finish (engine.ResolveQualifiedPools, mp-turx).
+	// The field is retained for YAML round-trip compatibility with existing
+	// tournament data files, and engine/estimate_schedule.go still reads it on
+	// the legacy code path that estimates source-linked playoffs that may
+	// already exist on disk. That legacy read is harmless for new comps (the
+	// field is always empty) and is tracked for removal in bead mp-c3pf.
+	SourceCompID         string `yaml:"source_comp_id,omitempty" json:"sourceCompID,omitempty"`
+	PoolMatchDuration    int    `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
+	PlayoffMatchDuration int    `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
 	// MaxEnchoPeriods caps how many encho (overtime) periods one match
 	// may run before the operator must call daihyosen. Zero means
 	// unlimited (FIK general default). T104, CHK029.
@@ -376,6 +372,18 @@ func (c Competition) IsPlayoffEnabled() bool {
 	default:
 		return false
 	}
+}
+
+// EffectivePoolWinners returns the number of finishers each pool promotes to the
+// knockout, defaulting to 2 when unset (<=0). Single source of truth for the
+// qualifier count so the draw-time validation (pools.go), preview-bracket build
+// (bracket.go), incremental seeding (knockout.go), and schedule estimation
+// (estimate_schedule.go) cannot drift from one another.
+func (c Competition) EffectivePoolWinners() int {
+	if c.PoolWinners > 0 {
+		return c.PoolWinners
+	}
+	return 2
 }
 
 type CompetitionStatus string

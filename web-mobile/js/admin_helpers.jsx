@@ -28,14 +28,35 @@ function sideName(side) {
 // name that happens to start with "Winner of " — a legitimate
 // participant named "Winner of the 2025 Cup" should still pass.
 // (See web-mobile/js/viewer.jsx for the consumer.)
+//
+// Mixed-comp pool-origin caveat: before a pool finishes seeding, knockout
+// bracket leaves carry pool-origin placeholder labels like "Pool A-1st",
+// "Pool B-2nd" (format produced by helper.GenerateFinals / engine/knockout.go).
+// These look like real strings to sideName() but are not real participants.
+// Mirrors the Go regex poolFinalistPlaceholderRE = `^Pool .+-\d+(st|nd|rd|th)$`.
 const BRACKET_PLACEHOLDER_RE = /^Winner of r\d+-m\d+$/;
+const POOL_ORIGIN_PLACEHOLDER_RE = /^Pool .+-\d+(st|nd|rd|th)$/;
 function hasBothSides(m) {
   if (!m) return false;
   const a = sideName(m.sideA);
   const b = sideName(m.sideB);
   if (!a || !b) return false;
   if (BRACKET_PLACEHOLDER_RE.test(a) || BRACKET_PLACEHOLDER_RE.test(b)) return false;
+  if (POOL_ORIGIN_PLACEHOLDER_RE.test(a) || POOL_ORIGIN_PLACEHOLDER_RE.test(b)) return false;
   return true;
+}
+
+// hasPoolOriginPlaceholder reports whether a bracket match still has a pool-origin
+// "Pool A-1st" side (a mixed comp whose feeder pool hasn't finished). Unlike
+// !hasBothSides, this is TRUE only for pool placeholders — NOT for normal
+// "Winner of rX-mY" feeders or structural byes — so the "Knockout filling in"
+// banner shows ONLY for an incomplete mixed knockout, not standalone playoffs or
+// bye-containing brackets.
+function hasPoolOriginPlaceholder(m) {
+  if (!m) return false;
+  const a = sideName(m.sideA);
+  const b = sideName(m.sideB);
+  return POOL_ORIGIN_PLACEHOLDER_RE.test(a) || POOL_ORIGIN_PLACEHOLDER_RE.test(b);
 }
 
 // Returns { total, done, live } match counts for a single competition object.
@@ -291,6 +312,7 @@ function deriveTournamentDays(startDate, durationDays) {
 if (typeof window !== "undefined") {
   window.sideName = sideName;
   window.hasBothSides = hasBothSides;
+  window.hasPoolOriginPlaceholder = hasPoolOriginPlaceholder;
   window.compMatchStats = compMatchStats;
   window.normalizeDate = normalizeDate;
   window.dmyToIso = dmyToIso;
@@ -374,6 +396,7 @@ export {
   promptAdminPassword,
   sideName,
   hasBothSides,
+  hasPoolOriginPlaceholder,
   compMatchStats,
   normalizeDate,
   dmyToIso,

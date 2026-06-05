@@ -395,7 +395,7 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 
 // TestEstimateFinalistCount_UsesSourcePoolWinners verifies that the finalist
 // count is derived from the SOURCE competition's PoolWinners, not from the
-// playoffs competition's PoolWinners. Mirrors resolvePoolWinners (ranking.go:168).
+// playoffs competition's PoolWinners. Mirrors ResolveQualifiedPools (engine/knockout.go).
 //
 // Finalist counts chosen to be powers-of-2 so bracketMatchCount is stable
 // regardless of Finding 3's fix, keeping this test independent.

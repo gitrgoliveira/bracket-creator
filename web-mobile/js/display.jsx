@@ -43,6 +43,24 @@ function sideLabel(side, withZekkenName) {
     return side.name || "TBD";
 }
 
+// Reject a bracket side that is still a placeholder rather than a resolved
+// competitor: a "Winner of rX-mY" feeder OR a pool-origin "Pool A-1st" leaf.
+// The latter matters since mp-turx: a mixed comp's bracket.preview strip lifts
+// the moment ANY single pool resolves, so the aggregate /api/viewer payload then
+// exposes a partially-resolved bracket whose un-finished pools are still
+// placeholders. Without this filter the TV/lobby surfaces render phantom
+// "Pool C-1st vs Pool D-1st" bouts and mark idle courts active. Mirrors
+// admin_helpers.hasBothSides without a module-eval window dependency.
+const DISPLAY_PLACEHOLDER_RE = /^(Winner of r\d+-m\d+|Pool .+-\d+(st|nd|rd|th))$/;
+function bracketSidesReady(m) {
+    if (!m || !m.sideA || !m.sideB) return false;
+    const aName = typeof m.sideA === "string" ? m.sideA : (m.sideA.name || "");
+    const bName = typeof m.sideB === "string" ? m.sideB : (m.sideB.name || "");
+    if (!aName || !bName) return false;
+    if (DISPLAY_PLACEHOLDER_RE.test(aName) || DISPLAY_PLACEHOLDER_RE.test(bName)) return false;
+    return true;
+}
+
 // Find the running match on a court from a tournament + competitions blob.
 // Returns null when no live match. Used by TvDisplay and StreamingOverlay.
 function findLiveOnCourt(competitions, court) {
@@ -61,7 +79,7 @@ function findLiveOnCourt(competitions, court) {
         for (let ri = 0; ri < rounds.length; ri++) {
             for (const m of rounds[ri]) {
                 if ((m.court || "") !== court) continue;
-                if (m.status === "running" && m.sideA && m.sideB) {
+                if (m.status === "running" && bracketSidesReady(m)) {
                     return { match: m, competition: c, isBracket: true, roundIndex: ri, totalRounds: rounds.length };
                 }
             }
@@ -89,7 +107,7 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
         rounds.forEach((round, ri) => round.forEach((m) => {
             if ((m.court || "") !== court) return;
             if (m.status !== "scheduled") return;
-            if (!m.sideA || !m.sideB) return;
+            if (!bracketSidesReady(m)) return; // skip "Pool X-Nth" / "Winner of …" placeholders
             out.push({ ...m, _comp: c, _isBracket: true, _roundIndex: ri, _totalRounds: rounds.length });
         }));
     }
@@ -111,20 +129,12 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
 function countCourtMatches(competitions, court) {
     let live = 0, scheduled = 0, completed = 0;
     if (!competitions || !court) return { live, scheduled, completed };
-    const hasBoth = (m) => {
-        // Mirror admin_helpers.hasBothSides without taking a window
-        // dependency at module-eval time. Bracket placeholders ("Winner
-        // of r0-m1") are non-empty strings on raw payloads — reject them
-        // explicitly so a half-resolved bracket doesn't inflate the
-        // "scheduled" count and prevent the "All matches completed"
-        // empty state from firing.
-        if (!m || !m.sideA || !m.sideB) return false;
-        const aName = typeof m.sideA === "string" ? m.sideA : (m.sideA.name || "");
-        const bName = typeof m.sideB === "string" ? m.sideB : (m.sideB.name || "");
-        if (!aName || !bName) return false;
-        if (/^Winner of r\d+-m\d+$/.test(aName) || /^Winner of r\d+-m\d+$/.test(bName)) return false;
-        return true;
-    };
+    // Count only matches with two real sides — reject "Winner of rX-mY" feeders
+    // AND "Pool A-1st" pool-origin leaves — so a half-resolved bracket doesn't
+    // inflate the "scheduled" count and prevent the "All matches completed"
+    // empty state from firing. (bracketSidesReady mirrors admin_helpers.hasBothSides
+    // without a module-eval window dependency.)
+    const hasBoth = bracketSidesReady;
     const bump = (m) => {
         if (!hasBoth(m)) return;
         if (m.status === "running") live++;
@@ -164,6 +174,7 @@ function findActiveCourts(tournament, competitions) {
         for (const round of ((c.bracket && c.bracket.rounds) || [])) {
             for (const m of round) {
                 if (!m.court) continue;
+                if (!bracketSidesReady(m)) continue; // a placeholder bout doesn't make a court "active"
                 if (m.status === "running" || m.status === "scheduled") inUse.add(m.court);
             }
         }

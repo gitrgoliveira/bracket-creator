@@ -6,6 +6,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const compMatchStats = window.compMatchStats;
 const hasBothSides = window.hasBothSides;
+const hasPoolOriginPlaceholder = window.hasPoolOriginPlaceholder;
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
 const isValidDate = window.isValidDate;
@@ -1033,17 +1034,23 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
       .catch(err => showToast(err.message, "error"));
   };
   const selectedMatch = findSelectedMatch();
-  // mp-9dz: a preview bracket (mixed source) shows pool-origin placeholder
-  // leaves ("Pool A 1st") and is NOT scoreable here — the knockout is played
-  // in the separate Playoffs competition. Disable match selection/scoring and
-  // surface an explanatory note instead of the live scoring panel.
-  const isPreview = !!bracket.preview;
+  // mp-turx: per-match playability — a bracket match is live iff hasBothSides()
+  // returns true (both sides are resolved real participants, not “Winner of rX-mY”
+  // feeders or pool-origin placeholders like “Pool A-1st”). The old bracket-wide
+  // `isPreview` gate is replaced: the tree always renders, and individual matches
+  // are non-interactive until their sides are decided. This supports the incremental
+  // fill-in model where pool finishers seed into the knockout as each pool completes.
+  // Show the "filling in" banner ONLY when pool-origin placeholders remain (a
+  // mixed comp whose feeder pools haven't all finished) — NOT for ordinary
+  // "Winner of rX-mY" feeders or structural byes, which standalone playoffs and
+  // bye-containing brackets legitimately have.
+  const hasUnseededPools = bracket.rounds.some(r => (r || []).some(m => hasPoolOriginPlaceholder(m)));
   return (
     <div className="row" style={{ gridTemplateColumns: "1fr 360px", alignItems: "start" }}>
       <div>
-        {isPreview && (
+        {hasUnseededPools && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
-            <strong>Preview bracket</strong> — positions show where each pool's finishers feed the knockout (e.g. “Pool A 1st”). Create the <strong>Playoffs</strong> competition to play and score it.
+            <strong>Knockout filling in</strong> — this bracket fills in automatically as each pool finishes. Matches become live once both sides are decided.
           </div>
         )}
         <div className="bracket-canvas" ref={scrollRef}>
@@ -1052,7 +1059,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
               rounds={bracket.rounds}
               variant={tweaks.cardVariant}
               showDojo={tweaks.showDojo}
-              onMatchClick={isPreview ? undefined : select}
+              onMatchClick={(m, ri, mi) => { if (hasBothSides(m)) select(m, ri, mi); }}
               highlightedMatchId={selected?.matchId}
               autoScrollMatchId={autoScrollId}
               scrollContainerRef={scrollRef}
@@ -1061,9 +1068,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
         </div>
       </div>
       <div>
-        {isPreview ? (
-          <div className="empty"><div className="icon">🌳</div><h3>Preview only</h3><div style={{ fontSize: 13 }}>This bracket is seeded from pool finishing positions. The knockout is played in the Playoffs competition created from these pools.</div></div>
-        ) : hasBothSides(selectedMatch) ? (
+        {hasBothSides(selectedMatch) ? (
           <LiveMatchPanel
             match={selectedMatch}
             compId={c.id}
@@ -1256,7 +1261,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
   );
 }
 
-function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onUpdate, onRefreshCompetition, onCreatePlayoff, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
+function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onUpdate, onRefreshCompetition, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
@@ -1429,7 +1434,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
         c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
-        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: (isDrawReady || bracket?.preview) ? "Bracket — preview" : "Bracket — live" } : null,
+        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — live" } : null,
         !isDrawReady ? { id: "scores", label: "Scores — edit" } : null,
       ].filter(Boolean)
     },
@@ -1507,16 +1512,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start when ready</div>
               </div>
             )}
-            {(c.format === "mixed" || c.format === "league") && c.status !== "setup" && c.status !== "draw-ready" && onCreatePlayoff && (() => {
-              if (c.format === "league") {
-                return <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>League: standings determine the winner</div>;
-              }
-              const playoffName = c.name + " - Playoffs";
-              const hasPlayoff = (t.competitions || []).some(cc => cc.name === playoffName);
-              return hasPlayoff
-                ? <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>Playoff bracket already created</div>
-                : <button className="btn btn--primary" onClick={() => onCreatePlayoff(c.id)}>Create playoff bracket →</button>;
-            })()}
+            {c.format === "league" && c.status !== "setup" && c.status !== "draw-ready" && (
+              <div style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>League: standings determine the winner</div>
+            )}
           </div>
         </div>
 

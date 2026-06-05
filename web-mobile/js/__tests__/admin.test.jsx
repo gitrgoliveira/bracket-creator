@@ -3,7 +3,7 @@ import { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreated
 
 // /deep-review finding on UI side: AdminApp's async handlers
 // (updateCompetition, moveMatchCourt, editMatchScore, addCompetition,
-// startCompetition, createPlayoff, startAllCompetitions, import
+// startCompetition, startAllCompetitions, import
 // onImported) all did
 //   `await window.API.X(...)` then `onUpdate({ ...t, competitions: comps })`
 // where `t` is closure-captured at handler-definition time. If SSE
@@ -100,7 +100,7 @@ describe('mergeCompetitionsIntoTournament', () => {
 });
 
 // Copilot finding (PR #104 round-9-followup): create flows
-// (addCompetition / createPlayoff) used `refreshCompsBestEffort` which
+// (addCompetition) used `refreshCompsBestEffort` which
 // just logged + toasted on refresh failure. The caller then navigated
 // to `view.kind="competition", id: created.id`, but local
 // `t.competitions` still didn't contain `created` — so AdminApp's
@@ -116,7 +116,7 @@ describe('mergeCompetitionsIntoTournament', () => {
 // e.g. via an SSE update that landed during the in-flight create).
 //
 // Pinning the mutator's behaviour here as a pure test — the full
-// addCompetition / createPlayoff handlers need DOM rendering to test
+// addCompetition handler needs DOM rendering to test
 // (vitest setup mocks React with stubs; see follow-up #4/#7).
 describe('refreshCompsAfterCreate merge mutator', () => {
   // Replicate the inline mutator pattern. Keep in sync with admin.jsx's

@@ -13,25 +13,6 @@ function collectText(node) {
   return '';
 }
 
-// Depth-first search for the first vnode matching predicate.
-function findInTree(node, predicate) {
-  if (!node || typeof node !== 'object') return null;
-  if (Array.isArray(node)) {
-    for (const k of node) {
-      const found = findInTree(k, predicate);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (predicate(node)) return node;
-  const kids = node.children || node.props?.children || [];
-  for (const k of [].concat(kids)) {
-    const found = findInTree(k, predicate);
-    if (found) return found;
-  }
-  return null;
-}
-
 // Collect every vnode whose `type` is the named child component reference.
 // The reactive shim does not execute child components, but it preserves the
 // `type` (the function reference) so we can assert which tabs/components the
@@ -48,10 +29,11 @@ function findAllByType(node, typeRef, acc = []) {
   return acc;
 }
 
-// mp-rrd Phase 1 + 2: the public viewer must expose Pools + Bracket tabs at
+// mp-rrd Phase 1: the public viewer must expose Pools + Bracket tabs at
 // draw-ready (the draw is published but no match has been called), keep
-// "not started" for setup, keep Swiss excluded from pools/bracket, never
-// treat draw-ready as live, and link a pools comp to its playoffs comp.
+// "not started" for setup, keep Swiss excluded from pools/bracket, and
+// never treat draw-ready as live. (Phase 2 split-comp cross-links removed
+// in mp-turx — mixed comps are now a single competition.)
 describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
   const realReact = global.React;
   let runtime;
@@ -187,48 +169,6 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     expect(labels.some(l => l.includes('Standings'))).toBe(true);
   });
 
-  it('links a pools comp to its playoffs comp and navigates on click', () => {
-    const playoffs = { id: 'po-1', name: 'Mixed Playoffs', sourceCompID: 'pools-1', status: 'setup', courts: ['A'], players: [], format: 'playoffs', kind: 'individual', teamSize: 0, startTime: '11:00' };
-    const onSelect = vi.fn();
-    const tree = runtime.mount(ViewerCompetition, {
-      tournament: { competitions: [mkPoolsComp(), playoffs] },
-      competition: mkPoolsComp(),
-      pools: samplePools,
-      poolMatches: [],
-      standings: [],
-      bracket: sampleBracket,
-      onBack: () => {},
-      onSelectCompetition: onSelect,
-      tweaks: {},
-    });
-    const text = collectText(tree);
-    expect(text).toContain('View the playoffs bracket');
-    expect(text).toContain('Mixed Playoffs');
-    // Find the cross-link button (carries the linked comp name) and click it.
-    const linkBtn = findInTree(tree, n => n?.type === 'button' && collectText(n).includes('Mixed Playoffs'));
-    expect(linkBtn).toBeTruthy();
-    linkBtn.props.onClick();
-    expect(onSelect).toHaveBeenCalledWith('po-1');
-  });
-
-  it('links a playoffs comp back to its source pools comp', () => {
-    const pools = mkPoolsComp();
-    const playoffs = { id: 'po-1', name: 'Mixed Playoffs', sourceCompID: 'pools-1', status: 'draw-ready', courts: ['A'], players: [], format: 'playoffs', kind: 'individual', teamSize: 0, startTime: '11:00', poolWinners: 0 };
-    const tree = runtime.mount(ViewerCompetition, {
-      tournament: { competitions: [pools, playoffs] },
-      competition: playoffs,
-      pools: [],
-      poolMatches: [],
-      standings: [],
-      bracket: sampleBracket,
-      onBack: () => {},
-      onSelectCompetition: () => {},
-      tweaks: {},
-    });
-    const text = collectText(tree);
-    expect(text).toContain('View the pools');
-    expect(text).toContain('Mixed Pools Cup');
-  });
 });
 
 // mp-rrd: the Overview tab body. draw-ready must show a "Draw is ready"

@@ -57,12 +57,16 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 		if bracket == nil {
 			return errMatchNotFound
 		}
-		if bracket.Preview {
-			return validationErrorf("bracket for competition %s is a read-only preview; run the Playoffs competition to score elimination matches", compId)
-		}
 		for rIdx := range bracket.Rounds {
 			for mIdx := range bracket.Rounds[rIdx] {
 				if bracket.Rounds[rIdx][mIdx].ID == matchId {
+					// NOTE: no playability gate here. withBracketMatch backs the
+					// SCHEDULING mutators (UpdateMatchCourt / UpdateMatchTime),
+					// which must work on not-yet-resolved (placeholder) knockout
+					// matches so operators can pre-arrange courts/times. The
+					// per-match playability gate lives only in the SCORING paths
+					// (recordBracketMatchResult / recordBracketMatchResultTx /
+					// OverrideBracketWinner).
 					mutate(&bracket.Rounds[rIdx][mIdx])
 					return nil
 				}
@@ -592,14 +596,18 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compId)
 		}
-		if bracket.Preview {
-			return validationErrorf("bracket for competition %s is a read-only preview; run the Playoffs competition to score elimination matches", compId)
-		}
 
 		found := false
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, m := range round {
 				if m.ID == matchId {
+					// A knockout match is playable only once both sides are
+					// resolved competitors (feeder pools/matches finished). This
+					// replaces the old bracket-wide Preview gate so the knockout
+					// fills in incrementally as pools qualify.
+					if !bracketMatchPlayable(&bracket.Rounds[rIdx][mIdx]) {
+						return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchId)
+					}
 					// Merge stored sides into result when the payload omitted
 					// them so that deriveDaihyosenWinner can map a
 					// representative player name back to the canonical team
@@ -827,13 +835,13 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compId)
 		}
-		if bracket.Preview {
-			return validationErrorf("bracket for competition %s is a read-only preview; run the Playoffs competition to score elimination matches", compId)
-		}
 		for rIdx := range bracket.Rounds {
 			for mIdx := range bracket.Rounds[rIdx] {
 				m := &bracket.Rounds[rIdx][mIdx]
 				if m.ID == matchId {
+					if !bracketMatchPlayable(m) {
+						return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
+					}
 					m.Winner = winnerName
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted

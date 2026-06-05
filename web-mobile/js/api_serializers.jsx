@@ -146,7 +146,21 @@ function buildPlayerMap(comp) {
     const map = {};
     const add = (p) => {
         const norm = normalizePlayer(p);
-        if (norm.name) map[norm.name] = { id: norm.id || norm.name, name: norm.name, dojo: norm.dojo || "", seed: norm.seed ?? 0 };
+        // Carry the FULL competitor identity so bracket/match sides resolved by
+        // name (e.g. a pool finisher seeded into the knockout) show the same
+        // details — dojo, zekken display name, and assigned number (e.g. "K1") —
+        // as the pool/schedule cards. Previously only {id,name,dojo,seed} were
+        // carried, so a qualifier lost their number and zekken in the bracket.
+        if (norm.name) map[norm.name] = {
+            id: norm.id || norm.name,
+            name: norm.name,
+            dojo: norm.dojo || "",
+            seed: norm.seed ?? 0,
+            displayName: norm.displayName || "",
+            number: norm.number || "",
+            tag: norm.tag || "",
+            danGrade: norm.danGrade || "",
+        };
     };
     if (comp?.config?.players) comp.config.players.forEach(add);
     if (comp?.players) comp.players.forEach(add);

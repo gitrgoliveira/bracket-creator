@@ -641,22 +641,6 @@ export function TournamentInfo({ tournament }) {
   );
 }
 
-// PhaseChip — one phase badge inside the paired card phase strip.
-// A phase is "live" while its matches are being played — the COMPETITION status
-// is "pools" or "playoffs" then (mirrors StatusBadge's showLiveDot in ui.jsx).
-// Note: "running" is a MATCH status, not a competition status, so it must not be
-// used here (that was the bug — the live ● never appeared).
-function PhaseChip({ label, status }) {
-  const isDone = status === "completed";
-  const isLive = status === "pools" || status === "playoffs";
-  const cls = `phase-chip phase-chip--${isDone ? "done" : isLive ? "live" : "pending"}`;
-  return (
-    <span className={cls}>
-      {isDone ? "✓ " : isLive ? "● " : ""}{label}
-    </span>
-  );
-}
-
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -671,38 +655,15 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   }, [comps, t.date]);
   const dates = Object.keys(compsByDate).sort(compareDmy);
 
-  // G1: build per-date display entries that group a mixed comp with its
-  // linked sourceCompID playoff into one card. Standalone playoff shells
-  // (those whose sourceCompID resolves to another comp in the list) are
-  // hidden — they appear as the Knockout phase inside their source's card.
+  // Every competition renders as its own standalone entry — the old split model
+  // (sourceCompID pairing) is gone; mixed comps are now a single competition.
   const displayEntriesByDate = useMemo(() => {
-    const compIds = new Set(comps.map(c => c.id));
-    // sourceCompID → its single playoff comp, built once (avoids an O(n) scan per
-    // entry). Only pair a playoff whose source exists in the list. If a source
-    // somehow has MORE than one playoff, don't pair any of them (drop from the
-    // map) so none silently vanishes — they fall back to standalone cards.
-    const playoffBySourceId = new Map();
-    const collidedSources = new Set();
-    comps.forEach(c => {
-      if (!c.sourceCompID || !compIds.has(c.sourceCompID)) return;
-      if (playoffBySourceId.has(c.sourceCompID)) collidedSources.add(c.sourceCompID);
-      else playoffBySourceId.set(c.sourceCompID, c);
-    });
-    collidedSources.forEach(s => playoffBySourceId.delete(s));
-    // A playoff is hidden as a standalone only when it is the one paired to its
-    // source (derived from the same map, so the two stay consistent).
-    const pairedPlayoffIds = new Set([...playoffBySourceId.values()].map(p => p.id));
     const result = {};
     Object.keys(compsByDate).forEach(d => {
-      result[d] = compsByDate[d]
-        .filter(c => !pairedPlayoffIds.has(c.id))
-        .map(c => {
-          const playoffs = playoffBySourceId.get(c.id);
-          return playoffs ? { kind: "pair", source: c, playoffs } : { kind: "single", comp: c };
-        });
+      result[d] = compsByDate[d].map(c => ({ kind: "single", comp: c }));
     });
     return result;
-  }, [comps, compsByDate]);
+  }, [compsByDate]);
 
   const [courtFilter, setCourtFilter] = useState("all");
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -881,53 +842,6 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               <div className="section-title">{formatDate(d)}</div>
               <div className="vlist">
                 {(displayEntriesByDate[d] || []).map((entry) => {
-                  if (entry.kind === "pair") {
-                    const { source, playoffs } = entry;
-                    const srcM = compMatches(source).filter(hasBothSides);
-                    const poM = compMatches(playoffs).filter(hasBothSides);
-                    const allM = srcM.concat(poM);
-                    const total = allM.length;
-                    const done = allM.filter(m => m.status === "completed").length;
-                    const liveCount = allM.filter(m => m.status === "running").length;
-                    const pct = total ? Math.round(done / total * 100) : 0;
-                    const showRegister = shouldShowRegister(t, source, !!onRegister);
-                    return (
-                      <div key={source.id} style={{ position: "relative" }}>
-                        <button className="vlist-item vlist-item--comp" style={{ width: "100%" }} onClick={() => onSelectCompetition(source.id)}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                            <div style={{ minWidth: 0 }}>
-                              <div className="vlist-item__eyebrow">{competitionKindLabel(source)}{source.teamSize > 1 ? ` · ${source.teamSize}-person` : ""}</div>
-                              <div className="vlist-item__name">{source.name}</div>
-                              <div className="vlist-item__meta">
-                                {source.players.length} {source.kind === "team" ? "teams" : "players"} · Starts {source.startTime}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="phase-strip">
-                            <PhaseChip label="Pools" status={source.status} />
-                            <span className="phase-strip__arrow">→</span>
-                            <PhaseChip label="Knockout" status={playoffs.status} />
-                          </div>
-                          {total > 0 && (
-                            <div className="vlist-item__progress">
-                              <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
-                              <div className="vlist-item__pct">
-                                {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
-                              </div>
-                            </div>
-                          )}
-                        </button>
-                        {showRegister && (
-                          <div style={{ padding: "0 12px 12px" }}>
-                            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onRegister(source.id); }}>
-                              Register for this competition
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-                  // kind === "single"
                   const c = entry.comp;
                   const matches = compMatches(c).filter(hasBothSides);
                   const total = matches.length;
@@ -1645,28 +1559,9 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   );
 }
 
-function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, onSelectCompetition, authed, onEditCompetition, tweaks }) {
+function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks }) {
   const [tab, setTab] = useState("overview");
   const c = competition;
-
-  // Phase 2 (mp-rrd) — link a pools/mixed comp to its separate playoffs comp
-  // and vice-versa. A mixed tournament is TWO competitions: the pools/mixed
-  // comp (holds the pools) and a playoffs comp created via POST /playoffs that
-  // carries a `sourceCompID` back-reference. Surface a one-tap affordance so a
-  // spectator landing on one can jump to the other under the same tournament.
-  const linkedComp = useMemo(() => {
-    const all = (tournament && tournament.competitions) || [];
-    // This comp IS a playoffs comp → link to its source pools/mixed comp.
-    if (c.sourceCompID) {
-      const src = all.find(x => x.id === c.sourceCompID);
-      if (src) return { comp: src, role: "pools" };
-    }
-    // This comp is a pools/mixed comp → link to the playoffs comp that
-    // references it (if one has been created yet).
-    const playoffs = all.find(x => x.sourceCompID === c.id);
-    if (playoffs) return { comp: playoffs, role: "playoffs" };
-    return null;
-  }, [tournament, c.id, c.sourceCompID]);
 
   const allMatches = useMemo(() => {
     const out = [];
@@ -1748,21 +1643,14 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     return "filtered";
   }, [followedPlayer, watchedIds, hasActiveFilter]);
 
+  // A mixed competition always carries a real bracket payload from the server
+  // (pool-origin placeholder leaves like "Pool A-1st" while pools are running,
+  // each replaced by the real finisher as that pool completes). No need for a
+  // client-side placeholder fallback — just use what the server sends.
   const derivedBracket = useMemo(() => {
     if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;
-    if (c.format === "mixed" && pools && pools.length > 0) {
-      const placeholders = [];
-      const winners = c.poolWinners || 2;
-      pools.forEach(p => {
-        for(let i=0; i<winners; i++) {
-           let rank = i===0?'1st':i===1?'2nd':i===2?'3rd':(i+1)+'th';
-           placeholders.push({ id: `tbd-${p.poolName}-${i}`, name: `${p.poolName} ${rank}`, dojo: "", seed: null });
-        }
-      });
-      return { rounds: window.buildBracket(placeholders, c.courts) };
-    }
     return null;
-  }, [bracket, c, pools]);
+  }, [bracket]);
 
   // draw-ready is NOT pre-start for the purposes of showing pool/bracket
   // structure — the draw has been generated and the payload already includes
@@ -1827,25 +1715,6 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
           ))}
         </div>
         <div className="viewer__body">
-          {linkedComp && onSelectCompetition && (
-            // Phase 2 (mp-rrd): pools <-> playoffs cross-link. A mixed
-            // tournament splits across two competitions; this lets a
-            // spectator hop between the pool draw and the knockout bracket.
-            <button
-              className="vlist-item vlist-item--row"
-              style={{ marginBottom: 12, width: "100%" }}
-              onClick={() => onSelectCompetition(linkedComp.comp.id)}
-            >
-              <span className="vlist-item__icon">{linkedComp.role === "playoffs" ? "🏆" : "👥"}</span>
-              <div className="vlist-item__rowbody">
-                <div className="vlist-item__rowtitle">
-                  {linkedComp.role === "playoffs" ? "View the playoffs bracket" : "View the pools"}
-                </div>
-                <div className="vlist-item__rowsub">{linkedComp.comp.name}</div>
-              </div>
-              <span className="vlist-item__rowchev">→</span>
-            </button>
-          )}
           {tab === "overview" && (
             <ViewerOverview
               c={c}
@@ -1901,7 +1770,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             // actual winners; when the final has no winner yet, deriveAwards
             // explicitly falls through to the standings-based path rather
             // than short-circuiting.
-            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} linkedPlayoffComp={linkedComp && linkedComp.role === "playoffs" ? linkedComp.comp : null} allComps={(tournament && tournament.competitions) || []} />
+            <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} allComps={(tournament && tournament.competitions) || []} />
           )}
         </div>
       </div>
@@ -3106,12 +2975,14 @@ function bracketHasDecidedFinal(bracket) {
 }
 
 // resolveCompetitionAwards: the single source of truth for a competition's
-// podium. Handles the mixed→linked-playoffs rule so pools+knockout always
-// resolves to the KNOCKOUT podium (1/2/3/3), never pool standings.
+// podium. Mixed (Pools + Knockout) is a single competition whose knockout fills
+// in place, so its podium is derived from its OWN bracket (the KNOCKOUT result,
+// 1/2/3/3 — never pool standings) once the final is decided.
 // Returns { state, podium } where state is one of:
 //   'final'       — podium is the final result
 //   'in-progress' — knockout not yet decided (podium [])
-//   'skip'        — a linked playoffs shell; represented by its mixed parent
+//   'skip'        — a LEGACY linked playoffs shell (sourceCompID set); its podium
+//                   is represented by its mixed parent. New data never hits this.
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 async function resolveCompetitionAwards(comp, allComps, fetchers) {
   const fmt = comp && comp.format;
@@ -3120,20 +2991,17 @@ async function resolveCompetitionAwards(comp, allComps, fetchers) {
     (players || []).forEach((p) => { if (p && p.name) m.set(p.name, p); });
     return m;
   };
-  if (fmt === "mixed") {
-    const matchingPlayoffs = (allComps || []).filter((p) => p && p.sourceCompID === comp.id);
-    if (matchingPlayoffs.length !== 1) return { state: "in-progress", podium: [] };
-    const playoff = matchingPlayoffs[0];
-    const pd = await fetchers.fetchCompetitionDetails(playoff.id);
-    if (bracketHasDecidedFinal(pd.bracket)) {
-      return { state: "final", podium: deriveAwards(pd.bracket, null, null, ntpFrom(pd.players)) };
-    }
-    return { state: "in-progress", podium: [] };
-  }
   if (fmt === "playoffs" && comp.sourceCompID) {
+    // Legacy split-model shell (a "- Playoffs" comp seeded from a mixed parent);
+    // represented by its parent, so skip to avoid double-listing. New data never
+    // sets sourceCompID.
     return { state: "skip", podium: [] };
   }
-  if (fmt === "playoffs") {
+  if (fmt === "mixed" || fmt === "playoffs") {
+    // Mixed is now a SINGLE competition: its knockout bracket fills in place as
+    // pools finish (no separate "- Playoffs" comp). Both mixed and standalone
+    // playoffs derive their podium from their OWN bracket once the final is
+    // decided; until then the knockout is still in progress.
     const d = await fetchers.fetchCompetitionDetails(comp.id);
     if (bracketHasDecidedFinal(d.bracket)) {
       return { state: "final", podium: deriveAwards(d.bracket, null, null, ntpFrom(d.players)) };
@@ -3155,7 +3023,7 @@ const PLACE_STYLE = {
   3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
 };
 
-function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, allComps }) {
+function AwardsView({ c, bracket, standings, pools, players, allComps }) {
   const containerRef = useRefV(null);
   const [isFs, setIsFs] = useState(false);
   const isLeague = c?.format === "league";
@@ -3192,9 +3060,10 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, 
       return;
     }
     let cancelled = false;
-    const syntheticAllComps = allComps && allComps.length > 0 ? allComps : (linkedPlayoffComp ? [linkedPlayoffComp] : []);
     const fetchers = { fetchCompetitionDetails: window.API.fetchCompetitionDetails, swissStandings: null };
-    resolveCompetitionAwards(c, syntheticAllComps, fetchers)
+    // Mixed awards derive from the comp's OWN bracket (single-competition model);
+    // allComps is only consulted for the legacy sourceCompID skip branch.
+    resolveCompetitionAwards(c, allComps || [], fetchers)
       .then(({ state, podium }) => {
         if (!cancelled) setKoAwards({ state, awards: podium });
       })
@@ -3202,7 +3071,7 @@ function AwardsView({ c, bracket, standings, pools, players, linkedPlayoffComp, 
         if (!cancelled) setKoAwards({ state: "in-progress", awards: [] });
       });
     return () => { cancelled = true; };
-  }, [c?.id, c?.format, linkedPlayoffComp?.id, linkedPlayoffComp?.status]);
+  }, [c?.id, c?.format, allComps]);
 
   const nameToPlayer = useMemo(() => {
     const m = new Map();

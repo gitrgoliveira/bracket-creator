@@ -110,6 +110,28 @@ func TestLeagueFormatHidesPlayoffs(t *testing.T) {
 	}
 }
 
+// EffectivePoolWinners() returns the configured PoolWinners, defaulting to 2 when
+// unset (<=0). Single source of truth for the knockout qualifier count.
+func TestEffectivePoolWinners(t *testing.T) {
+	cases := []struct {
+		name        string
+		poolWinners int
+		want        int
+	}{
+		{name: "unset defaults to 2", poolWinners: 0, want: 2},
+		{name: "negative defaults to 2", poolWinners: -1, want: 2},
+		{name: "explicit 1", poolWinners: 1, want: 1},
+		{name: "explicit 2", poolWinners: 2, want: 2},
+		{name: "explicit 4", poolWinners: 4, want: 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Competition{PoolWinners: tc.poolWinners}
+			assert.Equal(t, tc.want, c.EffectivePoolWinners())
+		})
+	}
+}
+
 // TestCopyCompetition_WithPlayersAndCourts exercises the Players and
 // Courts slice-copy branches in copyCompetition so mutations to the
 // copy don't alias back to the original.

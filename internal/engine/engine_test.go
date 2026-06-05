@@ -248,7 +248,7 @@ func TestStartCompetition_MixedFormat_NonRoundRobin(t *testing.T) {
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 	saveTestParticipants(t, store, compID, []string{
-		"P1", "P2", "P3", "P4",
+		"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
 	})
 
 	err := eng.StartCompetition(compID)
@@ -256,7 +256,8 @@ func TestStartCompetition_MixedFormat_NonRoundRobin(t *testing.T) {
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
-	// Non-round-robin with 4 players in 1 pool generates sequential pairs
+	// Non-round-robin with 8 players + PoolSize=4 (min mode) → 2 pools of 4,
+	// each generating sequential pairs (mixed needs ≥2 pools by invariant).
 	assert.NotEmpty(t, matches)
 }
 
@@ -532,7 +533,7 @@ func TestStartCompetition_NoParticipants(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "empty"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	// Don't save any participants file
 
 	err := eng.StartCompetition(compID)
@@ -544,7 +545,7 @@ func TestStartCompetition_InvalidSeedName(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bad-seed"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 
 	seeds := []domain.SeedAssignment{
@@ -780,7 +781,7 @@ func TestRecordPoolMatchResult(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pool-score"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -844,7 +845,7 @@ func TestCalculatePoolStandings_Basic(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "standings"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -891,7 +892,7 @@ func TestCalculatePoolStandings_AllDraws(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "all-draws"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -924,7 +925,7 @@ func TestCalculatePoolStandings_IpponDifferentialTiebreak(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tiebreak"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -978,7 +979,7 @@ func TestCalculatePoolStandings_IncompleteMatches(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "incomplete"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -1001,7 +1002,7 @@ func TestCalculatePoolStandings_WeightedScore(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "weighted-score"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie",
 	})
@@ -1073,11 +1074,13 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "team-scoring"
 
+	// Single-pool round-robin among 3 teams — semantically a league, not the
+	// "Pools + Knockout" shape (mixed needs ≥2 pools by invariant).
 	comp := &state.Competition{
 		ID:           compID,
 		Name:         "Team Competition",
 		Kind:         "team",
-		Format:       "mixed",
+		Format:       state.CompFormatLeague,
 		TeamSize:     3,
 		PoolSize:     3,
 		PoolSizeMode: "min",
@@ -1178,7 +1181,7 @@ func TestGenerateSchedule_Pools(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "schedule-pools"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C", "D", "E", "F"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1311,7 +1314,7 @@ func TestPoolMatchIDs_AreUnique(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "unique-pool-ids"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"A", "B", "C", "D", "E", "F",
 	})
@@ -1333,7 +1336,7 @@ func TestExportCompetitionXlsx(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "export-test"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1357,7 +1360,7 @@ func TestUpdateMatchCourt_Pool(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-pool"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1432,7 +1435,7 @@ func TestUpdateMatchCourt_Bracket(t *testing.T) {
 func TestUpdateMatchCourt_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-not-found"
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1535,7 +1538,7 @@ func TestCalculatePoolStandings_WithManualOverrides(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "standings-override"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1629,7 +1632,7 @@ func TestCalculatePoolStandings_EdgeCases(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "standings-edges"
 
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob"}) // Pool of 2
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1734,7 +1737,7 @@ func TestUpdateMatchTime_Pool(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "time-pool"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1783,7 +1786,7 @@ func TestUpdateMatchTime_Bracket(t *testing.T) {
 func TestUpdateMatchTime_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "time-not-found"
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1795,11 +1798,14 @@ func TestStartCompetition_TeamSizeFallback(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "team-comp"
 
+	// Tests TeamSize defaulting — format is incidental. Uses league so we don't
+	// need to satisfy the ≥2-pools mixed invariant for what is really a
+	// single-pool fixture.
 	comp := &state.Competition{
 		ID:       compID,
 		Name:     "Team Competition",
 		Kind:     "team",
-		Format:   "mixed",
+		Format:   state.CompFormatLeague,
 		PoolSize: 3,
 		Status:   "setup",
 		Courts:   []string{"A"},
@@ -1821,7 +1827,7 @@ func TestRecordMatchResult_PreservesSides(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "preservation-test"
 
-	createTestCompetition(t, store, compID, "mixed", 3)
+	createTestCompetition(t, store, compID, "league", 3)
 	// Create pool matches
 	matchID := "Pool A-0"
 	matches := []state.MatchResult{
@@ -2140,11 +2146,13 @@ func TestStartCompetition_PreservesNumberPrefix(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "prefix-test"
 
+	// Tests NumberPrefix preservation across the atomic commit — format is
+	// incidental. Uses league so we don't need ≥2 pools (mixed invariant).
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:           compID,
 		Name:         "Prefix Test",
 		Kind:         "individual",
-		Format:       "mixed",
+		Format:       state.CompFormatLeague,
 		PoolSize:     3,
 		PoolSizeMode: "min",
 		PoolWinners:  2,

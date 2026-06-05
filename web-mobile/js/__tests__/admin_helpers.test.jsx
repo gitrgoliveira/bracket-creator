@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -128,6 +128,33 @@ describe('hasBothSides', () => {
     expect(typeof t).toBe("boolean");
     const f = hasBothSides({ sideA: placeholder, sideB: real("b", "Bob") });
     expect(typeof f).toBe("boolean");
+  });
+});
+
+// hasPoolOriginPlaceholder gates the admin "Knockout filling in" banner. Unlike
+// !hasBothSides it must be TRUE only for pool-origin "Pool A-1st" placeholders —
+// NOT for "Winner of rX-mY" feeders or structural byes — so the banner doesn't
+// show for standalone playoffs or bye-containing brackets (Copilot round-7 finding).
+describe('hasPoolOriginPlaceholder', () => {
+  it('returns true when a side is a pool-origin "Pool X-Nth" placeholder', () => {
+    expect(hasPoolOriginPlaceholder({ sideA: "Pool A-1st", sideB: "Bob" })).toBe(true);
+    expect(hasPoolOriginPlaceholder({ sideA: "Alice", sideB: "Pool B-2nd" })).toBe(true);
+    expect(hasPoolOriginPlaceholder({ sideA: { id: "", name: "Pool C-1st" }, sideB: "Bob" })).toBe(true);
+  });
+
+  it('returns false for "Winner of rX-mY" feeders (a playoffs bracket is not "filling in")', () => {
+    expect(hasPoolOriginPlaceholder({ sideA: "Winner of r0-m1", sideB: "Bob" })).toBe(false);
+    expect(hasPoolOriginPlaceholder({ sideA: "Winner of r1-m0", sideB: "Winner of r1-m1" })).toBe(false);
+  });
+
+  it('returns false for structural byes and resolved matches', () => {
+    expect(hasPoolOriginPlaceholder({ sideA: "Alice", sideB: "" })).toBe(false);
+    expect(hasPoolOriginPlaceholder({ sideA: "Alice", sideB: "Bob" })).toBe(false);
+    expect(hasPoolOriginPlaceholder(null)).toBe(false);
+  });
+
+  it('returns false for a real participant whose name merely contains "Pool"', () => {
+    expect(hasPoolOriginPlaceholder({ sideA: "Liverpool FC", sideB: "Bob" })).toBe(false);
   });
 });
 

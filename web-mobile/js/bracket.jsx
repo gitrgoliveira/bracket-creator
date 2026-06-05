@@ -143,6 +143,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
       <div className="bc-name-wrap">
         <span className="bc-name">
           {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
+          {player.number ? <span className="num-prefix">{player.number}</span> : null}
           {player.name}
         </span>
         {showDojo && player.dojo ? <span className="bc-dojo">{player.dojo}</span> : null}

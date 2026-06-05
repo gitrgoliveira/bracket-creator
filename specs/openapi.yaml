@@ -1093,6 +1093,12 @@ paths:
         and the competition transitions directly to `pools` or `playoffs`. When in
         `setup` status the draw is generated first then the competition transitions
         (backward-compatible one-click path).
+
+        **Mixed (Pools + Knockout) competitions** start in `pools`. There is no
+        separate "start knockout" step: as each pool finishes, its finishers are
+        seeded into the (already-scheduled) knockout bracket automatically, and a
+        knockout match becomes scoreable as soon as both its feeder pools are done.
+        The competition moves to `playoffs` once the final pool has been seeded.
       security:
         - TournamentPassword: []
       parameters:
@@ -1121,40 +1127,6 @@ paths:
       responses:
         '200':
           description: Competition marked as completed.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Competition'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/competitions/{id}/playoffs:
-    post:
-      tags: [competitions]
-      summary: Create linked playoff competition
-      description: |
-        Creates a new `playoffs`-format competition linked to this mixed
-        (Pools + Knockout) competition. The server:
-        - Derives a name (`<source name> - Playoffs`) and ID.
-        - Records a `sourceCompID` link back to this competition.
-
-        The playoff starts with an EMPTY roster. Its participants are resolved
-        from the source competition's pool winners when the playoff is started
-        (`POST /start`) — the source pools must be final by then. No placeholder
-        participants are created.
-
-        Returns 400 if the source competition is not in `mixed` format.
-      security:
-        - TournamentPassword: []
-      parameters:
-        - $ref: '#/components/parameters/CompetitionId'
-      responses:
-        '201':
-          description: Playoff competition created and linked.
           content:
             application/json:
               schema:
@@ -2450,10 +2422,13 @@ components:
           description: >
             Lifecycle state. Set by the server — do not supply on create/update.
             `setup` → not yet started; `draw-ready` → draw generated and available
-            for preview, not yet started; `pools` → pools phase active;
-            `playoffs` → knockout phase active; `completed` → finished;
-            `invalid` → operator-declared invalid, prerequisite for deleting
-            an already-started competition.
+            for preview, not yet started; `pools` → pools phase active (for a
+            mixed competition the knockout bracket is already filling in
+            incrementally as pools finish — knockout matches with both sides
+            resolved are scoreable even in this state); `playoffs` → knockout
+            phase active (for mixed: every pool has been seeded into the bracket);
+            `completed` → finished; `invalid` → operator-declared invalid,
+            prerequisite for deleting an already-started competition.
           enum: [setup, draw-ready, pools, playoffs, completed, invalid, ""]
         mirror:
           type: boolean
@@ -2467,10 +2442,12 @@ components:
           type: string
           maxLength: 64
           description: >
-            For a `playoffs` competition created via POST /playoffs, the ID of
-            the mixed source competition whose pool winners seed this playoff.
-            The roster is resolved from the source at start time. Empty for all
-            other competitions.
+            DEPRECATED / legacy. Historically linked a separate `playoffs`
+            competition back to a mixed source. New competitions never set it —
+            a mixed (Pools + Knockout) competition now contains its own knockout
+            bracket, which fills in incrementally as each pool finishes (no
+            separate playoffs competition is created). Retained only for YAML
+            round-trip compatibility with pre-existing tournament data.
         teamMatchType:
           type: string
           description: Team-match scoring model — `fixed` (positions) or `kachinuki` (winner-stays).

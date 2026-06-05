@@ -41,8 +41,10 @@ func TestCourtsEqual(t *testing.T) {
 }
 
 // TestMaybeAutoCompletePools_AllComplete verifies that calling
-// MaybeAutoCompletePools on a pools competition whose every match is
+// MaybeAutoCompletePools on a league competition whose every match is
 // completed transitions Status to "completed" and returns AutoCompleteTransitioned.
+// NOTE: mixed-format competitions no longer auto-complete after pools — they
+// fill the knockout incrementally instead. This test covers the league case only.
 func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "auto-complete-all"
@@ -50,7 +52,7 @@ func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Auto Complete Test",
-		Format: state.CompFormatMixed,
+		Format: state.CompFormatLeague,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -63,7 +65,7 @@ func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteTransitioned, outcome, "all matches completed should trigger status transition")
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "all matches completed should trigger status transition (league)")
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
@@ -76,10 +78,13 @@ func TestMaybeAutoCompletePools_OnePending(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "auto-complete-pending"
 
+	// league: single-pool pending-match completeness (mixed now fills the
+	// knockout incrementally and requires ≥2 pools, so this generic
+	// "pending match blocks completion" case is exercised via league).
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
 		Name:   "Pending Test",
-		Format: state.CompFormatMixed,
+		Format: state.CompFormatLeague,
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
@@ -330,7 +335,7 @@ func TestGenerateDraw_PoolsFormat(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "generate-draw-pools"
 
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -433,7 +438,7 @@ func TestGenerateDraw_RejectsDrawReady(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "generate-draw-already-ready"
 
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -450,7 +455,7 @@ func TestDiscardDraw_ResetsToSetup(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
 	compID := "discard-draw"
 
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -479,7 +484,7 @@ func TestDiscardDraw_RejectsNonDrawReady(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "discard-draw-guard"
 
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 
 	err := eng.DiscardDraw(compID)
@@ -494,7 +499,7 @@ func TestStartCompetition_FromDrawReady(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "start-from-draw-ready"
 
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -530,7 +535,7 @@ func TestGenerateDraw_ThenDiscardThenRegenerateAndStart(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "full-preview-flow"
 
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -551,7 +556,7 @@ func setupDrawReadyMixed(t *testing.T, names []string) (*Engine, *state.Store, s
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 	compID := "replace-test"
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 
 	players := make([]domain.Player, len(names))
 	for i, n := range names {
@@ -670,7 +675,7 @@ func TestReplaceParticipantInDraw_DojoConflict(t *testing.T) {
 	// which may create a conflict in one pool.
 	eng, store, _ := setupTestEngine(t)
 	compID := "replace-dojo-conflict"
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 
 	players := []domain.Player{
 		{Name: "Alice", Dojo: "DojoX"},
@@ -758,7 +763,7 @@ func TestReplaceParticipantInDraw_SeedsUntouched(t *testing.T) {
 func TestReplaceParticipantInDraw_WrongState(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "replace-wrong-state"
-	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 

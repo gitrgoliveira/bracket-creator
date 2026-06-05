@@ -1274,54 +1274,6 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
 }
 
-// TestPlayoff_CreatesSourceLinkWithEmptyRoster verifies that POST /playoffs
-// stores a SourceCompID link to the mixed source and returns an EMPTY (but
-// non-nil) roster — the pool winners are resolved into the roster later, at
-// draw time (engine.resolvePoolWinners). The non-nil empty slice pins the
-// Copilot round-12 finding (#6): the response must not ship `players: null`
-// (Go nil slice → JSON null), because admin.jsx's refreshCompsAfterCreate
-// fallback appends the response into local state and render paths that read
-// `c.players.length` would crash.
-func TestPlayoff_CreatesSourceLinkWithEmptyRoster(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	src := state.Competition{
-		ID:          "src",
-		Name:        "Source",
-		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
-		PoolSize:    3,
-		PoolWinners: 2,
-	}
-	require.NoError(t, store.SaveCompetition(&src))
-	require.NoError(t, store.SaveParticipants("src", []domain.Player{
-		{ID: "p1", Name: "P1", Dojo: "D1"},
-		{ID: "p2", Name: "P2", Dojo: "D2"},
-	}))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/src/playoffs", nil)
-	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "response: %s", w.Body.String())
-
-	var resp state.Competition
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "src", resp.SourceCompID, "playoff must link back to the mixed source")
-	assert.Equal(t, state.CompFormatPlayoffs, resp.Format)
-	require.NotNil(t, resp.Players, "Players must NOT be null in POST /playoffs response")
-	assert.NotContains(t, w.Body.String(), `"players":null`,
-		"response must not ship `players: null` — client appends this into local state")
-	assert.Empty(t, resp.Players,
-		"playoff roster starts empty; pool winners are resolved at draw time")
-
-	// The link is persisted on disk, not just echoed in the response.
-	stored, err := store.LoadCompetition(resp.ID)
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-	assert.Equal(t, "src", stored.SourceCompID)
-}
-
 // TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure pins the
 // Copilot round-12 finding (#1): the transform used to flip
 // HasParticipantIDs=true BEFORE the post-transform SaveParticipants

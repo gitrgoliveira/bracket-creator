@@ -87,14 +87,13 @@ describe('resolveCompetitionAwards', () => {
   // ── mixed → final (two 3rds), derived from the comp's OWN bracket ─────────
   it('mixed comp with decided OWN-bracket final → state "final", podium has two 3rds', async () => {
     const mixedComp = { id: 'mixed-1', format: 'mixed' };
-    const allComps = [mixedComp]; // no linked playoffs comp in the single-comp model
     const bracket = decidedBracket();
     const fetchers = {
       fetchCompetitionDetails: vi.fn().mockResolvedValue({ bracket, players: [] }),
       swissStandings: null,
     };
 
-    const result = await resolveCompetitionAwards(mixedComp, allComps, fetchers);
+    const result = await resolveCompetitionAwards(mixedComp, fetchers);
 
     expect(result.state).toBe('final');
     expect(result.podium).toHaveLength(4);
@@ -109,14 +108,13 @@ describe('resolveCompetitionAwards', () => {
   // ── mixed → in-progress (own knockout not decided) ────────────────────────
   it('mixed comp with undecided OWN-bracket final → state "in-progress", podium []', async () => {
     const mixedComp = { id: 'mixed-2', format: 'mixed' };
-    const allComps = [mixedComp];
     const bracket = undecidedBracket();
     const fetchers = {
       fetchCompetitionDetails: vi.fn().mockResolvedValue({ bracket, players: [] }),
       swissStandings: null,
     };
 
-    const result = await resolveCompetitionAwards(mixedComp, allComps, fetchers);
+    const result = await resolveCompetitionAwards(mixedComp, fetchers);
 
     expect(result.state).toBe('in-progress');
     expect(result.podium).toEqual([]);
@@ -126,7 +124,6 @@ describe('resolveCompetitionAwards', () => {
   // ── mixed → in-progress (knockout still has pool placeholders) ────────────
   it('mixed comp whose bracket is still pool placeholders → state "in-progress"', async () => {
     const mixedComp = { id: 'mixed-3', format: 'mixed' };
-    const allComps = [mixedComp];
     // Bracket exists but the final is a forward reference (pools still feeding in).
     const bracket = { rounds: [[{ sideA: 'Pool A-1st', sideB: 'Pool B-1st', winner: null }]] };
     const fetchers = {
@@ -134,7 +131,7 @@ describe('resolveCompetitionAwards', () => {
       swissStandings: null,
     };
 
-    const result = await resolveCompetitionAwards(mixedComp, allComps, fetchers);
+    const result = await resolveCompetitionAwards(mixedComp, fetchers);
 
     expect(result.state).toBe('in-progress');
     expect(result.podium).toEqual([]);
@@ -142,15 +139,14 @@ describe('resolveCompetitionAwards', () => {
 
   // ── standalone playoffs → final ───────────────────────────────────────────
   it('standalone playoffs comp with decided final → state "final", podium has two 3rds', async () => {
-    const comp = { id: 'ko-1', format: 'playoffs' };
-    const allComps = [comp];
+    const comp = { id: 'ko-1', format: 'playoffs' }; // no sourceCompID
     const bracket = decidedBracket();
     const fetchers = {
       fetchCompetitionDetails: vi.fn().mockResolvedValue({ bracket, players: [] }),
       swissStandings: null,
     };
 
-    const result = await resolveCompetitionAwards(comp, allComps, fetchers);
+    const result = await resolveCompetitionAwards(comp, fetchers);
 
     expect(result.state).toBe('final');
     expect(result.podium).toHaveLength(4);
@@ -162,7 +158,6 @@ describe('resolveCompetitionAwards', () => {
   // ── league (standings-based) → final ─────────────────────────────────────
   it('league comp → state "final", standings-based podium', async () => {
     const comp = { id: 'league-1', format: 'league' };
-    const allComps = [comp];
     const standings = {
       'Pool A': [
         { player: { name: 'Alice', dojo: 'Aoyama' } },
@@ -176,7 +171,7 @@ describe('resolveCompetitionAwards', () => {
       swissStandings: null,
     };
 
-    const result = await resolveCompetitionAwards(comp, allComps, fetchers);
+    const result = await resolveCompetitionAwards(comp, fetchers);
 
     expect(result.state).toBe('final');
     expect(result.podium).toHaveLength(4);
@@ -187,7 +182,6 @@ describe('resolveCompetitionAwards', () => {
   // ── swiss (standings via dedicated endpoint) → final ─────────────────────
   it('swiss comp → calls swissStandings endpoint and returns standings-based podium', async () => {
     const comp = { id: 'swiss-1', format: 'swiss' };
-    const allComps = [comp];
     const swissData = [
       { player: { name: 'Kenji', dojo: 'Club A' } },
       { player: { name: 'Hiro', dojo: 'Club B' } },
@@ -197,7 +191,7 @@ describe('resolveCompetitionAwards', () => {
       swissStandings: vi.fn().mockResolvedValue(swissData),
     };
 
-    const result = await resolveCompetitionAwards(comp, allComps, fetchers);
+    const result = await resolveCompetitionAwards(comp, fetchers);
 
     expect(result.state).toBe('final');
     expect(fetchers.swissStandings).toHaveBeenCalledWith('swiss-1');

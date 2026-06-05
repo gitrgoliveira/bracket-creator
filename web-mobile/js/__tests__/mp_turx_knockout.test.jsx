@@ -70,7 +70,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
     'BracketTree', 'buildBracket', 'roundLabel', 'formatIpponsScore',
     'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
-    'queueLabel', 'queueLabelCompact',
+    'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
   ];
 
   const mkMixedComp = (overrides = {}) => ({
@@ -115,6 +115,10 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     global.window.buildBracket = () => liveBracket.rounds;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB && typeof m.sideA !== 'string' && m.sideA.id);

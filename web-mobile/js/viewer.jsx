@@ -2980,9 +2980,9 @@ function bracketHasDecidedFinal(bracket) {
 //   'final'       — podium is the final result
 //   'in-progress' — knockout not yet decided (podium [])
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
-// NOTE: allComps is vestigial (was used by the removed sourceCompID skip
+// NOTE: _allComps is vestigial (was used by the removed sourceCompID skip
 // branch) — tracked for removal in bead mp-i385.
-async function resolveCompetitionAwards(comp, allComps, fetchers) {
+async function resolveCompetitionAwards(comp, _allComps, fetchers) {
   const fmt = comp && comp.format;
   const ntpFrom = (players) => {
     const m = new Map();

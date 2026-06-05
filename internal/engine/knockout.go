@@ -275,6 +275,9 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		// (degenerate pool) leaves a match with one empty side still
 		// Scheduled. Mirror buildBracketFromLeaves's bye logic and
 		// propagate winners so downstream matches become playable.
+		// Guard: only auto-complete when the non-empty side is a resolved
+		// competitor, NOT a still-unresolved placeholder (its feeder pool
+		// may still be in progress).
 		for ri := range bracket.Rounds {
 			for mi := range bracket.Rounds[ri] {
 				live := &bracket.Rounds[ri][mi]
@@ -283,12 +286,14 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				}
 				aEmpty := live.SideA == ""
 				bEmpty := live.SideB == ""
-				if aEmpty && !bEmpty {
+				aResolved := !aEmpty && !isUnresolvedBracketSide(live.SideA)
+				bResolved := !bEmpty && !isUnresolvedBracketSide(live.SideB)
+				if aEmpty && bResolved {
 					live.Winner = live.SideB
 					live.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++
-				} else if !aEmpty && bEmpty {
+				} else if bEmpty && aResolved {
 					live.Winner = live.SideA
 					live.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)

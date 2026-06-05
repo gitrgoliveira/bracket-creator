@@ -256,13 +256,16 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			if pn, ok := poolNameFromMatchID(matchID); ok {
 				poolRescoredName = pn
 				poolWinners = comp.EffectivePoolWinners()
-				if preStandings, sErr := e.computeStandingsFrom(tx, compID); sErr == nil {
-					ps := preStandings[pn]
-					for i := 0; i < poolWinners && i < len(ps); i++ {
-						oldTopN = append(oldTopN, ps[i].Player.Name)
-					}
-				} else {
-					log.Printf("engine: mp-e2k1 pre-write standings compId=%s pool=%q: %v (guard skipped)", compID, pn, sErr)
+				// Fail closed: if we can't establish the pre-write finishers we
+				// can't prove the re-score is safe, so abort before writing
+				// anything (nothing is staged yet, so returning aborts cleanly).
+				preStandings, sErr := e.computeStandingsFrom(tx, compID)
+				if sErr != nil {
+					return nil, fmt.Errorf("mp-e2k1: pre-write standings for %s pool %q: %w", compID, pn, sErr)
+				}
+				ps := preStandings[pn]
+				for i := 0; i < poolWinners && i < len(ps); i++ {
+					oldTopN = append(oldTopN, ps[i].Player.Name)
 				}
 			}
 		}
@@ -296,39 +299,44 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// qualifying finisher changed. If a displaced finisher already appears
 	// in a started/completed bracket match, reject the re-score.
 	if err == nil && poolRescoredName != "" && len(oldTopN) > 0 {
+		// Fail closed on any verification-read failure past this point: the
+		// forward write is already staged, so we restore prior before returning
+		// the error — never silently commit a re-score we couldn't prove safe.
 		postStandings, sErr := e.computeStandingsFrom(tx, compID)
 		if sErr != nil {
-			log.Printf("engine: mp-e2k1 post-write standings compId=%s pool=%q: %v (guard skipped)", compID, poolRescoredName, sErr)
-		} else {
-			ps := postStandings[poolRescoredName]
-			// Build new top-N set and find displaced names. poolWinners was
-			// captured pre-write — the competition record can't change within
-			// this tx, so no reload is needed.
-			newSet := make(map[string]struct{}, poolWinners)
-			for i := 0; i < poolWinners && i < len(ps); i++ {
-				newSet[ps[i].Player.Name] = struct{}{}
+			e.rollbackMatchResultTx(tx, compID, matchID, prior)
+			return nil, fmt.Errorf("mp-e2k1: post-write standings for %s pool %q: %w", compID, poolRescoredName, sErr)
+		}
+		ps := postStandings[poolRescoredName]
+		// Build new top-N set and find displaced names. poolWinners was
+		// captured pre-write — the competition record can't change within
+		// this tx, so no reload is needed.
+		newSet := make(map[string]struct{}, poolWinners)
+		for i := 0; i < poolWinners && i < len(ps); i++ {
+			newSet[ps[i].Player.Name] = struct{}{}
+		}
+		var displaced []string
+		for _, name := range oldTopN {
+			if _, stillIn := newSet[name]; !stillIn {
+				displaced = append(displaced, name)
 			}
-			var displaced []string
-			for _, name := range oldTopN {
-				if _, stillIn := newSet[name]; !stillIn {
-					displaced = append(displaced, name)
-				}
+		}
+		if len(displaced) > 0 {
+			started, knockoutMatchID, hErr := e.hasStartedKnockoutMatchTx(tx, compID, displaced)
+			if hErr != nil {
+				e.rollbackMatchResultTx(tx, compID, matchID, prior)
+				return nil, fmt.Errorf("mp-e2k1: checking started knockout matches for %s: %w", compID, hErr)
 			}
-			if len(displaced) > 0 {
-				started, knockoutMatchID, hErr := e.hasStartedKnockoutMatchTx(tx, compID, displaced)
-				if hErr != nil {
-					log.Printf("engine: hasStartedKnockoutMatchTx compId=%s: %v (guard skipped)", compID, hErr)
-				} else if started {
-					// Reject: restore the prior result so the corrupting re-score
-					// never lands. Within a tx, writes are in-memory WAL intents
-					// coalesced last-write-wins, so this rollback supersedes the
-					// forward write before Commit applies the final state.
-					e.rollbackMatchResultTx(tx, compID, matchID, prior)
-					return nil, &DownstreamKnockoutScoredError{
-						Pool:     poolRescoredName,
-						Finisher: displaced[0],
-						MatchID:  knockoutMatchID,
-					}
+			if started {
+				// Reject: restore the prior result so the corrupting re-score
+				// never lands. Within a tx, writes are in-memory WAL intents
+				// coalesced last-write-wins, so this rollback supersedes the
+				// forward write before Commit applies the final state.
+				e.rollbackMatchResultTx(tx, compID, matchID, prior)
+				return nil, &DownstreamKnockoutScoredError{
+					Pool:     poolRescoredName,
+					Finisher: displaced[0],
+					MatchID:  knockoutMatchID,
 				}
 			}
 		}
@@ -645,10 +653,13 @@ func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, play
 	}
 	bracket, err := tx.LoadBracket(compID)
 	if err != nil {
-		// A missing bracket is not an error — standalone (non-mixed) comps
-		// or competitions that haven't reached the draw yet have no bracket;
-		// no downstream match can be started.
-		return false, "", nil
+		// A genuinely absent bracket is NOT an error — LoadBracket maps a
+		// missing file to an empty bracket with nil error (parseBracketFile,
+		// os.IsNotExist). So a non-nil error here is a real fault (corrupt
+		// bracket.json, permission/IO error). Propagate it rather than treating
+		// it as "no started knockout match", which would let the caller's guard
+		// fail open and allow a re-score that should be blocked.
+		return false, "", err
 	}
 	if bracket == nil {
 		return false, "", nil

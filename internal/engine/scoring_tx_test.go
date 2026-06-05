@@ -2,6 +2,8 @@ package engine
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -404,10 +406,11 @@ func TestRecordMatchResultWithIneligibilityTx_HansokuAutoAward(t *testing.T) {
 
 // --- mp-e2k1: pool re-score guard against scored downstream knockout --------
 
-// saveMixedCompWithBracket sets up a minimal mixed competition with two pools
-// (poolWinners=1 by default), saves the pool matches and the preview bracket.
-// Returns the engine, store, compID, and the round-0 bracket match ID so tests
-// can record a knockout score directly.
+// saveMixedCompForGuardTest sets up a minimal mixed competition with two pools
+// (poolWinners=1), saves the scheduled pool matches and the preview knockout
+// bracket. Returns the engine, store, and compID. Tests that need the round-0
+// knockout match read it from the saved bracket via store.LoadBracket →
+// Rounds[0][0].ID.
 func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Store, string) {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
@@ -755,4 +758,70 @@ func TestPoolRescore_TeamMixed_GuardFires(t *testing.T) {
 	require.NoError(t, txErr)
 	require.Error(t, rescore, "team mixed comp must also be protected by the downstream knockout guard")
 	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+}
+
+// TestPoolRescore_CorruptBracket_FailsClosed verifies the guard does NOT fail
+// open when the bracket can't be read. A displacing re-score whose verification
+// hits a corrupt bracket.json must be rejected (error surfaced) and the prior
+// pool result preserved — never silently committed. (Copilot review, PR #246.)
+func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "guard-corrupt"
+
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+	}
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Kind: "individual",
+		Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 1,
+	}))
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+	}))
+	// Both pools already decided: A1 1st in Pool A, B1 1st in Pool B.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	// Build + save a valid bracket, then corrupt it on disk. The tx read path
+	// (loadBracketLocked) parses the file directly (no cache), so the corrupt
+	// bytes surface as a parse error inside the guard.
+	finals := helper.GenerateFinals(pools, 1)
+	tree := helper.CreateBalancedTree(finals)
+	helper.ApplyPoolAdjustments(tree)
+	comp, _ := store.LoadCompetition(compID)
+	bracket, err := eng.buildBracketFromLeaves(comp, helper.TreeToLeafArray(tree))
+	require.NoError(t, err)
+	require.NoError(t, store.SaveBracket(compID, bracket))
+	bracketPath := filepath.Join(dir, "competitions", compID, "bracket.json")
+	require.NoError(t, os.WriteFile(bracketPath, []byte("{ this is not valid json"), 0o600))
+
+	// Re-score Pool A-0 to flip the finisher (A1 → A2). This displaces A1, so the
+	// guard tries to read the (now corrupt) bracket. It must fail closed.
+	var rescore error
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
+			SideA: "A1", SideB: "A2", Winner: "A2", IpponsB: []string{"M"}, Status: state.MatchStatusCompleted,
+		})
+		return nil // mirror the handler: surface the engine error out-of-band
+	})
+	require.NoError(t, txErr)
+	require.Error(t, rescore, "a corrupt bracket must make the guard fail closed, not silently allow the re-score")
+	assert.NotErrorIs(t, rescore, ErrDownstreamKnockoutScored, "this is a read fault, not a clean downstream-scored rejection")
+
+	// The corrupting re-score must NOT have persisted: Pool A-0 still A1-wins.
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var poolA0 *state.MatchResult
+	for i := range stored {
+		if stored[i].ID == "Pool A-0" {
+			poolA0 = &stored[i]
+		}
+	}
+	require.NotNil(t, poolA0)
+	assert.Equal(t, "A1", poolA0.Winner, "prior pool result must be preserved after a fail-closed rejection")
 }

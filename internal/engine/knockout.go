@@ -159,21 +159,32 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 
 // ResolveQualifiedPools incrementally seeds the in-place knockout bracket of a
 // mixed (Pools + Knockout) competition. For EVERY pool whose results are final
-// it replaces that pool's finalist placeholders ("Pool A-1st", …) in the bracket
-// with the real pool finishers, and resolves any bye those finishers inherit.
-// Pools still in progress keep their placeholders. There is NO all-pools gate: a
-// knockout match becomes playable the moment both its feeder pools have
+// it writes that pool's real finishers into the bracket slots their finalist
+// placeholders ("Pool A-1st", …) occupy, and resolves any bye those finishers
+// inherit. Pools still in progress keep their placeholders. There is NO all-pools
+// gate: a knockout match becomes playable the moment both its feeder pools have
 // finished, while other pools are still running.
 //
-// The bracket is generated and scheduled at draw time (generatePoolPreviewBracket
-// → assignBracketMatchSlots), so resolving placeholders never changes a match's
-// court or time — only its competitor labels. Idempotent: once a placeholder is
-// replaced it is gone, so re-running only seeds newly-completed pools.
+// Resolution is RE-SEEDABLE, not a one-shot string replace. It recomputes the
+// deterministic placeholder template (the same GenerateFinals → CreateBalancedTree
+// → ApplyPoolAdjustments → TreeToLeafArray pipeline used at draw) and resolves the
+// live bracket against it BY POSITION. So if an operator re-scores a completed
+// pool match after that pool was already seeded — changing the 1st/2nd finisher —
+// the new finisher overwrites the stale name in the same slot, instead of being
+// silently dropped (the live side no longer holds the placeholder string, but the
+// template still does). Pools and PoolWinners are fixed after the draw, so the
+// template's shape is identical to the live bracket's. The bracket's court/time
+// slots are assigned at draw time and never change here — only competitor labels.
 //
-// Returns (resolvedNow, allResolved): how many placeholder labels were replaced
-// THIS call, and whether the bracket now has zero pool-origin placeholders left
-// (every pool seeded). No-op (0, false, nil) for non-mixed competitions —
-// standalone playoffs brackets carry no pool placeholders.
+// Known limitation (mp-e2k1): re-seeding repaints round-0 leaves and
+// bye-propagated sides, but does NOT invalidate a DOWNSTREAM knockout match that
+// was already scored during the pool phase if its feeder pool is later re-scored
+// to a different finisher.
+//
+// Returns (resolvedNow, allResolved): how many bracket sides changed THIS call,
+// and whether the bracket now has zero pool-origin placeholders left (every pool
+// seeded). No-op (0, false, nil) for non-mixed competitions — standalone playoffs
+// brackets carry no pool placeholders.
 func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
@@ -224,6 +235,18 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		}
 	}
 
+	// Recompute the deterministic placeholder template so seeding is re-seedable
+	// (see the doc comment): we resolve the live bracket by POSITION against this
+	// template, whose sides still hold the original "Pool X-Nth" placeholders even
+	// after the live sides have been replaced with real names.
+	finals := helper.GenerateFinals(pools, poolWinners)
+	tree := helper.CreateBalancedTree(finals)
+	helper.ApplyPoolAdjustments(tree)
+	template, terr := e.buildBracketFromLeaves(comp, helper.TreeToLeafArray(tree))
+	if terr != nil {
+		return 0, false, fmt.Errorf("rebuilding placeholder template for %s: %w", compID, terr)
+	}
+
 	resolvedNow := 0
 	allResolved := false
 	uerr := e.store.UpdateBracket(compID, func(bracket *state.Bracket) error {
@@ -232,28 +255,36 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		}
 		n := 0
 		for ri := range bracket.Rounds {
+			if ri >= len(template.Rounds) {
+				break // structural mismatch guard; templates are normally identical
+			}
 			for mi := range bracket.Rounds[ri] {
-				m := &bracket.Rounds[ri][mi]
-				// Resolve SideA/SideB and the Winner field (a bye match pre-fills
-				// Winner with the placeholder; later rounds carry the propagated
-				// placeholder too). "Winner of …" and "" values are not resolver
-				// keys, so they are left untouched.
-				if name, ok := resolver[m.SideA]; ok {
-					m.SideA = name
+				if mi >= len(template.Rounds[ri]) {
+					break
+				}
+				live := &bracket.Rounds[ri][mi]
+				tpl := template.Rounds[ri][mi]
+				// tpl.SideA/SideB/Winner hold the ORIGINAL placeholder labels (or
+				// "Winner of …"/""), stable across re-scores. Only completed-pool
+				// placeholders are resolver keys; "Winner of" and "" never are, so
+				// already-scored knockout sides and unresolved feeders are untouched.
+				// Compare against the live value so an unchanged re-run is a no-op.
+				if name, ok := resolver[tpl.SideA]; ok && live.SideA != name {
+					live.SideA = name
 					n++
 				}
-				if name, ok := resolver[m.SideB]; ok {
-					m.SideB = name
+				if name, ok := resolver[tpl.SideB]; ok && live.SideB != name {
+					live.SideB = name
 					n++
 				}
-				if name, ok := resolver[m.Winner]; ok {
-					m.Winner = name
+				if name, ok := resolver[tpl.Winner]; ok && live.Winner != name {
+					live.Winner = name
 				}
 			}
 		}
 		allResolved = !bracketHasPoolPlaceholders(bracket)
 		if n == 0 {
-			return errMatchNotFound // no change → skip the rewrite
+			return errMatchNotFound // no effective change → skip the rewrite
 		}
 		resolvedNow = n
 		// The bracket is now (partially) live; the legacy global Preview flag is

@@ -111,6 +111,73 @@ func TestResolveQualifiedPools_Incremental(t *testing.T) {
 	assert.False(t, b.Preview, "Preview flag must be cleared once the bracket is seeded")
 }
 
+// TestResolveQualifiedPools_ReSeedAfterRescore verifies the re-seedable contract:
+// if an operator re-scores a completed pool match AFTER that pool was seeded into
+// the knockout — changing the finisher order — the new finisher overwrites the
+// stale name in the same bracket slot (not silently dropped). This is the mp-turx
+// incremental-seeding desync the /security-review sub-agent caught.
+func TestResolveQualifiedPools_ReSeedAfterRescore(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "reseed"
+
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+	}
+	saveMixedScaffold(t, store, compID, pools, 2)
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+	}))
+
+	// Record the placeholder slot positions BEFORE any resolution so we can assert
+	// the SAME slot is re-seeded after a re-score.
+	tpl, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	tplSides := bracketSides(tpl)
+	idxA1st, idxA2nd := -1, -1
+	for i, s := range tplSides {
+		if s == "Pool A-1st" {
+			idxA1st = i
+		}
+		if s == "Pool A-2nd" {
+			idxA2nd = i
+		}
+	}
+	require.GreaterOrEqual(t, idxA1st, 0, "template must contain Pool A-1st")
+	require.GreaterOrEqual(t, idxA2nd, 0, "template must contain Pool A-2nd")
+
+	// First scoring: A1 beats A2 (A1 is 1st), B1 beats B2. Seed.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	sides := bracketSides(b)
+	require.Equal(t, "A1", sides[idxA1st], "Pool A-1st slot holds A1 after first scoring")
+	require.Equal(t, "A2", sides[idxA2nd], "Pool A-2nd slot holds A2 after first scoring")
+
+	// RE-SCORE Pool A so A2 now wins (A2 becomes 1st, A1 becomes 2nd) while the
+	// comp is still in the pool phase. This is a routine operator correction.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A2", IpponsB: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+	resolvedNow, _, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	assert.Greater(t, resolvedNow, 0, "re-score must re-seed the changed slots")
+
+	b, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	sides = bracketSides(b)
+	assert.Equal(t, "A2", sides[idxA1st], "Pool A-1st slot must now hold A2 after the re-score (re-seeded, not stale)")
+	assert.Equal(t, "A1", sides[idxA2nd], "Pool A-2nd slot must now hold A1 after the re-score")
+}
+
 // TestResolveQualifiedPools_LonePoolNoMatches verifies that a pool with exactly
 // one participant (round-robin generates ZERO matches for it) is treated as
 // complete, so its lone finisher is seeded and the comp does not get stuck in

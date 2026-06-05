@@ -22,7 +22,7 @@ import (
 //     when comp.CheckInEnabled (opt-in: full roster when nobody checked in).
 //     - Source-linked playoffs (comp.SourceCompID != "" and comp has an
 //     empty roster): derive from the SOURCE competition's pool count ×
-//     SOURCE competition's PoolWinners (mirrors buildFinalistResolver in engine/knockout.go).
+//     SOURCE competition's PoolWinners (mirrors ResolveQualifiedPools in engine/knockout.go).
 //     If the source has no pools yet (draw not generated), returns a zero
 //     ScheduleEstimate without an error — the estimate is unknown at that stage.
 //  4. Map comp.Format → helper.EstimateMatchCountsInput and call
@@ -68,7 +68,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 	// Step 4: derive match counts via the Phase 1 helper.
 	poolWinners := comp.PoolWinners
 	if poolWinners <= 0 {
-		poolWinners = 2 // mirrors buildFinalistResolver's default in engine/knockout.go
+		poolWinners = 2 // mirrors ResolveQualifiedPools' default in engine/knockout.go
 	}
 	in := helper.EstimateMatchCountsInput{
 		Format:       comp.Format,
@@ -104,7 +104,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 //
 // For source-linked playoffs (comp.SourceCompID != "" and roster is empty),
 // the participant count is derived from the SOURCE competition's pool count ×
-// SOURCE comp.PoolWinners. This mirrors buildFinalistResolver in engine/knockout.go,
+// SOURCE comp.PoolWinners. This mirrors ResolveQualifiedPools in engine/knockout.go,
 // which uses len(pools) × winnersPerPool as the authoritative finalist count (not
 // recomputed from participant count + pool size, because CreatePools may choose
 // a different pool count in "min" vs "max" mode).
@@ -154,7 +154,7 @@ func (e *Engine) estimateParticipantCount(comp *state.Competition) (int, error) 
 //
 // Finding 2 fix: the winners-per-pool comes from the SOURCE competition's
 // PoolWinners field, not from the playoffs competition's PoolWinners. This
-// mirrors buildFinalistResolver in engine/knockout.go which uses srcComp.PoolWinners.
+// mirrors ResolveQualifiedPools in engine/knockout.go which uses srcComp.PoolWinners.
 //
 // It reads:
 //  1. The source competition config to get its PoolWinners (default 2 when ≤0).
@@ -183,7 +183,7 @@ func (e *Engine) estimateFinalistCount(srcCompID string) (int, error) {
 		// Source draw not generated yet — can't estimate.
 		return 0, nil
 	}
-	// Mirror buildFinalistResolver (engine/knockout.go): use srcComp.PoolWinners,
+	// Mirror ResolveQualifiedPools (engine/knockout.go): use srcComp.PoolWinners,
 	// default 2 when ≤0.
 	winnersPerPool := srcComp.PoolWinners
 	if winnersPerPool <= 0 {

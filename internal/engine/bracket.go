@@ -59,10 +59,10 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 //
 // No-ops (returns nil without writing bracket.json) when there are no pools
 // (nothing to seed a tree from) or when helper.GenerateFinals returns an empty
-// list. PoolWinners <= 0 is coerced to 2 (mirroring buildFinalistResolver's
-// default) rather than treated as "skip" — a mixed source with the field unset
-// still has a knockout to preview, and matching the resolver default ensures the
-// preview shape equals the live knockout bracket.
+// list. PoolWinners <= 0 is coerced to 2 (matching the same default in
+// ResolveQualifiedPools) rather than treated as "skip" — a mixed source with the
+// field unset still has a knockout to preview, and matching the resolver default
+// ensures the preview shape equals the live knockout bracket.
 func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil {
@@ -74,7 +74,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 
 	poolWinners := comp.PoolWinners
 	if poolWinners <= 0 {
-		poolWinners = 2 // mirror buildFinalistResolver's default — see doc comment
+		poolWinners = 2 // match ResolveQualifiedPools' default — see doc comment
 	}
 
 	finals := helper.GenerateFinals(pools, poolWinners)

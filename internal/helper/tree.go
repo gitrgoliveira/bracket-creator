@@ -138,11 +138,22 @@ func parsePoolRank(rankStr string) int64 {
 // distributes them into bracket slots, the first-place finisher of one pool
 // is paired against the second-place finisher of another pool.
 //
-// The algorithm cycles through all pools, advancing a round counter every
-// time a full set of pools has been placed.  The position rank for each slot
-// is computed as (i + round) % poolWinners, which shifts the rank picked for
-// successive pools so that adjacent bracket slots always contain different
-// finishing positions.
+// The algorithm emits one full pass over the pools per "round" r (r =
+// 0..poolWinners-1). Within a round, pool p contributes the finisher of rank
+// (p + r) % poolWinners. For any fixed pool p, the ranks chosen across the
+// rounds form a cyclic shift of {0..poolWinners-1} — a permutation — so every
+// "<pool>-<ordinal>" placeholder appears EXACTLY once: no duplicates, none
+// missing, for ALL pool counts and poolWinners values. Adjacent slots hold
+// different pools whose ranks differ by 1 (mod poolWinners), preserving the
+// cross-pool seeding intent so 1st-place finishers are paired against lower
+// finishers of other pools.
+//
+// (The previous formulation gated its round counter on
+// `len(pools)%poolWinners == 0`, which aliased the rank rotation for
+// non-coprime combinations — e.g. poolWinners>=4 with 2/6/10 pools — silently
+// duplicating some placeholders and dropping others. Since mp-turx makes these
+// placeholders the leaves of the LIVE in-place knockout, that corrupted real
+// results; this formulation is duplicate-free by construction.)
 //
 // Example with 4 pools and 2 winners per pool:
 //
@@ -161,18 +172,11 @@ func GenerateFinals(pools []Pool, poolWinners int) []string {
 	}
 
 	matches := make([]string, 0, len(pools)*poolWinners)
-	round := -1
-	for i := 0; i < len(pools)*poolWinners; i++ {
-
-		poolPos := i % len(pools)
-
-		if poolPos == 0 && len(pools)%poolWinners == 0 {
-			round++
-		} else if round < 0 {
-			round = 0
+	for r := 0; r < poolWinners; r++ {
+		for p := 0; p < len(pools); p++ {
+			pos := (p + r) % poolWinners
+			matches = append(matches, finalists[p][pos])
 		}
-		pos := (i + round) % poolWinners
-		matches = append(matches, finalists[poolPos][pos])
 	}
 
 	return matches

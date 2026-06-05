@@ -245,6 +245,45 @@ func TestGenerateFinals(t *testing.T) {
 	}
 }
 
+// TestGenerateFinals_NoDuplicatesOrMissing sweeps poolWinners 1..6 × pool counts
+// 2..10 and asserts the output multiset is EXACTLY {each pool} × {1st..poolWinners}
+// — every placeholder present exactly once, none duplicated, none missing. This
+// is the invariant the old `len(pools)%poolWinners` round-gate violated for
+// non-coprime combos (e.g. poolWinners>=4 with 2/6/10 pools), which silently
+// corrupted the live in-place knockout (mp-turx). The previous tests only checked
+// length/membership and happened to use clean combos, so they missed it.
+func TestGenerateFinals_NoDuplicatesOrMissing(t *testing.T) {
+	for poolWinners := 1; poolWinners <= 6; poolWinners++ {
+		for poolCount := 2; poolCount <= 10; poolCount++ {
+			name := fmt.Sprintf("%dpools_%dwinners", poolCount, poolWinners)
+			t.Run(name, func(t *testing.T) {
+				pools := make([]Pool, poolCount)
+				want := make(map[string]int, poolCount*poolWinners)
+				for p := 0; p < poolCount; p++ {
+					pools[p] = Pool{PoolName: fmt.Sprintf("Pool %c", 'A'+p)}
+					for rank := 1; rank <= poolWinners; rank++ {
+						want[fmt.Sprintf("Pool %c-%s", 'A'+p, GetOrdinal(rank))] = 1
+					}
+				}
+
+				finals := GenerateFinals(pools, poolWinners)
+				require.Len(t, finals, poolCount*poolWinners,
+					"output length must equal poolCount*poolWinners")
+
+				got := make(map[string]int, len(finals))
+				for _, f := range finals {
+					got[f]++
+				}
+				for label := range got {
+					assert.LessOrEqual(t, got[label], 1, "placeholder %q appears %d times (must be exactly once)", label, got[label])
+				}
+				assert.Equal(t, want, got,
+					"multiset of finalists must be exactly each pool × each rank, with no dups/missing")
+			})
+		}
+	}
+}
+
 func TestCalculateDepth(t *testing.T) {
 	tests := []struct {
 		name     string

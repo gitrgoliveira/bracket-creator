@@ -2997,6 +2997,11 @@ function bracketHasDecidedFinal(bracket) {
 //   'in-progress' — knockout not yet decided (podium [])
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 async function resolveCompetitionAwards(comp, fetchers) {
+  // Linked playoffs shells (sourceCompID set) are driven by their parent mixed
+  // competition — skip them to avoid double-counting the same results.
+  if (comp && comp.sourceCompID) {
+    return { state: "skip", podium: [] };
+  }
   const fmt = comp && comp.format;
   const ntpFrom = (players) => {
     const m = new Map();
@@ -3699,7 +3704,7 @@ async function buildAllWinnersPublic(comps, fetchers) {
   const results = await Promise.all(
     completed.map(async (comp) => {
       try {
-        const { state, podium } = await resolveCompetitionAwards(comp, comps, fetchers);
+        const { state, podium } = await resolveCompetitionAwards(comp, fetchers);
         return { comp, state, podium };
       } catch (err) {
         return { comp, state: "error", podium: [], error: err?.message || String(err) };

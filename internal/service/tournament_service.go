@@ -12,9 +12,12 @@ type TournamentService struct {
 	excelClient *excel.Client
 }
 
+// newExcelClient is the factory used by NewTournamentService; overridable in tests.
+var newExcelClient = excel.NewClient
+
 // NewTournamentService creates a new tournament service
 func NewTournamentService() (*TournamentService, error) {
-	client, err := excel.NewClient()
+	client, err := newExcelClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Excel client: %w", err)
 	}

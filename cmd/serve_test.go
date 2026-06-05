@@ -652,6 +652,18 @@ func TestServeOptionsRun(t *testing.T) {
 	assert.Equal(t, 8080, o.port)
 }
 
+// TestServeOptionsRun_InvalidPort exercises the run() code path by asking gin
+// to bind on an invalid port (>65535). gin delegates to net.Listen which fails
+// immediately, so run() returns an error without blocking.
+func TestServeOptionsRun_InvalidPort(t *testing.T) {
+	o := &serveOptions{
+		bindAddress: "localhost",
+		port:        99999, // > 65535, causes net.Listen to fail immediately
+	}
+	err := o.run(nil, nil)
+	assert.Error(t, err)
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

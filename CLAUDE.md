@@ -192,6 +192,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
   go test -race -cover . ./cmd/... ./internal/... ./tests/...
   ```
   Packages below 85% must be brought up before merging. New packages must include test files covering their public API. Tracked in bead mp-3abe.
+  **Intentionally untested:** `internal/domain/internal/glossarygen` is a `go generate` code-generator (emits `glossary_data.js`); it has no exported API and is excluded from the gate.
 
 ## Merge & Rebase
 

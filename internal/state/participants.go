@@ -733,14 +733,13 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
 	}
 
-	// Reserved-name guard for the bulk SaveParticipants path: that caller
-	// passes names through without TitleCasing, so this is the only backstop
-	// for names like "Pool A-1st" arriving via roster import.
+	// Reserved-name guard: names arriving via the bulk SaveParticipants path
+	// may be raw (neither TitleCased nor trimmed), so trim before matching to
+	// catch inputs like " Pool A-1st " that would otherwise slip through.
 	// AddParticipant and updateParticipantNoLock apply their own pre-TitleCase
-	// checks and will never reach here with a matching name (TitleCase alters
-	// ordinal suffixes so the post-TitleCase form never matches the regex).
+	// checks before reaching here; for those paths the guard is defence-in-depth.
 	for _, p := range players {
-		if helper.IsReservedParticipantName(p.Name) {
+		if helper.IsReservedParticipantName(strings.TrimSpace(p.Name)) {
 			return fmt.Errorf("%w: %q", ErrReservedName, p.Name)
 		}
 	}

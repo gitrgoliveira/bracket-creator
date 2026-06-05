@@ -433,13 +433,24 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
   );
 }
 
+// matchScoreStr: unified score string for any completed match.
+// Tries teamIVScore first (team matches with subResults → "IV–IV"),
+// then falls back to formatIpponsScore. Callers pass pre-resolved ippons
+// arrays (which may be derived from scoreA/scoreB for bracket matches).
+// Returns "" when neither path produces a string (caller handles "—" fallback).
+function matchScoreStr(m, ipponsB, ipponsA) {
+  return teamIVScore(m)
+    || formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei);
+}
+
 window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.roundLabel = roundLabel;
 window.formatIpponsScore = formatIpponsScore;
 window.teamIVScore = teamIVScore;
+window.matchScoreStr = matchScoreStr;
 window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, matchScoreStr };

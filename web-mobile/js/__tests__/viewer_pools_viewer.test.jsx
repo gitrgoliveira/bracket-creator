@@ -28,7 +28,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
   let runtime;
   let PoolsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
 
   const baseComp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 2 };
   const tweaks = { showDojo: false };
@@ -69,6 +69,10 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
@@ -246,7 +250,7 @@ describe('PoolsViewer league standings label (mp-mnwu)', () => {
   let runtime;
   let PoolsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
 
   const leagueComp = (status) => ({
     format: 'league',
@@ -278,6 +282,10 @@ describe('PoolsViewer league standings label (mp-mnwu)', () => {
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
@@ -344,7 +352,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
   let runtime;
   let PoolNumberedMatchRow;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -358,6 +366,10 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;

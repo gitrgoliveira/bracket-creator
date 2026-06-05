@@ -352,7 +352,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   // `global.window.x = vi.fn()` assignments — without this the mocked globals
   // leak into later suites and make failures order-dependent.
   const savedGlobals = {};
-  const STUBBED = ['formatIpponsScore', 'ipponsFromScore'];
+  const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr'];
 
   const mkTeamMatch = (subs) => ({
     compKind: 'team',
@@ -376,6 +376,10 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     // Only globals MatchDetailCard executes on the team path. The non-team
     // ippons block (which calls window.isHikiwake) is gated out for teams.
     global.window.formatIpponsScore = vi.fn(() => '3-2');
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = vi.fn(() => []);
     vi.resetModules();
     ({ MatchDetailCard } = await import('../viewer.jsx'));
@@ -863,7 +867,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
   const realReact = global.React;
   let runtime;
   let ViewerOverview;
-  const STUBBED = ['ipponsFromScore', 'formatIpponsScore', 'queueLabel', 'isHikiwake', 'useEscapeToClose', 'hasBothSides', 'StatusBadge', 'formatLabel', 'roundLabel', 'queueLabelCompact', 'pluralize'];
+  const STUBBED = ['ipponsFromScore', 'formatIpponsScore', 'queueLabel', 'isHikiwake', 'useEscapeToClose', 'hasBothSides', 'StatusBadge', 'formatLabel', 'roundLabel', 'queueLabelCompact', 'pluralize', 'teamIVScore', 'matchScoreStr'];
   const savedGlobals = {};
 
   const mkMatch = (id) => ({
@@ -893,6 +897,10 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
     global.window.ipponsFromScore = vi.fn(() => []);
     global.window.formatIpponsScore = vi.fn(() => '');
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.queueLabel = vi.fn(() => '');
     global.window.queueLabelCompact = vi.fn(() => '');
     global.window.isHikiwake = vi.fn(() => false);

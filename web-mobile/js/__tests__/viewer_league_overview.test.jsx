@@ -33,7 +33,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
   let runtime;
   let ViewerOverview;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -47,6 +47,10 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;

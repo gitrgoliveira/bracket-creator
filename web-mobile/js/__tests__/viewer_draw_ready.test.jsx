@@ -45,7 +45,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
     'BracketTree', 'buildBracket', 'roundLabel', 'formatIpponsScore',
     'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
-    'queueLabel', 'queueLabelCompact',
+    'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
   ];
 
   // A minimal mixed pools comp at draw-ready with one populated pool and a
@@ -87,6 +87,10 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     global.window.buildBracket = () => sampleBracket.rounds;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
@@ -180,7 +184,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
   let runtime;
   let ViewerOverview;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -194,6 +198,10 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     vi.resetModules();
     ({ ViewerOverview } = await import('../viewer.jsx'));

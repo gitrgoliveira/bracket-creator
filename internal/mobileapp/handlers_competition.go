@@ -425,6 +425,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if err != nil {
+			if errors.Is(err, state.ErrReservedName) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -854,6 +858,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// which entry collided.
 				if errors.Is(err, state.ErrDuplicateName) {
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+					return
+				}
+				if errors.Is(err, state.ErrReservedName) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})

@@ -3,40 +3,24 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"regexp"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// poolFinalistPlaceholderRE matches a pool-origin finalist placeholder label as
-// produced by helper.GenerateFinals: "<PoolName>-<ordinal>", e.g. "Pool A-1st".
-// Pool names are auto-generated as "Pool <char>" (helper.CreatePools), so a real
-// competitor/team name colliding with this exact shape ("Pool …-Nth") is
-// extremely unlikely in practice. NOTE: this regex now gates knockout-match
-// scoreability (bracketMatchPlayable), so a participant literally named like a
-// placeholder would be misclassified as unresolved. Reserving these patterns at
-// the participant-name validation boundary is tracked as a follow-up (mp-igdg).
-var poolFinalistPlaceholderRE = regexp.MustCompile(`^Pool .+-\d+(st|nd|rd|th)$`)
-
-// winnerOfPlaceholderRE matches the EXACT next-round feeder placeholder the
-// engine emits (buildBracketFromLeaves: "Winner of r<d>-m<i>"). Anchored so a
-// real competitor named e.g. "Winner of the 2025 Cup" is NOT mistaken for an
-// unresolved feeder (which would make their match unscoreable).
-var winnerOfPlaceholderRE = regexp.MustCompile(`^Winner of r\d+-m\d+$`)
-
 // isUnresolvedBracketSide reports whether a bracket side is still a forward
 // reference rather than a resolved competitor: an empty structural bye slot, a
 // "Winner of rX-mY" feeder, or a pool-origin finalist placeholder that has not
 // been seeded yet (its feeder pool is still in progress).
+//
+// The two placeholder patterns are defined authoritatively in
+// helper.IsReservedParticipantName (mp-igdg); knockout.go no longer
+// duplicates them.
 func isUnresolvedBracketSide(side string) bool {
 	if side == "" {
 		return true
 	}
-	if winnerOfPlaceholderRE.MatchString(side) {
-		return true
-	}
-	return poolFinalistPlaceholderRE.MatchString(side)
+	return helper.IsReservedParticipantName(side)
 }
 
 // bracketMatchPlayable reports whether a bracket match can be scored: both sides
@@ -58,7 +42,7 @@ func bracketHasPoolPlaceholders(b *state.Bracket) bool {
 	}
 	for _, round := range b.Rounds {
 		for _, m := range round {
-			if poolFinalistPlaceholderRE.MatchString(m.SideA) || poolFinalistPlaceholderRE.MatchString(m.SideB) {
+			if helper.IsPoolFinalistPlaceholder(m.SideA) || helper.IsPoolFinalistPlaceholder(m.SideB) {
 				return true
 			}
 		}

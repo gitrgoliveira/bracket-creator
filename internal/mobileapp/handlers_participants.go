@@ -139,6 +139,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 					return
 				}
+				if errors.Is(err, state.ErrReservedName) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
 				if errors.Is(err, state.ErrCompetitionNotInSetup) {
 					// Reload to distinguish draw-ready from a fully-started competition
 					// under TOCTOU: status could have flipped between our check above
@@ -233,6 +237,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// in case the pre-check above ever diverges from the write layer.
 			if errors.Is(err, state.ErrDuplicateName) {
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			if errors.Is(err, state.ErrReservedName) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
@@ -370,6 +378,8 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					httpStatus = http.StatusNotFound
 				case errors.Is(err, state.ErrDuplicateName):
 					httpStatus = http.StatusConflict
+				case errors.Is(err, state.ErrReservedName):
+					httpStatus = http.StatusBadRequest
 				}
 				httpMsg = err.Error()
 				return err

@@ -122,11 +122,15 @@ const PLACE_STYLE_ADMIN = {
 
 // buildAllWinners resolves podium for each completed comp using the shared
 // resolveCompetitionAwards helper.
-async function buildAllWinners(completedComps, allComps, fetchers) {
+// Signature: buildAllWinners(completedComps, fetchers)
+// Returns a Promise resolving to an array of { comp, state, podium } objects
+// (plus an `error` string field when state === "error").
+// state is one of "final" | "in-progress" | "error".
+async function buildAllWinners(completedComps, fetchers) {
   return Promise.all(
     completedComps.map(async (comp) => {
       try {
-        const { state, podium } = await window.resolveCompetitionAwards(comp, allComps, fetchers);
+        const { state, podium } = await window.resolveCompetitionAwards(comp, fetchers);
         return { comp, state, podium };
       } catch (err) {
         return { comp, state: "error", podium: [], error: err?.message || String(err) };
@@ -154,7 +158,7 @@ function AllWinnersModal({ comps, onClose }) {
   useEffectA(() => {
     let cancelled = false;
     setState((s) => ({ ...s, loading: true }));
-    buildAllWinners(completed, comps, {
+    buildAllWinners(completed, {
       fetchCompetitionDetails: window.API.fetchCompetitionDetails.bind(window.API),
       swissStandings: window.API.swissStandings ? window.API.swissStandings.bind(window.API) : null,
     }).then((results) => {

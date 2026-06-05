@@ -37,6 +37,12 @@ var ErrDuplicateName = errors.New("a participant with the same name and dojo alr
 // AddParticipant/ReplaceParticipant do.
 var ErrCompetitionNotInSetup = errors.New("competition has already started")
 
+// ErrReservedName is returned by the participant write paths when a name
+// matches an internal bracket-placeholder pattern (e.g. "Pool A-1st",
+// "Winner of r1-m3").  Such names would be silently misclassified as
+// unresolved bracket slots, making knockout matches permanently unscoreable.
+var ErrReservedName = errors.New("participant name collides with a reserved bracket-placeholder pattern")
+
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
 	WithSeeds bool  // set false to skip the seeds.csv read (hot list paths)
@@ -444,6 +450,14 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	if err := transform(&players[foundIdx]); err != nil {
 		return nil, err
 	}
+
+	// Reserved-name check before TitleCase — same reason as AddParticipant:
+	// the raw input may match the reserved regex even though TitleCase would
+	// alter the ordinal suffix.
+	if helper.IsReservedParticipantName(strings.TrimSpace(players[foundIdx].Name)) {
+		return nil, fmt.Errorf("%w: %q", ErrReservedName, strings.TrimSpace(players[foundIdx].Name))
+	}
+
 	// Canonicalize to match what CreatePlayers produces on load (Title-case),
 	// so participants.csv and seeds.csv store the same form that will be read
 	// back — otherwise a rename to "alice cooper" would be read as "Alice Cooper"
@@ -656,6 +670,14 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 		}
 	}
 
+	// Reserved-name check before TitleCase so the error fires on the raw input
+	// ("Pool B-3rd") even though TitleCase would transform the ordinal suffix to
+	// a non-matching form ("Pool B-3Rd"). The bulk SaveParticipants path skips
+	// TitleCase, so saveParticipantsNoLock also carries this guard for that path.
+	if helper.IsReservedParticipantName(strings.TrimSpace(p.Name)) {
+		return nil, fmt.Errorf("%w: %q", ErrReservedName, strings.TrimSpace(p.Name))
+	}
+
 	p.Name = helper.TitleCaseName(p.Name)
 	p.ID = newParticipantID()
 	p.PoolPosition = int64(len(players))
@@ -703,6 +725,17 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	}
 	if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
 		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
+	}
+
+	// Reserved-name guard: reject any participant whose name matches a
+	// bracket-placeholder pattern.  Names are already TitleCased at this
+	// point (AddParticipant / UpdateParticipant apply TitleCaseName before
+	// calling save), so the regex match is reliable regardless of how the
+	// original input was cased.
+	for _, p := range players {
+		if helper.IsReservedParticipantName(p.Name) {
+			return fmt.Errorf("%w: %q", ErrReservedName, p.Name)
+		}
 	}
 
 	path := s.compPath(compID, "participants.csv")

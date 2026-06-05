@@ -11,12 +11,10 @@ import (
 
 // poolFinalistPlaceholderRE matches a pool-origin finalist placeholder label as
 // produced by helper.GenerateFinals: "<PoolName>-<ordinal>", e.g. "Pool A-1st".
-// Pool names are auto-generated as "Pool <char>" (helper.CreatePools), so a real
-// competitor/team name colliding with this exact shape ("Pool …-Nth") is
-// extremely unlikely in practice. NOTE: this regex now gates knockout-match
-// scoreability (bracketMatchPlayable), so a participant literally named like a
-// placeholder would be misclassified as unresolved. Reserving these patterns at
-// the participant-name validation boundary is tracked as a follow-up (mp-igdg).
+// Pool names are auto-generated as "Pool <char>" (helper.CreatePools).
+// Participant names matching this pattern are blocked at the write boundary by
+// helper.IsReservedParticipantName so they can never be misclassified as
+// unresolved bracket slots (mp-igdg).
 var poolFinalistPlaceholderRE = regexp.MustCompile(`^Pool .+-\d+(st|nd|rd|th)$`)
 
 // winnerOfPlaceholderRE matches the EXACT next-round feeder placeholder the

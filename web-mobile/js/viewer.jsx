@@ -2176,7 +2176,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
   const bWin = winnerName && winnerName === bName;
 
   const scoreStr = m.status === "completed"
-    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
+    ? (window.teamIVScore(m) || window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei))
     : null;
 
   return (
@@ -2333,11 +2333,11 @@ const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
 
   // scoreStr: non-null only for completed matches; the render span below
   // handles the empty-string/null → "—" fallback in one place.
+  // For team matches, teamIVScore derives the IV aggregate from subResults (mp-o4xl);
+  // for individual matches it returns null and formatIpponsScore is used instead.
   // ipponsB = Shiro (left), ipponsA = Aka (right) — same arg order as all other callers.
-  // Note: team pool matches typically don't persist ipponsA/B (only subResults is stored),
-  // so formatIpponsScore may return "" for those — see mp-o4xl for the follow-up.
   const scoreStr = m.status === "completed"
-    ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
+    ? (window.teamIVScore(m) || window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei))
     : null;
 
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
@@ -2660,7 +2660,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer, PoolNumberedMatchRow };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

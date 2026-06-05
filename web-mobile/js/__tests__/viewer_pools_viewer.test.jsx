@@ -335,3 +335,104 @@ describe('PoolsViewer league standings label (mp-mnwu)', () => {
     expect(text).not.toContain('Standings');
   });
 });
+
+// ------------------------------------------------------------------
+// mp-o4xl: PoolNumberedMatchRow shows IV aggregate for team matches
+// ------------------------------------------------------------------
+describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
+  const realReact = global.React;
+  let runtime;
+  let PoolNumberedMatchRow;
+  const savedGlobals = {};
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] }
+        : { had: false };
+    });
+    global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.isHikiwake = () => false;
+    global.window.formatIpponsScore = () => '';
+    global.window.ipponsFromScore = () => [];
+    global.window.queueLabel = () => '';
+    global.window.queueLabelCompact = () => null;
+    vi.resetModules();
+    ({ PoolNumberedMatchRow } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('renders the IV string for a completed team match with subResults (not "—")', () => {
+    // Stub teamIVScore to return the IV aggregate (as it would for a real team match)
+    global.window.teamIVScore = () => '2–1';
+
+    const m = {
+      id: 'Pool A-0',
+      sideA: { name: 'TeamA' },
+      sideB: { name: 'TeamB' },
+      status: 'completed',
+      subResults: [
+        { position: 0, winner: 'TeamB', sideA: 'P1', sideB: 'P2' },
+        { position: 1, winner: 'TeamA', sideA: 'P3', sideB: 'P4' },
+        { position: 2, winner: 'TeamB', sideA: 'P5', sideB: 'P6' },
+      ],
+    };
+
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
+    const text = collectText(tree);
+    // Should show "2–1" from teamIVScore, not "—" (the fallback for empty score)
+    expect(text).toContain('2–1');
+    expect(text).not.toBe(expect.stringContaining('—'));
+  });
+
+  it('renders "—" for a completed individual match with no subResults when formatIpponsScore returns empty', () => {
+    // teamIVScore returns null for individual matches (no subResults)
+    global.window.teamIVScore = () => null;
+    global.window.formatIpponsScore = () => ''; // also empty
+
+    const m = {
+      id: 'Pool A-1',
+      sideA: { name: 'Alice' },
+      sideB: { name: 'Bob' },
+      status: 'completed',
+      ipponsA: [],
+      ipponsB: [],
+    };
+
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 2 });
+    const text = collectText(tree);
+    expect(text).toContain('—');
+  });
+
+  it('falls back to formatIpponsScore when teamIVScore returns null', () => {
+    global.window.teamIVScore = () => null;
+    global.window.formatIpponsScore = () => 'M–·';
+
+    const m = {
+      id: 'Pool B-0',
+      sideA: { name: 'Alice' },
+      sideB: { name: 'Bob' },
+      status: 'completed',
+      ipponsA: ['M'],
+      ipponsB: [],
+    };
+
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 3 });
+    const text = collectText(tree);
+    expect(text).toContain('M–·');
+  });
+});

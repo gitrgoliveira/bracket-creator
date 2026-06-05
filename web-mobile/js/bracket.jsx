@@ -126,6 +126,29 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
   return `${aStr || "·"}–${bStr || "·"}` + suffix;
 }
 
+// teamIVScore: derive a team match's individual-victories aggregate ("shiroIV–akaIV")
+// from persisted subResults. Mirrors Go engine.ComputeTeamSummary: skip the daihyosen
+// sentinel (position < 0); award IV to whichever match-level side won each bout (winner
+// matches the match-level OR sub-level side name); empty winner = hikiwake (no IV).
+// Orientation: sideB = Shiro (left), sideA = Aka (right) — matches the (ipponsB, ipponsA)
+// call order used everywhere. Returns null when there are no subResults (individual
+// matches) so callers fall back to formatIpponsScore.
+function teamIVScore(m) {
+  const subs = m && m.subResults;
+  if (!Array.isArray(subs) || subs.length === 0) return null;
+  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  let ivA = 0, ivB = 0;
+  for (const sub of subs) {
+    if (!sub || sub.position < 0) continue; // skip daihyosen sentinel
+    const w = sub.winner;
+    if (!w) continue;                        // hikiwake / undecided → no IV
+    if (w === aName || w === sub.sideA) ivA++;
+    else if (w === bName || w === sub.sideB) ivB++;
+  }
+  return `${ivB}–${ivA}`; // Shiro (B) – Aka (A)
+}
+
 const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD }) => {
   const isAka = side === "a";
   if (!player || isTBD) {
@@ -414,8 +437,9 @@ window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.roundLabel = roundLabel;
 window.formatIpponsScore = formatIpponsScore;
+window.teamIVScore = teamIVScore;
 window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore };

@@ -46,9 +46,10 @@ const (
 	// AutoCompletePoolsResolved means one or more (but not all) pools of a mixed
 	// competition were just seeded into the knockout bracket, OR tiebreaker/DH
 	// matches were injected. The competition stays in CompStatusPools while the
-	// remaining pools run, but the bracket changed and newly-playable knockout
-	// matches may now be schedulable. Callers should broadcast EventMatchUpdated
-	// and EventScheduleUpdated.
+	// remaining pools run, but the bracket changed and knockout matches whose
+	// both sides are now resolved have become SCOREABLE (scheduling is never
+	// gated — court/time can be set on a placeholder match at any time). Callers
+	// should broadcast EventMatchUpdated and EventScheduleUpdated.
 	AutoCompletePoolsResolved AutoCompleteOutcome = 4
 )
 

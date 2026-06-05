@@ -1644,8 +1644,9 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   }, [followedPlayer, watchedIds, hasActiveFilter]);
 
   // A mixed competition always carries a real bracket payload from the server
-  // (preview leaves before Start knockout, resolved players after). No need for
-  // a client-side placeholder fallback — just use what the server sends.
+  // (pool-origin placeholder leaves like "Pool A-1st" while pools are running,
+  // each replaced by the real finisher as that pool completes). No need for a
+  // client-side placeholder fallback — just use what the server sends.
   const derivedBracket = useMemo(() => {
     if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;
     return null;

@@ -270,37 +270,26 @@ func (t *Tournament) Days() []string {
 }
 
 type Competition struct {
-	ID                string            `yaml:"id" json:"id"`
-	Name              string            `yaml:"name" json:"name"`
-	Kind              string            `yaml:"kind" json:"kind"`
-	Format            string            `yaml:"format" json:"format"`
-	PoolFormat        string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
-	TeamSize          int               `yaml:"team_size" json:"teamSize"`
-	PoolSize          int               `yaml:"pool_size" json:"poolSize"`
-	PoolSizeMode      string            `yaml:"pool_size_mode" json:"poolSizeMode"`
-	PoolWinners       int               `yaml:"pool_winners" json:"poolWinners"`
-	RoundRobin        bool              `yaml:"round_robin" json:"roundRobin"`
-	Courts            []string          `yaml:"courts" json:"courts"`
-	StartTime         string            `yaml:"start_time" json:"startTime"`
-	Date              string            `yaml:"date" json:"date"`
-	Status            CompetitionStatus `yaml:"status" json:"status"`
-	Mirror            bool              `yaml:"mirror" json:"mirror"`
-	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
-	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
-	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
-	// SourceCompID links a playoffs competition back to the mixed
-	// (Pools + Knockout) competition that this competition was seeded from.
-	// NEW competitions never set this field — the split-playoffs flow was
-	// replaced by a single mixed competition whose knockout bracket fills in
-	// incrementally as pools finish (engine.ResolveQualifiedPools, mp-turx).
-	// The field is retained for YAML round-trip compatibility with existing
-	// tournament data files, and engine/estimate_schedule.go still reads it on
-	// the legacy code path that estimates source-linked playoffs that may
-	// already exist on disk. That legacy read is harmless for new comps (the
-	// field is always empty) and is tracked for removal in bead mp-c3pf.
-	SourceCompID         string `yaml:"source_comp_id,omitempty" json:"sourceCompID,omitempty"`
-	PoolMatchDuration    int    `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
-	PlayoffMatchDuration int    `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+	ID                   string            `yaml:"id" json:"id"`
+	Name                 string            `yaml:"name" json:"name"`
+	Kind                 string            `yaml:"kind" json:"kind"`
+	Format               string            `yaml:"format" json:"format"`
+	PoolFormat           string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
+	TeamSize             int               `yaml:"team_size" json:"teamSize"`
+	PoolSize             int               `yaml:"pool_size" json:"poolSize"`
+	PoolSizeMode         string            `yaml:"pool_size_mode" json:"poolSizeMode"`
+	PoolWinners          int               `yaml:"pool_winners" json:"poolWinners"`
+	RoundRobin           bool              `yaml:"round_robin" json:"roundRobin"`
+	Courts               []string          `yaml:"courts" json:"courts"`
+	StartTime            string            `yaml:"start_time" json:"startTime"`
+	Date                 string            `yaml:"date" json:"date"`
+	Status               CompetitionStatus `yaml:"status" json:"status"`
+	Mirror               bool              `yaml:"mirror" json:"mirror"`
+	WithZekkenName       bool              `yaml:"with_zekken_name" json:"withZekkenName"`
+	NumberPrefix         string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
+	HasParticipantIDs    bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
+	PoolMatchDuration    int               `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
+	PlayoffMatchDuration int               `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
 	// MaxEnchoPeriods caps how many encho (overtime) periods one match
 	// may run before the operator must call daihyosen. Zero means
 	// unlimited (FIK general default). T104, CHK029.

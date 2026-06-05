@@ -408,7 +408,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     const text = collectText(tree);
     // Should show "2–1" from teamIVScore, not "—" (the fallback for empty score)
     expect(text).toContain('2–1');
-    expect(text).not.toBe(expect.stringContaining('—'));
+    expect(text).not.toContain('—');
   });
 
   it('renders "—" for a completed individual match with no subResults when formatIpponsScore returns empty', () => {

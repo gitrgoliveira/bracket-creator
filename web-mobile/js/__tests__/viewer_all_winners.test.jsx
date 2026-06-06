@@ -109,7 +109,7 @@ describe('buildAllWinnersPublic', () => {
     expect(results[0].podium).toHaveLength(4);
   });
 
-  it('filters out linked playoffs comp (sourceCompID set) — state "skip"', async () => {
+  it('filters out linked playoffs comp (sourceCompID set) before resolving', async () => {
     const mixedComp = { id: 'mixed-1', name: 'Pools+KO', format: 'mixed', status: 'completed' };
     const playoffComp = { id: 'po-1', name: 'Playoffs', format: 'playoffs', sourceCompID: 'mixed-1', status: 'completed' };
     const allComps = [mixedComp, playoffComp];

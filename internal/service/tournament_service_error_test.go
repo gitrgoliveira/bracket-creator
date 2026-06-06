@@ -10,13 +10,9 @@ import (
 )
 
 func TestNewTournamentService_ExcelClientError(t *testing.T) {
-	orig := newExcelClient
-	newExcelClient = func() (*excel.Client, error) {
+	_, err := newTournamentServiceWithFactory(func() (*excel.Client, error) {
 		return nil, fmt.Errorf("injected excel failure")
-	}
-	t.Cleanup(func() { newExcelClient = orig })
-
-	_, err := NewTournamentService()
+	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create Excel client")
 }

@@ -2995,14 +2995,8 @@ function bracketHasDecidedFinal(bracket) {
 // Returns { state, podium } where state is one of:
 //   'final'       — podium is the final result
 //   'in-progress' — knockout not yet decided (podium [])
-//   'skip'        — linked playoffs shell (sourceCompID set); caller should drop it
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 async function resolveCompetitionAwards(comp, fetchers) {
-  // Linked playoffs shells (sourceCompID set) are driven by their parent mixed
-  // competition — skip them to avoid double-counting the same results.
-  if (comp && comp.sourceCompID) {
-    return { state: "skip", podium: [] };
-  }
   const fmt = comp && comp.format;
   const ntpFrom = (players) => {
     const m = new Map();
@@ -3696,12 +3690,13 @@ function AnnouncementBanner({ announcements, onDismiss }) {
 
 // ---------------------------------------------------------------------------
 // buildAllWinnersPublic — public-viewer equivalent of admin_shell's
-// buildAllWinners. Thin orchestrator: filter completed comps, resolve each
-// through resolveCompetitionAwards, drop linked-playoffs shells (state==="skip").
+// buildAllWinners. Thin orchestrator: filter completed comps (excluding linked
+// playoffs shells whose sourceCompID marks them as driven by a parent mixed
+// competition), resolve each through resolveCompetitionAwards.
 // Exported to window so AllWinnersView and tests can reach it.
 // ---------------------------------------------------------------------------
 async function buildAllWinnersPublic(comps, fetchers) {
-  const completed = (comps || []).filter((c) => c.status === "completed");
+  const completed = (comps || []).filter((c) => c.status === "completed" && !c.sourceCompID);
   const results = await Promise.all(
     completed.map(async (comp) => {
       try {
@@ -3712,7 +3707,7 @@ async function buildAllWinnersPublic(comps, fetchers) {
       }
     })
   );
-  return results.filter((r) => r.state !== "skip");
+  return results;
 }
 
 // ---------------------------------------------------------------------------

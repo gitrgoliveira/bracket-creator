@@ -189,14 +189,9 @@ function Term({ name, children, nested }) {
 // into the router via app.jsx's parsePath ("/glossary" → viewer mode
 // with viewerScreen='glossary').
 function GlossaryPage({ onBack }) {
-  // Flat alphabetical list (mp-mjaq).
-  const ids = [
-    'aka', 'chuken', 'daihyosen', 'dan', 'encho',
-    'fukusho', 'fusenpai', 'fusensho', 'hansoku', 'hikiwake',
-    'ippon', 'ippon-shobu', 'jiho', 'kachinuki', 'kachinuki-exhaustion',
-    'kiken', 'kiken-injury', 'kiken-voluntary',
-    'senpo', 'shiaijo', 'shiro', 'taisho', 'waza', 'zekken',
-  ];
+  // Derive alphabetical list from the generated GLOSSARY map so new
+  // entries added in glossary.go appear automatically (mp-mjaq).
+  const ids = Object.keys(GLOSSARY).sort();
 
   return (
     <div className="viewer">

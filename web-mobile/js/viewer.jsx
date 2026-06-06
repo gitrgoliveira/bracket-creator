@@ -940,7 +940,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </a>
           </div>
 
-          {/* T069 / FR-016: "Display modes" — link cards into the public
+          {/* T069 / FR-016: "Display modes" — links into the public
               /display routes for TV screens, lobby boards, and OBS browser
               sources. Each link opens in a new tab so the host page
               (viewer) keeps its tab and stays interactive. Collapsed by

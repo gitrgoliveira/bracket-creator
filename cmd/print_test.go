@@ -238,8 +238,9 @@ func TestPrintUnknownType(t *testing.T) {
 }
 
 // TestPrintSofficeNotFound checks the ErrSofficeNotFound branch in run()
-// by pointing LIBREOFFICE_PATH at a non-existent file so that both $PATH and
-// well-known candidate paths are bypassed and the generator creation fails.
+// by pointing LIBREOFFICE_PATH at a non-existent binary. LocateSoffice only
+// treats LIBREOFFICE_PATH as authoritative when it resolves to an executable;
+// when it doesn't, the test skips if LibreOffice is still found via $PATH.
 func TestPrintSofficeNotFound(t *testing.T) {
 	t.Setenv("LIBREOFFICE_PATH", "/nonexistent-soffice-binary-abc123")
 

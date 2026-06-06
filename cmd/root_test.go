@@ -55,12 +55,13 @@ func TestExecute(t *testing.T) {
 // TestExecuteWithResources verifies that ExecuteWithResources sets appResources
 // before delegating to cobra.
 func TestExecuteWithResources(t *testing.T) {
+	originalResources := appResources
 	rootCmd.SetOut(io.Discard)
 	rootCmd.SetErr(io.Discard)
 	defer func() {
 		rootCmd.SetOut(nil)
 		rootCmd.SetErr(nil)
-		appResources = nil
+		appResources = originalResources // restore rather than nil to avoid racing parallel tests
 	}()
 	rootCmd.SetArgs([]string{})
 	defer rootCmd.SetArgs(nil)

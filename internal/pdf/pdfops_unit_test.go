@@ -80,10 +80,16 @@ func TestStampPageNumbers_NonExistent(t *testing.T) {
 // --- generate: outDir not creatable ---
 
 func TestGenerate_OutDirNotCreatable(t *testing.T) {
+	// Create a regular file and pass its path as outDir.
+	// os.MkdirAll fails with ENOTDIR when the path already exists as a file,
+	// which is deterministic even when tests run as root.
+	f, err := os.CreateTemp(t.TempDir(), "not-a-dir-*")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
 	g := &Generator{}
 	sources := []SourceWorkbook{{Path: "dummy.xlsx"}}
-	// /nonexistent-parent is in root; we have no permission to create it, so MkdirAll fails.
-	_, err := g.generate(context.Background(), nil, sources, "/nonexistent-parent-dir-xyz/sub")
+	_, err = g.generate(context.Background(), nil, sources, f.Name())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "create output dir")
 }

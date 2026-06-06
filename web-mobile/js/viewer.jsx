@@ -2995,6 +2995,7 @@ function bracketHasDecidedFinal(bracket) {
 // Returns { state, podium } where state is one of:
 //   'final'       — podium is the final result
 //   'in-progress' — knockout not yet decided (podium [])
+//   'skip'        — linked playoffs shell (sourceCompID set); caller should drop it
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 async function resolveCompetitionAwards(comp, fetchers) {
   // Linked playoffs shells (sourceCompID set) are driven by their parent mixed

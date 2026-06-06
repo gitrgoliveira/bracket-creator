@@ -327,7 +327,6 @@ function App() {
   // useEffect below always resolves the null state (success or
   // fail-open) within one HTTP round-trip.
   const [authConfig, setAuthConfig] = useS(null);
-  const [_versionInfo, setVersionInfo] = useS(null);
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
@@ -511,20 +510,18 @@ function App() {
   }, []);
 
   useE(() => {
+    // Fetch once; store on window for VersionFooter to poll.
+    // Use false (not null) as the "fetched, no data" sentinel so the
+    // interval in VersionFooter can distinguish undefined (not yet done)
+    // from false (done, nothing to show) and always clears itself.
+    // fetchVersion() never rejects — api_client catches internally — so
+    // no .catch() is needed. Cancelled flag guards the window assignment
+    // against the (unlikely) case where App is re-mounted in tests.
+    let cancelled = false;
     window.API.fetchVersion().then((info) => {
-      setVersionInfo(info);
-      if (typeof window !== 'undefined') {
-        // Use false (not null) as the "fetched but no data" sentinel so that
-        // VersionFooter's interval can distinguish "not yet fetched" (undefined)
-        // from "fetch completed with no result" (false) and always clear itself.
-        window.appVersionInfo = info ?? false;
-      }
-    }).catch(() => {
-      setVersionInfo(null);
-      if (typeof window !== 'undefined') {
-        window.appVersionInfo = false; // sentinel: fetch done, no data
-      }
+      if (!cancelled) window.appVersionInfo = info ?? false;
     });
+    return () => { cancelled = true; };
   }, []);
 
   // Mirror authConfig into the admin_helpers cache so promptAdminPassword()
@@ -1276,7 +1273,7 @@ function CreateTournament({ onCreated, authConfig }) {
           </button>
         </form>
       </div>
-      <window.VersionFooter />
+      <VersionFooter />
     </div>
   );
 }

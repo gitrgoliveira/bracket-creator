@@ -319,17 +319,22 @@ export function formatCompMinutes(m) {
 // API.updateCompetitionAwards (elevated-gated PUT /api/competitions/:id/awards).
 // v1 = free-text only; no competitor picker (deferred).
 function FightingSpiritAwardsEditor({ c, password, showToast }) {
-  const [awards, setAwards] = useStateA(() => (c.fightingSpiritAwards || []).map(a => ({ ...a })));
+  // Each row carries a stable client-only `_key` so React keys survive
+  // mid-list removals (index keys cause inputs to "jump" / reuse the wrong
+  // DOM node when a middle row is deleted). `_key` is stripped before save.
+  const keyCounter = useRefA(0);
+  const withKey = (a) => ({ ...a, _key: keyCounter.current++ });
+  const [awards, setAwards] = useStateA(() => (c.fightingSpiritAwards || []).map(withKey));
   const [saving, setSaving] = useStateA(false);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Sync from parent when the competition prop refreshes (e.g. SSE update).
   useEffectA(() => {
-    setAwards((c.fightingSpiritAwards || []).map(a => ({ ...a })));
+    setAwards((c.fightingSpiritAwards || []).map(withKey));
   }, [c.fightingSpiritAwards]);
 
-  const addRow = () => setAwards(prev => [...prev, { title: "Fighting Spirit", recipientName: "", recipientDojo: "" }]);
+  const addRow = () => setAwards(prev => [...prev, withKey({ title: "Fighting Spirit", recipientName: "", recipientDojo: "" })]);
   const removeRow = (idx) => setAwards(prev => prev.filter((_, i) => i !== idx));
   const updateField = (idx, field, val) => setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a));
 
@@ -338,7 +343,9 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     if (admin === null) return;
     setSaving(true);
     try {
-      await window.API.updateCompetitionAwards(c.id, awards, password, admin);
+      // Strip the client-only `_key` before sending to the API.
+      const payload = awards.map(({ _key, ...rest }) => rest);
+      await window.API.updateCompetitionAwards(c.id, payload, password, admin);
       if (mountedRef.current) showToast("Fighting Spirit awards saved.", "success");
     } catch (e) {
       if (mountedRef.current) showToast(e.message || "Failed to save awards", "error");
@@ -356,7 +363,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
         <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>No awards yet.</div>
       )}
       {awards.map((a, idx) => (
-        <div key={idx} style={{ display: "flex", gap: 6, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div key={a._key} style={{ display: "flex", gap: 6, alignItems: "flex-start", flexWrap: "wrap" }}>
           <input
             className="input"
             placeholder="Title (e.g. Fighting Spirit)"

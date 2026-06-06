@@ -552,7 +552,9 @@ const API = {
     },
     // Replace the full fighting-spirit awards list for a competition.
     // awards: array of { title, recipientName, recipientDojo? }.
-    // Requires the elevated (admin) password.
+    // Requires X-Admin-Password only when the elevated gate is active
+    // (locked mode); in file mode the gate is optional. adminPassword is
+    // sent when provided and ignored server-side when the gate is off.
     async updateCompetitionAwards(id, awards, password, adminPassword) {
         const res = await fetch(`/api/competitions/${id}/awards`, {
             method: 'PUT',

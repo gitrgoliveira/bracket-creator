@@ -1856,6 +1856,17 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		assert.Equal(t, "Osaka", saved.FightingSpiritAwards[0].RecipientDojo)
 	})
 
+	t.Run("400: missing fightingSpiritAwards field (body {}) rejected", func(t *testing.T) {
+		// The field is documented required; a body of `{}` must 400 rather
+		// than silently clear the list. An explicit [] (covered above) clears.
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBufferString("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "fightingSpiritAwards is required")
+	})
+
 	t.Run("400: malformed JSON body rejected", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBufferString("{not json"))

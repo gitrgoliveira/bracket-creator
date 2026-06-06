@@ -1351,15 +1351,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Pointer slice distinguishes "field omitted" (nil) from "explicit
+		// empty array" ([]). The field is documented required (OpenAPI
+		// required: [fightingSpiritAwards]); a body of `{}` must 400 rather
+		// than silently clear the list, while an explicit [] clears it.
 		var body struct {
-			FightingSpiritAwards []state.FightingSpiritAward `json:"fightingSpiritAwards"`
+			FightingSpiritAwards *[]state.FightingSpiritAward `json:"fightingSpiritAwards"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if body.FightingSpiritAwards == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "fightingSpiritAwards is required (use an empty array to clear all awards)"})
+			return
+		}
 
-		awards := body.FightingSpiritAwards
+		awards := *body.FightingSpiritAwards
 		if len(awards) > MaxFightingSpiritAwards {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards must not exceed %d entries", MaxFightingSpiritAwards)})
 			return
@@ -1373,23 +1381,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			recipientDojo := strings.TrimSpace(a.RecipientDojo)
 
 			if title == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("awards[%d]: title is required", i)})
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: title is required", i)})
 				return
 			}
 			if recipientName == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("awards[%d]: recipientName is required", i)})
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: recipientName is required", i)})
 				return
 			}
 			if err := validateMaxLen("title", title, MaxLenPlayerName); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("awards[%d]: %s", i, err.Error())})
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: %s", i, err.Error())})
 				return
 			}
 			if err := validateMaxLen("recipientName", recipientName, MaxLenPlayerName); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("awards[%d]: %s", i, err.Error())})
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: %s", i, err.Error())})
 				return
 			}
 			if err := validateMaxLen("recipientDojo", recipientDojo, MaxLenPlayerDojo); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("awards[%d]: %s", i, err.Error())})
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: %s", i, err.Error())})
 				return
 			}
 			trimmed = append(trimmed, state.FightingSpiritAward{

@@ -313,6 +313,92 @@ export function formatCompMinutes(m) {
   return `${h}h ${String(min).padStart(2, "0")}m`;
 }
 
+// FightingSpiritAwardsEditor: free-text form for adding/removing/saving
+// optional fighting-spirit (敢闘賞) awards for a competition. Each award has
+// a title, recipient name, and optional dojo. Save calls
+// API.updateCompetitionAwards (elevated-gated PUT /api/competitions/:id/awards).
+// v1 = free-text only; no competitor picker (deferred).
+function FightingSpiritAwardsEditor({ c, password, showToast }) {
+  const [awards, setAwards] = useStateA(() => (c.fightingSpiritAwards || []).map(a => ({ ...a })));
+  const [saving, setSaving] = useStateA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // Sync from parent when the competition prop refreshes (e.g. SSE update).
+  useEffectA(() => {
+    setAwards((c.fightingSpiritAwards || []).map(a => ({ ...a })));
+  }, [c.fightingSpiritAwards]);
+
+  const addRow = () => setAwards(prev => [...prev, { title: "Fighting Spirit", recipientName: "", recipientDojo: "" }]);
+  const removeRow = (idx) => setAwards(prev => prev.filter((_, i) => i !== idx));
+  const updateField = (idx, field, val) => setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a));
+
+  const save = async () => {
+    const admin = window.promptAdminPassword ? window.promptAdminPassword() : null;
+    if (admin === null) return;
+    setSaving(true);
+    try {
+      await window.API.updateCompetitionAwards(c.id, awards, password, admin);
+      if (mountedRef.current) showToast("Fighting Spirit awards saved.", "success");
+    } catch (e) {
+      if (mountedRef.current) showToast(e.message || "Failed to save awards", "error");
+    } finally {
+      if (mountedRef.current) setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontWeight: 600, fontSize: 14 }}>🔥 Fighting Spirit Awards <span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
+      <div className="field__hint" style={{ marginTop: -4 }}>Record individual honourees independent of the placement podium. Shown to viewers on the Awards tab.</div>
+      {awards.length === 0 && (
+        <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>No awards yet.</div>
+      )}
+      {awards.map((a, idx) => (
+        <div key={idx} style={{ display: "flex", gap: 6, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <input
+            className="input"
+            placeholder="Title (e.g. Fighting Spirit)"
+            value={a.title || ""}
+            onChange={e => updateField(idx, "title", e.target.value)}
+            style={{ flex: "1 1 140px", minWidth: 100 }}
+            data-testid={`fs-award-title-${idx}`}
+          />
+          <input
+            className="input"
+            placeholder="Recipient name"
+            value={a.recipientName || ""}
+            onChange={e => updateField(idx, "recipientName", e.target.value)}
+            style={{ flex: "2 1 180px", minWidth: 120 }}
+            data-testid={`fs-award-name-${idx}`}
+          />
+          <input
+            className="input"
+            placeholder="Dojo (optional)"
+            value={a.recipientDojo || ""}
+            onChange={e => updateField(idx, "recipientDojo", e.target.value)}
+            style={{ flex: "1 1 120px", minWidth: 90 }}
+            data-testid={`fs-award-dojo-${idx}`}
+          />
+          <button
+            className="btn btn--sm btn--ghost"
+            onClick={() => removeRow(idx)}
+            aria-label="Remove award"
+            data-testid={`fs-award-remove-${idx}`}
+          >✕</button>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <button className="btn btn--sm btn--ghost" onClick={addRow} data-testid="fs-award-add">+ Add award</button>
+        <button className="btn btn--sm btn--primary" onClick={save} disabled={saving} data-testid="fs-award-save">
+          {saving && <span className="spinner" />}
+          {saving ? "Saving…" : "Save awards"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
   const [lastSaved, setLastSaved] = useStateA(null);
   const [saveErr, setSaveErr] = useStateA(null);
@@ -903,6 +989,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
+      <FightingSpiritAwardsEditor c={c} password={password} showToast={showToast} />
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
         {(local.status === "pools" || local.status === "playoffs") && (
           <div>

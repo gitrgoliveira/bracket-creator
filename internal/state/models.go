@@ -269,6 +269,16 @@ func (t *Tournament) Days() []string {
 	return days
 }
 
+// FightingSpiritAward is an optional, per-competition individual honour
+// (敢闘賞 / kantōshō) independent of the placement podium. Recipient is a
+// plain name string for parity with the rest of the system (no UUID ref) —
+// it is display-only and matches nothing.
+type FightingSpiritAward struct {
+	Title         string `yaml:"title" json:"title"`
+	RecipientName string `yaml:"recipient_name" json:"recipientName"`
+	RecipientDojo string `yaml:"recipient_dojo,omitempty" json:"recipientDojo,omitempty"`
+}
+
 type Competition struct {
 	ID                   string            `yaml:"id" json:"id"`
 	Name                 string            `yaml:"name" json:"name"`
@@ -328,6 +338,8 @@ type Competition struct {
 	Naginata bool `yaml:"naginata,omitempty" json:"naginata"`
 
 	CheckInEnabled bool `yaml:"check_in_enabled,omitempty" json:"checkInEnabled,omitempty"`
+
+	FightingSpiritAwards []FightingSpiritAward `yaml:"fighting_spirit_awards,omitempty" json:"fightingSpiritAwards,omitempty"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
 }

@@ -2674,7 +2674,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer, PoolNumberedMatchRow };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -3139,18 +3139,26 @@ function AwardsView({ c, bracket, standings, pools, players }) {
   }
 
   if (awards.length === 0) {
+    const fsAwards = c?.fightingSpiritAwards;
+    const hasFsAwards = fsAwards && fsAwards.length > 0;
     if (isMixed && resolvedState === "in-progress") {
       return (
-        <div className="empty" data-testid="awards-in-progress">
-          <div className="icon">🏆</div>
-          <h3>Knockout in progress</h3>
+        <div>
+          <div className="empty" data-testid="awards-in-progress">
+            <div className="icon">🏆</div>
+            <h3>Knockout in progress</h3>
+          </div>
+          {hasFsAwards && <FightingSpiritSection fsAwards={fsAwards} isFs={isFs} />}
         </div>
       );
     }
     return (
-      <div className="empty" data-testid="awards-empty">
-        <div className="icon">🏆</div>
-        <h3>Final standings not yet available</h3>
+      <div>
+        <div className="empty" data-testid="awards-empty">
+          <div className="icon">🏆</div>
+          <h3>Final standings not yet available</h3>
+        </div>
+        {hasFsAwards && <FightingSpiritSection fsAwards={fsAwards} isFs={isFs} />}
       </div>
     );
   }
@@ -3213,6 +3221,8 @@ function AwardsView({ c, bracket, standings, pools, players }) {
             );
           })}
         </div>
+        {/* Fighting Spirit awards — distinct section, independent of the podium */}
+        <FightingSpiritSection fsAwards={c?.fightingSpiritAwards} isFs={isFs} />
       </div>
     );
   }
@@ -3289,6 +3299,58 @@ function AwardsView({ c, bracket, standings, pools, players }) {
           ))}
         </div>
       )}
+
+      {/* Fighting Spirit awards — distinct section, independent of the podium */}
+      <FightingSpiritSection fsAwards={c?.fightingSpiritAwards} isFs={isFs} />
+    </div>
+  );
+}
+
+// FightingSpiritSection renders the 🔥 Fighting Spirit subsection inside
+// AwardsView. Distinct from the placement podium — never merged into
+// deriveAwards/podium logic. Renders nothing when the list is empty/absent.
+function FightingSpiritSection({ fsAwards, isFs }) {
+  if (!fsAwards || fsAwards.length === 0) return null;
+  return (
+    <div
+      style={{ marginTop: 24, borderTop: "1px solid var(--line)", paddingTop: 16 }}
+      data-testid="fighting-spirit-section"
+    >
+      <div
+        className="section-title"
+        style={{ margin: "0 0 12px", fontSize: isFs ? 22 : 15 }}
+      >
+        🔥 Fighting Spirit
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {fsAwards.map((a, idx) => (
+          <div
+            key={idx}
+            style={{
+              padding: isFs ? "14px 20px" : "10px 14px",
+              borderRadius: 8,
+              background: "var(--accent-soft, #fff7ed)",
+              border: "1px solid var(--accent-warm, #fb923c)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+            }}
+            data-testid={`fighting-spirit-award-${idx}`}
+          >
+            <div style={{ fontSize: isFs ? 13 : 11, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              {a.title}
+            </div>
+            <div style={{ fontSize: isFs ? 22 : 16, fontWeight: 700, color: "var(--ink-1)" }}>
+              {a.recipientName}
+            </div>
+            {a.recipientDojo && (
+              <div style={{ fontSize: isFs ? 14 : 12, color: "var(--ink-3)" }}>
+                {a.recipientDojo}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

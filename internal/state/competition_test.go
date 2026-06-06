@@ -334,3 +334,84 @@ func TestNaginataJSONAlwaysPresent(t *testing.T) {
 		assert.NotContains(t, string(data), "naginata", "YAML tag keeps omitempty: false must not appear in config.md")
 	})
 }
+
+// TestFightingSpiritAwardsRoundTrip verifies that FightingSpiritAwards
+// round-trip through YAML correctly: N awards survive, absent field loads
+// as nil, and an empty slice omits the key from YAML output.
+func TestFightingSpiritAwardsRoundTrip(t *testing.T) {
+	t.Run("N awards round-trip through YAML front-matter", func(t *testing.T) {
+		original := Competition{
+			ID:   "fs-comp",
+			Name: "FS Awards",
+			FightingSpiritAwards: []FightingSpiritAward{
+				{Title: "Fighting Spirit", RecipientName: "Alice Yamada", RecipientDojo: "Shinjuku"},
+				{Title: "Best Technique", RecipientName: "Bob Tanaka"},
+			},
+		}
+		data, err := writeFrontMatter(&original)
+		require.NoError(t, err)
+
+		var loaded Competition
+		require.NoError(t, parseFrontMatter(data, &loaded))
+
+		require.Len(t, loaded.FightingSpiritAwards, 2, "both awards must survive the round-trip")
+		assert.Equal(t, "Fighting Spirit", loaded.FightingSpiritAwards[0].Title)
+		assert.Equal(t, "Alice Yamada", loaded.FightingSpiritAwards[0].RecipientName)
+		assert.Equal(t, "Shinjuku", loaded.FightingSpiritAwards[0].RecipientDojo)
+		assert.Equal(t, "Best Technique", loaded.FightingSpiritAwards[1].Title)
+		assert.Equal(t, "Bob Tanaka", loaded.FightingSpiritAwards[1].RecipientName)
+		assert.Equal(t, "", loaded.FightingSpiritAwards[1].RecipientDojo, "absent dojo must be empty string")
+	})
+
+	t.Run("absent field loads as nil (legacy config)", func(t *testing.T) {
+		legacyYAML := []byte("---\nid: legacy\nname: Legacy Comp\n---\n")
+		var c Competition
+		require.NoError(t, parseFrontMatter(legacyYAML, &c))
+		assert.Nil(t, c.FightingSpiritAwards, "absent field must load as nil")
+	})
+
+	t.Run("empty slice omits the key from YAML output", func(t *testing.T) {
+		c := Competition{
+			ID:                   "empty-fs",
+			Name:                 "No Awards",
+			FightingSpiritAwards: []FightingSpiritAward{},
+		}
+		data, err := writeFrontMatter(&c)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "fighting_spirit_awards", "omitempty: empty slice must not appear in YAML")
+	})
+
+	t.Run("dojo optional: omitempty omits it from YAML when empty", func(t *testing.T) {
+		original := Competition{
+			ID:   "no-dojo-comp",
+			Name: "No Dojo",
+			FightingSpiritAwards: []FightingSpiritAward{
+				{Title: "Spirit", RecipientName: "Carol Ito"},
+			},
+		}
+		data, err := writeFrontMatter(&original)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "recipient_dojo", "empty dojo must not appear in YAML")
+	})
+
+	t.Run("round-trips via store SaveCompetition + LoadCompetition", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+
+		comp := &Competition{
+			ID:     "store-fs-comp",
+			Name:   "Store FS Test",
+			Status: CompStatusComplete,
+			FightingSpiritAwards: []FightingSpiritAward{
+				{Title: "Fighting Spirit", RecipientName: "Dan Watanabe", RecipientDojo: "Osaka"},
+			},
+		}
+		require.NoError(t, store.SaveCompetition(comp))
+
+		loaded, err := store.LoadCompetition("store-fs-comp")
+		require.NoError(t, err)
+		require.Len(t, loaded.FightingSpiritAwards, 1)
+		assert.Equal(t, "Dan Watanabe", loaded.FightingSpiritAwards[0].RecipientName)
+		assert.Equal(t, "Osaka", loaded.FightingSpiritAwards[0].RecipientDojo)
+	})
+}

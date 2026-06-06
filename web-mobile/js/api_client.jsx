@@ -550,6 +550,25 @@ const API = {
         }
         return res.json();
     },
+    // Replace the full fighting-spirit awards list for a competition.
+    // awards: array of { title, recipientName, recipientDojo? }.
+    // Requires the elevated (admin) password.
+    async updateCompetitionAwards(id, awards, password, adminPassword) {
+        const res = await fetch(`/api/competitions/${id}/awards`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password,
+                ...adminHdr(adminPassword)
+            },
+            body: JSON.stringify({ fightingSpiritAwards: awards })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to update competition awards");
+        }
+        return res.json();
+    },
     // T129/T130: per-round team lineups (FR-040). GET returns the persisted
     // TeamLineup for (compId, teamId, round) — 404 when no lineup has been
     // submitted yet, which the form treats as "blank, editable". PUT replaces

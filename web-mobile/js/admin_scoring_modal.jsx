@@ -1166,41 +1166,12 @@ function renderPositionLabel(label) {
   return label;
 }
 
-// mp-bkg regression guard: exported so vitest can test the fallback
-// logic without mounting the component. Calls the two API functions
-// supplied as arguments (injected for testing), resolves to the
-// per-match lineup when it exists, falling back to the round lineup
-// when the match-specific GET returns null (404).
-// Both API calls are soft-fail: a network error on the per-match
-// endpoint falls through to the round endpoint; a network error on
-// the round endpoint is swallowed (same behaviour as the pre-mp-bkg
-// round-only path).
-async function resolveMatchLineup(compId, teamId, matchId, round, { fetchMatchLineup, fetchTeamLineup }) {
-  try {
-    const matchLineup = await fetchMatchLineup(compId, teamId, matchId);
-    if (matchLineup !== null) return matchLineup;
-  } catch (_e) { /* network: fall through */ }
-  try {
-    return await fetchTeamLineup(compId, teamId, round);
-  } catch (_e) { /* 404 / network: ignore */ }
-  return null;
-}
-
-// resolveLineupTeamId maps a match-side key to the participant id that
-// lineups are actually stored under. A match side's `id` is the team NAME
-// (api_serializers.buildPlayerMap sets id = name), but TeamLineups are
-// keyed server-side by the participant's real id (a UUID — the value
-// teamIdOf() returns from comp.players). Passing the name straight through
-// makes the lineup GET 404, so the per-match (and round) lineup never
-// reaches the scoring grid. We look the side up in the competition's
-// participant list by id OR name and return its real id. Exported for tests.
-function resolveLineupTeamId(sideKey, players) {
-  if (!sideKey) return "";
-  const list = Array.isArray(players) ? players : [];
-  const p = list.find(pl => pl
-    && (pl.id === sideKey || pl.ID === sideKey || pl.name === sideKey || pl.Name === sideKey));
-  return (p && (p.id || p.ID)) || sideKey;
-}
+// mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
+// across all consumer surfaces (admin scoring modal, viewer, TvDisplay,
+// StreamingOverlay). The implementations live in lineup_resolver.js;
+// re-exported here so existing imports from admin_scoring_modal.jsx continue
+// to work (scoring_modal_match_lineup.test.jsx imports directly from here).
+import { resolveMatchLineup, resolveLineupTeamId } from './lineup_resolver.jsx';
 
 function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport }) {
   const m = match;

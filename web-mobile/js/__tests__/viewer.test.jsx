@@ -352,7 +352,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   // `global.window.x = vi.fn()` assignments — without this the mocked globals
   // leak into later suites and make failures order-dependent.
   const savedGlobals = {};
-  const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr'];
+  const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr', 'isHikiwake'];
 
   const mkTeamMatch = (subs) => ({
     compKind: 'team',
@@ -368,6 +368,8 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     subResults: subs,
   });
 
+  let BoutSubRow;
+
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
@@ -381,8 +383,9 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = vi.fn(() => []);
+    global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
-    ({ MatchDetailCard } = await import('../viewer.jsx'));
+    ({ MatchDetailCard, BoutSubRow } = await import('../viewer.jsx'));
   });
 
   afterEach(() => {
@@ -399,7 +402,26 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     vi.resetModules();
   });
 
+  // mp-13y: BoutSubRow is now a standalone component — MatchDetailCard renders
+  // <BoutSubRow/> as a child component vnode. The reactive shim does NOT expand
+  // child component vnodes (it only runs the root factory), so text assertions
+  // on the overall MatchDetailCard tree can't see inside BoutSubRow. Instead,
+  // mount BoutSubRow directly to verify the DH row's text and hantei marker.
   it('labels the daihyosen row "Daihyosen" and shows "Hantei" when decidedByHantei', () => {
+    // Verify the DH row via a direct BoutSubRow mount (canonical layout test).
+    const dhSub = { position: -1, ipponsA: ['K'], ipponsB: [], decidedByHantei: true };
+    const dhTree = runtime.mount(BoutSubRow, { sub: dhSub, index: 1, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
+    const dhText = collectText(dhTree);
+    expect(dhText).toContain('Daihyosen');
+    expect(dhText).not.toContain('Match -1');
+    expect(dhText).toContain('Hantei');
+    // The marker must carry left spacing so it does not render flush against
+    // the label as "DaihyosenHantei" (Copilot review on #192).
+    const marker = findInTree(dhTree, n => n?.props?.['data-testid'] === 'sub-row-hantei');
+    expect(marker).toBeTruthy();
+    expect(marker.props.style?.marginLeft).toBeTruthy();
+
+    // MatchDetailCard must still render the team-subs container for team matches.
     const tree = runtime.mount(MatchDetailCard, {
       match: mkTeamMatch([
         { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
@@ -407,29 +429,17 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
       ]),
       onClose: null,
     });
-    const text = collectText(tree);
-    expect(text).toContain('Match 1');
-    expect(text).toContain('Daihyosen');
-    expect(text).not.toContain('Match -1');
-    expect(text).toContain('Hantei');
-    // The marker must carry left spacing so it does not render flush against
-    // the label as "DaihyosenHantei" (Copilot review on #192).
-    const marker = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei');
-    expect(marker).toBeTruthy();
-    expect(marker.props.style?.marginLeft).toBeTruthy();
+    const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
+    expect(teamSubs).toBeTruthy();
   });
 
   it('omits the "Hantei" marker when no sub was decided by hantei', () => {
-    const tree = runtime.mount(MatchDetailCard, {
-      match: mkTeamMatch([
-        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
-        { position: -1, ipponsA: ['K'], ipponsB: ['K'], decidedByHantei: false },
-      ]),
-      onClose: null,
-    });
-    const text = collectText(tree);
-    expect(text).toContain('Daihyosen');
-    expect(text).not.toContain('Hantei');
+    // Mount BoutSubRow directly for the DH row without hantei.
+    const dhSub = { position: -1, ipponsA: ['K'], ipponsB: ['K'], decidedByHantei: false };
+    const dhTree = runtime.mount(BoutSubRow, { sub: dhSub, index: 1, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
+    const dhText = collectText(dhTree);
+    expect(dhText).toContain('Daihyosen');
+    expect(dhText).not.toContain('Hantei');
   });
 
   // mp-116: Overview "Recent results" bug — allMatches useMemo was not threading
@@ -535,8 +545,9 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     const text = collectText(tree);
     // Header must show the round label, not an empty string after "Shiaijo A ·".
     expect(text).toContain('Final');
-    // Team path renders the SHIRO/Position/AKA sub-bout table.
-    expect(text).toContain('Position');
+    // mp-13y: team path now renders the SHIRO/Score/AKA canonical header (was Position).
+    expect(text).toContain('Score');
+    expect(text).not.toContain('Position');
   });
 
   it('renders the pool name in the header for a pool match', () => {

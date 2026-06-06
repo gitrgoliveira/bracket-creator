@@ -1,6 +1,8 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup } from './lineup_resolver.jsx';
+
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
@@ -1782,10 +1784,150 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   );
 }
 
+// boutHansokuMark — returns the FIK-canonical outstanding hansoku marker for a
+// side's foul count. fouls % 2 === 1 → red ▲ (one outstanding hansoku);
+// fouls % 2 === 0 → "" (none or already converted to an H ippon on the
+// opponent). Never renders two triangles — FIK Table 1 (p.15) requires the ▲
+// to be deleted when the second hansoku is recorded and 1 ippon awarded.
+// Exported for vitest.
+export function boutHansokuMark(foulCount) {
+  return (foulCount || 0) % 2 === 1 ? "▲" : "";
+}
+
+// useTeamLineups — async effect hook that fetches per-match lineups for both
+// sides of a team match. Returns { lineupA, lineupB } where each is either a
+// lineup object ({ positions: {...} }) or null when no lineup has been set.
+// Degrades gracefully: if window.API is missing (public viewer with no auth)
+// both lineups remain null and the caller falls back to bout numbers.
+//
+// sideAKey / sideBKey are the raw `id` values from match.sideA / match.sideB
+// which api_serializers sets to the team name; resolveLineupTeamId maps them
+// to the participant UUID that the lineup API is keyed under.
+function useTeamLineups(match) {
+  const [lineupA, setLineupA] = useState(null);
+  const [lineupB, setLineupB] = useState(null);
+
+  const compId = match?.compId;
+  const matchId = match?.id;
+  const sideAId = match?.sideA?.id || match?.sideA?.name || (typeof match?.sideA === "string" ? match?.sideA : "");
+  const sideBId = match?.sideB?.id || match?.sideB?.name || (typeof match?.sideB === "string" ? match?.sideB : "");
+
+  useEffect(() => {
+    if (!compId || !matchId || !window.API) return undefined;
+    let cancelled = false;
+
+    (async () => {
+      // Fetch competition detail to resolve name-keyed side → UUID (same
+      // pattern as TeamScoreEditorModal; see admin_scoring_modal.jsx).
+      let players = [];
+      try {
+        const detail = await window.API.fetchCompetitionDetails(compId);
+        if (cancelled) return;
+        players =
+          (detail && detail.players && detail.players.length ? detail.players : null)
+          || (detail && detail.config && detail.config.players)
+          || [];
+      } catch (_e) {
+        // Soft-fail: lineup stays null, viewer falls back to bout number.
+        console.warn("useTeamLineups: competition fetch failed", _e);
+      }
+
+      // Extract a numeric round index for the round-lineup fallback.
+      let round = 0;
+      if (typeof match.round === "string") {
+        const mr = /^Round\s+(\d+)$/.exec(match.round);
+        if (mr) round = parseInt(mr[1], 10) - 1;
+      } else if (typeof match.round === "number") {
+        round = match.round;
+      }
+
+      const teamAId = resolveLineupTeamId(sideAId, players);
+      const teamBId = resolveLineupTeamId(sideBId, players);
+
+      if (teamAId) {
+        const l = await resolveMatchLineup(compId, teamAId, matchId, round, window.API);
+        if (!cancelled) setLineupA(l);
+      }
+      if (teamBId) {
+        const l = await resolveMatchLineup(compId, teamBId, matchId, round, window.API);
+        if (!cancelled) setLineupB(l);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [compId, matchId]);
+
+  return { lineupA, lineupB };
+}
+
+// BoutSubRow — canonical FIK team-match bout row used by both MatchDetailCard
+// and MatchViewerModal. Format: Shiro name (left) | bout marks (centre) | Aka name (right).
+// names on the outside, marks in the centre — matching the TvDisplay format.
+//
+// Props:
+//   sub        — subResult object { ipponsA, ipponsB, hansokuA, hansokuB,
+//                                   position, decidedByHantei, sideA, sideB }
+//   index      — 0-based position index (for fallback label)
+//   lineupA    — resolved lineup for sideA (Aka / right side)
+//   lineupB    — resolved lineup for sideB (Shiro / left side)
+//   teamSize   — number of bout positions (for named key lookup)
+//   isDH       — true for the daihyosen row (position -1)
+export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH }) {
+  const ipponsB = (sub.ipponsB || []).filter(x => x && x !== "•").join("");
+  const ipponsA = (sub.ipponsA || []).filter(x => x && x !== "•").join("");
+  const hansokuB = sub.hansokuB || 0;
+  const hansokuA = sub.hansokuA || 0;
+
+  // Outstanding hansoku on each side (fouls % 2 === 1).
+  const foulMarkB = boutHansokuMark(hansokuB);
+  const foulMarkA = boutHansokuMark(hansokuA);
+
+  // Bout marks centre: shiro-score [▲] – [▲] aka-score, or X for draw,
+  // or DH label for the daihyosen row.
+  const isDraw = sub.decidedByHantei
+    ? false
+    : (window.isHikiwake && (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision)));
+
+  // Resolve player names from lineup; fall back to bout number (1-indexed).
+  const boutNum = isDH ? "DH" : String((sub && sub.position > 0 ? sub.position : index + 1));
+  const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || sub.sideB || boutNum;
+  const akaName   = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || sub.sideA || boutNum;
+
+  // Centre marks: ippon letters + draw/hantei indicators.
+  const centreMarks = isDH
+    ? (
+        <span>
+          <span style={{ fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>Daihyosen</span>
+          {sub.decidedByHantei && <span style={{ marginLeft: 4, fontSize: 10, color: "var(--ink-3)", fontWeight: 600 }} data-testid="sub-row-hantei">Hantei</span>}
+        </span>
+      )
+    : isDraw
+      ? <span style={{ fontWeight: 700 }}>X</span>
+      : (
+          <span>
+            {foulMarkB && <span style={{ color: "var(--red, #c1121f)", marginRight: 2 }} data-testid="foul-mark-b">{foulMarkB}</span>}
+            <span>{ipponsB || "—"}</span>
+            <span style={{ opacity: 0.5, margin: "0 4px" }}>–</span>
+            <span>{ipponsA || "—"}</span>
+            {foulMarkA && <span style={{ color: "var(--red, #c1121f)", marginLeft: 2 }} data-testid="foul-mark-a">{foulMarkA}</span>}
+            {sub.decidedByHantei && <span style={{ marginLeft: 4, fontSize: 10, color: "var(--ink-3)", fontWeight: 600 }} data-testid="sub-row-hantei">Hantei</span>}
+          </span>
+        );
+
+  return (
+    <div className="match-detail-card__sub-row" data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
+      <span className="match-detail-card__sub-name" data-testid="sub-shiro-name">{shiroName}</span>
+      <span className="match-detail-card__sub-pos" data-testid="sub-marks">{centreMarks}</span>
+      <span className="match-detail-card__sub-name match-detail-card__sub-name--right" data-testid="sub-aka-name">{akaName}</span>
+    </div>
+  );
+}
+
 // Inline match detail card — shown directly on the page (no modal needed).
 function MatchDetailCard({ match, onClose }) {
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
+  const teamSize = match.teamSize || 0;
   const aName = match.sideA?.name || "TBD";
   const bName = match.sideB?.name || "TBD";
   const aWin = match.winner?.id === match.sideA?.id && match.winner?.id;
@@ -1796,6 +1938,10 @@ function MatchDetailCard({ match, onClose }) {
   // same fallback used in VSchedItem so the score display is consistent.
   const mdcIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
   const mdcIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
+
+  // mp-13y: fetch per-match lineups for team matches so bout rows show
+  // competitor names instead of bout numbers.
+  const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null);
 
   return (
     <div className="match-detail-card">
@@ -1833,7 +1979,13 @@ function MatchDetailCard({ match, onClose }) {
         <div className="match-detail-card__ippons">
           <div className="match-detail-card__ippons-side">
             <span className="match-detail-card__ippons-val">{mdcIpponsB.filter(x => x && x !== "•").join("") || "—"}</span>
-            {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
+            {/* mp-13y: outstanding hansoku shown as red ▲ (FIK Table 1 p.15).
+                fouls % 2 === 1 → one outstanding ▲; 0 → cleared (converted to H). */}
+            {boutHansokuMark(match.hansokuB) && (
+              <span className="match-detail-card__fouls" style={{ color: "var(--red, #c1121f)" }} data-testid="mdc-foul-b">
+                {boutHansokuMark(match.hansokuB)}
+              </span>
+            )}
           </div>
           <div className="match-detail-card__ippons-center">
             {match.decidedByHantei && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
@@ -1841,27 +1993,32 @@ function MatchDetailCard({ match, onClose }) {
           </div>
           <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
             <span className="match-detail-card__ippons-val">{mdcIpponsA.filter(x => x && x !== "•").join("") || "—"}</span>
-            {match.hansokuA > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuA}</span>}
+            {boutHansokuMark(match.hansokuA) && (
+              <span className="match-detail-card__fouls" style={{ color: "var(--red, #c1121f)" }} data-testid="mdc-foul-a">
+                {boutHansokuMark(match.hansokuA)}
+              </span>
+            )}
           </div>
         </div>
       )}
 
-      {isDone && isTeam && match.subResults && match.subResults.length > 0 && (
+      {/* mp-13y: team sub-bout rows in canonical FIK format:
+          Shiro name (left) | bout marks (centre) | Aka name (right).
+          Works for both completed and live (in-progress) team matches so
+          lineup names appear during play too. */}
+      {isTeam && match.subResults && match.subResults.length > 0 && (
         <div className="match-detail-card__team-subs">
-          {match.subResults.map((sub, i) => {
-            const sA = (sub.ipponsA || []).filter(x => x && x !== "•").join("") || "—";
-            const sB = (sub.ipponsB || []).filter(x => x && x !== "•").join("") || "—";
-            return (
-              <div key={i} className="match-detail-card__sub-row">
-                <span className="match-detail-card__sub-score">{sB}</span>
-                <span className="match-detail-card__sub-pos">
-                  {subBoutLabel(sub, i)}
-                  {sub.decidedByHantei && <span className="match-detail-card__decision" data-testid="sub-row-hantei" style={{ marginLeft: 6 }}>Hantei</span>}
-                </span>
-                <span className="match-detail-card__sub-score match-detail-card__sub-score--right">{sA}</span>
-              </div>
-            );
-          })}
+          {match.subResults.map((sub, i) => (
+            <BoutSubRow
+              key={i}
+              sub={sub}
+              index={i}
+              lineupA={lineupA}
+              lineupB={lineupB}
+              teamSize={teamSize}
+              isDH={sub.position === -1}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -3377,6 +3534,7 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
   const [scoringMatch, setScoringMatch] = useState(null);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
+  const teamSize = match.teamSize || 0;
   const aName = match.sideA?.name || "TBD";
   const bName = match.sideB?.name || "TBD";
   const aWin = match.winner?.id === match.sideA?.id;
@@ -3389,6 +3547,9 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
   const isSelfRun = tournament && tournament.mode === "self-run";
   const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
   const isFinalized = match.status === "completed";
+
+  // mp-13y: per-match lineups for team sub-bout canonical rendering.
+  const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null);
 
   if (scoringMatch && window.ScoreEditorModal) {
     return React.createElement(window.ScoreEditorModal, {
@@ -3419,7 +3580,7 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
           <span><TermV name="shiaijo">Shiaijo</TermV> {match.court} · {match.phase === "pool" ? match.poolName : match.round}</span>
           <window.StatusBadge status={match.status} showLiveDot={match.status === "running"} />
         </div>
-        
+
         <div className="se-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <div className={`se-head__side ${bWin ? "se-head__side--w" : ""}`} style={{ flex: 1 }}>
              <div className="se-head__name" style={{ fontWeight: 600 }}>{bName}</div>
@@ -3434,33 +3595,25 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
 
         {isTeam ? (
           <div>
+            {/* mp-13y: canonical team-match bout table header.
+                Format mirrors the FIK Table 2 dantai-shiai scoreboard:
+                Shiro name (left) | bout marks (centre) | Aka name (right). */}
             <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 8, fontSize: 12, fontWeight: 600, color: "var(--ink-3)" }}>
-              <div style={{ width: 80 }}>SHIRO</div>
-              <div style={{ flex: 1, textAlign: "center" }}>Position</div>
-              <div style={{ width: 80, textAlign: "right" }}>AKA</div>
+              <div style={{ flex: 1 }}>SHIRO</div>
+              <div style={{ flex: 1, textAlign: "center" }}>Score</div>
+              <div style={{ flex: 1, textAlign: "right" }}>AKA</div>
             </div>
-            {match.subResults && match.subResults.length > 0 ? match.subResults.map((sub, i) => {
-               const sIpponsB = (sub.ipponsB || []).filter(x => x && x !== "•").join("");
-               const sIpponsA = (sub.ipponsA || []).filter(x => x && x !== "•").join("");
-               const hansokuB = sub.hansokuB || 0;
-               const hansokuA = sub.hansokuA || 0;
-               return (
-                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line-light)" }}>
-                   <div style={{ width: 80, display: "flex", flexDirection: "column" }}>
-                     <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsB || "—"}</span>
-                     {hansokuB > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuB}</span>}
-                   </div>
-                   <div style={{ flex: 1, textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>
-                     {subBoutLabel(sub, i)}
-                     {sub.decidedByHantei && <span data-testid="sub-pool-hantei" style={{ marginLeft: 6, fontWeight: 600 }}>Hantei</span>}
-                   </div>
-                   <div style={{ width: 80, textAlign: "right", display: "flex", flexDirection: "column" }}>
-                     <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsA || "—"}</span>
-                     {hansokuA > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuA}</span>}
-                   </div>
-                 </div>
-               );
-            }) : (
+            {match.subResults && match.subResults.length > 0 ? match.subResults.map((sub, i) => (
+              <BoutSubRow
+                key={i}
+                sub={sub}
+                index={i}
+                lineupA={lineupA}
+                lineupB={lineupB}
+                teamSize={teamSize}
+                isDH={sub.position === -1}
+              />
+            )) : (
               <div style={{ textAlign: "center", padding: 20, color: "var(--ink-3)" }}>No individual match details available.</div>
             )}
           </div>
@@ -3470,13 +3623,22 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flex: 1 }}>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
                   <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsB.filter(x => x && x !== "•").join("") || "—"}</div>
-                  {match.hansokuB > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuB}</div>}
+                  {/* mp-13y: ▲ for outstanding hansoku (FIK Table 1 p.15) */}
+                  {boutHansokuMark(match.hansokuB) && (
+                    <div style={{ fontSize: 14, color: "var(--red, #c1121f)", marginTop: 4 }} data-testid="mdc-foul-b">
+                      {boutHansokuMark(match.hansokuB)}
+                    </div>
+                  )}
                </div>
                <div style={{ fontSize: 24, color: "var(--ink-3)", padding: "0 16px" }}>-</div>
                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flex: 1 }}>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
                   <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsA.filter(x => x && x !== "•").join("") || "—"}</div>
-                  {match.hansokuA > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuA}</div>}
+                  {boutHansokuMark(match.hansokuA) && (
+                    <div style={{ fontSize: 14, color: "var(--red, #c1121f)", marginTop: 4 }} data-testid="mdc-foul-a">
+                      {boutHansokuMark(match.hansokuA)}
+                    </div>
+                  )}
                </div>
             </div>
             {match.decidedByHantei && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}

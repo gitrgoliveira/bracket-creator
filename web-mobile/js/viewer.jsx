@@ -2997,6 +2997,14 @@ function bracketHasDecidedFinal(bracket) {
 //   'in-progress' — knockout not yet decided (podium [])
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 async function resolveCompetitionAwards(comp, fetchers) {
+  // A linked-playoffs shell (legacy split-comp layout carrying sourceCompID)
+  // derives its podium from its source comp, never standalone — drop it so it
+  // doesn't appear twice in the results summary. buildAllWinnersPublic filters
+  // state==="skip". (The current data model no longer emits sourceCompID, so
+  // this is defensive parity with the documented behaviour.)
+  if (comp && comp.sourceCompID) {
+    return { state: "skip", podium: [] };
+  }
   const fmt = comp && comp.format;
   const ntpFrom = (players) => {
     const m = new Map();
@@ -3699,7 +3707,7 @@ async function buildAllWinnersPublic(comps, fetchers) {
   const results = await Promise.all(
     completed.map(async (comp) => {
       try {
-        const { state, podium } = await resolveCompetitionAwards(comp, comps, fetchers);
+        const { state, podium } = await resolveCompetitionAwards(comp, fetchers);
         return { comp, state, podium };
       } catch (err) {
         return { comp, state: "error", podium: [], error: err?.message || String(err) };

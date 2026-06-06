@@ -34,8 +34,8 @@ func TestGetResources(t *testing.T) {
 }
 
 // TestExecute verifies the Execute function runs without panicking when the
-// root command is invoked with --help (which cobra handles internally, returns
-// nil, and never calls os.Exit).
+// root command is invoked with no arguments (cobra prints usage and returns
+// nil, so os.Exit is never called).
 func TestExecute(t *testing.T) {
 	// Suppress cobra's output so help text doesn't pollute test logs.
 	rootCmd.SetOut(io.Discard)

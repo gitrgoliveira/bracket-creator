@@ -174,7 +174,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
             invisible spacer line so all sides (and thus all bracket cards) keep
             a uniform height (mp-7f2w). When showDojo is off, no line is rendered
             anywhere, so cards stay uniformly short. */}
-        {showDojo ? <span className="bc-dojo">{player.dojo || " "}</span> : null}
+        {showDojo ? <span className="bc-dojo">{player.dojo || <span aria-hidden="true">{"\u00A0"}</span>}</span> : null}
       </div>
       {score != null ? <span className="bc-score">{score}</span> : null}
     </div>

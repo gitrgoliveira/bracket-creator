@@ -514,10 +514,16 @@ function App() {
     window.API.fetchVersion().then((info) => {
       setVersionInfo(info);
       if (typeof window !== 'undefined') {
-        window.appVersionInfo = info;
+        // Use false (not null) as the "fetched but no data" sentinel so that
+        // VersionFooter's interval can distinguish "not yet fetched" (undefined)
+        // from "fetch completed with no result" (false) and always clear itself.
+        window.appVersionInfo = info ?? false;
       }
     }).catch(() => {
       setVersionInfo(null);
+      if (typeof window !== 'undefined') {
+        window.appVersionInfo = false; // sentinel: fetch done, no data
+      }
     });
   }, []);
 
@@ -1276,15 +1282,22 @@ function CreateTournament({ onCreated, authConfig }) {
 }
 
 function VersionFooter() {
+  // Initialize from window.appVersionInfo if already set (e.g. fast-loading page
+  // where App's fetch resolved before this component mounts). Treat the false
+  // sentinel ("fetched, no data") as null so the render guard below hides the footer.
   const [info, setInfo] = React.useState(window.appVersionInfo || null);
   React.useEffect(() => {
-    if (window.appVersionInfo) {
-      setInfo(window.appVersionInfo);
+    // window.appVersionInfo is either:
+    //   undefined — fetch not yet started/completed → poll
+    //   false     — fetch done, no data (null result or network error) → stop, show nothing
+    //   object    — fetch done with version data → show footer
+    if (window.appVersionInfo !== undefined) {
+      setInfo(window.appVersionInfo || null);
       return;
     }
     const interval = setInterval(() => {
-      if (window.appVersionInfo) {
-        setInfo(window.appVersionInfo);
+      if (window.appVersionInfo !== undefined) {
+        setInfo(window.appVersionInfo || null);
         clearInterval(interval);
       }
     }, 100);

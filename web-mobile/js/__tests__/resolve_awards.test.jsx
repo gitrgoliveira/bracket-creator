@@ -155,6 +155,22 @@ describe('resolveCompetitionAwards', () => {
     expect(result.podium[3]).toMatchObject({ place: 3 });
   });
 
+  // ── linked-playoffs shell → skip ─────────────────────────────────────────
+  it('playoffs comp with sourceCompID → state "skip", no fetch, podium []', async () => {
+    const comp = { id: 'playoffs-linked', format: 'playoffs', sourceCompID: 'mixed-1' };
+    const fetchers = {
+      fetchCompetitionDetails: vi.fn(),
+      swissStandings: null,
+    };
+
+    const result = await resolveCompetitionAwards(comp, fetchers);
+
+    expect(result.state).toBe('skip');
+    expect(result.podium).toEqual([]);
+    // The linked playoffs shell is skipped without fetching its details.
+    expect(fetchers.fetchCompetitionDetails).not.toHaveBeenCalled();
+  });
+
   // ── league (standings-based) → final ─────────────────────────────────────
   it('league comp → state "final", standings-based podium', async () => {
     const comp = { id: 'league-1', format: 'league' };

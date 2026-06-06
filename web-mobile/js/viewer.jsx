@@ -1377,8 +1377,8 @@ function DisplayModes({ tournament }) {
   // data has loaded fully.
   if (courts.length === 0) return null;
   return (
-    <>
-      <div className="section-title" style={{ marginTop: 20 }}>Display modes</div>
+    <details style={{ marginTop: 20 }}>
+      <summary className="section-title" style={{ cursor: "pointer" }}>Display modes</summary>
       <div className="vlist" data-testid="viewer-home-display-modes">
         {courts.map((cc) => (
           <a
@@ -1432,7 +1432,7 @@ function DisplayModes({ tournament }) {
           <span className="vlist-item__rowchev">→</span>
         </a>
       </div>
-    </>
+    </details>
   );
 }
 

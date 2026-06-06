@@ -275,6 +275,24 @@ func TestValidateTournamentLengths_ErrorCases(t *testing.T) {
 		RulesURL: "ftp://example.com",
 	}))
 
+	// VenueMapURL too long.
+	require.Error(t, validateTournamentLengths(&state.Tournament{
+		Name:        base.Name,
+		Venue:       base.Venue,
+		Date:        base.Date,
+		Password:    base.Password,
+		VenueMapURL: strings.Repeat("x", MaxLenVenueMapURL+1),
+	}))
+
+	// RulesURL too long.
+	require.Error(t, validateTournamentLengths(&state.Tournament{
+		Name:     base.Name,
+		Venue:    base.Venue,
+		Date:     base.Date,
+		Password: base.Password,
+		RulesURL: strings.Repeat("x", MaxLenRulesURL+1),
+	}))
+
 	// AwardsNote too long.
 	require.Error(t, validateTournamentLengths(&state.Tournament{
 		Name:       base.Name,
@@ -416,8 +434,7 @@ func TestRegisterEligibilityHandlers_SetStatusError(t *testing.T) {
 // TestScheduleEstimate_UnparsableMultiplier covers the "multiplier must be a number"
 // branch (line 64-67 in handlers_schedule.go).
 func TestScheduleEstimate_UnparsableMultiplier(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/schedule/estimate?matchDuration=3&multiplier=abc&courts=2", nil)
 	r.ServeHTTP(w, req)
@@ -428,8 +445,7 @@ func TestScheduleEstimate_UnparsableMultiplier(t *testing.T) {
 // TestScheduleEstimate_UnparsableCourts covers the "courts must be an integer"
 // branch (line 73-76 in handlers_schedule.go).
 func TestScheduleEstimate_UnparsableCourts(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=abc", nil)
 	r.ServeHTTP(w, req)
@@ -441,8 +457,7 @@ func TestScheduleEstimate_UnparsableCourts(t *testing.T) {
 // fallback (line 118-120 in handlers_schedule.go) — an unparsable optional
 // param silently falls back to the default and the request still returns 200.
 func TestScheduleEstimate_InvalidOptionalParam(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&numMatches=abc", nil)
 	r.ServeHTTP(w, req)
@@ -604,8 +619,7 @@ func TestReinstateHandler_InternalError(t *testing.T) {
 // (lines 67-70 in handlers_viewer.go) via GET /api/viewer/competitions and
 // (lines 158-161) via GET /api/viewer/competitions/:id.
 func TestViewerCompetitions_HasParticipantIDs(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: ""}))
 	comp := &state.Competition{
 		ID:                "has-ids-comp",
@@ -627,38 +641,6 @@ func TestViewerCompetitions_HasParticipantIDs(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
-}
-
-// ---------------------------------------------------------------------------
-// validateTournamentLengths — VenueMapURL and RulesURL too long
-// ---------------------------------------------------------------------------
-
-// TestValidateTournamentLengths_URLTooLong covers the validateMaxLen("venueMapURL")
-// and validateMaxLen("rulesURL") error returns (lines 229-231 and 241-243 in
-// handlers_tournament.go).
-func TestValidateTournamentLengths_URLTooLong(t *testing.T) {
-	base := &state.Tournament{
-		Name:     "OK",
-		Venue:    "OK",
-		Date:     "2026-01-01",
-		Password: "pw",
-	}
-
-	require.Error(t, validateTournamentLengths(&state.Tournament{
-		Name:        base.Name,
-		Venue:       base.Venue,
-		Date:        base.Date,
-		Password:    base.Password,
-		VenueMapURL: strings.Repeat("x", MaxLenVenueMapURL+1),
-	}))
-
-	require.Error(t, validateTournamentLengths(&state.Tournament{
-		Name:     base.Name,
-		Venue:    base.Venue,
-		Date:     base.Date,
-		Password: base.Password,
-		RulesURL: strings.Repeat("x", MaxLenRulesURL+1),
-	}))
 }
 
 // ---------------------------------------------------------------------------
@@ -716,8 +698,7 @@ func TestNewRouterWithHub_NilVerifier(t *testing.T) {
 // TestCourtLive_MatchOnDifferentCourt covers the !strings.EqualFold(m.Court, court)
 // continue branch (line 69-70 in handlers_display.go).
 func TestCourtLive_MatchOnDifferentCourt(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name: "T", Password: "", Courts: []string{"A", "B"},
 	}))
@@ -736,8 +717,7 @@ func TestCourtLive_MatchOnDifferentCourt(t *testing.T) {
 // TestCourtLive_MatchNotRunning covers the m.Status != MatchStatusRunning
 // continue branch (line 72-73 in handlers_display.go).
 func TestCourtLive_MatchNotRunning(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name: "T", Password: "", Courts: []string{"A"},
 	}))
@@ -756,8 +736,7 @@ func TestCourtLive_MatchNotRunning(t *testing.T) {
 // TestCourtLive_HasParticipantIDs covers the comp.HasParticipantIDs hasIDsHint
 // branch (lines 80-83 in handlers_display.go) when finding a live match.
 func TestCourtLive_HasParticipantIDs(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name: "T", Password: "", Courts: []string{"A"},
 	}))
@@ -784,8 +763,7 @@ func TestCourtLive_HasParticipantIDs(t *testing.T) {
 // TestSwissGenerateRound_InvalidCompID covers the requireValidCompID !ok branch
 // (line 50-52 in handlers_swiss.go).
 func TestSwissGenerateRound_InvalidCompID(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/.invalid/swiss/generate-round", nil)
 	r.ServeHTTP(w, req)
@@ -795,8 +773,7 @@ func TestSwissGenerateRound_InvalidCompID(t *testing.T) {
 // TestSwissStandings_InvalidCompID covers the requireValidCompID !ok branch
 // (line 110-112 in handlers_swiss.go).
 func TestSwissStandings_InvalidCompID(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/competitions/.invalid/swiss/standings", nil)
 	r.ServeHTTP(w, req)
@@ -810,8 +787,7 @@ func TestSwissStandings_InvalidCompID(t *testing.T) {
 // TestCompetitionPOST_NameTooLong covers the validateCompetitionLengths error path
 // (lines 278-281 in handlers_competition.go).
 func TestCompetitionPOST_NameTooLong(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	comp := map[string]any{"name": strings.Repeat("x", MaxLenCompetitionName+1)}
 	b, _ := json.Marshal(comp)
 	w := httptest.NewRecorder()
@@ -824,8 +800,7 @@ func TestCompetitionPOST_NameTooLong(t *testing.T) {
 // TestCompetitionPOST_PlayerNameTooLong covers the validatePlayerLengths error path
 // (lines 287-290 in handlers_competition.go).
 func TestCompetitionPOST_PlayerNameTooLong(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	comp := map[string]any{
 		"name": "OK",
 		"players": []map[string]any{
@@ -843,8 +818,7 @@ func TestCompetitionPOST_PlayerNameTooLong(t *testing.T) {
 // TestCompetitionPOST_NegativeDuration covers the validateCompetitionDurations
 // error path (lines 337-340 in handlers_competition.go).
 func TestCompetitionPOST_NegativeDuration(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	comp := map[string]any{"name": "OK", "matchDuration": -1}
 	b, _ := json.Marshal(comp)
 	w := httptest.NewRecorder()
@@ -857,8 +831,7 @@ func TestCompetitionPOST_NegativeDuration(t *testing.T) {
 // TestCompetitionPOST_InvalidFormat covers the validateCompetitionFormat
 // error path (lines 345-348 in handlers_competition.go).
 func TestCompetitionPOST_InvalidFormat(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	comp := map[string]any{"name": "OK", "format": "unknown_format"}
 	b, _ := json.Marshal(comp)
 	w := httptest.NewRecorder()
@@ -871,8 +844,7 @@ func TestCompetitionPOST_InvalidFormat(t *testing.T) {
 // TestCompetitionPOST_InvalidTeamMatchType covers the ValidateTeamMatchType
 // error path (lines 358-361 in handlers_competition.go).
 func TestCompetitionPOST_InvalidTeamMatchType(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	comp := map[string]any{"name": "OK", "teamMatchType": "unknown_type"}
 	b, _ := json.Marshal(comp)
 	w := httptest.NewRecorder()
@@ -885,8 +857,7 @@ func TestCompetitionPOST_InvalidTeamMatchType(t *testing.T) {
 // TestCompetitionGET_NotFound covers the comp == nil 404 path
 // (lines 446-449 in handlers_competition.go).
 func TestCompetitionGET_NotFound(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, _, _, _, _ := setupTestRouter(t)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/competitions/nonexistent-comp", nil)
 	r.ServeHTTP(w, req)
@@ -900,8 +871,7 @@ func TestCompetitionGET_NotFound(t *testing.T) {
 // TestQuickScore_SideATooLong covers the validateMaxLen("sideA") error path
 // (lines 330-333 in handlers_match.go).
 func TestQuickScore_SideATooLong(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "qs-len", TeamSize: 3}))
 	require.NoError(t, store.SavePoolMatches("qs-len", []state.MatchResult{
 		{ID: "m1", SideA: "T1", SideB: "T2"},
@@ -921,8 +891,7 @@ func TestQuickScore_SideATooLong(t *testing.T) {
 // TestQuickScore_SideBTooLong covers the validateMaxLen("sideB") error path
 // (lines 334-337 in handlers_match.go).
 func TestQuickScore_SideBTooLong(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
+	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "qs-len2", TeamSize: 3}))
 	require.NoError(t, store.SavePoolMatches("qs-len2", []state.MatchResult{
 		{ID: "m1", SideA: "T1", SideB: "T2"},

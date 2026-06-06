@@ -109,34 +109,6 @@ describe('buildAllWinnersPublic', () => {
     expect(results[0].podium).toHaveLength(4);
   });
 
-  it('filters out linked playoffs comp (sourceCompID set) before resolving', async () => {
-    const mixedComp = { id: 'mixed-1', name: 'Pools+KO', format: 'mixed', status: 'completed' };
-    const playoffComp = { id: 'po-1', name: 'Playoffs', format: 'playoffs', sourceCompID: 'mixed-1', status: 'completed' };
-    const allComps = [mixedComp, playoffComp];
-    const bracket = {
-      rounds: [
-        [{ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' }, { sideA: 'Carol', sideB: 'Dan', winner: 'Carol' }],
-        [{ sideA: 'Alice', sideB: 'Carol', winner: 'Alice' }],
-      ],
-    };
-    const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, players: [] });
-
-    // buildAllWinnersPublic takes the full comp list — it filters for completed internally
-    const results = await window.buildAllWinnersPublic(allComps, {
-      fetchCompetitionDetails,
-      swissStandings: null,
-    });
-
-    // playoffComp (linked shell) must be filtered out; mixedComp resolved to final
-    expect(results.find(r => r.comp.id === 'po-1')).toBeUndefined();
-    expect(results.find(r => r.comp.id === 'mixed-1')).toBeDefined();
-    const mixedResult = results.find(r => r.comp.id === 'mixed-1');
-    expect(mixedResult.state).toBe('final');
-    expect(mixedResult.podium).toHaveLength(4);
-    expect(mixedResult.podium[2].place).toBe(3);
-    expect(mixedResult.podium[3].place).toBe(3);
-  });
-
   it('mixed comp whose OWN knockout final is undecided → state "in-progress", podium []', async () => {
     const mixedComp = { id: 'mixed-2', name: 'Pools+KO', format: 'mixed', status: 'completed' };
     const allComps = [mixedComp];

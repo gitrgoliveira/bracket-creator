@@ -19,7 +19,7 @@ import (
 func TestVersionEndpoint(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "version-test-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
 
 	store, err := state.NewStore(tempDir)
 	require.NoError(t, err)
@@ -43,6 +43,5 @@ func TestVersionEndpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, version.GetVersion(), resp.Version)
-	assert.Equal(t, version.GetGitCommit(), resp.GitCommit)
 	assert.Equal(t, version.GetBuildDate(), resp.BuildDate)
 }

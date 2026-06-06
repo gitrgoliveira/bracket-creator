@@ -25,6 +25,7 @@ import (
 func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
 	tempDir, err := os.MkdirTemp("", "mobileapp-test-*")
 	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
 
 	store, err := state.NewStore(tempDir)
 	require.NoError(t, err)

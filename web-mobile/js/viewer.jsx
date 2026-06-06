@@ -3875,6 +3875,10 @@ function AllWinnersView({ tournament, onBack, tweaks }) {
                   </div>
                 );
               })}
+              {/* Fighting Spirit awards: an independent annotation (not the
+                  placement podium), shown for any competition that has them
+                  regardless of podium state. Self-guards when empty. */}
+              <FightingSpiritSection fsAwards={comp.fightingSpiritAwards} isFs={false} />
             </div>
           ))}
         </div>

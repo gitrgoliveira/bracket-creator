@@ -3690,23 +3690,24 @@ function AnnouncementBanner({ announcements, onDismiss }) {
 
 // ---------------------------------------------------------------------------
 // buildAllWinnersPublic — public-viewer equivalent of admin_shell's
-// buildAllWinners. Thin orchestrator: filter completed comps, resolve each
-// through resolveCompetitionAwards, drop linked-playoffs shells (state==="skip").
+// buildAllWinners. Thin orchestrator: filter completed comps (excluding linked
+// playoffs shells whose sourceCompID marks them as driven by a parent mixed
+// competition), resolve each through resolveCompetitionAwards.
 // Exported to window so AllWinnersView and tests can reach it.
 // ---------------------------------------------------------------------------
 async function buildAllWinnersPublic(comps, fetchers) {
-  const completed = (comps || []).filter((c) => c.status === "completed");
+  const completed = (comps || []).filter((c) => c.status === "completed" && !c.sourceCompID);
   const results = await Promise.all(
     completed.map(async (comp) => {
       try {
-        const { state, podium } = await resolveCompetitionAwards(comp, comps, fetchers);
+        const { state, podium } = await resolveCompetitionAwards(comp, fetchers);
         return { comp, state, podium };
       } catch (err) {
         return { comp, state: "error", podium: [], error: err?.message || String(err) };
       }
     })
   );
-  return results.filter((r) => r.state !== "skip");
+  return results;
 }
 
 // ---------------------------------------------------------------------------

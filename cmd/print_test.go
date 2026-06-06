@@ -183,3 +183,135 @@ func TestPrintTournamentDataStoreConstruction(t *testing.T) {
 	)
 	require.NoError(t, err)
 }
+
+// TestGeneratePDFsValidation exercises the early-exit validation branches of
+// generatePDFs without requiring LibreOffice. A nil generator is safe here
+// because all tested branches return before any gen.* call.
+func TestGeneratePDFsValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        printOptions
+		wantErrFrag string
+	}{
+		{
+			name:        "all type with --output set",
+			opts:        printOptions{pdfType: "all", output: "/tmp/out.pdf", outputDir: ""},
+			wantErrFrag: "--output is not valid with --type=all",
+		},
+		{
+			name:        "all type without --output-dir",
+			opts:        printOptions{pdfType: "all"},
+			wantErrFrag: "--type=all requires --output-dir",
+		},
+		{
+			name:        "single type without any output flag",
+			opts:        printOptions{pdfType: "names"},
+			wantErrFrag: "provide --output",
+		},
+		{
+			name:        "single type with both output flags",
+			opts:        printOptions{pdfType: "names", output: "/tmp/out.pdf", outputDir: "/tmp/"},
+			wantErrFrag: "--output and --output-dir are mutually exclusive",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newPrintCmd()
+			err := tc.opts.generatePDFs(cmd, nil, nil, "test-label")
+			require.Error(t, err)
+			assert.True(t, strings.Contains(err.Error(), tc.wantErrFrag),
+				"expected error to contain %q, got: %v", tc.wantErrFrag, err)
+		})
+	}
+}
+
+// TestPrintUnknownType checks that an unrecognised --type is rejected before
+// any soffice call (exercises the run() validation branch).
+func TestPrintUnknownType(t *testing.T) {
+	dir := t.TempDir()
+	// write a dummy xlsx so collectWorkbooks doesn't fail first
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.xlsx"), []byte("x"), 0o644))
+	err := runPrintCmd(t, "--type=bogus", "--input="+dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown --type")
+}
+
+// TestPrintSofficeNotFound checks the ErrSofficeNotFound branch in run()
+// by pointing LIBREOFFICE_PATH at a non-existent file so that both $PATH and
+// well-known candidate paths are bypassed and the generator creation fails.
+func TestPrintSofficeNotFound(t *testing.T) {
+	t.Setenv("LIBREOFFICE_PATH", "/nonexistent-soffice-binary-abc123")
+
+	// Ensure soffice is really absent on this run.
+	if _, err := pdf.NewGenerator(); err == nil {
+		t.Skip("LibreOffice found on PATH despite LIBREOFFICE_PATH override; skipping")
+	}
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.xlsx"), []byte("x"), 0o644))
+	err := runPrintCmd(t, "--type=names", "--input="+dir, "--output-dir="+t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "LibreOffice")
+}
+
+// findExampleXLSXForCmd returns an example XLSX from the repo root, skipping
+// if none is found. The cmd package is one directory below the repo root.
+func findExampleXLSXForCmd(t *testing.T) string {
+	t.Helper()
+	candidate := filepath.Join("..", "playoffs-example-medium.xlsx")
+	if _, err := os.Stat(candidate); err != nil {
+		t.Skipf("example workbook not found at %s: %v", candidate, err)
+	}
+	abs, err := filepath.Abs(candidate)
+	require.NoError(t, err)
+	return abs
+}
+
+// TestPrintInputDirSingleType exercises the --input + single-type path through
+// generatePDFs (including the output rename at the end). Requires soffice.
+func TestPrintInputDirSingleType(t *testing.T) {
+	if _, err := pdf.NewGenerator(); err != nil {
+		t.Skipf("skipping: LibreOffice not available (%v)", err)
+	}
+	xlsx := findExampleXLSXForCmd(t)
+	dir := t.TempDir()
+	// Copy the example xlsx into a temp dir so collectWorkbooks finds it.
+	xlsxDst := filepath.Join(dir, "example.xlsx")
+	data, err := os.ReadFile(xlsx) // #nosec G304 — test-only read of a repo asset
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(xlsxDst, data, 0o644))
+
+	outDir := t.TempDir()
+
+	err = runPrintCmd(t,
+		"--type=registration",
+		"--input="+dir,
+		"--output-dir="+outDir,
+	)
+	require.NoError(t, err)
+}
+
+// TestPrintInputDirSingleTypeWithOutput exercises the --output rename path in
+// generatePDFs (when --output is given instead of --output-dir for a single type).
+func TestPrintInputDirSingleTypeWithOutput(t *testing.T) {
+	if _, err := pdf.NewGenerator(); err != nil {
+		t.Skipf("skipping: LibreOffice not available (%v)", err)
+	}
+	xlsx := findExampleXLSXForCmd(t)
+	dir := t.TempDir()
+	xlsxDst := filepath.Join(dir, "example.xlsx")
+	data, err := os.ReadFile(xlsx) // #nosec G304 — test-only read of a repo asset
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(xlsxDst, data, 0o644))
+
+	outFile := filepath.Join(t.TempDir(), "out.pdf")
+
+	err = runPrintCmd(t,
+		"--type=registration",
+		"--input="+dir,
+		"--output="+outFile,
+	)
+	require.NoError(t, err)
+	_, statErr := os.Stat(outFile)
+	assert.NoError(t, statErr, "output file should exist")
+}

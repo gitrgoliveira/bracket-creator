@@ -1397,7 +1397,7 @@ function DisplayModes({ tournament }) {
           { icon: "📺", title: "Court displays", suffix: "" },
           { icon: "🎥", title: "Streaming overlays", suffix: "&overlay=1" },
         ].map((row) => (
-          <div key={row.title} className="vlist-item vlist-item--row" style={{ textDecoration: "none" }}>
+          <div key={row.title} className="vlist-item vlist-item--row" style={{ cursor: "default" }}>
             <span className="vlist-item__icon">{row.icon}</span>
             <div className="vlist-item__rowbody">
               <div className="vlist-item__rowtitle">{row.title}</div>

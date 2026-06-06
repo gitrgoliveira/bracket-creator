@@ -914,16 +914,6 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </>
           )}
 
-          {/* T069 / FR-016: "Display modes" — link cards into the public
-              /display routes for TV screens, lobby boards, and OBS browser
-              sources. Each link opens in a new tab so the host page
-              (viewer) keeps its tab and stays interactive. Active courts
-              come from tournament.courts (the full configured list); the
-              "all-courts overview" card is always present. Placed below
-              Up Next so a viewer who has already glanced at their next
-              match can drop into the display mode they need. */}
-          <DisplayModes tournament={t} />
-
           {/* mp-c38: sponsor logos. Hidden when none configured. */}
           {window.SponsorStrip && <window.SponsorStrip sponsors={t && t.sponsors} variant="viewer" />}
 
@@ -949,6 +939,14 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               <span className="vlist-item__rowchev">→</span>
             </a>
           </div>
+
+          {/* T069 / FR-016: "Display modes" — link cards into the public
+              /display routes for TV screens, lobby boards, and OBS browser
+              sources. Each link opens in a new tab so the host page
+              (viewer) keeps its tab and stays interactive. Collapsed by
+              default (mp-mjaq) since most viewers are spectators; only
+              tournament operators need these links. */}
+          <DisplayModes tournament={t} />
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
@@ -1380,43 +1378,6 @@ function DisplayModes({ tournament }) {
     <details style={{ marginTop: 20 }}>
       <summary className="section-title" style={{ cursor: "pointer" }}>Display modes</summary>
       <div className="vlist" data-testid="viewer-home-display-modes">
-        {courts.map((cc) => (
-          <a
-            key={cc}
-            className="vlist-item vlist-item--row"
-            href={`/display?court=${encodeURIComponent(cc)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ textDecoration: "none" }}
-          >
-            <span className="vlist-item__icon">📺</span>
-            <div className="vlist-item__rowbody">
-              <div className="vlist-item__rowtitle"><TermV name="shiaijo">Shiaijo</TermV> {cc} display</div>
-              <div className="vlist-item__rowsub">Fullscreen board for a single court · opens in a new tab</div>
-            </div>
-            <span className="vlist-item__rowchev">→</span>
-          </a>
-        ))}
-        {/* Per-court OBS/vMix overlay entry (previously URL-only). Links to the
-            transparent lower-third streaming overlay so operators can grab the
-            browser-source URL per shiaijo straight from the UI. */}
-        {courts.map((cc) => (
-          <a
-            key={`overlay-${cc}`}
-            className="vlist-item vlist-item--row"
-            href={`/display?court=${encodeURIComponent(cc)}&overlay=1`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ textDecoration: "none" }}
-          >
-            <span className="vlist-item__icon">🎥</span>
-            <div className="vlist-item__rowbody">
-              <div className="vlist-item__rowtitle"><TermV name="shiaijo">Shiaijo</TermV> {cc} streaming overlay</div>
-              <div className="vlist-item__rowsub">Transparent lower-third for OBS / vMix · opens in a new tab</div>
-            </div>
-            <span className="vlist-item__rowchev">→</span>
-          </a>
-        ))}
         <a
           className="vlist-item vlist-item--row"
           href="/display?court=all"
@@ -1431,6 +1392,27 @@ function DisplayModes({ tournament }) {
           </div>
           <span className="vlist-item__rowchev">→</span>
         </a>
+        {/* Per-court links consolidated into compact inline rows. */}
+        {[
+          { icon: "📺", title: "Court displays", suffix: "" },
+          { icon: "🎥", title: "Streaming overlays", suffix: "&overlay=1" },
+        ].map((row) => (
+          <div key={row.title} className="vlist-item vlist-item--row" style={{ textDecoration: "none" }}>
+            <span className="vlist-item__icon">{row.icon}</span>
+            <div className="vlist-item__rowbody">
+              <div className="vlist-item__rowtitle">{row.title}</div>
+              <div className="vlist-item__rowsub" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {courts.map((cc, i) => (
+                  <span key={cc}>
+                    <a href={`/display?court=${encodeURIComponent(cc)}${row.suffix}`} target="_blank" rel="noopener noreferrer"
+                      style={{ color: "var(--text-link, #2563eb)" }}>Shiaijo {cc}</a>
+                    {i < courts.length - 1 && <span style={{ color: "var(--text-3, #999)", marginLeft: 8 }}>·</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </details>
   );

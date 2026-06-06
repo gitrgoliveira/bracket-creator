@@ -3,40 +3,25 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"regexp"
+	"log"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// poolFinalistPlaceholderRE matches a pool-origin finalist placeholder label as
-// produced by helper.GenerateFinals: "<PoolName>-<ordinal>", e.g. "Pool A-1st".
-// Pool names are auto-generated as "Pool <char>" (helper.CreatePools), so a real
-// competitor/team name colliding with this exact shape ("Pool …-Nth") is
-// extremely unlikely in practice. NOTE: this regex now gates knockout-match
-// scoreability (bracketMatchPlayable), so a participant literally named like a
-// placeholder would be misclassified as unresolved. Reserving these patterns at
-// the participant-name validation boundary is tracked as a follow-up (mp-igdg).
-var poolFinalistPlaceholderRE = regexp.MustCompile(`^Pool .+-\d+(st|nd|rd|th)$`)
-
-// winnerOfPlaceholderRE matches the EXACT next-round feeder placeholder the
-// engine emits (buildBracketFromLeaves: "Winner of r<d>-m<i>"). Anchored so a
-// real competitor named e.g. "Winner of the 2025 Cup" is NOT mistaken for an
-// unresolved feeder (which would make their match unscoreable).
-var winnerOfPlaceholderRE = regexp.MustCompile(`^Winner of r\d+-m\d+$`)
-
 // isUnresolvedBracketSide reports whether a bracket side is still a forward
 // reference rather than a resolved competitor: an empty structural bye slot, a
 // "Winner of rX-mY" feeder, or a pool-origin finalist placeholder that has not
 // been seeded yet (its feeder pool is still in progress).
+//
+// The two placeholder patterns are defined authoritatively in
+// helper.IsReservedParticipantName (mp-igdg); knockout.go no longer
+// duplicates them.
 func isUnresolvedBracketSide(side string) bool {
 	if side == "" {
 		return true
 	}
-	if winnerOfPlaceholderRE.MatchString(side) {
-		return true
-	}
-	return poolFinalistPlaceholderRE.MatchString(side)
+	return helper.IsReservedParticipantName(side)
 }
 
 // bracketMatchPlayable reports whether a bracket match can be scored: both sides
@@ -58,7 +43,7 @@ func bracketHasPoolPlaceholders(b *state.Bracket) bool {
 	}
 	for _, round := range b.Rounds {
 		for _, m := range round {
-			if poolFinalistPlaceholderRE.MatchString(m.SideA) || poolFinalistPlaceholderRE.MatchString(m.SideB) {
+			if helper.IsPoolFinalistPlaceholder(m.SideA) || helper.IsPoolFinalistPlaceholder(m.SideB) {
 				return true
 			}
 		}
@@ -224,10 +209,16 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		}
 		ps := standings[pool.PoolName]
 		for rank := 1; rank <= poolWinners; rank++ {
-			if rank-1 >= len(ps) {
-				return 0, false, validationErrorf("pool %q is marked complete but has only %d ranked finishers (need %d)", pool.PoolName, len(ps), poolWinners)
-			}
 			key := fmt.Sprintf("%s-%s", pool.PoolName, helper.GetOrdinal(rank))
+			if rank-1 >= len(ps) {
+				// Degenerate pool (hand-edited data / legacy import): fewer
+				// finishers than PoolWinners. Map the unfillable placeholder
+				// to "" (bye) so the bracket slot auto-resolves. Draw-time
+				// validation prevents this in supported flows.
+				log.Printf("engine.ResolveQualifiedPools: pool %q has only %d ranked finisher(s) but PoolWinners=%d; treating rank %d as bye", pool.PoolName, len(ps), poolWinners, rank)
+				resolver[key] = ""
+				continue
+			}
 			resolver[key] = ps[rank-1].Player.Name
 		}
 	}
@@ -280,6 +271,41 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				}
 			}
 		}
+		// Auto-complete newly created bye matches: a resolver mapping to ""
+		// (degenerate pool) leaves a match with one empty side still
+		// Scheduled. Mirror buildBracketFromLeaves's bye logic and
+		// propagate winners so downstream matches become playable.
+		// Guard: only auto-complete when the non-empty side is a resolved
+		// competitor, NOT a still-unresolved placeholder (its feeder pool
+		// may still be in progress).
+		for ri := range bracket.Rounds {
+			for mi := range bracket.Rounds[ri] {
+				live := &bracket.Rounds[ri][mi]
+				if live.Status != state.MatchStatusScheduled {
+					continue
+				}
+				aEmpty := live.SideA == ""
+				bEmpty := live.SideB == ""
+				aResolved := !aEmpty && !isUnresolvedBracketSide(live.SideA)
+				bResolved := !bEmpty && !isUnresolvedBracketSide(live.SideB)
+				if aEmpty && bResolved {
+					live.Winner = live.SideB
+					live.Status = state.MatchStatusCompleted
+					e.propagateBracketWinner(bracket, ri, mi)
+					n++
+				} else if bEmpty && aResolved {
+					live.Winner = live.SideA
+					live.Status = state.MatchStatusCompleted
+					e.propagateBracketWinner(bracket, ri, mi)
+					n++
+				} else if aEmpty && bEmpty {
+					live.Status = state.MatchStatusCompleted
+					e.propagateBracketWinner(bracket, ri, mi)
+					n++
+				}
+			}
+		}
+
 		allResolved = !bracketHasPoolPlaceholders(bracket)
 		if n == 0 {
 			return errMatchNotFound // no effective change → skip the rewrite

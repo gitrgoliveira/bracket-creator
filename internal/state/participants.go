@@ -37,6 +37,12 @@ var ErrDuplicateName = errors.New("a participant with the same name and dojo alr
 // AddParticipant/ReplaceParticipant do.
 var ErrCompetitionNotInSetup = errors.New("competition has already started")
 
+// ErrReservedName is returned by the participant write paths when a name
+// matches an internal bracket-placeholder pattern (e.g. "Pool A-1st",
+// "Winner of r1-m3").  Such names would be silently misclassified as
+// unresolved bracket slots, making knockout matches permanently unscoreable.
+var ErrReservedName = errors.New("participant name collides with a reserved bracket-placeholder pattern")
+
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
 	WithSeeds bool  // set false to skip the seeds.csv read (hot list paths)
@@ -444,6 +450,25 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	if err := transform(&players[foundIdx]); err != nil {
 		return nil, err
 	}
+
+	// Reserved-name check before TitleCase, but ONLY when the name actually
+	// changed.  Check-in transforms leave the name untouched; running the
+	// guard unconditionally would break check-in for any participant whose
+	// stored name happens to match the reserved pattern (however unlikely).
+	// When the name DID change, check the raw pre-TitleCase value: TitleCase
+	// alters ordinal suffixes ("3rd"→"3Rd") so the post-TitleCase form would
+	// never match the reserved regex.
+	// Detect rename by comparing raw values (before TrimSpace) so that a
+	// stored name like "Alice" is never spuriously considered changed by a
+	// check-in transform that doesn't touch Name at all.  TrimSpace is only
+	// for the regex match, not for change detection.
+	if players[foundIdx].Name != oldName {
+		trimmedName := strings.TrimSpace(players[foundIdx].Name)
+		if helper.IsReservedParticipantName(trimmedName) {
+			return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
+		}
+	}
+
 	// Canonicalize to match what CreatePlayers produces on load (Title-case),
 	// so participants.csv and seeds.csv store the same form that will be read
 	// back — otherwise a rename to "alice cooper" would be read as "Alice Cooper"
@@ -656,6 +681,15 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 		}
 	}
 
+	// Reserved-name check before TitleCase so the error fires on the raw input
+	// ("Pool B-3rd") even though TitleCase would transform the ordinal suffix to
+	// a non-matching form ("Pool B-3Rd"). The bulk SaveParticipants path skips
+	// TitleCase, so saveParticipantsNoLock also carries this guard for that path.
+	trimmedName := strings.TrimSpace(p.Name)
+	if helper.IsReservedParticipantName(trimmedName) {
+		return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
+	}
+
 	p.Name = helper.TitleCaseName(p.Name)
 	p.ID = newParticipantID()
 	p.PoolPosition = int64(len(players))
@@ -703,6 +737,17 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	}
 	if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
 		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
+	}
+
+	// Reserved-name guard: names arriving via the bulk SaveParticipants path
+	// may be raw (neither TitleCased nor trimmed), so trim before matching to
+	// catch inputs like " Pool A-1st " that would otherwise slip through.
+	// AddParticipant and updateParticipantNoLock apply their own pre-TitleCase
+	// checks before reaching here; for those paths the guard is defence-in-depth.
+	for _, p := range players {
+		if trimmed := strings.TrimSpace(p.Name); helper.IsReservedParticipantName(trimmed) {
+			return fmt.Errorf("%w: %q", ErrReservedName, trimmed)
+		}
 	}
 
 	path := s.compPath(compID, "participants.csv")

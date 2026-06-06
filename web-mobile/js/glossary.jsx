@@ -184,8 +184,8 @@ function Term({ name, children, nested }) {
   );
 }
 
-// GlossaryPage — the /glossary viewer surface. Lists every term
-// grouped by tier so volunteers can browse the full register. Wired
+// GlossaryPage — the /glossary viewer surface. Lists terms in a flat
+// alphabetical layout so volunteers can browse the full register. Wired
 // into the router via app.jsx's parsePath ("/glossary" → viewer mode
 // with viewerScreen='glossary').
 function GlossaryPage({ onBack }) {

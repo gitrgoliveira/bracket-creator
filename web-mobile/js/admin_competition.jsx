@@ -348,9 +348,10 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   };
 
   return (
-    <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontWeight: 600, fontSize: 14 }}>🔥 Fighting Spirit Awards <span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
-      <div className="field__hint" style={{ marginTop: -4 }}>Record individual honourees independent of the placement podium. Shown to viewers on the Awards tab.</div>
+    <div className="row">
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="card__title">🔥 Fighting Spirit Awards <span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
+        <div className="card__sub" style={{ marginTop: -4 }}>Record individual honourees independent of the placement podium. Shown to viewers on the Awards tab.</div>
       {awards.length === 0 && (
         <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>No awards yet.</div>
       )}
@@ -394,6 +395,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
           {saving && <span className="spinner" />}
           {saving ? "Saving…" : "Save awards"}
         </button>
+      </div>
       </div>
     </div>
   );
@@ -989,7 +991,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
-      <FightingSpiritAwardsEditor c={c} password={password} showToast={showToast} />
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
         {(local.status === "pools" || local.status === "playoffs") && (
           <div>
@@ -1510,6 +1511,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // individual competitions so the sidebar stays uncluttered.
         c.kind === "team" ? { id: "lineups", label: "Lineups" } : null,
         { id: "settings", label: "Settings" },
+        { id: "awards", label: "Fighting Spirit" },
       ].filter(Boolean)
     },
     {
@@ -1627,6 +1629,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {section === "participants" && <AdminParticipants c={c} tournament={t} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
             {section === "lineups" && window.AdminTeamLineupsList && <window.AdminTeamLineupsList comp={c} password={password} showToast={showToast} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} onStatusChange={setLocalStatus} />}
+            {section === "awards" && <FightingSpiritAwardsEditor c={c} password={password} showToast={showToast} />}
             {/* T191/T193 (FR-050d/e): Swiss-round management. */}
             {/* onViewStandings is wired to the public viewer URL so the */}
             {/* operator can navigate into the viewer-mode standings */}

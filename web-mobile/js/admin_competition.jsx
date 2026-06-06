@@ -326,17 +326,30 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const withKey = (a) => ({ ...a, _key: keyCounter.current++ });
   const [awards, setAwards] = useStateA(() => (c.fightingSpiritAwards || []).map(withKey));
   const [saving, setSaving] = useStateA(false);
+  // `dirty` guards the prop-sync effect: the parent refetches the competition
+  // on unrelated SSE events (match updates, status changes), which would
+  // otherwise clobber the operator's typed-but-unsaved edits. We only re-sync
+  // from props when there are no pending edits — except on a competition
+  // SWITCH, where we always reset to the new comp's list.
+  const [dirty, setDirty] = useStateA(false);
+  const lastCompId = useRefA(c.id);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
-  // Sync from parent when the competition prop refreshes (e.g. SSE update).
+  // Sync from parent. Reset unconditionally when switching competitions;
+  // otherwise skip while the user has unsaved edits (see `dirty` above).
   useEffectA(() => {
-    setAwards((c.fightingSpiritAwards || []).map(withKey));
-  }, [c.fightingSpiritAwards]);
+    const switched = lastCompId.current !== c.id;
+    lastCompId.current = c.id;
+    if (switched || !dirty) {
+      setAwards((c.fightingSpiritAwards || []).map(withKey));
+      if (switched) setDirty(false);
+    }
+  }, [c.id, c.fightingSpiritAwards, dirty]);
 
-  const addRow = () => setAwards(prev => [...prev, withKey({ title: "Fighting Spirit", recipientName: "", recipientDojo: "" })]);
-  const removeRow = (idx) => setAwards(prev => prev.filter((_, i) => i !== idx));
-  const updateField = (idx, field, val) => setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a));
+  const addRow = () => { setDirty(true); setAwards(prev => [...prev, withKey({ title: "Fighting Spirit", recipientName: "", recipientDojo: "" })]); };
+  const removeRow = (idx) => { setDirty(true); setAwards(prev => prev.filter((_, i) => i !== idx)); };
+  const updateField = (idx, field, val) => { setDirty(true); setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a)); };
 
   const save = async () => {
     const admin = window.promptAdminPassword ? window.promptAdminPassword() : null;
@@ -346,7 +359,9 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       // Strip the client-only `_key` before sending to the API.
       const payload = awards.map(({ _key, ...rest }) => rest);
       await window.API.updateCompetitionAwards(c.id, payload, password, admin);
-      if (mountedRef.current) showToast("Fighting Spirit awards saved.", "success");
+      // Edits are now persisted; clear dirty so the next prop refresh
+      // (the save triggers an SSE refetch) re-syncs to the saved state.
+      if (mountedRef.current) { setDirty(false); showToast("Fighting Spirit awards saved.", "success"); }
     } catch (e) {
       if (mountedRef.current) showToast(e.message || "Failed to save awards", "error");
     } finally {

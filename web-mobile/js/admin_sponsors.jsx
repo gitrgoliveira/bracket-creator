@@ -148,6 +148,7 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
               type="file"
               accept="image/png,image/jpeg"
             />
+            <div className="field__hint">Landscape (wide) image recommended — logos display as a small strip.</div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button type="submit" className="btn btn--primary" disabled={busy}>

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mp-13y — viewer match-detail modal, in context</title>
+<style>
+  :root{
+    --ink-1:#111827; --ink-3:#6b7280; --red:#c0392b;
+    --line:#e5e7eb; --line-light:#f3f4f6; --bg-2:#f9fafb;
+  }
+  body{ font-family:-apple-system,system-ui,sans-serif; background:#e5e7eb; margin:0; padding:32px; color:var(--ink-1); }
+  h1{ font-size:18px; margin:0 0 4px; }
+  .note{ font-size:13px; color:#4b5563; max-width:820px; margin:0 0 20px; line-height:1.5; }
+  .stage{ display:flex; gap:40px; flex-wrap:wrap; align-items:flex-start; }
+  .col-label{ font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:#6b7280; margin:0 0 10px; font-weight:700;}
+  .col-label.proposed{ color:#047857; }
+
+  /* faithful replica of the real modal card */
+  .card{ background:#fff; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,.18);
+    width:500px; max-width:500px; padding:20px; box-sizing:border-box; }
+  .modal-top{ display:flex; justify-content:space-between; margin-bottom:16px; align-items:center;}
+  .modal-top h2{ margin:0; font-size:18px; }
+  .btn-ghost{ font-size:12px; color:#374151; background:#f3f4f6; border:1px solid #e5e7eb;
+    border-radius:6px; padding:5px 10px; cursor:pointer; }
+  .sub-line{ margin-bottom:16px; font-size:13px; color:var(--ink-3); display:flex; justify-content:space-between; align-items:center;}
+  .status-badge{ font-size:11px; font-weight:600; color:#b45309; background:#fef3c7; padding:3px 8px; border-radius:10px; }
+  .status-badge .dot{ color:#dc2626; }
+
+  .se-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+  .se-head__side{ flex:1; }
+  .se-head__side.right{ text-align:right; }
+  .se-head__name{ font-weight:600; }
+  .badge{ display:inline-block; padding:2px 6px; font-size:11px; border-radius:4px; margin-top:4px; }
+  .badge--shiro{ background:#fff; color:#000; border:1px solid #ddd; }
+  .badge--aka{ background:var(--red); color:#fff; }
+  .se-head__vs{ padding:0 16px; color:var(--ink-3); }
+
+  .thead{ display:flex; justify-content:space-between; border-bottom:1px solid var(--line);
+    padding-bottom:8px; margin-bottom:8px; font-size:12px; font-weight:600; color:var(--ink-3); }
+  .thead .c-side{ width:80px; }
+  .thead .c-mid{ flex:1; text-align:center; }
+  .thead .c-side.right{ text-align:right; }
+
+  .brow{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line-light); }
+  .brow .cell{ width:80px; display:flex; flex-direction:column; }
+  .brow .cell.right{ text-align:right; align-items:flex-end; }
+  .brow .score{ font-weight:600; font-size:14px; }
+  .brow .fouls{ font-size:11px; color:var(--ink-3); }
+  .brow .mid{ flex:1; text-align:center; font-size:13px; color:var(--ink-3); }
+
+  /* proposed name treatment inside the mid column */
+  .brow .mid .pos{ font-size:11px; letter-spacing:.04em; color:#9ca3af; }
+  .brow .mid .names{ font-size:13px; color:var(--ink-1); margin-top:2px; }
+  .brow .mid .names .nshiro{ color:var(--ink-1); font-weight:600; }
+  .brow .mid .names .naka{ color:var(--red); font-weight:600; }
+  .brow .mid .names .sep{ color:#9ca3af; padding:0 5px; font-weight:400; }
+  /* proposed card: colour conveys side (no SHIRO/AKA text). Aka column = red. */
+  .card.prop .se-head__name.naka{ color:var(--red); }
+  .card.prop .cell.right .score{ color:var(--red); }
+  .brow.dh{ border-top:2px solid #111; }
+  .dh-tag{ display:inline-block; background:#111; color:#fff; font-size:10px; font-weight:700; letter-spacing:.08em; padding:2px 7px; border-radius:3px; }
+
+  .callout{ max-width:820px; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px;
+    padding:14px 16px; font-size:13px; color:#065f46; margin-top:28px; line-height:1.5; }
+  .callout b{ color:#064e3b; }
+  mark{ background:#fde68a; padding:0 2px; border-radius:2px; }
+</style>
+</head>
+<body>
+  <h1>mp-13y — viewer match-detail modal, shown in context</h1>
+  <p class="note">
+    This is the <b>real</b> <code>MatchViewerModal</code> (viewer.jsx:3311) — what a viewer sees when they
+    tap a team match. <b>Left = today (already shipped). Right = proposed.</b> The modal already renders a
+    <code>SHIRO · Position · AKA</code> table with per-bout <b>scores</b> — but the centre column only says
+    "Match 1 / Match 2 …" with <b>no names</b>. The lineup feature fills the competitor names into rows that
+    already carry the score. <b>It does not add a score — the score is already here.</b>
+  </p>
+
+  <div class="stage">
+
+    <!-- ======================= CURRENT ======================= -->
+    <div>
+      <p class="col-label">Today — already shipped</p>
+      <div class="card">
+        <div class="modal-top">
+          <h2>Match Details</h2>
+          <button class="btn-ghost">Close</button>
+        </div>
+        <div class="sub-line">
+          <span>Shiaijo A · Round 2</span>
+          <span class="status-badge"><span class="dot">●</span> Running</span>
+        </div>
+        <div class="se-head">
+          <div class="se-head__side">
+            <div class="se-head__name">Tokyo Kendo Renmei</div>
+            <span class="badge badge--shiro">SHIRO</span>
+          </div>
+          <div class="se-head__vs">vs</div>
+          <div class="se-head__side right">
+            <div class="se-head__name">Osaka Bushido Dojo</div>
+            <span class="badge badge--aka">AKA</span>
+          </div>
+        </div>
+
+        <div class="thead">
+          <div class="c-side">SHIRO</div>
+          <div class="c-mid">Position</div>
+          <div class="c-side right">AKA</div>
+        </div>
+
+        <div class="brow">
+          <div class="cell"><span class="score">M</span></div>
+          <div class="mid">Match 1</div>
+          <div class="cell right"><span class="score">—</span><span class="fouls">Fouls: 1</span></div>
+        </div>
+        <div class="brow">
+          <div class="cell"><span class="score">—</span></div>
+          <div class="mid">Match 2</div>
+          <div class="cell right"><span class="score">—</span></div>
+        </div>
+        <div class="brow">
+          <div class="cell"><span class="score">KM</span></div>
+          <div class="mid">Match 3</div>
+          <div class="cell right"><span class="score">DH</span></div>
+        </div>
+        <div class="brow">
+          <div class="cell"><span class="score">—</span></div>
+          <div class="mid">Match 4</div>
+          <div class="cell right"><span class="score">—</span></div>
+        </div>
+        <div class="brow">
+          <div class="cell"><span class="score">—</span></div>
+          <div class="mid">Match 5</div>
+          <div class="cell right"><span class="score">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================= PROPOSED ======================= -->
+    <div>
+      <p class="col-label proposed">Proposed — names filled in, colour instead of SHIRO/AKA tags</p>
+      <div class="card prop">
+        <div class="modal-top">
+          <h2>Match Details</h2>
+          <button class="btn-ghost">Close</button>
+        </div>
+        <div class="sub-line">
+          <span>Shiaijo A · Round 2</span>
+          <span class="status-badge"><span class="dot">●</span> Running</span>
+        </div>
+        <div class="se-head">
+          <div class="se-head__side">
+            <div class="se-head__name nshiro">Tokyo Kendo Renmei</div>
+          </div>
+          <div class="se-head__vs">vs</div>
+          <div class="se-head__side right">
+            <div class="se-head__name naka">Osaka Bushido Dojo</div>
+          </div>
+        </div>
+
+        <div class="thead">
+          <div class="c-side">&nbsp;</div>
+          <div class="c-mid">Players</div>
+          <div class="c-side right">&nbsp;</div>
+        </div>
+
+        <div class="brow">
+          <div class="cell"><span class="score">M</span></div>
+          <div class="mid">
+            <div class="names"><span class="nshiro">Sato Ken</span><span class="sep">·</span><span class="naka">Yamada Ryo</span></div>
+          </div>
+          <div class="cell right"><span class="score">—</span><span class="fouls">Fouls: 1</span></div>
+        </div>
+        <div class="brow">
+          <div class="cell"><span class="score">—</span></div>
+          <div class="mid">
+            <div class="names"><span class="nshiro">Tanaka Aiko</span><span class="sep">·</span><span class="naka">Ito Haruki</span></div>
+          </div>
+          <div class="cell right"><span class="score">—</span></div>
+        </div>
+        <div class="brow">
+          <div class="cell"><span class="score">KM</span></div>
+          <div class="mid">
+            <div class="names"><span class="nshiro">Watanabe Kei</span><span class="sep">·</span><span class="naka">Mori Daichi</span></div>
+          </div>
+          <div class="cell right"><span class="score">DH</span></div>
+        </div>
+        <div class="brow">
+          <div class="cell"><span class="score">—</span></div>
+          <div class="mid">
+            <div class="names"><span class="nshiro">Nakamura Yui</span><span class="sep">·</span><span class="naka">Suzuki Rin</span></div>
+          </div>
+          <div class="cell right"><span class="score">—</span></div>
+        </div>
+        <div class="brow">
+          <div class="cell"><span class="score">—</span></div>
+          <div class="mid">
+            <div class="names"><span class="nshiro">Kobayashi Shun</span><span class="sep">·</span><span class="naka">Hayashi Sora</span></div>
+          </div>
+          <div class="cell right"><span class="score">—</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="callout">
+    <b>What this means for the bead.</b> The viewer match-detail modal is the in-context home, and it
+    <b>already shows the score</b> (per-bout ippon letters + fouls) — so the lineup must <mark>not</mark>
+    add a second score block. The change is narrow: replace the centre column's bare
+    <code>"Match&nbsp;N"</code> label (from <code>subBoutLabel</code>, viewer.jsx:1056) with the two competitor
+    names for that bout, resolved from the per-match lineup endpoint. When a bout has no pinned name, fall
+    back to the existing <code>"Match&nbsp;N"</code> label rather than crashing.
+  </div>
+</body>
+</html>

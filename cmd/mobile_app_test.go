@@ -102,6 +102,37 @@ func TestMobileAppOptions_LockPasswordRejectsBadHash(t *testing.T) {
 	assert.Contains(t, err.Error(), "valid bcrypt hash")
 }
 
+// TestMobileAppOptions_RunReachesServer exercises the server-startup code
+// path (lines after store/verifier creation) by using a valid store and an
+// invalid port that causes ListenAndServe to return immediately with an error.
+// This covers the file-verifier selection, hub creation, and select branch.
+func TestMobileAppOptions_RunReachesServer(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SSE_MAX_CLIENTS", "not-a-number") // exercises the Warn branch
+	o := &mobileAppOptions{
+		folder:      dir,
+		bindAddress: "localhost",
+		port:        99999, // >65535: net.Listen fails immediately
+	}
+	err := o.run(nil, nil)
+	// The server fails to bind — expect a non-nil listen error.
+	require.Error(t, err)
+}
+
+// TestMobileAppOptions_RunSSEMaxClientsValid exercises the valid-positive-int
+// branch of SSE_MAX_CLIENTS parsing within run().
+func TestMobileAppOptions_RunSSEMaxClientsValid(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SSE_MAX_CLIENTS", "10")
+	o := &mobileAppOptions{
+		folder:      dir,
+		bindAddress: "localhost",
+		port:        99999,
+	}
+	err := o.run(nil, nil)
+	require.Error(t, err) // fails to bind, as intended
+}
+
 // LOCK_PASSWORD env var is parsed via strconv.ParseBool so that values
 // like "TRUE", "True", "1", "t" all activate locked mode (not just "true").
 // Invalid values (e.g. "yes", "enabled") must produce a clear startup

@@ -14,14 +14,15 @@ type TournamentService struct {
 
 // NewTournamentService creates a new tournament service
 func NewTournamentService() (*TournamentService, error) {
-	client, err := excel.NewClient()
+	return newTournamentServiceWithFactory(excel.NewClient)
+}
+
+func newTournamentServiceWithFactory(f func() (*excel.Client, error)) (*TournamentService, error) {
+	client, err := f()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Excel client: %w", err)
 	}
-
-	return &TournamentService{
-		excelClient: client,
-	}, nil
+	return &TournamentService{excelClient: client}, nil
 }
 
 // Close closes any resources used by the service

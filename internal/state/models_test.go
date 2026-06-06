@@ -391,3 +391,38 @@ func TestTournament_EmptySponsors_OmitsKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(b), "sponsors:", "empty Sponsors must be omitted from YAML")
 }
+
+func TestValidateSponsor(t *testing.T) {
+	tests := []struct {
+		name    string
+		sponsor Sponsor
+		wantErr error
+	}{
+		{name: "empty name", sponsor: Sponsor{}, wantErr: ErrSponsorNameRequired},
+		{name: "name too long", sponsor: Sponsor{Name: strings.Repeat("a", MaxSponsorNameLen+1)}, wantErr: ErrSponsorNameTooLong},
+		{name: "valid name no link", sponsor: Sponsor{Name: "Acme"}, wantErr: nil},
+		{name: "valid name and link", sponsor: Sponsor{Name: "Acme", Link: "https://acme.example"}, wantErr: nil},
+		{name: "link too long", sponsor: Sponsor{Name: "Acme", Link: "https://" + strings.Repeat("x", MaxSponsorLinkLen)}, wantErr: ErrSponsorLinkTooLong},
+		{name: "link not http", sponsor: Sponsor{Name: "Acme", Link: "ftp://acme.example"}, wantErr: ErrSponsorLinkInvalid},
+		{name: "link no host", sponsor: Sponsor{Name: "Acme", Link: "https://"}, wantErr: ErrSponsorLinkInvalid},
+		{name: "link with credentials", sponsor: Sponsor{Name: "Acme", Link: "https://user:pass@acme.example"}, wantErr: ErrSponsorLinkInvalid},
+		{name: "plain http link", sponsor: Sponsor{Name: "Acme", Link: "http://acme.example"}, wantErr: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateSponsor(tc.sponsor)
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateTournamentMode(t *testing.T) {
+	assert.NoError(t, ValidateTournamentMode(""))
+	assert.NoError(t, ValidateTournamentMode(TournamentModeOfficiated))
+	assert.NoError(t, ValidateTournamentMode(TournamentModeSelfRun))
+	assert.Error(t, ValidateTournamentMode("unknown-mode"))
+}

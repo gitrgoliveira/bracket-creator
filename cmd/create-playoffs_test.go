@@ -222,3 +222,32 @@ func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
 	err = o.run(nil, nil)
 	assert.Error(t, err)
 }
+
+func TestPlayoffOptionsRun_InvalidOutputPath(t *testing.T) {
+	tmpInput, err := os.CreateTemp("", "input-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpInput.Name())
+	_, err = tmpInput.WriteString("Alice,DojoA\nBob,DojoB\nCarol,DojoC\nDave,DojoD\n")
+	require.NoError(t, err)
+	tmpInput.Close()
+
+	o := &playoffOptions{
+		filePath:   tmpInput.Name(),
+		outputPath: filepath.Join(t.TempDir(), "nonexistent", "output.xlsx"), // parent dir missing
+		courts:     1,
+	}
+	err = o.run(nil, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to open output file")
+}
+
+func TestPlayoffOptionsRun_FileNotFound(t *testing.T) {
+	o := &playoffOptions{
+		filePath:   "/nonexistent/input.csv",
+		outputPath: filepath.Join(t.TempDir(), "output.xlsx"),
+		courts:     1,
+	}
+	err := o.run(nil, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read entries from file")
+}

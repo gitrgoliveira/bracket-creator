@@ -188,6 +188,7 @@ func TestPrintTournamentDataStoreConstruction(t *testing.T) {
 // generatePDFs without requiring LibreOffice. A nil generator is safe here
 // because all tested branches return before any gen.* call.
 func TestGeneratePDFsValidation(t *testing.T) {
+	tmpDir := t.TempDir()
 	tests := []struct {
 		name        string
 		opts        printOptions
@@ -195,7 +196,7 @@ func TestGeneratePDFsValidation(t *testing.T) {
 	}{
 		{
 			name:        "all type with --output set",
-			opts:        printOptions{pdfType: "all", output: "/tmp/out.pdf", outputDir: ""},
+			opts:        printOptions{pdfType: "all", output: filepath.Join(tmpDir, "out.pdf"), outputDir: ""},
 			wantErrFrag: "--output is not valid with --type=all",
 		},
 		{
@@ -210,7 +211,7 @@ func TestGeneratePDFsValidation(t *testing.T) {
 		},
 		{
 			name:        "single type with both output flags",
-			opts:        printOptions{pdfType: "names", output: "/tmp/out.pdf", outputDir: "/tmp/"},
+			opts:        printOptions{pdfType: "names", output: filepath.Join(tmpDir, "out.pdf"), outputDir: tmpDir},
 			wantErrFrag: "--output and --output-dir are mutually exclusive",
 		},
 	}
@@ -237,8 +238,9 @@ func TestPrintUnknownType(t *testing.T) {
 }
 
 // TestPrintSofficeNotFound checks the ErrSofficeNotFound branch in run()
-// by pointing LIBREOFFICE_PATH at a non-existent file so that both $PATH and
-// well-known candidate paths are bypassed and the generator creation fails.
+// by pointing LIBREOFFICE_PATH at a non-existent binary. LocateSoffice only
+// treats LIBREOFFICE_PATH as authoritative when it resolves to an executable;
+// when it doesn't, the test skips if LibreOffice is still found via $PATH.
 func TestPrintSofficeNotFound(t *testing.T) {
 	t.Setenv("LIBREOFFICE_PATH", "/nonexistent-soffice-binary-abc123")
 

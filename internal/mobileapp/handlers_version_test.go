@@ -37,11 +37,13 @@ func TestVersionEndpoint(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 
 	var resp versionResponse
 	err = json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 
 	assert.Equal(t, version.GetVersion(), resp.Version)
+	assert.Equal(t, version.GetGitCommit(), resp.GitCommit)
 	assert.Equal(t, version.GetBuildDate(), resp.BuildDate)
 }

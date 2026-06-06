@@ -949,6 +949,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               <span className="vlist-item__rowchev">→</span>
             </a>
           </div>
+          {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={t} />}
@@ -1786,6 +1787,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             // than short-circuiting.
             <AwardsView c={c} bracket={bracket} standings={standings} pools={pools} players={c.players} />
           )}
+          {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={c.id} />}
@@ -2995,7 +2997,7 @@ function bracketHasDecidedFinal(bracket) {
 // Returns { state, podium } where state is one of:
 //   'final'       — podium is the final result
 //   'in-progress' — knockout not yet decided (podium [])
-//   'skip'        — legacy linked-playoffs shell (sourceCompID); caller should ignore
+//   'skip'        — linked-playoffs shell (sourceCompID set); caller excludes from results
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 async function resolveCompetitionAwards(comp, fetchers) {
   // A linked-playoffs shell (legacy split-comp layout carrying sourceCompID)
@@ -3310,6 +3312,7 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
         </div>
         <div className="viewer__body">
           <ScheduleViewer tournament={tournament} tweaks={extendedTweaks} />
+          {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} />}

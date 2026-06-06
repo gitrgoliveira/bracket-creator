@@ -34,8 +34,8 @@ func TestGetResources(t *testing.T) {
 }
 
 // TestExecute verifies the Execute function runs without panicking when the
-// root command is invoked with no arguments (cobra prints usage and returns
-// nil, so os.Exit is never called).
+// root command is invoked with --help (which cobra handles internally, returns
+// nil, and never calls os.Exit).
 func TestExecute(t *testing.T) {
 	// Suppress cobra's output so help text doesn't pollute test logs.
 	rootCmd.SetOut(io.Discard)
@@ -44,8 +44,9 @@ func TestExecute(t *testing.T) {
 		rootCmd.SetOut(nil)
 		rootCmd.SetErr(nil)
 	}()
-	// Override args: empty list causes cobra to print usage and return nil.
-	rootCmd.SetArgs([]string{})
+	// Use --help: cobra handles it internally, returns nil, never calls os.Exit.
+	// This is more explicit than relying on cobra's default zero-arg behaviour.
+	rootCmd.SetArgs([]string{"--help"})
 	defer rootCmd.SetArgs(nil)
 
 	// Execute must not panic.
@@ -55,14 +56,15 @@ func TestExecute(t *testing.T) {
 // TestExecuteWithResources verifies that ExecuteWithResources sets appResources
 // before delegating to cobra.
 func TestExecuteWithResources(t *testing.T) {
+	originalResources := appResources
 	rootCmd.SetOut(io.Discard)
 	rootCmd.SetErr(io.Discard)
 	defer func() {
 		rootCmd.SetOut(nil)
 		rootCmd.SetErr(nil)
-		appResources = nil
+		appResources = originalResources // restore rather than nil to avoid racing parallel tests
 	}()
-	rootCmd.SetArgs([]string{})
+	rootCmd.SetArgs([]string{"--help"})
 	defer rootCmd.SetArgs(nil)
 
 	res := &resources.Resources{}

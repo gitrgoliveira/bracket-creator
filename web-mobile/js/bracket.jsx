@@ -169,7 +169,12 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
           {player.number ? <span className="num-prefix">{player.number}</span> : null}
           {player.name}
         </span>
-        {showDojo && player.dojo ? <span className="bc-dojo">{player.dojo}</span> : null}
+        {/* Reserve the dojo line on every side when dojos are shown — a real
+            player without a dojo, or a "Winner of…" placeholder, gets an
+            invisible spacer line so all sides (and thus all bracket cards) keep
+            a uniform height (mp-7f2w). When showDojo is off, no line is rendered
+            anywhere, so cards stay uniformly short. */}
+        {showDojo ? <span className="bc-dojo">{player.dojo || <span aria-hidden="true">{"\u00A0"}</span>}</span> : null}
       </div>
       {score != null ? <span className="bc-score">{score}</span> : null}
     </div>
@@ -296,7 +301,284 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
   );
 }
 
-function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayer }) {
+// buildDisplayModel decides how to render a bracket. When the engine has tagged
+// matches with effective-round metadata (mp-7f2w: displayRound / hidden /
+// feeders), it groups the REAL matches into effective-round columns identical to
+// the Excel Tree sheet (structural byes skip a column, phantom bye matches are
+// dropped) and exposes a feeder graph for connector drawing. Otherwise it falls
+// back to the legacy balanced-rounds shape with positional (2i, 2i+1) feeders so
+// brackets generated before this field existed render exactly as before.
+// useAutoScrollToMatch smooth-scrolls the bracket so the given match is centred
+// in the scroll container. Shared by both the effective-round (BracketTreeMeta)
+// and legacy (BracketTreeLegacy) renderers so the centring math lives in one place.
+function useAutoScrollToMatch(autoScrollMatchId, refMap, scrollContainerRef, version) {
+  useLayoutEffectBC(() => {
+    if (!autoScrollMatchId) return;
+    const realId = String(autoScrollMatchId).split("::")[0];
+    let frame1 = 0, frame2 = 0;
+    const run = () => {
+      const el = refMap.current[realId];
+      const scrollEl = scrollContainerRef?.current;
+      if (!el || !scrollEl) return;
+      const elRect = el.getBoundingClientRect();
+      const scRect = scrollEl.getBoundingClientRect();
+      const targetLeft = scrollEl.scrollLeft + (elRect.left - scRect.left) - (scRect.width / 2 - elRect.width / 2);
+      const targetTop = scrollEl.scrollTop + (elRect.top - scRect.top) - (scRect.height / 2 - elRect.height / 2);
+      scrollEl.scrollTo({ left: Math.max(0, targetLeft), top: Math.max(0, targetTop), behavior: "smooth" });
+    };
+    frame1 = requestAnimationFrame(() => { frame2 = requestAnimationFrame(run); });
+    return () => { cancelAnimationFrame(frame1); cancelAnimationFrame(frame2); };
+  }, [autoScrollMatchId, version]);
+}
+
+function buildDisplayModel(rounds) {
+  if (!rounds || rounds.length === 0) return { hasMeta: false, columns: rounds || [], feedersById: {} };
+  const hasMeta = rounds.some((r) => r.some((m) => (m.displayRound || 0) > 0 || m.hidden));
+  if (hasMeta) {
+    let maxDR = 0;
+    const real = [];
+    rounds.forEach((r) => r.forEach((m) => {
+      if (!m.hidden && (m.displayRound || 0) > 0) { real.push(m); if (m.displayRound > maxDR) maxDR = m.displayRound; }
+    }));
+    const columns = [];
+    for (let dr = maxDR; dr >= 1; dr--) columns.push(real.filter((m) => m.displayRound === dr));
+    const feedersById = {};
+    real.forEach((m) => { feedersById[m.id] = (m.feeders || []).filter(Boolean); });
+    return { hasMeta: true, columns, feedersById };
+  }
+  // Legacy: columns = rounds. Connectors are positional (BracketConnectors
+  // derives the 2i/2i+1 feeders from `rounds` itself), so no feeder graph is
+  // produced here — feedersById stays empty to match the empty-input shape.
+  return { hasMeta: false, columns: rounds, feedersById: {} };
+}
+
+// computeMetaTops lays out an (uneven) effective-round bracket. It walks the
+// feeder graph from the final: matches with no feeders ("seeded" entrants — real
+// players or bye recipients) are stacked top-to-bottom in depth-first encounter
+// order, and every parent is centred on the mean of its feeders. Returns a map
+// of matchId → absolute top (px). heights is matchId → measured card height.
+function computeMetaTops(columns, feedersById, heights) {
+  const GAP = 16;
+  const DEFAULT_H = 110;
+  const centerOf = {};
+  const inProgress = new Set();
+  let cursor = 0;
+  const visit = (id) => {
+    if (centerOf[id] != null) return centerOf[id];
+    // Cycle guard (mirrors the DisplayRound!=0 guard in the Go BFS): centerOf is
+    // only set post-order for parents, so a cyclic feeders graph would recurse
+    // forever. The engine only emits acyclic trees, but a corrupt/hand-edited
+    // bracket.json must not crash the renderer — break the cycle and return 0.
+    if (inProgress.has(id)) return 0;
+    inProgress.add(id);
+    const fs = (feedersById[id] || []).filter(Boolean);
+    const h = heights[id] || DEFAULT_H;
+    if (fs.length === 0) {
+      const c = cursor + h / 2;
+      cursor += h + GAP;
+      centerOf[id] = c;
+      inProgress.delete(id);
+      return c;
+    }
+    const cs = fs.map(visit);
+    const c = cs.reduce((a, b) => a + b, 0) / cs.length;
+    centerOf[id] = c;
+    inProgress.delete(id);
+    return c;
+  };
+  const rootId = columns[columns.length - 1]?.[0]?.id;
+  if (rootId) visit(rootId);
+  // Defensive: the engine only sets displayRound>0 on matches reachable from the
+  // final, so visit(rootId) already placed every match in `columns`. This loop
+  // is a no-op for engine output and only fires on corrupt/hand-written metadata.
+  columns.forEach((col) => col.forEach((m) => {
+    if (centerOf[m.id] == null) {
+      const h = heights[m.id] || DEFAULT_H;
+      centerOf[m.id] = cursor + h / 2;
+      cursor += h + GAP;
+    }
+  }));
+  const tops = {};
+  columns.forEach((col) => col.forEach((m) => {
+    tops[m.id] = centerOf[m.id] - (heights[m.id] || DEFAULT_H) / 2;
+  }));
+  return tops;
+}
+
+// BracketConnectorsMeta draws feeder→parent elbows for the effective-round
+// layout (mp-7f2w). Unlike the legacy BracketConnectors it pairs by the explicit
+// feeder graph, not binary (2i, 2i+1) positions, so uneven columns connect
+// correctly. A match with a single feeder (the other side is a bye/seeded
+// entrant) gets one elbow; the bye side draws no line.
+function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version, showDojo, variant }) {
+  const [paths, setPaths] = useStateBC([]);
+  const [size, setSize] = useStateBC({ w: 0, h: 0 });
+
+  useLayoutEffectBC(() => {
+    const compute = () => {
+      const tree = treeRef.current;
+      if (!tree) return;
+      const treeRect = tree.getBoundingClientRect();
+      const out = [];
+      columns.forEach((col) => col.forEach((m) => {
+        const fs = (feedersById[m.id] || []).filter(Boolean);
+        if (fs.length === 0) return;
+        const mEl = refMap.current[m.id];
+        if (!mEl) return;
+        const mR = mEl.getBoundingClientRect();
+        const mLeft = mR.left - treeRect.left;
+        const mMidY = anchorY(mEl, mR, treeRect.top);
+        fs.forEach((fid) => {
+          const fEl = refMap.current[fid];
+          if (!fEl) return;
+          const fR = fEl.getBoundingClientRect();
+          const fRight = fR.right - treeRect.left;
+          const fMidY = anchorY(fEl, fR, treeRect.top);
+          const midX = (fRight + mLeft) / 2;
+          out.push({ d: `M ${fRight} ${fMidY} L ${midX} ${fMidY} L ${midX} ${mMidY} L ${mLeft} ${mMidY}` });
+        });
+      }));
+      setPaths(out);
+      setSize({ w: tree.scrollWidth, h: tree.scrollHeight });
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    if (treeRef.current) ro.observe(treeRef.current);
+    window.addEventListener("resize", compute);
+    return () => { ro.disconnect(); window.removeEventListener("resize", compute); };
+    // showDojo/variant change card heights → feeder anchors move, so recompute.
+  }, [columns, feedersById, version, showDojo, variant]);
+
+  return (
+    <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
+      {paths.map((p, i) => (
+        <path key={i} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
+      ))}
+    </svg>
+  );
+}
+
+// BracketTreeMeta renders the effective-round columns (mp-7f2w). Every card is a
+// real match; structural byes are absent. Cards in column 0 plus every card is
+// absolutely positioned at the feeder-graph-derived top so parents sit centred
+// on their feeders (see computeMetaTops).
+function BracketTreeMeta({ columns, feedersById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayer }) {
+  const treeRef = useRef(null);
+  const refMap = useRef({});
+  const [version, setVersion] = useStateBC(0);
+  const [cardTops, setCardTops] = useStateBC(null);
+
+  // Reset the measured layout only when the TOPOLOGY changes, not on every new
+  // `columns` reference. Match ids and the feeder graph are frozen at generation
+  // time, so a score update (which only mutates sideA/sideB/status/score) yields
+  // the same signature and the measured tops are preserved — avoiding a reset-to-
+  // null reflow flash on every live-court update. Genuine height changes on
+  // resolution are still caught by the measure effect's ResizeObserver below.
+  const topoSig = React.useMemo(
+    () => columns.map((c) => c.map((m) => m.id).join(",")).join("|"),
+    [columns]
+  );
+  useEffectBC(() => { setCardTops(null); setVersion((v) => v + 1); }, [topoSig]);
+
+  useLayoutEffectBC(() => {
+    const measure = () => {
+      const tree = treeRef.current;
+      if (!tree || !columns || columns.length === 0) return;
+      const heights = {};
+      for (const col of columns) {
+        for (const m of col) {
+          const el = refMap.current[m.id];
+          if (!el) return;
+          heights[m.id] = el.getBoundingClientRect().height;
+        }
+      }
+      const tops = computeMetaTops(columns, feedersById, heights);
+      // Every column is absolutely positioned, so the flow height of each
+      // round-matches container is 0 and the tree would collapse. Derive the
+      // overall content height from the lowest card bottom and pin it on the
+      // containers so the tree (and its scroll area) size correctly.
+      let height = 0;
+      for (const col of columns) {
+        for (const m of col) {
+          const bottom = (tops[m.id] || 0) + (heights[m.id] || 0);
+          if (bottom > height) height = bottom;
+        }
+      }
+      setCardTops((prev) => {
+        if (prev) {
+          const same = Math.abs((prev.height ?? 0) - height) < 0.5 &&
+            Object.keys(tops).length === Object.keys(prev.tops).length &&
+            Object.keys(tops).every((k) => Math.abs((prev.tops[k] ?? 0) - tops[k]) < 0.5);
+          if (same) return prev;
+        }
+        return { tops, height };
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (treeRef.current) ro.observe(treeRef.current);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+    // showDojo/variant affect card heights, so re-measure (and reposition) when
+    // they change — not just on topology/version. The convergence guard keeps a
+    // no-op recompute from causing a render.
+  }, [columns, feedersById, version, showDojo, variant]);
+
+  useAutoScrollToMatch(autoScrollMatchId, refMap, scrollContainerRef, version);
+
+  if (!columns || columns.length === 0) return null;
+  const positioned = !!cardTops;
+  // Every column is absolutely positioned, so override the legacy flex:1 (which
+  // would zero the basis) and pin an explicit height; otherwise the flex row has
+  // no non-abs column to establish its height and the tree collapses.
+  const matchesStyle = positioned ? { flex: "none", height: `${cardTops.height}px`, minHeight: `${cardTops.height}px` } : undefined;
+  return (
+    <div className={`bc-tree bc-tree--v${variant}`} ref={treeRef}>
+      <BracketConnectorsMeta columns={columns} feedersById={feedersById} treeRef={treeRef} refMap={refMap} version={version} showDojo={showDojo} variant={variant} />
+      {columns.map((col, ci) => (
+        <div key={ci} className="bc-round" style={{ "--round": ci }}>
+          <div className="bc-round-label">{roundLabel(ci, columns.length)}</div>
+          <div className={`bc-round-matches${positioned ? " bc-round-matches--abs" : ""}`} style={matchesStyle}>
+            {col.map((m, mi) => {
+              const top = positioned ? cardTops.tops[m.id] : undefined;
+              const wrapStyle = top != null
+                ? { "--mi": mi, position: "absolute", top: `${top}px`, left: 0, right: 0 }
+                : { "--mi": mi };
+              return (
+                <div className="bc-match-wrap" key={m.id} style={wrapStyle}>
+                  <MatchCard
+                    match={m}
+                    variant={variant}
+                    showDojo={showDojo}
+                    highlighted={m.id === highlightedMatchId}
+                    matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
+                    onClick={() => onMatchClick && onMatchClick(m, ci, mi)}
+                    highlightPlayer={highlightPlayer}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// BracketTree switches between the effective-round renderer (when the engine
+// supplied display metadata) and the legacy balanced-rounds renderer.
+function BracketTree(props) {
+  // Memoise on rounds identity: buildDisplayModel returns fresh arrays, and the
+  // meta renderer's effects key on those — recomputing every render would reset
+  // the measured layout in a loop.
+  const model = React.useMemo(() => buildDisplayModel(props.rounds), [props.rounds]);
+  if (model.hasMeta) {
+    return <BracketTreeMeta {...props} columns={model.columns} feedersById={model.feedersById} />;
+  }
+  return <BracketTreeLegacy {...props} />;
+}
+
+function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayer }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -373,23 +655,7 @@ function BracketTree({ rounds, variant = 1, showDojo = true, onMatchClick, highl
     return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
   }, [rounds, version]);
 
-  useLayoutEffectBC(() => {
-    if (!autoScrollMatchId) return;
-    const realId = String(autoScrollMatchId).split("::")[0];
-    let frame1 = 0, frame2 = 0;
-    const run = () => {
-      const el = refMap.current[realId];
-      const scrollEl = scrollContainerRef?.current;
-      if (!el || !scrollEl) return;
-      const elRect = el.getBoundingClientRect();
-      const scRect = scrollEl.getBoundingClientRect();
-      const targetLeft = scrollEl.scrollLeft + (elRect.left - scRect.left) - (scRect.width / 2 - elRect.width / 2);
-      const targetTop = scrollEl.scrollTop + (elRect.top - scRect.top) - (scRect.height / 2 - elRect.height / 2);
-      scrollEl.scrollTo({ left: Math.max(0, targetLeft), top: Math.max(0, targetTop), behavior: "smooth" });
-    };
-    frame1 = requestAnimationFrame(() => { frame2 = requestAnimationFrame(run); });
-    return () => { cancelAnimationFrame(frame1); cancelAnimationFrame(frame2); };
-  }, [autoScrollMatchId, version]);
+  useAutoScrollToMatch(autoScrollMatchId, refMap, scrollContainerRef, version);
 
   if (!rounds) return null;
   // Round 0 flows naturally; rounds ≥ 1 are absolutely positioned at the measured
@@ -453,4 +719,4 @@ window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, matchScoreStr };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, matchScoreStr, buildDisplayModel, computeMetaTops };

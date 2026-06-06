@@ -650,6 +650,24 @@ type BracketMatch struct {
 	SubResults []SubMatchResult `json:"subResults,omitempty"`
 	// ResultSource mirrors MatchResult.ResultSource for bracket matches.
 	ResultSource string `json:"resultSource,omitempty"`
+	// Display metadata (mp-7f2w) — additive, computed at generation time so the
+	// viewer can render the bracket with the SAME effective-round columns as the
+	// printed Excel Tree sheet (matches grouped by depth-from-root, structural
+	// byes skipping a column) instead of the balanced pow2 rounds. These fields
+	// are purely for rendering; the resolution/scoring/scheduling logic continues
+	// to use the positional ID + "Winner of rX-mY" scheme unchanged.
+	//
+	// DisplayRound is the effective round counted from the final (1 = Final,
+	// 2 = Semifinal, …). 0 means unset — either a legacy bracket generated before
+	// this field existed (viewer falls back to positional rendering) or a Hidden
+	// phantom match. Hidden marks a structural-bye match (empty-vs-empty dead
+	// match, or a latent bye where one side never had an opponent) that is not a
+	// real bout and must not be drawn as a match card. Feeders holds the IDs of
+	// the two real feeder matches whose winners meet here, in [A, B] order; an
+	// empty string means that side is a seeded entrant / bye (no connector line).
+	DisplayRound int      `json:"displayRound,omitempty"`
+	Hidden       bool     `json:"hidden,omitempty"`
+	Feeders      []string `json:"feeders,omitempty"`
 }
 
 type Bracket struct {

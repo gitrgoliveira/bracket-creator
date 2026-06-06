@@ -239,5 +239,119 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 	state.ApplyCompetitionDefaults(comp)
 	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
 
+	// Display metadata (mp-7f2w): label each match with its effective round and
+	// real feeders so the viewer renders the same effective-round columns as the
+	// Excel Tree sheet (structural byes skip a column). Computed once here, while
+	// the "Winner of rX-mY" placeholders are still intact — it must NOT be
+	// recomputed after results resolve those placeholders into player names.
+	computeBracketDisplayMetadata(bracket)
+
 	return bracket, nil
+}
+
+// computeBracketDisplayMetadata fills DisplayRound / Hidden / Feeders on every
+// match so the viewer can render effective-round columns identical to the Excel
+// Tree sheet (matches grouped by depth-from-root; structural byes skip a column
+// rather than appearing as empty cards). It is purely additive — the positional
+// ID + "Winner of rX-mY" resolution scheme used by scoring/scheduling/the pool
+// resolver is untouched.
+//
+// A match is REAL iff both sides are non-empty (a structural bye always leaves
+// one side ""). Phantom matches (empty-vs-empty dead matches and one-sided latent
+// byes) are marked Hidden. For each real match, Feeders holds the IDs of the two
+// REAL feeder matches whose winners meet here ([A, B] order); a side fed by a
+// seeded entrant / pool placeholder / bye carries "" (no connector). DisplayRound
+// counts from the final (1 = Final), assigned by walking the real feeder graph
+// outward from the lone real match in the last round.
+//
+// Must run after bye winners have been auto-resolved and propagated (so resolved
+// names already sit in their feeder slots) — i.e. at the end of bracket build.
+func computeBracketDisplayMetadata(bracket *state.Bracket) {
+	rounds := bracket.Rounds
+	numRounds := len(rounds)
+	if numRounds == 0 {
+		return
+	}
+
+	at := func(r, m int) *state.BracketMatch {
+		if r < 0 || r >= numRounds || m < 0 || m >= len(rounds[r]) {
+			return nil
+		}
+		return &rounds[r][m]
+	}
+	isReal := func(m *state.BracketMatch) bool {
+		return m != nil && m.SideA != "" && m.SideB != ""
+	}
+
+	// realFeederID follows a "Winner of rX-mY" side through any phantom (bye)
+	// matches to the underlying REAL feeder match's ID, or "" when the side is a
+	// seeded entrant / resolved name / dead end (no connector line).
+	var realFeederID func(side string) string
+	realFeederID = func(side string) string {
+		if !strings.HasPrefix(side, "Winner of") {
+			return "" // resolved name, pool placeholder, or empty → no feeder
+		}
+		r, m := parseWinnerOf(side, numRounds)
+		f := at(r, m)
+		if f == nil {
+			return ""
+		}
+		if isReal(f) {
+			return f.ID
+		}
+		// Phantom: descend through whichever side carries a competitor.
+		if f.SideA != "" {
+			return realFeederID(f.SideA)
+		}
+		if f.SideB != "" {
+			return realFeederID(f.SideB)
+		}
+		return "" // dead match (both empty)
+	}
+
+	byID := make(map[string]*state.BracketMatch)
+	for r := range rounds {
+		for i := range rounds[r] {
+			mm := &rounds[r][i]
+			byID[mm.ID] = mm
+			if isReal(mm) {
+				mm.Hidden = false
+				mm.DisplayRound = 0 // assigned by the walk below
+				mm.Feeders = []string{realFeederID(mm.SideA), realFeederID(mm.SideB)}
+			} else {
+				mm.Hidden = true
+				mm.DisplayRound = 0
+				mm.Feeders = nil
+			}
+		}
+	}
+
+	// Walk the real feeder graph outward from the final (the lone real match in
+	// the last round). It is a tree, so each match is reached exactly once; the
+	// DisplayRound != 0 guard also bounds against any unexpected cycle.
+	final := at(numRounds-1, 0)
+	if !isReal(final) {
+		return // degenerate bracket (e.g. < 2 competitors)
+	}
+	type qItem struct {
+		m  *state.BracketMatch
+		dr int
+	}
+	queue := []qItem{{final, 1}}
+	for len(queue) > 0 {
+		it := queue[0]
+		queue = queue[1:]
+		if it.m == nil || it.m.DisplayRound != 0 {
+			continue
+		}
+		it.m.DisplayRound = it.dr
+		for _, fid := range it.m.Feeders {
+			if fid == "" {
+				continue
+			}
+			if f := byID[fid]; f != nil && f.DisplayRound == 0 {
+				queue = append(queue, qItem{f, it.dr + 1})
+			}
+		}
+	}
 }

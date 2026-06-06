@@ -4,9 +4,11 @@ import "regexp"
 
 // reservedPoolFinalistRE matches the pool-finalist placeholder labels the
 // engine writes into bracket slots: "<PoolName>-<ordinal>", e.g. "Pool A-1st".
-// Pool names are generated as "Pool <char>" (A–Z), so a real participant named
-// like a placeholder is extremely unlikely — but scoring now gates on this
-// regex, so we block it at the write boundary to prevent silent mis-classification.
+// Pool names are generated as "Pool <label>" where label is A–Z for the first
+// 26 pools, then AA, BB, … (same letter doubled) for pools beyond 26 — so a
+// real participant named like a placeholder is extremely unlikely, but scoring
+// now gates on this regex, so we block it at the write boundary to prevent
+// silent mis-classification.
 var reservedPoolFinalistRE = regexp.MustCompile(`^Pool .+-\d+(st|nd|rd|th)$`)
 
 // reservedWinnerOfRE matches the next-round feeder labels the engine emits

@@ -267,6 +267,7 @@ function GlossaryPage({ onBack }) {
               </div>
             </section>
           ))}
+          {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
     </div>

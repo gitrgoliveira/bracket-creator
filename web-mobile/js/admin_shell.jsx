@@ -367,6 +367,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>From folder with manifest.yaml</div>
           </button>
         </div>
+        {window.VersionFooter && <window.VersionFooter />}
       </div>
       {exportPdfOpen && (
         <ExportPdfModal

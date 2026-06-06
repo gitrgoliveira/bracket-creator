@@ -44,8 +44,9 @@ func TestExecute(t *testing.T) {
 		rootCmd.SetOut(nil)
 		rootCmd.SetErr(nil)
 	}()
-	// Override args: empty list causes cobra to print usage and return nil.
-	rootCmd.SetArgs([]string{})
+	// Use --help: cobra handles it internally, returns nil, never calls os.Exit.
+	// This is more explicit than relying on cobra's default zero-arg behaviour.
+	rootCmd.SetArgs([]string{"--help"})
 	defer rootCmd.SetArgs(nil)
 
 	// Execute must not panic.
@@ -63,7 +64,7 @@ func TestExecuteWithResources(t *testing.T) {
 		rootCmd.SetErr(nil)
 		appResources = originalResources // restore rather than nil to avoid racing parallel tests
 	}()
-	rootCmd.SetArgs([]string{})
+	rootCmd.SetArgs([]string{"--help"})
 	defer rootCmd.SetArgs(nil)
 
 	res := &resources.Resources{}

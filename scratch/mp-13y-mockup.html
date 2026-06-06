@@ -133,45 +133,10 @@
     Aka=right (red).
   </p>
 
-  <h2>Viewer — match details (proposed)</h2>
-  <div class="row">
-    <div class="card viewer">
-      <div class="header">
-        <div><strong>Team Match · Round 2</strong></div>
-        <div class="court">Shiaijo A</div>
-      </div>
-      <div class="teams">
-        <div class="team-name side-shiro">Tokyo Kendo Renmei</div>
-        <div class="vs">vs</div>
-        <div class="team-name side-aka">Osaka Bushido Dojo</div>
-      </div>
-
-      <div class="lineup">
-        <table>
-          <tbody>
-            <tr><td class="shiro">Sato Ken</td>      <td class="aka">Yamada Ryo</td></tr>
-            <tr><td class="shiro">Tanaka Aiko</td>   <td class="aka">2</td></tr>
-            <tr><td class="shiro">Watanabe Kei</td>  <td class="aka">Mori Daichi</td></tr>
-            <tr><td class="shiro">4</td>             <td class="aka">Suzuki Rin</td></tr>
-            <tr><td class="shiro">Kobayashi Shun</td><td class="aka">Hayashi Sora</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <p class="legend">Empty state when no per-match lineup pinned (returns 404):</p>
-      <div class="lineup">
-        <table>
-          <tbody>
-            <tr><td class="shiro">1</td><td class="aka">1</td></tr>
-            <tr><td class="shiro">2</td><td class="aka">2</td></tr>
-            <tr><td class="shiro">3</td><td class="aka">3</td></tr>
-            <tr><td class="shiro">4</td><td class="aka">4</td></tr>
-            <tr><td class="shiro">5</td><td class="aka">5</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+  <p class="note">
+    <strong>Viewer surface</strong> is the existing match-detail bout table (names + results in one
+    reusable component) — see <code>mp-13y-viewer-context.html</code>. Not duplicated here.
+  </p>
 
   <h2>TV display (TvDisplay) — fullscreen per-court scoreboard</h2>
   <p class="note">

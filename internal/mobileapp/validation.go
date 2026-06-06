@@ -80,6 +80,11 @@ const (
 	// practical ceiling for tournament rosters (no real competition has
 	// exceeded ~200).
 	MaxBulkCheckInIDs = 1000
+
+	// MaxFightingSpiritAwards is the upper bound on the number of fighting
+	// spirit awards a competition may carry. 20 is a generous cap for
+	// the typical ceremony (usually 1–3 honourees).
+	MaxFightingSpiritAwards = 20
 )
 
 // validateMaxLen returns a ValidationError when val exceeds max bytes.

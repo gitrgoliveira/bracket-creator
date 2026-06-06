@@ -1178,6 +1178,50 @@ paths:
           description: Overrides reset.
 
 
+  /api/competitions/{id}/awards:
+    put:
+      tags: [competitions]
+      summary: Set fighting-spirit awards
+      description: |
+        Replaces the full list of fighting-spirit (敢闘賞) awards for the competition.
+        Awards are independent of the auto-derived placement podium and may be set at
+        any competition status. Passing an empty array clears all awards.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active
+        (see the AdminPassword security scheme); 503 if locked mode is active
+        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
+      security:
+        - TournamentPassword: []
+          AdminPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fightingSpiritAwards]
+              properties:
+                fightingSpiritAwards:
+                  type: array
+                  maxItems: 20
+                  items:
+                    $ref: '#/components/schemas/FightingSpiritAward'
+      responses:
+        '200':
+          description: Awards saved; returns updated competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/schedule:
     put:
       tags: [competitions]
@@ -2445,6 +2489,14 @@ components:
         maxEnchoPeriods:
           type: integer
           description: Maximum number of encho (extended time) periods permitted per match.
+        fightingSpiritAwards:
+          type: array
+          description: >
+            Optional fighting-spirit (敢闘賞) awards for this competition. Independent of the
+            auto-derived placement podium. Absent / empty when no awards have been set.
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/FightingSpiritAward'
         players:
           type: array
           description: >
@@ -2452,6 +2504,23 @@ components:
             `GET /api/viewer/competitions/{id}`). Always empty in admin competition responses.
           items:
             $ref: '#/components/schemas/Player'
+
+    FightingSpiritAward:
+      type: object
+      required: [title, recipientName]
+      properties:
+        title:
+          type: string
+          maxLength: 100
+          description: Award title, e.g. "Fighting Spirit".
+        recipientName:
+          type: string
+          maxLength: 100
+          description: Plain name of the honouree.
+        recipientDojo:
+          type: string
+          maxLength: 100
+          description: Dojo affiliation of the honouree (optional, for disambiguation).
 
     Player:
       type: object

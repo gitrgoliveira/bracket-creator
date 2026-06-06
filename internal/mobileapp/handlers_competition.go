@@ -1344,4 +1344,91 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		c.Status(http.StatusNoContent)
 	})
+
+	r.PUT("/competitions/:id/awards", RequireElevatedPassword(elevated), func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+
+		// Pointer slice distinguishes "field omitted" (nil) from "explicit
+		// empty array" ([]). The field is documented required (OpenAPI
+		// required: [fightingSpiritAwards]); a body of `{}` must 400 rather
+		// than silently clear the list, while an explicit [] clears it.
+		var body struct {
+			FightingSpiritAwards *[]state.FightingSpiritAward `json:"fightingSpiritAwards"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if body.FightingSpiritAwards == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "fightingSpiritAwards is required (use an empty array to clear all awards)"})
+			return
+		}
+
+		awards := *body.FightingSpiritAwards
+		if len(awards) > MaxFightingSpiritAwards {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards must not exceed %d entries", MaxFightingSpiritAwards)})
+			return
+		}
+
+		// Validate and trim each award before persisting.
+		trimmed := make([]state.FightingSpiritAward, 0, len(awards))
+		for i, a := range awards {
+			title := strings.TrimSpace(a.Title)
+			recipientName := strings.TrimSpace(a.RecipientName)
+			recipientDojo := strings.TrimSpace(a.RecipientDojo)
+
+			if title == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: title is required", i)})
+				return
+			}
+			if recipientName == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: recipientName is required", i)})
+				return
+			}
+			if err := validateMaxLen("title", title, MaxLenPlayerName); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: %s", i, err.Error())})
+				return
+			}
+			if err := validateMaxLen("recipientName", recipientName, MaxLenPlayerName); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: %s", i, err.Error())})
+				return
+			}
+			if err := validateMaxLen("recipientDojo", recipientDojo, MaxLenPlayerDojo); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: %s", i, err.Error())})
+				return
+			}
+			trimmed = append(trimmed, state.FightingSpiritAward{
+				Title:         title,
+				RecipientName: recipientName,
+				RecipientDojo: recipientDojo,
+			})
+		}
+
+		var compOut *state.Competition
+		var notFoundFlag bool
+		changed, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			if current == nil {
+				notFoundFlag = true
+				return nil, nil
+			}
+			current.FightingSpiritAwards = trimmed
+			compOut = current
+			return current, nil
+		})
+		if notFoundFlag {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
+		c.JSON(http.StatusOK, compOut)
+	})
 }

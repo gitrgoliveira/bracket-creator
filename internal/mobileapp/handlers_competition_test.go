@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -1626,6 +1628,267 @@ func TestUpdateCompetitionTeamSizeValidation(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestPUTCompetitionAwards(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "awards-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     cid,
+		Name:   "Awards Comp",
+		Status: state.CompStatusComplete,
+	}))
+
+	t.Run("happy path: awards persisted + 200 + SSE emitted", func(t *testing.T) {
+		ch := hub.Subscribe()
+		defer hub.Unsubscribe(ch)
+
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Fighting Spirit", "recipientName": "Alice Yamada", "recipientDojo": "Shinjuku"},
+				{"title": "Best Technique", "recipientName": "Bob Tanaka"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		// Parse response competition and check awards.
+		var resp state.Competition
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.FightingSpiritAwards, 2)
+		assert.Equal(t, "Fighting Spirit", resp.FightingSpiritAwards[0].Title)
+		assert.Equal(t, "Alice Yamada", resp.FightingSpiritAwards[0].RecipientName)
+		assert.Equal(t, "Shinjuku", resp.FightingSpiritAwards[0].RecipientDojo)
+		assert.Equal(t, "Best Technique", resp.FightingSpiritAwards[1].Title)
+		assert.Equal(t, "Bob Tanaka", resp.FightingSpiritAwards[1].RecipientName)
+		assert.Equal(t, "", resp.FightingSpiritAwards[1].RecipientDojo)
+
+		// Verify persistence.
+		saved, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.Len(t, saved.FightingSpiritAwards, 2)
+		assert.Equal(t, "Alice Yamada", saved.FightingSpiritAwards[0].RecipientName)
+
+		// Check SSE tournament_updated was broadcast.
+		sawUpdate := false
+		for range 4 {
+			select {
+			case msg := <-ch:
+				if strings.Contains(msg, `"type":"tournament_updated"`) {
+					sawUpdate = true
+				}
+			default:
+			}
+		}
+		assert.True(t, sawUpdate, "tournament_updated SSE event must be emitted after award save")
+	})
+
+	t.Run("clear awards: empty array persisted", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{"fightingSpiritAwards": []any{}})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		saved, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Empty(t, saved.FightingSpiritAwards, "awards must be cleared")
+	})
+
+	t.Run("404 for unknown competition", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Ghost"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/no-such-comp/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "competition not found")
+	})
+
+	t.Run("400: empty title rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "   ", "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "title is required")
+	})
+
+	t.Run("400: empty recipientName rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": ""},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "recipientName is required")
+	})
+
+	t.Run("400: over-cap count (21 awards) rejected", func(t *testing.T) {
+		awards := make([]map[string]any, 21)
+		for i := range awards {
+			awards[i] = map[string]any{"title": "Spirit", "recipientName": fmt.Sprintf("Person %d", i)}
+		}
+		body, _ := json.Marshal(map[string]any{"fightingSpiritAwards": awards})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "fightingSpiritAwards must not exceed")
+	})
+
+	t.Run("400: title exceeds max length", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": strings.Repeat("x", MaxLenPlayerName+1), "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400: recipientName exceeds max length", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": strings.Repeat("x", MaxLenPlayerName+1)},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400: recipientDojo exceeds max length", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Alice", "recipientDojo": strings.Repeat("x", MaxLenPlayerDojo+1)},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("missing elevated password rejected", func(t *testing.T) {
+		// Build a router with an active elevated gate: store has a tournament
+		// with a non-empty AdminPassword. The gate becomes active and any
+		// request without X-Admin-Password must be rejected.
+		tmpDir := t.TempDir()
+		s, err := state.NewStore(tmpDir)
+		require.NoError(t, err)
+		// SaveTournament with AdminPassword set activates the fileElevatedVerifier gate.
+		require.NoError(t, s.SaveTournament(&state.Tournament{
+			Name:          "T",
+			Password:      "mainpw",
+			Courts:        []string{"A"},
+			AdminPassword: "secretadminpw",
+		}))
+		require.NoError(t, s.SaveCompetition(&state.Competition{
+			ID: "awards-elev", Name: "Elev Test",
+		}))
+
+		gin.SetMode(gin.TestMode)
+		elev := NewFileElevatedVerifier(s)
+		hr := gin.New()
+		api := hr.Group("/api")
+		RegisterCompetitionHandlers(api, s, nil, NewHub(), elev)
+
+		body2, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/awards-elev/awards", bytes.NewBuffer(body2))
+		req.Header.Set("Content-Type", "application/json")
+		// Do NOT set X-Admin-Password — should be rejected with 401 (wrong credential).
+		hr.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code, "missing elevated password must return 401, got %d: %s", w.Code, w.Body.String())
+	})
+
+	t.Run("whitespace trimmed from awards before persisting", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "  Spirit  ", "recipientName": "  Carol  ", "recipientDojo": "  Osaka  "},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		saved, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.Len(t, saved.FightingSpiritAwards, 1)
+		assert.Equal(t, "Spirit", saved.FightingSpiritAwards[0].Title)
+		assert.Equal(t, "Carol", saved.FightingSpiritAwards[0].RecipientName)
+		assert.Equal(t, "Osaka", saved.FightingSpiritAwards[0].RecipientDojo)
+	})
+
+	t.Run("400: missing fightingSpiritAwards field (body {}) rejected", func(t *testing.T) {
+		// The field is documented required; a body of `{}` must 400 rather
+		// than silently clear the list. An explicit [] (covered above) clears.
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBufferString("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "fightingSpiritAwards is required")
+	})
+
+	t.Run("400: malformed JSON body rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBufferString("{not json"))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400: invalid competition ID rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		// An over-length ID (>64 chars) is a single valid path segment that
+		// reaches the handler and is rejected by requireValidCompID before
+		// any store access.
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+strings.Repeat("x", 65)+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
 

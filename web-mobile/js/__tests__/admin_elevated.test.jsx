@@ -16,6 +16,7 @@ describe('API elevated-password header (X-Admin-Password)', () => {
     ['resetOverrides', () => API.resetOverrides('c1', 'main', 'adminpw'), 'DELETE', '/api/competitions/c1/overrides'],
     ['addParticipant', () => API.addParticipant('c1', { name: 'X', dojo: 'D' }, 'main', 'adminpw'), 'POST', '/api/competitions/c1/participants'],
     ['replaceParticipant', () => API.replaceParticipant('c1', 'p1', { name: 'X', dojo: 'D' }, 'main', 'adminpw'), 'PUT', '/api/competitions/c1/participants/p1'],
+    ['updateCompetitionAwards', () => API.updateCompetitionAwards('c1', [], 'main', 'adminpw'), 'PUT', '/api/competitions/c1/awards'],
   ];
 
   gated.forEach(([label, call, method, url]) => {

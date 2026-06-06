@@ -200,6 +200,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
           <div className="field">
             <label className="field__label">{hasLogo ? "Replace logo" : "Upload logo"} (PNG or JPEG, ≤1 MB)</label>
             <input ref={fileRef} type="file" accept="image/png,image/jpeg" />
+            <div className="field__hint">Square image recommended (e.g. 200×200 px). Displays at 30×30 px in the top bar.</div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button type="submit" className="btn btn--primary" disabled={busy}>

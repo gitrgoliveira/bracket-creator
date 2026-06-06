@@ -148,6 +148,7 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
               type="file"
               accept="image/png,image/jpeg"
             />
+            <div className="field__hint">Landscape orientation recommended. Displays at 40–48 px tall.</div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button type="submit" className="btn btn--primary" disabled={busy}>

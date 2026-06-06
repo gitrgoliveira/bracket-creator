@@ -1855,6 +1855,30 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		assert.Equal(t, "Carol", saved.FightingSpiritAwards[0].RecipientName)
 		assert.Equal(t, "Osaka", saved.FightingSpiritAwards[0].RecipientDojo)
 	})
+
+	t.Run("400: malformed JSON body rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBufferString("{not json"))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400: invalid competition ID rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		// An over-length ID (>64 chars) is a single valid path segment that
+		// reaches the handler and is rejected by requireValidCompID before
+		// any store access.
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+strings.Repeat("x", 65)+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
 }
 
 func TestDiscardDrawHandler(t *testing.T) {

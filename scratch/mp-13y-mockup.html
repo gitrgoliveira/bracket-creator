@@ -120,22 +120,17 @@
 </style>
 </head>
 <body>
-  <h1>mp-13y — per-match lineup rendering (mockup)</h1>
-  <p class="note">
-    <strong>Scope: team matches only.</strong> A "per-match lineup" only exists for team matches —
-    individual matches have no Senpo/Taisho positions and the TvDisplay is already a single
-    name-vs-name card, not a 5-row grid. The viewer table, the 5-row TvDisplay scoreboard, and
-    the StreamingOverlay layouts shown below all apply to team matches. Individual-match surfaces
-    are out of scope for this bead and remain as-is.
+  <h1>mp-13y — per-match lineup rendering (rough sketch)</h1>
+  <p class="note" style="background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; padding:10px 12px; border-radius:6px;">
+    <strong>⚠ ROUGH ILLUSTRATION — NOT layout-binding.</strong> The team-match display is STRICT. The
+    exact layout is governed by the existing in-app components and the official FIK dantai-shiai scoreboard
+    (FIK Regs, Shinpan Management, Table 2, p.16) — NOT by these sketches. Do not copy this geometry into
+    the implementation. <strong>Scope: team matches only; all three surfaces ship in one bead / one PR.</strong>
   </p>
   <p class="note">
-    All data shown is illustrative. Colors follow the project rule: Shiro=left (neutral),
-    Aka=right (red).
-  </p>
-
-  <p class="note">
-    <strong>Viewer surface</strong> is the existing match-detail bout table (names + results in one
-    reusable component) — see <code>mp-13y-viewer-context.html</code>. Not duplicated here.
+    <strong>Viewer surface</strong> = inject the lineup names into the existing strict match-detail bout
+    table (MatchDetailCard viewer.jsx:1860 + MatchViewerModal viewer.jsx:3378) without changing its
+    layout. Not sketched here — follow the existing component.
   </p>
 
   <h2>TV display (TvDisplay) — fullscreen per-court scoreboard</h2>
@@ -242,19 +237,11 @@
     </div>
   </div>
 
-  <h2>Recommendation (scope decision for the bead)</h2>
+  <h2>Scope</h2>
   <p class="note">
-    Three distinct surfaces, three distinct decisions:
-  </p>
-  <ul class="note">
-    <li><strong>Viewer match-details</strong> — ship in this bead. Read-only table, plenty of room, lowest risk.</li>
-    <li><strong>TV display (TvDisplay)</strong> — likely ship in this bead too; the per-bout name+score grid is a small addition on top of the existing court tile. Real risk is layout on smaller TVs.</li>
-    <li><strong>Streaming overlay (StreamingOverlay)</strong> — split into a follow-up bead. The "current bout" surface needs its own product call (do we show the position kanji? team score? both?) and broadcasters will want a layout mock. Don't bundle it.</li>
-  </ul>
-  <p class="note">
-    Net: this bead = viewer + TvDisplay. New bead = StreamingOverlay lineup rendering.
-    That keeps the PR scoped to one product question per surface and avoids dragging a
-    broadcaster review into a UAT pass focused on the in-venue audience.
+    All three surfaces — viewer match-detail (existing components), TvDisplay, StreamingOverlay —
+    ship under <strong>one bead (mp-13y) and one PR</strong>. Exact layout follows the strict canonical
+    format (existing components + FIK Table 2), not these sketches.
   </p>
 </body>
 </html>

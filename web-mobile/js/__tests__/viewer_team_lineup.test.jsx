@@ -3,8 +3,9 @@
 //
 // Covers:
 //   - lineup_resolver.jsx: resolveLineupTeamId, pickFromLineup, resolveMatchLineup
-//   - viewer.jsx: boutHansokuMark, BoutSubRow canonical layout
-//   - display.jsx: boutHansokuMarkD, findCurrentBoutIndex
+//   - match_scoreboard.jsx: boutHansokuMark, BoutSubRow canonical layout
+//     (hansoku marking moved here from display.jsx's removed boutHansokuMarkD)
+//   - display.jsx: findCurrentBoutIndex
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';

@@ -45,6 +45,23 @@ describe('match_scoreboard: teamIVPW', () => {
     ];
     expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 1, pwShiro: 3, pwAka: 2 });
   });
+
+  it('prefers the explicit winner when no ippon letters are recorded (quick-score / forfeit)', () => {
+    const subs = [
+      // winner set, no ippons — fusensho/kiken style. sideA=aka, sideB=shiro.
+      { position: 1, sideA: 'Aka P', sideB: 'Shiro P', winner: 'Shiro P', ipponsA: [], ipponsB: [] },
+      { position: 2, sideA: 'Aka P', sideB: 'Shiro P', winner: 'Aka P', ipponsA: [], ipponsB: [] },
+    ];
+    // IV counted from winner; PW stays 0 (no ippon points were scored).
+    expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 1, pwShiro: 0, pwAka: 0 });
+  });
+
+  it('falls back to ippon comparison when winner matches neither side', () => {
+    const subs = [
+      { position: 1, sideA: 'Aka P', sideB: 'Shiro P', winner: '', ipponsB: ['M', 'K'], ipponsA: [] },
+    ];
+    expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 2, pwAka: 0 });
+  });
 });
 
 describe('match_scoreboard components', () => {

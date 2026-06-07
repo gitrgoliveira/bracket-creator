@@ -154,8 +154,16 @@ export function teamIVPW(subResults) {
   for (const s of (subResults || []).filter(x => x.position !== -1)) {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
-    if (b > a) ivShiro++; else if (a > b) ivAka++;
     pwShiro += b; pwAka += a;
+    // IV (individual victory): prefer the explicit winner — quick-score and
+    // decision-based outcomes (fusensho, kiken, hantei) set `winner` without
+    // ippon letters, so an ippon-count comparison alone would miss the
+    // victory. Fall back to ippon counts only when no winner is recorded or
+    // it matches neither side. sideA = aka (right), sideB = shiro (left).
+    if (s.winner && s.winner === s.sideA) ivAka++;
+    else if (s.winner && s.winner === s.sideB) ivShiro++;
+    else if (b > a) ivShiro++;
+    else if (a > b) ivAka++;
   }
   return { ivShiro, ivAka, pwShiro, pwAka };
 }
@@ -193,7 +201,12 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   const isScored = (s) => {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
+    // A bout counts as scored once it has any recorded outcome: ippon letters,
+    // a hansoku, a hantei, an explicit winner or decision (quick-score and
+    // forfeit-style outcomes set winner/decision without ippon letters), or a
+    // hikiwake draw.
     return a > 0 || b > 0 || s.hansokuA || s.hansokuB || s.decidedByHantei ||
+      !!s.winner || (typeof s.decision === "string" && s.decision !== "") ||
       (typeof window.isHikiwake === "function" && (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
   };
   const currentIdx = regular.findIndex(s => !isScored(s));

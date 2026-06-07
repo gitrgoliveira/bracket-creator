@@ -238,6 +238,15 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds) {
     if (isBracket && typeof roundIndex === "number" && window.roundLabel) {
         return window.roundLabel(roundIndex, totalRounds);
     }
+    // Pool matches reach the display feed with round === -1 (a sentinel, not a
+    // real round) and no poolName, but their id is shaped "<PoolName>-<index>".
+    // Derive the pool name from the id rather than rendering the bare "-1".
+    if (typeof m.round === "number" && m.round < 0) {
+        const id = typeof m.id === "string" ? m.id : "";
+        const cut = id.lastIndexOf("-");
+        if (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) return id.slice(0, cut);
+        return "";
+    }
     return m.round || "";
 }
 
@@ -264,9 +273,11 @@ function overlayPositionLabel(teamSize, index, sub) {
 function findCurrentBoutIndex(subResults) {
     if (!subResults || !subResults.length) return 0;
     // Return the first UNSCORED regular bout — the bout currently in progress.
-    // A bout is scored if it has real ippons, a hansoku, a hantei decision, or a
-    // hikiwake. This aligns with TeamScoreboard's currentIdx logic. When all
-    // regular bouts are complete, returns subResults.length (signals DH/done).
+    // A bout is scored if it has real ippons, a hansoku, a hantei decision, an
+    // explicit winner/decision (quick-score and forfeit-style outcomes set
+    // these without ippon letters), or a hikiwake. This aligns with
+    // TeamScoreboard's isScored logic. When all regular bouts are complete,
+    // returns subResults.length (signals DH/done).
     const regular = subResults.filter(s => s.position !== -1);
     for (let i = 0; i < regular.length; i++) {
         const s = regular[i];
@@ -274,9 +285,10 @@ function findCurrentBoutIndex(subResults) {
             (s.ipponsB && s.ipponsB.some(x => x && x !== "•"));
         const hasFoul = s.hansokuA || s.hansokuB;
         const hasHantei = s.decidedByHantei;
+        const hasOutcome = !!s.winner || (typeof s.decision === "string" && s.decision !== "");
         const isDraw = typeof window.isHikiwake === "function" &&
             (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision));
-        if (!hasIppon && !hasFoul && !hasHantei && !isDraw) return i;
+        if (!hasIppon && !hasFoul && !hasHantei && !hasOutcome && !isDraw) return i;
     }
     return regular.length;
 }

@@ -2235,10 +2235,10 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) 
   // collides and can show the wrong cell. Prefer the participant UUID,
   // falling back to name for legacy data that predates id persistence.
   const pkey = (x) => (x && x.id != null && x.id !== "" ? String(x.id) : (x && x.name) || "");
-  // Pull side/winner ids tolerant of BOTH the canonical object shape
-  // (`m.sideA.id` / `m.winner.id` from api_serializers.jsx) and the flat
-  // shape (`m.sideAId` / `m.winnerId`) some fixtures/CSV round-trips use.
-  const sideId = (m, side) => { const [aId, bId] = matchParticipantIds(m); return side === "a" ? aId : bId; };
+  // Winner id tolerant of BOTH the canonical object shape (`m.winner.id`
+  // from api_serializers.jsx) and the flat `m.winnerId` shape some
+  // fixtures/CSV round-trips use. (Side ids come from the shared
+  // matchParticipantIds helper; names from matchParticipantNames.)
   const winnerId = (m) => (m.winner && typeof m.winner === "object" ? m.winner.id : null) || m.winnerId || "";
 
   // Index every match under BOTH its id-pair and its name-pair. The id
@@ -2248,10 +2248,10 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) 
   // affect the name fallback, which is the pre-existing behavior.
   const matchMap = {};
   matches.forEach(m => {
-    const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-    const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
-    const aKey = sideId(m, "a") || aName;
-    const bKey = sideId(m, "b") || bName;
+    const [aName, bName] = matchParticipantNames(m);
+    const [aId, bId] = matchParticipantIds(m);
+    const aKey = aId || aName;
+    const bKey = bId || bName;
     if (aKey && bKey) {
       matchMap[`${aKey}||${bKey}`] = m;
       matchMap[`${bKey}||${aKey}`] = m;
@@ -2308,12 +2308,13 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) 
                 const m = matchMap[`${pkey(rowPlayer)}||${pkey(colPlayer)}`] || matchMap[`${rowPlayer.name}||${colPlayer.name}`];
                 if (!m) return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, "not played")} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
 
-                const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+                const [aName] = matchParticipantNames(m);
+                const [aId] = matchParticipantIds(m);
                 const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
                 // Which side is the row player? Match on id when both the
                 // match side and the player carry one; else by name.
-                const rowIsAka = (sideId(m, "a") && rowPlayer.id)
-                  ? sideId(m, "a") === rowPlayer.id
+                const rowIsAka = (aId && rowPlayer.id)
+                  ? aId === rowPlayer.id
                   : aName === rowPlayer.name;
 
                 const interactiveProps = onMatchClick ? {

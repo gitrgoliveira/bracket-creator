@@ -556,17 +556,16 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 //
 // Phase 2c simultaneity gate.
 func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID string) error {
-	// Find target match sides (pool first, then bracket).
 	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
 	if err != nil {
-		// Match not found — let the existing caller handle it.
 		return nil
 	}
 	if sideA == "" && sideB == "" {
 		return nil
 	}
 
-	// Check pool matches for a Running conflict.
+	idA, idB := resolvePlayerIDsTx(tx, compID, sideA, sideB)
+
 	poolMatches, err := tx.LoadPoolMatches(compID)
 	if err == nil {
 		for _, m := range poolMatches {
@@ -575,20 +574,19 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 			}
 			if sideA != "" && (m.SideA == sideA || m.SideB == sideA) {
 				return &IneligibleCompetitorError{
-					PlayerID: sideA,
+					PlayerID: idA,
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
 				}
 			}
 			if sideB != "" && (m.SideA == sideB || m.SideB == sideB) {
 				return &IneligibleCompetitorError{
-					PlayerID: sideB,
+					PlayerID: idB,
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
 				}
 			}
 		}
 	}
 
-	// Check bracket matches for a Running conflict.
 	bracket, berr := tx.LoadBracket(compID)
 	if berr == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
@@ -598,13 +596,13 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 				}
 				if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
 					return &IneligibleCompetitorError{
-						PlayerID: sideA,
+						PlayerID: idA,
 						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 					}
 				}
 				if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
 					return &IneligibleCompetitorError{
-						PlayerID: sideB,
+						PlayerID: idB,
 						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 					}
 				}
@@ -613,6 +611,27 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 	}
 
 	return nil
+}
+
+func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, string) {
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil {
+		return sideA, sideB
+	}
+	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	if err != nil {
+		return sideA, sideB
+	}
+	pool := combinedPlayerPool(comp.Players, participants)
+	idA := lookupPlayerID(pool, sideA)
+	if idA == "" {
+		idA = sideA
+	}
+	idB := lookupPlayerID(pool, sideB)
+	if idB == "" {
+		idB = sideB
+	}
+	return idA, idB
 }
 
 // checkConcurrentIneligibilityTx is the tx-aware twin of

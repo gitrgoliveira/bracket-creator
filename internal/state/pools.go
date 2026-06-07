@@ -336,7 +336,11 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 			m.ResultSource = rec[14]
 		}
 		if len(rec) > 15 && rec[15] != "" {
-			m.Round, _ = strconv.Atoi(rec[15])
+			if v, err := strconv.Atoi(rec[15]); err == nil {
+				m.Round = v
+			} else {
+				m.Round = -1
+			}
 		} else {
 			m.Round = -1
 		}

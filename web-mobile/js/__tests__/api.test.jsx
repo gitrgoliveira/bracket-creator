@@ -140,6 +140,27 @@ describe('API Utils', () => {
       expect(norm.sideB).toEqual({ id: 'Bob', name: 'Bob' }); // Fallback if not in map
     });
 
+    // mp-jvzy: the playerMap is keyed by NAME, so two same-name participants
+    // (allowed when dojos differ) collapse onto one id. When the server sends
+    // explicit per-side ids (sideAId/sideBId/winnerId from pool-matches.csv),
+    // those are authoritative and must override the collapsed lookup — without
+    // this the league matrix renders the same-name head-to-head inverted.
+    it('overrides name-collapsed ids with server sideAId/sideBId/winnerId', () => {
+      // Both "Tanaka Kenji" — name-keyed map holds only the last-added id.
+      const playerMap = { 'Tanaka Kenji': { id: 'uuid-mumeishi', name: 'Tanaka Kenji', dojo: 'Mumeishi' } };
+      const match = {
+        sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji', winner: 'Tanaka Kenji',
+        sideAId: 'uuid-kenshikan', sideBId: 'uuid-mumeishi', winnerId: 'uuid-kenshikan',
+        status: 'completed', ipponsA: ['M'], ipponsB: [],
+      };
+      const norm = normalizeMatch(match, playerMap);
+      expect(norm.sideA.id).toBe('uuid-kenshikan'); // flat id wins over collapsed map id
+      expect(norm.sideB.id).toBe('uuid-mumeishi');
+      expect(norm.winner.id).toBe('uuid-kenshikan');
+      // The shared playerMap object must NOT be mutated by the id stamp.
+      expect(playerMap['Tanaka Kenji'].id).toBe('uuid-mumeishi');
+    });
+
     it('should build score object from ippons for pool matches', () => {
       const match = {
         sideA: 'A', sideB: 'B', winner: 'A',

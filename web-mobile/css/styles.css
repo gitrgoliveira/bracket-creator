@@ -4884,46 +4884,6 @@ button.my-match__opp {
   gap: 4px;
 }
 
-.match-detail-card__sub-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  padding: 3px 0;
-}
-
-/* mp-13y: colour-code bout-row competitors to match the TV display board —
-   Shiro (left) dark, Aka (right) red. */
-.match-detail-card__sub-name {
-  flex: 1;
-  min-width: 0;
-  font-weight: 600;
-  color: #111;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.match-detail-card__sub-name--right {
-  text-align: right;
-  color: var(--red, #b91c1c);
-}
-
-.match-detail-card__sub-pos {
-  color: var(--ink-3);
-  font-size: 11px;
-  font-weight: 600;
-  text-align: center;
-  flex: 1;
-}
-
-.match-detail-card__sub-score {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 14px;
-  min-width: 32px;
-}
-.match-detail-card__sub-score--right { text-align: right; }
-
 /* ---------- Shared FIK scoreboard (match_scoreboard.jsx) ----------
    ONE component for the viewer card, the self-run modal and the TV display.
    §263 individual = ippon-letter slots; §277 team = IV/PW summary + bout rows.

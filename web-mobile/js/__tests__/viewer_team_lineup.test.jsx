@@ -342,40 +342,42 @@ describe('display: findCurrentBoutIndex (mp-13y)', () => {
     vi.resetModules();
   });
 
-  // findCurrentBoutIndex scans from the end and returns the index of the last
-  // sub that has scored data (ippons or hansoku). If none have been scored yet,
-  // it returns 0 (the first bout is "current").
+  // findCurrentBoutIndex returns the index of the FIRST UNSCORED regular bout
+  // (the bout currently in progress). When all regular bouts are complete, it
+  // returns regularSubs.length (signals DH/done). Aligns with TeamScoreboard's
+  // currentIdx logic.
 
   it('returns 0 when no subs have been scored yet', () => {
     expect(findCurrentBoutIndex([{ position: 1 }, { position: 2 }])).toBe(0);
   });
 
-  it('returns the index of the last sub with ippon data', () => {
+  it('returns the first unscored bout after scored ones', () => {
     const subs = [
       { position: 1, ipponsA: ['M'], ipponsB: [] },
       { position: 2, ipponsA: [], ipponsB: ['D'] },
       { position: 3, ipponsA: [], ipponsB: [] },
     ];
-    // Sub at index 1 is the last with scored data (ipponsB has 'D').
-    expect(findCurrentBoutIndex(subs)).toBe(1);
+    // Subs 0,1 scored; sub 2 is the first unscored → returns 2.
+    expect(findCurrentBoutIndex(subs)).toBe(2);
   });
 
-  it('returns the index of the last sub with hansoku data', () => {
+  it('returns the first unscored bout after hansoku data', () => {
     const subs = [
       { position: 1, ipponsA: ['M'], ipponsB: [], hansokuA: 0 },
       { position: 2, ipponsA: [], ipponsB: [], hansokuB: 1 },
       { position: 3, ipponsA: [], ipponsB: [] },
     ];
-    expect(findCurrentBoutIndex(subs)).toBe(1);
+    // Subs 0,1 scored; sub 2 is the first unscored → returns 2.
+    expect(findCurrentBoutIndex(subs)).toBe(2);
   });
 
-  it('returns last index when all subs have been scored', () => {
+  it('returns regularSubs.length when all subs have been scored', () => {
     const subs = [
       { position: 1, ipponsA: ['M'], ipponsB: [] },
       { position: 2, ipponsA: [], ipponsB: ['K'] },
     ];
-    // Both have data; last scored is index 1.
-    expect(findCurrentBoutIndex(subs)).toBe(1);
+    // Both scored; all done → returns 2 (subs.length).
+    expect(findCurrentBoutIndex(subs)).toBe(2);
   });
 
   it('skips "•" placeholder ippons (not real data)', () => {

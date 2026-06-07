@@ -19,7 +19,7 @@
 // are expected to evolve.
 
 import { pickFromLineup } from './lineup_resolver.jsx';
-import { TeamScoreboard, IndividualScore, useTeamLineups } from './match_scoreboard.jsx';
+import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -263,15 +263,22 @@ function overlayPositionLabel(teamSize, index, sub) {
 // Used by StreamingOverlay to pick which bout names and score to show.
 function findCurrentBoutIndex(subResults) {
     if (!subResults || !subResults.length) return 0;
-    for (let i = subResults.length - 1; i >= 0; i--) {
-        const s = subResults[i];
-        if ((s.ipponsA && s.ipponsA.some(x => x && x !== "•")) ||
-            (s.ipponsB && s.ipponsB.some(x => x && x !== "•")) ||
-            s.hansokuA || s.hansokuB) {
-            return i;
-        }
+    // Return the first UNSCORED regular bout — the bout currently in progress.
+    // A bout is scored if it has real ippons, a hansoku, a hantei decision, or a
+    // hikiwake. This aligns with TeamScoreboard's currentIdx logic. When all
+    // regular bouts are complete, returns subResults.length (signals DH/done).
+    const regular = subResults.filter(s => s.position !== -1);
+    for (let i = 0; i < regular.length; i++) {
+        const s = regular[i];
+        const hasIppon = (s.ipponsA && s.ipponsA.some(x => x && x !== "•")) ||
+            (s.ipponsB && s.ipponsB.some(x => x && x !== "•"));
+        const hasFoul = s.hansokuA || s.hansokuB;
+        const hasHantei = s.decidedByHantei;
+        const isDraw = typeof window.isHikiwake === "function" &&
+            (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision));
+        if (!hasIppon && !hasFoul && !hasHantei && !isDraw) return i;
     }
-    return 0;
+    return regular.length;
 }
 
 
@@ -457,15 +464,13 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         isTeamMatch && promoted ? promoted.competition : null
     );
 
-    // mp-13y: DH (Daihyosen) row gating — shown only when:
-    //   1. All regular bouts are complete (no unfought sub-result).
+    // mp-13y: DH (Daihyosen) row gating — shown when:
+    //   1. All regular bouts are complete (every sub has ippons, hantei, or draw).
     //   2. IV (Individual Victories) are tied.
     //   3. PW (Points Won) are also tied.
     //   4. It is a knockout phase (not a pool match).
-    //   5. The daihyosen sub-result (position === -1) exists.
-    // "All bouts complete" means every sub-result has at least one scored ippon
-    // or a draw/hantei decision. This prevents showing DH when the match is
-    // still in progress. Never shown in pools — pool ties resolve via standings.
+    // The DH sub-result (position === -1) may or may not exist yet; when absent,
+    // TeamScoreboard renders a "Daihyosen pending" placeholder.
     const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
     const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
         !!(promoted && promoted.match && promoted.match.phase === "bracket");
@@ -481,15 +486,23 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
         });
         if (!allDone) return false;
-        // Count IV and PW per side.
-        let ivA = 0, ivB = 0, pwA = 0, pwB = 0;
+        // Count IV and PW per side. A hantei-decided 0-0 bout counts as an IV
+        // for the hantei winner (the side flagged by decidedByHantei metadata).
+        // Use the shared teamIVPW for the ippon-based counts, then layer hantei.
+        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults);
+        let ivA = ivAka, ivB = ivShiro, pwA = pwAka, pwB = pwShiro;
+        // Hantei bouts with 0-0 ippons: decidedByHantei is truthy, winner is
+        // inferred from the match decision or sub.winner field when available.
         for (const s of regularSubs) {
             const aIp = (s.ipponsA || []).filter(x => x && x !== "•").length;
             const bIp = (s.ipponsB || []).filter(x => x && x !== "•").length;
-            if (aIp > bIp) ivA++;
-            else if (bIp > aIp) ivB++;
-            pwA += aIp;
-            pwB += bIp;
+            if (s.decidedByHantei && aIp === 0 && bIp === 0) {
+                // Hantei with no ippons — count 1 IV for the winner side.
+                // Without explicit winner metadata, treat hantei as a tie for
+                // DH-gating purposes (conservative: doesn't suppress DH).
+                if (s.winner === "A" || s.winner === "aka") ivA++;
+                else if (s.winner === "B" || s.winner === "shiro") ivB++;
+            }
         }
         return ivA === ivB && pwA === pwB;
     }, [subResults, isTeamMatch, isKnockoutPhase]);

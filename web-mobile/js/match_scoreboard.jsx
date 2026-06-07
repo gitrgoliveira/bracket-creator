@@ -40,6 +40,10 @@ export function useTeamLineups(match, competition) {
   const sideBId = match?.sideB?.id || match?.sideB?.name || (typeof match?.sideB === "string" ? match?.sideB : "");
 
   useEB(() => {
+    // Clear stale lineups immediately so the previous match's names never leak
+    // into the next render (Copilot review: stale lineup state).
+    setLineupA(null);
+    setLineupB(null);
     if (!compId || !matchId || !window.API) return undefined;
     let cancelled = false;
     (async () => {
@@ -73,7 +77,7 @@ export function useTeamLineups(match, competition) {
       }
     })();
     return () => { cancelled = true; };
-  }, [compId, matchId]);
+  }, [compId, matchId, sideAId, sideBId]);
 
   return { lineupA, lineupB };
 }

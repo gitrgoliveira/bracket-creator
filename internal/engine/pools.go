@@ -59,15 +59,18 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
+	hasRounds := false
 	switch comp.PoolFormat {
 	case state.PoolFormatPartial:
 		helper.CreatePartialPoolMatches(pools)
+		hasRounds = true
 	default:
 		// PoolFormatFull (default / unset) and any unrecognized value fall
 		// through to the legacy code path. RoundRobin remains the inner
 		// switch for backward compatibility (FR-052, R9).
 		if comp.RoundRobin {
 			helper.CreatePoolRoundRobinMatches(pools)
+			hasRounds = true
 		} else {
 			helper.CreatePoolMatches(pools)
 		}
@@ -107,13 +110,17 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 			}
 		}
 		for i, m := range p.Matches {
+			round := m.Round
+			if !hasRounds {
+				round = -1
+			}
 			results = append(results, state.MatchResult{
 				ID:     p.PoolName + "-" + strconv.Itoa(i),
 				SideA:  m.SideA.Name,
 				SideB:  m.SideB.Name,
 				Status: state.MatchStatusScheduled,
 				Court:  poolCourts[i%len(poolCourts)],
-				Round:  m.Round,
+				Round:  round,
 				// ScheduledAt is populated below by
 				// assignPoolMatchSlots — uniform start times were
 				// retired in T150.

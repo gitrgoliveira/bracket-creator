@@ -509,6 +509,7 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
   const realReact = global.React;
   let runtime;
   let MatchViewerModal;
+  let MatchDetailCard;
   const STUBBED = ['useEscapeToClose', 'ipponsFromScore'];
   const savedGlobals = {};
 
@@ -520,7 +521,7 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     global.window.useEscapeToClose = vi.fn();
     global.window.ipponsFromScore = vi.fn(() => []);
     vi.resetModules();
-    ({ MatchViewerModal } = await import('../viewer.jsx'));
+    ({ MatchViewerModal, MatchDetailCard } = await import('../viewer.jsx'));
   });
 
   afterEach(() => {
@@ -534,7 +535,11 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     vi.resetModules();
   });
 
-  it('renders the round label in the header for a bracket match', () => {
+  // mp-13y: the modal now reuses the canonical MatchDetailCard for its body
+  // (DRY — same header, colour badges and BoutSubRow grid as the inline card).
+  // The header text rendering itself is covered by the MatchDetailCard suite;
+  // here we assert the modal delegates with the correct match.
+  it('delegates to MatchDetailCard with the round label for a bracket match', () => {
     const match = {
       phase: 'bracket', round: 'Final', compKind: 'team', teamSize: 5,
       status: 'completed', court: 'A',
@@ -542,15 +547,12 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
       subResults: [{ position: 1, ipponsA: ['M'], ipponsB: [] }],
     };
     const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
-    const text = collectText(tree);
-    // Header must show the round label, not an empty string after "Shiaijo A ·".
-    expect(text).toContain('Final');
-    // mp-13y: team path now renders the SHIRO/Score/AKA canonical header (was Position).
-    expect(text).toContain('Score');
-    expect(text).not.toContain('Position');
+    const card = findInTree(tree, (n) => n.type === MatchDetailCard);
+    expect(card).toBeTruthy();
+    expect(card.props.match.round).toBe('Final');
   });
 
-  it('renders the pool name in the header for a pool match', () => {
+  it('delegates to MatchDetailCard with the pool name for a pool match', () => {
     const match = {
       phase: 'pool', poolName: 'Pool A', compKind: 'team', teamSize: 5,
       status: 'completed', court: 'B',
@@ -558,7 +560,9 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
       subResults: [{ position: 1, ipponsA: ['M'], ipponsB: [] }],
     };
     const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
-    expect(collectText(tree)).toContain('Pool A');
+    const card = findInTree(tree, (n) => n.type === MatchDetailCard);
+    expect(card).toBeTruthy();
+    expect(card.props.match.poolName).toBe('Pool A');
   });
 });
 

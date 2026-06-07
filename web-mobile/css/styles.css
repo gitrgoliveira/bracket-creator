@@ -4892,6 +4892,22 @@ button.my-match__opp {
   padding: 3px 0;
 }
 
+/* mp-13y: colour-code bout-row competitors to match the TV display board —
+   Shiro (left) dark, Aka (right) red. */
+.match-detail-card__sub-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: #111;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.match-detail-card__sub-name--right {
+  text-align: right;
+  color: var(--red, #b91c1c);
+}
+
 .match-detail-card__sub-pos {
   color: var(--ink-3);
   font-size: 11px;

@@ -359,8 +359,10 @@ function TvWhiteBoutRow({ sub, index, lineupA, lineupB, teamSize, isDH, state })
     const isDraw = !sub.decidedByHantei && typeof window.isHikiwake === "function" &&
         (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
     const boutNum = isDH ? "DH" : String(sub && sub.position > 0 ? sub.position : index + 1);
-    const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || sub.sideB || boutNum;
-    const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || sub.sideA || boutNum;
+    // Pinned lineup name, else the bare bout number. NOT sub.sideA/sideB —
+    // those hold the team name for team matches and would repeat per row.
+    const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || boutNum;
+    const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || boutNum;
 
     const rowBg = state === "now" ? "#fef3c7" : "transparent";
     const queued = state === "queued";

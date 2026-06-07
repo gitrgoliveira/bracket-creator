@@ -863,6 +863,65 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     // row N and column N cross-reference the same player.
     expect(rowNums).toEqual(['1', '2', '3']);
   });
+
+  // Regression: two participants share a name but have different dojos/ids.
+  // Name-only cell indexing collapses both into one matchMap entry and shows
+  // the wrong result; id-based keys must keep them distinct. (Copilot #261)
+  it('disambiguates same-name participants by id when mapping cells', () => {
+    const samePool = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'T1', name: 'Tanaka Kenji', dojo: 'Tokyo' },
+        { id: 'T2', name: 'Tanaka Kenji', dojo: 'Osaka' }, // same name, different id
+        { id: 'A1', name: 'Alice', dojo: 'Kyoto' },
+      ],
+    };
+    // T1 beat Alice; T2 lost to Alice. With name-only keys both
+    // "Tanaka Kenji vs Alice" cells resolve to the same (last-registered)
+    // match and show identical results.
+    const mWin = {
+      id: 'Pool A-0', sideA: { id: 'T1', name: 'Tanaka Kenji' }, sideB: { id: 'A1', name: 'Alice' },
+      sideAId: 'T1', sideBId: 'A1', status: 'completed', winner: { id: 'T1', name: 'Tanaka Kenji' },
+      ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const mLoss = {
+      id: 'Pool A-1', sideA: { id: 'T2', name: 'Tanaka Kenji' }, sideB: { id: 'A1', name: 'Alice' },
+      sideAId: 'T2', sideBId: 'A1', status: 'completed', winner: { id: 'A1', name: 'Alice' },
+      ipponsA: [], ipponsB: ['K'], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: samePool, matches: [mWin, mLoss], tweaks: {} });
+    const labels = allCells(tree).map(c => c.props?.['aria-label']).filter(Boolean);
+    // The id-keyed mapping yields BOTH outcomes for the same name vs Alice —
+    // proof the two Tanakas resolved to different matches.
+    expect(labels).toContain('Match: Tanaka Kenji vs Alice — Win');
+    expect(labels).toContain('Match: Tanaka Kenji vs Alice — Loss');
+  });
+
+  // Regression: the head-to-head between two same-name participants. The
+  // winner is stored by name (ambiguous), so rowWon must resolve via
+  // winnerId — otherwise BOTH rows show the same result. (browser-found)
+  it('resolves the winner of a same-name head-to-head by id', () => {
+    const twoTanaka = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'T1', name: 'Tanaka Kenji', dojo: 'Tokyo' },
+        { id: 'T2', name: 'Tanaka Kenji', dojo: 'Osaka' },
+      ],
+    };
+    // T1 beat T2. winner name "Tanaka Kenji" is ambiguous; winnerId 'T1' is not.
+    const headToHead = {
+      id: 'Pool A-0', sideA: { id: 'T1', name: 'Tanaka Kenji' }, sideB: { id: 'T2', name: 'Tanaka Kenji' },
+      sideAId: 'T1', sideBId: 'T2', winnerId: 'T1', status: 'completed',
+      winner: { id: 'T1', name: 'Tanaka Kenji' }, ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: twoTanaka, matches: [headToHead], tweaks: {} });
+    const bodyCells = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__cell--win') || c.props?.className?.includes('league-matrix__cell--loss'));
+    const wins = bodyCells.filter(c => c.props?.className?.includes('--win'));
+    const losses = bodyCells.filter(c => c.props?.className?.includes('--loss'));
+    // Exactly one win (T1's row) and one loss (T2's row) — NOT two wins.
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(1);
+  });
 });
 
 // mp-7x4n: ViewerOverview opens MatchViewerModal in self-run mode,

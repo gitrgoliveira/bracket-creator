@@ -154,6 +154,33 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 		if result.SideB == "" {
 			result.SideB = r.SideB
 		}
+		// Preserve the participant ids stamped at generation: score
+		// requests carry names only, so without this backfill the
+		// whole-struct `*r = *result` below would wipe SideAID/SideBID
+		// on the first score, breaking league-matrix cell mapping.
+		if result.SideAID == "" {
+			result.SideAID = r.SideAID
+		}
+		if result.SideBID == "" {
+			result.SideBID = r.SideBID
+		}
+		// Resolve WinnerID from the side ids now that they are present.
+		// Prefer an explicit WinnerSide hint (set by handlers that know
+		// the winning side by score, not name — the only way to tell apart
+		// two participants who share a name); otherwise fall back to a
+		// name match, which is unambiguous unless both sides share a name.
+		if result.WinnerID == "" {
+			switch {
+			case result.WinnerSide == "A":
+				result.WinnerID = result.SideAID
+			case result.WinnerSide == "B":
+				result.WinnerID = result.SideBID
+			case result.Winner != "" && result.Winner == result.SideA && result.Winner != result.SideB:
+				result.WinnerID = result.SideAID
+			case result.Winner != "" && result.Winner == result.SideB && result.Winner != result.SideA:
+				result.WinnerID = result.SideBID
+			}
+		}
 		if result.Court == "" {
 			result.Court = r.Court
 		}
@@ -207,6 +234,33 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		}
 		if result.SideB == "" {
 			result.SideB = r.SideB
+		}
+		// Preserve the participant ids stamped at generation: score
+		// requests carry names only, so without this backfill the
+		// whole-struct `*r = *result` below would wipe SideAID/SideBID
+		// on the first score, breaking league-matrix cell mapping.
+		if result.SideAID == "" {
+			result.SideAID = r.SideAID
+		}
+		if result.SideBID == "" {
+			result.SideBID = r.SideBID
+		}
+		// Resolve WinnerID from the side ids now that they are present.
+		// Prefer an explicit WinnerSide hint (set by handlers that know
+		// the winning side by score, not name — the only way to tell apart
+		// two participants who share a name); otherwise fall back to a
+		// name match, which is unambiguous unless both sides share a name.
+		if result.WinnerID == "" {
+			switch {
+			case result.WinnerSide == "A":
+				result.WinnerID = result.SideAID
+			case result.WinnerSide == "B":
+				result.WinnerID = result.SideBID
+			case result.Winner != "" && result.Winner == result.SideA && result.Winner != result.SideB:
+				result.WinnerID = result.SideAID
+			case result.Winner != "" && result.Winner == result.SideB && result.Winner != result.SideA:
+				result.WinnerID = result.SideBID
+			}
 		}
 		if result.Court == "" {
 			result.Court = r.Court

@@ -2214,13 +2214,34 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
   if (players.length < 2) return null;
 
   const isHighlighted = (p) => isFollowedPlayer(p, highlightPlayer);
+
+  // Stable participant key. A name is NOT unique within a competition —
+  // two participants from different dojos may share one (the duplicate
+  // check only rejects same-name AND same-dojo), so name-only indexing
+  // collides and can show the wrong cell. Prefer the participant UUID,
+  // falling back to name for legacy data that predates id persistence.
+  const pkey = (x) => (x && x.id != null && x.id !== "" ? String(x.id) : (x && x.name) || "");
+  const sideId = (m, side) => (side === "a" ? m.sideAId : m.sideBId) || "";
+
+  // Index every match under BOTH its id-pair and its name-pair. The id
+  // entries are collision-free and used first; the name entries are a
+  // fallback for partially-migrated data (players carry ids but an older
+  // pool-matches.csv does not, or vice versa). Same-name collisions only
+  // affect the name fallback, which is the pre-existing behavior.
   const matchMap = {};
   matches.forEach(m => {
     const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
     const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+    const aKey = sideId(m, "a") || aName;
+    const bKey = sideId(m, "b") || bName;
+    if (aKey && bKey) {
+      matchMap[`${aKey}||${bKey}`] = m;
+      matchMap[`${bKey}||${aKey}`] = m;
+    }
     if (aName && bName) {
-      matchMap[`${aName}||${bName}`] = m;
-      matchMap[`${bName}||${aName}`] = m;
+      // Name fallback (does not clobber an existing id entry).
+      if (!matchMap[`${aName}||${bName}`]) matchMap[`${aName}||${bName}`] = m;
+      if (!matchMap[`${bName}||${aName}`]) matchMap[`${bName}||${aName}`] = m;
     }
   });
 
@@ -2245,26 +2266,32 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
           <tr>
             <th className="league-matrix__corner"></th>
             {players.map((p, i) => (
-              <th key={p.name} scope="col" aria-label={p.name} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={isLeague ? (tweaks.showDojo ? p.name : shortName(p)) : p.name}>{p.number || (i + 1)}</th>
+              <th key={`${pkey(p)}#${i}`} scope="col" aria-label={p.name} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={isLeague ? (tweaks.showDojo ? p.name : shortName(p)) : p.name}>{p.number || (i + 1)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {players.map((rowPlayer, ri) => (
-            <tr key={rowPlayer.name} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
+            <tr key={`${pkey(rowPlayer)}#${ri}`} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
               <td className="league-matrix__row-head" title={rowPlayer.name}>
                 <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
                 <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {
                 const colMe = isHighlighted(colPlayer) ? " league-matrix__col--me" : "";
-                if (ri === ci) return <td key={colPlayer.name} className={`league-matrix__cell league-matrix__cell--self${colMe}`}>&mdash;</td>;
-                const m = matchMap[`${rowPlayer.name}||${colPlayer.name}`];
-                if (!m) return <td key={colPlayer.name} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
+                if (ri === ci) return <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell league-matrix__cell--self${colMe}`}>&mdash;</td>;
+                // Look up the match by id-pair first (collision-free),
+                // then by name-pair for legacy/un-migrated data.
+                const m = matchMap[`${pkey(rowPlayer)}||${pkey(colPlayer)}`] || matchMap[`${rowPlayer.name}||${colPlayer.name}`];
+                if (!m) return <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
 
                 const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
                 const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
-                const rowIsAka = aName === rowPlayer.name;
+                // Which side is the row player? Match on id when both the
+                // match side and the player carry one; else by name.
+                const rowIsAka = (sideId(m, "a") && rowPlayer.id)
+                  ? sideId(m, "a") === rowPlayer.id
+                  : aName === rowPlayer.name;
 
                 const interactiveProps = onMatchClick ? {
                   role: "button",
@@ -2274,7 +2301,7 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={colPlayer.name} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
+                  return <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2282,7 +2309,13 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
                 const ipponsA = (m.ipponsA || []).filter(x => x && x !== "•");
                 const ipponsB = (m.ipponsB || []).filter(x => x && x !== "•");
                 const rowIppons = rowIsAka ? ipponsA : ipponsB;
-                const rowWon = winnerName && winnerName === rowPlayer.name;
+                // Prefer the winner id: when two participants share a name,
+                // the winner name alone can't tell them apart (e.g. the
+                // head-to-head between two same-name/different-dojo players).
+                // Fall back to name for legacy data without a winner id.
+                const rowWon = (m.winnerId && rowPlayer.id)
+                  ? m.winnerId === rowPlayer.id
+                  : (winnerName && winnerName === rowPlayer.name);
                 const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
 
                 let cellContent;
@@ -2299,7 +2332,7 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
                 }
 
                 return (
-                  <td key={colPlayer.name} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );

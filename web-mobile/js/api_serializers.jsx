@@ -79,23 +79,34 @@ function toBackendMatchResult(patch, match) {
 function normalizeMatch(m, playerMap) {
     if (!m) return m;
     const norm = { ...m };
-    // Normalize sideA/sideB from string to {id, name}
+    // Normalize sideA/sideB/winner from name-string to {id, name}.
+    //
+    // playerMap is keyed by NAME, which collapses same-name participants
+    // (e.g. two "Tanaka Kenji" from different dojos — the duplicate check
+    // only rejects same-name AND same-dojo) onto a single id. When the
+    // server provides an explicit per-side id (m.sideAId / m.sideBId /
+    // m.winnerId — populated from pool-matches.csv), it is the authoritative
+    // identity and overrides the name-collapsed lookup. We clone the
+    // playerMap entry before stamping the id so the shared map object isn't
+    // mutated across matches.
+    const resolveSide = (name, flatId) => {
+        const p = playerMap?.[name];
+        const base = p ? { ...p } : { id: name, name };
+        if (flatId) base.id = flatId;
+        return base;
+    };
     if (typeof norm.sideA === "string" && norm.sideA) {
-        const p = playerMap?.[norm.sideA];
-        norm.sideA = p || { id: norm.sideA, name: norm.sideA };
+        norm.sideA = resolveSide(norm.sideA, m.sideAId);
     } else if (!norm.sideA) {
         norm.sideA = { id: "", name: "" };
     }
     if (typeof norm.sideB === "string" && norm.sideB) {
-        const p = playerMap?.[norm.sideB];
-        norm.sideB = p || { id: norm.sideB, name: norm.sideB };
+        norm.sideB = resolveSide(norm.sideB, m.sideBId);
     } else if (!norm.sideB) {
         norm.sideB = { id: "", name: "" };
     }
-    // Normalize winner from string to object
     if (typeof norm.winner === "string" && norm.winner) {
-        const p = playerMap?.[norm.winner];
-        norm.winner = p || { id: norm.winner, name: norm.winner };
+        norm.winner = resolveSide(norm.winner, m.winnerId);
     }
     // Build score object from flat scoreA/scoreB if needed (bracket matches)
     if (!norm.score && (norm.scoreA || norm.scoreB) && norm.status === "completed") {

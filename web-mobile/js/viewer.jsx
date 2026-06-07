@@ -1704,7 +1704,12 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             <div className="viewer__title">{c.name}</div>
             <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
-          <StatusBadge status={c.status} showLiveDot format={c.format} />
+          {/* Suppress the "League" badge during pools: the active tab already
+              reads "League", so the badge is pure redundancy. Other statuses
+              (Playoffs / Completed) still carry information, so keep those. */}
+          {!(c.status === "pools" && c.format === "league") && (
+            <StatusBadge status={c.status} showLiveDot format={c.format} />
+          )}
           {authed && onEditCompetition && (
             <button className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}>✎ Edit</button>
           )}
@@ -1996,6 +2001,9 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
                     <div style={{ fontWeight: 500 }}>
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
+                      {/* Rank badge for parity with the full League standings table.
+                          This summary is already rank-sorted, so rank === i + 1. */}
+                      <span className="rank-badge">{rankOrdinal(i + 1)}{s.isOverridden ? "*" : ""}</span>
                     </div>
                     {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
                   </td>
@@ -2209,7 +2217,7 @@ PoolMatchRow.displayName = "PoolMatchRow";
 
 // Round-robin matrix for a single pool/league. Each off-diagonal cell shows the
 // row player's result (W/L/X) against the column player; diagonal cells are self.
-function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, isLeague }) {
+function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
 
@@ -2221,7 +2229,11 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
   // collides and can show the wrong cell. Prefer the participant UUID,
   // falling back to name for legacy data that predates id persistence.
   const pkey = (x) => (x && x.id != null && x.id !== "" ? String(x.id) : (x && x.name) || "");
-  const sideId = (m, side) => (side === "a" ? m.sideAId : m.sideBId) || "";
+  // Pull side/winner ids tolerant of BOTH the canonical object shape
+  // (`m.sideA.id` / `m.winner.id` from api_serializers.jsx) and the flat
+  // shape (`m.sideAId` / `m.winnerId`) some fixtures/CSV round-trips use.
+  const sideId = (m, side) => { const [aId, bId] = matchParticipantIds(m); return side === "a" ? aId : bId; };
+  const winnerId = (m) => (m.winner && typeof m.winner === "object" ? m.winner.id : null) || m.winnerId || "";
 
   // Index every match under BOTH its id-pair and its name-pair. The id
   // entries are collision-free and used first; the name entries are a
@@ -2318,8 +2330,9 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
                 // the winner name alone can't tell them apart (e.g. the
                 // head-to-head between two same-name/different-dojo players).
                 // Fall back to name for legacy data without a winner id.
-                const rowWon = (m.winnerId && rowPlayer.id)
-                  ? m.winnerId === rowPlayer.id
+                const wId = winnerId(m);
+                const rowWon = (wId && rowPlayer.id)
+                  ? wId === rowPlayer.id
                   : (winnerName && winnerName === rowPlayer.name);
                 const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
 
@@ -2329,10 +2342,15 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
                   cellContent = <span className="league-matrix__draw">X</span>;
                   resultLabel = "Draw";
                 } else if (rowWon) {
-                  cellContent = <span className="league-matrix__win">{rowIppons.join("") || "W"}</span>;
+                  // Show the row player's ippon letters (M/K/D/T/H); the green
+                  // cell colour signals the win. No "W" fallback — W is not an
+                  // ippon. A win with no recorded ippons (walkover/hantei)
+                  // shows an empty green cell.
+                  cellContent = <span className="league-matrix__win">{rowIppons.join("")}</span>;
                   resultLabel = "Win";
                 } else {
-                  cellContent = <span className="league-matrix__loss">{rowIppons.join("") || "L"}</span>;
+                  // The loser's own ippons (red), or empty when they scored none.
+                  cellContent = <span className="league-matrix__loss">{rowIppons.join("")}</span>;
                   resultLabel = "Loss";
                 }
 
@@ -2347,9 +2365,10 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
         </tbody>
       </table>
       <div className="league-matrix__legend">
-        <span className="league-matrix__legend-item league-matrix__legend-item--win">W = win</span>
-        <span className="league-matrix__legend-item league-matrix__legend-item--loss">L = loss</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--win">win</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--loss">loss</span>
         <span className="league-matrix__legend-item league-matrix__legend-item--draw">X = draw</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>letters = ippons (M/K/D/T/H)</span>
         <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row player's result vs column player"}</span>
       </div>
     </div>
@@ -2459,7 +2478,10 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           : (pool.players || []);
 
         return (
-          <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
+          // A lone pool (every league has exactly one) must span the full grid
+          // width. Otherwise the landscape 2-column `.pools-grid` renders it at
+          // half width, mismatching the full-width Overview standings table.
+          <div key={pool.poolName} className="pool" style={{ padding: 14, gridColumn: pools.length === 1 ? "1 / -1" : undefined }}>
             <div className="pool__head">
               <div className="pool__name">{isLeague ? (allMatchesComplete ? "Final standings" : "Standings") : pool.poolName}</div>
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
@@ -2564,7 +2586,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             {/* Round-robin matrix — optional grid below the match list (individual only) */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 4 }}>
-                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} isLeague={isLeague} />
+                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
               </div>
             )}
           </div>

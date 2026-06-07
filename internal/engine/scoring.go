@@ -144,9 +144,11 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 // would wipe SideAID/SideBID on the first score and break league-matrix cell
 // mapping. WinnerID is resolved from an explicit WinnerSide hint when present
 // (the only way to tell apart two participants who share a name), else from a
-// name match (unambiguous unless both sides share a name). `stored` is the
-// on-disk record (with the generation-time ids); `result` is the incoming
-// score. Purely additive — never touches name-based scoring/standings logic.
+// name match (unambiguous unless both sides share a name), and as a last
+// resort — for a same-name head-to-head with no side hint — from the scoreline
+// (the side with more ippons is the winner). `stored` is the on-disk record
+// (with the generation-time ids); `result` is the incoming score. Purely
+// additive — never touches name-based scoring/standings logic.
 func backfillMatchIdentity(result, stored *state.MatchResult) {
 	if result.SideAID == "" {
 		result.SideAID = stored.SideAID
@@ -166,7 +168,31 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 		result.WinnerID = result.SideAID
 	case result.Winner != "" && result.Winner == result.SideB && result.Winner != result.SideA:
 		result.WinnerID = result.SideBID
+	case result.Winner != "":
+		// Same-name head-to-head (Winner matches both sides) with no
+		// WinnerSide hint — e.g. the admin score editor, which picks a
+		// winner by name. The winning side usually has more ippons, so
+		// infer from the scoreline. Equal counts (hantei/undecidable) or a
+		// draw (empty Winner) leave WinnerID empty → name fallback.
+		switch a, b := countScoringIppons(result.IpponsA), countScoringIppons(result.IpponsB); {
+		case a > b:
+			result.WinnerID = result.SideAID
+		case b > a:
+			result.WinnerID = result.SideBID
+		}
 	}
+}
+
+// countScoringIppons counts real ippon marks, ignoring empty entries and the
+// "•" placeholder the UI uses for an unfilled slot.
+func countScoringIppons(ippons []string) int {
+	n := 0
+	for _, v := range ippons {
+		if v != "" && v != "•" {
+			n++
+		}
+	}
+	return n
 }
 
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {

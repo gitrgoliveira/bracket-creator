@@ -3384,6 +3384,13 @@ button.my-match__opp {
   text-overflow: ellipsis;
 }
 
+.tw-match__round {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary, #666);
+  margin-left: 0.25rem;
+}
+
 .tw-match__players {
   min-width: 0;
   line-height: 1.3;

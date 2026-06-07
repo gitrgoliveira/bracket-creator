@@ -1,9 +1,5 @@
 package helper
 
-import (
-	"github.com/gitrgoliveira/bracket-creator/internal/helper/pool"
-)
-
 // CreatePartialPoolMatches fills each pool's Matches slice with
 // adjacent-neighbour pairings only — for N players it produces N-1
 // matches in the sequence (0,1), (1,2), ..., (N-2,N-1). This is the
@@ -21,19 +17,21 @@ import (
 func CreatePartialPoolMatches(pools []Pool) {
 	for i := range pools {
 		p := &pools[i]
-		// Convert helper.Player → pool.Player (only ID needed for pairing)
-		ids := make([]pool.Player, len(p.Players))
-		for j, pl := range p.Players {
-			ids[j] = pool.Player{ID: pl.Name}
+		if len(p.Players) < 2 {
+			continue
 		}
-		sub := pool.GenerateAdjacentPairings(ids)
-		// Re-map back to helper.Match pointing at the original p.Players
-		// entries — preserve the address invariant the rest of the
-		// helper package (Excel rendering, etc.) relies on.
-		for k := range sub {
+
+		roundLookup := buildRoundLookup(PathGraphRounds(len(p.Players)))
+
+		for k := 0; k < len(p.Players)-1; k++ {
+			round := 0
+			if r, ok := roundLookup[IntPair{A: k, B: k + 1}]; ok {
+				round = r
+			}
 			p.Matches = append(p.Matches, Match{
 				SideA: &p.Players[k],
 				SideB: &p.Players[k+1],
+				Round: round,
 			})
 		}
 	}

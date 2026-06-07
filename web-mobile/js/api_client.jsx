@@ -358,6 +358,13 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
+            // with a human-readable reason ("already fighting in match X on court Y").
+            // Prefer reasonHuman, then reason, then the error code so the operator
+            // sees a useful message rather than the raw "ineligible_competitor" key.
+            if (err.error === "ineligible_competitor" || err.error === "already_ineligible") {
+                throw new Error(err.reasonHuman || err.reason || err.error || "Failed to record score");
+            }
             throw new Error(err.error || "Failed to record score");
         }
         return res.json();

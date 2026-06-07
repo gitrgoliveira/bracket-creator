@@ -883,3 +883,156 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	}
 	require.True(t, found, "second match must exist in bracket after rollback")
 }
+
+// TestStartMatch_RejectsSimultaneousMatch verifies the simultaneity gate
+// (Phase 2c): when a participant is already Running in another match within
+// the same competition, StartMatch must return *IneligibleCompetitorError
+// matching errors.Is(err, ErrIneligibleCompetitor) with a reason that
+// mentions "already fighting".
+func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
+	t.Run("pool match running blocks second pool match for same participant", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-pool"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// A-0: Alice vs Bob (Running), A-2: Alice vs Charlie (Scheduled)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "A-1", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusScheduled},
+			{ID: "A-2", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.StartMatch(compID, "A-2")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "want ErrIneligibleCompetitor, got %v", err)
+
+		var ineligErr *IneligibleCompetitorError
+		require.ErrorAs(t, err, &ineligErr)
+		assert.Contains(t, ineligErr.Reason, "already fighting")
+	})
+
+	t.Run("SideB participant running blocks second match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-sideb"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// A-0: Alice vs Bob (Running). A-1: Charlie vs Bob (Scheduled).
+		// Bob (SideB of A-0) is running — starting A-1 should be blocked.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
+			{ID: "A-1", SideA: "Charlie", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.StartMatch(compID, "A-1")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "got %v", err)
+
+		var ineligErr *IneligibleCompetitorError
+		require.ErrorAs(t, err, &ineligErr)
+		assert.Contains(t, ineligErr.Reason, "already fighting")
+	})
+
+	t.Run("completed match does not block new match for same participant", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-completed"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// A-0: Alice vs Bob (Completed). A-2: Alice vs Charlie (Scheduled).
+		// Completed match must NOT block Alice from starting A-2.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
+			{ID: "A-2", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.StartMatch(compID, "A-2")
+		assert.NoError(t, err, "completed match must not block the simultaneity check")
+	})
+
+	t.Run("scheduled match does not block new match for same participant", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-scheduled"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// A-0: Alice vs Bob (Scheduled). A-2: Alice vs Charlie (Scheduled).
+		// Another scheduled match must NOT block.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+			{ID: "A-2", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.StartMatch(compID, "A-2")
+		assert.NoError(t, err, "scheduled match must not block the simultaneity check")
+	})
+
+	t.Run("bracket match running blocks pool match for same participant", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-bracket"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// Alice is Running in a bracket match; trying to start a pool match
+		// involving Alice should be blocked.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+		}))
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{ID: "B-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "C"},
+				},
+			},
+		}))
+
+		err := eng.StartMatch(compID, "P-0")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "got %v", err)
+
+		var ineligErr *IneligibleCompetitorError
+		require.ErrorAs(t, err, &ineligErr)
+		assert.Contains(t, ineligErr.Reason, "already fighting")
+	})
+}

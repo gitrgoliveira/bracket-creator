@@ -511,6 +511,7 @@ type MatchResult struct {
 	DecisionReason string           `json:"decisionReason,omitempty"`
 	Status         MatchStatus      `json:"status"`
 	Court          string           `json:"court"`
+	Round          int              `json:"round" yaml:"round"`
 	ScheduledAt    string           `json:"scheduledAt"`
 	SubResults     []SubMatchResult `json:"subResults,omitempty"`
 	Encho          *EnchoMetadata   `json:"encho,omitempty" yaml:"encho,omitempty"`

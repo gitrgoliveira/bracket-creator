@@ -70,6 +70,8 @@ function competitionKindLabel(c) {
 
 const pluralize = window.pluralize;
 const isPoolDaihyosenID = id => id.includes('-DH-');
+const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolName;
+window.poolLabel = poolLabel;
 
 function compMatches(c) {
   const out = [];
@@ -91,7 +93,7 @@ function compMatches(c) {
   rawPoolMatches.forEach(m => {
     const isDH = isPoolDaihyosenID(m.id || "");
     const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
-    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compFormat: c.format, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin
@@ -110,6 +112,7 @@ function compMatches(c) {
     phaseName: window.roundLabel(ri, rounds.length),
     compId: c.id,
     compName: c.name,
+    compFormat: c.format,
     compKind: c.kind,
     teamSize: c.teamSize
   })));
@@ -1120,7 +1123,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   const myBadgeLabel = isOnSideA ? "AKA" : "SHIRO";
   const oppBadgeClass = isOnSideA ? "bc-color-badge--shiro" : "bc-color-badge--aka";
   const oppBadgeLabel = isOnSideA ? "SHIRO" : "AKA";
-  const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
+  const phaseLabel = nextMatch.phase === "pool" ? poolLabel(nextMatch) : (nextMatch.round || "Bracket");
   // FR-025: queue position is 1-indexed per court for scheduled matches; 0 for
   // running/completed. Treat null/undefined/0 as "don't render" so we stay
   // gracefully empty for non-queued matches and pre-T046 responses. Wording
@@ -1569,7 +1572,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
             matches.forEach((m) => {
                 const isDH = isPoolDaihyosenID(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
             });
         });
     }
@@ -1800,7 +1803,7 @@ function MatchDetailCard({ match, onClose }) {
         <div className="match-detail-card__meta">
           <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
           <span>·</span>
-          <span>{match.phase === "pool" ? match.poolName : (match.round || "")}</span>
+          <span>{match.phase === "pool" ? poolLabel(match) : (match.round || "")}</span>
           {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1939,7 +1942,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="my-match__lbl">Your next match</div>
           <div className="my-match__name">{myPlayer.name}</div>
           <div className="my-match__round">
-            {myUpcoming.phase === "pool" ? myUpcoming.poolName : myUpcoming.round}
+            {myUpcoming.phase === "pool" ? poolLabel(myUpcoming) : myUpcoming.round}
             {myUpcoming.status === "running" ? " · LIVE NOW" : ""}
           </div>
           <div className="my-match__row">
@@ -2130,7 +2133,10 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {showCompetition && m.compName ? <span>· {m.compName}</span> : null}
-        {m.phase === "pool" ? <span>· {m.poolName}</span> : <span>· {m.round || ""}</span>}
+        {m.phase === "pool" ? <span>· {poolLabel(m)}</span> : <span>· {m.round || ""}</span>}
+        {m.round != null && typeof m.round === "number" && m.round >= 0 && (
+          <span className="tw-match__round">R{m.round + 1}</span>
+        )}
         {queueLabel && (
           <span className="vsched-item__queue" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)" }}>
             {queueLabel}
@@ -2224,7 +2230,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
     return parts.length > 1 ? parts[0][0] + ". " + parts.slice(1).join(" ") : n;
   };
 
-  const enrichMatch = (m) => ({ ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: "", teamSize: 0 });
+  const enrichMatch = (m) => ({ ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: m.compFormat, compName: m.compName, compKind: "", teamSize: 0 });
 
   const handleCellClick = (m) => { if (onMatchClick) onMatchClick(enrichMatch(m)); };
 
@@ -2491,7 +2497,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                     if (isTeam) {
                       // Team: enrich match the same way as the legacy PoolMatchRow path
                       const isDH = isPoolDaihyosenID(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compName: competition.name, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -2502,7 +2508,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                       );
                     } else {
                       // Individual: ippon notation score
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: "", teamSize: 0 };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compName: competition.name, compKind: "", teamSize: 0 };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -2858,7 +2864,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
-        <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
+        <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
         {queuePill && (
           <div className="tw-match__queue" style={{ fontSize: 10, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
             {queuePill}

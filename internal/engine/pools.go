@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -58,15 +59,18 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
+	hasRounds := false
 	switch comp.PoolFormat {
 	case state.PoolFormatPartial:
 		helper.CreatePartialPoolMatches(pools)
+		hasRounds = true
 	default:
 		// PoolFormatFull (default / unset) and any unrecognized value fall
 		// through to the legacy code path. RoundRobin remains the inner
 		// switch for backward compatibility (FR-052, R9).
 		if comp.RoundRobin {
 			helper.CreatePoolRoundRobinMatches(pools)
+			hasRounds = true
 		} else {
 			helper.CreatePoolMatches(pools)
 		}
@@ -81,6 +85,13 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	if numCourts == 0 {
 		numCourts = 1
 	}
+
+	if len(pools) == 1 && numCourts > 1 {
+		if err := ValidateCourtCount(len(players), numCourts); err != nil {
+			return err
+		}
+	}
+
 	courtAssign, err := helper.AssignPoolsToCourts(len(pools), numCourts)
 	if err != nil {
 		return fmt.Errorf("assigning pools to courts: %w", err)
@@ -99,16 +110,43 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 			}
 		}
 		for i, m := range p.Matches {
+			round := m.Round
+			if !hasRounds {
+				round = -1
+			}
 			results = append(results, state.MatchResult{
 				ID:     p.PoolName + "-" + strconv.Itoa(i),
 				SideA:  m.SideA.Name,
 				SideB:  m.SideB.Name,
 				Status: state.MatchStatusScheduled,
 				Court:  poolCourts[i%len(poolCourts)],
+				Round:  round,
 				// ScheduledAt is populated below by
 				// assignPoolMatchSlots — uniform start times were
 				// retired in T150.
 			})
+		}
+	}
+
+	// For single-pool multi-court, distribute each round's matches across
+	// courts so that simultaneous matches never share a participant.
+	// When a round has more matches than courts (e.g. 6 players / 2
+	// courts → 3 matches per round), the extra match is queued on the
+	// same court and runs sequentially; the runtime simultaneity gate
+	// (checkSimultaneousMatch) prevents double-booking at match start.
+	if len(pools) == 1 && len(comp.Courts) > 1 {
+		sort.SliceStable(results, func(i, j int) bool {
+			return results[i].Round < results[j].Round
+		})
+		roundStart := 0
+		currentRound := -1
+		for i := range results {
+			if results[i].Round != currentRound {
+				currentRound = results[i].Round
+				roundStart = 0
+			}
+			results[i].Court = comp.Courts[roundStart%len(comp.Courts)]
+			roundStart++
 		}
 	}
 

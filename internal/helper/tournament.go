@@ -45,6 +45,7 @@ type MatchWinner struct {
 type Match struct {
 	SideA *Player `json:"sideA"`
 	SideB *Player `json:"sideB"`
+	Round int     `json:"round"`
 }
 
 func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
@@ -388,6 +389,32 @@ func CreatePoolMatches(pools []Pool) {
 	}
 }
 
+// playerIndex returns the position of p in players by pointer identity, or -1.
+func playerIndex(players []Player, p *Player) int {
+	for i := range players {
+		if &players[i] == p {
+			return i
+		}
+	}
+	return -1
+}
+
+// buildRoundLookup converts a CircleMethodRounds (or PathGraphRounds) result
+// into a map from normalised IntPair (A < B) to round index.
+func buildRoundLookup(rounds [][]IntPair) map[IntPair]int {
+	lookup := make(map[IntPair]int)
+	for r, pairs := range rounds {
+		for _, p := range pairs {
+			a, b := p.A, p.B
+			if a > b {
+				a, b = b, a
+			}
+			lookup[IntPair{A: a, B: b}] = r
+		}
+	}
+	return lookup
+}
+
 func CreatePoolRoundRobinMatches(pools []Pool) {
 
 	for poolN, pool := range pools {
@@ -403,7 +430,6 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[2]},
 				Match{SideA: &currentPool.Players[1], SideB: &currentPool.Players[2]},
 			)
-			continue
 		case 4:
 			currentPool.Matches = append(currentPool.Matches,
 				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[1]},
@@ -413,40 +439,53 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[2]},
 				Match{SideA: &currentPool.Players[1], SideB: &currentPool.Players[3]},
 			)
-			continue
-		}
+		default:
+			for i := 1; i < size; i++ {
+				for k, j := i, 0; j < size-i; j, k = j+1, k+1 {
+					sideA := &currentPool.Players[j]
+					sideB := &currentPool.Players[k]
 
-		for i := 1; i < size; i++ {
-			for k, j := i, 0; j < size-i; j, k = j+1, k+1 {
-				sideA := &currentPool.Players[j]
-				sideB := &currentPool.Players[k]
+					if len(currentPool.Matches) > 0 {
+						prev := currentPool.Matches[len(currentPool.Matches)-1]
+						prevSide := func(match Match, player *Player) int {
+							if match.SideA == player {
+								return 1
+							}
+							if match.SideB == player {
+								return 2
+							}
+							return 0
+						}
 
-				if len(currentPool.Matches) > 0 {
-					prev := currentPool.Matches[len(currentPool.Matches)-1]
-					prevSide := func(match Match, player *Player) int {
-						if match.SideA == player {
-							return 1
+						sideAStatus := prevSide(prev, sideA)
+						sideBStatus := prevSide(prev, sideB)
+						if sideAStatus == 2 || sideBStatus == 1 {
+							sideA, sideB = sideB, sideA
 						}
-						if match.SideB == player {
-							return 2
-						}
-						return 0
 					}
 
-					sideAStatus := prevSide(prev, sideA)
-					sideBStatus := prevSide(prev, sideB)
-					if sideAStatus == 2 || sideBStatus == 1 {
-						sideA, sideB = sideB, sideA
-					}
+					currentPool.Matches = append(currentPool.Matches, Match{
+						SideA: sideA,
+						SideB: sideB,
+					})
 				}
-
-				currentPool.Matches = append(currentPool.Matches, Match{
-					SideA: sideA,
-					SideB: sideB,
-				})
 			}
 		}
 
+		// Assign Round indices using the circle-method schedule.
+		roundLookup := buildRoundLookup(CircleMethodRounds(size))
+		for mi := range currentPool.Matches {
+			m := &currentPool.Matches[mi]
+			idxA := playerIndex(currentPool.Players, m.SideA)
+			idxB := playerIndex(currentPool.Players, m.SideB)
+			a, b := idxA, idxB
+			if a > b {
+				a, b = b, a
+			}
+			if r, ok := roundLookup[IntPair{A: a, B: b}]; ok {
+				m.Round = r
+			}
+		}
 	}
 
 }

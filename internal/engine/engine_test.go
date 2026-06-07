@@ -35,7 +35,7 @@ func createTestCompetition(t *testing.T, store *state.Store, id string, format s
 		PoolSizeMode: "min",
 		PoolWinners:  2,
 		RoundRobin:   true,
-		Courts:       []string{"A", "B"},
+		Courts:       []string{"A"},
 		StartTime:    "09:00",
 		Status:       "setup",
 	}
@@ -1873,9 +1873,15 @@ func TestStartCompetition_PoolCourtDistribution(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-dist-pools"
 
-	// createTestCompetition uses Courts: []string{"A", "B"}
-	createTestCompetition(t, store, compID, "mixed", 3)
-	// 6 players → 2 pools. AssignPoolsToCourts(2, 2) → [0, 1]
+	// 2 courts with mixed format and 6 players → 2 pools (multi-pool, no
+	// single-pool court validation). AssignPoolsToCourts(2, 2) → [0, 1].
+	comp := &state.Competition{
+		ID: compID, Name: "Court Dist Pools", Kind: "individual",
+		Format: "mixed", PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
+		RoundRobin: true, Courts: []string{"A", "B"},
+		StartTime: "09:00", Status: "setup",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
 	})
@@ -1907,9 +1913,14 @@ func TestStartCompetition_BracketCourtDistribution(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-dist-bracket"
 
-	// createTestCompetition uses Courts: []string{"A", "B"}
-	createTestCompetition(t, store, compID, "playoffs", 3)
-	// 8 players → pow2=8, 4 first-round matches split across 2 courts
+	// 2 courts with playoffs and 8 players — bracket court distribution.
+	comp := &state.Competition{
+		ID: compID, Name: "Court Dist Bracket", Kind: "individual",
+		Format: "playoffs", PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
+		RoundRobin: true, Courts: []string{"A", "B"},
+		StartTime: "09:00", Status: "setup",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
 	saveTestParticipants(t, store, compID, []string{
 		"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
 	})

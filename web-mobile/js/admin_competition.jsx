@@ -862,6 +862,31 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           ))}
         </div>
         <div className="field__hint">Concurrency = number of shiaijo (courts) assigned. Schedule prevents double-booking with other competitions.</div>
+        {/* FR: court-count suggestion for league / single-pool competitions (mp-dc52 Phase 3) */}
+        {(local.format === "league" || local.poolFormat === "partial") && (() => {
+          const playerCount = (c.players || []).length;
+          if (playerCount < 2) return null;
+          const numCourts = local.courts.length;
+          const hardCap = Math.max(1, Math.floor(playerCount / 2));
+          const suggestedCourts = Math.max(1, hardCap - 1);
+          return (
+            <div>
+              {numCourts > hardCap && (
+                <div className="field__hint" style={{ color: "var(--red)" }}>
+                  Too many courts — extra courts would sit idle. Maximum: {hardCap}
+                </div>
+              )}
+              {numCourts === hardCap && hardCap > suggestedCourts && (
+                <div className="field__hint" style={{ color: "#78350f" }}>
+                  No rest between fights at {numCourts} courts. Consider {suggestedCourts}.
+                </div>
+              )}
+              <div className="field__hint">
+                Suggested: {suggestedCourts} courts for {playerCount} players
+              </div>
+            </div>
+          );
+        })()}
       </div>
       {local.format === "mixed" && (
         <>

@@ -2147,6 +2147,9 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {showCompetition && m.compName ? <span>· {m.compName}</span> : null}
         {m.phase === "pool" ? <span>· {m.poolName}</span> : <span>· {m.round || ""}</span>}
+        {m.round != null && typeof m.round === "number" && m.round >= 0 && (
+          <span class="tw-match__round">R{m.round + 1}</span>
+        )}
         {queueLabel && (
           <span className="vsched-item__queue" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)" }}>
             {queueLabel}

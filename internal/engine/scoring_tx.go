@@ -506,8 +506,9 @@ func (e *Engine) lookupMatchSidesTx(tx state.StoreTx, compID, matchID string) (s
 
 // StartMatchTx is the tx-aware FR-035 gate. Same contract as
 // StartMatch: returns *IneligibleCompetitorError when any participant
-// in matchID is marked ineligible from a *different* match. The
-// undo-path is permitted (status with MatchID==matchID is skipped).
+// in matchID is marked ineligible from a *different* match or is
+// currently Running in a different match (Phase 2c simultaneity gate).
+// The undo-path is permitted (status with MatchID==matchID is skipped).
 //
 // The score handler wraps RecordMatchResultWithIneligibilityTx with
 // this check so a fought / hikiwake score on a match whose
@@ -516,6 +517,9 @@ func (e *Engine) lookupMatchSidesTx(tx state.StoreTx, compID, matchID string) (s
 // RecordDecisionTx, which intentionally bypasses this gate — they ARE
 // the act of recording a new withdrawal.
 func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
+	if err := e.checkSimultaneousMatchTx(tx, compID, matchID); err != nil {
+		return err
+	}
 	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
 	if err != nil {
 		return err
@@ -543,6 +547,71 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 			return &IneligibleCompetitorError{PlayerID: pid, Reason: st.Reason}
 		}
 	}
+	return nil
+}
+
+// checkSimultaneousMatchTx is the tx-aware twin of checkSimultaneousMatch.
+// Returns *IneligibleCompetitorError if either participant in matchID is
+// currently Running in a different match within the same competition.
+//
+// Phase 2c simultaneity gate.
+func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID string) error {
+	// Find target match sides (pool first, then bracket).
+	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
+	if err != nil {
+		// Match not found — let the existing caller handle it.
+		return nil
+	}
+	if sideA == "" && sideB == "" {
+		return nil
+	}
+
+	// Check pool matches for a Running conflict.
+	poolMatches, err := tx.LoadPoolMatches(compID)
+	if err == nil {
+		for _, m := range poolMatches {
+			if m.ID == matchID || m.Status != state.MatchStatusRunning {
+				continue
+			}
+			if sideA != "" && (m.SideA == sideA || m.SideB == sideA) {
+				return &IneligibleCompetitorError{
+					PlayerID: sideA,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+				}
+			}
+			if sideB != "" && (m.SideA == sideB || m.SideB == sideB) {
+				return &IneligibleCompetitorError{
+					PlayerID: sideB,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+				}
+			}
+		}
+	}
+
+	// Check bracket matches for a Running conflict.
+	bracket, berr := tx.LoadBracket(compID)
+	if berr == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == matchID || bm.Status != state.MatchStatusRunning {
+					continue
+				}
+				if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+					return &IneligibleCompetitorError{
+						PlayerID: sideA,
+						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					}
+				}
+				if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+					return &IneligibleCompetitorError{
+						PlayerID: sideB,
+						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					}
+				}
+			}
+		}
+	}
+
 	return nil
 }
 

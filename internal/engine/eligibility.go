@@ -113,20 +113,93 @@ func (e *Engine) CheckEligibility(compID string, playerIDs []string) error {
 }
 
 // StartMatch gates the scheduled → running transition by checking
-// every participant's competitor-status. It returns *IneligibleCompetitorError
-// (which matches errors.Is(err, ErrIneligibleCompetitor)) when any
-// participant has Eligible: false; nil when the match may proceed.
+// every participant's competitor-status and ensuring that no participant
+// is already Running in a different match within the same competition
+// (the simultaneity gate, Phase 2c).
+//
+// It returns *IneligibleCompetitorError (which matches
+// errors.Is(err, ErrIneligibleCompetitor)) when any participant has
+// Eligible: false or is already fighting elsewhere; nil when the match
+// may proceed.
 //
 // The status transition itself remains with the score handler — this
 // method is the pre-flight gate.
 //
 // FR-035, T084.
 func (e *Engine) StartMatch(compID, matchID string) error {
+	if err := e.checkSimultaneousMatch(compID, matchID); err != nil {
+		return err
+	}
 	ids, err := e.resolveMatchParticipantIDs(compID, matchID)
 	if err != nil {
 		return err
 	}
 	return e.checkEligibilityExcludingMatch(compID, ids, matchID)
+}
+
+// checkSimultaneousMatch returns an *IneligibleCompetitorError if either
+// participant in matchID is currently Running in a different match within
+// the same competition. Pool matches and bracket matches are both checked.
+//
+// Phase 2c simultaneity gate.
+func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
+	// Find target match sides (pool first, then bracket).
+	sideA, sideB, err := e.lookupMatchSides(compID, matchID)
+	if err != nil {
+		// Match not found — let the existing caller handle it.
+		return nil
+	}
+	if sideA == "" && sideB == "" {
+		return nil
+	}
+
+	// Check pool matches for a Running conflict.
+	poolMatches, err := e.store.LoadPoolMatches(compID)
+	if err == nil {
+		for _, m := range poolMatches {
+			if m.ID == matchID || m.Status != state.MatchStatusRunning {
+				continue
+			}
+			if sideA != "" && (m.SideA == sideA || m.SideB == sideA) {
+				return &IneligibleCompetitorError{
+					PlayerID: sideA,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+				}
+			}
+			if sideB != "" && (m.SideA == sideB || m.SideB == sideB) {
+				return &IneligibleCompetitorError{
+					PlayerID: sideB,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+				}
+			}
+		}
+	}
+
+	// Check bracket matches for a Running conflict.
+	bracket, berr := e.store.LoadBracket(compID)
+	if berr == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == matchID || bm.Status != state.MatchStatusRunning {
+					continue
+				}
+				if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+					return &IneligibleCompetitorError{
+						PlayerID: sideA,
+						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					}
+				}
+				if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+					return &IneligibleCompetitorError{
+						PlayerID: sideB,
+						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // checkEligibilityExcludingMatch is like CheckEligibility but skips

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -81,6 +82,13 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	if numCourts == 0 {
 		numCourts = 1
 	}
+
+	if len(pools) == 1 && numCourts > 1 {
+		if err := ValidateCourtCount(len(players), numCourts); err != nil {
+			return err
+		}
+	}
+
 	courtAssign, err := helper.AssignPoolsToCourts(len(pools), numCourts)
 	if err != nil {
 		return fmt.Errorf("assigning pools to courts: %w", err)
@@ -105,10 +113,30 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				SideB:  m.SideB.Name,
 				Status: state.MatchStatusScheduled,
 				Court:  poolCourts[i%len(poolCourts)],
+				Round:  m.Round,
 				// ScheduledAt is populated below by
 				// assignPoolMatchSlots — uniform start times were
 				// retired in T150.
 			})
+		}
+	}
+
+	// For single-pool multi-court, reassign courts by round so that all
+	// matches within a round are distributed across courts — ensuring no
+	// two matches sharing a player run simultaneously on different courts.
+	if len(pools) == 1 && len(comp.Courts) > 1 {
+		sort.SliceStable(results, func(i, j int) bool {
+			return results[i].Round < results[j].Round
+		})
+		roundStart := 0
+		currentRound := -1
+		for i := range results {
+			if results[i].Round != currentRound {
+				currentRound = results[i].Round
+				roundStart = 0
+			}
+			results[i].Court = comp.Courts[roundStart%len(comp.Courts)]
+			roundStart++
 		}
 	}
 

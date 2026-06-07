@@ -50,6 +50,90 @@ func TestLoadPoolMatchesLocked_WithData(t *testing.T) {
 	assert.Equal(t, "Charlie", results[1].Winner)
 }
 
+// TestPoolMatches_SideIDsRoundTrip verifies the appended SideAID/SideBID
+// columns survive a save→load cycle (the league matrix relies on them to
+// disambiguate same-name participants from different dojos).
+func TestPoolMatches_SideIDsRoundTrip(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	matches := []MatchResult{
+		{ID: "Pool A-0", SideA: "Tanaka Kenji", SideB: "Yamamoto Yuki", SideAID: "uuid-a", SideBID: "uuid-b", Status: MatchStatusScheduled},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "uuid-a", results[0].SideAID)
+	assert.Equal(t, "uuid-b", results[0].SideBID)
+}
+
+// TestPoolMatches_LegacyFileWithoutIDs verifies a pool-matches.csv written
+// before the id columns existed (15 columns) still loads, leaving the id
+// fields empty so consumers fall back to name matching.
+func TestPoolMatches_LegacyFileWithoutIDs(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "legacy-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Legacy"}))
+
+	// 15-column legacy row (header + one data row), no SideAID/SideBID.
+	legacy := "PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt,ResultSource\n" +
+		"Pool A,0,Alice,Bob,,,,0,0,,scheduled,A,,09:00,\n"
+	require.NoError(t, os.WriteFile(store.compPath(compID, "pool-matches.csv"), []byte(legacy), 0600))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Alice", results[0].SideA)
+	assert.Empty(t, results[0].SideAID, "legacy row has no id column → empty")
+	assert.Empty(t, results[0].SideBID)
+}
+
+// TestPools_PlayerIDRoundTrip verifies the appended participant-id column in
+// pools.csv survives a save→load cycle so pool.players carry .ID for the
+// league matrix.
+func TestPools_PlayerIDRoundTrip(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	pools := []helper.Pool{{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{Name: "Tanaka Kenji", Dojo: "Tokyo", ID: "uuid-1"},
+			{Name: "Yamamoto Yuki", Dojo: "Osaka", ID: "uuid-2"},
+		},
+	}}
+	require.NoError(t, store.SavePools(compID, pools))
+
+	loaded, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	require.Len(t, loaded[0].Players, 2)
+	assert.Equal(t, "uuid-1", loaded[0].Players[0].ID)
+	assert.Equal(t, "uuid-2", loaded[0].Players[1].ID)
+}
+
 func TestLoadPoolMatchesLocked_InvalidCompID(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-pools-test-*")
 	require.NoError(t, err)

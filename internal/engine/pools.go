@@ -115,12 +115,14 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				round = -1
 			}
 			results = append(results, state.MatchResult{
-				ID:     p.PoolName + "-" + strconv.Itoa(i),
-				SideA:  m.SideA.Name,
-				SideB:  m.SideB.Name,
-				Status: state.MatchStatusScheduled,
-				Court:  poolCourts[i%len(poolCourts)],
-				Round:  round,
+				ID:      p.PoolName + "-" + strconv.Itoa(i),
+				SideA:   m.SideA.Name,
+				SideB:   m.SideB.Name,
+				SideAID: m.SideA.ID,
+				SideBID: m.SideB.ID,
+				Status:  state.MatchStatusScheduled,
+				Court:   poolCourts[i%len(poolCourts)],
+				Round:   round,
 				// ScheduledAt is populated below by
 				// assignPoolMatchSlots — uniform start times were
 				// retired in T150.

@@ -51,6 +51,73 @@ func saveTestParticipants(t *testing.T, store *state.Store, compID string, names
 	require.NoError(t, store.SaveParticipants(compID, players))
 }
 
+// TestStartCompetition_LeagueMatchesCarrySideIDs pins that generated
+// league/pool matches stamp each side's participant UUID (SideAID/SideBID)
+// from the roster. The league matrix relies on these to cross-reference a
+// cell to the right row/column player when two participants share a name.
+func TestStartCompetition_LeagueMatchesCarrySideIDs(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "league-ids"
+
+	createTestCompetition(t, store, compID, "league", 4)
+	// Real UUID-v4-shaped ids: the participant loader sniffs the first CSV
+	// field and only treats a row as id-bearing when it matches the UUID
+	// shape (else it parses as the legacy name-first format).
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+		idC = "33333333-3333-4333-8333-333333333333"
+		idD = "44444444-4444-4444-8444-444444444444"
+	)
+	players := []domain.Player{
+		{ID: idA, Name: "Tanaka Kenji", Dojo: "Tokyo"},
+		{ID: idB, Name: "Tanaka Kenji", Dojo: "Osaka"}, // same name, different dojo
+		{ID: idC, Name: "Suzuki Hiro", Dojo: "Nagoya"},
+		{ID: idD, Name: "Watanabe Ryo", Dojo: "Kyoto"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+
+	validIDs := map[string]bool{idA: true, idB: true, idC: true, idD: true}
+	for _, m := range matches {
+		assert.NotEmpty(t, m.SideAID, "match %s SideAID should be stamped from the roster", m.ID)
+		assert.NotEmpty(t, m.SideBID, "match %s SideBID should be stamped from the roster", m.ID)
+		assert.True(t, validIDs[m.SideAID], "match %s SideAID %q is not a roster id", m.ID, m.SideAID)
+		assert.True(t, validIDs[m.SideBID], "match %s SideBID %q is not a roster id", m.ID, m.SideBID)
+		assert.NotEqual(t, m.SideAID, m.SideBID, "a match must be between two distinct participants")
+	}
+
+	// Scoring a match sends names only (no ids). Verify the backfill in
+	// writeMatchResult preserves the generation-time SideAID/SideBID rather
+	// than wiping them via the whole-struct `*r = *result` overwrite, and
+	// resolves WinnerID from the WinnerSide hint — the only way to tell apart
+	// the winner when both sides share a name (this is exactly the A-0
+	// Tanaka-vs-Tanaka match).
+	first := matches[0]
+	wantA, wantB := first.SideAID, first.SideBID
+	require.NoError(t, eng.RecordMatchResult(compID, first.ID, &state.MatchResult{
+		ID: first.ID, SideA: first.SideA, SideB: first.SideB,
+		Winner: first.SideA, WinnerSide: "A", Status: state.MatchStatusCompleted,
+	}))
+	reloaded, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var got *state.MatchResult
+	for i := range reloaded {
+		if reloaded[i].ID == first.ID {
+			got = &reloaded[i]
+		}
+	}
+	require.NotNil(t, got)
+	assert.Equal(t, wantA, got.SideAID, "scoring must preserve SideAID")
+	assert.Equal(t, wantB, got.SideBID, "scoring must preserve SideBID")
+	assert.Equal(t, wantA, got.WinnerID, "WinnerSide=A must resolve WinnerID to SideAID even when both sides share a name")
+}
+
 // --- Pool Generation Tests ---
 
 func TestStartCompetition_MixedFormat_BasicGeneration(t *testing.T) {

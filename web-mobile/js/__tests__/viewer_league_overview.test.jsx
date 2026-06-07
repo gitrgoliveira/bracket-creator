@@ -156,6 +156,39 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(text).not.toContain('Final standings');
   });
 
+  // mp-jvzy: the "#" column must render the backend's authoritative
+  // PlayerStanding.rank (which folds in tiebreakers + manual overrides),
+  // NOT the array index. Pass ranks that deliberately differ from index+1
+  // and assert the rendered cells follow s.rank — locking the DRY contract.
+  it('league "#" column shows authoritative s.rank, not the row index', () => {
+    const standings = { League: [
+      { player: { id: 'a', name: 'Player A', dojo: '' }, wins: 3, losses: 0, draws: 0, ipponsGiven: 6, ipponsTaken: 0, rank: 10 },
+      { player: { id: 'b', name: 'Player B', dojo: '' }, wins: 2, losses: 1, draws: 0, ipponsGiven: 4, ipponsTaken: 2, rank: 20 },
+      { player: { id: 'c', name: 'Player C', dojo: '' }, wins: 1, losses: 2, draws: 0, ipponsGiven: 2, ipponsTaken: 4, rank: 30 },
+    ] };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: leagueComp('pools'),
+      standings,
+      pools,
+      poolMatches: mixedMatches(1, 2),
+    });
+    const container = findInTree(tree, n => n?.props?.['data-testid'] === 'league-overview-standings');
+    expect(container).not.toBeNull();
+    const rankCells = [];
+    (function walk(node) {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      if (node.type === 'tr') {
+        const kids = [].concat(node.props?.children || []).filter(Boolean);
+        const firstTd = kids.find(k => k && k.type === 'td');
+        if (firstTd) rankCells.push(collectText(firstTd));
+      }
+      walk(node.props?.children ?? node.children);
+    })(container);
+    expect(rankCells).toEqual(['10', '20', '30']); // s.rank, never 1/2/3
+  });
+
   it('completed league shows winner badge and final standings', () => {
     const standings = { League: makeStandings(4) };
     const tree = runtime.mount(ViewerOverview, {

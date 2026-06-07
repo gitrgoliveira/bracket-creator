@@ -184,29 +184,14 @@ function Term({ name, children, nested }) {
   );
 }
 
-// GlossaryPage — the /glossary viewer surface. Lists every term
-// grouped by tier so volunteers can browse the full register. Wired
+// GlossaryPage — the /glossary viewer surface. Lists terms in a flat
+// alphabetical layout so volunteers can browse the full register. Wired
 // into the router via app.jsx's parsePath ("/glossary" → viewer mode
 // with viewerScreen='glossary').
 function GlossaryPage({ onBack }) {
-  // Tiering is encoded in the spec but not on the wire — we hand-list
-  // the IDs by tier here. A simpler "alphabetical" list would lose
-  // the volunteer-priority signal in glossary.md. If we add a tier
-  // field to domain.Term later, switch this to a groupBy.
-  const tiers = [
-    {
-      label: 'Tier 1 — Every operator sees these',
-      ids: ['hikiwake', 'encho', 'kiken', 'kiken-voluntary', 'kiken-injury', 'fusenpai', 'fusensho', 'daihyosen', 'hansoku', 'shiro', 'aka', 'shiaijo', 'ippon'],
-    },
-    {
-      label: 'Tier 2 — Team competitions and overtime',
-      ids: ['ippon-shobu', 'kachinuki', 'senpo', 'jiho', 'chuken', 'fukusho', 'taisho'],
-    },
-    {
-      label: 'Tier 3 — Registration and setup',
-      ids: ['zekken', 'dojo', 'dan', 'waza', 'kachinuki-exhaustion'],
-    },
-  ];
+  // Derive alphabetical list from the generated GLOSSARY map so new
+  // entries added in glossary.go appear automatically (mp-mjaq).
+  const ids = Object.keys(GLOSSARY).sort();
 
   return (
     <div className="viewer">
@@ -224,49 +209,44 @@ function GlossaryPage({ onBack }) {
         </div>
 
         <div className="viewer__body">
-          {tiers.map((tier) => (
-            <section key={tier.label} className="glossary-tier">
-              <div className="section-title" style={{ marginTop: 16 }}>{tier.label}</div>
-              <div className="glossary-list">
-                {tier.ids.map((id) => {
-                  const entry = lookupTerm(id);
-                  if (!entry) return null;
-                  return (
-                    <article key={id} className="glossary-entry" id={`g-${id}`}>
-                      <header className="glossary-entry__head">
-                        <span className="glossary-entry__romaji">{entry.id.split('-').map(capitalise).join('-')}</span>
-                        {entry.kanji && <span className="glossary-entry__kanji"> · {entry.kanji}</span>}
-                        <span className="glossary-entry__short"> — {entry.short}</span>
-                      </header>
-                      <p className="glossary-entry__tooltip">
-                        {renderTooltipBody(entry.tooltip, entry.seeAlso)}
-                      </p>
-                      {entry.seeAlso && entry.seeAlso.length > 0 && (
-                        <div className="glossary-entry__see">
-                          See also:{' '}
-                          {entry.seeAlso.map((refId, i) => (
-                            <React.Fragment key={refId}>
-                              {i > 0 ? ', ' : ''}
-                              <a
-                                href={`#g-${refId}`}
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  const el = document.getElementById(`g-${refId}`);
-                                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                }}
-                              >
-                                {capitalise(refId)}
-                              </a>
-                            </React.Fragment>
-                          ))}
-                        </div>
-                      )}
-                    </article>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+          <div className="glossary-list">
+            {ids.map((id) => {
+              const entry = lookupTerm(id);
+              if (!entry) return null;
+              return (
+                <article key={id} className="glossary-entry" id={`g-${id}`}>
+                  <header className="glossary-entry__head">
+                    <span className="glossary-entry__romaji">{entry.id.split('-').map(capitalise).join('-')}</span>
+                    {entry.kanji && <span className="glossary-entry__kanji"><span aria-hidden="true"> · </span>{entry.kanji}</span>}
+                    <span className="glossary-entry__short"> — {entry.short}</span>
+                  </header>
+                  <p className="glossary-entry__tooltip">
+                    {renderTooltipBody(entry.tooltip, entry.seeAlso)}
+                  </p>
+                  {entry.seeAlso && entry.seeAlso.length > 0 && (
+                    <div className="glossary-entry__see">
+                      See also:{' '}
+                      {entry.seeAlso.map((refId, i) => (
+                        <React.Fragment key={refId}>
+                          {i > 0 ? ', ' : ''}
+                          <a
+                            href={`#g-${refId}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              const el = document.getElementById(`g-${refId}`);
+                              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }}
+                          >
+                            {capitalise(refId)}
+                          </a>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>

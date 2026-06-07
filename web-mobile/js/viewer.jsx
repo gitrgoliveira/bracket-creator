@@ -1363,10 +1363,12 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
 }
 
 // DisplayModes — viewer-home section linking to the public /display routes.
-// Renders one card per configured court plus an "all-courts overview" card.
-// Each card opens in a new tab so the operator's viewer session stays open.
-// Lives in viewer.jsx (not display.jsx) because it's a viewer-side surface
-// that consumes the display routes rather than rendering them.
+// Collapsed by default inside a <details> element. Contains one "all-courts
+// overview" link plus two compact inline rows (court displays, streaming
+// overlays) each listing per-court links inline rather than one card per
+// court. Each link opens in a new tab so the operator's viewer session stays
+// open. Lives in viewer.jsx (not display.jsx) because it is a viewer-side
+// surface that consumes the display routes rather than rendering them.
 function DisplayModes({ tournament }) {
   const courts = (tournament && tournament.courts) || [];
   // No court list — render nothing rather than a confusing single "all"

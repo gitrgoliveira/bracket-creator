@@ -4908,7 +4908,7 @@ button.my-match__opp {
 }
 .match-detail-card__sub-score--right { text-align: right; }
 
-/* ---------- Pool Round-Robin Matrix (Viewer) ---------- */
+/* ---------- League Round-Robin Matrix (Viewer) ---------- */
 .league-matrix-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;

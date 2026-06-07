@@ -128,9 +128,12 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
-	// For single-pool multi-court, reassign courts by round so that all
-	// matches within a round are distributed across courts — ensuring no
-	// two matches sharing a player run simultaneously on different courts.
+	// For single-pool multi-court, distribute each round's matches across
+	// courts so that simultaneous matches never share a participant.
+	// When a round has more matches than courts (e.g. 6 players / 2
+	// courts → 3 matches per round), the extra match is queued on the
+	// same court and runs sequentially; the runtime simultaneity gate
+	// (checkSimultaneousMatch) prevents double-booking at match start.
 	if len(pools) == 1 && len(comp.Courts) > 1 {
 		sort.SliceStable(results, func(i, j int) bool {
 			return results[i].Round < results[j].Round

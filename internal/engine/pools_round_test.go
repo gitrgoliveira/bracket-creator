@@ -11,8 +11,8 @@ import (
 
 // TestPoolGeneration_SinglePoolMultiCourt_RoundAwareCourts verifies that when a
 // single league pool is generated with multiple courts, matches within the same
-// round never share a participant — i.e. each round's matches are genuinely
-// concurrent without scheduling conflicts.
+// round never share a participant — so no two matches that could run
+// concurrently involve the same player.
 func TestPoolGeneration_SinglePoolMultiCourt_RoundAwareCourts(t *testing.T) {
 	t.Parallel()
 

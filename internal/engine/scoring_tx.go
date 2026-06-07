@@ -615,7 +615,7 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 
 func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, string) {
 	comp, err := tx.LoadCompetition(compID)
-	if err != nil {
+	if err != nil || comp == nil {
 		return sideA, sideB
 	}
 	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)

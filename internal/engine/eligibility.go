@@ -202,7 +202,7 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 
 func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (string, string) {
 	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
+	if err != nil || comp == nil {
 		return sideA, sideB
 	}
 	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)

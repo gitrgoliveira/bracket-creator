@@ -193,7 +193,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   const isScored = (s) => {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
-    return a > 0 || b > 0 || s.decidedByHantei ||
+    return a > 0 || b > 0 || s.hansokuA || s.hansokuB || s.decidedByHantei ||
       (typeof window.isHikiwake === "function" && (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
   };
   const currentIdx = regular.findIndex(s => !isScored(s));
